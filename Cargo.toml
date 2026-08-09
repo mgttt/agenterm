@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-dynacore", "crates/agenterm-nativecore", "crates/agenterm-guestcore"]
+members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql"]
 resolver = "2"
 
 [package]
@@ -27,14 +27,17 @@ path = "src/bin/agenterm-cc.rs"
 name = "agenterm-con"
 path = "src/bin/agenterm-con.rs"
 
+[features]
+default = []
+script-lua = ["agenterm-lua"]
+script-sql = ["agenterm-sql"]
+
 [dependencies]
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
-agenterm-dynacore = { path = "crates/agenterm-dynacore" }
-agenterm-nativecore = { path = "crates/agenterm-nativecore" }
 agenterm-rh = { path = "crates/agenterm-rh" }
-agenterm-lua = { path = "crates/agenterm-lua" }
+agenterm-lua = { path = "crates/agenterm-lua", optional = true }
 agenterm-qjs = { path = "crates/agenterm-qjs" }
-agenterm-sql = { path = "crates/agenterm-sql" }
+agenterm-sql = { path = "crates/agenterm-sql", optional = true }
 ab_glyph = "0.2.32"
 anyhow = "1"
 png = "0.17"

@@ -33,7 +33,7 @@ pub use compile::{
 };
 pub use corpus::{
     CorpusScanOptions, CorpusScanReport, extract_task_entries, scan_relative_files,
-    scan_rhai_directory, scan_task_manifest,
+    scan_rh_directory, scan_task_manifest,
 };
 pub use error::RhError;
 pub use host_api::{

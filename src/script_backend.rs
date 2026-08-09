@@ -26,8 +26,10 @@ use crate::script_rh_run::RhRunContext;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScriptBackend {
     Rh,
+    #[cfg(feature = "script-lua")]
     Lua,
     Qjs,
+    #[cfg(feature = "script-sql")]
     Sql,
 }
 
@@ -41,8 +43,10 @@ impl ScriptBackend {
             .as_deref()
         {
             Some("rhai") => Self::Rh,
+            #[cfg(feature = "script-lua")]
             Some("lua") => Self::Lua,
             Some("qjs") => Self::Qjs,
+            #[cfg(feature = "script-sql")]
             Some("sql") => Self::Sql,
             _ => Self::Rh,
         }
@@ -51,20 +55,24 @@ impl ScriptBackend {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Rh => "rh",
+            #[cfg(feature = "script-lua")]
             Self::Lua => "lua",
             Self::Qjs => "qjs",
+            #[cfg(feature = "script-sql")]
             Self::Sql => "sql",
         }
     }
 
     /// Select backend from task entry file extension.
     pub fn from_entry_path(path: &str) -> Self {
+        #[cfg(feature = "script-lua")]
         if path.ends_with(".lua") {
             return Self::Lua;
         }
         if path.ends_with(".js") || path.ends_with(".mjs") {
             return Self::Qjs;
         }
+        #[cfg(feature = "script-sql")]
         if path.ends_with(".sql") {
             return Self::Sql;
         }
@@ -226,149 +234,6 @@ pub fn rh_load_pack(
     crate::script_rh_pack::load_rh_pack(path)
 }
 
-/// dynacore invocation result — deliberately its own small type (not
-/// `crate::script_engine::ScriptInvocationResult`): dynacore packs do not go
-/// through the `ScriptEngineBackend` trait (see
-/// `try_execute_dynacore_pack_invocation`'s doc for why), so there is no
-/// reason to share that trait's result shape.
-pub struct DynacoreInvocationResult {
-    pub stdout: String,
-    pub value: Option<serde_json::Value>,
-}
-
-/// Runs a cached dynacore pack (`crate::script_dynacore_pack::cached_dynacore_pack`,
-/// configured via `AGENTERM_DYNACORE_PACK_STORE`/`AGENTERM_DYNACORE_PACK_HASH`)
-/// if one is configured. Mirrors `try_execute_rh_invocation`'s cached-native-
-/// pack shape (`resolve_rh_pack`'s `cached_rh_pack()` branch): `Ok(None)`
-/// means "no pack configured, fall through to the rh/lua/qjs/sql engines",
-/// `Ok(Some(_))` is a completed run, `Err` covers a verification failure, a
-/// step-limit abort, or a `Run`/`Eval` asked for without a fleet bridge.
-///
-/// dynacore packs are binary content-addressed artifacts, not human-authored
-/// text source — this deliberately does NOT go through the
-/// `ScriptEngineBackend` trait's `check(source)`/`execute(source)` shape
-/// (`script_engine.rs`'s trait doc: "does not cover... pack/qualify CLI
-/// verbs (engine-specific pack shapes, see design §3 non-goals)"; rh's own
-/// native pack — `script_rh_pack.rs` — takes the exact same "own path, not
-/// the trait" stance for the same reason). `script_worker.rs::execute_inner`
-/// calls this directly, before dispatching to any `ScriptEngineBackend`.
-pub fn try_execute_dynacore_pack_invocation(
-    operation: ScriptOperation,
-    fleet_bridge: Option<crate::script_dynacore_host::DynacoreFleetBridgeFn>,
-) -> Result<Option<DynacoreInvocationResult>, String> {
-    let Some(pack) = crate::script_dynacore_pack::cached_dynacore_pack() else {
-        return Ok(None);
-    };
-    // Re-verifying here (cheap — see verify.rs's own doc: "produce-time, no
-    // execution, one pass") is what actually produces the `VerifiedModule`
-    // this call needs: `VerifiedModule<'a>` borrows the `Module` it
-    // verifies, so the OnceLock-cached pack can only hold the owned
-    // `Module` (load-time verification in `load_dynacore_pack` already
-    // proved it well-formed once; this is not a new, unproven gate).
-    let verified = crate::script_dynacore_host::verify_pack(&pack.module)
-        .map_err(|fault| format!("dynacore pack failed verification: {fault:?}"))?;
-
-    match operation {
-        // Mirrors try_execute_rh_invocation's own Api arm: unreachable in
-        // practice (execute_inner short-circuits ScriptOperation::Api before
-        // any backend dispatch), kept only so this match stays exhaustive.
-        ScriptOperation::Api => Ok(None),
-        ScriptOperation::Check => Ok(Some(DynacoreInvocationResult {
-            stdout: String::new(),
-            value: None,
-        })),
-        ScriptOperation::Run | ScriptOperation::Eval => {
-            let Some(bridge) = fleet_bridge else {
-                return Err(
-                    "dynacore pack invocation requires a fleet bridge (broker) but none was supplied"
-                        .to_owned(),
-                );
-            };
-            let outcome = crate::script_dynacore_host::run_pack(&verified, &bridge);
-            match outcome.termination {
-                agenterm_dynacore::eval_core::Termination::Exited(value) => {
-                    Ok(Some(DynacoreInvocationResult {
-                        stdout: String::new(),
-                        value: Some(serde_json::Value::from(value)),
-                    }))
-                }
-                agenterm_dynacore::eval_core::Termination::StepLimitExceeded => Err(
-                    "dynacore pack exceeded its step limit before finishing".to_owned(),
-                ),
-            }
-        }
-    }
-}
-
-/// nativecore invocation result — same "own small type, not
-/// `ScriptEngineBackend`'s result shape" reasoning as `DynacoreInvocationResult`
-/// (see that type's doc); the two are not unified because nativecore packs
-/// have no fleet-call surface to report through.
-pub struct NativecoreInvocationResult {
-    pub stdout: String,
-    pub value: Option<serde_json::Value>,
-}
-
-/// Runs a cached nativecore pack
-/// (`crate::script_nativecore_pack::cached_nativecore_pack`, configured via
-/// `AGENTERM_NATIVECORE_PACK_STORE`/`AGENTERM_NATIVECORE_PACK_HASH`) if one is
-/// configured. Mirrors `try_execute_dynacore_pack_invocation`'s shape, minus
-/// a fleet bridge parameter: nativecore intents call `seam.rs::do_intent`
-/// directly onto real Win32 APIs (`plan/design-dynacore-native-core.md` §7.1
-/// — "没有 bridge 要穿过去"), so there is no broker to plumb through and no
-/// `Run`/`Eval`-without-a-bridge error case to report. `Ok(None)` means "no
-/// pack configured, fall through to the dynacore/rh/lua/qjs/sql chain",
-/// `Ok(Some(_))` is a completed run, `Err` covers a verification failure or a
-/// step-limit abort.
-///
-/// nativecore packs are binary content-addressed artifacts, not
-/// human-authored text source — this deliberately does NOT go through the
-/// `ScriptEngineBackend` trait, for the same reason
-/// `try_execute_dynacore_pack_invocation` does not (see that function's
-/// doc). `script_worker.rs::execute_inner` calls this directly, before
-/// dispatching to any `ScriptEngineBackend`.
-pub fn try_execute_nativecore_pack_invocation(
-    operation: ScriptOperation,
-) -> Result<Option<NativecoreInvocationResult>, String> {
-    let Some(pack) = crate::script_nativecore_pack::cached_nativecore_pack() else {
-        return Ok(None);
-    };
-    // Re-verifying here (cheap — see agenterm-nativecore's verify.rs doc:
-    // "produce-time, no execution, one pass") is what actually produces the
-    // `VerifiedModule` this call needs: `VerifiedModule<'a>` borrows the
-    // `Module` it verifies, so the OnceLock-cached pack can only hold the
-    // owned `Module` (load-time verification in `load_nativecore_pack`
-    // already proved it well-formed once; this is not a new, unproven gate).
-    let verified = agenterm_nativecore::verify::verify(&pack.module)
-        .map_err(|fault| format!("nativecore pack failed verification: {fault:?}"))?;
-
-    match operation {
-        // Mirrors try_execute_dynacore_pack_invocation's own Api arm:
-        // unreachable in practice (execute_inner short-circuits
-        // ScriptOperation::Api before any backend dispatch), kept only so
-        // this match stays exhaustive.
-        ScriptOperation::Api => Ok(None),
-        ScriptOperation::Check => Ok(Some(NativecoreInvocationResult {
-            stdout: String::new(),
-            value: None,
-        })),
-        ScriptOperation::Run | ScriptOperation::Eval => {
-            let outcome = agenterm_nativecore::eval_core::run(&verified);
-            match outcome.termination {
-                agenterm_nativecore::eval_core::Termination::Exited(value) => {
-                    Ok(Some(NativecoreInvocationResult {
-                        stdout: String::new(),
-                        value: Some(serde_json::Value::from(value)),
-                    }))
-                }
-                agenterm_nativecore::eval_core::Termination::StepLimitExceeded => Err(
-                    "nativecore pack exceeded its step limit before finishing".to_owned(),
-                ),
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -408,6 +273,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "script-lua")]
     fn lua_backend_from_env() {
         // Trait-M4: was mixed with a try_execute_lua_invocation check-path
         // probe and a lua_backend_enabled() assertion; both are now covered
@@ -432,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "script-lua")]
     fn lua_backend_from_entry_path() {
         assert_eq!(
             ScriptBackend::from_entry_path("scripts/lua/test.lua"),
@@ -448,13 +315,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "script-lua")]
     fn lua_backend_as_str() {
         assert_eq!(ScriptBackend::Lua.as_str(), "lua");
         assert_eq!(ScriptBackend::Rh.as_str(), "rh");
     }
 
     #[test]
-    fn retired_rhai_backend_env_defaults_to_rh() {
+    fn retired_rh_backend_env_defaults_to_rh() {
         let _guard = ENV_LOCK.lock().expect("lock");
         let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
         unsafe {
@@ -506,6 +374,7 @@ mod tests {
             ScriptBackend::from_entry_path("scripts/qjs/test.mjs"),
             ScriptBackend::Qjs
         );
+        #[cfg(feature = "script-lua")]
         assert_eq!(
             ScriptBackend::from_entry_path("test.lua"),
             ScriptBackend::Lua
@@ -518,6 +387,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "script-sql")]
     fn sql_backend_from_env() {
         // Mirrors qjs_backend_from_env: ScriptBackend-enum-routing-only, no
         // enabled()/check-path probe here (sql has no such probe yet — its
@@ -541,6 +411,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "script-sql")]
     fn sql_backend_from_entry_path() {
         assert_eq!(
             ScriptBackend::from_entry_path("scripts/sql/test.sql"),
@@ -553,6 +424,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "script-sql")]
     fn sql_backend_as_str() {
         assert_eq!(ScriptBackend::Sql.as_str(), "sql");
     }

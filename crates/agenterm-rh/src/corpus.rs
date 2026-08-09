@@ -101,7 +101,7 @@ pub fn scan_task_manifest(options: CorpusScanOptions) -> Result<CorpusScanReport
     Ok(report)
 }
 
-pub fn scan_rhai_directory(options: CorpusScanOptions) -> Result<CorpusScanReport, RhError> {
+pub fn scan_rh_directory(options: CorpusScanOptions) -> Result<CorpusScanReport, RhError> {
     if options.tasks_manifest.is_some() {
         return scan_task_manifest(options);
     }
@@ -248,7 +248,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::{CorpusScanOptions, extract_task_entries, scan_rhai_directory, scan_task_manifest};
+    use super::{CorpusScanOptions, extract_task_entries, scan_rh_directory, scan_task_manifest};
 
     struct TestDir(PathBuf);
 
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn scripts_rh_scan_produces_report() {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let report = scan_rhai_directory(CorpusScanOptions {
+        let report = scan_rh_directory(CorpusScanOptions {
             project_root: repo.clone(),
             relative_dir: "scripts/rh".to_owned(),
             ..CorpusScanOptions::default()

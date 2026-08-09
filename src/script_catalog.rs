@@ -170,11 +170,11 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         since: "script-api-v1",
         profiles: SHIPPED_PROFILES,
         signature: "print(value)",
-        kind: "rhai_builtin",
+        kind: "rh_builtin",
         authority: "none",
         side_effects: &["captured_output"],
         execution: "sync",
-        cancellation: "between_rhai_operations",
+        cancellation: "between_rh_operations",
         errors: &["limit_output_bytes"],
         result: None,
         operation_id: None,
@@ -739,14 +739,14 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "std::env::get(name)",
             (
                 &[
-                    "var_is_a_rhai_reserved_word",
+                    "var_is_a_rh_reserved_word",
                     "worker_environment_snapshot",
                     "value_not_audited",
                 ],
                 &["environment_missing", "environment_not_unicode"],
             ),
             ),
-            &["std::env::var is exposed as get because var is Rhai-reserved"],
+            &["std::env::var is exposed as get because var is Rh language reserved"],
         ),
         shipped_local_entry(
             "std.env.has",
@@ -784,12 +784,12 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 RustMapping::Adapted,
                 "std::process::command(program)",
                 (
-                    &["new_is_a_rhai_reserved_word", "no_implicit_shell"],
+                    &["new_is_a_rh_reserved_word", "no_implicit_shell"],
                     &["process_program_empty"],
                 ),
             ),
             &[
-                "Command::new cannot be exposed because new is Rhai-reserved",
+                "Command::new cannot be exposed because new is Rh language reserved",
                 "the host never inserts an implicit shell",
                 "errors use stable AgenTerm codes rather than Rust io::Error values",
             ],
@@ -901,7 +901,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 "command.start()",
                 (
                     &[
-                        "spawn_is_a_rhai_reserved_word",
+                        "spawn_is_a_rh_reserved_word",
                         "invocation_owned",
                         "job_object_cleanup",
                     ],
@@ -909,7 +909,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 ),
             ),
             &[
-                "Command::spawn is exposed as start because spawn is Rhai-reserved",
+                "Command::spawn is exposed as start because spawn is Rh language reserved",
                 "the Child is owned by one supervised invocation",
                 "descendants inherit supervisor process-tree cleanup",
             ],
@@ -1330,7 +1330,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             None,
             RustMapping::None,
             "task.id / task.kind / task.state / task.done / task.cancelled / task.wait([timeout]) / task.cancel()",
-            (&["typed_host_payload_only", "no_rhai_dynamic_cross_thread", "failed_terminal_state"], &["task_wait_timeout", "task_failed", "task_cancelled"]),
+            (&["typed_host_payload_only", "no_rh_dynamic_cross_thread", "failed_terminal_state"], &["task_wait_timeout", "task_failed", "task_cancelled"]),
         ),
         http_entry(
             "rh.http.request",
@@ -1372,7 +1372,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (
                 &[
                     "project_root_relative",
-                    "rhai_extension_implicit",
+                    "rh_extension_implicit",
                     "compiled_self_contained",
                 ],
                 &[
@@ -1428,7 +1428,7 @@ pub fn catalog() -> Value {
         "api_version": SCRIPT_API_VERSION,
         "default_profile": "local",
         "execution_model": "unrestricted_local",
-        "model": "rhai_language + rust_shaped_std_subset + rhai_native_extensions + agenterm_fleet",
+        "model": "rh_language + rust_shaped_std_subset + rh_native_extensions + agenterm_fleet",
         "comparison": {
             "schema_version": SCRIPT_COMPARISON_SCHEMA_VERSION,
             "purpose": "research analogues for horizontal discovery; never a compatibility claim",
@@ -1696,7 +1696,7 @@ fn shipped_runtime_entry(
         rust_path: None,
         rust_mapping: RustMapping::None,
         semantic_differences: &[
-            "AgenTerm/Rhai invocation lifecycle extension with no Rust std surface equivalent",
+            "AgenTerm/Rh invocation lifecycle extension with no Rust std surface equivalent",
             "temporary ownership and atomic promotion are enforced by the host runtime",
         ],
         comparisons: unreviewed_comparisons(),
@@ -1940,7 +1940,7 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
         return similar_comparisons(
             "JSON",
             "JSON",
-            "AgenTerm conversion is bounded and uses Rhai-compatible Dynamic values",
+            "AgenTerm conversion is bounded and uses Rh-compatible Dynamic values",
         );
     }
     if stable_id.starts_with("rh.bytes.") {
@@ -2001,7 +2001,7 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
         return similar_comparisons(
             "ECMAScript modules",
             "ECMAScript modules",
-            "AgenTerm resolves only deterministic project-root-relative Rhai modules without network lookup",
+            "AgenTerm resolves only deterministic project-root-relative Rh modules without network lookup",
         );
     }
     if stable_id == "runtime.project.named-task" {

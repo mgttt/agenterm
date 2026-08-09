@@ -38,8 +38,7 @@ struct Harness {
     settings: PathBuf,
     instances: PathBuf,
     server: Option<std::process::Child>,
-    // OS-enforced backstop for the manual kill in `Drop` below — see
-    // `tests/dynacore_live_server.rs`'s `Harness` for why: Rust `Drop` never
+    // OS-enforced backstop for the manual kill in `Drop` below: Rust `Drop` never
     // runs if this test binary is force-killed from the outside (a CI
     // timeout, a hung wait loop someone interrupts), which otherwise orphans
     // `agenterm.exe server`. This kill-on-close containment handle is closed

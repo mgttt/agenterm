@@ -148,7 +148,7 @@ fn process_concurrent_framed_worker<R: Read>(
             ScriptFramePayload::ReplRequest(request) => (
                 request.session_id.as_str(),
                 "protocol_repl_unavailable",
-                "interactive REPL was removed with the Rhai interpreter",
+                "interactive REPL was removed with the Rh interpreter",
             ),
             ScriptFramePayload::ReplResponse(response) => (
                 response.session_id.as_str(),
@@ -446,7 +446,7 @@ fn process_frame(frame: ScriptFrame, completed_invocations: &mut HashSet<String>
         ScriptFramePayload::ReplRequest(request) => protocol_failure_for(
             &request.session_id,
             "protocol_repl_unavailable",
-            "interactive REPL was removed with the Rhai interpreter",
+            "interactive REPL was removed with the Rh interpreter",
         ),
         ScriptFramePayload::ReplResponse(response) => protocol_failure_for(
             &response.session_id,
@@ -637,56 +637,6 @@ fn execute_inner(
             bridge
         });
 
-    // dynacore pack: opt-in via AGENTERM_DYNACORE_PACK_STORE +
-    // AGENTERM_DYNACORE_PACK_HASH, independent of AGENTERM_SCRIPT_BACKEND
-    // (which only selects among rh/lua/qjs/sql and defaults to rh) — this
-    // only fires when a caller has explicitly pointed at a dynacore pack
-    // store+hash, so it cannot change behavior for any existing invocation
-    // that doesn't set those two env vars. Checked before the rh/lua/qjs/sql
-    // branches below for that reason.
-    //
-    // Reuses the SAME `fleet_bridge` built above — in-process, one function
-    // call per fleet.call, no new bridge and no subprocess — via a direct
-    // pass-through: `crate::script_engine::ScriptFleetBridgeFn` and
-    // `crate::script_dynacore_host::DynacoreFleetBridgeFn` are both exactly
-    // `Arc<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>` (the
-    // same type under two names — a type alias does not create a new
-    // nominal type), so no wrapper closure is needed here, unlike rh's
-    // Arc->Box bridge in `RhEngineBackend::execute`.
-    //
-    // Does NOT go through `ScriptEngineBackend`/`ScriptEngine` — dynacore
-    // packs are binary content-addressed artifacts, not human-authored text
-    // source, so this is not a fifth `ScriptEngineBackend` impl; no new
-    // `ScriptBackend`/`ScriptOperation` variant either. See
-    // `script_backend::try_execute_dynacore_pack_invocation`'s doc for the
-    // full rationale (mirrors rh's own native-pack path, `script_rh_pack.rs`).
-    match crate::script_backend::try_execute_dynacore_pack_invocation(
-        invocation.operation,
-        fleet_bridge.clone(),
-    ) {
-        Ok(Some(result)) => return Ok((result.stdout, result.value)),
-        Ok(None) => {}
-        Err(error) => return Err(configuration_error("dynacore_backend", error)),
-    }
-
-    // nativecore pack: opt-in via AGENTERM_NATIVECORE_PACK_STORE +
-    // AGENTERM_NATIVECORE_PACK_HASH, independent of the dynacore pack pair
-    // above and of AGENTERM_SCRIPT_BACKEND — only fires when a caller has
-    // explicitly pointed at a nativecore pack store+hash, so it cannot
-    // change behavior for any existing invocation that doesn't set those
-    // two env vars.
-    //
-    // No `fleet_bridge` to pass through here (unlike the dynacore branch
-    // above): nativecore intents call `seam.rs::do_intent` directly onto
-    // real Win32 APIs, not through a fleet broker — see
-    // `script_backend::try_execute_nativecore_pack_invocation`'s doc and
-    // `plan/design-dynacore-native-core.md` §7.1.
-    match crate::script_backend::try_execute_nativecore_pack_invocation(invocation.operation) {
-        Ok(Some(result)) => return Ok((result.stdout, result.value)),
-        Ok(None) => {}
-        Err(error) => return Err(configuration_error("nativecore_backend", error)),
-    }
-
     // rh backend: no `#[cfg(not(test))]` gate — rh's `execute_inner` unit
     // tests (below) rely on this branch actually running.
     if crate::script_engine::RhEngineBackend.enabled() {
@@ -700,7 +650,7 @@ fn execute_inner(
     }
 
     // Lua backend: enabled via AGENTERM_SCRIPT_BACKEND=lua or `.lua` entry.
-    #[cfg(not(test))]
+    #[cfg(all(not(test), feature = "script-lua"))]
     if crate::script_engine::LuaEngineBackend.enabled() {
         return dispatch_via_engine(
             &crate::script_engine::LuaEngineBackend,
@@ -731,7 +681,7 @@ fn execute_inner(
     // `dispatch_via_engine`'s `configuration_error` mapping — correct
     // fail-closed behavior for a placeholder backend, not a bug: a `check`
     // operation still works (sql's check is real), only `run`/`eval` fail.
-    #[cfg(not(test))]
+    #[cfg(all(not(test), feature = "script-sql"))]
     if crate::script_engine::SqlEngineBackend.enabled() {
         return dispatch_via_engine(
             &crate::script_engine::SqlEngineBackend,
@@ -1252,322 +1202,5 @@ mod tests {
             failure_code(frame_result(&frames[0])),
             "protocol_result_frame_too_large"
         );
-    }
-}
-
-/// Black-box proof that the dynacore integration's fleet_call path is a real
-/// in-process function call, not a subprocess — the thing
-/// `tests/dynacore_live_server.rs`/`examples/dynacore_run.rs`'s old
-/// subprocess-per-call bridge could NOT prove (that file's own header
-/// explains why it had to shell out to `agenterm cli` for every call:
-/// `script_worker.rs`/`script_backend.rs` were mid-flight-modified by a
-/// concurrent session at the time). That constraint is gone; this module
-/// exercises `crate::script_dynacore_host::verify_pack`/`run_pack` — the
-/// SAME two calls `crate::script_backend::try_execute_dynacore_pack_invocation`
-/// makes (see that function's doc) — through a bridge that reaches a REAL,
-/// separately-spawned `agenterm` server via `crate::client::send_ipc_request_to_timeout`,
-/// a direct function call that opens one real IPC socket per call and never
-/// spawns a subprocess.
-///
-/// Lives in a separate `#[cfg(test)] mod` (not folded into `mod tests`
-/// above) because it needs its own `Harness`/bridge helpers and does not
-/// touch `script_worker.rs`'s frame/invocation machinery at all — unlike
-/// `mod tests`, nothing here calls `execute`/`execute_inner`, so it is not
-/// exposed to that OnceLock's process-wide "first caller wins" caching
-/// behavior (`script_dynacore_pack::cached_dynacore_pack()` is itself
-/// exercised by `script_dynacore_pack.rs`'s own env-free unit tests instead
-/// — see that file's header for why the *env-var-triggered* path specifically
-/// cannot be unit-tested reliably in `--lib`'s shared test binary, the exact
-/// same reason `script_rh_pack.rs`'s own `cached_rh_pack()` is only
-/// exercised through subprocess-spawning integration tests like
-/// `tests/rh_framed_worker.rs`, never a `--lib` unit test).
-#[cfg(test)]
-mod dynacore_in_process_broker_tests {
-    use std::{
-        fs,
-        net::TcpListener,
-        path::PathBuf,
-        process::{Child, Command, Stdio},
-        sync::Arc,
-        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-    };
-
-    use agenterm_dynacore::eval_core::Termination;
-
-    use crate::script_dynacore_host::{self, DynacoreFleetBridgeFn};
-
-    /// Resolve the `agenterm` server executable built alongside this test
-    /// binary at RUNTIME. `CARGO_BIN_EXE_agenterm` is only defined at
-    /// compile time for integration tests/benchmarks — NOT for `--lib` unit
-    /// tests (probed directly: `env!("CARGO_BIN_EXE_agenterm")` fails to
-    /// compile in this module with "may not be available for the current
-    /// Cargo target") — so this mirrors `examples/dynacore_run.rs`'s own
-    /// `locate_agenterm_cli` sibling-path strategy (that file hit the exact
-    /// same macro restriction for `[[example]]` targets) instead. A `--lib`
-    /// unit test binary builds to `target/<profile>/deps/agenterm-<hash>
-    /// (.exe)`; the `agenterm` bin target builds to
-    /// `target/<profile>/agenterm(.exe)` — one directory up from `deps/`.
-    fn locate_agenterm_server_exe() -> PathBuf {
-        locate_sibling_exe("agenterm")
-    }
-
-    fn locate_sibling_exe(bin_name: &str) -> PathBuf {
-        let exe_name = format!("{bin_name}{}", std::env::consts::EXE_SUFFIX);
-        if let Ok(current) = std::env::current_exe()
-            && let Some(deps_dir) = current.parent()
-            && let Some(profile_dir) = deps_dir.parent()
-        {
-            let candidate = profile_dir.join(&exe_name);
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        PathBuf::from(exe_name)
-    }
-
-    /// A real, isolated headless `agenterm` server process this test owns
-    /// end to end — trimmed from `tests/dynacore_live_server.rs`'s own
-    /// `Harness`. Unlike that file, nothing here shells out to
-    /// `agenterm cli` per call: `wait_ready` and every fleet bridge call
-    /// below use `crate::client::send_ipc_request_to_timeout` directly, an
-    /// in-process function call over a real IPC socket.
-    struct Harness {
-        root: PathBuf,
-        address: String,
-        workspace: PathBuf,
-        settings: PathBuf,
-        instances: PathBuf,
-        server: Option<Child>,
-        // OS-enforced backstop for the manual kill in `Drop` below — see
-        // `tests/dynacore_live_server.rs`'s `Harness` for why: Rust `Drop`
-        // never runs if this test binary is force-killed from the outside,
-        // which otherwise orphans `agenterm.exe server`. This kill-on-close
-        // containment handle is closed by the OS during process teardown
-        // regardless of how that teardown happens.
-        _server_tree_guard: Option<crate::platform::process::ProcessTreeGuard>,
-    }
-
-    impl Harness {
-        fn start(label: &str) -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "agenterm-dynacore-in-process-{label}-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("system time")
-                    .as_nanos()
-            ));
-            fs::create_dir_all(&root).expect("create isolation root");
-            let address = TcpListener::bind("127.0.0.1:0")
-                .expect("reserve loopback address")
-                .local_addr()
-                .expect("loopback address")
-                .to_string();
-            let instances = root.join("instances");
-            fs::create_dir_all(&instances).expect("create instance directory");
-            let mut harness = Self {
-                workspace: root.join("workspace.json"),
-                settings: root.join("settings.json"),
-                instances,
-                address,
-                root,
-                server: None,
-                _server_tree_guard: None,
-            };
-            let server = Command::new(locate_agenterm_server_exe())
-                .args(["server", "--address", &harness.address])
-                .env("AGENTERM_IPC_ADDRESS", &harness.address)
-                .env("AGENTERM_WORKSPACE_PATH", &harness.workspace)
-                .env("AGENTERM_SETTINGS_PATH", &harness.settings)
-                .env("AGENTERM_INSTANCE_DIR", &harness.instances)
-                .env("AGENTERM_NO_ACTIVATE", "1")
-                .env("AGENTERM_HEADLESS_VIEWPORT", "1400x900")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("start isolated headless server");
-            harness._server_tree_guard = Some(
-                crate::platform::process::ProcessTreeGuard::attach(&server)
-                    .expect("attach kill-on-close containment to isolated server"),
-            );
-            harness.server = Some(server);
-            harness.wait_ready();
-            harness
-        }
-
-        fn wait_ready(&self) {
-            let deadline = Instant::now() + Duration::from_secs(20);
-            loop {
-                if crate::client::send_ipc_request_to_timeout(
-                    &self.address,
-                    vec!["protocol-info".to_owned()],
-                    Duration::from_millis(500),
-                )
-                .is_ok_and(|response| response.ok)
-                {
-                    return;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "server never became reachable"
-                );
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
-
-    impl Drop for Harness {
-        fn drop(&mut self) {
-            if let Some(mut server) = self.server.take() {
-                let _ = crate::client::send_ipc_request_to_timeout(
-                    &self.address,
-                    vec!["kill-server".to_owned()],
-                    Duration::from_secs(5),
-                );
-                let deadline = Instant::now() + Duration::from_secs(5);
-                while Instant::now() < deadline {
-                    if matches!(server.try_wait(), Ok(Some(_))) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                let _ = server.kill();
-                let _ = server.wait();
-            }
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
-    /// In-process fleet bridge for the proofs below: routes `tabs.list` to a
-    /// real, already-running server via `crate::client::send_ipc_request_to_timeout`
-    /// (a direct function call, one real IPC socket per call, no subprocess
-    /// spawn) and projects the real `tabs` field — the exact translation
-    /// `client::handle_script_broker` performs for the `tabs.list` broker
-    /// operation in production.
-    fn real_tabs_list_bridge(address: String) -> DynacoreFleetBridgeFn {
-        Arc::new(move |operation_id: &str, _params_json: &str| -> Result<String, String> {
-            if operation_id != "tabs.list" {
-                return Err(format!("test bridge has no mapping for {operation_id}"));
-            }
-            let response = crate::client::send_ipc_request_to_timeout(
-                &address,
-                vec!["ui-snapshot".to_owned()],
-                Duration::from_secs(5),
-            )
-            .map_err(|error| format!("send_ipc_request_to_timeout failed: {error:#}"))?;
-            if !response.ok {
-                return Err(format!("ui-snapshot failed: {}", response.error));
-            }
-            let snapshot: serde_json::Value = serde_json::from_str(&response.output)
-                .map_err(|error| format!("ui-snapshot did not print JSON: {error}"))?;
-            let tabs = snapshot
-                .get("tabs")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!([]));
-            Ok(tabs.to_string())
-        })
-    }
-
-    /// Acceptance: N dynacore `run_pack` invocations — each making TWO real
-    /// `fleet.tabs.list` round trips against a live server — complete
-    /// entirely within THIS test process. No `agenterm cli` (or any other)
-    /// subprocess is spawned for any of the fleet calls, in contrast to the
-    /// ONE reference subprocess spawn this same test also times, for scale.
-    #[test]
-    fn n_dynacore_fleet_calls_run_in_process_without_any_subprocess() {
-        let harness = Harness::start("cheap");
-        let bridge = real_tabs_list_bridge(harness.address.clone());
-
-        let module = script_dynacore_host::demo_pack_module();
-        let verified = script_dynacore_host::verify_pack(&module)
-            .expect("the demo pack must verify against the real OPERATION_CATALOG");
-
-        const ITERATIONS: usize = 100;
-        let started = Instant::now();
-        for _ in 0..ITERATIONS {
-            let outcome = script_dynacore_host::run_pack(&verified, &bridge);
-            assert_eq!(
-                outcome.termination,
-                Termination::Exited(1),
-                "against a reachable server tabs.list succeeds every time"
-            );
-            assert_eq!(outcome.calls.len(), 2);
-        }
-        let in_process_elapsed = started.elapsed();
-        let calls_made = ITERATIONS * 2;
-        let avg_in_process_call = in_process_elapsed / calls_made as u32;
-
-        // Reference point: ONE `agenterm cli ui-snapshot` subprocess call —
-        // the EXACT SAME real work (`ui-snapshot` against this same live
-        // server) the old `dynacore_live_server.rs`/`dynacore_run.rs`
-        // bridge paid a fresh subprocess spawn for, on EVERY SINGLE fleet
-        // call. Doing the identical operation isolates the subprocess-spawn
-        // tax as the only difference from this test's in-process bridge
-        // (which reaches the same `ui-snapshot` IPC path, just via a direct
-        // function call instead of `Command::spawn`).
-        let spawn_started = Instant::now();
-        let output = Command::new(locate_agenterm_server_exe())
-            .args(["cli", "--address", &harness.address, "ui-snapshot"])
-            .output()
-            .expect("spawn a reference agenterm cli subprocess");
-        let single_subprocess_elapsed = spawn_started.elapsed();
-        assert!(
-            output.status.success(),
-            "reference agenterm cli ui-snapshot subprocess must itself succeed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        println!(
-            "dynacore in-process: {calls_made} real fleet_calls in {in_process_elapsed:?} \
-             (avg {avg_in_process_call:?}/call); one reference `agenterm cli ui-snapshot` \
-             subprocess doing the SAME work took {single_subprocess_elapsed:?}"
-        );
-
-        assert!(
-            avg_in_process_call < single_subprocess_elapsed,
-            "average in-process fleet_call ({avg_in_process_call:?}) should be cheaper than \
-             paying a subprocess spawn ON TOP OF the same ui-snapshot IPC work \
-             ({single_subprocess_elapsed:?}) — the old per-call subprocess architecture paid \
-             that subprocess tax for every one of the {calls_made} calls this test made \
-             in-process instead"
-        );
-    }
-
-    /// Acceptance: real fleet_call semantics, real data — not a mocked
-    /// bridge. The demo pack's Ok arm branches on a REAL round trip's Ok/Err
-    /// outcome and makes its second call using that real result, proving
-    /// this in-process path produces the same correctness the old
-    /// subprocess-bridged `tests/dynacore_live_server.rs` proved, without
-    /// paying a subprocess per call.
-    #[test]
-    fn dynacore_pack_reflects_real_server_data_through_the_in_process_bridge() {
-        let harness = Harness::start("correctness");
-        let bridge = real_tabs_list_bridge(harness.address.clone());
-
-        let module = script_dynacore_host::demo_pack_module();
-        let verified = script_dynacore_host::verify_pack(&module).expect("verify");
-
-        let outcome = script_dynacore_host::run_pack(&verified, &bridge);
-        assert_eq!(
-            outcome.termination,
-            Termination::Exited(1),
-            "a reachable server takes the Ok arm and exits with the second call's dest word"
-        );
-        assert_eq!(outcome.calls.len(), 2, "the Ok arm makes exactly two real round trips");
-        for call in &outcome.calls {
-            assert_eq!(call.operation_id, "tabs.list");
-            assert_eq!(call.params_json, "{}");
-            let tabs: serde_json::Value = serde_json::from_str(
-                call.result
-                    .as_ref()
-                    .expect("a real, reachable server answers tabs.list with Ok"),
-            )
-            .expect("a real server's tabs.list result is JSON");
-            assert!(
-                tabs.is_array(),
-                "a real ui-snapshot's tabs field is a JSON array, not a hand-written mock \
-                 payload: {tabs}"
-            );
-        }
     }
 }

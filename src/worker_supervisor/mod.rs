@@ -386,6 +386,7 @@ mod tests {
             script_backend_environment(Some(OsString::from("rhai"))),
             OsString::from("rh")
         );
+        #[cfg(feature = "script-lua")]
         assert_eq!(
             script_backend_environment(Some(OsString::from("lua"))),
             OsString::from("lua")

@@ -1,21 +1,24 @@
 # AgenTerm v0.1.16 公开计划
 
-状态：**已定稿，待授权开工**（2026-08-07）  
+状态：**已收窄，待执行**（2026-08-10 从原稿收窄；原定稿 2026-08-07）  
 不创建 tag / Candidate / Release，除非人工明确授权。  
-版本列车仍停在 **0.1.15 代码线**；本文件是 **下一列车执行投影**，不替代 PRD。
+版本列车仍停在 **0.1.15 代码线**；本文件是 **当前列车执行投影**，不替代 PRD。
 
-**主题：多 GUI 产品化收口 + Unix 多实例可达 + 0.1.15 尾账。**
+**主题（收窄后）：多 GUI 产品化收口 + Unix 多实例真机闭环 + Windows 现场尾账。**
 
-比 v0.1.15 更窄：发布链降本与 install 卫生主波已在 main；本版把用户
-已踩到的「多窗 / 多 server」体验做成**可重复、可讲清**的产品面，并补齐
-Unix 侧仍缺的多实例入口，顺带关掉最贵的未验证据与测试腐化。
+原计划中发布链证据（R′）、安装尾（G′′）、低成本尾账（L′）、脚本引擎深化
+（Rh-M23、QJS-M6）、控制台宿主余量（C10d）及跨版轨（M/N/CC/NET）已整体
+迁入 [`plan-v0.1.17.md`](plan-v0.1.17.md)。v0.1.16 执行中超额完成的三轨
+（agenterm-con 产品化、QuickJS 引擎、跨引擎共享层 + SQL）保留为已完成事实，
+但不再消耗本版剩余工时。
 
 > 产品不变量（已拍板，不得回退）：**GUI 不独占 server**。同一 server 允许多个
 > 并发交互 GUI（`ui-lease` 多租约，上限 16）。`As Window` = 再开一扇窗，
 > **不是**抢唯一租约、也不是 handoff 到现有窗。
 
 上版工作树与证据：[`plan-v0.1.15.md`](plan-v0.1.15.md)（must-ship 主体已合 main；
-公开发版仍未授权）。结构 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md)。
+公开发版仍未授权）。下一版推迟项：[`plan-v0.1.17.md`](plan-v0.1.17.md)。
+结构 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 ---
 
@@ -45,13 +48,15 @@ Unix 侧仍缺的多实例入口，顺带关掉最贵的未验证据与测试腐
    open-instance / As Window 语义**在 macOS/Linux 仍不完整（0.1.15 §11.3 优先
    级 2/4 未齐）。
 
-### 0.3 已知测试/证据债（不阻塞写代码，但阻塞「声称全绿」）
+### 0.3 已知测试/证据债（T-debt 已迁 v0.1.17，仅记录不阻塞本版）
 
 - 集成/发布链偶发红：`linux_package`（缺 SBOM 类产物）、`supply_chain` 计数 pin
-  —— 需认领，勿在 GUI 叶里「顺手改断言」。
+  —— 已迁 v0.1.17 认领
 - R1/R2 配置已合，**连续 Candidate `worker.state=reused` + cache &lt;8GB** 仍缺
-  观测勾选。
-- U2 真机回归、R4 dry-run 真跑：配置/代码在，**人工证据**未收。
+  观测勾选 —— 已迁 v0.1.17
+- U2 真机回归、R4 dry-run 真跑：配置/代码在，**人工证据**未收
+  —— U2 留在本版，R4e 迁 v0.1.17
+- 11 个文件有未提交变更（见 git status）—— 本版验收前需清理提交
 
 ---
 
@@ -98,18 +103,16 @@ W. Multi-GUI productization
   - **验收**：As Window 路径单测/源码锁仍要求 `--ui-client`；PRD multi-lease 一致
   - **成本**：小；**依赖**：无
 
-### Ux. Win 现场尾账（从 0.1.15 迁入）
+### Ux. Win 现场尾账（从 0.1.15 迁入；U4/S4 已迁 v0.1.17）
 
 ```text
 Ux. Windows residual UX
-├─ [ ] U2 标签切换假刷新真机回归（0.1.15）
-├─ [ ] U4 TabSelected 不重推整屏 cells（可选，工期紧可砍）
-└─ [ ] S4 同窗热切换权威（默认不进 must-ship；仅文档边界）
+└─ [ ] U2 标签切换假刷新真机回归（0.1.15）
 ```
 
 - [ ] **U2** — 空 composer 连点 tab：无 ComposerDraft 风暴；可选黑盒
-- [ ] **U4** — 可选协议优化；不阻塞发版叙事
-- [ ] **S4** — 明确「同窗热切换」边界：默认 **新窗 / As Window**，不重做权威
+- ~~U4~~ — 已迁 v0.1.17（可选协议优化）
+- ~~S4~~ — 已迁 v0.1.17（同窗热切换权威边界）
 
 ### O. Unix 多实例可达（OSX 主责 `unix/frontend`）
 
@@ -172,7 +175,7 @@ C. Console host (agenterm-con.exe)
 ├─ [x] C10b DECSCUSR 光标形状 + 闪烁（conhost 没有，vim 插入/普通模式区分靠它）
 ├─ [x] C10c 构建卫生：incremental 缓存 12GB→1.3GB，接入 bootstrap 单点
 ├─ [x] C11 `--emit-snapshot`/`--script`/截图：agent 可编程接口（见下）
-└─ [ ] C10d 未做的超越面（有余力再挑）：回看搜索、OSC 8 超链接、脏行重绘
+└─ [ ] C10d 未做的超越面 → **已迁 v0.1.17**（回看搜索、OSC 8 超链接、脏行重绘）
 ```
 
 **里程碑状态（2026-08-08，二次复核后）**：C1–C3、C5–C9、C10a–c、C11 均已完成，
@@ -676,35 +679,22 @@ panic 位置同上。
   - **非目标**：不引入 `AllocConsole`，不把 mux/MCP 重新拆成独立 PE，不改变
     IPC 或 CLI 命令语义。
 
-### R′. 发布链证据收口（配置已合，只收证 + 最小修）
+### 已迁出项（完整内容见 [`plan-v0.1.17.md`](plan-v0.1.17.md)）
 
-```text
-R′. Evidence closeout
-├─ [ ] R1e Candidate bootstrap.worker.state==reused 连续两次 + cache 配额
-├─ [ ] R2e cargo-home restore-keys 前缀命中日志
-├─ [ ] R4e release dry_run 真跑一次（无 tag/draft）
-└─ [ ] T-debt linux_package / supply_chain 集成红认领
-```
+以下整组已整体迁入 v0.1.17，本版不再认领：
 
-- 不重做 cache 策略；只**观测或修自己引入的红**。
-- **T-debt**：发布相关 pin/产物；与 GUI 叶并行，文件域互斥。
+| 迁出组 | 内容 | 迁出原因 |
+|--------|------|----------|
+| **R′** | R1e/R2e/R4e/T-debt | 需真实 Candidate 运行，v0.1.16 不发布 |
+| **G′′** | G1/H2/G7b/c/d | 依赖政策拍板 |
+| **L′** | L7/L1/L5/L6/L4/L2/L3 | 工期紧砍，非 must-ship |
+| **U4/S4** | 可选协议优化 + 同窗热切换文档 | 明确标「工期紧可砍」 |
+| **Rh-M23** | AOT 扩面 + check parity | Lnx agent 独立轨 |
+| **QJS-M6** | API 级静态校验 | 新发现缺口，设计决策未做 |
+| **C10d** | 回看搜索/OSC 8/脏行重绘 | 有余力再挑 |
+| **M/N/CC/NET** | 多 agent 观察/platform facade/CC/去中心化 | 均推 v0.2.x |
 
-### G′′. 安装尾（政策解锁才做）
-
-| 叶 | 条件 | 说明 |
-|----|------|------|
-| **G1** | G-P1 已拍板可回落 unsigned | macOS `curl\|bash` happy path |
-| **H2** | H1 稳定一版后 | install.sh 消费 `releases.json` |
-| **G7b/c/d** | 等 G-P2 | 升级遇 running server 的默认策略 |
-
-未拍板：**只做文案/文档**，不改 keep-server 默认。
-
-### L′. 低成本尾账（工期紧按序砍）
-
-砍叶序：**L7 → L1 → L5 → L6 → L4 → L2/L3**（定义见 0.1.15 §1.5 L′）。  
-本版 **must-ship 默认只认 L7 + L1**；其余可选。
-
-### Rh. 脚本引擎矩阵（rh / lua / qjs，并行轨，不挤 W/O）
+### Rh. 脚本引擎矩阵（rh / lua / qjs / sql，已完成事实不消耗剩余工时）
 
 **FYI（2026-08-07 用户口头同步，非本版执行序，先落盘防 compact 丢上下文）**：
 脚本引擎侧现在是 **三引擎路线图**，非本 plan 主责 agent 驱动，仅记录以防跨
@@ -758,7 +748,7 @@ lua 雏形来去规避这个风险。
 | 叶 | 说明 |
 |----|------|
 | **Rh-M22** | [x] `agenterm-rhai` 薄壳 + **M22f 默认 rh**；Candidate 六 cell 改名仍待人审 |
-| **Rh-M23** | AOT 扩面 + check parity + caller wave 1 + shim 硬化（[`plan-rh-3.md`](plan-rh-3.md) §5） |
+| **Rh-M23** | → **已迁 v0.1.17**（AOT 扩面 + check parity + caller wave 1 + shim 硬化） |
 | **Rh-default** | [x] **M22f 已默认** `AGENTERM_SCRIPT_BACKEND=rh`；显式 `=rhai` 可回退 |
 | **Lua-proto** | FYI；Win 现场 grok.ds 实现中，目标能力对齐 rh；无本 plan 验收叶 |
 | **QJS-M0** | [x] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型（`rquickjs` 0.12.2，bundled quickjs-ng，MSVC `cc` 自动探测编译）+ 最小 eval 跑通（算术/字符串/语法错误捕获，3 单测绿）；**暂未接入根 workspace**——lua 侧当时在同一工作树有未提交的 `Cargo.toml`/`Cargo.lock` 改动，用嵌套空 `[workspace]` 表隔离，避免撞车；lua 已提交（`8b3764f5`），接入根 workspace 留给 QJS-M1 |
@@ -779,7 +769,7 @@ lua 雏形来去规避这个风险。
 | **QJS-M5c** | [~] 接进 `check`（新 `check_with_project_validation(source, label, project_root)`，无 import/export 的脚本**逐字节委托给原 `check()`**，不是重新实现——有独立测试证明「委托」是真委托：传一个不存在的 project_root 进去，非-module 脚本照样过，因为根本没走到会失败的那段代码）、`check_many.rs`（原来 `project_root` 只用来做 manifest 文件名越权校验，现在真的传给每个文件的 check，import 图校验和「哪些文件允许被列进 manifest」共用同一个已验证过的 root，不是两条平行逻辑）、CLI `check`/`eval`/`run`（新 `--project-root DIR`；`check` 不给默认值，强制显式，对齐 `check-many` 已有的约定；`eval`/`run` 默认用入口文件自己的父目录，理由：这两个是单文件调用为主的场景，每次都要求显式传参是纯摩擦）。**没做**：`pack`/`qualify`——manifest 现在不记 project_root，build 和 load 是分开的两次调用，M5c 没有在 pack 的 schema 里加字段，所以先诚实标为未做，不是漏做。8 个新测试（check.rs 4 个 + check_many.rs 2 个新增，验证「非 module 脚本零行为变化」「真实多文件图校验通过」「被 import 的文件语法错也能抓到」「越权 import 被拒」）+ CLI 端到端 smoke（真建了一个 `entry.js` + `lib/value.js` 的两文件项目，`check` 不给 `--project-root` 时按设计**必须失败**、给了就过；`eval`/`run` 不给参数也能跑通，因为默认用了入口文件的父目录；越权 import 的 `../../../../etc/passwd.js` 真的被拒；**普通无 import 脚本三个动词全部逐字节验证行为不变**，不是assumed）。`cargo test -p agenterm-qjs --lib` 77/77 绿、`cargo clippy -p agenterm-qjs --lib --all-targets -- -D warnings` 零警告、`cargo check --workspace` 干净。仍差：M5d（还没做的部分：pack/qualify 的多文件支持，以及给这套东西写一个正式的端到端 smoke 脚本存进仓库而不是只在这轮对话里跑过） |
 | **QJS-M5d（部分）** | [~] M5d 两件事里做完了一件：**repo 落地的端到端回归测试**（`crates/agenterm-qjs/tests/module_imports.rs` + `fixtures/module-import-project/`：真实 `entry.js`+`lib/value.js`+`escape-attempt.js` 三个文件躺在仓库里，不是临时目录字符串），风格对齐 `agenterm-rh/tests/public_contract.rs`（调库的公开 API 打真文件，不是 shell 出二进制）。6 个测试：sniff 探测真 fixture、plain `check()` 无 project-root 时按设计失败、`check_with_project_validation` 对真项目全绿、`eval_module_entry_with_host` 真的跑出 42 和对应 `print()` 输出、越权 fixture 在 `eval` 和 `check` 两条入口**都**被拒（不是只测了一条就假设另一条也对）。`cargo test -p agenterm-qjs`（含新 `tests/module_imports.rs` 目标）全绿、`cargo clippy -p agenterm-qjs --all-targets -- -D warnings` 零警告。**`cargo check --workspace` 这次没法用来验收**——共享工作树的 `agenterm-con`（另一个 agent 的在制品）当前编不过（`ScriptCommand` 匹配非穷尽，`git status` 显示该文件本轮未被我改动，是已经躺在共享分支历史里的问题，不是我引入的，也没去碰它去修）；改用 `cargo check -p agenterm-qjs --lib --tests` 单独验证本 crate 干净，作为诚实的替代证据，不是「反正跑不动就不验了」。**没做的另一件**：pack/qualify 的多文件 import 支持仍然没做，manifest schema 改动还没设计，本条不算 M5d 收尾，只是先把能独立交付的一半（回归测试）落地 |
 | **QJS-M5d（收尾）** | [x] M5d 剩下那一半也做完：`pack`/`qualify` 的多文件 import 支持。**先做了一次关键调研再动手，不是假设着设计**——写了一个抛弃式 probe 测试（跑完即删，没进最终代码）实测 `Module::write()` 是否把被 import 文件的字节码也编码进去：改 `leaf.js` 内容从 `1` 改成 `999999`，entry 模块的序列化字节码**长度和内容完全不变**——证明 `Module::write()` 只序列化本模块自身，不含依赖，「单 blob 装下整张 import 图」这条路在 rquickjs 0.12 的公开 API 里走不通，不是本 assistant 技术力不够绕不开，是这条路本来就不存在，据此选择了「pack 目录里塞进整张 graph 的真实源文件副本」这个唯一站得住的设计，写进了 `pack_module.rs` 的模块级文档，留证据不是留断言。新增 `pack_module.rs`：`discover_import_graph`（`RecordingLoader` 包一层 `ScriptLoader`，复用 `Module::declare` 真实链接过程发现整张图，不是另起一套会独立漂移的文本扫描器）+ 独立 schema `agenterm.qjs-module-pack-manifest/v1`（不是塞进 `pack.rs` 现有 `QjsPackManifest` 加可选字段——两种 pack 形状真的不同，一个结构体两种「有时候有意义」的字段是在给未来埋雷）+ `QjsModulePack`（load 只用 pack 目录自己当 project_root，不需要原 `--project-root` 还在）。CLI `pack build`/`qualify` 接上 `--project-root`（module 脚本必须显式给，和 `check` 同一约定）；`pack load`/`run-smoke` 靠 peek `manifest.json` 的 `schema` 字段自动分派到单文件还是多文件 loader，不用用户自己记「这个目录是哪种 pack」。**过程中真的抓到一个自己写的 bug，是手测抓到的不是read code看出来的**：`pack build --dir X --project-root Y` 一开始把 `Y` 悄悄丢了——`require_flag_value(args, "--dir", ...)` 内部 `args.collect()` 会把整个剩余 iterator 耗尽，后面再调 `optional_flag_value(args, "--project-root")` 拿到的是空迭代器，永远返回 `None`，报错文案却是「需要 --project-root」，不是「参数解析出 bug 了」那种更容易发现的错误——手测第一轮 `pack build`/`qualify` 全部失败才揪出来，修法是改成一次性 collect 成 `Vec` 再对同一个 slice 查两次 `find_flag_value`，删掉了现在没人再用的旧 `require_flag_value`，补了 3 个针对这条 bug 本身的单测锁住（不是修完就完事，验证「以后不会再犯」）。修完后**重新跑了完全相同的一遍手测**，包括最有说服力的一步：`pack build` 之后把原始 `entry.js`/`lib/` 整个删掉，`pack load` 仍然正确跑出 42——证明 self-contained 这条设计承诺是真的，不是文档说说而已。18 个新单测（`pack_module.rs` 6 个 + `main.rs` 3 个 flag-parsing 回归测试，另加已有的不变）、`cargo test -p agenterm-qjs --lib` 83/83 绿、`cargo test --bin agenterm-qjs` 3/3 绿、`cargo clippy -p agenterm-qjs --lib --all-targets -- -D warnings` 零警告、`cargo check -p agenterm-qjs --lib --tests --bins` 干净（`cargo check --workspace` 仍卡在 `agenterm-con` 那个不是我引入的问题上，同上一条的做法，不假装它通过了）。**至此 QJS-M5（design-qjs-module-imports.md 全部 4 个分期 M5a–M5d）全部完成**，qjs 现在对 rh 的「project-relative import」能力做到了功能对等（机制不同：qjs 用真 ES module + QuickJS 原生链接器，rh 手写文本扫描器，见设计文档 §5 对照表），仍未做的是文档里从一开始就写明的非目标（动态 `import()`、把 `fleet.js` 迁移成 export 风格）——不是漏做，是设计阶段就定的范围边界 |
-| **QJS-M6（新发现，未做）** | [ ] M5 收尾后**主动回头复核**「qjs 的 `check_with_project_validation` 是不是真的对齐了 rh 同名函数」，没有停在「名字一样、import 图校验也做了」就收手——读了 rh 的 `check_with_project_validation` 实际实现（`crates/agenterm-rh/src/check.rs:31-43`）才发现它其实做**两件事**：① import 图校验（qjs 已对齐）② 对每个 shipped API 引用做静态校验（`api_validate.rs` + `shipped_surfaces.rs`，例如 `std::fs::not_shipped(...)` 语法合法但会被 rh 的 check 拦下）。qjs **完全没做②**——实测（不是读代码猜的）：`agenterm-qjs check` 一个调用 `__host.fleet_call('tabs.totallyNotARealOperation', '{}')` 的脚本，返回 `qjs check ok`，退出码 0。已经在 `check.rs` 模块文档和 `check_with_project_validation` 的函数文档里把这条差距写清楚（之前的旧注释把①②混在一起说「已知缺口」，现在拆开：①已解，②仍开，避免读者以为整条已经对齐）。**这条为什么没有当场动手补**：不是小活——需要（a）一份 qjs 能读的「已发布 fleet/std 操作」目录（`shipped_surfaces.rs` 现在是 rh 内部 Rust 常量数组，不是跨引擎可消费的格式，得先决定要不要导出成 JSON 或专门为 qjs 建一份）、（b）一个扫描 JS 源码里 `__host.fleet_call('字面量字符串', ...)` 调用点的静态扫描器（对齐 rh 自己那套 `qualified_function_calls`/`fleet_method_calls` 文本扫描，但换成 JS 语法）、（c）而且即使做了，**只能校验字符串字面量的 operation id**——`__host.fleet_call(someVariable, ...)` 这种运行时才知道值的调用，静态扫不出来，rh 自己的文本扫描器大概率也有同样的天花板，不是 qjs 独有的短板。本轮判断：与其为了「看起来完整」仓促糊一个只覆盖字面量、不确定和 rh 实际行为对不对得上的校验器，不如先诚实记录，留给下一轮有意识地做决策（要不要做、做到什么颗粒度、目录怎么共享） |
+| **QJS-M6（新发现）** | → **已迁 v0.1.17**（API 级静态校验缺口：`check_with_project_validation` 第②件事——shipped API 引用校验——qjs 完全没做；需要跨引擎 shipped surfaces 目录 + JS 源码 `__host.fleet_call` 静态扫描器；设计决策待 v0.1.17 做） |
 | **QJS-risks** | [~] 7 条已知风险，2 条已解——「根 workspace C 依赖冲突」（验证 `cargo check --workspace` 干净）；「unrestricted 哲学是否走样」**部分验证**：`__host` 绑定本身不裁剪任何全局对象，`fleet_call`/`arg` 错误路径原样透出宿主错误消息为 JS 异常（`eval::tests::fleet_call_error_surfaces_as_js_exception`），未发现绑定库默认收窄脚本可达面；线程模型风险因这次 GC 崩溃从"理论关注"变成"已验证的真实坑，且已有修复模式"——`Ctx` 不可跨调用捕获，这条经验应写进未来任何 qjs 绑定代码的约定。其余风险仍开放（并行摸索规格对账、无 AOT 性能特征、版本/哈希可复现性、CI 构建耗时）；详见 PRD §「Script engine family」→「Future」→**qjs execution backend** |
 
 | **Common-M1（2026-08-08）** | [x] **跨引擎共享层第一刀**：新 crate `crates/agenterm-script-common`，把三个引擎（rh/lua/qjs）各自手抄维持一致的 `check_many`（manifest/report 形状、路径越权/重复/预算守卫、exit_class→退出码映射）和 lua/qjs 逐行相同的 `corpus_scan`、manifest hex/hash 助手抽成一份实现；每个引擎只剩薄适配层（自己的 manifest `kind`、自己的 checker 闭包、自己的 CLI 参数解析——CLI 解析刻意不共享，各引擎错误类型不同，强行统一得不偿失）。**动机不只是省行数**（净 −784 行）：plan 本节「同一套 L2 契约、引擎只换 L3 后端」此前靠人肉 copy-paste-and-compare 维持，未来第四个后端（用户已提 sql）再抄一遍只会更漂；现在契约是结构性的——新后端 day one 就接共享 driver。**过程中发现并修复一个真实差异，不是纯重构**：lua 旧版 `check_many` 解析 manifest 路径时**没有**项目根越权检查（rh/qjs 都有）——manifest 里 `../../../x.lua` 能指到项目外；走共享 driver 后免费补上，加了针对性回归测试（旧 lua 测试没有断言过旧的弱行为，确认不是静默破坏）。刻意**不**统一的：各引擎真正的 checker（签名/project-root 语义各不同）、pack/qualify（rh 是 native-codegen pack，与 lua/qjs 的 bytecode-指纹形状真不同，硬套一个 schema 是埋雷）、rh 的 `corpus.rs`（绑在整项目 transpile 管线上，不是裸 check，不硬塞）。执行方式：本 assistant 写共享 crate + lua check_many 迁移并先行验证，3 个并发 subagent 分别迁移 qjs check_many、rh check_many、lua/qjs corpus_scan+manifest（文件集互斥，无撞车），合流后在最终树上重跑全量验证：script-common 19/19、rh 200/200、qjs 84/84、lua 124/124、根 `script_check_many` 集成测试 2/2 全绿；clippy（common/lua/qjs）零警告；`cargo check --workspace` 过（根 lib 12 条既有警告非本轮引入）。已知未平账：rh 的 `cargo clippy --all-targets` 有 5 条**既有** transpile.rs lint（dead_code/collapsible_if 等，`git log` 确认来自 `8e5e1cd9`，Lnx 侧 agent 的活跃文件，本轮不代改）。所有公开 API 签名与 JSON 输出形状逐字段不变——三个引擎的 `lib.rs`/`main.rs` 零改动就通过编译即为证 |
@@ -798,17 +788,10 @@ lua 雏形来去规避这个风险。
 
 | **Common-M7（2026-08-09）** | [x] 第七轮，两并发 subagent + 主 agent 修 bug：① **CLI 动词层跨引擎 parity 测试**——`tests/script_cli_verb_parity.rs`（`CARGO_BIN_EXE_*` spawn 四个真实二进制，7 测试全绿）：version/check/check-many/未知动词/sql 保留动词逐场景断言，产出 verb×engine 可用性地图（文件头 doc）。**真实发现三条**：(a) **退出码分裂**——rh/lua 顶层失败折成 1，qjs/sql 折成 2（check broken、未知动词都如此；rh 的 wrong-kind check-many 例外地是 2）——qjs/sql 下语法错误和用法错误单靠退出码不可区分，已按各引擎实际值精确断言钉住防继续漂移；(b) **真 bug：lua `cmd_check_many` 完全忽略 `--project-root`/`--timeout-ms`**——从没迁到共享 parse_check_many_cli，手解析只认 `--manifest`/`--json`，wrapper 按对齐契约传参被静默丢弃（测试首跑当场抓到：manifest 相对路径按进程 CWD 解析全部 host_source_resolve 失败）。**主 agent 已修**：`cmd_check_many` 改走共享解析器，从 `C:\Windows` 作为 CWD 的真实二进制复测确认 `--project-root` 生效，另加 `check_many_project_root_honored_from_foreign_cwd` 四引擎回归锁；(c) qjs `task` 存根 exit 0 vs sql `task` 存根 exit 2——同名动词两种存根哲学，已记录。② **qjs pack_module 对齐 + 设计文档回填**——pack_module 收编共享 `sha256_hex`（删本地 hex_sha256）和 `write_json_receipt`（文本本就逐字同）；manifest write/read 和 verify_files 因错误文本形状真不同（mismatch 文本内嵌 path，共享 helper 无 path 槽）**留局部并注释原因**，不为复用改可观察文本；`design-script-engine-trait.md` 增「状态回填」节：M1-M4 完成表（各带 commit hash）+ 5 条实施偏差记录（含 rh 折叠被拒的永久性理由、§2.6 sql 验证结果）。验证：cli-parity 7/7、lua 124/124、qjs 84/84、engine-parity 8/8、exec-parity 7/7。另：测试运行会泄漏 `agenterm.exe server` 孤儿进程锁住构建输出（本轮撞到三次，均 taskkill 解决）——测试基建债，记录待查 |
 
+→ **已迁 v0.1.17**：Rh-M23（AOT 扩面）、QJS-M6（API 校验）、M/N/CC/NET（跨版轨）。
+
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
 [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md)。
-
-### M / N / CC / NET
-
-| 轨 | 本版态度 |
-|----|----------|
-| **M** 多 agent 观察 | 文档/约定可补；大功能推 v0.2.x 除非用户加急 |
-| **N1** platform facade | 可选小叶；不阻塞 W/O |
-| **L-CC** | 设计稿已有；实现默认 **v0.2.0** |
-| **L-NET** | 研究继续，**不进**本版 must-ship |
 
 ---
 
@@ -821,23 +804,16 @@ lua 雏形来去规避这个风险。
 | 1 | **W1 → W2 → W3** | 用户刚踩过；不变量必须可证 |
 | 2 | **W4** | 防回退独占文案 |
 | 3 | **U2** | 0.1.15 真机债；与 W 正交 |
-| 4 | **O-P2 → O-P4 → O-P3 → O-evidence** | Unix 多实例闭环 |
-| 5 | **R′ / T-debt** | 证据与发布红；可并行 |
-| 6 | **L7/L1** | 极小成本卫生 |
-| 7 | **Rh-M23** | 独立轨；不挡 GUI；M22 已 ship |
-| 8 | **C1 → C2 → C3** | 后备终端；低优先但高实用；开发间歇可推进 |
-| 砍 | U4、S4 实现、M 大叶、G7 策略、H2、C4 | 见表 §3 |
+| 4 | **O-evidence** | Unix 多实例闭环（O-P2/P4/P3 已 ship，只差真机证据） |
 
-### 2.2 泳道（继承 0.1.15 纪律，略）
+> R′/G′′/L′/U4/S4/Rh-M23/QJS-M6/C10d/M/N/CC/NET 已迁 v0.1.17。
+
+### 2.2 泳道（继承 0.1.15 纪律）
 
 | 泳道 | 主机 | 叶 | 可写 | 禁区 |
 |------|------|-----|------|------|
-| **Win-UX** | Windows | W*、U2、T-debt 若本地 | `remote_frontend*`、lease 相关、最小 PRD | 不抢 workflow |
-| **Unix-UX** | **OSX 单写** frontend | O-* | `unix/frontend/**`、shared 仅真共享 | 不与 Lnx 同写 frontend |
-| **Lnx-env** | Linux | F 环境、Linux smoke 复验、T-debt | `adapters/linux/**`、环境笔记 | 不写 unix frontend 巨石 |
-| **CI-R** | 任意独占 | R′ 观测/最小 workflow 修 | workflows / scripts/rh/check.rh | 不扩 scope 到 GUI |
-| **Rh** | 任意 | Rh-M23 | `crates/agenterm-rh/**`、caller 清单、wave 1 CI/bootstrap | 不删 `agenterm-rhai` PE；Candidate 改名仍 HOLD |
-| **C-fallback** | 任意 | C1–C3 | `src/bin/agenterm-con.rs`、`crates/agenterm-platform` consumer | 不引入 Fleet/server workspace；不扩成全功能终端 |
+| **Win-UX** | Windows | W*、U2 | `remote_frontend*`、lease 相关、最小 PRD | 不抢 workflow |
+| **Unix-UX** | **OSX 单写** frontend | O-evidence | `unix/frontend/**`、shared 仅真共享 | 不与 Lnx 同写 frontend |
 
 规则：一人一热域；shared-first；机制进 `agenterm-platform`；小步 push main。
 
@@ -846,10 +822,7 @@ lua 雏形来去规避这个风险。
 ```text
 时间 →
   Win-UX:  [W1][W2][W3][W4][U2]
-  Unix-UX: [==== O-P2 → O-P4 → O-P3 → O-evidence ====]
-  CI-R:    [R1e/R2e 观测][R4e dry_run][T-debt]
-  Rh:      [........ M23a/b → M23c → M23d ........]
-  C-fallback: [.......... C1 → C2 → C3 ..........]
+  Unix-UX: [============== O-evidence ==============]
 ```
 
 ---
@@ -858,11 +831,15 @@ lua 雏形来去规避这个风险。
 
 - 公开 **tag / Candidate / Promotion**（除非另文授权）
 - GUI **独占** server 或恢复「As Window = focus 现有窗」为默认
+- 发布链证据观测（R′，已迁 v0.1.17）
+- 安装尾（G′′，已迁 v0.1.17）
+- 低成本尾账（L′，已迁 v0.1.17）
+- 脚本引擎深化（Rh-M23、QJS-M6，已迁 v0.1.17）
+- 控制台宿主余量（C10d，已迁 v0.1.17）
+- 跨版轨 M/N/CC/NET（已迁 v0.1.17）
 - 夜间彩排 A1、Candidate 自动派发 A2
-- gate 大分片、smoke 并行分片
-- L-NET 实现、L-CC 大内容、computer-use
-- 回退 M22f 默认 rh backend（除非显式 bugfix）；Cranelift JIT
-- 结构 SSOT 大重构（S-struct HOLD，待用户通知）
+- 回退 M22f 默认 rh backend（除非显式 bugfix）
+- 结构 SSOT 大重构（S-struct HOLD）
 - 静默杀死用户 keep-server 会话
 
 ---
@@ -871,14 +848,12 @@ lua 雏形来去规避这个风险。
 
 | ID | 题 | 阻塞 |
 |----|-----|------|
-| **G-P2** | 升级遇 running server 默认策略 | G7b/c/d |
-| **P1/P5** | agenterm.work / Pages 归属 | H5、E1 |
-| **D1** | Candidate preflight 是否可祖先 SHA | 仅工具链 |
-| **Rh-M22-go** | ~~是否本版替换 `agenterm-rhai` 入口~~ → **M22f 已 ship 薄壳+默认 rh**；Candidate 六 cell 改名仍 HOLD | 公开 rename |
+| **Rh-M22-go** | Candidate 六 cell 改名（M22f 薄壳已 ship，公开 rename 仍 HOLD） | 公开 rename |
 | **S-struct** | 是否开 architecture 围栏重构 | HOLD |
-| **QJS-go** | ~~`agenterm-qjs` 何时开工~~ → **2026-08-07 已拍板：不等 lua，即刻开工**（用户接受并行摸索规格的对账风险，见 §1 Rh 节） | 已解除 |
 
 已拍板沿用：G-P1 unsigned 回落+警告；multi-lease；O Settings 对齐；mux/mcp 无独立 PE。
+
+> G-P2/P1/P5/D1 随 G′′/H2 整体迁 v0.1.17；QJS-go 已解除。
 
 ---
 
@@ -895,15 +870,17 @@ lua 雏形来去规避这个风险。
 
 ---
 
-## 6. 验收总门（本版「做完」定义）
+## 6. 验收总门（收窄后「做完」定义）
 
 未授权公开发布时，**开发完成** = 下列同时成立：
 
 1. **W2 + W3** 在干净重启下可复现；W4 无独占回退  
-2. **O-P2 + O-P4** 在 macOS 真机可达（Linux 复验可选）  
+2. **O-evidence** 在 macOS 真机可达（O-P2/P4/P3 已 ship，只差真机验证）  
 3. **U2** 真机或黑盒勾选  
-4. **R′** 至少 R4e 或书面记录「本版不跑 dry_run 的原因」  
-5. `lint` / `check --quick` 绿；不引入新的独占 lease 测试  
+4. `lint` / `check --quick` 绿；不引入新的独占 lease 测试  
+5. 未提交变更（11 files, +128/−24）已清理提交
+
+~~R′~~ 已迁 v0.1.17，本版不要求 dry_run。
 
 公开发版另走 Candidate → Promotion 双阶段合同（见 `skills/agenterm-release`）。
 
@@ -913,6 +890,7 @@ lua 雏形来去规避这个风险。
 
 | 日期 | 决定 |
 |------|------|
+| 2026-08-10 | **v0.1.16 收窄**：R′/G′′/L′/U4/S4/Rh-M23/QJS-M6/C10d/M/N/CC/NET 整体迁入新建的 [`plan-v0.1.17.md`](plan-v0.1.17.md)。v0.1.16 保留 W1–W4 + U2 + O-evidence 为 must-ship，已完成项（O-P2/P4/P3、C 组、CLI 组、Rh-M22f、QJS M0–M5d、Common M1–M7、SQL M0–M1）保留为已完成事实 |
 | 2026-08-07 | **QJS-go 拍板：不等 lua，本 assistant 即刻开工 `agenterm-qjs`**——用户主动提出「相当于提前给 v0.1.16 打基础」；本 assistant 建议分阶段（骨架先行、L2 对齐后置）并指出并行摸索规格的对账风险，用户选择接受风险、全部提前。仍不占本版 §2.2/§6 |
 | 2026-08-07 | **脚本引擎三轨路线图**（FYI）：rh（Lnx 现场，迁移中）/ lua（Win 现场 grok.ds，实现中，目标能力对齐 rh）/ qjs（见上一条）。落盘防 compact 丢上下文；见 §1 Rh 节 |
 | 2026-08-07 | 开立 **v0.1.16** 工作树：主题 = 多 GUI 产品化 + Unix 多实例可达 + 0.1.15 尾账；不默认公开发版 |
@@ -945,3 +923,68 @@ lua 雏形来去规避这个风险。
   clear product identity, per-key exit, and complete terminal-state restoration.
 - A real ConPTY black-box journey is the acceptance boundary; richer workspace
   and Fleet interactions are explicitly deferred.
+
+---
+
+## 附录 A：收窄后完成度重评估（2026-08-10）
+
+### A.1 迁出摘要
+
+8 组 / 24+ 叶已整体迁入 [`plan-v0.1.17.md`](plan-v0.1.17.md)：R′（4 叶）、
+G′′（3 叶）、L′（7 叶）、U4、S4、Rh-M23、QJS-M6、C10d、M/N/CC/NET（4 轨）。
+v0.1.16 不再认领这些项的验收。
+
+### A.2 保留 must-ship 项完成度
+
+| 叶 | 状态 | 说明 |
+|----|------|------|
+| **W1** 重启纪律与版本可观测 | ❌ 未开工 | 纯文档/文案，成本最小 |
+| **W2** As Window 黑盒 | ❌ 未开工 | 隔离 workspace 黑盒测试，成本中 |
+| **W3** 多 clients 可观测 | ❌ 未开工 | CLI/snapshot 字段审计，成本小–中，依赖 W2 |
+| **W4** 独占语义清扫 | ❌ 未开工 | 全仓 grep 审计，成本小 |
+| **U2** 标签切换假刷新真机回归 | ❌ 未开工 | 0.1.15 尾账，成本小 |
+| **O-evidence** macOS 真机 | ❌ 未完成 | O-P2/P4/P3 已 ship，只差真机验证，成本小 |
+
+**must-ship 完成率：≈0%**（O-P2/P4/P3 代码已完成但证据未收，W 组 zero progress）
+
+### A.3 已完成但不占剩余工时的项
+
+| 组 | 状态 | 说明 |
+|----|------|------|
+| **O-P2/P4/P3** | ✅ 已 ship | Unix instance picker + open-instance + strip 右键菜单；`WINDOWS_ONLY_UI_ACTIONS` 归零 |
+| **C1–C3, C5–C11** | ✅ 已 ship | agenterm-con 产品级终端；5 个已知缺口诚实标注 |
+| **C4** | ❌ 非目标 | server attach 本版不发 |
+| **CLI1–CLI3** | ✅ 已 ship | PE 转发 + 黑盒全绿 + 独立 agenterm-cli PE 删除 |
+| **Rh-M22f** | ✅ 已 ship | 默认 rh backend + agenterm-rhai 薄壳 |
+| **QJS M0–M5d** | ✅ 已 ship | 从骨架到 ES module import 图到 pack 多文件支持，全部收尾 |
+| **Common M1–M7** | ✅ 已 ship | 共享 driver → CLI 解析 → trait 统一 → parity 测试 |
+| **SQL M0–M1** | ✅ 已 ship | 占位落地 + rusqlite 真 execute |
+
+### A.4 收窄后综合评估
+
+| 分类 | 计数 | 完成 |
+|------|------|------|
+| **Must-ship 叶** | 6 (W1–W4, U2, O-evidence) | 0 |
+| **已完成（不耗工时）** | 11 组 | 11 |
+| **已迁 v0.1.17** | 8 组 | — |
+| **未提交变更** | 11 files, +128/−24 | 待提交 |
+
+**收窄后 must-ship 完成率：0%（6 叶全部未开工）**
+
+### A.5 与收窄前的对比
+
+| 指标 | 收窄前 | 收窄后 |
+|------|--------|--------|
+| must-ship 叶数 | 14+ | 6 |
+| 已完成叶数 | ~30（含超额完成） | ~30（不变） |
+| must-ship 完成率 | ~35% | 0%（但范围从 14 叶收窄到 6 叶） |
+| 阻塞项 | W 组 + R′ + G′′ + L′ + … | 仅 W 组 + U2 + O-evidence |
+| 预计收口成本 | 大（多轨并行） | 小（纯文档 + 黑盒测试 + macOS 真机） |
+
+收窄后 v0.1.16 的剩余工作估计：**W1（文档，1h）+ W2（黑盒，3–4h）+
+W3（CLI 审计，1–2h）+ W4（grep 审计，1h）+ U2（真机/黑盒，1–2h）+
+O-evidence（macOS 真机 session，1–2h）≈ 8–12 小时**。
+
+相比收窄前需要同时推进发布链证据观测、安装尾设计、脚本引擎深化、低成本尾账
+等多条独立泳道，收窄后的范围是可在一个集中 session 内完成的。
+

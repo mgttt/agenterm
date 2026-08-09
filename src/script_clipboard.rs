@@ -1,4 +1,4 @@
-//! Rhai bindings for the typed Script Runtime clipboard facade.
+//! Rh bindings for the typed Script Runtime clipboard facade.
 
 use rhai::{EvalAltResult, Module};
 
@@ -15,12 +15,12 @@ pub(crate) fn register(rhai_module: &mut Module) {
 }
 
 fn get_text() -> Result<String, Box<EvalAltResult>> {
-    script_clipboard::get_text().map_err(|error| clipboard_error(error, "rhai.clipboard.get_text"))
+    script_clipboard::get_text().map_err(|error| clipboard_error(error, "rh.clipboard.get_text"))
 }
 
 fn set_text(text: &str) -> Result<(), Box<EvalAltResult>> {
     script_clipboard::set_text(text)
-        .map_err(|error| clipboard_error(error, "rhai.clipboard.set_text"))
+        .map_err(|error| clipboard_error(error, "rh.clipboard.set_text"))
 }
 
 fn clipboard_error(error: ScriptClipboardError, operation: &'static str) -> Box<EvalAltResult> {

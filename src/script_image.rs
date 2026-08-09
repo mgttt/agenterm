@@ -45,7 +45,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     let file = File::open(path).map_err(|_| {
         image_error(
             "image_png_open",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "PNG file could not be opened",
             Some("io"),
         )
@@ -55,7 +55,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     let mut reader = decoder.read_info().map_err(|_| {
         image_error(
             "image_png_header",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "PNG header is invalid or unsupported",
             Some("invalid_data"),
         )
@@ -64,7 +64,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     if decoded_bytes == 0 || decoded_bytes > MAX_DECODED_PNG_BYTES {
         return Err(image_error(
             "image_png_size",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "decoded PNG must contain 1..67108864 bytes",
             Some("size_limit"),
         ));
@@ -73,7 +73,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     let frame = reader.next_frame(&mut pixels).map_err(|_| {
         image_error(
             "image_png_decode",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "PNG pixels could not be decoded",
             Some("invalid_data"),
         )
@@ -82,7 +82,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     if frame.width == 0 || frame.height == 0 {
         return Err(image_error(
             "image_png_dimensions",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "PNG dimensions must be nonzero",
             Some("invalid_data"),
         ));
@@ -96,7 +96,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
         png::ColorType::Indexed => {
             return Err(image_error(
                 "image_png_color",
-                "rhai.image.inspect_png",
+                "rh.image.inspect_png",
                 "expanded PNG retained an indexed color type",
                 Some("invalid_data"),
             ));
@@ -107,7 +107,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     let row_bytes = width.checked_mul(channels).ok_or_else(|| {
         image_error(
             "image_png_size",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "PNG row size overflowed",
             Some("size_limit"),
         )
@@ -115,7 +115,7 @@ fn inspect_png(path: &Path) -> Result<ScriptPngInfo, Box<EvalAltResult>> {
     if row_bytes.checked_mul(height) != Some(pixels.len()) {
         return Err(image_error(
             "image_png_size",
-            "rhai.image.inspect_png",
+            "rh.image.inspect_png",
             "decoded PNG byte length does not match its dimensions",
             Some("invalid_data"),
         ));

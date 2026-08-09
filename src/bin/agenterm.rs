@@ -13,7 +13,14 @@ const INTERNAL_ENGINE_SUBCOMMAND: &str = "__agenterm-internal-engine";
 /// shape that composes with zero changes to `run_console_worker`, which
 /// already treats its `args` parameter as an opaque, ordered Vec forwarded
 /// after the marker.
-const ENGINE_SUBCOMMANDS: &[&str] = &["rh", "lua", "qjs", "sql"];
+const ENGINE_SUBCOMMANDS: &[&str] = &[
+    "rh",
+    #[cfg(feature = "script-lua")]
+    "lua",
+    "qjs",
+    #[cfg(feature = "script-sql")]
+    "sql",
+];
 
 fn main() -> std::process::ExitCode {
     // Cargo's `RUSTC_WRAPPER` contract accepts exactly one executable path —
@@ -267,6 +274,7 @@ fn dispatch_engine(engine: &str, rest: Vec<String>) -> std::process::ExitCode {
             let os_args: Vec<std::ffi::OsString> = rest.into_iter().map(Into::into).collect();
             agenterm::script_rh_cli_main::run_main(os_args)
         }
+        #[cfg(feature = "script-lua")]
         "lua" => {
             // `agenterm_lua::cli::run` indexes into its `args` slice
             // starting at `[1]` — it expects argv INCLUDING a program-name
@@ -283,6 +291,7 @@ fn dispatch_engine(engine: &str, rest: Vec<String>) -> std::process::ExitCode {
             std::process::ExitCode::from(agenterm_lua::cli::run(&full))
         }
         "qjs" => std::process::ExitCode::from(agenterm_qjs::cli::run(&rest)),
+        #[cfg(feature = "script-sql")]
         "sql" => std::process::ExitCode::from(agenterm_sql::cli::run(&rest)),
         other => {
             eprintln!("agenterm: unknown engine subcommand `{other}`");

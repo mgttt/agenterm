@@ -303,7 +303,7 @@ pub fn emit_host_runtime(out: &mut String) {
                  Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
                      Ok(millis) => millis,\n\
                      Err(_) => {\n\
-                         let _ = rh_fail(\"system_time_overflow: milliseconds exceed Rhai integer\");\n\
+                         let _ = rh_fail(\"system_time_overflow: milliseconds exceed Rh integer\");\n\
                          0\n\
                      }\n\
                  },\n\
@@ -559,7 +559,7 @@ pub fn emit_host_runtime(out: &mut String) {
                      Ok(duration) => match i64::try_from(duration.as_millis()) {\n\
                          Ok(millis) => RhSystemTime { unix_millis: millis },\n\
                          Err(_) => {\n\
-                             let _ = rh_fail(\"system_time_overflow: milliseconds exceed Rhai integer\");\n\
+                             let _ = rh_fail(\"system_time_overflow: milliseconds exceed Rh integer\");\n\
                              RhSystemTime { unix_millis: 0 }\n\
                          }\n\
                      },\n\

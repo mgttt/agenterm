@@ -1,5 +1,5 @@
 //! Regression coverage for native `.rh` task cutover entries (including pack
-//! bundle/build qualification) and remaining Rhai-backed task entries where
+//! bundle/build qualification) and remaining Rh-backed task entries where
 //! applicable.
 
 use std::path::PathBuf;

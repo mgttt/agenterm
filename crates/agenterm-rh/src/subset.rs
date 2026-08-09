@@ -342,7 +342,7 @@ fn validate_root_expr(expr: &Expr) -> Option<RhError> {
     None
 }
 
-/// Fallback validation for scripts that delegate to the full Rhai worker runtime.
+/// Fallback validation for scripts that delegate to the full Rh worker runtime.
 pub fn compat_validate(source: &str, ast: &AST) -> Result<(), RhError> {
     let _ = source;
     if ast_contains_eval(ast) {

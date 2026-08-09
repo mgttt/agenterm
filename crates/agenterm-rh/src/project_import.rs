@@ -1,4 +1,4 @@
-//! Project-relative Rhai module import validation for check paths.
+//! Project-relative Rh module import validation for check paths.
 
 use std::collections::HashSet;
 use std::fs;

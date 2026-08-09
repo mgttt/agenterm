@@ -1108,7 +1108,7 @@ fn entry() { 42 }"#;
     }
 
     #[test]
-    fn rhai_self_contained_entry_returns_entry_value() {
+    fn rh_self_contained_entry_returns_entry_value() {
         use rhai::{Dynamic, Engine, Scope};
         let engine = Engine::new();
         let source = "fn entry() { 42 }";
@@ -1123,7 +1123,7 @@ fn entry() { 42 }"#;
     }
 
     #[test]
-    fn rhai_self_contained_entry_sees_args() {
+    fn rh_self_contained_entry_sees_args() {
         use rhai::{Dynamic, Engine, Scope};
         let engine = Engine::new();
         let mut scope = Scope::new();

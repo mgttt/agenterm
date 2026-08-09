@@ -444,7 +444,7 @@ fn duration_from_secs(value: rhai::INT) -> Result<ScriptDuration, Box<EvalAltRes
 
 fn duration_millis(value: &mut ScriptDuration) -> Result<rhai::INT, Box<EvalAltResult>> {
     rhai::INT::try_from(value.0.as_millis())
-        .map_err(|_| "duration_overflow: milliseconds exceed Rhai integer".into())
+        .map_err(|_| "duration_overflow: milliseconds exceed Rh integer".into())
 }
 
 fn env_get(name: &str) -> Result<String, Box<EvalAltResult>> {

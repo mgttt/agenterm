@@ -1,4 +1,4 @@
-//! Shared construction policy for every Rhai execution surface.
+//! Shared construction policy for every Rh execution surface.
 //!
 //! Callers own transport, cancellation, output capture, and session lifecycle;
 //! this module keeps the language limits and registered API graph identical.

@@ -256,7 +256,7 @@ impl ProjectModuleResolver {
             .into());
         }
         let mut candidate = self.root.join(path);
-        candidate.set_extension("rhai");
+        candidate.set_extension("rh");
         if let Ok(canonical) = fs::canonicalize(&candidate) {
             if !canonical.starts_with(&self.root) {
                 return Err(EvalAltResult::ErrorRuntime(
@@ -962,7 +962,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("scripts")).unwrap();
-        fs::write(root.join("scripts/check.rhai"), "40 + 2").unwrap();
+        fs::write(root.join("scripts/check.rh"), "40 + 2").unwrap();
         let manifest = root.join(SCRIPT_TASK_MANIFEST);
         fs::write(
             &manifest,
@@ -1007,14 +1007,14 @@ mod tests {
   "tasks": [
     {
       "id": "check",
-      "entry": "scripts/check.rhai",
+      "entry": "scripts/check.rh",
       "args": ["default"],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn"]
     },
-    {"id": "broken", "entry": "../outside.rhai"},
-    {"id": "check", "entry": "scripts/check.rhai"}
+    {"id": "broken", "entry": "../outside.rh"},
+    {"id": "check", "entry": "scripts/check.rh"}
   ]
 }"#,
         )
@@ -1152,8 +1152,8 @@ mod tests {
                 r#""minimum": 3, "maximum": 3"#,
             )
             .replace(
-                r#"{"id": "check", "entry": "scripts/check.rhai"}"#,
-                r#"{"id": "second", "entry": "scripts/check.rhai"}"#,
+                r#"{"id": "check", "entry": "scripts/check.rh"}"#,
+                r#"{"id": "second", "entry": "scripts/check.rh"}"#,
             );
         fs::write(&manifest, contents).unwrap();
         let catalog = load_task_catalog(&manifest).unwrap();
@@ -1233,14 +1233,14 @@ mod tests {
   "tasks": ["#,
             )
             .replace(
-                r#"{"id": "broken", "entry": "../outside.rhai"}"#,
-                r#"{"id": "unknown", "entry": "scripts/check.rhai", "dependencies": ["missing"]}"#,
+                r#"{"id": "broken", "entry": "../outside.rh"}"#,
+                r#"{"id": "unknown", "entry": "scripts/check.rh", "dependencies": ["missing"]}"#,
             )
             .replace(
-                r#"{"id": "check", "entry": "scripts/check.rhai"}"#,
-                r#"{"id": "self", "entry": "scripts/check.rhai", "dependencies": ["self"]},
-    {"id": "cycle-a", "entry": "scripts/check.rhai", "dependencies": ["cycle-b"]},
-    {"id": "cycle-b", "entry": "scripts/check.rhai", "dependencies": ["cycle-a"]}"#,
+                r#"{"id": "check", "entry": "scripts/check.rh"}"#,
+                r#"{"id": "self", "entry": "scripts/check.rh", "dependencies": ["self"]},
+    {"id": "cycle-a", "entry": "scripts/check.rh", "dependencies": ["cycle-b"]},
+    {"id": "cycle-b", "entry": "scripts/check.rh", "dependencies": ["cycle-a"]}"#,
             );
         fs::write(&manifest, contents).unwrap();
         let catalog = load_task_catalog(&manifest).unwrap();
@@ -1260,7 +1260,7 @@ mod tests {
     #[test]
     fn module_resolver_loads_root_relative_modules_and_rejects_escape() {
         let (root, _) = fixture();
-        fs::write(root.join("scripts/math.rhai"), "export const answer = 42;").unwrap();
+        fs::write(root.join("scripts/math.rh"), "export const answer = 42;").unwrap();
         let mut engine = Engine::new();
         engine.set_module_resolver(ProjectModuleResolver::new(&root).unwrap());
         assert_eq!(
@@ -1276,15 +1276,15 @@ mod tests {
         assert!(error.contains("script_module_root_escape"));
 
         fs::write(
-            root.join("compile-only.rhai"),
+            root.join("compile-only.rh"),
             r#"throw "must not execute";"#,
         )
         .unwrap();
         validate_project_imports(&engine, &root, r#"import "compile-only" as compile_only;"#)
             .unwrap();
 
-        fs::write(root.join("cycle-a.rhai"), r#"import "cycle-b" as b;"#).unwrap();
-        fs::write(root.join("cycle-b.rhai"), r#"import "cycle-a" as a;"#).unwrap();
+        fs::write(root.join("cycle-a.rh"), r#"import "cycle-b" as b;"#).unwrap();
+        fs::write(root.join("cycle-b.rh"), r#"import "cycle-a" as a;"#).unwrap();
         let error = engine
             .compile_into_self_contained(&rhai::Scope::new(), r#"import "cycle-a" as cycle;"#)
             .unwrap_err()

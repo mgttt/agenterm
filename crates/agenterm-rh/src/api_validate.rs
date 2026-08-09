@@ -1,4 +1,4 @@
-//! Static API surface validation for script sources (shared by Rhai and rh check paths).
+//! Static API surface validation for script sources (shared by the Rh engine and rh check paths).
 
 use crate::shipped_surfaces::SHIPPED_SURFACE_PATHS;
 

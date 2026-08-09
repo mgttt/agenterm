@@ -345,7 +345,7 @@ fn fs_copy(source: &str, destination: &str) -> Result<rhai::INT, Box<EvalAltResu
     let bytes = std::fs::copy(source, destination)
         .map_err(|error| io_error("fs_copy", destination, error))?;
     rhai::INT::try_from(bytes)
-        .map_err(|_| "fs_copy_overflow: byte count exceeds Rhai integer".into())
+        .map_err(|_| "fs_copy_overflow: byte count exceeds Rh integer".into())
 }
 
 fn fs_rename(source: &str, destination: &str) -> Result<(), Box<EvalAltResult>> {
@@ -510,7 +510,7 @@ fn dir_entry_metadata(entry: &mut ScriptDirEntry) -> Result<ScriptMetadata, Box<
 
 fn metadata_len(metadata: &mut ScriptMetadata) -> Result<rhai::INT, Box<EvalAltResult>> {
     rhai::INT::try_from(metadata.0.len())
-        .map_err(|_| "filesystem_metadata_overflow: file length exceeds Rhai integer".into())
+        .map_err(|_| "filesystem_metadata_overflow: file length exceeds Rh integer".into())
 }
 
 fn metadata_is_reparse_point(metadata: &mut ScriptMetadata) -> Result<bool, Box<EvalAltResult>> {
@@ -538,7 +538,7 @@ fn system_time_unix_millis(value: &mut ScriptSystemTime) -> Result<rhai::INT, Bo
         .map_err(|error| format!("system_time_before_unix_epoch: {error}"))?
         .as_millis();
     rhai::INT::try_from(millis)
-        .map_err(|_| "system_time_overflow: milliseconds exceed Rhai integer".into())
+        .map_err(|_| "system_time_overflow: milliseconds exceed Rh integer".into())
 }
 
 fn system_time_rfc3339(value: &mut ScriptSystemTime) -> Result<String, Box<EvalAltResult>> {

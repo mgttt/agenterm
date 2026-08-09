@@ -347,7 +347,7 @@ fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
 
 fn run_script_repl(_arguments: &[String]) -> i32 {
     cli_eprintln!(
-        "script repl was removed with the Rhai interpreter; \
+        "script repl was removed with the Rh interpreter; \
          use agenterm-rh for check, eval, and run on .rh sources"
     );
     2

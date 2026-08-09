@@ -30,7 +30,7 @@ use agenterm_rh::{
     CallerInventoryOptions, CorpusScanOptions, RH_VERSION, RhError, build_pack_dir, check,
     check_with_project_validation, compile_native, hash_file, load_and_call_entry,
     parse_check_many_cli, qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory,
-    scan_rhai_directory, transpile, write_receipt,
+    scan_rh_directory, transpile, write_receipt,
 };
 
 /// Entry point for the `agenterm-rh` CLI, callable from the thin
@@ -368,7 +368,7 @@ fn parse_run_cli(
                         .ok_or_else(|| RhError::Parse("missing path after --project-root".into()))?,
                 );
             }
-            // Legacy inert compatibility flag from agenterm-rhai task/run callers.
+            // Legacy inert compatibility flag from agenterm-rh task/run callers.
             "--profile" => {
                 let _ = args.next().ok_or_else(|| {
                     RhError::Parse("missing value after --profile".into())
@@ -546,7 +546,7 @@ fn run_corpus_scan_command(args: &mut impl Iterator<Item = String>) -> Result<()
             }
         }
     }
-    let report = scan_rhai_directory(CorpusScanOptions {
+    let report = scan_rh_directory(CorpusScanOptions {
         project_root,
         relative_dir,
         tasks_manifest,
@@ -671,8 +671,8 @@ fn print_usage() {
          commands:\n\
            check <file>                      validate rh subset\n\
            check-many --manifest FILE        bounded multi-file rh subset check\n\
-           corpus-scan [--root PATH] [--dir REL|--tasks [MANIFEST]]  scan .rhai scripts or task entries\n\
-           caller-inventory [--root PATH]            report agenterm-rhai operational references\n\
+           corpus-scan [--root PATH] [--dir REL|--tasks [MANIFEST]]  scan .rh scripts or task entries\n\
+           caller-inventory [--root PATH]            report agenterm-rh operational references\n\
            transpile <file> [-o rs]            emit Rust source for AOT\n\
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
            eval <file>                         check + AOT pack + dlopen entry (dev loop)\n\
