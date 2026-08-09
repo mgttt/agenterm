@@ -100,14 +100,39 @@ pub(crate) fn layout_server_add_chip(strip: StripRect) -> StripRect {
     }
 }
 
-/// Menu frame + (as_window item, close item), aligned under `anchor_left`.
+/// Context-menu rectangles by name, generic over the host's rect type.
+///
+/// Was a positional 3-tuple, and the two hosts disagreed on the order:
+/// unix passed through `(frame, as_window, close)` while windows re-packed
+/// as `(frame, close, as_window)` — every consumer compensated, so behavior
+/// matched only by convention, and one reordering away from a silent swap
+/// of the `As Window`/`Close` hit targets. Named fields end the convention.
+pub(crate) struct ServerContextMenuRects<R> {
+    pub(crate) frame: R,
+    pub(crate) as_window: R,
+    pub(crate) close: R,
+}
+
+impl<R> ServerContextMenuRects<R> {
+    /// Convert every rect with `f` — hosts use this to go from `StripRect`
+    /// to their own pixel-rect type without touching field pairing.
+    pub(crate) fn map<T>(self, mut f: impl FnMut(R) -> T) -> ServerContextMenuRects<T> {
+        ServerContextMenuRects {
+            frame: f(self.frame),
+            as_window: f(self.as_window),
+            close: f(self.close),
+        }
+    }
+}
+
+/// Menu frame + `as_window`/`close` items, aligned under `anchor_left`.
 pub(crate) fn layout_server_context_menu(
     origin_x: i32,
     origin_y: i32,
     client_right: i32,
     client_bottom: i32,
     anchor_left: Option<i32>,
-) -> (StripRect, StripRect, StripRect) {
+) -> ServerContextMenuRects<StripRect> {
     let width = SERVER_CONTEXT_MENU_WIDTH;
     let item_h = SERVER_CONTEXT_MENU_ITEM_HEIGHT;
     let pad = SERVER_CONTEXT_MENU_PAD;
@@ -133,7 +158,11 @@ pub(crate) fn layout_server_context_menu(
         right: left + width - pad,
         bottom: top + pad + item_h * 2,
     };
-    (frame, as_window, close)
+    ServerContextMenuRects {
+        frame,
+        as_window,
+        close,
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -285,11 +314,10 @@ mod tests {
 
     #[test]
     fn context_menu_aligns_under_chip_and_orders_as_window_then_close() {
-        let (frame, as_window, close) =
-            layout_server_context_menu(100, 40, 1000, 800, Some(120));
-        assert_eq!(frame.left, 120);
-        assert!(as_window.top < close.top);
-        assert_eq!(as_window.left, close.left);
-        assert_eq!(as_window.width(), close.width());
+        let menu = layout_server_context_menu(100, 40, 1000, 800, Some(120));
+        assert_eq!(menu.frame.left, 120);
+        assert!(menu.as_window.top < menu.close.top);
+        assert_eq!(menu.as_window.left, menu.close.left);
+        assert_eq!(menu.as_window.width(), menu.close.width());
     }
 }

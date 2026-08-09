@@ -69,6 +69,11 @@
    `(frame, close, as_window)` 而 Unix 返回 `(frame, as_window, close)`;当前净行为
    恰好一致,但任何一侧重排即静默错位。合并到 server_strip_ui.rs 的命名字段结构即消除。
 2. **F7**(已在 parity-audit 挂账):Win 快照缺 `caret`/`anchor`/`draft_length`。
+   实际 scope(2026-08-09 勘察):Win composer 是原生 EDIT 控件,文本在控件里
+   (`control_text(self.edit)`),选区必须新增 ControlWindow 契约方法
+   `control_selection`(EM_GETSEL)+ Windows adapter 实现 + 测试替身;返回的是
+   UTF-16 code-unit 偏移,须换算为字符索引才与 Unix `TextCursor` 语义对齐,
+   且要先核查多行 EDIT 的 CRLF 与服务器草稿 `\n` 的往返一致性。独立成刀。
 3. **shift 扩选 Win 缺失**(见 #2)。
 4. **settings modal 几何漂移**(见 #3)。
 
@@ -98,4 +103,6 @@ Unix:XRGB 像素帧、HiDPI 缩放、字形栅格、vt100 归属、X11/Wayland �
 - [ ] #3 modal_geometry.rs(含漂移收敛的产品决定:以哪套数字为准)
 - [ ] #4 SidebarViewport + row_hit(互补漏洞补齐)
 - [ ] #5 ScrollbarController + pointer_request_plan
-- [ ] 缺陷 1(元组契约)可随 server_strip_ui 命名字段结构先行单独修
+- [x] 缺陷 1(元组契约):`layout_server_context_menu` 改返回泛型命名字段结构
+  `ServerContextMenuRects<R>`(带 `map` 转换),两宿主 5 处消费点全部改字段访问,
+  反序补偿代码消除(2026-08-09)。

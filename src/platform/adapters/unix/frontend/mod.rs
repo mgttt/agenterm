@@ -79,8 +79,8 @@ use crate::frontend::instance_picker::{
 };
 use crate::frontend::server_strip_ui::{
     SERVER_TABS_REFRESH, ServerCloseConfirm, ServerContextAction, ServerTabContextMenu, StripRect,
-    layout_server_add_chip, layout_server_context_menu, layout_server_tab_chips,
-    server_tab_chip_label,
+    ServerContextMenuRects, layout_server_add_chip, layout_server_context_menu,
+    layout_server_tab_chips, server_tab_chip_label,
 };
 use crate::frontend::interaction::{
     ApplicationMouseMode, CancelTarget, ConfirmTarget, FocusDirection, FocusState, FocusSurface,
@@ -1408,11 +1408,7 @@ impl UnixApp {
     /// Menu frame plus the `As Window` and `Close` item rects.
     fn server_context_menu_geometry(
         &self,
-    ) -> Option<(
-        crate::ui_geometry::PixelRect,
-        crate::ui_geometry::PixelRect,
-        crate::ui_geometry::PixelRect,
-    )> {
+    ) -> Option<ServerContextMenuRects<crate::ui_geometry::PixelRect>> {
         let menu = self.server_tab_context_menu.as_ref()?;
         let (client_width, client_height) = self.client_size();
         let client_right = i32::try_from(client_width).unwrap_or(i32::MAX);
@@ -1424,28 +1420,27 @@ impl UnixApp {
             .into_iter()
             .find(|(_, row)| row.instance == menu.instance)
             .map(|(rect, _)| rect.left);
-        let (frame, as_window, close) = layout_server_context_menu(
+        let rects = layout_server_context_menu(
             menu.origin_x,
             menu.origin_y,
             client_right,
             client_bottom,
             anchor_left,
         );
-        let to_rect = |r: StripRect| crate::ui_geometry::PixelRect {
+        Some(rects.map(|r| crate::ui_geometry::PixelRect {
             left: r.left,
             top: r.top,
             right: r.right,
             bottom: r.bottom,
-        };
-        Some((to_rect(frame), to_rect(as_window), to_rect(close)))
+        }))
     }
 
     fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
-        let (_, as_window, close) = self.server_context_menu_geometry()?;
-        if as_window.contains(x, y) {
+        let menu = self.server_context_menu_geometry()?;
+        if menu.as_window.contains(x, y) {
             return Some(ServerContextAction::NewWindow);
         }
-        if close.contains(x, y) {
+        if menu.close.contains(x, y) {
             return Some(ServerContextAction::Close);
         }
         None
@@ -1457,10 +1452,10 @@ impl UnixApp {
     /// dismisses it and is *not* consumed, so the same press still reaches the
     /// strip or workbench underneath -- matching how native menus behave.
     fn handle_server_context_menu_click(&mut self, x: i32, y: i32) -> bool {
-        let Some((frame, _, _)) = self.server_context_menu_geometry() else {
+        let Some(menu_rects) = self.server_context_menu_geometry() else {
             return false;
         };
-        if !frame.contains(x, y) {
+        if !menu_rects.frame.contains(x, y) {
             self.dismiss_server_tab_context_menu();
             return false;
         }
@@ -2936,10 +2931,10 @@ impl UnixApp {
                         // Menu item bounds so an agent can drive `As Window` /
                         // `Close` with `ui-input pointer`, as a human does.
                         "menu": self.server_context_menu_geometry().map(
-                            |(frame, as_window, close)| serde_json::json!({
-                                "bounds": pixel_rect_json(frame),
-                                "as_window": pixel_rect_json(as_window),
-                                "close": pixel_rect_json(close),
+                            |menu| serde_json::json!({
+                                "bounds": pixel_rect_json(menu.frame),
+                                "as_window": pixel_rect_json(menu.as_window),
+                                "close": pixel_rect_json(menu.close),
                             }),
                         ),
                         "add": pixel_rect_json({
@@ -4884,10 +4879,10 @@ impl UnixApp {
             });
             render::ServerStripView {
                 menu: self.server_context_menu_geometry().map(
-                    |(frame, as_window, close)| render::ServerStripMenuView {
-                        frame: u32_rect(frame),
-                        as_window: u32_rect(as_window),
-                        close: u32_rect(close),
+                    |menu| render::ServerStripMenuView {
+                        frame: u32_rect(menu.frame),
+                        as_window: u32_rect(menu.as_window),
+                        close: u32_rect(menu.close),
                     },
                 ),
                 bounds: u32_rect(strip),

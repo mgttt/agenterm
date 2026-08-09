@@ -52,7 +52,8 @@ use crate::{
             SERVER_ADD_WIDTH, SERVER_TAB_STRIP_INSET, SERVER_TABS_REFRESH, StripRect,
             ServerCloseConfirm,
             ServerContextAction, ServerNewDialog, ServerTabContextMenu, layout_server_add_chip,
-            layout_server_context_menu, layout_server_tab_chips, server_tab_chip_label,
+            ServerContextMenuRects, layout_server_context_menu, layout_server_tab_chips,
+            server_tab_chip_label,
         },
         settings::{self, AppearanceField, SettingsDialog, SettingsScope, appearance_preset_grid},
         tab_editor::{TabEditorDialog, TabEditorFocus},
@@ -5610,7 +5611,7 @@ impl RemoteWindowState {
 
     fn server_context_menu_geometry(
         &self,
-    ) -> Option<(ProductPixelRect, ProductPixelRect, ProductPixelRect)> {
+    ) -> Option<ServerContextMenuRects<ProductPixelRect>> {
         let menu = self.server_tab_context_menu.as_ref()?;
         let client = self.window.client_size();
         let client_right = i32::try_from(client.width).unwrap_or(i32::MAX);
@@ -5621,37 +5622,25 @@ impl RemoteWindowState {
             .into_iter()
             .find(|(_, row)| row.instance == menu.instance)
             .map(|(rect, _)| rect.left);
-        let (frame, as_window, close) = layout_server_context_menu(
+        let rects = layout_server_context_menu(
             menu.origin_x,
             menu.origin_y,
             client_right,
             client_bottom,
             anchor_left,
         );
-        Some((
-            ProductPixelRect {
-                left: frame.left,
-                top: frame.top,
-                right: frame.right,
-                bottom: frame.bottom,
-            },
-            ProductPixelRect {
-                left: close.left,
-                top: close.top,
-                right: close.right,
-                bottom: close.bottom,
-            },
-            ProductPixelRect {
-                left: as_window.left,
-                top: as_window.top,
-                right: as_window.right,
-                bottom: as_window.bottom,
-            },
-        ))
+        Some(rects.map(|rect| ProductPixelRect {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        }))
     }
 
     fn server_context_action_at(&self, x: i32, y: i32) -> Option<ServerContextAction> {
-        let (_, close, as_window) = self.server_context_menu_geometry()?;
+        let menu = self.server_context_menu_geometry()?;
+        let as_window = menu.as_window;
+        let close = menu.close;
         if x >= as_window.left
             && x < as_window.right
             && y >= as_window.top
@@ -6000,9 +5989,10 @@ impl RemoteWindowState {
         device: &mut dyn ControlCanvas,
         palette: &ThemePalette,
     ) {
-        let Some((frame_rect, close, as_window)) = self.server_context_menu_geometry() else {
+        let Some(menu) = self.server_context_menu_geometry() else {
             return;
         };
+        let (frame_rect, as_window, close) = (menu.frame, menu.as_window, menu.close);
         fill(device, &frame_rect, palette.modal.canvas_rgb());
         frame(device, &frame_rect, palette.accent.canvas_rgb());
         fill(device, &as_window, palette.composer.canvas_rgb());
