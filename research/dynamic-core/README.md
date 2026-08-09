@@ -1,5 +1,16 @@
 # dynamic-core — research track index
 
+> 📦 **ARCHIVED (2026-08-09).** Closed at Q23 by explicit product-direction
+> decision, not because the questions ran out. Q0–Q23 answered what this
+> track set out to answer (shape / cost / permanent residues / where it
+> fails / what runtime-declared extension actually buys and doesn't — see
+> Q23's split verdict, the track's last entry). Effort moves to hardening
+> the real crate (`crates/agenterm-nativecore`, see
+> [`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md))
+> instead of opening new Qs here. Nothing below is deleted or wrong — it's a
+> closed, citable body of work; a future Q24 is not precluded if a real
+> product need reopens this axis, but none is planned.
+
 A clean-room research track on **"maximum information and control from minimum
 resources"**: how small can a self-extending native core be, and where does the
 growth come from. Every question here is settled by a **decisive experiment**
