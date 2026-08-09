@@ -206,7 +206,7 @@ fn open_locked(path: &Path) -> File {
 fn development_build_prunes_only_after_successful_artifact_staging() {
     let stage = BUILD_TASK.find("\"build_stage\"").expect("stage call");
     let prune = BUILD_TASK
-        .find("\"build_incremental_prune\"")
+        .find("\"build_incremental_prune")
         .expect("prune call");
     assert!(
         prune > stage,
@@ -225,7 +225,7 @@ fn development_build_uses_only_the_stable_wrapper_and_finalizes_after_staging() 
         .find("\"build_incremental_manifest\"")
         .expect("manifest finalizer");
     let prune = BUILD_TASK
-        .find("\"build_incremental_prune\"")
+        .find("\"build_incremental_prune")
         .expect("prune call");
     assert!(cargo < stage && stage < finalize && finalize < prune);
     assert!(BUILD_TASK.contains("AGENTERM_BOOTSTRAP_CACHE_WORKER"));
@@ -248,9 +248,14 @@ fn wrapper_source_owns_the_cargo_lock_barrier_and_exact_touch_evidence() {
     let touch = INCREMENTAL_WRAPPER_SOURCE
         .find("touch.roots.insert(touched_name)")
         .expect("exact touched root record");
+    // The forward is now three statements (builder + headless config +
+    // status) so wrapped rustc never flashes a console when the wrapper is
+    // the GUI-subsystem agenterm PE — assert the anchor of that chain.
     let compiler = INCREMENTAL_WRAPPER_SOURCE
-        .find("Command::new(compiler).args(rustc_arguments).status()")
+        .find("let mut rustc = Command::new(compiler)")
         .expect("transparent compiler forward");
+    assert!(INCREMENTAL_WRAPPER_SOURCE.contains("rustc.args(rustc_arguments)"));
+    assert!(INCREMENTAL_WRAPPER_SOURCE.contains("match rustc.status()"));
     assert!(cargo_lock < before && before < touch && touch < compiler);
     assert!(INCREMENTAL_WRAPPER_SOURCE.contains("barrier.lock()?"));
     assert!(INCREMENTAL_WRAPPER_SOURCE.contains("full-tree-metadata-v1"));
@@ -269,25 +274,27 @@ fn both_executables_dispatch_incremental_wrapper_mode() {
     let incremental = target.join("debug/incremental");
     let invocation = "test-wrapper-parity-0001";
     let state = target.join("debug/.agenterm-incremental").join(invocation);
-    let compiler_probe_env = std::env::var("CARGO_BIN_EXE_agenterm")
-        .expect("Cargo should expose the agenterm test binary");
-    let compiler_probe = Path::new(&compiler_probe_env);
+    // The compiler probe must be a DIFFERENT executable from the wrapper:
+    // now that the wrapper IS the main agenterm PE, using agenterm as the
+    // probe too would make the probe child inherit the wrapper env vars,
+    // match `current_exe() == RUSTC_WRAPPER` itself, and recurse into
+    // wrapper mode (a test-only artifact — real rustc is never agenterm).
+    // `rustc` is guaranteed present wherever `cargo test` runs.
+    let compiler_probe = Path::new("rustc");
     let direct = Command::new(compiler_probe)
         .arg("--version")
         .output()
         .expect("run direct compiler probe");
 
-    // NOT migrated to CARGO_BIN_EXE_agenterm (see file-level finding in the
-    // migration report): this exercises `agenterm-rh` acting AS the
-    // `RUSTC_WRAPPER` itself (`current_exe()` must equal the `RUSTC_WRAPPER`
-    // env var, and cargo's real protocol invokes that single path with no
-    // injectable prefix args) — `agenterm.exe` has no top-level rustc-wrapper
-    // detection outside its `__agenterm-internal-engine` dispatch branch, so
-    // pointing this at the main PE would either require prefix args cargo
-    // can't supply in production, or would silently test a shape unrelated
-    // to real `RUSTC_WRAPPER` usage. Left on the standalone bin pending a
-    // source-side fix to `src/bin/agenterm.rs`.
-    for executable in [Path::new(env!("CARGO_BIN_EXE_agenterm-rh"))] {
+    // Exercises the main PE acting AS the `RUSTC_WRAPPER` itself:
+    // `current_exe()` must equal the `RUSTC_WRAPPER` env var, and cargo's
+    // real protocol invokes that single path with no injectable prefix
+    // args. `src/bin/agenterm.rs::main()` probes
+    // `is_incremental_rustc_wrapper_process` on raw args BEFORE any
+    // subcommand dispatch (commit 82019aa9), which is exactly what makes
+    // the standalone `agenterm-rh` wrapper binary retirable — this test
+    // now locks that production shape.
+    for executable in [Path::new(env!("CARGO_BIN_EXE_agenterm"))] {
         let wrapped = Command::new(executable)
             .env(
                 "AGENTERM_INTERNAL_RUSTC_WRAPPER",
@@ -325,10 +332,11 @@ fn rustc_wrapper_snapshots_under_cargo_lock_and_finalizes_exact_touch_manifest()
     let state = target.join("debug/.agenterm-incremental").join(invocation);
     fs::create_dir_all(&state).expect("create producer state");
     let touched = incremental.join("probe-root");
-    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rh"));
-    let compiler_probe_env = std::env::var("CARGO_BIN_EXE_agenterm")
-        .expect("Cargo should expose the agenterm test binary");
-    let compiler_probe = Path::new(&compiler_probe_env);
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm"));
+    // Distinct from the wrapper executable — see
+    // both_executables_dispatch_incremental_wrapper_mode for why the probe
+    // must not be agenterm itself now that agenterm IS the wrapper.
+    let compiler_probe = Path::new("rustc");
     let compiler_arguments = [
         "--crate-name".to_owned(),
         "agenterm_incremental_probe".to_owned(),
@@ -411,7 +419,7 @@ fn hot_build_without_a_real_incremental_rustc_cannot_authorize_roots() {
     let state = target.join("debug/.agenterm-incremental").join(invocation);
     fs::create_dir_all(&state).expect("create empty producer state");
     let manifest = state.join("manifest.json");
-    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-rh"));
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm"));
     let finalized = Command::new(executable)
         .env(
             "AGENTERM_INTERNAL_RUSTC_WRAPPER",

@@ -56,11 +56,17 @@ fn ci_manifest_task_entrypoints_use_rh_front_door() {
     ] {
         let normalized = normalized_task_callers(source);
         let task_runs = normalized.matches("task run").count();
-        let rh_task_runs = normalized.matches("agenterm-rh task run").count();
+        // Post-retirement front door: `agenterm rh task run ...` (the main
+        // PE's rh subcommand), never the retired standalone binary.
+        let rh_task_runs = normalized.matches(" rh task run").count();
         assert!(task_runs > 0, "{name} must retain manifest task coverage");
         assert_eq!(
             rh_task_runs, task_runs,
-            "{name} has a task run outside the agenterm-rh front door"
+            "{name} has a task run outside the `agenterm rh` front door"
+        );
+        assert!(
+            !normalized.contains("agenterm-rh task run"),
+            "{name} still calls the retired standalone agenterm-rh binary"
         );
         assert!(
             !normalized.contains("agenterm-rhai task run"),
@@ -71,32 +77,38 @@ fn ci_manifest_task_entrypoints_use_rh_front_door() {
 
 #[test]
 fn candidate_and_release_use_only_rh_scripting_front_door() {
+    // Post-retirement (engine exes folded into the main PE as subcommands,
+    // 2026-08-09): the scripting front door is `agenterm rh ...`, and no
+    // workflow may reference the retired standalone binaries.
     assert!(CANDIDATE.contains(
-        "target/aarch64-apple-darwin/release/agenterm-rh \\\n            run scripts/rh/finalize-macos-provenance.rh"
+        "target/aarch64-apple-darwin/release/agenterm rh \\\n            run scripts/rh/finalize-macos-provenance.rh"
     ));
     assert!(CANDIDATE.contains(
-        "target/x86_64-apple-darwin/release/agenterm-rh \\\n            run scripts/rh/finalize-macos-provenance.rh"
+        "target/x86_64-apple-darwin/release/agenterm rh \\\n            run scripts/rh/finalize-macos-provenance.rh"
     ));
-    assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\""));
+    assert!(CANDIDATE.contains("chmod +x \"$RUNNER_TEMP/agenterm-candidate-tool/agenterm\""));
     assert!(CANDIDATE.contains(
-        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm-rh\" \\\n            run scripts/rh/candidate-aggregate.rh"
+        "\"$RUNNER_TEMP/agenterm-candidate-tool/agenterm\" rh \\\n            run scripts/rh/candidate-aggregate.rh"
     ));
-    assert!(RELEASE.contains("chmod +x \"$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh\""));
+    assert!(RELEASE.contains("chmod +x \"$RUNNER_TEMP/agenterm-promotion-tool/agenterm\""));
     assert!(RELEASE.contains(
-        "\"$RUNNER_TEMP/agenterm-promotion-tool/agenterm-rh\" \\\n            run scripts/rh/candidate-verify.rh"
+        "\"$RUNNER_TEMP/agenterm-promotion-tool/agenterm\" rh \\\n            run scripts/rh/candidate-verify.rh"
     ));
-    assert!(RELEASE.contains("chmod +x \"$RUNNER_TEMP/agenterm-publish-tool/agenterm-rh\""));
+    assert!(!CANDIDATE.contains("agenterm-rh\""));
+    assert!(!RELEASE.contains("agenterm-rh\""));
     assert!(!CANDIDATE.contains("agenterm-rhai"));
     assert!(!RELEASE.contains("agenterm-rhai"));
 }
 
 #[test]
 fn performance_experiment_uses_rh_for_build_and_manifest_tasks() {
+    // Post-retirement: the experiment builds the main PE and drives rh
+    // tasks through the `agenterm rh` subcommand front door.
     let normalized = normalized_task_callers(&PERFORMANCE_EXPERIMENT);
-    assert!(normalized.contains("cargo build --quiet --locked --bin agenterm-rh"));
-    assert!(normalized.contains("target/debug/agenterm-rh"));
-    assert!(normalized.contains("%RUNNER_TEMP%/agenterm-rh task run performance-samples"));
-    assert!(normalized.contains("%RUNNER_TEMP%/agenterm-rh task run performance-summary"));
+    assert!(normalized.contains("cargo build --quiet --locked --bin agenterm"));
+    assert!(normalized.contains("%RUNNER_TEMP%/agenterm rh task run performance-samples"));
+    assert!(normalized.contains("%RUNNER_TEMP%/agenterm rh task run performance-summary"));
+    assert!(!normalized.contains("--bin agenterm-rh"));
     assert!(!normalized.contains("agenterm-rhai"));
 }
 
@@ -118,14 +130,23 @@ fn artifact_manifest_declares_rh_dev_cli_offline_version_probe() {
     let executables = ARTIFACT_MANIFEST["executables"]
         .as_array()
         .expect("manifest executables");
-    let matches = executables
-        .iter()
-        .filter(|entry| entry["role"] == "rh-dev-cli")
-        .collect::<Vec<_>>();
-    assert_eq!(matches.len(), 1, "expected one rh-dev-cli executable");
-    let rh = matches[0];
-    assert_eq!(rh["name"], "agenterm-rh.exe");
-    assert_eq!(rh["offline_probe"], serde_json::json!(["version"]));
+    // Post-retirement: the rh-dev-cli role (standalone agenterm-rh.exe) is
+    // gone the same way scripting-cli went before it — rh scripting rides
+    // the main PE (`agenterm rh ...`), which needs no separate artifact.
+    assert!(
+        !executables
+            .iter()
+            .any(|entry| entry["role"] == "rh-dev-cli"),
+        "retired rh-dev-cli role must not reappear"
+    );
+    assert!(
+        !executables
+            .iter()
+            .any(|entry| entry["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("agenterm-rh"))),
+        "retired agenterm-rh executable must not reappear in the manifest"
+    );
     assert!(
         !executables
             .iter()
@@ -135,14 +156,15 @@ fn artifact_manifest_declares_rh_dev_cli_offline_version_probe() {
 }
 
 #[test]
-fn artifact_verification_probes_rh_dev_cli_and_rejects_invalid_versions() {
+fn artifact_verification_carries_no_retired_engine_cli_probes() {
+    // Post-retirement rewrite: artifact verification validates roles via
+    // scripts/rh/lib/artifact_manifest and must not re-grow probes for the
+    // retired standalone engine CLIs (rh-dev-cli went the way of
+    // scripting-cli).
     assert!(ARTIFACT_VERIFICATION.contains("fn entry("));
-    assert!(ARTIFACT_VERIFICATION.contains("\"rh-dev-cli\""));
-    assert!(ARTIFACT_VERIFICATION.contains("(\"\" + artifact.offline_probe[0]) == \"version\""));
-    assert!(ARTIFACT_VERIFICATION.contains("std::fs::metadata(path).len > 0"));
-    assert!(ARTIFACT_VERIFICATION.contains("std::process::command_stdout_file("));
-    assert!(ARTIFACT_VERIFICATION.contains("\"artifact_rh_version"));
-    assert!(!ARTIFACT_VERIFICATION.contains("dist, \"agenterm-rh.exe\""));
+    assert!(ARTIFACT_VERIFICATION.contains("artifact_manifest::validate("));
+    assert!(!ARTIFACT_VERIFICATION.contains("\"rh-dev-cli\""));
+    assert!(!ARTIFACT_VERIFICATION.contains("agenterm-rh.exe"));
     assert!(!ARTIFACT_VERIFICATION.contains("\"scripting-cli\""));
 }
 
@@ -196,16 +218,19 @@ fn macos_ci_cross_compiles_rh_reference_pack() {
 }
 
 #[test]
-fn rh_binary_is_owned_and_built_by_root_package() {
-    let root_bin = "[[bin]]\nname = \"agenterm-rh\"\npath = \"crates/agenterm-rh/src/main.rs\"";
-    assert!(ROOT_MANIFEST.contains(root_bin));
+fn rh_rides_the_main_binary_with_no_standalone_bin_target() {
+    // Post-retirement: the standalone agenterm-rh [[bin]] is gone — rh's
+    // CLI lives in the root lib (script_rh_cli_main) behind the
+    // `agenterm rh` subcommand, and bootstrap builds the single main PE.
+    let retired_bin = "name = \"agenterm-rh\"";
+    assert!(!ROOT_MANIFEST.contains(retired_bin));
     assert!(RH_MANIFEST.contains("autobins = false"));
     assert!(!RH_MANIFEST.contains("[[bin]]"));
 
-    let root_build = "cargo build --quiet --locked --bin agenterm-rh";
-    let old_package_build = "-p agenterm-rh --bin agenterm-rh";
+    let root_build = "cargo build --quiet --locked --bin agenterm";
+    let retired_build = "--bin agenterm-rh";
     assert!(UNIX_BOOTSTRAP.contains(root_build));
     assert!(WINDOWS_BOOTSTRAP.contains(root_build));
-    assert!(!UNIX_BOOTSTRAP.contains(old_package_build));
-    assert!(!WINDOWS_BOOTSTRAP.contains(old_package_build));
+    assert!(!UNIX_BOOTSTRAP.contains(retired_build));
+    assert!(!WINDOWS_BOOTSTRAP.contains(retired_build));
 }
