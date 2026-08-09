@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |------|-----|
 | **日期** | 2026-08-09 |
-| **状态** | 设计定稿，实现未开工 |
+| **状态** | §1–§6 已实现（`agenterm-nativecore`，25 个测试真机通过，独立编译）；本次追加 §7 产品接入 |
 | **前置** | [`research/dynamic-core/SYNTHESIS.md`](../research/dynamic-core/SYNTHESIS.md)（Q0–Q22）；
   [`research/dynamic-core/assembled/`](../research/dynamic-core/assembled/)（Q22，本设计复活它砍掉的那一半） |
 | **纠正** | [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) 描述的东西**不是这个**——
@@ -102,4 +102,58 @@ Q22 装配阶段本来就绑定了七个真实 Win32 API 原生调用（真机�
 
 ---
 
-*产品设计文档。命名冲突（`agenterm-dynacore` 暂被占用）待 logic pack 改名后一并清理。*
+## 7. 产品接入（下一轮，本次追加）
+
+§6 说"接入产品主流程是下一轮的事"——现在是这一轮。
+
+### 7.1 接入形状，照抄 logic pack 那次已验证成立的模式
+
+logic pack 的 `src/script_dynacore_pack.rs`/`try_execute_dynacore_pack_invocation`/
+`execute_inner` 三段式接入（进程内、env var 触发、`Ok(None)` 原样落空、真机黑盒测试证明
+不是子进程）已经审过、验过，是真实可用的模式。nativecore 照这个形状接，**但更简单**——
+`crates/agenterm-nativecore` 的公共 API 已经确认：
+
+```rust
+pub fn verify(m: &Module) -> Result<VerifiedModule<'_>, IrFault>;   // 不需要 catalog/bridge 参数
+pub fn run(vm: &VerifiedModule) -> RunOutcome;                       // 不需要 fleet_bridge 参数
+```
+
+**没有 bridge 要穿过去**——nativecore 的 pack 直接调 `seam.rs::do_intent` 落到真实 Win32 API，
+不经过 fleet broker。这意味着接入比 logic pack 更薄：不需要处理 `ScriptFleetBridgeFn`/
+`DynacoreFleetBridgeFn` 那层类型对齐，`try_execute_nativecore_pack_invocation` 的签名可以
+比 `try_execute_dynacore_pack_invocation` 少一个参数。
+
+### 7.2 交付物
+
+- `src/script_nativecore_pack.rs`（新，对齐 `script_dynacore_pack.rs`/`script_rh_pack.rs` 的
+  进程内缓存形状）：从 `AGENTERM_NATIVECORE_PACK_STORE`/`AGENTERM_NATIVECORE_PACK_HASH`
+  加载、验证、缓存一份 `VerifiedModule`（或等价可运行制品）
+- `src/script_backend.rs`：`try_execute_nativecore_pack_invocation`——`Ok(None)` = 没配置
+  （原样落空到 rh/lua/qjs/sql/logic-pack 现有链条），`Ok(Some(_))` = 跑完了，`Err` = 验证/
+  步数超限失败
+- `src/script_worker.rs`：`execute_inner` 里加一段调用（放在哪个位置相对其它几条分支
+  不重要，因为触发条件互斥——各自靠不同的 env var，不会同时命中）
+- 真机黑盒测试：证明产品路径调用的确实是**真实 Win32 API**（不是 mock），
+  至少覆盖 `spawn_echo`（进程真的被创建、真的被等待）与一次故意的验证失败（契约不对的
+  IR 在执行前被拒绝，不 panic）
+
+### 7.3 明确不引入新的权限层
+
+nativecore pack 够到的是**跟 rh/lua/qjs 今天已经有的同一份"无限制本地运行时"**——
+`AGENTS.md` 早就写死"没有权限分层、没有能力拒绝，Agent 策略归未来的 harness 管，
+不归引擎管"。良构验证（`verify()`）是**正确性门**（挡格式错误的 IR），
+**不是权限门**（不判断"这个操作允不允许做"）。接入时不要顺手加一层"nativecore 需要
+额外授权"的逻辑——那会制造一个跟 rh/lua/qjs 不一致的新姿态，不是这次要做的事。
+
+### 7.4 命名清理，明确记录、不阻塞本轮
+
+`agenterm-dynacore` 这个名字现在被 logic pack 占着，`agenterm-nativecore` 才是真身。
+这是历史遗留、需要修的错误命名，但**这一轮不做**——logic pack 已经在产品主流程里
+被多个文件引用（`script_worker.rs`/`script_backend.rs`/`lib.rs`），且这个 checkout
+同时有别的会话在改邻近文件，此刻改名风险大于收益。**留档，等两条并发工作都消停
+再做一次干净的改名 + 引用替换**。
+
+---
+
+*产品设计文档。命名冲突（`agenterm-dynacore` 暂被占用）待 logic pack 改名后一并清理，
+见 §7.4。*
