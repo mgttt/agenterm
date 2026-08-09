@@ -369,20 +369,21 @@ impl ScriptEngineBackend for QjsEngineBackend {
     }
 }
 
-/// sql engine adapter — see `plan/design-script-engine-trait.md` §2.6 (the
-/// design-time prediction this scaffold validates) and
+/// sql engine adapter — see `plan/design-sql-execution-target.md` (the M1
+/// design doc this impl now implements) and
 /// `crates/agenterm-sql/src/lib.rs`'s module doc (the honest "what's real
 /// vs. placeholder" writeup this impl matches).
 ///
 /// `check` is real: delegates to `agenterm_sql::check`, which really parses
-/// via `sqlparser`. `execute` is NOT real: there is no decided execution
-/// target for sql source yet (embedded engine vs. external DB connection
-/// vs. host-state-as-virtual-tables — see `agenterm_sql::eval`'s doc), so it
-/// fails closed with `agenterm_sql::eval_entry`'s error rather than
-/// pretending to run anything. `fleet_bridge` is accepted (trait shape
-/// parity with the other three engines) but unused here — §2.6 predicted
-/// exactly this ("sql 不需要 trait 新增方法，只需要 execute 内部把 fleet_bridge
-/// 参数忽略掉"), and this impl is the confirmation that held up in practice.
+/// via `sqlparser`. `execute` is ALSO real as of M1: delegates to
+/// `agenterm_sql::execute_entry`, which runs `source` against a private,
+/// in-process, ephemeral SQLite database (`rusqlite`, `bundled`) — see that
+/// function's module doc for the full value-mapping/budget/dialect-skew
+/// writeup. `fleet_bridge` remains unused here — M2 (host-state-as-virtual-
+/// tables) is the design doc's own plan for wiring it in, not M1; §2.6 of
+/// the earlier trait-design doc predicted "sql 不需要 trait 新增方法，只需要
+/// execute 内部把 fleet_bridge 参数忽略掉", and that still holds for M1's
+/// scope even though execute() itself is no longer a placeholder.
 pub struct SqlEngineBackend;
 
 impl ScriptEngineBackend for SqlEngineBackend {
@@ -406,18 +407,28 @@ impl ScriptEngineBackend for SqlEngineBackend {
     fn execute(
         &self,
         source: &str,
-        _options: &ScriptInvocationOptions,
+        options: &ScriptInvocationOptions,
         _fleet_bridge: Option<ScriptFleetBridgeFn>,
     ) -> Result<ScriptInvocationResult, ScriptEngineError> {
         if !self.enabled() {
             return Err(not_enabled_error(self.backend_id()));
         }
 
-        // agenterm_sql::eval_entry() always returns Err today (no decided
-        // execution target — see its module doc); this just forwards that
-        // error rather than re-deriving the message here.
-        agenterm_sql::eval_entry(source, "invocation.sql").map_err(|e| e.to_string())?;
-        Err("sql_execute_unreachable: eval_entry unexpectedly succeeded".to_owned())
+        // agenterm_sql::ExecuteBudgets is a small crate-local mirror of
+        // ScriptBudgets (agenterm-sql can't depend on this crate's types —
+        // see that struct's doc) covering only the M1-enforced subset:
+        // wall_time_ms, collection_items, and output_bytes (standing in for
+        // both output_bytes and string_bytes — see its doc for why).
+        let sql_budgets = options.budgets.as_ref().map(|budgets| agenterm_sql::ExecuteBudgets {
+            wall_time_ms: budgets.wall_time_ms,
+            collection_items: budgets.collection_items,
+            output_bytes: budgets.output_bytes,
+        });
+
+        let outcome = agenterm_sql::execute_entry(source, "invocation.sql", sql_budgets.as_ref())
+            .map_err(|e| e.to_string())?;
+
+        Ok(ScriptInvocationResult { stdout: outcome.stdout, value: outcome.value })
     }
 }
 
@@ -883,28 +894,59 @@ mod tests {
     }
 
     #[test]
-    fn sql_engine_execute_returns_the_not_implemented_error() {
-        // Pins the contract: sql's execute is fail-closed by design (no
-        // decided execution target — see agenterm_sql::eval's module doc),
-        // not merely "currently broken". Asserting the actual message
-        // means a future accidental regression to a *different* error (or
-        // a silent success) both get caught here.
+    fn sql_engine_execute_returns_rows_for_a_select() {
+        // M1: execute() is real (plan/design-sql-execution-target.md).
+        // Replaces the old placeholder-pinning test
+        // (sql_engine_execute_returns_the_not_implemented_error), which
+        // asserted the opposite — that execute() always failed closed.
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::set("sql");
+        let engine = SqlEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        let result = engine
+            .execute(SQL_VALID_SOURCE, &options, None)
+            .expect("sql execute should succeed for a valid SELECT");
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.value, Some(serde_json::json!([{"1": 1}])));
+    }
+
+    #[test]
+    fn sql_engine_execute_runs_multi_statement_scripts_in_order() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::set("sql");
+        let engine = SqlEngineBackend;
+        let options = ScriptInvocationOptions::default();
+
+        let result = engine
+            .execute(
+                "CREATE TABLE widgets (id INTEGER, name TEXT); \
+                 INSERT INTO widgets (id, name) VALUES (1, 'gizmo'); \
+                 SELECT id, name FROM widgets;",
+                &options,
+                None,
+            )
+            .expect("multi-statement sql execute should succeed");
+        assert_eq!(
+            result.value,
+            Some(serde_json::json!([{"id": 1, "name": "gizmo"}]))
+        );
+    }
+
+    #[test]
+    fn sql_engine_execute_errors_not_panics_on_bad_sql_at_execute_time() {
+        // "bad sql at execute time" here means execution-time (SQLite)
+        // rejection, not a check()-catchable parse error — querying a
+        // table that doesn't exist parses fine, fails when run.
         let _guard = ENV_LOCK.lock().expect("lock");
         let _env = EnvGuard::set("sql");
         let engine = SqlEngineBackend;
         let options = ScriptInvocationOptions::default();
 
         let error = engine
-            .execute(SQL_VALID_SOURCE, &options, None)
-            .expect_err("sql execute must fail closed, not succeed");
-        assert!(
-            error.contains("sql_eval_not_implemented"),
-            "unexpected error message: {error}"
-        );
-        assert!(
-            error.contains("no execution target is decided"),
-            "unexpected error message: {error}"
-        );
+            .execute("SELECT * FROM does_not_exist;", &options, None)
+            .expect_err("querying a nonexistent table should error, not panic");
+        assert!(!error.is_empty());
     }
 
     #[test]

@@ -33,13 +33,13 @@
 //! | `corpus-scan`                     | real                                            | real                                    | real                                                | real                                       |
 //! | `caller-inventory`                | real — rh-only, AOT-toolchain reporting          | absent (unknown command)                | absent                                              | absent                                     |
 //! | `transpile` / `compile`           | real — rh-only AOT pipeline                      | absent                                  | absent                                              | absent                                     |
-//! | `eval`                            | real                                             | real                                    | real                                                | **stub** — exits 2, "not implemented"      |
-//! | `run`                             | real (`--project-root`, `--timeout-ms`, ..., `-- ARGS`) | real (`-- ARGS`)              | real (`--project-root`, `-- ARGS`)                 | **stub** — exits 2                          |
+//! | `eval`                            | real                                             | real                                    | real                                                | **real as of M1** (`plan/design-sql-execution-target.md`) — embedded rusqlite/SQLite, no `--project-root`/host-arg flags (sql has no argument-binding concept yet) |
+//! | `run`                             | real (`--project-root`, `--timeout-ms`, ..., `-- ARGS`) | real (`-- ARGS`)              | real (`--project-root`, `-- ARGS`)                 | **real as of M1**, currently identical to `eval` (no `-- ARGS` handling — nothing for it to bind to yet) |
 //! | `run-smoke`                       | real (dlopen native)                            | real (delegates to `pack load`)         | real (delegates to `pack load`)                    | absent (unknown command)                   |
 //! | `pack build` / `pack load`        | real                                             | real                                    | real (module-aware, self-contained multi-file pack) | **stub** — exits 2 (whole `pack` verb, no subcommand dispatch) |
 //! | `qualify`                         | real                                             | real                                    | real (module-aware)                                | **stub** — exits 2                          |
 //! | `hash`                            | real                                             | real                                    | real                                                | absent — not a match arm at all, falls into `other => unknown command` |
-//! | `task`                            | real dispatch (`main()` intercepts `task` *before* `run()`, routes through `agenterm::run_script_entry_with_args`) | stub — its own tiny `--manifest`-driven list/show/run, not the real Script Runtime | stub — prints a redirect-to-`agenterm task` message, **exits 0** | **stub** — exits 2 via the same `not_implemented_stub` as `eval`/`run`/`pack`/`qualify` (unlike qjs's `task`, which is a 0-exit informational stub, not a reserved-error one) |
+//! | `task`                            | real dispatch (`main()` intercepts `task` *before* `run()`, routes through `agenterm::run_script_entry_with_args`) | stub — its own tiny `--manifest`-driven list/show/run, not the real Script Runtime | stub — prints a redirect-to-`agenterm task` message, **exits 0** | **stub** — exits 2 via the same `not_implemented_stub` as `pack`/`qualify` (unlike qjs's `task`, which is a 0-exit informational stub, not a reserved-error one) |
 //! | `--worker` / `--framed-worker`    | both real (legacy JSON + framed worker protocols) | `--framed-worker` only (no `--worker`) | absent | absent |
 //! | `--internal-incremental-finalize` | real, rh-only, internal                          | absent                                  | absent                                              | absent                                     |
 //!
@@ -667,9 +667,19 @@ fn qjs_task_stub_exits_nonzero_with_redirect_message() {
 
 // ── 6. sql's reserved-but-not-implemented verbs ─────────────────────────
 
+/// 2026-08 M1 update (`plan/design-sql-execution-target.md`): `eval`/`run`
+/// are REAL now (see `sql_eval_and_run_are_real` below) — dropped from this
+/// list, which used to cover all five of `eval`/`run`/`pack`/`qualify`/
+/// `task`. Only `pack`/`qualify`/`task` remain reserved stubs in M1's
+/// scope. The expected stderr substring also changed: sql's execution
+/// target is no longer undecided (that's the whole point of M1), so
+/// `not_implemented_stub`'s message no longer says "no decided execution
+/// target yet" — it now names the actual, narrower reason `pack`/`qualify`/
+/// `task` are still unimplemented (see `crates/agenterm-sql/src/cli.rs`'s
+/// `not_implemented_stub` doc).
 #[test]
 fn sql_reserved_verbs_stable_error() {
-    for verb in ["eval", "run", "pack", "qualify", "task"] {
+    for verb in ["pack", "qualify", "task"] {
         assert_parity_across_invocations(&SQL, |engine, invocation| {
             let output = run(engine, invocation, &[verb, "x.sql"]);
             assert_eq!(
@@ -685,9 +695,70 @@ fn sql_reserved_verbs_stable_error() {
                  substring; got {stderr}"
             );
             assert!(
-                stderr.contains("no decided execution target yet"),
-                "sql {verb}/{invocation:?}: expected the stable open-design-question \
-                 substring; got {stderr}"
+                stderr.contains("no decided shape for sql yet"),
+                "sql {verb}/{invocation:?}: expected the stable \
+                 no-decided-shape-yet substring; got {stderr}"
+            );
+            output
+        });
+    }
+}
+
+// ── 6b. sql's eval/run are real as of M1 ─────────────────────────────────
+
+/// `agenterm sql eval <file.sql>` and `agenterm sql run <file.sql>` both
+/// run the source for real now (`plan/design-sql-execution-target.md` §5's
+/// acceptance criterion) — exit 0, and stdout names the file plus the
+/// JSON-rendered result. This is the CLI-process-level twin of
+/// `tests/script_engine_exec_parity.rs`'s `sql_trivial_select_value` (same
+/// fixture, exercised through the real spawned binary instead of the
+/// in-process `ScriptEngineBackend` trait).
+#[test]
+fn sql_eval_and_run_are_real() {
+    for verb in ["eval", "run"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("select_one.sql");
+        std::fs::write(&file, "SELECT 1;").unwrap();
+        let file_arg = file.to_str().unwrap().to_string();
+
+        assert_parity_across_invocations(&SQL, |engine, invocation| {
+            let output = run(engine, invocation, &[verb, &file_arg]);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "sql {verb}/{invocation:?}: SELECT 1; should exit 0; stderr={}",
+                stderr_lossy(&output)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                stdout.contains(r#"[{"1":1}]"#),
+                "sql {verb}/{invocation:?}: expected stdout to contain the JSON-rendered \
+                 result of SELECT 1;, got: {stdout}"
+            );
+            output
+        });
+    }
+}
+
+/// A source that parses fine but fails at SQLite execution time (querying a
+/// nonexistent table) is a script-level failure for `eval`/`run` — exit 1,
+/// same taxonomy as `check <broken file>`, not a usage error.
+#[test]
+fn sql_eval_execute_time_error_exits_one() {
+    for verb in ["eval", "run"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("missing_table.sql");
+        std::fs::write(&file, "SELECT * FROM does_not_exist;").unwrap();
+        let file_arg = file.to_str().unwrap().to_string();
+
+        assert_parity_across_invocations(&SQL, |engine, invocation| {
+            let output = run(engine, invocation, &[verb, &file_arg]);
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "sql {verb}/{invocation:?}: an execute-time sqlite error is script-level (exit \
+                 1), not a usage error; stderr={}",
+                stderr_lossy(&output)
             );
             output
         });

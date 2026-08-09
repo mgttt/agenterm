@@ -1,33 +1,44 @@
-//! Execution-level parity across rh/lua/qjs through the unified
+//! Execution-level parity across rh/lua/qjs/sql through the unified
 //! `ScriptEngineBackend` trait (`src/script_engine.rs`).
 //!
 //! `tests/script_engine_parity.rs` already locks check-many-level parity.
 //! Nothing locked EXECUTION-level parity — what each engine actually
 //! returns for equivalent trivial programs through `check`/`execute` — until
 //! this file. The goal here is not to force false uniformity across three
-//! independently-designed engines; it is to produce a precise, asserted map
-//! of where their execution envelopes agree and where they genuinely
-//! diverge (a divergence caught and asserted here is a *success* for this
-//! file, not a bug to paper over).
+//! (now four) independently-designed engines; it is to produce a precise,
+//! asserted map of where their execution envelopes agree and where they
+//! genuinely diverge (a divergence caught and asserted here is a *success*
+//! for this file, not a bug to paper over).
 //!
-//! ## Why `agenterm-sql` is (mostly) not in `ENGINES` below
+//! ## `agenterm-sql`'s place in this file (M1, `execute` now real — see
+//! `plan/design-sql-execution-target.md` §4/§5)
 //!
-//! `agenterm-sql` is a fourth `ScriptEngineBackend` (see
-//! `crates/agenterm-sql/src/lib.rs`'s module doc and
-//! `src/script_engine.rs`'s `SqlEngineBackend`), and its `check` is real —
-//! so it does join `check_accepts_valid_rejects_broken` and
-//! `disabled_backend_errors` below, both of which only exercise `check` (or
-//! never reach parsing at all). But sql's `execute` is a deliberate
-//! fail-closed placeholder — there is no decided execution target yet
-//! (embedded engine vs. external DB vs. host-state-as-virtual-tables; see
-//! `agenterm_sql::eval`'s module doc) — so it is EXCLUDED from
-//! `trivial_entry_value`, `stdout_capture`, `execute_missing_entry_fails_closed`,
-//! and `error_not_panic`, all of which require a working `execute` to say
-//! anything meaningful. Enrolling sql there is deferred until `execute` is
-//! real, tracked at `plan/plan-v0.1.16.md` SQL-M0. Instead, sql's *current*
-//! execute contract — "fails closed with a specific not-implemented error,
-//! every time" — is pinned by its own dedicated test,
-//! `sql_execute_placeholder_contract`, below.
+//! sql's `check` was always real, so it already joined
+//! `check_accepts_valid_rejects_broken` and `disabled_backend_errors`
+//! (neither needs a working `execute`). As of M1, `execute` is ALSO real
+//! (`agenterm_sql::execute_entry`, backed by an ephemeral in-memory SQLite
+//! database — see `crates/agenterm-sql/src/eval.rs`'s module doc), but sql's
+//! declarative "batch of statements, last result set wins" execution model
+//! is different enough from rh/lua/qjs's "single command program, one
+//! value" model (design doc §1.2) that most of the trivial-program scenarios
+//! below still don't enroll sql *directly* — per the design doc §4 table,
+//! each gets sql's own scenario instead, asserting sql's actual documented
+//! shape rather than forcing scalar uniformity:
+//!
+//! | scenario | sql treatment | why |
+//! |---|---|---|
+//! | `trivial_entry_value` | NOT enrolled; see `sql_trivial_select_value` | sql's `value` for a trivial program is `Some(json!([{"1": 1}]))` (an array of row objects), not a bare scalar `Some(json!(42))` — mixing it into this test would break its "three engines agree on a scalar" assertion |
+//! | `stdout_capture` | NOT enrolled; see `sql_stdout_is_empty` | SQL has no `print()`/`NOTICE` concept in M1 — `stdout` is unconditionally `""`, not a print-and-capture result |
+//! | `execute_missing_entry_fails_closed` | NOT enrolled; see `sql_execute_no_result_set_is_none_not_error` | sql has no `entry()` concept at all, so "missing entry" doesn't apply; sql's closest analogue (a script with no result-producing statement) is a documented fail-*open*-to-`None` contract, not a fail-closed error |
+//! | `error_not_panic` | **enrolled directly** below | sql's execution-time-error-not-panic contract is structurally identical to rh/lua/qjs's — no new scenario needed |
+//! | `disabled_backend_errors` | already enrolled | unaffected by M1 — the `enabled()` gate runs before `execute` is attempted either way |
+//! | `check_accepts_valid_rejects_broken` | already enrolled | `check()` is unaffected by M1 |
+//!
+//! `sql_execute_placeholder_contract` (the "execute always fails closed with
+//! a not-implemented error" pin) is DELETED in this pass — that contract no
+//! longer holds now that `execute` is real, exactly as the design doc §4
+//! predicted it would need to be ("这个测试断言的是...M1 落地后这个契约不再
+//! 成立，必须删除或改写").
 
 use agenterm::script_backend::ScriptBackend;
 use agenterm::script_engine::{ScriptEngineBackend, ScriptInvocationOptions, engine_for};
@@ -435,42 +446,112 @@ fn error_not_panic() {
         "qjs: error message should surface the original 'boom' text, got: {qjs_error}"
     );
 
-    // DIVERGENCE FOUND: none of the three panics — all three fail closed
+    // sql: querying a table that doesn't exist. This parses fine (it's
+    // syntactically valid SQL) and fails only when SQLite actually tries to
+    // resolve `does_not_exist` at execution time — same "error, not panic"
+    // contract as the other three, enrolled directly (design doc §4: no new
+    // scenario needed for this one).
+    let sql_error = {
+        let _env = EnvGuard::set("sql");
+        engine_for(ScriptBackend::Sql)
+            .execute(
+                "SELECT * FROM does_not_exist;",
+                &ScriptInvocationOptions::default(),
+                None,
+            )
+            .expect_err("sql: querying a nonexistent table should error, not panic")
+    };
+    assert!(
+        sql_error.contains("does_not_exist"),
+        "sql: error should name the unresolved table, got: {sql_error}"
+    );
+
+    // DIVERGENCE FOUND: none of the four panics — all four fail closed
     // with `Err(String)` carrying a real diagnostic, so the trait-level
     // "error, not panic" contract holds uniformly. But *when* the error
     // occurs differs qualitatively: lua/qjs raise genuine runtime
-    // exceptions from a running script, while rh's equivalent "calling
-    // something that doesn't exist" case is caught at AOT compile time,
-    // before rh ever executes a single instruction. A caller cannot
-    // assume "the entry function started running" from "execute()
-    // returned Err" for rh the way it safely can for lua/qjs.
+    // exceptions from a running script, rh's equivalent "calling
+    // something that doesn't exist" case is caught at AOT compile time
+    // before rh ever executes a single instruction, and sql's is caught by
+    // SQLite at statement-execution time (not sqlparser's parse time — the
+    // statement is syntactically valid SQL). A caller cannot assume "the
+    // program started running" from "execute() returned Err" uniformly
+    // across all four engines.
 }
 
 // ---------------------------------------------------------------------
-// 7. sql_execute_placeholder_contract
+// 7. sql's own execution-envelope scenarios (design doc §4's "needs a new
+// scenario" rows — see this file's top-of-file doc table)
 // ---------------------------------------------------------------------
 
+/// sql's analogue of `trivial_entry_value`: NOT enrolled directly in that
+/// test because sql's `value` shape for a trivial program is an array of
+/// row objects, not a bare scalar (design doc §2.1/§4).
 #[test]
-fn sql_execute_placeholder_contract() {
+fn sql_trivial_select_value() {
     let _guard = ENV_LOCK.lock().expect("lock");
+    let _env = EnvGuard::set("sql");
 
-    // Pins sql's *current* execute() contract at the trait level: enabled,
-    // given source that checks perfectly clean, execute() still fails
-    // closed with a specific, stable "not implemented" diagnostic — never
-    // a silent success and never a different, unrelated error. See this
-    // file's top-of-file doc for why sql can't yet join
-    // trivial_entry_value/stdout_capture/execute_missing_entry_fails_closed/
-    // error_not_panic, and `src/script_engine.rs`'s own
-    // `sql_engine_execute_returns_the_not_implemented_error` test (the
-    // trait-impl-level twin of this trait-level assertion) for the exact
-    // message this is pinned against.
-    let _env = EnvGuard::set(ScriptBackend::Sql.as_str());
-    let error = engine_for(ScriptBackend::Sql)
+    let result = engine_for(ScriptBackend::Sql)
         .execute("SELECT 1;", &ScriptInvocationOptions::default(), None)
-        .expect_err("sql execute must fail closed, not succeed");
-    assert!(
-        error.contains("sql_eval_not_implemented"),
-        "expected sql's execute() error to carry the stable `sql_eval_not_implemented` \
-         marker, got: {error}"
+        .expect("sql execute should succeed");
+    assert_eq!(
+        result.value,
+        Some(serde_json::json!([{"1": 1}])),
+        "sql: SELECT 1; should yield an array of one row object, keyed by sqlite's own column \
+         name (`\"1\"` for an unaliased literal expression, not PostgreSQL's `?column?`)"
+    );
+}
+
+/// sql's analogue of `stdout_capture`: NOT enrolled directly in that test
+/// because sql has no `print()`/`NOTICE` concept in M1 — `stdout` is
+/// unconditionally empty rather than a print-and-capture result (design
+/// doc §2.1: "SQL 没有 print() 概念").
+#[test]
+fn sql_stdout_is_empty() {
+    let _guard = ENV_LOCK.lock().expect("lock");
+    let _env = EnvGuard::set("sql");
+
+    let result = engine_for(ScriptBackend::Sql)
+        .execute(
+            "CREATE TABLE t (id INTEGER); INSERT INTO t VALUES (1); SELECT * FROM t;",
+            &ScriptInvocationOptions::default(),
+            None,
+        )
+        .expect("sql execute should succeed");
+    assert_eq!(result.stdout, "", "sql: stdout should always be empty in M1");
+}
+
+/// sql's analogue of `execute_missing_entry_fails_closed`: NOT enrolled
+/// directly in that test because sql has no `entry()` concept for
+/// "missing" to apply to. The closest analogue — a script with no
+/// result-producing statement at all (empty script, or only DDL/DML) — is a
+/// DOCUMENTED fail-*open*-to-`None` contract (design doc §4: "建议 M1 决定
+/// 空 value 用 None 而不是报错"), the mirror image of rh/qjs's fail-closed
+/// missing-entry error and closer in spirit to lua's fail-open-to-0 (but
+/// sql uses `None`, not a fabricated `0`, to keep "no result" distinguishable
+/// from "a result that happens to be falsy/zero").
+#[test]
+fn sql_execute_no_result_set_is_none_not_error() {
+    let _guard = ENV_LOCK.lock().expect("lock");
+    let _env = EnvGuard::set("sql");
+    let engine = engine_for(ScriptBackend::Sql);
+    let options = ScriptInvocationOptions::default();
+
+    let empty = engine
+        .execute("", &options, None)
+        .expect("sql: an empty script must not fail closed");
+    assert_eq!(empty.value, None, "sql: an empty script's value should be None");
+
+    let ddl_only = engine
+        .execute(
+            "CREATE TABLE t (id INTEGER); INSERT INTO t VALUES (1);",
+            &options,
+            None,
+        )
+        .expect("sql: a script with no result-producing statement must not fail closed");
+    assert_eq!(
+        ddl_only.value, None,
+        "sql: a script with only DDL/DML should yield None, not an error or a fabricated 0"
     );
 }

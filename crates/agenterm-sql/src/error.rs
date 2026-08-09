@@ -1,10 +1,14 @@
 //! Typed error envelope, structurally aligned with `agenterm_qjs::QjsError`
 //! (see `crates/agenterm-qjs/src/error.rs`) and, further back,
 //! `agenterm_rh::RhError` — same shape (parse vs. other-check failure
-//! classes), not the same variants. sql has no execute/runtime phase at all
-//! yet (see `lib.rs`'s module doc and `eval.rs`), so this enum only needs to
-//! cover the things that exist today: parse failures, everything else that's
-//! still script-level, and usage/configuration failures.
+//! classes), not the same variants. As of M1 (see `lib.rs`'s module doc and
+//! `eval.rs`), sql DOES have a real execute/runtime phase
+//! (`eval::execute_entry`), but it still fits this same two-class-plus-usage
+//! shape: a `sqlparser` parse failure is [`SqlError::Parse`], and an
+//! execution-time failure (SQLite rejects the re-serialized statement, a
+//! runtime error, a budget exceeded) is [`SqlError::Check`] — both
+//! script-level, both exit `1`. No new variant was needed to land real
+//! execution.
 //!
 //! ## Exit-code classification, mirroring `agenterm_qjs::QjsError`'s (see
 //! that file's doc for the full rationale, aligned 2026-08 with

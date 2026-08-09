@@ -31,10 +31,23 @@
 //! statement, returning one `Vec<Statement>` for the whole source (verified
 //! in the tests below, not assumed).
 
+use sqlparser::ast::Statement;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 
 use crate::error::SqlError;
+
+/// Parse `source` into its `;`-separated statements without executing or
+/// planning anything, returning the AST `Vec<Statement>` sqlparser produces.
+/// Shared by [`check`] (which discards the AST, keeping only "did it
+/// parse?") and `eval::execute_entry` (which re-serializes each `Statement`
+/// via its `Display` impl and runs it against SQLite) — one parse call, one
+/// dialect choice, per design doc `plan/design-sql-execution-target.md` §5
+/// M1's explicit "复用，不重新分词" instruction.
+pub(crate) fn parse_statements(source: &str, label: &str) -> Result<Vec<Statement>, SqlError> {
+    let dialect = PostgreSqlDialect {};
+    Parser::parse_sql(&dialect, source).map_err(|err| SqlError::Parse(format!("{label}: {err}")))
+}
 
 /// Parse `source` as one or more `;`-separated SQL statements without
 /// executing or planning anything. `label` is accepted for symmetry with
@@ -43,10 +56,7 @@ use crate::error::SqlError;
 /// into `sqlparser`'s own error messages — `sqlparser`'s `ParserError`
 /// carries its own line/column location, not a caller-supplied label.
 pub fn check(source: &str, label: &str) -> Result<(), SqlError> {
-    let dialect = PostgreSqlDialect {};
-    Parser::parse_sql(&dialect, source)
-        .map(|_statements| ())
-        .map_err(|err| SqlError::Parse(format!("{label}: {err}")))
+    parse_statements(source, label).map(|_statements| ())
 }
 
 #[cfg(test)]

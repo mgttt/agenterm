@@ -30,7 +30,10 @@ serde_json = "1"
 # dependency, same "vendored C dependency" shape `agenterm-lua`'s `mlua`
 # (`vendored` LuaJIT) already established as precedent in this workspace
 # (design doc §3.2/risk 2).
-rusqlite = { version = "0.40", features = ["bundled"] }
+# `hooks` additionally enables `Connection::progress_handler`, used to
+# enforce `ScriptBudgets.wall_time_ms` (design doc §5 M1's "至少落地
+# wall_time_ms ... 两项" budget bullet) — `bundled` alone does not pull it in.
+rusqlite = { version = "0.40", features = ["bundled", "hooks"] }
 
 [dev-dependencies]
 agenterm-script-common = { path = "../agenterm-script-common", features = ["test-support"] }
