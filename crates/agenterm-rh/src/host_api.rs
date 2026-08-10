@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 90;
+pub const RH_CODEGEN_REVISION: u32 = 91;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -24,7 +24,15 @@ pub fn host_api_module(namespace: &str) -> Option<&'static str> {
     }
 }
 pub const RH_HOST_OUT_CAP: u32 = 65536;
-pub const RH_HOST_FS_READ_CAP: u32 = 1024 * 1024;
+// Bound on a single native `std::fs::read_to_string` through the host FFI
+// (the generated pack allocates a scratch buffer of exactly this size, and
+// the host refuses a larger file rather than truncating it silently). The
+// original 1 MiB bound (8cec57bc) stopped fitting real tool output once the
+// dependency graph grew: `cargo metadata --locked --format-version 1` is
+// 2.31 MB at this commit, which broke the supply-chain gate with
+// "file exceeds the host output buffer". 16 MiB keeps the read bounded —
+// the point of the cap — with headroom for that output to keep growing.
+pub const RH_HOST_FS_READ_CAP: u32 = 16 * 1024 * 1024;
 pub const RH_HOST_UTILITY_FAIL: u32 = 1;
 pub const RH_HOST_UTILITY_EXISTS_CASE_EXACT: u32 = 2;
 pub const RH_HOST_UTILITY_PROCESS_STATUS: u32 = 3;
