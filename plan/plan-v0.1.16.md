@@ -894,6 +894,7 @@ W1–W4/U2/O-evidence 已迁 v0.1.17，不再阻塞本版发布链修复完成�
 
 | 日期 | 决定 |
 |------|------|
+| 2026-08-11 | **windows CI 红的五个真因已定位并修复**（linux 在 `eeeb7f40` 起转绿）：① AOT pack 有界 drain 超时后返回空串，把 xclip 挂死换成静默丢输出，下游表现为 `json_parse: EOF ... column 0`（codegen 93 改为快照式取回）；② `package-qualified-selftest` 的 4 条拒绝腿在进程内调用 `require(...)` 库，native pack 把它编译成 `rh_fail` 中止，自检自杀（改子进程）；③ `startup-smoke` 的 `run_cli_output` 漏了 `cli` 子命令（标准化二进制入口后的遗留），两次 30s `wait-ui` 实际只打印用法指引，且返回值被丢弃 → UI client 未就绪 → 服务器以 `ui_client_unavailable` 拒绝交接 → launcher 静默自开窗口不退出 → 只报一个 `:timeout`；④ `cli-smoke` 用 `type_of(x)=="()"` 探测缺字段，属解释器语义，native pack 里是 `rh_fail`，该 smoke 从来不可能以 native 通过；⑤ supply-chain 门只给任务 60s 而其 `cargo metadata` 子预算 45s，与同链 clippy/测试争 cargo package lock 时打穿。附带：windows smoke 步骤补上 `AGENTERM_SCRIPT_WORKER_STDERR: inherit`（失败任务的 STEP 轨迹此前全部丢弃，这是本轮每个诊断都必须本地复现的原因）；交接被拒绝不再静默。 |
 | 2026-08-10 | **所有未完成产品叶迁出**：用户要求 W1–W4、U2、O-evidence 与其它未完成债统一由 v0.1.17 接管；本版仅收口 exact-SHA CI / Candidate 可达性，不再以 6 个产品尾叶作为 must-ship |
 | 2026-08-10 | **发布链修复重新开启**：当前任务授权修复 v0.1.16 的 CI / Candidate / Promotion 链问题，但不等同于公开 Promotion 授权。先取得新 exact-SHA CI 全绿，再按 Candidate 合同封存六平台字节；公开 `publish-v0.1.16` 仍需用户对具体 Candidate 明确批准 |
 | 2026-08-10 | **v0.1.16 收窄**：R′/G′′/L′/U4/S4/Rh-M23/QJS-M6/C10d/M/N/CC/NET 整体迁入新建的 [`plan-v0.1.17.md`](plan-v0.1.17.md)。v0.1.16 保留 W1–W4 + U2 + O-evidence 为 must-ship，已完成项（O-P2/P4/P3、C 组、CLI 组、Rh-M22f、QJS M0–M5d、Common M1–M7、SQL M0–M1）保留为已完成事实 |
