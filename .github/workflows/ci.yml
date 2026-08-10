@@ -200,10 +200,6 @@ jobs:
         shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
-          # Without this the worker's stderr is Stdio::null(), so every STEP
-          # line a failing smoke printed is discarded and the CI log shows only
-          # the final error code. macOS control-center already sets it.
-          AGENTERM_SCRIPT_WORKER_STDERR: inherit
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
@@ -224,10 +220,6 @@ jobs:
         shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
-          # Without this the worker's stderr is Stdio::null(), so every STEP
-          # line a failing smoke printed is discarded and the CI log shows only
-          # the final error code. macOS control-center already sets it.
-          AGENTERM_SCRIPT_WORKER_STDERR: inherit
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
@@ -243,10 +235,6 @@ jobs:
         shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
-          # Without this the worker's stderr is Stdio::null(), so every STEP
-          # line a failing smoke printed is discarded and the CI log shows only
-          # the final error code. macOS control-center already sets it.
-          AGENTERM_SCRIPT_WORKER_STDERR: inherit
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
@@ -261,10 +249,6 @@ jobs:
         shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
-          # Without this the worker's stderr is Stdio::null(), so every STEP
-          # line a failing smoke printed is discarded and the CI log shows only
-          # the final error code. macOS control-center already sets it.
-          AGENTERM_SCRIPT_WORKER_STDERR: inherit
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
