@@ -41,7 +41,7 @@ QuickJS 引擎 M0→M5d、跨引擎共享层 Common-M1→M7），合计占掉了
 | **QJS-M6** | QJS 脚本引擎 | API 级静态校验（`shipped_surfaces` 对账），新发现缺口 |
 | **C10d** | C 控制台宿主 | 回看搜索、OSC 8 超链接、脏行重绘，标「有余力再挑」 |
 | **C-residual** | C 控制台宿主 | 脚本拖拽、真实 TUI 方向键/备用屏滚轮、IME、GUI 输入调用点与 DECKPAM 仍缺 |
-| **Engine-debt** | 脚本引擎 | qjs pack 身份、lua fail-closed entry、rh stale surfaces、测试孤儿进程需显式归档或修复 |
+| **Engine-debt** | 脚本引擎 | qjs pack 身份、lua fail-closed entry、rh stale surfaces、`agenterm cli script` 弃用入口删除、测试孤儿进程需显式归档或修复 |
 | **M/N/CC/NET** | 跨版轨 | 多 agent 观察 / platform facade / Control Center / 去中心化网络，均推 v0.2.x |
 
 ### 0.2 v0.1.16 留下的已知缺口（非本版引入，仅记录）
@@ -52,6 +52,8 @@ QuickJS 引擎 M0→M5d、跨引擎共享层 Common-M1→M7），合计占掉了
 - qjs `pack` 字节码 hash 是指纹而非加载依据（与 lua 同因不同由）
 - lua `check_many` 的 `--project-root`/`--timeout-ms` 已修复（Common-M7），但 lua 无 fail-closed entry 契约
 - rh `shipped_surfaces.rs` 声明的 76 条 fleet.* 中有 32 条在 host `OPERATION_CATALOG` 不存在（stale 声明）
+- `agenterm cli script` 已弃用并在 v0.1.17 待删除；公开引擎入口统一为
+  `agenterm rh|lua|qjs|sql`，现存调用者、help 与 catalog 仍待迁移
 - 测试运行会泄漏 `agenterm.exe server` 孤儿进程锁住构建输出
 
 ---
@@ -259,6 +261,16 @@ R′. Evidence closeout
   或标 planned/unavailable；未实现 API 是产品缺口，不是权限裁剪理由。
 - [ ] **E4 测试孤儿进程** — owning tests 必须清理其 `agenterm server` 子树并证明
   构建输出可覆盖；安全失败保留诊断但不做宽泛进程清理。
+- [ ] **E5 删除已弃用的 `agenterm cli script` 入口（to delete）**
+  - **用户问题**：同一脚本能力同时暴露 generic CLI 路径与按引擎路径，会让帮助、
+    文档、测试和错误提示长期漂移，并继续诱导新调用者依赖待退役入口。
+  - **不变量**：公开入口统一为 `agenterm rh|lua|qjs|sql`；删除 alias 不得删除任何
+    已发布引擎能力，也不得把 `capability` 元数据解释为授权。
+  - **证据 / owner**：先迁移仓库全部调用者，再由 CLI dispatch/help/catalog 与跨引擎
+    黑盒证明四个按引擎入口仍可发现和执行；`agenterm cli script` 返回稳定、typed
+    unknown-command 失败，且全仓不再把它写成可用命令。
+  - **安全失败 / 非目标**：任何仍有 owner 的调用者未迁完时不得先删 dispatch；
+    不借此重写引擎执行器、删除 Script API 或引入新权限/profile 语义。
 
 ### M / N / CC / NET（跨版轨）
 
@@ -282,7 +294,7 @@ R′. Evidence closeout
 | 3 | **W2 → W3** | 同一隔离多窗 journey，前者产生后者证据 |
 | 4 | **U2 / O-evidence** | 各自需要真实 Windows/macOS 主机，可并行 |
 | 5 | **R1e → R2e → R4e** | 发布链证据；需 Candidate / rehearsal 窗口 |
-| 6 | **QJS-M6 / E1–E3** | 引擎债按文件边界并行，最后统一 parity；Rh-M23 已完成 |
+| 6 | **QJS-M6 / E1–E3 → E5** | 先收引擎/catalog 债，再迁调用者并删除 deprecated alias；Rh-M23 已完成 |
 | 7 | **G1 → H2 → G7b → G7c → G7d** | 安装尾；政策已定，H2 依赖 H1 稳定证据 |
 | 余量 | **L5/L6/L4/L2/L3、U4、S4、C-residual、C10d 三叶** | 仍是已登记叶；不满足证据就保持未完成，不静默丢弃 |
 
@@ -296,6 +308,7 @@ R′. Evidence closeout
 | **Win-UX** | Windows | U2/U4/S4/C-residual | owning UI/con files | 不改 release workflow |
 | **OSX evidence** | macOS | O-evidence | evidence/scripts only；代码缺口另立 owner | 不把 cross-build 当真机证据 |
 | **Rh** | 任意 | E3 | `crates/agenterm-rh/**` | Rh-M23 已完成；不把未实现 API 变成限制 profile |
+| **Script CLI** | 任意 | E5 | CLI dispatch/help/catalog + owning blackboxes | 先迁调用者，后删 alias；不改引擎能力 |
 | **QJS** | 任意 | QJS-M6/E1 | `crates/agenterm-qjs/**` | 不引入新 unsafe/GC 路径 |
 | **Lua** | 任意 | E2 | `crates/agenterm-lua/**` | 不复制 rh AOT |
 | **Install** | Linux/macOS | G1/H2/G7 | `scripts/install.sh` | 不改 keep-server 默认 |
@@ -311,6 +324,7 @@ R′. Evidence closeout
   OSX:      .........[O-evidence]............
   QJS:      [.......... QJS-M6 / E1 .........]
   Rh/Lua:   [.......... E3 | E2 ...............]
+  ScriptCLI:[........ caller migration → E5 delete]
   Win-UX:   [U4/S4/C-residual 可选]
   Install:  [G1][H2][G7b/c/d]
   C-fb:     [C10d-search/osc8/dirty-lines 可选]
@@ -374,7 +388,9 @@ R′. Evidence closeout
 5. **L7 + L1 + DOC-PRD** 仓库卫生、身份真机与 PRD capability 状态已同步
 6. **QJS-M6 / E1–E4** 均有实现证据或明确、可追踪的后续版本决定，不能只留在
    “已知缺口”叙述里
-7. `lint` / `check --quick` 绿；涉及平台行为时 owning native smoke 也绿
+7. **E5** 已完成调用者迁移并删除 `agenterm cli script` 的 dispatch/help/catalog；
+   `agenterm rh|lua|qjs|sql` 黑盒全绿，旧入口稳定 typed fail-closed
+8. `lint` / `check --quick` 绿；涉及平台行为时 owning native smoke 也绿
 
 ---
 
@@ -382,6 +398,7 @@ R′. Evidence closeout
 
 | 日期 | 决定 |
 |------|------|
+| 2026-08-10 | `agenterm cli script` 正式标记为 deprecated、v0.1.17 **to delete**；先迁移全部调用者，公开脚本入口统一为 `agenterm rh|lua|qjs|sql` |
 | 2026-08-10 | 用户要求把 v0.1.16 未完成工作全部迁入 v0.1.17：W1–W4、U2、O-evidence、C-residual 与已知 engine/test debt 现均有显式叶、证据、安全失败和非目标；不再用 §3 “非目标”把未完成工作从计划中消失 |
 | 2026-08-10 | 开立 **v0.1.17** 工作树：从 v0.1.16 迁入所有已推迟项（R′/G′′/L′/U4/S4/QJS-M6/C10d/M/N/CC/NET）；Rh-M23 经复核已完成，仅保留为基线；主题 = 发布链证据 + 安装尾 + 脚本引擎深化 + 低成本卫生 |
 | 2026-08-10 | 旧决定“v0.1.16 保留 W1–W4 + U2 + O-evidence、本版不重复”被同日的新迁移要求取代；这些叶由 v0.1.17 接管 |
