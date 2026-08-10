@@ -196,7 +196,18 @@ fn entry() {
         ];
         let lease = command_json(context, cli, attach_args, 0);
         let same_lease = command_json(context, cli, attach_args, 0);
-        let conflict = command_text_expect(
+        // UI leases are CAPACITY-bounded (`UI_LEASE_MAX_CLIENTS`), not
+        // exclusive: `UiLeaseError::Conflict` means "too many concurrent
+        // interactive UI leases", and the product has no "another live UI
+        // client" error at all -- see the comment on that variant in
+        // `src/ui_lease.rs`. This leg demanded that nonexistent text plus a
+        // nonzero exit, so it could never pass; it is release-lane only and the
+        // release lane has not been green. A second client legitimately gets its
+        // OWN lease. What must hold is that it does not inherit the first
+        // client's lease identity, and that the first lease stays addressable
+        // (the `unauthorized` leg below still proves a wrong lease id is
+        // rejected).
+        let second_client = command_json(
             context,
             cli,
             [
@@ -204,14 +215,27 @@ fn entry() {
                 "--client-id", "conflict-" + run_id,
                 "--client-pid", "" + server.id
             ],
-            1
+            0
         );
         test_harness::require(
             lease.lease_id.starts_with("ui-")
                 && same_lease.lease_id == lease.lease_id
                 && same_lease.expires_unix_ms >= lease.expires_unix_ms
-                && conflict.contains("another live UI client"),
+                && second_client.lease_id.starts_with("ui-")
+                && second_client.lease_id != lease.lease_id,
             "server_smoke_ui_lease_owner"
+        );
+        // Release it again so the rest of this smoke observes exactly one lease;
+        // the later detach step asserts `attached == 0`.
+        command_json(
+            context,
+            cli,
+            [
+                "ui-lease", "detach",
+                "--lease-id", second_client.lease_id,
+                "--client-pid", "" + server.id
+            ],
+            0
         );
         let heartbeat = command_json(
             context,
@@ -310,8 +334,15 @@ fn entry() {
                 interaction_columns = 0 + tab.screen.columns;
             }
         }
+        // The product rejects a wrong lease id with `ui_lease_not_attached`
+        // ("no live UI lease matches the supplied identity") or, when the pid
+        // does match a live lease, `ui_lease_owner_mismatch` ("... does not
+        // match a live lease"). "does not match the current owner" is not a
+        // string this product ever emits, so this leg could never pass either.
+        // Accept either real rejection rather than inventing prose.
         test_harness::require(
-            unauthorized.contains("does not match the current owner")
+            (unauthorized.contains("no live UI lease matches the supplied identity")
+                || unauthorized.contains("does not match a live lease"))
                 && selected.action == "select"
                 && selected.tab_id == interaction_tab
                 && resized.rows == 24
