@@ -93,8 +93,14 @@ fn run_quality(repo) {
     let task_manifest =
         std::path::join(repo, "agenterm.tasks.json").display;
     let command = std::process::command(worker);
+    // `rh` is mandatory on this binary -- `scripts/bootstrap.cmd` invokes the
+    // same worker as `"%AGENTERM_BOOTSTRAP_WORKER%" rh task run ...`. Without it
+    // the GUI launcher answers with entry-point guidance and a usage-error exit,
+    // so this release driver could never run the gate it claims to run. Third
+    // site of this regression class (startup-smoke, preflight-benchmark), all
+    // dating from the retirement of the standalone worker binaries.
     command.args([
-        "task", "run", "check",
+        "rh", "task", "run", "check",
         "--manifest", task_manifest,
         "--", "--release", "--include-stress"
     ]);
