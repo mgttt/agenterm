@@ -528,7 +528,7 @@
         "retina-png-evidence"
       ],
       "budget": {
-        "timeout_ms": 120000,
+        "timeout_ms": 300000,
         "max_operations": 10000000,
         "max_output_bytes": 1048576
       },

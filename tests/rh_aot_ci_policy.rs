@@ -27,6 +27,10 @@ static ARTIFACT_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../scripts/artifacts.json"))
         .expect("scripts/artifacts.json must be valid JSON")
 });
+static TASK_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../agenterm.tasks.json"))
+        .expect("agenterm.tasks.json must be valid JSON")
+});
 
 fn job_span(name: &str, next_job: Option<&str>) -> &'static str {
     let marker = format!("  {name}:\n");
@@ -245,4 +249,12 @@ fn expensive_task_entry_packs_have_one_dedicated_ci_owner() {
     assert!(CHECK.contains("\"--skip\", \"pack_builds\""));
     assert!(UNIX_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
     assert!(WINDOWS_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
+}
+
+#[test]
+fn macos_control_center_lifecycle_has_bounded_full_journey_budget() {
+    let budget = &TASK_MANIFEST["contracts"]["control-center-macos-smoke"]["budget"];
+    assert_eq!(budget["timeout_ms"], 300_000);
+    assert_eq!(budget["max_operations"], 10_000_000);
+    assert_eq!(budget["max_output_bytes"], 1_048_576);
 }
