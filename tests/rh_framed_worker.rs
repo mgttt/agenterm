@@ -152,7 +152,13 @@ fn framed_worker_run_entry_fixture_with_rh_backend() {
 #[test]
 fn framed_worker_rejects_retired_whole_script_compat_fallback() {
     with_rh_backend(|| {
-        let source = std::fs::read_to_string("scripts/archive/rhai/lint.rhai")
+        // The original fixture (scripts/archive/rhai/lint.rhai) was folded
+        // into scripts/archive/rhai-old.tgz when the retired rhai archive
+        // was compacted (commit b0045922) -- this is that same file's real
+        // content (extracted once, tracked here), still a realistic legacy
+        // whole-script source with no `fn entry()`, which is exactly the
+        // property this test exercises.
+        let source = std::fs::read_to_string("fixtures/rh/legacy-whole-script-lint-sample.rhai")
             .expect("read lint task source");
         let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm"))
             .args(["__agenterm-internal-engine", "rh"])
@@ -176,7 +182,7 @@ fn framed_worker_rejects_retired_whole_script_compat_fallback() {
             api_version: SCRIPT_API_VERSION,
             operation: ScriptOperation::Run,
             profile: ScriptProfile::Local,
-            source_label: "scripts/archive/rhai/lint.rhai".into(),
+            source_label: "fixtures/rh/legacy-whole-script-lint-sample.rhai".into(),
             source,
             project_root: Some(env!("CARGO_MANIFEST_DIR").into()),
             invocation_temp_root: None,
