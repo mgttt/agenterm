@@ -994,7 +994,7 @@ fn entry() {
             "control_center_linux_first_frame"
         );
         let rendered = rh::image::inspect_png(cockpit_png);
-        let tab_count = selected.connected_server.tabs.len;
+        let tab_count = 0 + selected.connected_server.tabs.len;
         let expected_tabs = "" + tab_count + " tabs";
         test_harness::require(
             capture.owner_pid == cc.id
@@ -1118,7 +1118,7 @@ fn entry() {
             // each 26-pixel body row to one Cockpit line. Only the strip's first
             // rendered row is guaranteed inside the 480-px-tall client, so the
             // pointer target is that row — never the keyboard-selected tab.
-            let tab_count = selected.connected_server.tabs.len;
+            let tab_count = 0 + selected.connected_server.tabs.len;
             let visible_start = 0;
             if native_input_index > 0 {
                 visible_start = native_input_index - 1;

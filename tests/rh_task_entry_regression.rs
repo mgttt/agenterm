@@ -1231,6 +1231,20 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
         source.contains("[\"cli\", \"--instance\", \"dev\", \"protocol-info\", \"--running\"]")
     );
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
+    assert!(
+        output
+            .rust
+            .matches("rh_json_array_len(&selected, &[\"connected_server\", \"tabs\"])")
+            .count()
+            >= 2,
+        "{}",
+        output.rust
+    );
+    assert!(
+        !output.rust.contains("\"tabs\", \"len\""),
+        "{}",
+        output.rust
+    );
     for needle in [
         "rh_process_stdout_file(",
         "rh_host_json_call(\"process.list\"",
@@ -1254,4 +1268,9 @@ fn control_center_linux_smoke_passes_complete_endpoint_arguments() {
     assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
     assert!(!source.contains("fn push_endpoint("));
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
+    assert!(
+        !output.rust.contains("\"tabs\", \"len\""),
+        "{}",
+        output.rust
+    );
 }

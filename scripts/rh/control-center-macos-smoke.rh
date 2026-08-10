@@ -933,7 +933,7 @@ fn entry() {
                 && baseline_tab != native_input_tab,
             "control_center_macos_native_input_targets_not_live"
         );
-        let tab_count = selected.connected_server.tabs.len;
+        let tab_count = 0 + selected.connected_server.tabs.len;
         let visible_start = 0;
         if native_input_index > 0 {
             visible_start = native_input_index - 1;
