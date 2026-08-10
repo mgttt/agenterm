@@ -503,8 +503,8 @@ impl ScriptEngineBackend for WasmcoreEngineBackend {
             return Err(not_enabled_error(self.backend_id()));
         }
 
-        let wasm_bytes = std::fs::read(source)
-            .map_err(|e| format!("reading wasm file {source}: {e}"))?;
+        let wasm_bytes =
+            std::fs::read(source).map_err(|e| format!("reading wasm file {source}: {e}"))?;
         agenterm_wasmcore::WasmCoreHost::validate_binary(&self.host, &wasm_bytes)
             .map_err(|e| format!("wasm validation: {e}"))
     }

@@ -23,8 +23,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use agenterm_wasmcore::{WasmCoreHost, WasmFleetBridgeFn};
 
@@ -37,7 +37,9 @@ use agenterm_wasmcore::{WasmCoreHost, WasmFleetBridgeFn};
 /// so parallel `#[test]`s compiling different guests never collide.
 fn compile_guest(name: &str, source: &str) -> PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let out_dir = manifest_dir.join("target").join("wasmcore-hardening-guests");
+    let out_dir = manifest_dir
+        .join("target")
+        .join("wasmcore-hardening-guests");
     std::fs::create_dir_all(&out_dir)
         .unwrap_or_else(|e| panic!("create {}: {e}", out_dir.display()));
     let src_path = out_dir.join(format!("{name}.rs"));
@@ -359,12 +361,15 @@ fn main() {
 
 #[test]
 fn alloc_returning_a_pointer_two_bytes_before_the_real_end_is_rejected_precisely() {
-    let wasm = compile_guest("alloc_returns_near_end_oob", GUEST_ALLOC_RETURNS_NEAR_END_OOB);
+    let wasm = compile_guest(
+        "alloc_returns_near_end_oob",
+        GUEST_ALLOC_RETURNS_NEAR_END_OOB,
+    );
     let host = WasmCoreHost::new();
 
-    let err = host
-        .run_module(&wasm, Some(echo_bridge()))
-        .expect_err("a payload that overruns the real memory end by even a few bytes must be rejected");
+    let err = host.run_module(&wasm, Some(echo_bridge())).expect_err(
+        "a payload that overruns the real memory end by even a few bytes must be rejected",
+    );
     let message = format!("{err:#}");
 
     assert!(
@@ -431,7 +436,8 @@ fn guest_lying_about_a_huge_params_len_is_rejected_and_bridge_is_never_invoked()
     // size 1114112)" -- exact start/end/size reported, not a generic
     // failure.
     assert!(
-        message.contains("reading params_json from guest memory") && message.contains("out of bounds"),
+        message.contains("reading params_json from guest memory")
+            && message.contains("out of bounds"),
         "expected a clean, precise input-bounds rejection, got: {message}"
     );
     assert_eq!(
@@ -510,7 +516,10 @@ fn main() {
 
 #[test]
 fn guest_lying_with_a_small_realistic_overrun_past_the_real_end_is_rejected() {
-    let wasm = compile_guest("lies_with_near_end_overrun", GUEST_LIES_WITH_NEAR_END_OVERRUN);
+    let wasm = compile_guest(
+        "lies_with_near_end_overrun",
+        GUEST_LIES_WITH_NEAR_END_OVERRUN,
+    );
     let host = WasmCoreHost::new();
 
     let err = host
@@ -519,7 +528,8 @@ fn guest_lying_with_a_small_realistic_overrun_past_the_real_end_is_rejected() {
     let message = format!("{err:#}");
 
     assert!(
-        message.contains("reading operation_id from guest memory") && message.contains("out of bounds"),
+        message.contains("reading operation_id from guest memory")
+            && message.contains("out of bounds"),
         "expected a clean, precise input-bounds rejection, got: {message}"
     );
 }

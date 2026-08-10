@@ -22,12 +22,7 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
         },
         FontFileCandidate {
             name: "Sarasa Fixed SC",
-            components: &[
-                "C:",
-                "Windows",
-                "Fonts",
-                "sarasaMonoSC-Regular.ttf",
-            ],
+            components: &["C:", "Windows", "Fonts", "sarasaMonoSC-Regular.ttf"],
         },
         FontFileCandidate {
             name: "Cascadia Code",

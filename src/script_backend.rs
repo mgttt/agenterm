@@ -489,10 +489,7 @@ mod tests {
             ScriptBackend::from_entry_path("scripts/wasm/test.wasm"),
             ScriptBackend::Wasmcore
         );
-        assert_eq!(
-            ScriptBackend::from_entry_path("test.rh"),
-            ScriptBackend::Rh
-        );
+        assert_eq!(ScriptBackend::from_entry_path("test.rh"), ScriptBackend::Rh);
     }
 
     #[cfg(feature = "script-wasmcore")]

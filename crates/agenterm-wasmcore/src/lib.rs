@@ -208,8 +208,7 @@ impl WasmCoreHost {
     /// if the bytes form a valid `wasm32-wasip1` module, or `Err` with a
     /// descriptive message if validation fails.
     pub fn validate_binary(&self, wasm_bytes: &[u8]) -> Result<()> {
-        wasmtime::Module::validate(&self.engine, wasm_bytes)
-            .context("validating wasm binary")
+        wasmtime::Module::validate(&self.engine, wasm_bytes).context("validating wasm binary")
     }
 
     /// One-time AOT precompile: compiles `wasm_path`'s bytes for this
@@ -270,7 +269,9 @@ impl WasmCoreHost {
                 // SAFETY: forwarding this function's own safety contract to
                 // the worker thread; the caller of `run_precompiled_module`
                 // already accepted it.
-                unsafe { run_precompiled_module_on_worker_thread(&engine, &cwasm_path, fleet_bridge) }
+                unsafe {
+                    run_precompiled_module_on_worker_thread(&engine, &cwasm_path, fleet_bridge)
+                }
             })
             .context("spawning agenterm-wasmcore guest-run worker thread")?;
         handle
@@ -442,7 +443,9 @@ fn write_guest_result(
     out_len_ptr: i32,
 ) -> Result<()> {
     if out_ptr_ptr < 0 || out_len_ptr < 0 {
-        bail!("negative out-parameter pointer (out_ptr_ptr={out_ptr_ptr}, out_len_ptr={out_len_ptr})");
+        bail!(
+            "negative out-parameter pointer (out_ptr_ptr={out_ptr_ptr}, out_len_ptr={out_len_ptr})"
+        );
     }
 
     let alloc_export = caller

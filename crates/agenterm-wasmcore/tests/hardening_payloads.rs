@@ -15,7 +15,9 @@ use agenterm_wasmcore::{WasmCoreHost, WasmFleetBridgeFn};
 
 fn compile_guest(name: &str, source: &str) -> PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let out_dir = manifest_dir.join("target").join("wasmcore-hardening-guests");
+    let out_dir = manifest_dir
+        .join("target")
+        .join("wasmcore-hardening-guests");
     std::fs::create_dir_all(&out_dir)
         .unwrap_or_else(|e| panic!("create {}: {e}", out_dir.display()));
     let src_path = out_dir.join(format!("{name}.rs"));
@@ -50,7 +52,9 @@ fn compile_guest(name: &str, source: &str) -> PathBuf {
 /// to make silent truncation/corruption detectable without needing a
 /// crypto dependency this crate does not otherwise have.
 fn checksum(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0u64, |acc, b| acc.wrapping_add(u64::from(*b)))
+    bytes
+        .iter()
+        .fold(0u64, |acc, b| acc.wrapping_add(u64::from(*b)))
 }
 
 /// Deterministic filler content of an exact byte length -- same generator
@@ -59,7 +63,9 @@ fn checksum(bytes: &[u8]) -> u64 {
 /// receive the bytes of (the *result* direction: the guest is the one
 /// that reads those bytes back, not this test process).
 fn make_pattern(byte_len: usize, alphabet: &[u8]) -> Vec<u8> {
-    (0..byte_len).map(|i| alphabet[i % alphabet.len()]).collect()
+    (0..byte_len)
+        .map(|i| alphabet[i % alphabet.len()])
+        .collect()
 }
 
 // ---------------------------------------------------------------------
@@ -155,7 +161,10 @@ fn several_mb_payloads_round_trip_exactly_in_both_directions() {
         "host must receive the guest's full params_json length, no truncation"
     );
     assert_eq!(
-        received_checksum.lock().unwrap().expect("bridge must have run"),
+        received_checksum
+            .lock()
+            .unwrap()
+            .expect("bridge must have run"),
         checksum(expected_params_json.as_bytes()),
         "host must receive the guest's exact params_json bytes, no corruption"
     );
@@ -237,8 +246,13 @@ fn two_hundred_sequential_calls_from_one_guest_run_show_no_state_leak_or_reorder
     let seen = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let seen2 = seen.clone();
     let bridge: WasmFleetBridgeFn = Arc::new(move |op_id: &str, params_json: &str| {
-        seen2.lock().unwrap().push((op_id.to_owned(), params_json.to_owned()));
-        Ok(format!("{{\"echo_op\":\"{op_id}\",\"echo_params\":{params_json}}}"))
+        seen2
+            .lock()
+            .unwrap()
+            .push((op_id.to_owned(), params_json.to_owned()));
+        Ok(format!(
+            "{{\"echo_op\":\"{op_id}\",\"echo_params\":{params_json}}}"
+        ))
     });
 
     let run = host

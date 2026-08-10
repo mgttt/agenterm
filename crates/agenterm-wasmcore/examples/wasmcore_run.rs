@@ -131,9 +131,11 @@ fn parse_args() -> Result<Option<PathBuf>, String> {
 /// simple, not a stand-in for any real agenterm product operation -- see
 /// this file's module docs and `README.md`'s ABI spec.
 fn demo_bridge() -> WasmFleetBridgeFn {
-    Arc::new(|_op_id: &str, params_json: &str| -> Result<String, String> {
-        Ok(format!("{{\"received\":{params_json}}}"))
-    })
+    Arc::new(
+        |_op_id: &str, params_json: &str| -> Result<String, String> {
+            Ok(format!("{{\"received\":{params_json}}}"))
+        },
+    )
 }
 
 /// Compiles [`DEMO_GUEST_SOURCE`] to a real wasm32-wasip1 module via a real

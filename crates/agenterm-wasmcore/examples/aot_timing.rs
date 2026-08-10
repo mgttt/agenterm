@@ -121,7 +121,9 @@ fn main() {
     let wasm_path = compile_guest();
     println!("guest: {}", wasm_path.display());
 
-    let wasm_len = std::fs::metadata(&wasm_path).expect("stat guest.wasm").len();
+    let wasm_len = std::fs::metadata(&wasm_path)
+        .expect("stat guest.wasm")
+        .len();
     println!(".wasm size: {wasm_len} bytes");
 
     let host = WasmCoreHost::new();
@@ -138,7 +140,10 @@ fn main() {
     let cwasm_len = cwasm_bytes.len();
     println!(".cwasm size: {cwasm_len} bytes");
     println!();
-    report("AOT precompile (Engine::precompile_module)", precompile_durations);
+    report(
+        "AOT precompile (Engine::precompile_module)",
+        precompile_durations,
+    );
 
     // --- Phase 2: end-to-end JIT compile-and-run (WasmCoreHost::run_module). ---
     let jit_durations = time_n(ITERATIONS, || {
@@ -170,7 +175,10 @@ fn main() {
     let jit_load_only = time_n(ITERATIONS, || {
         wasmtime::Module::from_file(&engine, &wasm_path).expect("Module::from_file")
     });
-    report("Isolated: Module::from_file (JIT compile only, no run)", jit_load_only);
+    report(
+        "Isolated: Module::from_file (JIT compile only, no run)",
+        jit_load_only,
+    );
 
     let aot_load_only = time_n(ITERATIONS, || {
         // SAFETY: same trusted, same-process, unmodified .cwasm as phase 3.
@@ -182,5 +190,7 @@ fn main() {
         aot_load_only,
     );
 
-    println!("Done. See README.md \"AOT precompilation\" for the verdict drawn from these numbers.");
+    println!(
+        "Done. See README.md \"AOT precompilation\" for the verdict drawn from these numbers."
+    );
 }

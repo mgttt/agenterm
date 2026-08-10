@@ -51,7 +51,11 @@ fn compiled_guest_wasm() -> &'static Path {
             "compiling {} to wasm32-wasip1 failed with {status}",
             guest_src.display()
         );
-        assert!(out_wasm.is_file(), "expected {} to exist after a successful rustc run", out_wasm.display());
+        assert!(
+            out_wasm.is_file(),
+            "expected {} to exist after a successful rustc run",
+            out_wasm.display()
+        );
         out_wasm
     })
 }

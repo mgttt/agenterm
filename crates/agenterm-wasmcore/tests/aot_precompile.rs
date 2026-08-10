@@ -109,8 +109,9 @@ fn aot_precompiled_module_produces_identical_output_to_the_jit_path() {
     // SAFETY: `cwasm_path` was just written, unmodified, from this same
     // process's own `precompile_module` call above -- exactly the
     // trusted-input contract `run_precompiled_module` documents.
-    let aot_result = unsafe { host.run_precompiled_module(&cwasm_path, Some(echo_and_reject_bridge())) }
-        .expect("AOT guest run (deserialize_file + run) should complete");
+    let aot_result =
+        unsafe { host.run_precompiled_module(&cwasm_path, Some(echo_and_reject_bridge())) }
+            .expect("AOT guest run (deserialize_file + run) should complete");
 
     assert_eq!(
         jit_result.exit, aot_result.exit,
@@ -154,13 +155,13 @@ fn aot_precompiled_module_produces_identical_output_to_the_jit_path() {
 #[test]
 fn aot_precompiled_module_is_rejected_by_an_engine_with_incompatible_config() {
     let wasm_path = compiled_guest_wasm();
-    let wasm_bytes = std::fs::read(wasm_path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", wasm_path.display()));
+    let wasm_bytes =
+        std::fs::read(wasm_path).unwrap_or_else(|e| panic!("read {}: {e}", wasm_path.display()));
 
     let mut config_a = wasmtime::Config::new();
     config_a.epoch_interruption(false);
-    let engine_a =
-        wasmtime::Engine::new(&config_a).expect("building an engine with epoch_interruption(false)");
+    let engine_a = wasmtime::Engine::new(&config_a)
+        .expect("building an engine with epoch_interruption(false)");
     let cwasm_bytes = engine_a
         .precompile_module(&wasm_bytes)
         .expect("precompiling with engine_a should succeed");
