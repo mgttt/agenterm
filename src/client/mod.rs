@@ -1618,7 +1618,10 @@ fn run_script_command_with_context(
                 if crate::script_backend::ScriptBackend::from_entry_path(path).as_str()
                     == "wasmcore"
                 {
-                    (canonical.display().to_string(), canonical.display().to_string())
+                    (
+                        canonical.display().to_string(),
+                        canonical.display().to_string(),
+                    )
                 } else {
                     let file = match std::fs::File::open(&canonical) {
                         Ok(file) => file,
