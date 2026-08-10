@@ -204,6 +204,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     existing remote asset must match an allowlisted Candidate name, size and
     SHA-256, missing assets upload without overwrite, and the exact asset set
     is reverified before the draft becomes public
+  - [x] the read-only post-Release integrity gate expects the complete
+    Promotion asset set, including the derived `releases.json` index, and
+    binds that index back to the sealed manifest SHA, source SHA, version,
+    tag, and all six manifest-declared platform artifacts; an omitted, extra,
+    or identity-drifted index fails instead of leaving a falsely red or weakly
+    verified public release
   - [x] the unpublished draft title and complete body are bound to a typed
     Promotion identity containing Candidate run ID, source SHA, Candidate
     manifest hash and macOS channel. Recovery requires exact title/body
@@ -422,7 +428,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       that exact stable ID for child creation, selection, wait, rename, and
       close after indexes shift
     - [x] `AGENTERM_SETTINGS_PATH` isolates settings read/write/restart tests
-      from the default `%LOCALAPPDATA%\AgenTerm\settings.json`
+      from the default `~/AppData/Local/AgenTerm/settings.json`
     - [x] public semantic actions resize, minimize, maximize, and restore the
       window; `wait-ui` verifies post-state, minimize preserves the last PTY
       grid, and `--terminal-grid-changed-from ROWSxCOLS` proves resize has

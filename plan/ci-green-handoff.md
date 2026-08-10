@@ -8,7 +8,7 @@
 2. candidate 成功后:`gh workflow run release.yml -f candidate_run_id=<id> -f confirmation=publish-v0.1.16`。
 3. 版本号已是 0.1.16;**不要**手动打 tag/release(此前手动发布因缺 lnx/osx 产物已撤销,release.yml 自己建 tag)。
 
-gh CLI 在 `%LOCALAPPDATA%\Programs\gh\bin\gh.exe`(已登录 mgttt)。远程 push URL 内嵌 PAT,**绝不外泄**。共享 checkout,**只用 `git commit --only <路径>`** 提交。
+已配置的 `gh` CLI 会话可用于 Actions 读取。远程 push 凭据不得查询、打印或复用为 API 凭据。共享 checkout，提交时只暂存已审查路径。
 
 ## 战况(截至 e7b8e774,已连推十波修复)
 

@@ -1,14 +1,16 @@
 # AgenTerm v0.1.16 公开计划
 
-状态：**已收窄，待执行**（2026-08-10 从原稿收窄；原定稿 2026-08-07）  
+状态：**发布链修复中；产品尾叶已迁 v0.1.17**（2026-08-10）
 不创建 tag / Candidate / Release，除非人工明确授权。  
 版本列车仍停在 **0.1.15 代码线**；本文件是 **当前列车执行投影**，不替代 PRD。
 
-**主题（收窄后）：多 GUI 产品化收口 + Unix 多实例真机闭环 + Windows 现场尾账。**
+**当前唯一收口主题：修复 v0.1.16 exact-SHA CI / Candidate 发布链；公开 Promotion
+仍需对具体 Candidate 的独立人工授权。**
 
 原计划中发布链证据（R′）、安装尾（G′′）、低成本尾账（L′）、脚本引擎深化
 （Rh-M23、QJS-M6）、控制台宿主余量（C10d）及跨版轨（M/N/CC/NET）已整体
-迁入 [`plan-v0.1.17.md`](plan-v0.1.17.md)。v0.1.16 执行中超额完成的三轨
+以及仍未完成的 **W1–W4、U2、O-evidence** 均迁入
+[`plan-v0.1.17.md`](plan-v0.1.17.md)。v0.1.16 执行中超额完成的三轨
 （agenterm-con 产品化、QuickJS 引擎、跨引擎共享层 + SQL）保留为已完成事实，
 但不再消耗本版剩余工时。
 
@@ -30,7 +32,7 @@
 |----|----------|
 | **R/A′** | cache slim + restore-keys、net-research 出 release 门、script-smoke 左移、step summary |
 | **G′** | `--version`、orphan symlink、releases keep、升级提示文案 |
-| **H′** | releases.json 派生、provenance 补值（H2 消费端仍后置） |
+| **H′** | releases.json 派生、provenance 补值；发布后完整性门现将该索引纳入精确资产集并绑定 sealed manifest / SHA / tag / 六平台身份 |
 | **S′/U′** | server strip、同窗 attach、U1/U3 假刷新止血 |
 | **B′** | buffer/send-keys 主路径；mux/mcp **独立 PE 移除**，CLI 子命令保留 |
 | **租约** | multi-lease + `As Window` 强制 `--ui-client`（`94f0990`） |
@@ -41,7 +43,7 @@
 
 1. **激活标签 As Window「没效果」/ 警告框** — 根因组合：旧 server 独占逻辑 +
    launcher handoff（无 `--ui-client`）+ 进程未退干净。代码已修；**证据与
-   重启纪律**仍缺产品化（本版 **W1**）。
+   重启纪律**仍缺产品化（已迁 v0.1.17 **W1**）。
 2. **「奇怪问题」** — 多窗/多实例路径上仍有边角（菜单 z-order 曾盖、strip 布局、
    脏进程混跑）；本版只收**可复现、可证伪**叶，不扩成大重构。
 3. **Unix 多实例 UX** — Settings 与 strip 已开始补；**instance picker /
@@ -55,7 +57,7 @@
 - R1/R2 配置已合，**连续 Candidate `worker.state=reused` + cache &lt;8GB** 仍缺
   观测勾选 —— 已迁 v0.1.17
 - U2 真机回归、R4 dry-run 真跑：配置/代码在，**人工证据**未收
-  —— U2 留在本版，R4e 迁 v0.1.17
+  —— 均迁 v0.1.17；R4e 只承接本版发布链最终仍缺的证据
 - 11 个文件有未提交变更（见 git status）—— 本版验收前需清理提交
 
 ---
@@ -65,17 +67,17 @@
 选择原则（继承 v0.1.14/15）：**宁可少而全绿，不要多而半途**。  
 叶定义：用户问题 · 不变量 · 可观察证据 · 安全失败 · 黑盒 owner · 非目标。
 
-### W. 多 GUI / 多窗产品面（本版第一优先）
+### W. 多 GUI / 多窗产品面（定义保留；执行已迁 v0.1.17）
 
 ```text
 W. Multi-GUI productization
-├─ [ ] W1 重启纪律 + 状态可观测（用户/agent 能分辨新旧 PE 与 lease）
-├─ [ ] W2 As Window 黑盒：激活标签 → 第二 GUI + 第二 lease（非 handoff）
-├─ [ ] W3 ui-lease status 多 clients 可观测（CLI / snapshot 不谎称独占）
-└─ [ ] W4 残留独占文案/路径审计（错误串、handoff 消息、PRD 措辞）
+├─ → v0.1.17 W1 重启纪律 + 状态可观测（用户/agent 能分辨新旧 PE 与 lease）
+├─ → v0.1.17 W2 As Window 黑盒：激活标签 → 第二 GUI + 第二 lease（非 handoff）
+├─ → v0.1.17 W3 ui-lease status 多 clients 可观测（CLI / snapshot 不谎称独占）
+└─ → v0.1.17 W4 残留独占文案/路径审计（错误串、handoff 消息、PRD 措辞）
 ```
 
-- [ ] **W1 重启纪律与版本可观测**
+- **W1 重启纪律与版本可观测（已迁 v0.1.17）**
   - **用户问题**：混跑旧 server/GUI → 警告框或「没反应」，误判产品坏了
   - **做法**：文档/状态栏/错误文案明确「须退干净 server」；可选用
     `server-list` + `--version` 对照表写进 agent 指南短节；不自动杀会话
@@ -83,7 +85,7 @@ W. Multi-GUI productization
   - **非目标**：静默 `taskkill` 全部 agenterm；削弱 keep-server
   - **成本**：小；**依赖**：无
 
-- [ ] **W2 As Window 黑盒（激活标签）**
+- **W2 As Window 黑盒（激活标签；已迁 v0.1.17）**
   - **用户问题**：右键 As Window 必须**真开第二窗**
   - **不变量**：spawn 带 `--ui-client`；允许 `--endpoint`+`--instance`；
     multi-lease attach 成功
@@ -91,26 +93,26 @@ W. Multi-GUI productization
     进程数 +1、`ui-lease status` clients≥2、两窗均可交互；失败弹框文案可理解
   - **成本**：中（黑盒/smoke）；**依赖**：W1 干净环境
 
-- [ ] **W3 多 clients 可观测**
+- **W3 多 clients 可观测（已迁 v0.1.17）**
   - **做法**：`ui-lease status` / 相关 snapshot 字段诚实列出 `clients[]`；
     文档不写「唯一 GUI」
   - **验收**：两 GUI 附着时 status JSON `attached=true` 且 clients 长度≥2
   - **成本**：小–中；**依赖**：W2
 
-- [ ] **W4 独占语义清扫**
+- **W4 独占语义清扫（已迁 v0.1.17）**
   - **做法**：全仓搜 `exclusive` / `already attached` / handoff 误导文案；
     产品路径不回退 `2d1c235` 式「只 focus 不双开」作为 As Window 默认
   - **验收**：As Window 路径单测/源码锁仍要求 `--ui-client`；PRD multi-lease 一致
   - **成本**：小；**依赖**：无
 
-### Ux. Win 现场尾账（从 0.1.15 迁入；U4/S4 已迁 v0.1.17）
+### Ux. Win 现场尾账（定义保留；U2/U4/S4 均已迁 v0.1.17）
 
 ```text
 Ux. Windows residual UX
-└─ [ ] U2 标签切换假刷新真机回归（0.1.15）
+└─ → v0.1.17 U2 标签切换假刷新真机回归（0.1.15）
 ```
 
-- [ ] **U2** — 空 composer 连点 tab：无 ComposerDraft 风暴；可选黑盒
+- **U2（已迁 v0.1.17）** — 空 composer 连点 tab：无 ComposerDraft 风暴；可选黑盒
 - ~~U4~~ — 已迁 v0.1.17（可选协议优化）
 - ~~S4~~ — 已迁 v0.1.17（同窗热切换权威边界）
 
@@ -124,7 +126,7 @@ O. Unix multi-instance reachability
 ├─ [x] O-P2 Instance picker（模态 + 6 个 ui-action 接线）
 ├─ [x] O-P4 open-instance / 新窗拉起（含 As Window 语义对齐）
 ├─ [x] O-P3 strip 右键菜单深度（Close / As Window 与 Win 行为契约）
-└─ [ ] O-evidence macOS 真机：strip 切换 + 第二窗 attach
+└─ → v0.1.17 O-evidence macOS 真机：strip 切换 + 第二窗 attach
 ```
 
 - [x] **O-P2** — 已消灭。Unix 画 + 6 个 action 接进 **shared `control_dispatch`**
@@ -144,7 +146,7 @@ O. Unix multi-instance reachability
   ⚠️ **Close 没有确认框**：Unix 无 `ModalSurface::ServerClose`，写一半会让用户
   卡在无法 confirm/cancel 的死状态，所以改为直接执行 + 两道 guard（stale 行、
   自己的 server 都拒绝，实测 GUI 存活）。已留 `TODO(macos)`。
-- [ ] **O-evidence** — 真机表：切换 instance、As Window、keep-server 后再附着
+- **O-evidence（已迁 v0.1.17）** — 真机表：切换 instance、As Window、keep-server 后再附着
 
 **禁区**：Lnx 与 OSX **不同时**写 `unix/frontend/**`（继承 0.1.15 §2.2.1）。
 
@@ -359,7 +361,7 @@ panic 位置同上。
 
 4. **部分已补**：找到了那个"确定性安装、体积小、行为可预期"的 TUI 依赖——
    `less`（随 Git for Windows 一起装的 `usr\bin\less.exe`，这台机器上是
-   `C:\Program Files\Git\usr\bin\less.exe`；开发机装 Git 是近乎普遍的前提，
+   Git for Windows 随附的 `usr/bin/less.exe`；开发机装 Git 是近乎普遍的前提，
    所以可移植性不算差）。新增 `real_tui_less_scrolls_via_character_and_space_keys`：
    真正驱动一个 raw/cbreak 模式的 curses 风格 TUI（不是 cmd.exe 那种
    cooked-mode 行编辑器），证明字符键（`j`）和空格键的转发链路
@@ -685,12 +687,13 @@ panic 位置同上。
 
 | 迁出组 | 内容 | 迁出原因 |
 |--------|------|----------|
-| **R′** | R1e/R2e/R4e/T-debt | 需真实 Candidate 运行，v0.1.16 不发布 |
-| **G′′** | G1/H2/G7b/c/d | 依赖政策拍板 |
+| **W/U/O evidence** | W1–W4/U2/O-evidence | 用户要求把本版所有未完成产品叶迁入 v0.1.17 |
+| **R′** | R1e/R2e/R4e/T-debt | 仅承接本版发布链最终仍缺的观察/债，不双排当前修复 |
+| **G′′** | G1/H2/G7b/c/d | G-P1/G-P2 已拍板；安装体验在下一版执行 |
 | **L′** | L7/L1/L5/L6/L4/L2/L3 | 工期紧砍，非 must-ship |
 | **U4/S4** | 可选协议优化 + 同窗热切换文档 | 明确标「工期紧可砍」 |
-| **Rh-M23** | AOT 扩面 + check parity | Lnx agent 独立轨 |
-| **QJS-M6** | API 级静态校验 | 新发现缺口，设计决策未做 |
+| **Rh-M23** | 已完成基线，不迁移 | `plan-rh-3.md` 四叶均已完成 |
+| **QJS-M6** | API 级静态校验 | 下一版按 operation catalog parity 实现 |
 | **C10d** | 回看搜索/OSC 8/脏行重绘 | 有余力再挑 |
 | **M/N/CC/NET** | 多 agent 观察/platform facade/CC/去中心化 | 均推 v0.2.x |
 
@@ -748,7 +751,7 @@ lua 雏形来去规避这个风险。
 | 叶 | 说明 |
 |----|------|
 | **Rh-M22** | [x] `agenterm-rhai` 薄壳 + **M22f 默认 rh**；Candidate 六 cell 改名仍待人审 |
-| **Rh-M23** | → **已迁 v0.1.17**（AOT 扩面 + check parity + caller wave 1 + shim 硬化） |
+| **Rh-M23** | [x] 已完成；证据见 `plan-rh-3.md`，v0.1.17 不重复迁移 |
 | **Rh-default** | [x] **M22f 已默认** `AGENTERM_SCRIPT_BACKEND=rh`；显式 `=rhai` 可回退 |
 | **Lua-proto** | FYI；Win 现场 grok.ds 实现中，目标能力对齐 rh；无本 plan 验收叶 |
 | **QJS-M0** | [x] `crates/agenterm-qjs` 骨架 + QuickJS 绑定选型（`rquickjs` 0.12.2，bundled quickjs-ng，MSVC `cc` 自动探测编译）+ 最小 eval 跑通（算术/字符串/语法错误捕获，3 单测绿）；**暂未接入根 workspace**——lua 侧当时在同一工作树有未提交的 `Cargo.toml`/`Cargo.lock` 改动，用嵌套空 `[workspace]` 表隔离，避免撞车；lua 已提交（`8b3764f5`），接入根 workspace 留给 QJS-M1 |
@@ -788,7 +791,8 @@ lua 雏形来去规避这个风险。
 
 | **Common-M7（2026-08-09）** | [x] 第七轮，两并发 subagent + 主 agent 修 bug：① **CLI 动词层跨引擎 parity 测试**——`tests/script_cli_verb_parity.rs`（`CARGO_BIN_EXE_*` spawn 四个真实二进制，7 测试全绿）：version/check/check-many/未知动词/sql 保留动词逐场景断言，产出 verb×engine 可用性地图（文件头 doc）。**真实发现三条**：(a) **退出码分裂**——rh/lua 顶层失败折成 1，qjs/sql 折成 2（check broken、未知动词都如此；rh 的 wrong-kind check-many 例外地是 2）——qjs/sql 下语法错误和用法错误单靠退出码不可区分，已按各引擎实际值精确断言钉住防继续漂移；(b) **真 bug：lua `cmd_check_many` 完全忽略 `--project-root`/`--timeout-ms`**——从没迁到共享 parse_check_many_cli，手解析只认 `--manifest`/`--json`，wrapper 按对齐契约传参被静默丢弃（测试首跑当场抓到：manifest 相对路径按进程 CWD 解析全部 host_source_resolve 失败）。**主 agent 已修**：`cmd_check_many` 改走共享解析器，从 `C:\Windows` 作为 CWD 的真实二进制复测确认 `--project-root` 生效，另加 `check_many_project_root_honored_from_foreign_cwd` 四引擎回归锁；(c) qjs `task` 存根 exit 0 vs sql `task` 存根 exit 2——同名动词两种存根哲学，已记录。② **qjs pack_module 对齐 + 设计文档回填**——pack_module 收编共享 `sha256_hex`（删本地 hex_sha256）和 `write_json_receipt`（文本本就逐字同）；manifest write/read 和 verify_files 因错误文本形状真不同（mismatch 文本内嵌 path，共享 helper 无 path 槽）**留局部并注释原因**，不为复用改可观察文本；`design-script-engine-trait.md` 增「状态回填」节：M1-M4 完成表（各带 commit hash）+ 5 条实施偏差记录（含 rh 折叠被拒的永久性理由、§2.6 sql 验证结果）。验证：cli-parity 7/7、lua 124/124、qjs 84/84、engine-parity 8/8、exec-parity 7/7。另：测试运行会泄漏 `agenterm.exe server` 孤儿进程锁住构建输出（本轮撞到三次，均 taskkill 解决）——测试基建债，记录待查 |
 
-→ **已迁 v0.1.17**：Rh-M23（AOT 扩面）、QJS-M6（API 校验）、M/N/CC/NET（跨版轨）。
+→ **已迁 v0.1.17**：QJS-M6（API 校验）、M/N/CC/NET（跨版轨）。
+Rh-M23 已完成，仅作为下一版基线。
 
 细节 SSOT：[`plan-rh-3.md`](plan-rh-3.md)、[`design-rh-aot.md`](design-rh-aot.md)、
 [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md)。
@@ -797,23 +801,22 @@ lua 雏形来去规避这个风险。
 
 ## 2. 排序与三端泳道
 
-### 2.1 建议执行序
+### 2.1 当前执行序
 
 | 序 | 叶 | 理由 |
 |----|-----|------|
-| 1 | **W1 → W2 → W3** | 用户刚踩过；不变量必须可证 |
-| 2 | **W4** | 防回退独占文案 |
-| 3 | **U2** | 0.1.15 真机债；与 W 正交 |
-| 4 | **O-evidence** | Unix 多实例闭环（O-P2/P4/P3 已 ship，只差真机证据） |
+| 1 | **exact-SHA CI 修复** | Windows/Linux AOT 与 macOS 原生 smoke 必须先全绿 |
+| 2 | **Candidate 前置判断** | 仅在 exact SHA CI 全绿后解析是否具备机械封存条件 |
+| 3 | **停止于发布权威边界** | 未获具体 Candidate 的 Promotion 授权，不建 tag/Release |
 
-> R′/G′′/L′/U4/S4/Rh-M23/QJS-M6/C10d/M/N/CC/NET 已迁 v0.1.17。
+> W1–W4/U2/O-evidence 与 R′/G′′/L′/U4/S4/QJS-M6/C10d/M/N/CC/NET
+> 已迁 v0.1.17；Rh-M23 已完成，不重复迁移。
 
 ### 2.2 泳道（继承 0.1.15 纪律）
 
 | 泳道 | 主机 | 叶 | 可写 | 禁区 |
 |------|------|-----|------|------|
-| **Win-UX** | Windows | W*、U2 | `remote_frontend*`、lease 相关、最小 PRD | 不抢 workflow |
-| **Unix-UX** | **OSX 单写** frontend | O-evidence | `unix/frontend/**`、shared 仅真共享 | 不与 Lnx 同写 frontend |
+| **CI/release repair** | 各 owning host | exact-SHA CI 红与发布完整性 | owning tests/scripts/workflows | 不扩到 v0.1.17 产品叶 |
 
 规则：一人一热域；shared-first；机制进 `agenterm-platform`；小步 push main。
 
@@ -821,8 +824,9 @@ lua 雏形来去规避这个风险。
 
 ```text
 时间 →
-  Win-UX:  [W1][W2][W3][W4][U2]
-  Unix-UX: [============== O-evidence ==============]
+  CI:       [Windows quality][Linux AOT][macOS native smoke]
+  Release:  ...............[exact-SHA green][Candidate condition check]
+  Authority:.........................................[STOP before Promotion]
 ```
 
 ---
@@ -834,7 +838,7 @@ lua 雏形来去规避这个风险。
 - 发布链证据观测（R′，已迁 v0.1.17）
 - 安装尾（G′′，已迁 v0.1.17）
 - 低成本尾账（L′，已迁 v0.1.17）
-- 脚本引擎深化（Rh-M23、QJS-M6，已迁 v0.1.17）
+- 脚本引擎深化（QJS-M6 已迁 v0.1.17；Rh-M23 已完成）
 - 控制台宿主余量（C10d，已迁 v0.1.17）
 - 跨版轨 M/N/CC/NET（已迁 v0.1.17）
 - 夜间彩排 A1、Candidate 自动派发 A2
@@ -874,13 +878,13 @@ lua 雏形来去规避这个风险。
 
 未授权公开发布时，**开发完成** = 下列同时成立：
 
-1. **W2 + W3** 在干净重启下可复现；W4 无独占回退  
-2. **O-evidence** 在 macOS 真机可达（O-P2/P4/P3 已 ship，只差真机验证）  
-3. **U2** 真机或黑盒勾选  
-4. `lint` / `check --quick` 绿；不引入新的独占 lease 测试  
-5. 未提交变更（11 files, +128/−24）已清理提交
+1. 修复提交的 **exact SHA CI 全绿**，包括 Windows、Linux x86_64/aarch64、
+   macOS x86_64/aarch64 与 platform-contract cells
+2. 发布完整性静态/黑盒合同覆盖 manifest、`releases.json` 与 Release exact asset set
+3. `lint` / `check --quick` 及 owning targeted regressions 全绿
+4. 工作树中的本任务改动已小步提交；不夹带无关文件
 
-~~R′~~ 已迁 v0.1.17，本版不要求 dry_run。
+W1–W4/U2/O-evidence 已迁 v0.1.17，不再阻塞本版发布链修复完成。
 
 公开发版另走 Candidate → Promotion 双阶段合同（见 `skills/agenterm-release`）。
 
@@ -890,6 +894,8 @@ lua 雏形来去规避这个风险。
 
 | 日期 | 决定 |
 |------|------|
+| 2026-08-10 | **所有未完成产品叶迁出**：用户要求 W1–W4、U2、O-evidence 与其它未完成债统一由 v0.1.17 接管；本版仅收口 exact-SHA CI / Candidate 可达性，不再以 6 个产品尾叶作为 must-ship |
+| 2026-08-10 | **发布链修复重新开启**：当前任务授权修复 v0.1.16 的 CI / Candidate / Promotion 链问题，但不等同于公开 Promotion 授权。先取得新 exact-SHA CI 全绿，再按 Candidate 合同封存六平台字节；公开 `publish-v0.1.16` 仍需用户对具体 Candidate 明确批准 |
 | 2026-08-10 | **v0.1.16 收窄**：R′/G′′/L′/U4/S4/Rh-M23/QJS-M6/C10d/M/N/CC/NET 整体迁入新建的 [`plan-v0.1.17.md`](plan-v0.1.17.md)。v0.1.16 保留 W1–W4 + U2 + O-evidence 为 must-ship，已完成项（O-P2/P4/P3、C 组、CLI 组、Rh-M22f、QJS M0–M5d、Common M1–M7、SQL M0–M1）保留为已完成事实 |
 | 2026-08-07 | **QJS-go 拍板：不等 lua，本 assistant 即刻开工 `agenterm-qjs`**——用户主动提出「相当于提前给 v0.1.16 打基础」；本 assistant 建议分阶段（骨架先行、L2 对齐后置）并指出并行摸索规格的对账风险，用户选择接受风险、全部提前。仍不占本版 §2.2/§6 |
 | 2026-08-07 | **脚本引擎三轨路线图**（FYI）：rh（Lnx 现场，迁移中）/ lua（Win 现场 grok.ds，实现中，目标能力对齐 rh）/ qjs（见上一条）。落盘防 compact 丢上下文；见 §1 Rh 节 |
@@ -927,6 +933,9 @@ lua 雏形来去规避这个风险。
 ---
 
 ## 附录 A：收窄后完成度重评估（2026-08-10）
+
+> **历史快照，已被 2026-08-10 后续迁移决定取代。** 下列“保留 must-ship”与
+> 0% 数字只说明迁移前盘点，不是当前 v0.1.16 验收口径；六叶现均由 v0.1.17 接管。
 
 ### A.1 迁出摘要
 
@@ -987,4 +996,3 @@ O-evidence（macOS 真机 session，1–2h）≈ 8–12 小时**。
 
 相比收窄前需要同时推进发布链证据观测、安装尾设计、脚本引擎深化、低成本尾账
 等多条独立泳道，收窄后的范围是可在一个集中 session 内完成的。
-
