@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 92;
+pub const RH_CODEGEN_REVISION: u32 = 93;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -967,25 +967,48 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
              process\n\
          }\n\n\
-         fn rh_read_pipe_limited(mut reader: impl std::io::Read, limit: usize) -> (String, bool) {\n\
-             let mut bytes = Vec::new();\n\
+         type RhPipeBuffer = std::sync::Arc<std::sync::Mutex<(Vec<u8>, bool)>>;\n\n\
+         // Accumulate into a SHARED buffer instead of returning only at EOF,\n\
+         // so a reader that never observes EOF (see the drain-grace note\n\
+         // below) can still be robbed of what it did manage to read.\n\
+         // Returning at EOF only meant a held-open pipe reported EMPTY\n\
+         // output, which surfaced downstream as `json_parse: EOF while\n\
+         // parsing a value at line 1 column 0`: silent data loss, harder to\n\
+         // diagnose than the hang that bounding the wait fixed.\n\
+         fn rh_drain_pipe_into(\n\
+             mut reader: impl std::io::Read,\n\
+             limit: usize,\n\
+             shared: &RhPipeBuffer,\n\
+         ) {\n\
              let mut chunk = [0_u8; 8192];\n\
-             let mut truncated = false;\n\
              loop {\n\
                  match reader.read(&mut chunk) {\n\
                      Ok(0) => break,\n\
                      Ok(count) => {\n\
-                         let room = limit.saturating_sub(bytes.len());\n\
-                         let take = count.min(room);\n\
-                         bytes.extend_from_slice(&chunk[..take]);\n\
-                         if take < count {\n\
-                             truncated = true;\n\
+                         if let Ok(mut captured) = shared.lock() {\n\
+                             let room = limit.saturating_sub(captured.0.len());\n\
+                             let take = count.min(room);\n\
+                             captured.0.extend_from_slice(&chunk[..take]);\n\
+                             if take < count {\n\
+                                 captured.1 = true;\n\
+                             }\n\
                          }\n\
                      }\n\
                      Err(_) => break,\n\
                  }\n\
              }\n\
-             (String::from_utf8(bytes).unwrap_or_default(), truncated)\n\
+         }\n\n\
+         fn rh_pipe_snapshot(shared: &RhPipeBuffer) -> (String, bool) {\n\
+             match shared.lock() {\n\
+                 // Lossy: an abandoned reader can be snapshotted\n\
+                 // mid-codepoint, and partial text beats dropping the\n\
+                 // whole capture.\n\
+                 Ok(captured) => (\n\
+                     String::from_utf8_lossy(&captured.0).into_owned(),\n\
+                     captured.1,\n\
+                 ),\n\
+                 Err(_) => (String::new(), false),\n\
+             }\n\
          }\n\n\
          // Drain grace after the child is reaped. A `join()` here would be\n\
          // UNBOUNDED: a child that forks a background process (xclip holding\n\
@@ -997,30 +1020,42 @@ pub fn emit_host_runtime(out: &mut String) {
          // `OUTPUT_DRAIN_GRACE` / `output_drain_deadline` in\n\
          // `src/script_process.rs`); this is the same bound for generated\n\
          // packs. A reader that misses the window is abandoned, not joined:\n\
-         // the captured output is reported as empty rather than blocking.\n\
+         // the captured output is snapshotted, never lost and never blocking.\n\
          const RH_OUTPUT_DRAIN_GRACE: std::time::Duration =\n\
              std::time::Duration::from_secs(2);\n\n\
          fn rh_start_pipe_reader<R>(\n\
              reader: Option<R>,\n\
              limit: usize,\n\
-         ) -> Option<std::sync::mpsc::Receiver<(String, bool)>>\n\
+         ) -> Option<(RhPipeBuffer, std::sync::mpsc::Receiver<()>)>\n\
          where\n\
              R: std::io::Read + Send + 'static,\n\
          {\n\
              reader.map(|pipe| {\n\
+                 let shared: RhPipeBuffer = std::sync::Arc::new(\n\
+                     std::sync::Mutex::new((Vec::new(), false)),\n\
+                 );\n\
+                 let reader_shared = std::sync::Arc::clone(&shared);\n\
                  let (sender, receiver) = std::sync::mpsc::channel();\n\
                  std::thread::spawn(move || {\n\
-                     let _ = sender.send(rh_read_pipe_limited(pipe, limit));\n\
+                     rh_drain_pipe_into(pipe, limit, &reader_shared);\n\
+                     let _ = sender.send(());\n\
                  });\n\
-                 receiver\n\
+                 (shared, receiver)\n\
              })\n\
          }\n\n\
          fn rh_finish_pipe_reader(\n\
-             reader: Option<std::sync::mpsc::Receiver<(String, bool)>>,\n\
+             reader: Option<(RhPipeBuffer, std::sync::mpsc::Receiver<()>)>,\n\
          ) -> (String, bool) {\n\
-             reader\n\
-                 .and_then(|reader| reader.recv_timeout(RH_OUTPUT_DRAIN_GRACE).ok())\n\
-                 .unwrap_or_else(|| (String::new(), false))\n\
+             match reader {\n\
+                 Some((shared, drained)) => {\n\
+                     // Wait for EOF up to the grace period, then take\n\
+                     // whatever was captured. Abandoning the reader thread\n\
+                     // is safe: it only appends into `shared` under its lock.\n\
+                     let _ = drained.recv_timeout(RH_OUTPUT_DRAIN_GRACE);\n\
+                     rh_pipe_snapshot(&shared)\n\
+                 }\n\
+                 None => (String::new(), false),\n\
+             }\n\
          }\n\n\
          fn rh_finish_process_output(\n\
              mut child: std::process::Child,\n\
@@ -2061,8 +2096,14 @@ mod tests {
             .find("match child.try_wait()")
             .expect("child wait loop");
         assert!(reader < wait, "pipes must drain while the child is alive");
-        assert!(runtime.contains("limit.saturating_sub(bytes.len())"));
+        assert!(runtime.contains("limit.saturating_sub(captured.0.len())"));
         assert!(!runtime.contains("if bytes.len() >= limit"));
+        // A bounded drain must SNAPSHOT the shared buffer, never report an
+        // empty capture: a reader abandoned at the grace deadline (a child
+        // that forked a pipe-holding grandchild) previously yielded "",
+        // which downstream parsed as `json_parse: EOF ... column 0`.
+        assert!(runtime.contains("rh_pipe_snapshot(&shared)"));
+        assert!(!runtime.contains("recv_timeout(RH_OUTPUT_DRAIN_GRACE).ok()"));
         assert!(
             runtime.contains("Some(serde_json::Value::Object(items)) => match needle.as_str()"),
             "JSON object contains must preserve Rhai Map key-membership semantics"
