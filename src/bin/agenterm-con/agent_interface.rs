@@ -215,6 +215,18 @@ pub enum ScriptCommand {
     /// the executor schedules it via the same `about_to_wait` `WaitUntil`
     /// mechanism the resize debounce and cursor blink use.
     WaitMs(u64),
+    /// Blocks the script until `text` appears somewhere in the rendered
+    /// screen (or `timeout_ms` elapses, which fails the script rather than
+    /// continuing silently).
+    ///
+    /// Exists because a fixed `wait_ms` cannot express "the shell has
+    /// finished writing": guessing a duration makes any test that must act
+    /// *after* output settles racy on a slow machine. That is not
+    /// hypothetical — a scripted click landing before `echo`'s output
+    /// arrived had its selection wiped by `drain_pty`'s "new output clears
+    /// stale selection" rule, which passes locally and fails on a loaded CI
+    /// runner.
+    WaitText { text: String, timeout_ms: u64 },
     /// Captures the next rendered frame as a PNG at the given path.
     ///
     /// `--emit-snapshot` proves what *text* is on screen; it cannot prove
@@ -338,6 +350,9 @@ struct RawCommand {
     #[serde(default)]
     shift: bool,
     wait_ms: Option<u64>,
+    wait_text: Option<String>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
     screenshot: Option<PathBuf>,
     click: Option<RawClick>,
     mouse_down: Option<RawClick>,
@@ -353,6 +368,7 @@ impl RawCommand {
             self.paste.is_some(),
             self.key.is_some(),
             self.wait_ms.is_some(),
+            self.wait_text.is_some(),
             self.screenshot.is_some(),
             self.click.is_some(),
             self.mouse_down.is_some(),
@@ -365,7 +381,7 @@ impl RawCommand {
         .count();
         if present != 1 {
             return Err(format!(
-                "script command {index}: exactly one of text/paste/key/wait_ms/screenshot/click/mouse_down/mouse_up/mouse_move/wheel is required, found {present}"
+                "script command {index}: exactly one of text/paste/key/wait_ms/wait_text/screenshot/click/mouse_down/mouse_up/mouse_move/wheel is required, found {present}"
             ));
         }
         if let Some(text) = self.text {
@@ -386,6 +402,17 @@ impl RawCommand {
         }
         if let Some(ms) = self.wait_ms {
             return Ok(ScriptCommand::WaitMs(ms));
+        }
+        if let Some(text) = self.wait_text {
+            if text.is_empty() {
+                return Err(format!(
+                    "script command {index}: wait_text must not be empty"
+                ));
+            }
+            return Ok(ScriptCommand::WaitText {
+                text,
+                timeout_ms: self.timeout_ms.unwrap_or(10_000),
+            });
         }
         if let Some(path) = self.screenshot {
             return Ok(ScriptCommand::Screenshot(path));

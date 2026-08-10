@@ -600,10 +600,17 @@ fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
     // already unit-tested in isolation, but never through a live session
     // driven by `--script`.
     let dir = scratch_dir("click-selection");
+    // `wait_text`, not a guessed `wait_ms`: `drain_pty` clears the selection
+    // on any new output ("new output clears stale selection"), so a click
+    // that lands before `echo`'s output arrives has its selection wiped
+    // before any snapshot can observe it. A fixed duration passes on a fast
+    // box and failed on a loaded CI runner (windows lane, run 31400784754);
+    // this sequences on the output actually being on screen instead.
     let script = write_script(
         &dir,
         r#"[
             {"text": "echo CLICK_MARKER\r"},
+            {"wait_text": "CLICK_MARKER", "timeout_ms": 15000},
             {"wait_ms": 300},
             {"click": {"row": 3, "col": 5}},
             {"wait_ms": 200}
@@ -637,6 +644,7 @@ fn scripted_press_drag_release_extends_a_local_selection() {
         &dir,
         r#"[
             {"text": "echo DRAG_MARKER\r"},
+            {"wait_text": "DRAG_MARKER", "timeout_ms": 15000},
             {"wait_ms": 300},
             {"mouse_down": {"row": 3, "col": 2}},
             {"mouse_move": {"row": 3, "col": 9}},
@@ -690,7 +698,8 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
         &format!(
             r#"[
             {{"text": {} }},
-            {{"wait_ms": 6000}},
+            {{"wait_text": "SCROLL_LINE_120", "timeout_ms": 30000}},
+            {{"wait_ms": 300}},
             {{"wheel": {{"row": 0, "col": 0, "notches": 5}}}},
             {{"wait_ms": 200}},
             {{"wheel": {{"row": 0, "col": 0, "notches": -2}}}},

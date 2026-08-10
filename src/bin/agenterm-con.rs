@@ -542,6 +542,9 @@ struct ConTerminal {
     /// When the next queued `WaitMs` elapses. `None` when nothing is queued
     /// or the next command is ready to run immediately.
     script_wait_until: Option<Instant>,
+    /// Deadline for the in-flight `WaitText`, set the first time that command
+    /// is seen so re-polling it does not restart its own timeout.
+    script_wait_text_deadline: Option<Instant>,
     /// Set by a script `Screenshot` command; captured and cleared by the
     /// next `render()`, since pixel data only exists transiently there.
     pending_screenshot: Option<PathBuf>,
@@ -649,6 +652,7 @@ impl ConTerminal {
             snapshot_path: None,
             script: VecDeque::new(),
             script_wait_until: None,
+            script_wait_text_deadline: None,
             pending_screenshot: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
@@ -1269,6 +1273,15 @@ impl ConTerminal {
         ));
     }
 
+    /// Whether `needle` appears in any rendered row right now. Used by the
+    /// script `wait_text` command to sequence on real output instead of a
+    /// guessed duration.
+    fn screen_contains(&self, needle: &str) -> bool {
+        let screen = self.parser.screen();
+        let cols = screen.size().1;
+        screen.rows(0, cols).any(|row| row.contains(needle))
+    }
+
     /// Runs every `--script` command that is due, pacing `WaitMs` through the
     /// same `about_to_wait` scheduling the resize debounce and cursor blink
     /// use rather than blocking the thread — a blocking sleep here would
@@ -1303,6 +1316,31 @@ impl ConTerminal {
                     let until = now + Duration::from_millis(ms);
                     self.script_wait_until = Some(until);
                     return Some(until);
+                }
+                ScriptCommand::WaitText { text, timeout_ms } => {
+                    let deadline = *self
+                        .script_wait_text_deadline
+                        .get_or_insert(now + Duration::from_millis(timeout_ms));
+                    if self.screen_contains(&text) {
+                        self.script_wait_text_deadline = None;
+                    } else if now >= deadline {
+                        // Fail loudly: a silently-skipped wait would hand the
+                        // next command exactly the race this command exists
+                        // to remove.
+                        eprintln!(
+                            "agenterm-con: script wait_text timed out after {timeout_ms}ms                              waiting for {text:?}"
+                        );
+                        std::process::exit(3);
+                    } else {
+                        // Re-poll soon; PTY draining and rendering continue
+                        // between wakes because this returns to the event loop
+                        // instead of sleeping here.
+                        self.script
+                            .push_front(ScriptCommand::WaitText { text, timeout_ms });
+                        let until = now + Duration::from_millis(20);
+                        self.script_wait_until = Some(until);
+                        return Some(until);
+                    }
                 }
                 ScriptCommand::Screenshot(path) => {
                     // Pixels only exist transiently inside render(); stash the
