@@ -329,10 +329,15 @@ fn entry() {
         );
         let first_gui = start_gui(context, gui, cli);
         let tab = only_tab(context, cli);
+        // Bind the stable tab id as text once. Left inline at each use, the
+        // transpiler can pick the INTEGER json getter for `.id`, and a stable id
+        // is a string (`@1`) -- the native pack then fails with
+        // `json_integer_path: id` instead of driving the tab.
+        let tab_id = "" + tab.id;
         json_cli(
             context,
             cli,
-            ["wait-ui", "-t", tab.id, "--tab-state", "running",
+            ["wait-ui", "-t", tab_id, "--tab-state", "running",
              "--timeout-ms", "30000"]
         );
         if internal_failure_probe != 0 {
@@ -341,18 +346,18 @@ fn entry() {
                 "INTERNAL_FAILURE_BUNDLE_PROBE:gui:" + context.run_id
             );
         }
-        let pane_before = only_pane(context, cli, tab.id);
+        let pane_before = only_pane(context, cli, tab_id);
         let token_before =
             "AGENTERM_THEME_BEFORE_" + std::process::id();
         text_cli(
             context,
             cli,
-            ["send-keys", "-t", tab.id, "echo " + token_before, "Enter"]
+            ["send-keys", "-t", tab_id, "echo " + token_before, "Enter"]
         );
         text_cli(
             context,
             cli,
-            ["wait-pane", "-t", tab.id, "--contains", token_before,
+            ["wait-pane", "-t", tab_id, "--contains", token_before,
              "--submit-complete", "--timeout-ms", "30000"]
         );
 
@@ -453,19 +458,19 @@ fn entry() {
         text_cli(
             context,
             cli,
-            ["send-keys", "-t", tab.id, "echo " + token_after, "Enter"]
+            ["send-keys", "-t", tab_id, "echo " + token_after, "Enter"]
         );
         text_cli(
             context,
             cli,
-            ["wait-pane", "-t", tab.id, "--contains", token_after,
+            ["wait-pane", "-t", tab_id, "--contains", token_after,
              "--submit-complete", "--timeout-ms", "30000"]
         );
-        let pane_after = only_pane(context, cli, tab.id);
+        let pane_after = only_pane(context, cli, tab_id);
         let capture = text_cli(
             context,
             cli,
-            ["capture-pane", "-p", "-t", tab.id]
+            ["capture-pane", "-p", "-t", tab_id]
         );
         test_harness::require(
             pane_after.pid == pane_before.pid
@@ -503,10 +508,15 @@ fn entry() {
 
         let second_gui = start_gui(context, gui, cli);
         let restored = only_tab(context, cli);
+        // Bind the id as text first. Inline, the transpiler picked the integer
+        // JSON getter for this `.id` and a stable tab id is a string (`@1`), so
+        // the native pack failed with `json_integer_path: id` instead of waiting
+        // for the restored tab.
+        let restored_id = "" + restored.id;
         json_cli(
             context,
             cli,
-            ["wait-ui", "-t", restored.id, "--tab-state", "running",
+            ["wait-ui", "-t", restored_id, "--tab-state", "running",
              "--timeout-ms", "30000"]
         );
         assert_theme_closed(json_cli(context, cli, ["ui-snapshot"]), "fancy-day");

@@ -360,9 +360,23 @@ fn entry() {
             fingerprint + "\",\"intent\":\"mutation\",\"deadline_unix_ms\":0}}\n";
         let response_path =
             std::path::join(context.run_directory, "wake-expired-response.jsonl").display;
+        // `TcpClient('host:port')` binds the single string to the
+        // `AddressFamily` overload and throws before connecting, so this leg
+        // could never have passed -- it is release-lane only, and the release
+        // lane has not been green. Host and port must be separate arguments.
+        // TODO(rh-net): replace this shell-out with
+        // `std::net::TcpStream::connect_timeout` once that surface has a native
+        // emitter; that also retires the powershell-audit exemption added for
+        // this file.
+        let address_parts = ctx_address.split(":");
+        test_harness::require(
+            address_parts.len == 2,
+            "wake_smoke_expired_address_shape:" + ctx_address
+        );
         let ps =
             "$req='" + request_text + "'; "
-            + "$c=New-Object Net.Sockets.TcpClient('" + ctx_address + "'); "
+            + "$c=New-Object Net.Sockets.TcpClient('" + address_parts[0]
+            + "'," + address_parts[1] + "); "
             + "$s=$c.GetStream(); "
             + "$w=New-Object IO.StreamWriter($s); "
             + "$w.Write($req); $w.Flush(); "
