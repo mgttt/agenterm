@@ -369,8 +369,9 @@ fn set_native_clipboard(context, platform, text) {
     if platform == "linux" {
         let command = std::process::command("xclip");
         command.args([
-            "-selection", "clipboard", "-loops", "2", "-silent", payload_path
+            "-selection", "clipboard", "-loops", "2", "-silent"
         ]);
+        command.stdin_text(text);
         command.timeout(std::time::Duration::from_secs(30));
         command.start();
         return 0;
@@ -826,13 +827,11 @@ fn entry() {
         let paste_marker = "AGENTERM_NATIVE_PASTE_" + context.run_id;
         let clipboard_text = "echo " + paste_marker;
         if platform == "linux" {
-            let payload_path = clipboard_payload_path(context);
-            rh::runtime::atomic_write(payload_path, clipboard_text);
             let clipboard_command = std::process::command("xclip");
             clipboard_command.args([
-                "-selection", "clipboard", "-loops", "2", "-silent",
-                payload_path
+                "-selection", "clipboard", "-loops", "2", "-silent"
             ]);
+            clipboard_command.stdin_text(clipboard_text);
             clipboard_command.timeout(std::time::Duration::from_secs(30));
             let clipboard_owner = clipboard_command.start();
             owned_children.push(clipboard_owner);

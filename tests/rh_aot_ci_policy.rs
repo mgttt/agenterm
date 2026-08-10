@@ -19,6 +19,11 @@ static CLIENT_SMOKE: LazyLock<String> =
     LazyLock::new(|| include_str!("../scripts/rh/client-smoke.rh").replace("\r\n", "\n"));
 static ROOT_MANIFEST: &str = include_str!("../Cargo.toml");
 static RH_MANIFEST: &str = include_str!("../crates/agenterm-rh/Cargo.toml");
+static SCRIPT_SMOKE: &str = include_str!("../scripts/rh/script-smoke.rh");
+static DIAGNOSTIC_BUNDLE_SELFTEST: &str =
+    include_str!("../scripts/rh/diagnostic-bundle-selftest.rh");
+static PLATFORM_UX_PARITY_SMOKE: &str = include_str!("../scripts/rh/platform-ux-parity-smoke.rh");
+static RH_AOT_SMOKE: &str = include_str!("../scripts/rh/rh-aot-smoke.rh");
 static UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
 static WINDOWS_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
 static UNIX_RH_CHECK: &str = include_str!("../scripts/rh-check.sh");
@@ -141,6 +146,46 @@ fn unix_frontend_native_journeys_have_explicit_cleanup_budget() {
         assert_eq!(budget["max_operations"], 100_000_000, "{task}");
         assert_eq!(budget["max_output_bytes"], 1_048_576, "{task}");
     }
+}
+
+#[test]
+fn every_manifest_task_has_an_execution_contract() {
+    let tasks = TASK_MANIFEST["tasks"].as_array().expect("manifest tasks");
+    let contracts = TASK_MANIFEST["contracts"]
+        .as_object()
+        .expect("manifest contracts");
+    for task in tasks {
+        let id = task["id"].as_str().expect("task id");
+        assert!(contracts.contains_key(id), "task contract missing: {id}");
+    }
+}
+
+#[test]
+fn linux_clipboard_smoke_feeds_xclip_through_stdin() {
+    let source = include_str!("../scripts/rh/unix-frontend-smoke.rh");
+    assert!(source.contains("clipboard_command.stdin_text(clipboard_text)"));
+    assert!(source.contains("command.stdin_text(text)"));
+    assert!(!source.contains("\"-silent\", payload_path"));
+}
+
+#[test]
+fn active_quality_smokes_use_the_unified_agenterm_rh_front_door() {
+    let manifest = serde_json::to_string(&*TASK_MANIFEST).expect("serialize task manifest");
+    for (name, source) in [
+        ("task manifest", manifest.as_str()),
+        ("check", CHECK.as_str()),
+        ("script smoke", SCRIPT_SMOKE),
+        ("diagnostic bundle", DIAGNOSTIC_BUNDLE_SELFTEST),
+        ("platform UX parity", PLATFORM_UX_PARITY_SMOKE),
+        ("rh AOT smoke", RH_AOT_SMOKE),
+    ] {
+        assert!(!source.contains("dist/agenterm-rh"), "{name}");
+        assert!(!source.contains("target/debug/agenterm-rh"), "{name}");
+    }
+    assert!(SCRIPT_SMOKE.contains("[\\\"rh\\\", \\\"--framed-worker\\\"]"));
+    assert!(DIAGNOSTIC_BUNDLE_SELFTEST.contains("\"rh\", \"run\", entry_s"));
+    assert!(PLATFORM_UX_PARITY_SMOKE.contains("\"rh\", \"task\", \"run\""));
+    assert!(RH_AOT_SMOKE.contains("[\"rh\", \"pack\", \"build\""));
 }
 
 #[test]

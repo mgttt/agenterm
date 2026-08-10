@@ -324,6 +324,42 @@
         "task.build-identity"
       ]
     },
+    "lua-build-identity": {
+      "inputs": [
+        "source-tree",
+        "cargo-lock",
+        "artifact-manifest"
+      ],
+      "outputs": [
+        "build-identity"
+      ],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576
+      },
+      "network": [],
+      "evidence": [
+        "task.lua-build-identity"
+      ]
+    },
+    "lua-check": {
+      "inputs": [
+        "lua-source-tree"
+      ],
+      "outputs": [
+        "lua-syntax-results"
+      ],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576
+      },
+      "network": [],
+      "evidence": [
+        "task.lua-check"
+      ]
+    },
     "harness-cleanup-selftest": {
       "inputs": [
         "script-runtime"
@@ -1642,7 +1678,7 @@
       "args": [
         ".",
         "dist/agenterm.com",
-        "dist/agenterm-rh.exe",
+        "dist/agenterm.exe",
         "dist/agenterm.exe"
       ],
       "dependencies": [
@@ -2090,7 +2126,7 @@
       "args": [
         ".",
         "dist/agenterm.com",
-        "dist/agenterm-rh.exe",
+        "dist/agenterm.exe",
         "dist/agenterm.exe"
       ],
       "dependencies": [],
@@ -2159,7 +2195,6 @@
       "args": [
         ".",
         "dist/agenterm.exe",
-        "dist/agenterm-rh.exe",
         "dist/agenterm.com",
         "windows"
       ],
@@ -2183,7 +2218,6 @@
       "args": [
         ".",
         "dist/agenterm",
-        "dist/agenterm-rh",
         "dist/agenterm",
         "linux"
       ],
@@ -2207,7 +2241,6 @@
       "args": [
         ".",
         "dist/agenterm",
-        "dist/agenterm-rh",
         "dist/agenterm",
         "macos"
       ],

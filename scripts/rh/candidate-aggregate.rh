@@ -1,7 +1,7 @@
 // Build and validate one exact-SHA Candidate manifest from a closed payload.
 //
 // Usage:
-//   agenterm-rh task run candidate-aggregate -- \
+//   agenterm rh task run candidate-aggregate -- \
 //     SOURCE_ROOT METADATA_JSON ASSET_DIRECTORY OUTPUT_MANIFEST
 //
 // METADATA_JSON schema v1 fields:

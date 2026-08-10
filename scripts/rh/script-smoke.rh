@@ -346,10 +346,12 @@ fn cli_json(context, cli, arguments, audit_path) {
 }
 
 fn direct_text(context, script, arguments, audit_path) {
+    let rh_arguments = ["rh"];
+    append_arguments(rh_arguments, arguments);
     let result = run_program(
         context,
         script,
-        arguments,
+        rh_arguments,
         0,
         audit_path,
         script_smoke_empty_env(),
@@ -361,10 +363,12 @@ fn direct_text(context, script, arguments, audit_path) {
 }
 
 fn direct_json(context, script, arguments, audit_path) {
+    let rh_arguments = ["rh"];
+    append_arguments(rh_arguments, arguments);
     let result = run_program(
         context,
         script,
-        arguments,
+        rh_arguments,
         0,
         audit_path,
         script_smoke_empty_env(),
@@ -473,7 +477,7 @@ fn start_http_fixture(
         context,
         script,
         [
-            "run",
+            "rh", "run",
             fixture_path,
             "--profile",
             "local",
@@ -562,7 +566,7 @@ fn framed_invocation(frame_id, invocation_id, source, version) {\n\
 }\n\
 fn invoke_framed(input_bytes) {\n\
     let command = std::process::command(script_path);\n\
-    command.args([\"--framed-worker\"]);\n\
+    command.args([\"rh\", \"--framed-worker\"]);\n\
     command.stdin_bytes(input_bytes);\n\
     command.capture_limit(262144);\n\
     let output = command.output();\n\
@@ -883,7 +887,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     let pipe_command = configured_program(
         context,
         script,
-        ["api", "--json"],
+        ["rh", "api", "--json"],
         "",
         script_smoke_empty_env()
     );
@@ -1944,7 +1948,7 @@ fn assert_runtime_and_framing(
     let malformed_command = configured_program(
         context,
         script,
-        ["--worker"],
+        ["rh", "--worker"],
         "",
         script_smoke_empty_env()
     );
@@ -1963,7 +1967,7 @@ fn assert_runtime_and_framing(
     let oversized_command = configured_program(
         context,
         script,
-        ["--worker"],
+        ["rh", "--worker"],
         "",
         script_smoke_empty_env()
     );
@@ -2014,6 +2018,7 @@ fn assert_runtime_and_framing(
 fn assert_supervisor(
     context,
     cli,
+    script,
     audit_path,
     runtime_dir
 ) {
@@ -2041,7 +2046,8 @@ fn assert_supervisor(
         "script_supervisor_hard_timeout_untyped"
     );
 
-    let existing = process_ids("agenterm-rh.exe");
+    let worker_name = std::path::PathBuf::from(script).file_name;
+    let existing = process_ids(worker_name);
     let crash_client = start_script_client(
         context,
         cli,
@@ -2053,7 +2059,7 @@ fn assert_supervisor(
         audit_path
     );
     let crash_worker = wait_new_process(
-        "agenterm-rh.exe",
+        worker_name,
         existing,
         3000
     );
@@ -2723,7 +2729,7 @@ fn run_fleet_journey(
             "script_fleet_note_restore_failed"
         );
 
-        print("STEP direct agenterm-rh north-star named task");
+        print("STEP direct agenterm rh north-star named task");
         let source_project = std::path::join(
             repo,
             "examples/script-daily-check"
@@ -2819,13 +2825,8 @@ fn run_fleet_journey(
             audit_path
         );
         test_harness::require(
-            (
-                direct_help.contains("AgenTerm Script Runtime")
-                    && direct_help.contains("agenterm-rh task run")
-            ) || (
-                direct_help.contains("agenterm-rh")
-                    && direct_help.contains("task list")
-            ),
+            direct_help.contains("agenterm rh")
+                && direct_help.contains("task list|show|check|run"),
             "script_direct_help_mismatch"
         );
         test_harness::require(
@@ -3183,19 +3184,6 @@ fn assert_audit(
     );
 }
 
-fn prefer_rh_worker(script) {
-    let parent = std::path::parent(script).display;
-    let rh_win = std::path::join(parent, "agenterm-rh.exe").display;
-    if std::fs::exists(rh_win) {
-        return rh_win;
-    }
-    let rh = std::path::join(parent, "agenterm-rh").display;
-    if std::fs::exists(rh) {
-        return rh;
-    }
-    return script;
-}
-
 fn entry() {
 if args.len == 1 && args[0] == "--list-evidence" {
     for id in declared_evidence_ids() {
@@ -3213,7 +3201,7 @@ test_harness::require(
 );
 let repo = std::path::absolute(args[0]).display;
 let cli = std::path::absolute(args[1]).display;
-let script = prefer_rh_worker(std::path::absolute(args[2]).display);
+let script = std::path::absolute(args[2]).display;
 let gui = std::path::absolute(args[3]).display;
 let internal_failure_probe = args.len == 5;
 for executable in [cli, script, gui] {
@@ -3279,6 +3267,7 @@ try {
     assert_supervisor(
         context,
         cli,
+        script,
         audit_file,
         runtime_dir
     );

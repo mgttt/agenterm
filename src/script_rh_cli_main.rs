@@ -261,7 +261,7 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
             let mut subargs = args;
             let Some(subcommand) = subargs.next() else {
                 return Err(RhError::Parse(
-                    "usage: agenterm-rh pack build <file.rh> --dir PATH".into(),
+                    "usage: agenterm rh pack build <file.rh> --dir PATH".into(),
                 ));
             };
             if subcommand != "build" {
@@ -452,7 +452,7 @@ fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
 
 fn run_public_check_command(arguments: &[String]) -> Result<u8, RhError> {
     let Some(path) = arguments.first() else {
-        return Err(RhError::Parse("usage: agenterm-rh check <file>".into()));
+        return Err(RhError::Parse("usage: agenterm rh check <file>".into()));
     };
     let mut project_root = PathBuf::from(".");
     let mut json = false;
@@ -625,7 +625,7 @@ fn require_path(
 ) -> Result<PathBuf, RhError> {
     args.next()
         .map(PathBuf::from)
-        .ok_or_else(|| RhError::Parse(format!("usage: agenterm-rh {command} <file> [-o out]")))
+        .ok_or_else(|| RhError::Parse(format!("usage: agenterm rh {command} <file> [-o out]")))
 }
 
 fn parse_output_flag(args: &mut impl Iterator<Item = String>) -> Result<Option<PathBuf>, RhError> {
@@ -678,14 +678,14 @@ fn pack_dir_flag(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, RhE
 
 fn print_usage() {
     eprintln!(
-        "agenterm-rh {RH_VERSION}\n\
+        "agenterm rh {RH_VERSION}\n\
          \n\
          commands:\n\
            check <file>                      validate rh subset\n\
            check-many --manifest FILE        bounded multi-file rh subset check\n\
            evidence-list <file>              list static task evidence declarations\n\
            corpus-scan [--root PATH] [--dir REL|--tasks [MANIFEST]]  scan .rh scripts or task entries\n\
-           caller-inventory [--root PATH]            report agenterm-rh operational references\n\
+           caller-inventory [--root PATH]            report retired Script CLI references\n\
            transpile <file> [-o rs]            emit Rust source for AOT\n\
            compile <file> [-o native]          transpile + cargo -> native + manifest\n\
            eval <file>                         check + AOT pack + dlopen entry (dev loop)\n\

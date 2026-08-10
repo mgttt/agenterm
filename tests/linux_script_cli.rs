@@ -104,6 +104,6 @@ mod unix {
             .expect("spawn agenterm cli");
         assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("invoke agenterm-rh directly"));
+        assert!(stderr.contains("invoke agenterm rh directly"));
     }
 }

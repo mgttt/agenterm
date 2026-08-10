@@ -155,19 +155,6 @@ fn entry() {
         require(manifest_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
 
         let program = worker;
-        let program_rh_target =
-            std::path::join(repo, "target/debug/agenterm-rh").display;
-        if std::fs::exists(program_rh_target)
-                && std::fs::metadata(program_rh_target).is_file
-                && std::fs::metadata(program_rh_target).len > 0 {
-            program = program_rh_target;
-        }
-        let program_rh_dist = std::path::join(repo, "dist/agenterm-rh").display;
-        if std::fs::exists(program_rh_dist)
-                && std::fs::metadata(program_rh_dist).is_file
-                && std::fs::metadata(program_rh_dist).len > 0 {
-            program = program_rh_dist;
-        }
         let rh_code = std::process::command_stdout_file(
             program,
             [

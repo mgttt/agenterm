@@ -1,7 +1,7 @@
 // Enforce the frozen v0.1.10 PowerShell migration ledger.
 //
 // Named task:
-//   agenterm-rh task run migration-audit --json
+//   agenterm rh task run migration-audit --json
 
 fn entry() {
     if args.len > 1 {

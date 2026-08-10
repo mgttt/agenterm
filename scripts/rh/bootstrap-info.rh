@@ -1,7 +1,7 @@
 // Report stage-0 inputs without performing a build or changing the repository.
 //
 // Named task:
-//   agenterm-rh task run bootstrap-info --json
+//   agenterm rh task run bootstrap-info --json
 
 fn entry() {
     let repo_joined = std::path::join(".", "").display;

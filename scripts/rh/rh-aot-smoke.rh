@@ -1,10 +1,10 @@
 // Prove rh-0 check, AOT pack build, native_hash receipt, and dlopen entry smoke.
 //
-// Args: REPO [AGENTERM_RH_BINARY]
+// Args: REPO [AGENTERM_BINARY]
 
 fn entry() {
     if args.len != 1 && args.len != 2 {
-        return rh::fail("expected: REPO [AGENTERM_RH_BINARY]");
+        return rh::fail("expected: REPO [AGENTERM_BINARY]");
     }
 
     let repo = std::path::absolute(args[0]).display;
@@ -17,8 +17,8 @@ fn entry() {
     if args.len == 2 {
         rh = std::path::absolute(args[1]).display;
     } else {
-        let win = std::path::join(repo, "target/debug/agenterm-rh.exe").display;
-        let unix = std::path::join(repo, "target/debug/agenterm-rh").display;
+        let win = std::path::join(repo, "target/debug/agenterm.exe").display;
+        let unix = std::path::join(repo, "target/debug/agenterm").display;
         if std::fs::exists(win) {
             rh = win;
         } else {
@@ -33,7 +33,7 @@ fn entry() {
 
     let check_code = std::process::command_status(
         rh,
-        ["check", fixture],
+        ["rh", "check", fixture],
         30000,
         #{ current_dir: repo }
     );
@@ -41,7 +41,7 @@ fn entry() {
 
     let build_code = std::process::command_status(
         rh,
-        ["pack", "build", fixture, "--dir", pack_dir],
+        ["rh", "pack", "build", fixture, "--dir", pack_dir],
         180000,
         #{ current_dir: repo }
     );
@@ -63,7 +63,7 @@ fn entry() {
         std::path::join(pack_dir, "run-smoke.stdout.tmp").display;
     let smoke_code = std::process::command_stdout_file(
         rh,
-        ["run-smoke", native],
+        ["rh", "run-smoke", native],
         30000,
         smoke_stdout,
         #{ current_dir: repo }
@@ -80,7 +80,7 @@ fn entry() {
         std::path::join(pack_dir, "qualification.json").display;
     let qualify_code = std::process::command_status(
         rh,
-        ["qualify", fixture, "--dir", pack_dir, "-o", receipt_path],
+        ["rh", "qualify", fixture, "--dir", pack_dir, "-o", receipt_path],
         180000,
         #{ current_dir: repo }
     );

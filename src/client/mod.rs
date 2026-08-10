@@ -316,16 +316,16 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
 fn script_help_text() -> &'static str {
     "AgenTerm Script Runtime\n\
          Usage:\n\
-           agenterm-rh api [MODULE] [--status STATE] [--tree|--json]\n\
-           agenterm-rh check [OPTIONS] FILE.rh|-\n\
-           agenterm-rh check-many --manifest FILE [OPTIONS]\n\
-           agenterm-rh evidence-list FILE.rh\n\
-           agenterm-rh eval [OPTIONS] EXPRESSION|-- FILE.rh [--] [ARGS...]\n\
-           agenterm-rh run [OPTIONS] FILE.rh|- [--] [ARGS...]\n\
-           agenterm-rh task list [--manifest PATH] [--json]\n\
-           agenterm-rh task show TASK [--manifest PATH] [--json]\n\
-           agenterm-rh task check [TASK] [--manifest PATH] [--json]\n\
-           agenterm-rh task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
+           agenterm rh api [MODULE] [--status STATE] [--tree|--json]\n\
+           agenterm rh check [OPTIONS] FILE.rh|-\n\
+           agenterm rh check-many --manifest FILE [OPTIONS]\n\
+           agenterm rh evidence-list FILE.rh\n\
+           agenterm rh eval [OPTIONS] EXPRESSION|-- FILE.rh [--] [ARGS...]\n\
+           agenterm rh run [OPTIONS] FILE.rh|- [--] [ARGS...]\n\
+           agenterm rh task list [--manifest PATH] [--json]\n\
+           agenterm rh task show TASK [--manifest PATH] [--json]\n\
+           agenterm rh task check [TASK] [--manifest PATH] [--json]\n\
+           agenterm rh task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
          Options: --timeout-ms N --max-operations N --max-collection-items N \
          --max-string-bytes N --max-output-bytes N --project-root DIR \
          --manifest FILE --json"
@@ -349,7 +349,7 @@ fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
 fn run_script_repl(_arguments: &[String]) -> i32 {
     cli_eprintln!(
         "script repl was removed with the Rh interpreter; \
-         use agenterm-rh for check, eval, and run on .rh sources"
+         use agenterm rh for check, eval, and run on .rh sources"
     );
     2
 }
@@ -1376,7 +1376,7 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
     if !crate::platform::services::script_host::hosted_worker_available() {
         cli_eprintln!(
             "agenterm cli script hosting is not yet available on this platform; \
-             invoke agenterm-rh directly"
+             invoke agenterm rh directly"
         );
         return 2;
     }

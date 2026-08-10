@@ -1,12 +1,12 @@
 // Cross-platform UX parity smoke orchestrator.
-// Canonical runtime for local execution is `agenterm-rh task run`.
+// Canonical runtime for local execution is `agenterm rh task run`.
 // It chains the existing platform-specific smoke suites with a shared evidence map
 // and keeps a single launch contract in one place.
 //
 // Usage:
 //   REPO GUI_EXE SCRIPT_EXE CLI_EXE PLATFORM
 // platform: windows|linux|macos
-// SCRIPT_EXE is optional and defaults to dist/{agenterm-rh(.exe)|agenterm-rh},
+// SCRIPT_EXE is optional and defaults to dist/agenterm(.exe),
 //
 
 import "scripts/rh/lib/test_harness" as test_harness;
@@ -958,8 +958,8 @@ fn resolve_script_binary(script_exe, repository) {
     let repository_path = "" + repository;
     let candidates = [
         script_exe_text,
-        std::path::join(repository_path, "dist/agenterm-rh.exe").display,
-        std::path::join(repository_path, "dist/agenterm-rh").display,
+        std::path::join(repository_path, "dist/agenterm.exe").display,
+        std::path::join(repository_path, "dist/agenterm").display,
     ];
 
     let candidate_index = 0;
@@ -997,12 +997,7 @@ fn parse_platform_args(positional_args) {
         let maybe_gui = absolute(positional_args[five_gui_index]);
         let maybe_script = absolute(positional_args[five_script_index]);
         let maybe_cli = absolute(positional_args[five_cli_index]);
-        let maybe_script_text = "" + maybe_script;
-        let maybe_gui_text = "" + maybe_gui;
-        let maybe_cli_text = "" + maybe_cli;
-        if maybe_script_text.to_lower().contains("agenterm-rh") &&
-                maybe_gui_text.ends_with("agenterm.exe") &&
-                maybe_cli_text.ends_with("agenterm.exe") {
+        if std::fs::exists(maybe_script) != 0 {
             return #{
                 repository: maybe_repo,
                 gui_exe: maybe_gui,
@@ -1106,17 +1101,17 @@ fn execute_phase(
     command.current_dir(repo_path);
     if extra_count == 2 {
         command.args([
-            "task", "run", task_name_text, repo_path,
+            "rh", "task", "run", task_name_text, repo_path,
             extra1_text, extra2_text
         ]);
     } else if extra_count == 3 {
         command.args([
-            "task", "run", task_name_text, repo_path,
+            "rh", "task", "run", task_name_text, repo_path,
             extra1_text, extra2_text, extra3_text
         ]);
     } else if extra_count == 5 {
         command.args([
-            "task", "run", task_name_text, repo_path,
+            "rh", "task", "run", task_name_text, repo_path,
             extra1_text, extra2_text, extra3_text, extra4_text, extra5_text
         ]);
     } else {
@@ -1136,7 +1131,7 @@ fn execute_phase(
             test_harness::append_command_record(
                 context,
                 [
-                    "task", "run", task_name_text, repo_path,
+                    "rh", "task", "run", task_name_text, repo_path,
                     extra1_text, extra2_text
                 ],
                 output,
@@ -1147,7 +1142,7 @@ fn execute_phase(
             test_harness::append_command_record(
                 context,
                 [
-                    "task", "run", task_name_text, repo_path,
+                    "rh", "task", "run", task_name_text, repo_path,
                     extra1_text, extra2_text, extra3_text
                 ],
                 output,
@@ -1158,7 +1153,7 @@ fn execute_phase(
             test_harness::append_command_record(
                 context,
                 [
-                    "task", "run", task_name_text, repo_path,
+                    "rh", "task", "run", task_name_text, repo_path,
                     extra1_text, extra2_text, extra3_text, extra4_text, extra5_text
                 ],
                 output,
