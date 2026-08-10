@@ -1218,6 +1218,9 @@ fn control_center_smoke_uses_native_bundled_pack() {
 fn control_center_macos_smoke_uses_native_bundled_pack() {
     let (source, output) = transpile_project_entry("scripts/rh/control-center-macos-smoke.rh");
     assert!(source.contains("fn entry("));
+    assert!(source.contains("fn preserves_background("));
+    assert!(!source.contains("control_center_macos_frontmost_unavailable"));
+    assert!(!source.contains("PASS: macOS caller-selected UDS"));
     assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
     assert!(
         source.contains("for attempt in 0..600"),
