@@ -69,8 +69,8 @@ fn assert_native_fixture(
 }
 
 #[test]
-fn codegen_revision_is_eighty_seven() {
-    assert_eq!(RH_CODEGEN_REVISION, 88);
+fn codegen_revision_is_eighty_nine() {
+    assert_eq!(RH_CODEGEN_REVISION, 89);
 }
 
 #[test]
