@@ -185,6 +185,25 @@ jobs:
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
         # note: check command runtime includes lint + quick integrated checks in this lane
+      - name: Upload failed quality-gate diagnostics
+        # Gates redirect each child's output to
+        # target/qualification/scratch/command-<n>.{stdout,stderr} (see run_gate
+        # in check.rh), and the chain prints only its PASS/FAIL summary. So a
+        # gate that dies mid-run -- a `process_timeout` above all -- leaves the
+        # CI log with the error code and nothing else, while the actual output
+        # sits on the runner and is discarded with it. candidate.yml has uploaded
+        # its equivalent all along; this lane never did, which is why every
+        # windows timeout this week cost a fresh round trip to guess at.
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-quality-gate-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            target/qualification/scratch/command-*.stdout
+            target/qualification/scratch/command-*.stderr
+            target/qualification/timing.json
       - name: Prove rh AOT pack pipeline
         id: rh-aot
         shell: bash
