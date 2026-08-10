@@ -52,7 +52,16 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     if !launch_options.ui_client {
         match attempt_gui_handoff(no_activate, true) {
             GuiHandoffResult::HandedOff => return GuiLaunchResult::Reused,
-            GuiHandoffResult::Continue => {}
+            GuiHandoffResult::Continue(reason) => {
+                if let Some(reason) = reason {
+                    // This launcher is about to open its OWN window instead of
+                    // reusing the running one. Say so: the silent version is
+                    // indistinguishable from "no server was running".
+                    write_best_effort_stderr(&format!(
+                        "Launcher handoff declined ({reason}); opening a new window."
+                    ));
+                }
+            }
             GuiHandoffResult::Blocked(error) => {
                 write_best_effort_stderr(&format!(
                     "The running AgenTerm server rejected the launcher handoff: {}\n\

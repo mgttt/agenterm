@@ -25,7 +25,12 @@ fn run_cli_output(
     let workspace_text = "" + workspace_path;
     let settings_text = "" + settings_path;
     let instance_text = "" + instance_directory;
-    let command_arguments = ["--address", address_text];
+    // `cli` is mandatory: this binary is the GUI launcher, and
+    // `agenterm --address ... wait-ui` only prints GUI entry-point guidance.
+    // The verb went missing when the standalone CLI binary became the
+    // `agenterm cli` subcommand, and because every caller here discarded the
+    // result, both 30s `wait-ui` calls silently did nothing for months.
+    let command_arguments = ["cli", "--address", address_text];
     if extra1 != "" { command_arguments.push("" + extra1); }
     if extra2 != "" { command_arguments.push("" + extra2); }
     if extra3 != "" { command_arguments.push("" + extra3); }
@@ -82,6 +87,22 @@ fn read_until(stream, needle, timeout_ms) {
     throw "startup_stream_text_timeout:" + needle;
 }
 
+// 1 when the child exited inside the budget, 0 when it is still running.
+fn exited_within(child, timeout_ms) {
+    let started = std::time::SystemTime::now().unix_millis;
+    let keep_waiting = 1;
+    while (keep_waiting != 0) {
+        if child.state == "exited" {
+            return 1;
+        }
+        if std::time::SystemTime::now().unix_millis - started >= timeout_ms {
+            return 0;
+        }
+        rh::task::sleep(std::time::Duration::from_millis(5));
+    }
+    0
+}
+
 fn wait_for_exit(child, timeout_ms, code) {
     let code_text = "" + code;
     let started = std::time::SystemTime::now().unix_millis;
@@ -97,7 +118,11 @@ fn wait_for_exit(child, timeout_ms, code) {
         }
         rh::task::sleep(std::time::Duration::from_millis(5));
     }
-    throw code_text + ":timeout";
+    // Report the budget and whatever the child said, not just "timeout": a bare
+    // label cost a full CI round trip to learn whether the child was slow, hung,
+    // or was told by the server that it could not hand off at all.
+    let waited = std::time::SystemTime::now().unix_millis - started;
+    throw code_text + ":timeout:waited=" + waited + "ms>" + timeout_ms + "ms";
     child.wait_with_output(std::time::Duration::from_millis(0))
 }
 
@@ -215,7 +240,12 @@ fn entry() {
             "startup_inherited_stderr_guidance:" + initial_guidance
         );
 
-        run_cli_output(
+        // These two waits used to have their results DISCARDED, so a window
+        // that never became visible cost 60s of silent waiting and then
+        // surfaced as `startup_second_gui_handoff_timeout` -- the launcher
+        // handoff is refused when no UI client is visible, one whole layer away
+        // from the actual problem. Assert the precondition where it is checked.
+        let window_wait = run_cli_output(
             smoke_address,
             smoke_workspace,
             smoke_settings,
@@ -224,7 +254,12 @@ fn entry() {
             "wait-ui", "--window-state", "restored",
             "--timeout-ms", "30000", "", ""
         );
-        run_cli_output(
+        test_harness::require(
+            window_wait.success != 0,
+            "startup_window_restored_wait:" + window_wait.stderr_text() +
+                window_wait.stdout_text()
+        );
+        let tab_wait = run_cli_output(
             smoke_address,
             smoke_workspace,
             smoke_settings,
@@ -232,6 +267,11 @@ fn entry() {
             cli_exe,
             "wait-ui", "-t", "0", "--tab-state", "running",
             "--timeout-ms", "30000"
+        );
+        test_harness::require(
+            tab_wait.success != 0,
+            "startup_tab_running_wait:" + tab_wait.stderr_text() +
+                tab_wait.stdout_text()
         );
         // Window title string on Child.platform_facts is not native-emitted yet;
         // first-window timing + wait-ui already prove the native window path.
@@ -248,10 +288,23 @@ fn entry() {
         second_command.capture_limit(262144);
         let second = second_command.start();
         owned_children.push(second);
-        let second_output = wait_for_exit(
-            second,
-            1000,
-            "startup_second_gui_handoff_timeout"
+        // A launcher that is refused says so on stderr and then opens its own
+        // window, i.e. it never exits. Read that reason instead of reporting a
+        // bare timeout: the bare version cost a full CI round trip per guess.
+        let handed_off = exited_within(second, 1000);
+        if handed_off == 0 {
+            let declined = read_until(
+                second.stderr,
+                "Launcher handoff declined",
+                1500
+            );
+            test_harness::require(
+                0,
+                "startup_second_gui_handoff_timeout:" + declined
+            );
+        }
+        let second_output = second.wait_with_output(
+            std::time::Duration::from_millis(2000)
         );
         test_harness::require(second_output.success != 0, "startup_second_gui_exit");
         let second_guidance = second_output.stderr_text();
