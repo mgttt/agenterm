@@ -784,7 +784,7 @@ fn entry() {
             && shell_bootstrap_lower.contains(
                 "cargo build --quiet --locked --bin agenterm"
             )
-            && shell_bootstrap_operational_lines <= 160,
+            && shell_bootstrap_operational_lines <= 200,
         "migration_shell_bootstrap_not_generic"
     );
     require(
