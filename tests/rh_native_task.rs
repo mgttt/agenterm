@@ -151,10 +151,9 @@ fn verify_docs_site_is_native_and_archives_interpreted_source() {
     let manifest = std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
     assert!(manifest.contains("\"entry\": \"scripts/rh/verify-docs-site.rh\""));
     assert!(!manifest.contains("\"entry\": \"scripts/rhai/verify-docs-site.rhai\""));
-    assert!(
-        repo.join("scripts/archive/rhai/verify-docs-site.rhai")
-            .is_file()
-    );
+    // See tests/rhai_migration.rs's matching comment: individually archived
+    // .rhai files were compacted into one tarball (b0045922).
+    assert!(repo.join("scripts/archive/rhai-old.tgz").is_file());
     assert!(!repo.join("scripts/rhai/verify-docs-site.rhai").exists());
 }
 
@@ -225,10 +224,9 @@ fn internal_version_policy_is_native_and_archives_interpreted_source() {
     let manifest = std::fs::read_to_string(repo.join("agenterm.tasks.json")).expect("manifest");
     assert!(manifest.contains("\"entry\": \"scripts/rh/internal-version-policy.rh\""));
     assert!(!manifest.contains("\"entry\": \"scripts/rhai/internal-version-policy.rhai\""));
-    assert!(
-        repo.join("scripts/archive/rhai/internal-version-policy.rhai")
-            .is_file()
-    );
+    // See tests/rhai_migration.rs's matching comment: individually archived
+    // .rhai files were compacted into one tarball (b0045922).
+    assert!(repo.join("scripts/archive/rhai-old.tgz").is_file());
     assert!(
         !repo
             .join("scripts/rhai/internal-version-policy.rhai")
