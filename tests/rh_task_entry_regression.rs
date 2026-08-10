@@ -1221,6 +1221,7 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
     assert!(source.contains("fn preserves_background("));
     assert!(!source.contains("control_center_macos_frontmost_unavailable"));
     assert!(!source.contains("PASS: macOS caller-selected UDS"));
+    assert!(source.contains("NO_ACTIVATE_BASELINE_UNAVAILABLE"));
     assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
     assert!(
         source.contains("for attempt in 0..600"),

@@ -319,8 +319,13 @@ fn preserves_background(child, previous) {
     let previous_id = 0 + previous;
     let facts = child.platform_facts;
     facts.top_level_window_present != 0
-        && facts.top_level_window_is_foreground == 0
-        && (previous_id == 0 || facts.foreground_window_id == previous_id)
+        && (
+            previous_id == 0
+                || (
+                    facts.top_level_window_is_foreground == 0
+                        && facts.foreground_window_id == previous_id
+                )
+        )
 }
 
 fn wait_child_foreground(child, previous, code) {
@@ -852,6 +857,13 @@ fn entry() {
                     control_center_pid: cc.id
                 })
         );
+        if foreground_before == 0 {
+            print(
+                "NO_ACTIVATE_BASELINE_UNAVAILABLE: runner exposed no " +
+                    "pre-existing foreground window; focus preservation " +
+                    "is not claimed for this journey"
+            );
+        }
         let png_sha256 = rh::crypto::sha256_file(cockpit_png);
         test_harness::require(
             capture.owner_pid == cc.id
