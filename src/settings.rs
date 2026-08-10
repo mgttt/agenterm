@@ -81,7 +81,7 @@ pub(crate) struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            terminal_font_family: "Consolas".to_owned(),
+            terminal_font_family: "Sarasa Fixed SC".to_owned(),
             terminal_font_size: default_terminal_font_size(),
             appearance_preset: AppearancePreset::classic_night(),
             locale: LocaleId::English,
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn missing_fields_receive_stable_defaults() {
         let config: AppConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(config.terminal_font_family, "Consolas");
+        assert_eq!(config.terminal_font_family, "Sarasa Fixed SC");
         assert_eq!(config.terminal_font_size, default_terminal_font_size());
         assert_eq!(config.appearance_preset, AppearancePreset::classic_night());
         assert_eq!(config.locale, LocaleId::English);
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn settings_round_trip_uses_stable_theme_id() {
         let config = AppConfig {
-            terminal_font_family: "Consolas".to_owned(),
+            terminal_font_family: "Sarasa Fixed SC".to_owned(),
             terminal_font_size: 13,
             appearance_preset: AppearancePreset::classic_day(),
             locale: LocaleId::TraditionalChinese,
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn terminal_overrides_merge_per_field_and_can_return_to_inheritance() {
         let mut config = AppConfig {
-            terminal_font_family: "Consolas".to_owned(),
+            terminal_font_family: "Sarasa Fixed SC".to_owned(),
             terminal_font_size: 12,
             appearance_preset: AppearancePreset::classic_night(),
             ..AppConfig::default()
@@ -425,7 +425,7 @@ mod tests {
         );
 
         let effective = config.effective_terminal_appearance("127.0.0.1:48815", Some("@7"));
-        assert_eq!(effective.terminal_font_family, "Consolas");
+        assert_eq!(effective.terminal_font_family, "Sarasa Fixed SC");
         assert_eq!(effective.terminal_font_size, 18);
         assert_eq!(effective.appearance_preset, AppearancePreset::classic_day());
         assert_eq!(

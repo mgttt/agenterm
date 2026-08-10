@@ -12,9 +12,23 @@ use crate::contract::font::{
 
 pub(crate) fn candidates() -> Vec<FontFileCandidate> {
     // Windows monospace font files. Ordered by preference; the first readable
-    // file wins. Cascadia Code ships on Windows 10+, Consolas on all supported
-    // versions. Paths are absolute and use backslashes on Windows.
+    // file wins. Sarasa Fixed SC is preferred for broad Chinese coverage,
+    // then Cascadia Code / Consolas for fallback. Paths are absolute and use
+    // backslashes on Windows.
     vec![
+        FontFileCandidate {
+            name: "Sarasa Fixed SC",
+            components: &["C:", "Windows", "Fonts", "sarasa-mono-sc-regular.ttf"],
+        },
+        FontFileCandidate {
+            name: "Sarasa Fixed SC",
+            components: &[
+                "C:",
+                "Windows",
+                "Fonts",
+                "sarasaMonoSC-Regular.ttf",
+            ],
+        },
         FontFileCandidate {
             name: "Cascadia Code",
             components: &["C:", "Windows", "Fonts", "cascadia.ttf"],
@@ -36,11 +50,11 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
 
 /// Fonts consulted only for glyphs the primary face does not have.
 ///
-/// The monospace faces above are Latin-only, so without this list a terminal
-/// on a Chinese/Japanese/Korean system renders CJK output as blank cells — the
-/// cell width is reserved but nothing is drawn. These are never chosen as the
-/// primary face (cell metrics must come from the monospace font), only asked
-/// for glyphs it is missing.
+/// The primary faces above are fixed-pitch and optimized for terminal metrics;
+/// without explicit coverage fallbacks, a CJK/Japanese/Korean terminal may render
+/// blank cells (width reserved, glyph absent). These are never chosen as the
+/// primary face (cell metrics must come from the monospace font); they are only
+/// used for missing glyphs.
 pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
     vec![
         FontFileCandidate {
@@ -87,7 +101,7 @@ pub(crate) fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
     // renderers). Cell width ≈ 0.55×height for typical monospace fonts.
     let h = f32::from(size_px);
     Ok(FontMetrics {
-        family: Some("Consolas"),
+        family: Some("Sarasa Fixed SC"),
         size_px,
         cell_width: (h * 0.55).round().max(1.0),
         cell_height: h,

@@ -1,17 +1,3 @@
-# Standalone by design, not a root-workspace member: `[workspace]` below is
-# an empty table so Cargo treats this directory as its own workspace root
-# instead of walking up to `D:\dev\agenterm\Cargo.toml` and erroring with
-# "current package believes it's in a workspace when it's not" (verified —
-# that is the real error hit before this table was added). Mirrors how
-# `agenterm-nativecore`/`agenterm-dynacore`/`agenterm-guestcore` are kept out
-# of the root workspace's `members` list (see `git log -- Cargo.toml`,
-# commit fef91b2d "cleanup: remove dynacore/nativecore integration" —
-# an active concurrent session removed those three from root `members` the
-# same day this crate was built). `wasmtime` is also a heavy dependency
-# tree; keeping it out of the root `Cargo.lock` avoids bloating every other
-# crate's build in this workspace.
-[workspace]
-
 [package]
 name = "agenterm-wasmcore"
 version = "0.1.0"

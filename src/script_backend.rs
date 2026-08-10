@@ -32,6 +32,8 @@ pub enum ScriptBackend {
     Qjs,
     #[cfg(feature = "script-sql")]
     Sql,
+    #[cfg(feature = "script-wasmcore")]
+    Wasmcore,
 }
 
 impl ScriptBackend {
@@ -50,6 +52,8 @@ impl ScriptBackend {
             Some("qjs") => Self::Qjs,
             #[cfg(feature = "script-sql")]
             Some("sql") => Self::Sql,
+            #[cfg(feature = "script-wasmcore")]
+            Some("wasmcore") | Some("wasm") => Self::Wasmcore,
             _ => Self::Rh,
         }
     }
@@ -63,6 +67,8 @@ impl ScriptBackend {
             Self::Qjs => "qjs",
             #[cfg(feature = "script-sql")]
             Self::Sql => "sql",
+            #[cfg(feature = "script-wasmcore")]
+            Self::Wasmcore => "wasmcore",
         }
     }
 
@@ -79,6 +85,10 @@ impl ScriptBackend {
         #[cfg(feature = "script-sql")]
         if path.ends_with(".sql") {
             return Self::Sql;
+        }
+        #[cfg(feature = "script-wasmcore")]
+        if path.ends_with(".wasm") {
+            return Self::Wasmcore;
         }
         if path.ends_with(".rh") {
             return Self::Rh;
@@ -430,5 +440,64 @@ mod tests {
     #[cfg(feature = "script-sql")]
     fn sql_backend_as_str() {
         assert_eq!(ScriptBackend::Sql.as_str(), "sql");
+    }
+
+    #[cfg(feature = "script-wasmcore")]
+    #[test]
+    fn wasmcore_backend_from_env() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "wasmcore");
+        }
+        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Wasmcore);
+
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[cfg(feature = "script-wasmcore")]
+    #[test]
+    fn wasmcore_backend_from_env_alias_wasm() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
+        unsafe {
+            std::env::set_var("AGENTERM_SCRIPT_BACKEND", "wasm");
+        }
+        assert_eq!(ScriptBackend::from_env(), ScriptBackend::Wasmcore);
+
+        match prior {
+            Some(value) => unsafe {
+                std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
+            },
+        }
+    }
+
+    #[cfg(feature = "script-wasmcore")]
+    #[test]
+    fn wasmcore_backend_from_entry_path() {
+        assert_eq!(
+            ScriptBackend::from_entry_path("scripts/wasm/test.wasm"),
+            ScriptBackend::Wasmcore
+        );
+        assert_eq!(
+            ScriptBackend::from_entry_path("test.rh"),
+            ScriptBackend::Rh
+        );
+    }
+
+    #[cfg(feature = "script-wasmcore")]
+    #[test]
+    fn wasmcore_backend_as_str() {
+        assert_eq!(ScriptBackend::Wasmcore.as_str(), "wasmcore");
     }
 }

@@ -687,9 +687,24 @@ fn execute_inner(
         );
     }
 
+    // wasmcore backend: enabled via AGENTERM_SCRIPT_BACKEND=wasmcore or `.wasm` entry.
+    #[cfg(all(not(test), feature = "script-wasmcore"))]
+    {
+        let engine = crate::script_engine::WasmcoreEngineBackend::default();
+        if engine.enabled() {
+            return dispatch_via_engine(
+                &engine,
+                invocation.operation,
+                &invocation.source,
+                &options,
+                fleet_bridge,
+            );
+        }
+    }
+
     Err(configuration_error(
         "script_backend_unavailable",
-        "no script backend handled this invocation; set AGENTERM_SCRIPT_BACKEND to rh, lua, qjs, or sql with matching source",
+        "no script backend handled this invocation; set AGENTERM_SCRIPT_BACKEND to rh, lua, qjs, sql, or wasmcore with matching source",
     ))
 }
 

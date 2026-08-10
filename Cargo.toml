@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql"]
+members = [".", "crates/agenterm-platform", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-wasmcore"]
 resolver = "2"
 
 [package]
@@ -32,6 +32,10 @@ default = []
 script-lua = ["agenterm-lua"]
 script-sql = ["agenterm-sql"]
 script-qjs = ["agenterm-qjs"]
+script-wasmcore = ["agenterm-wasmcore"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("agenterm-lua", "agenterm-qjs", "agenterm-sql", "agenterm-wasmcore", "default", "script-lua", "script-qjs", "script-sql", "script-wasmcore"))'] }
 
 [dependencies]
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
@@ -39,6 +43,7 @@ agenterm-rh = { path = "crates/agenterm-rh" }
 agenterm-lua = { path = "crates/agenterm-lua", optional = true }
 agenterm-qjs = { path = "crates/agenterm-qjs", optional = true }
 agenterm-sql = { path = "crates/agenterm-sql", optional = true }
+agenterm-wasmcore = { path = "crates/agenterm-wasmcore", optional = true }
 ab_glyph = "0.2.32"
 anyhow = "1"
 png = "0.17"

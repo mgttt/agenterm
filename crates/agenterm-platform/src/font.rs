@@ -34,10 +34,10 @@ pub fn candidates() -> Vec<FontFileCandidate> {
 
 /// Faces consulted only for glyphs the primary font lacks.
 ///
-/// The primary candidates are monospace Latin faces, which is right for cell
-/// metrics and wrong for coverage: without a fallback chain a terminal renders
-/// CJK and emoji as blank cells — the width is reserved, nothing is drawn.
-/// These are never selected as the primary face.
+/// The primary candidates are fixed-pitch monospace faces for stable cell metrics.
+/// Without coverage fallbacks, CJK and emoji can still render as blank cells
+/// (cell width reserved, glyphs missing). These are never selected as the
+/// primary face.
 pub fn fallback_candidates() -> Vec<FontFileCandidate> {
     selected::font::fallback_candidates()
 }

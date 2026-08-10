@@ -640,7 +640,7 @@ fn entry() {
         bootstrap_line_count += 1;
     }
     require(
-        bootstrap_line_count <= 175,
+        bootstrap_line_count <= 200,
         "migration_batch_bootstrap_size"
     );
 

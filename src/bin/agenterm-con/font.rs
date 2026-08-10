@@ -212,8 +212,8 @@ fn load_faces() -> Vec<Face> {
     // Coverage fallbacks are additive: every one that loads joins the chain,
     // because `raster_uncached` walks it until a face actually has the glyph.
     // Stopping at the first (as this function used to, for the primary list)
-    // is what made CJK render as blank cells — Consolas has no Han glyphs and
-    // nothing else was ever consulted.
+    // is what made CJK render as blank cells when the chosen primary face had
+    // no Han glyph coverage and no fallback was consulted.
     for candidate in agenterm_platform::font::fallback_candidates() {
         push_faces(&mut faces, candidate);
     }

@@ -374,7 +374,7 @@ mod tests {
 
     fn appearance() -> EffectiveTerminalAppearance {
         EffectiveTerminalAppearance {
-            terminal_font_family: "Consolas".to_owned(),
+            terminal_font_family: "Sarasa Fixed SC".to_owned(),
             terminal_font_size: 14,
             appearance_preset: AppearancePreset::classic_night(),
         }
@@ -398,7 +398,7 @@ mod tests {
         dialog.open(appearance(), None, TerminalAppearanceOverride::default());
         assert!(dialog.is_open());
         assert_eq!(dialog.scope(), SettingsScope::Defaults);
-        assert_eq!(dialog.font_family_draft(), "Consolas");
+        assert_eq!(dialog.font_family_draft(), "Sarasa Fixed SC");
         assert_eq!(dialog.font_size_draft(), "14");
         assert_eq!(dialog.preset_draft(), AppearancePreset::classic_night());
     }
@@ -441,7 +441,7 @@ mod tests {
             default.clone(),
             Some("@1".to_owned()),
             TerminalAppearanceOverride {
-                terminal_font_family: Some("Consolas".to_owned()),
+                terminal_font_family: Some("Sarasa Fixed SC".to_owned()),
                 terminal_font_size: None,
                 appearance_preset: Some(AppearancePreset::classic_night()),
             },
@@ -453,7 +453,7 @@ mod tests {
         dialog
             .switch_scope(SettingsScope::Defaults)
             .expect("switch back");
-        assert_eq!(dialog.font_family_draft(), "Consolas");
+        assert_eq!(dialog.font_family_draft(), "Sarasa Fixed SC");
         dialog
             .switch_scope(SettingsScope::CurrentTerminal)
             .expect("switch");
@@ -502,7 +502,7 @@ mod tests {
             .expect("switch");
         assert_eq!(dialog.font_family_draft(), "Cascadia Mono");
         assert!(dialog.reset_overrides());
-        assert_eq!(dialog.font_family_draft(), "Consolas");
+        assert_eq!(dialog.font_family_draft(), "Sarasa Fixed SC");
         assert_eq!(dialog.font_size_draft(), "14");
         assert_eq!(dialog.preset_draft(), AppearancePreset::classic_night());
     }

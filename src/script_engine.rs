@@ -464,6 +464,79 @@ impl ScriptEngineBackend for SqlEngineBackend {
     }
 }
 
+/// wasmcore engine adapter. Loads a `.wasm` file (source is the file path),
+/// JIT-compiles it via Cranelift, and runs it with the shared fleet bridge.
+///
+/// `check` validates the WASM binary via `wasmtime::Module::validate_binary`;
+/// `execute` calls `WasmCoreHost::run_module` with a `WasmFleetBridgeFn`
+/// passthrough (identical shape to `ScriptFleetBridgeFn` — zero-cost re-wrap).
+#[cfg(feature = "script-wasmcore")]
+pub struct WasmcoreEngineBackend {
+    host: agenterm_wasmcore::WasmCoreHost,
+}
+
+#[cfg(feature = "script-wasmcore")]
+impl Default for WasmcoreEngineBackend {
+    fn default() -> Self {
+        Self {
+            host: agenterm_wasmcore::WasmCoreHost::new(),
+        }
+    }
+}
+
+#[cfg(feature = "script-wasmcore")]
+impl ScriptEngineBackend for WasmcoreEngineBackend {
+    fn backend_id(&self) -> ScriptBackend {
+        ScriptBackend::Wasmcore
+    }
+
+    fn entry_extensions(&self) -> &'static [&'static str] {
+        &["wasm"]
+    }
+
+    fn check(
+        &self,
+        source: &str,
+        _options: &ScriptInvocationOptions,
+    ) -> Result<(), ScriptEngineError> {
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
+        }
+
+        let wasm_bytes = std::fs::read(source)
+            .map_err(|e| format!("reading wasm file {source}: {e}"))?;
+        agenterm_wasmcore::WasmCoreHost::validate_binary(&self.host, &wasm_bytes)
+            .map_err(|e| format!("wasm validation: {e}"))
+    }
+
+    fn execute(
+        &self,
+        source: &str,
+        _options: &ScriptInvocationOptions,
+        fleet_bridge: Option<ScriptFleetBridgeFn>,
+    ) -> Result<ScriptInvocationResult, ScriptEngineError> {
+        if !self.enabled() {
+            return Err(not_enabled_error(self.backend_id()));
+        }
+
+        let wasm_bridge: Option<agenterm_wasmcore::WasmFleetBridgeFn> =
+            fleet_bridge.map(|bridge| {
+                let arc: agenterm_wasmcore::WasmFleetBridgeFn = bridge;
+                arc
+            });
+
+        let result = self
+            .host
+            .run_module(source, wasm_bridge)
+            .map_err(|e| format!("wasm execution: {e}"))?;
+
+        Ok(ScriptInvocationResult {
+            stdout: result.stdout,
+            value: None,
+        })
+    }
+}
+
 // ---------------------------------------------------------------------
 // §2.4 — enum static dispatch
 // ---------------------------------------------------------------------
@@ -480,6 +553,8 @@ pub enum ScriptEngine {
     Qjs(QjsEngineBackend),
     #[cfg(feature = "script-sql")]
     Sql(SqlEngineBackend),
+    #[cfg(feature = "script-wasmcore")]
+    Wasmcore(WasmcoreEngineBackend),
 }
 
 impl ScriptEngine {
@@ -492,6 +567,8 @@ impl ScriptEngine {
         engines.push(Self::Lua(LuaEngineBackend));
         #[cfg(feature = "script-sql")]
         engines.push(Self::Sql(SqlEngineBackend));
+        #[cfg(feature = "script-wasmcore")]
+        engines.push(Self::Wasmcore(WasmcoreEngineBackend::default()));
         engines
     }
 
@@ -505,6 +582,8 @@ impl ScriptEngine {
             ScriptBackend::Qjs => Self::Qjs(QjsEngineBackend),
             #[cfg(feature = "script-sql")]
             ScriptBackend::Sql => Self::Sql(SqlEngineBackend),
+            #[cfg(feature = "script-wasmcore")]
+            ScriptBackend::Wasmcore => Self::Wasmcore(WasmcoreEngineBackend::default()),
         }
     }
 }
@@ -525,6 +604,8 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Qjs(backend) => backend.backend_id(),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.backend_id(),
+            #[cfg(feature = "script-wasmcore")]
+            Self::Wasmcore(backend) => backend.backend_id(),
         }
     }
 
@@ -537,6 +618,8 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Qjs(backend) => backend.entry_extensions(),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.entry_extensions(),
+            #[cfg(feature = "script-wasmcore")]
+            Self::Wasmcore(backend) => backend.entry_extensions(),
         }
     }
 
@@ -553,6 +636,8 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Qjs(backend) => backend.check(source, options),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.check(source, options),
+            #[cfg(feature = "script-wasmcore")]
+            Self::Wasmcore(backend) => backend.check(source, options),
         }
     }
 
@@ -570,6 +655,8 @@ impl ScriptEngineBackend for ScriptEngine {
             Self::Qjs(backend) => backend.execute(source, options, fleet_bridge),
             #[cfg(feature = "script-sql")]
             Self::Sql(backend) => backend.execute(source, options, fleet_bridge),
+            #[cfg(feature = "script-wasmcore")]
+            Self::Wasmcore(backend) => backend.execute(source, options, fleet_bridge),
         }
     }
 }
