@@ -2,12 +2,15 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use agenterm_rh::{
     RH_CODEGEN_REVISION, RH_HOST_API_VERSION, RhError, RhPack, bundle_project_source,
 };
 
 static SOURCE_CACHE: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
+static SOURCE_BUILD_LOCK: Mutex<()> = Mutex::new(());
+static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn cache_key(source: &str) -> String {
     format!(
@@ -45,30 +48,74 @@ pub fn compile_source_to_cache_with_project(
         return Ok(path);
     }
 
-    let dir = std::env::temp_dir().join(format!("agenterm-rh-src-{key}"));
-    if dir.is_dir() {
-        if RhPack::load(&dir).is_ok() {
-            *SOURCE_CACHE.lock().expect("lock") = Some((key.clone(), dir.clone()));
-            return Ok(dir);
-        }
-        let _ = std::fs::remove_dir_all(&dir);
+    let _build_guard = SOURCE_BUILD_LOCK.lock().expect("lock");
+    if let Some((cached_key, path)) = SOURCE_CACHE.lock().expect("lock").clone()
+        && cached_key == key
+        && path.is_dir()
+    {
+        return Ok(path);
     }
-    if let Err(error) = agenterm_rh::build_pack_dir(&bundled, &dir) {
-        if bundled != source && project_root.is_some() && source.contains("import ") {
-            let fallback_key = cache_key(source);
-            let fallback_dir = std::env::temp_dir().join(format!("agenterm-rh-src-{fallback_key}"));
-            if fallback_dir.is_dir() && RhPack::load(&fallback_dir).is_ok() {
-                *SOURCE_CACHE.lock().expect("lock") = Some((fallback_key, fallback_dir.clone()));
-                return Ok(fallback_dir);
-            }
-            let _ = std::fs::remove_dir_all(&fallback_dir);
-            agenterm_rh::build_pack_dir(source, &fallback_dir)?;
-            *SOURCE_CACHE.lock().expect("lock") = Some((fallback_key, fallback_dir.clone()));
-            return Ok(fallback_dir);
+
+    match build_or_load_immutable_pack(&bundled, &key) {
+        Ok(dir) => {
+            *SOURCE_CACHE.lock().expect("lock") = Some((key, dir.clone()));
+            Ok(dir)
         }
+        Err(_error)
+            if bundled != source && project_root.is_some() && source.contains("import ") =>
+        {
+            let fallback_key = cache_key(source);
+            let fallback_dir = build_or_load_immutable_pack(source, &fallback_key)?;
+            *SOURCE_CACHE.lock().expect("lock") = Some((fallback_key, fallback_dir.clone()));
+            Ok(fallback_dir)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn build_or_load_immutable_pack(source: &str, key: &str) -> Result<PathBuf, RhError> {
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-src-{key}"));
+    if dir.is_dir() && RhPack::load(&dir).is_ok() {
+        return Ok(dir);
+    }
+    if dir.exists() {
+        if dir.is_dir() {
+            std::fs::remove_dir_all(&dir).map_err(|error| RhError::Compile(error.to_string()))?;
+        } else {
+            std::fs::remove_file(&dir).map_err(|error| RhError::Compile(error.to_string()))?;
+        }
+    }
+
+    let sequence = STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let staging = std::env::temp_dir().join(format!(
+        "agenterm-rh-src-{key}.staging-{}-{sequence}",
+        std::process::id()
+    ));
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    if let Err(error) = agenterm_rh::build_pack_dir(source, &staging) {
+        let _ = std::fs::remove_dir_all(&staging);
         return Err(error);
     }
-    *SOURCE_CACHE.lock().expect("lock") = Some((key, dir.clone()));
+
+    match std::fs::rename(&staging, &dir) {
+        Ok(()) => {}
+        Err(_error) if dir.is_dir() && RhPack::load(&dir).is_ok() => {
+            // Another process won the same immutable source-key publication.
+            // Its complete pack is byte-equivalent; discard only our staging.
+            let _ = std::fs::remove_dir_all(&staging);
+        }
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(RhError::Compile(format!(
+                "publishing rh source cache {}: {error}",
+                dir.display()
+            )));
+        }
+    }
+
+    RhPack::load(&dir)?;
     Ok(dir)
 }
 
