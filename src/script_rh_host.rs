@@ -213,6 +213,11 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
             }
         }
         agenterm_rh::RH_HOST_UTILITY_PRINT => {
+            if std::env::var_os("AGENTERM_SCRIPT_WORKER_STDERR")
+                .is_some_and(|value| value == "inherit")
+            {
+                eprintln!("{input}");
+            }
             if let Some(capture) = crate::script_rh_run::current_run_context()
                 .and_then(|context| context.output_capture)
             {
