@@ -1231,6 +1231,15 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
     assert!(source.contains("tests/fixtures/incompatible_ipc_peer.rs"));
     assert!(!source.contains("std::net::TcpListener::bind"));
     assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
+    assert_eq!(
+        source.matches("cc.window_key(\"Enter\")").count(),
+        1,
+        "the macOS lifecycle smoke must not relabel a second keyboard journey as pointer evidence"
+    );
+    assert!(
+        !source.contains("NATIVE_POINTER_"),
+        "macOS background pointer Unsupported is owned by the platform contract"
+    );
     assert!(
         source.contains("for attempt in 0..600"),
         "macOS cold-start protocol readiness must retain its bounded ARM runner budget"

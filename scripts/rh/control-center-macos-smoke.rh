@@ -28,17 +28,6 @@ fn registry_owner_pid(registry) {
     0 + record.pid
 }
 
-fn tab_id_at_index(tabs, target_index) {
-    let index = 0;
-    for tab in tabs {
-        if index == target_index {
-            return "" + tab.id;
-        }
-        index = index + 1;
-    }
-    throw "control_center_macos_tab_id_at_index_missing";
-}
-
 fn find_tab_index(tabs, wanted_tab_id) {
     let wanted = "" + wanted_tab_id;
     let index = 0;
@@ -920,28 +909,6 @@ fn entry() {
                 && baseline_tab != native_input_tab,
             "control_center_macos_native_input_targets_not_live"
         );
-        let tab_count = 0 + selected.connected_server.tabs.len;
-        let visible_start = 0;
-        if native_input_index > 0 {
-            visible_start = native_input_index - 1;
-        }
-        let maximum_start = 0;
-        if tab_count > 3 {
-            maximum_start = tab_count - 3;
-        }
-        if visible_start > maximum_start {
-            visible_start = maximum_start;
-        }
-        let pointer_index = visible_start;
-        test_harness::require(
-            pointer_index != native_input_index
-                && pointer_index < tab_count,
-            "control_center_macos_native_pointer_target_not_visible"
-        );
-        let pointer_target = tab_id_at_index(
-            selected.connected_server.tabs,
-            pointer_index
-        );
         let input_baseline = json_command(
             context,
             control_center,
@@ -981,70 +948,6 @@ fn entry() {
                 selected_epoch,
                 "control_center_macos_native_keyboard_navigation"
             );
-            let pointer_failure = "";
-            try {
-                cc.window_key("Home");
-                for step in 0..pointer_index {
-                    cc.window_key("Down");
-                }
-                cc.window_key("Enter");
-            } catch (error) {
-                pointer_failure = catch_text(error);
-            }
-            if pointer_failure == "" {
-                let pointer_selected = wait_active_tab(
-                    context,
-                    control_center,
-                    registry,
-                    runtime,
-                    cc,
-                    pointer_target,
-                    server.id,
-                    selected_epoch,
-                    "control_center_macos_native_pointer_navigation"
-                );
-                test_harness::require(
-                    pointer_selected.connected_server.active_tab_id
-                            == pointer_target
-                        && pointer_selected.connected_server.pid == server.id
-                        && pointer_selected.connected_server.epoch == selected_epoch
-                        && pointer_selected.connected_server.endpoint
-                            == protocol.endpoint,
-                    "control_center_macos_native_pointer_navigation_truth"
-                );
-                print(
-                    "NATIVE_POINTER_POSITIVE: bounded pointer navigation " +
-                        "changed only active_tab"
-                );
-            } else {
-                test_harness::require(
-                    pointer_failure.contains("process_window_input_unsupported")
-                        && pointer_failure.contains("unsupported")
-                        && pointer_failure.contains("platform_error") == 0,
-                    "control_center_macos_native_pointer_unexpected_failure:" +
-                        pointer_failure
-                );
-                let pointer_unchanged = json_command(
-                    context,
-                    control_center,
-                    registry,
-                    runtime,
-                    ["snapshot", "--json", "--instance", "dev"]
-                );
-                test_harness::require(
-                    pointer_unchanged.connected_server.active_tab_id
-                            == native_input_tab
-                        && pointer_unchanged.connected_server.pid == server.id
-                        && pointer_unchanged.connected_server.epoch == selected_epoch
-                        && pointer_unchanged.connected_server.endpoint
-                            == protocol.endpoint,
-                    "control_center_macos_native_pointer_unsupported_changed_state"
-                );
-                print(
-                    "NATIVE_POINTER_UNAVAILABLE: process-targeted background " +
-                        "pointer delivery is typed Unsupported"
-                );
-            }
             test_harness::require(
                 keyboard_selected.connected_server.active_tab_id
                         == native_input_tab
