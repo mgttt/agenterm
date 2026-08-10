@@ -172,8 +172,8 @@ that seed fails, so broken product source cannot destroy the recovery runtime.
 There is no standalone `agenterm-rh` bootstrap or second shell-owned build
 policy.
 
-- `dist/agenterm.exe` — GUI application; `agenterm server` starts the headless
-  authority as a separate process of the same PE. `agenterm rh|lua|qjs|sql`
+- `dist/agenterm.exe` — GUI application and agenterm cli entry; `agenterm
+  server` starts the headless authority as a separate process of the same PE. `agenterm rh|lua|qjs|sql`
   are argv-transparent subcommand aliases for the four script engines (native
   `.rh` task/worker CLI: live automation under `scripts/rh/`; archived Rhai
   under `scripts/archive/rhai/`) — the standalone `agenterm-rh.exe` /
@@ -182,9 +182,10 @@ policy.
 - `dist/agenterm-cc.exe` — isolated Control Center projection; informational
   commands include `--help`, `--version`, `capabilities --json`, and
   `snapshot --json`.
-- `dist/agenterm.com` — minimal Windows Console-subsystem forwarder. Windows
-  command resolution selects it for extensionless `agenterm cli` and
-  `agenterm tui`, while all behavior remains implemented by `agenterm.exe`.
+- `dist/agenterm.com` — synchronous CUI and TUI forwarder to agenterm.exe: a
+  minimal Windows Console-subsystem PE. Windows command resolution selects it
+  for extensionless `agenterm cli` and `agenterm tui`, while all behavior
+  remains implemented by `agenterm.exe`.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
