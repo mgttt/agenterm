@@ -1185,6 +1185,8 @@ mod tests {
         expected.push(ScriptBackend::Lua);
         #[cfg(feature = "script-sql")]
         expected.push(ScriptBackend::Sql);
+        #[cfg(feature = "script-wasmcore")]
+        expected.push(ScriptBackend::Wasmcore);
         assert_eq!(ids, expected);
     }
 
