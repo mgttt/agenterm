@@ -1947,7 +1947,9 @@ ordinary = run_gate(
         worker,
         manifest,
         "supply-chain",
-        60000,
+        // 60s could not cover its own `cargo metadata` child budget once the
+        // cargo package lock was contended; the manifest budget is 300s.
+        180000,
         two_task_extra(
             repo,
             std::path::join(

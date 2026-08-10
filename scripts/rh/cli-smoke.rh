@@ -15,12 +15,15 @@ fn null_json() {
     rh::json::parse("null")
 }
 
+// The null sentinel is the whole contract here: every lookup helper below
+// returns `rh::json::parse("null")` when it finds nothing. This used to also
+// probe `value.kind` and test `type_of(marker) == "()"`, which is interpreter
+// thinking -- in a native pack a missing JSON path is not `()`, it is a
+// fail-return (`json_path: kind`) that aborts the task. That made this smoke
+// unable to pass as a native pack at all.
 fn json_is_present(value) {
-    let marker = value.kind;
-    if type_of(marker) == "()" {
-        return 0;
-    }
-    if value == null_json() {
+    let text = rh::json::stringify(value);
+    if text == "null" {
         0
     } else {
         1
@@ -79,8 +82,14 @@ fn wait_sidebar_snapshot(context, cli, configured_width) {
     json(context, cli, ["ui-snapshot"])
 }
 
+// Both call sites pass CLI arguments (`--address ... ui-action ...`), so this
+// must go through the `cli` verb. With the raw `configured_command` the target
+// binary is the GUI launcher, which answers CLI arguments with entry-point
+// guidance -- the assertions here were checking that guidance text, not the
+// operation validation they name. The verb became mandatory when the standalone
+// CLI binary was folded into `agenterm cli`.
 fn direct(context, program, arguments, expected_failure) {
-    let command = test_harness::configured_command(
+    let command = test_harness::configured_cli_command(
         context,
         program,
         arguments
@@ -117,7 +126,11 @@ fn tab_by_name(tab_entries, name) {
         if ("" + tab.name) == wanted {
             return tab;
         }
-        if json_is_present(tab.title) != 0 {
+        // `json_is_present(tab.title)` cannot guard anything in a native pack:
+        // the argument is evaluated BEFORE the call, and a missing JSON path is
+        // a fail-return, so the guard aborted the task instead of skipping the
+        // entry. Ask the object for the key instead.
+        if tab.contains("title") {
             if ("" + tab.title) == wanted {
                 return tab;
             }
@@ -586,12 +599,22 @@ try {
                 "cli_smoke_composer_byte_identity"
             );
         }
-        let working_context = "" + tab.working_context;
-        test_harness::require(
-            working_context.contains("http_proxy") == 0
-                && working_context.contains("https_proxy") == 0,
-            "cli_smoke_proxy_value_disclosed"
-        );
+        // The contract is "if the snapshot exposes a working context, it must
+        // not leak proxy values" -- so it applies only to tabs that carry the
+        // field. Two native-pack corrections: reading an absent path is a
+        // fail-return, and `working_context` is an OBJECT, so asking for a
+        // string at that path fails too (`json_string_path: working_context`).
+        // Serializing it also widens the check to nested fields such as
+        // `working_context.cwd`, which the string coercion never reached.
+        if tab.contains("working_context") {
+            let working_context_value = tab.working_context;
+            let working_context = rh::json::stringify(working_context_value);
+            test_harness::require(
+                working_context.contains("http_proxy") == 0
+                    && working_context.contains("https_proxy") == 0,
+                "cli_smoke_proxy_value_disclosed"
+            );
+        }
     }
     test_harness::emit_evidence(
         context,
@@ -1000,8 +1023,18 @@ try {
             "--after", width_after_sequence
         ]
     );
-    let width_event =
-        event_by_kind(width_events.events, "layout.tabs.width");
+    // Take the LAST width event, not the first: the loop above walks 250 (the
+    // default) -> 180 -> 480, so two `layout.tabs.width` events are committed
+    // and `event_by_kind`'s first match is the 180 one, which can never satisfy
+    // an assertion about the width just set. Inlined rather than added as a
+    // helper -- a new local function here perturbs the transpiler's return-kind
+    // fixpoint and breaks native emit of `json()` above.
+    let width_event = null_json();
+    for candidate in width_events.events {
+        if ("" + candidate.kind) == "layout.tabs.width" {
+            width_event = candidate;
+        }
+    }
     let width_operation_id = "" + width_event.payload.operation_id;
     test_harness::require(
         json_is_present(width_event)

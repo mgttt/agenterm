@@ -97,13 +97,18 @@ fn entry() {
             "metadata", "--locked", "--format-version", "1",
             "--manifest-path", manifest_path
         ],
-        45000,
+        // `cargo metadata --locked` does not resolve, but it still takes the
+        // cargo package lock, and this gate runs in a chain where clippy and the
+        // unit tests hold it. 45s was tight enough that a cold Windows runner
+        // blew the child deadline (`process_timeout`) instead of reporting a
+        // supply-chain problem.
+        120000,
         metadata_path,
         #{ current_dir: repo }
     );
     require(
         metadata_code == 0,
-        "supply_chain_cargo_metadata"
+        "supply_chain_cargo_metadata:exit=" + metadata_code
     );
     let metadata = rh::json::parse_file(metadata_path);
     std::fs::try_remove_file(metadata_path);
