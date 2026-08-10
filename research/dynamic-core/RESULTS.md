@@ -1,6 +1,6 @@
 # Dynamic-core experiment — RESULTS
 
-Decisive experiment for `plan/design-dynamic-core-experiment.md`: **does the dynamic
+Decisive experiment for `plan/archive/design-dynamic-core-experiment.md`: **does the dynamic
 core want 1 layer or 2?** Measured, not argued. Clean-room; no prior implementation
 was consulted.
 

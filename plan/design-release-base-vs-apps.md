@@ -74,7 +74,7 @@
 | `app.control-center-web` | WebView 壳 + `assets/`（research → 可选 App） | host ~521KiB 级 + assets | 高（UI 壳） |
 | `app.llm-gateway` | `agenterm-llm-gateway` + browser worker | 独立预算 | 中（Native Shell） |
 | `app.llm-gateway-pack` | Rhai Logic Pack | 小（KiB–MiB） | **很高**（站点适配） |
-| `app.agenterm-rhai`（讨论） | 统一 Rhai 产品层 `.agp` | 中 | 高；见 `plan/agenterm-rhai-app.md` |
+| `app.agenterm`（v0.1.18 起） | 一份跨 OS/ISA 的 QJS 产品层 `.agp` | 小–中 | 高；见 `plan/plan-v0.1.18.md` |
 | `app.skins-builtin` | 四预设皮肤 | 小 | 低 |
 | （远期）`app.softmgr-ui` | 包管理 UI | TBD | 低 |
 
@@ -104,13 +104,13 @@ Logic Pack **不**进 Candidate 六平台 PE 矩阵；走 **pack 签名 + hash**
 | **Base** | 五/六个核心 PE + 文档 | 只要终端 + 自动化 |
 | **Base + CC** | Base + `app.control-center` | 默认推荐（仍可选） |
 | **Full Desktop** | Base + CC + LLM Gateway + builtin packs + skins | 超控/Agent 工作流 |
-| **App-only update** | 单个 `.agp`（仅 CC 或仅 pack） | 已装 Base 的用户 |
+| **App-only update** | 单个 portable `.agp`；不重编 Base | 已装兼容 Base 的用户 |
 
 命名示例（远期）：
 
 ```text
 agenterm-base-0.1.15-win-x64.zip
-agenterm-app-cc-0.2.0-win-x64.agp
+agenterm-app-0.2.0.agp
 agenterm-app-llm-pack-2026.08.06.1.agp
 ```
 

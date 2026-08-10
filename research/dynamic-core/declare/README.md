@@ -6,7 +6,7 @@ Windows/x86_64: **只能烤但可检测** — you still cannot *query* the true 
 `offsetof` oracle), but a wrong bake is **detectable** for every layout fact that
 participates in a semantic round-trip, using only ③ `sym` + ④ `call`, at **+0 kernel bytes**.
 
-- Spec: [`plan/design-declare-detection-experiment.md`](../../../plan/design-declare-detection-experiment.md)
+- Spec: [`plan/archive/design-declare-detection-experiment.md`](../../../plan/archive/design-declare-detection-experiment.md)
 - Results (numbers, decision trace, deviations): [`RESULTS.md`](./RESULTS.md)
 
 ## Reproduce

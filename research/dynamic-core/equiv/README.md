@@ -1,6 +1,6 @@
 # Equivalence-invariant experiment (Q4)
 
-Implements [`plan/design-equivalence-invariant-experiment.md`](../../../plan/design-equivalence-invariant-experiment.md):
+Implements [`plan/archive/design-equivalence-invariant-experiment.md`](../../../plan/archive/design-equivalence-invariant-experiment.md):
 **can "one neutral IR, lowered by two independent paths, must be behaviourally
 equivalent" be made a STRUCTURAL invariant — a violation blocks producing runnable
 bytes — rather than a forgettable after-the-fact check? At what cost and coverage?**

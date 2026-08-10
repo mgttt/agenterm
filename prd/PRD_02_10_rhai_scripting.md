@@ -47,23 +47,15 @@ position" below). Four engines, in lineage order:
   2026-08-07 (commit `8b3764f5` and follow-ups). Not built by the same agent
   driving this PRD file — tracked here for cross-session awareness, see
   `plan/plan-v0.1.16.md` §1 "Rh. 脚本引擎矩阵".
-- **qjs — `agenterm-qjs`, capability-aligned with rh, QuickJS-based (in
-  progress).** New sibling engine using `rquickjs` (bundled quickjs-ng C
-  source) as the binding. QJS-M0 (skeleton + minimal eval, `140a9152`) and
-  QJS-M1 (`check`/`eval`/`check-many` CLI verbs field-for-field aligned
-  with rh's contract, `cc7df9df`) shipped 2026-08-07, followed by root-
-  workspace integration (`d5ac9a8a`, mirrors rh's `[[bin]]`-in-root-package
-  shape). QJS-M2 in progress (`e50fbbf8`, 2026-08-08): `__host` function
-  binding (`fleet_call`/`args_len`/`arg`/`print`) deliberately matches
-  `agenterm_lua::LuaHostFunctions`'s shape/naming rather than inventing a
-  qjs-specific convention, and `scripts/qjs/lib/fleet.js` is a near-line-
-  for-line port of `scripts/lua/lib/fleet.lua` — proven end-to-end against
-  the real file. A real memory-safety bug (GC-uncollectable reference
-  cycle from capturing `Ctx` in a bound closure, crashed the process) was
-  found and fixed along the way — see the "Thread/concurrency model
-  mismatch" risk entry below. Still open: `agenterm::script_backend`
-  wiring and `task`/`run`/`pack`/`qualify` verbs. Open risks and remaining
-  milestones: see "Future" § **qjs execution backend** below.
+- **qjs — `agenterm-qjs`, capability-aligned with rh, QuickJS-based
+  (partial; product App host planned).** QJS-M0–M5d delivered the engine,
+  host bridge, CLI/check-many/pack paths, module work and shared cross-engine
+  support; the old M2-era “backend/task/run/pack all open” description is no
+  longer authoritative. A real memory-safety bug (a GC-uncollectable cycle
+  from capturing `Ctx` in a bound closure) was found and fixed during that
+  work. Remaining App-host work is owned by `plan/plan-v0.1.18.md`: QJS-M6
+  literal operation validation, six-target Base adoption, long-lived
+  Runtime/Context, interrupt/dirty reload and deterministic `.agp` lifecycle.
 
 "Capability alignment" between rh/lua/qjs means: same L2 facade/catalog
 surface, same CLI verb contract (check/eval/pack/check-many/task — see rh's
@@ -1061,22 +1053,24 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
   dependency-declaration schema).
   - **Base runtime** — stable PE family (`agenterm`, `agenterm-rh`, …):
     host Facade, broker, supervision, qualification; rebases rarely
-  - **Application layer** — signed **rh pack** (native artifact + manifest;
-    future Logic Pack / gateway pack): load in-process via `script_rh_pack`,
-    hot-swappable without rebuilding the base PE
-  - Control Center, gateway sidecar, and task runners consume the same host
-    C ABI (`rh_register_host_v2`, `rh_host_eval`, fleet shim)
-- [~] **qjs execution backend** (`crates/agenterm-qjs`, in progress,
-  capability parity with rh): QJS-M0 (skeleton + `rquickjs` binding +
-  minimal eval, `140a9152`), QJS-M1 (`check`/`eval`/`check-many` CLI verb
-  parity, `cc7df9df`), root-workspace integration (`d5ac9a8a`, same
-  `[[bin]]`-in-root-package shape as rh), and the QJS-M2 host-binding layer
-  (`__host.fleet_call`/`args_len`/`arg`/`print` matching
-  `agenterm_lua::LuaHostFunctions`'s shape + a near-line-for-line
-  `scripts/qjs/lib/fleet.js` port of `scripts/lua/lib/fleet.lua`,
-  `e50fbbf8`) are shipped; see "Script engine family" above and
-  `plan/plan-v0.1.16.md` §1 QJS-M0/M1/M2. `agenterm::script_backend`
-  wiring and `task`/`run`/`pack`/`qualify` remain open (QJS-M2 continues).
+  - **Application layer (planned v0.1.18+)** — one portable QJS source pack
+    (`agenterm.app` / `.agp`) loaded by a narrow, versioned App Host ABI;
+    the same pack bytes are consumed by all six Base targets and App-only
+    delivery does not rebuild the Base. Rh native packs remain Build/CI and
+    general automation artifacts, not the product App portability fallback.
+    Current execution plan: [`plan/plan-v0.1.18.md`](../plan/plan-v0.1.18.md).
+  - Control Center remains a separate PE and will obtain cacheable static App
+    semantics from the server's single Engine over IPC; PTY/parser/render/Fleet
+    authority remain native. Phase 0 does not yet migrate real CC behavior.
+- [~] **qjs execution backend** (`crates/agenterm-qjs`): QJS-M0–M5d and the
+  shared cross-engine CLI/check-many/pack support are present; the earlier
+  M2-era statement that backend/task/run/pack wiring remained wholly open is
+  obsolete. Remaining product-App work is explicit: QJS-M6 literal operation
+  validation against the versioned App Host ABI/actually exposed operation
+  subset, six-target default-host adoption measurements, a long-lived
+  Runtime/Context, named exports, interrupt/dirty reload, and deterministic
+  `.agp` lifecycle. None of those planned v0.1.18 leaves is shipped merely
+  because one-shot QJS CLI/pack support exists.
   Open risk
   questions recorded here so they aren't silently assumed away by "it built
   and evaluated `1+2`" — none are blocking QJS-M0, all should be resolved

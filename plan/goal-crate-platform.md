@@ -132,6 +132,6 @@
 
 ## 备注（给人看，不进 agent 强制正文）
 
-- 与 [`goal-cli-input-parity.md`](goal-cli-input-parity.md) 互补：那边偏 CLI `ui-input` 像素原语；**本文件偏 crate 边界 + 机制漏点 + catalog 闸**。
+- 与已归档的 [`archive/goal-cli-input-parity.md`](archive/goal-cli-input-parity.md) 互补：历史 goal 偏 CLI `ui-input` 像素原语；**本文件偏 crate 边界 + 机制漏点 + catalog 闸**。
 - 与 [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) 关系：parity 地图管**可见行为差距**；本 goal 管**封装归属与闸**。
 - 产出的 `plan-platform-encapsulation-gap.md` 落地后应挂进 [`plan/README.md`](README.md) 现行表（执行本 goal 的 agent 应更新索引一行）。

@@ -1,6 +1,6 @@
 # Q13 — Declare without a host layout oracle: bake-and-pray vs bake-and-detect — RESULTS
 
-Decisive experiment for [`plan/design-declare-detection-experiment.md`](../../../plan/design-declare-detection-experiment.md).
+Decisive experiment for [`plan/archive/design-declare-detection-experiment.md`](../../../plan/archive/design-declare-detection-experiment.md).
 Takes Q6's three irreducibly-baked Windows layout facts and asks: on a host that
 publishes no struct layout, can a wrong offset be **detected (fail-fast)** instead of
 **silently crashing**? Built and run on real Windows/x86_64 using only ③ `sym` + ④ `call`.

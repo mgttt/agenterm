@@ -1,6 +1,6 @@
 # Q14 — Behavioural verification of naming bindings — RESULTS
 
-Decisive experiment for [`plan/design-naming-verification-experiment.md`](../../../plan/design-naming-verification-experiment.md).
+Decisive experiment for [`plan/archive/design-naming-verification-experiment.md`](../../../plan/archive/design-naming-verification-experiment.md).
 Challenges the last residue Q4/Q13 declared irreducible: the **naming binding truth**
 (「符号 index 1 是不是真的 `CreateFileA`」). Built and run on real Windows/x86_64 using
 only ③ `sym` + ④ `call`. Clean-room; reuses Q13's four-primitive contract as the template.

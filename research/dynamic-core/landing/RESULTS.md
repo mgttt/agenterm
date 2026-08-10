@@ -1,6 +1,6 @@
 # Q12 RESULTS — the landing gate: which "second-gate" hazards actually bite (Windows/x86_64)
 
-**规格**：[`plan/design-landing-gate-experiment.md`](../../../plan/design-landing-gate-experiment.md)
+**规格**：[`plan/archive/design-landing-gate-experiment.md`](../../../plan/archive/design-landing-gate-experiment.md)
 
 Q8 measured the **first gate** — can a page be made executable and jumped into. This
 experiment measures the **second gate** the survey (`reference-cross-target-execution.md`

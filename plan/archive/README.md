@@ -25,6 +25,15 @@
 | `platform-ui-ux-boundary-tree.md` | superseded | 只叙事；权威 ARCHITECTURE |
 | `design-agenterm-cli-merge.md` | 已 shipped | `agenterm cli` 同 PE 转发（AttachConsole + DuplicateHandle）落地 + 真机验证记录；权威 PRD_02_02 + plan-v0.1.16 §CLI |
 | `design-agenterm-bin-separation.md` | 结论被推翻 | 同日"不能合并"分析；被落地实现证伪，保留论证过程 |
+| `agenterm-rhai-app.md` | superseded | Rhai product App 讨论稿；现行 QJS App 架构与 Phase 0 → `../plan-v0.1.18.md` |
+| `plan-agenterm-app-pack.md` | superseded | App Pack 完整推演已收敛进 `../plan-v0.1.18.md`；本文保留历史细节 |
+| `design-script-engine-subcommands.md` | 已实现 | SUB-M1～M4 已落地；公开入口/退役状态由 PRD 与 v0.1.17 E5 拥有 |
+| `design-dynacore-native-core.md` | 已实现后终止投入 | crate 保留；`dynacore` 当前方向为 `../design-dynacore-logic-pack.md` |
+| `design-*-experiment.md`（dynamic-core Q0–Q15） | 研究轨已封闭 | 15 份实验规格；综合结论与重开条件在 `research/dynamic-core/` |
+| `plan-rh-namespace-phase-c.md` + `rhai-trace-*.md` | 已完成 | M42f8 namespace/trace 迁移历史；现行证据为 `../plan-rh-3.md` + PRD |
+| `goal-cli-input-parity.md` | goal 已接管 | 剩余叶与规则已进入 `../agent-human-parity-audit.md`/catalog/PRD |
+| `design-agenterm-product-review.md` | 已吸收 | Task/Pipeline/rules 结论进入 CC PRD/现行设计 |
+| `design-cc-hyper-control-agent-sinking.md` | 已吸收 | 下沉边界进入 CC PRD/现行 v7 设计 |
 
 > 公开发布序列：v0.1.6 → v0.1.10 → v0.1.11 → **v0.1.14**。  
 > v0.1.12 与 v0.1.13 有完整 plan 但无 tag、无 GitHub Release  
@@ -35,7 +44,9 @@
 | 内容 | 文档 |
 |------|------|
 | **plan/ 现行索引** | [`plan/README.md`](../README.md) |
-| 在制版本工作树 | `plan/plan-v0.1.16.md` |
+| 当前代码线/发布链 | `plan/plan-v0.1.16.md` |
+| 下一列车收口树 | `plan/plan-v0.1.17.md` |
+| Portable App Substrate 草案 | `plan/plan-v0.1.18.md` |
 | 上一已发布版本复盘（历史） | `plan/archive/plan-v0.1.14.md` |
 | 发布链要求（版本无关） | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements |
 | 结构 SSOT | `plan/ARCHITECTURE.md` |

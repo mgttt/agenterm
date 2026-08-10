@@ -1,4 +1,4 @@
-//! The signature registry — v2 (`plan/design-dynacore-native-core.md` §9),
+//! The signature registry — v2 (`plan/archive/design-dynacore-native-core.md` §9),
 //! solving the specific gap Q23 measured (`research/dynamic-core/runtime-intent/
 //! RESULTS.md`, S5): a single-author pack has no way to make `verify()` know
 //! a native symbol's TRUE arity, because Windows x64 exports carry no

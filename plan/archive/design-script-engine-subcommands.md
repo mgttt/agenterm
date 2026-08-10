@@ -1,7 +1,12 @@
-# 脚本引擎子命令化：`agenterm {rh|lua|qjs|sql}` 设计
+# ⚠️ 已归档：脚本引擎子命令化设计
+
+> **归档于 2026-08-10。** SUB-M1～M4 已落地，公开入口与退役工作由当前 PRD、
+> `plan/plan-v0.1.17.md` E5 和黑盒合同拥有。本文保留实现前设计与历史决策，不再派工。
+
+# 脚本引擎子命令化：`agenterm {rh|lua|qjs|sql}` 设计（历史原稿）
 
 > 2026-08-09。用户指示：「准备安排把几种后端（rh,lua,qjs,sql）做成 agenterm 的子命令」。
-> 本文档是执行前设计；分期见 §5。与 [`archive/design-agenterm-cli-merge.md`](archive/design-agenterm-cli-merge.md)
+> 本文档是执行前设计；分期见 §5。与 [`design-agenterm-cli-merge.md`](design-agenterm-cli-merge.md)
 > 同族——复用同一套 GUI-子系统控制台接管机制，不重复发明。
 >
 > **后续决策更新（2026-08-09，同日）：** SUB-M1～M4（commit `234b2f87`）已落地

@@ -1,4 +1,10 @@
-# Q14 — Behavioural verification of naming bindings (design / criteria)
+# ⚠️ 已归档：dynamic-core 已判决实验规格
+
+> **归档于 2026-08-10。** Q0–Q23 研究轨已经封闭，综合结论与重新开启条件由
+> `research/dynamic-core/SYNTHESIS.md` 和 `research/dynamic-core/README.md` 拥有。
+> 本文件只保存该问题的实验前判据与历史结果，不是活跃版本任务。
+
+# Q14 — Behavioural verification of naming bindings (design / criteria)（历史规格）
 
 > **不进 must-ship，不改 PRD 能力状态。** 研究轨投影，实现在
 > `research/dynamic-core/naming/`，不挂进根 workspace。净室：不读、不引用任何既有实现源码。

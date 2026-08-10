@@ -1,7 +1,7 @@
 # tables/ — Q7: OS-interface content as DATA
 
 Decisive experiment for
-[`plan/design-os-interface-as-data-experiment.md`](../../../plan/design-os-interface-as-data-experiment.md).
+[`plan/archive/design-os-interface-as-data-experiment.md`](../../../plan/archive/design-os-interface-as-data-experiment.md).
 
 **Question:** Q1 found the architecture has exactly one seam — the OS-interface content
 (leaks L1–L5) — that is per-target, hand-written, and unverifiable. **Can that content

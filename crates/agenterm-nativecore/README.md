@@ -8,7 +8,7 @@ it never generates machine code, never transitions a page RW→RX, and never `dl
 anything. That is the whole reason this crate exists as something other than a restatement
 of `agenterm-rh`'s AOT pack (which *does* need a compiler and executable memory, and is a
 better tool whenever both are available — see
-[`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md) §0–§1
+[`plan/archive/design-dynacore-native-core.md`](../../plan/archive/design-dynacore-native-core.md) §0–§1
 for the measured, not-guessed, constraints that motivate the split).
 
 **Status: ARCHIVED (2026-08-09).** This is not "dynacore" — see the disambiguation section
@@ -181,7 +181,7 @@ as the seven-intent path.
 
 ## What this crate does NOT do (v1 scope)
 
-Per [`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md) §6,
+Per [`plan/archive/design-dynacore-native-core.md`](../../plan/archive/design-dynacore-native-core.md) §6,
 this is deliberate scope, not a backlog:
 
 - No EIGHTH compile-time `Intent` — still true; the seven listed above are the entire

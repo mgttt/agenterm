@@ -1,11 +1,17 @@
-# dynacore（真身）：不靠编译器、不靠可执行内存的原生调用解释器
+# ⚠️ 已归档：native-core 原生调用解释器设计
+
+> **归档于 2026-08-10。** 本设计已经实现且不再主动投入；`dynacore` 的现行产品方向见
+> [`../design-dynacore-logic-pack.md`](../design-dynacore-logic-pack.md)，保留实现事实见
+> `crates/agenterm-nativecore/README.md`。本文只作历史设计与验收记录。
+
+# dynacore（历史命题）：不靠编译器、不靠可执行内存的原生调用解释器
 
 | 字段 | 值 |
 |------|-----|
 | **日期** | 2026-08-09 |
-| **状态** | **归档（2026-08-09）。** §1–§9 全部已实现并已推送（`agenterm-nativecore` 进了根 workspace、接了产品、有 CLI、有 README、38 个真机测试全绿、含 §9 的签名注册表）。用户最终判断（2026-08-09）：这条crate 的名字（`agenterm-nativecore`）不该继续跟 `agenterm-dynacore` 抢"到底谁是 dynacore"这件事——反复的命名混淆本身造成的沟通损耗，已经超过继续投入的价值。**代码保留、不删、不退（已测试、opt-in、未配置时零成本），但不再作为"dynacore"这个名字的候选，也不再主动投入**。「dynacore」这个名字和后续投入，从这次起归 `crates/agenterm-dynacore`（logic pack）——见 [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md)。本文件保留作历史记录 |
-| **前置** | [`research/dynamic-core/SYNTHESIS.md`](../research/dynamic-core/SYNTHESIS.md)（Q0–Q22）；
-  [`research/dynamic-core/assembled/`](../research/dynamic-core/assembled/)（Q22，本设计复活它砍掉的那一半） |
+| **状态** | **归档（2026-08-09）。** §1–§9 全部已实现并已推送（`agenterm-nativecore` 进了根 workspace、接了产品、有 CLI、有 README、38 个真机测试全绿、含 §9 的签名注册表）。用户最终判断（2026-08-09）：这条crate 的名字（`agenterm-nativecore`）不该继续跟 `agenterm-dynacore` 抢"到底谁是 dynacore"这件事——反复的命名混淆本身造成的沟通损耗，已经超过继续投入的价值。**代码保留、不删、不退（已测试、opt-in、未配置时零成本），但不再作为"dynacore"这个名字的候选，也不再主动投入**。「dynacore」这个名字和后续投入，从这次起归 `crates/agenterm-dynacore`（logic pack）——见 [`design-dynacore-logic-pack.md`](../design-dynacore-logic-pack.md)。本文件保留作历史记录 |
+| **前置** | [`research/dynamic-core/SYNTHESIS.md`](../../research/dynamic-core/SYNTHESIS.md)（Q0–Q22）；
+  [`research/dynamic-core/assembled/`](../../research/dynamic-core/assembled/)（Q22，本设计复活它砍掉的那一半） |
 | **早前的判断，已被"状态"行推翻** | 本文件曾经记录"这才是真身，该拿到 dynacore 这个名字，logic pack
   该改名让位"——这个技术判断没有错，但**执行代价（反复的命名混淆本身消耗的沟通成本）被用户判定
   为不值得继续背**，见上面"状态"行（2026-08-09）。`crates/agenterm-dynacore` 保留原名，
@@ -190,7 +196,7 @@ dynacore 一个它原来不认识的 Win32 API？
 ### 8.1 Q23 结果，已测（2026-08-09）
 
 真机测完了，结论是**判决性拆分**，不是三选一，也不是简单的能/不能——
-详见 [`research/dynamic-core/runtime-intent/RESULTS.md`](../research/dynamic-core/runtime-intent/RESULTS.md)
+详见 [`research/dynamic-core/runtime-intent/RESULTS.md`](../../research/dynamic-core/runtime-intent/RESULTS.md)
 （本节只摘要，不重测；数字口径见该文件）：
 
 - **能扩展，真机验证**：一个 nativecore 七个 intent 里从没出现过的 kernel32 导出
@@ -279,4 +285,4 @@ ISA/struct-by-value/运行时发现——**继续不做**，见 §6，不受本�
 
 *产品设计文档，本文件描述的 crate（`agenterm-nativecore`）已归档（2026-08-09，见文件头
 "状态"行）——保留作历史记录，不再是当前投入方向。「dynacore」这个名字和后续投入见
-[`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md)。*
+[`../design-dynacore-logic-pack.md`](../design-dynacore-logic-pack.md)。*

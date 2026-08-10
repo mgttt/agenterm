@@ -579,24 +579,22 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M9 governed LLM gateway hypothesis: local forwarding, routing, quota,
   audit, cost, credential isolation, and redaction remain unassigned until
   scripting, MCP, and event-core gates produce a concrete product need
-- [ ] M15 / pre-v0.2.0 rh backend migration and layered pack deployment
-  (schedule after v0.1.15; not in v0.1.15 scope)
-  - [~] rh AOT track (rh-0→rh-2) ships on `main` for trial:
+- [~] M15 / Script Runtime migration complete; Portable App layered deployment planned
+  - [x] rh AOT track and native `.rh` automation ship on `main`:
     subset check, transpile→rustc AOT, pack qualify, fleet native shim, host
     eval, source-hash cache, `AGENTERM_SCRIPT_BACKEND=rh`, `./rh-check.sh`
-  - [ ] incremental **Rhai → rh** migration after v0.1.15 delivery:
-    automation corpus stays `.rhai` until then; per-script rh-2 validation,
-    optional default backend switch, pack-only hot path for task entry points
-  - [ ] **layered deployment** (JVM / JAR analogue):
-    stable base PE family (host, broker, supervision) vs signed **rh pack**
-    application layer loaded in-process via `script_rh_pack`; Control Center,
-    gateway sidecar, and task runners share one host C ABI
-  - [ ] design SSOT: [`plan/design-rh-aot.md`](../plan/design-rh-aot.md);
-    checklist in
-    [Rust host + Rhai scripting — Future](PRD_02_10_rhai_scripting.md#future-pre-v02.0-schedule-after-v0115)
-  - [ ] non-goals until v0.1.15 ships: 62-task manifest migration, default
-    `AGENTERM_SCRIPT_BACKEND=rh`, npm-style remote rh imports, Cranelift direct
-    codegen
+  - [x] incremental **Rhai → rh** migration retired the live `.rhai` corpus,
+    old PE/REPL and interpreted fallback; current evidence is `plan/plan-rh-3.md`
+  - [ ] **Portable App layered deployment (v0.1.18+)**:
+    stable six-target Base family (host, broker, supervision) vs one portable
+    QJS `agenterm.app` `.agp`, loaded through a narrow versioned App Host ABI;
+    App-only delivery must not rebuild Base. Rh remains Build/CI and general
+    local automation, not the product App fallback.
+  - [ ] execution SSOT: [`plan/plan-v0.1.18.md`](../plan/plan-v0.1.18.md);
+    Script Runtime authority:
+    [`PRD_02_10_rhai_scripting.md`](PRD_02_10_rhai_scripting.md)
+  - [ ] v0.1.18 non-goals: remote channel/signature/apply, real CC authority
+    migration, WASM product wiring, APE/polyglot loader, and npm dependencies
 - [ ] M13 / v0.2.x Distribution surface and one package substrate
   - [ ] `agenterm.work` becomes the single public distribution entry point:
     OS/architecture detection, one copyable install command per platform, a

@@ -4,7 +4,7 @@
 |------|-----|
 | **日期** | 2026-08-09 |
 | **状态** | 设计，Phase 1 待派出实现 |
-| **前置** | [`design-dynacore-native-core.md`](design-dynacore-native-core.md)（已归档，但 seam.rs 的 Win32 绑定要复用）；
+| **前置** | [`archive/design-dynacore-native-core.md`](archive/design-dynacore-native-core.md)（已归档，但 seam.rs 的 Win32 绑定要复用）；
   [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md)（agenterm-dynacore，继续独立存在，不受本设计影响）；
   `D:\dev\moltbaby\systems\ape\vm\ape-vm.c`（参考实现，**不直接编译进 agenterm**，见 §3 provenance） |
 | **触发** | 用户指出 dynacore/nativecore 两条线都从没真正做到"面对 ISA/OS"这个最初的北极星——

@@ -1,7 +1,7 @@
 //! Root-lib entry point for the `agenterm-rh` CLI.
 //!
 //! Moved verbatim from `crates/agenterm-rh/src/main.rs` for SUB-M2 of
-//! `plan/design-script-engine-subcommands.md` (see §2/§5 there). Zero
+//! `plan/archive/design-script-engine-subcommands.md` (see §2/§5 there). Zero
 //! behavior change — this is a location + visibility move, not a rewrite.
 //!
 //! `crates/agenterm-rh/src/main.rs` is a root-package `[[bin]]` whose CLI

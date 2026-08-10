@@ -5,7 +5,7 @@ const INTERNAL_TUI_SUBCOMMAND: &str = "__agenterm-internal-tui";
 const INTERNAL_ENGINE_SUBCOMMAND: &str = "__agenterm-internal-engine";
 /// `agenterm rh|lua|qjs|sql <rest>` — argv-transparent aliases for the four
 /// standalone `agenterm-{rh,lua,qjs,sql}` binaries (SUB-M3,
-/// `plan/design-script-engine-subcommands.md` §3). One shared internal
+/// `plan/archive/design-script-engine-subcommands.md` §3). One shared internal
 /// marker (`INTERNAL_ENGINE_SUBCOMMAND`) carries the engine token as its
 /// first forwarded argument, rather than minting four more
 /// `__agenterm-internal-{rh,lua,qjs,sql}` markers — the design doc's own

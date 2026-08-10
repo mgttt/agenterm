@@ -1,4 +1,10 @@
-# Rhai trace scrub notes (intentional remaining mentions)
+# ⚠️ Archived: Rhai trace scrub notes
+
+> Archived on 2026-08-10 after Phase C/M42f8 completion. Current runtime and migration
+> truth lives in `plan/plan-rh-3.md`, `prd/PRD_02_10_rhai_scripting.md`, and automated
+> caller-inventory guards. Counts below are historical.
+
+# Rhai trace scrub notes (historical remaining-mention snapshot)
 
 Operational scrub completed **2026-08-08** for skills/docs operator paths.
 This file inventories **intentional** residual Rhai branding — not a mass-edit
@@ -54,4 +60,4 @@ These are **historical references** or **audit snapshots**, not live operator pa
 
 - Sequencing: [`plan-rh-namespace-phase-c.md`](plan-rh-namespace-phase-c.md)
 - Full audit snapshot: [`rhai-trace-m42f8e.md`](rhai-trace-m42f8e.md)
-- Rh migration plan: [`plan-rh-3.md`](plan-rh-3.md)
+- Rh migration plan: [`plan-rh-3.md`](../plan-rh-3.md)

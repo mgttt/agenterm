@@ -8,7 +8,7 @@
 |------|-----|
 | **审计日期** | 2026-08-08（HEAD `506395d8`） |
 | **方法** | 只读代码取证，逐条 `file:line`；不采信文档自述 |
-| **相关** | [`goal-cli-input-parity.md`](goal-cli-input-parity.md)（本轮 `ui-input` 的上游任务书）、[`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md)、[`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) |
+| **相关** | [`archive/goal-cli-input-parity.md`](archive/goal-cli-input-parity.md)（历史上游任务书）、[`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md)、[`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) |
 | **owning PRD** | [`PRD_02_07_agent_control_plane.md`](../prd/PRD_02_07_agent_control_plane.md)（观察/动作）、[`PRD_02_15_command_line.md`](../prd/PRD_02_15_command_line.md)（CLI 契约） |
 
 ---
@@ -416,7 +416,7 @@ Win32 只有 `WM_LBUTTONDOWN`(clicks=1) / `WM_LBUTTONDBLCLK`(clicks=2)，**没�
 ### 已经做对、**不要回退**的部分
 
 - `ui-input` 走**同一条** `handle_pixel_event`，无第二套 hit-test
-  （`goal-cli-input-parity.md` T1 的硬性约束已被遵守）——**任何 Windows 移植
+  （`archive/goal-cli-input-parity.md` T1 的硬性约束已被遵守）——**任何 Windows 移植
   必须保持这条**，不得为绕开 native `EDIT` composer 而另写一份命中测试。
 - `ui-snapshot` 的 bounds 覆盖：工具栏逐按钮（`:6721-6731`）、tab 行 8 个子矩形
   （`:2852-2871`）、`actions.new_child`/`actions.close`（`:2770-2812`）、滚动条
@@ -609,7 +609,7 @@ CLI **不联服务器**：目录是二进制的属性，不是运行中 server �
 > （`clicks` 由 OS 计算 vs 由应用提升、原生子控件 vs 全自绘）**是真实的平台差异，
 > 不是可以抹平的偶然**——提取时必须保留它们，否则又会造出一个人类到不了的状态面。
 
-**关键提醒（来自 `goal-cli-input-parity.md` T2）**：动 `src/operations.rs` 加公开
+**关键提醒（来自 `archive/goal-cli-input-parity.md` T2）**：动 `src/operations.rs` 加公开
 命令时，`tests/rhai_migration.rs` 的
 `prd_alignment_task_matches_public_catalogs_and_fails_closed` 会 fail-closed，
 **必须同步更新 `prd/` 目录与该测试里 pin 的计数串**。

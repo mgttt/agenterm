@@ -1,4 +1,10 @@
-# Agenterm Rhai 应用包（Thin Base + Rhai App Pack）
+# ⚠️ 已归档：Agenterm Rhai 应用包（Thin Base + Rhai App Pack）
+
+> **归档于 2026-08-10。** Rhai 单轨 App 方案已被 QJS Portable App Substrate 取代；
+> 现行架构、Phase 0 与后续去向见 [`../plan-v0.1.18.md`](../plan-v0.1.18.md)。本文只保留
+> 早期讨论历史，不是现行 App Engine、Host ABI 或版本执行依据。
+
+# Agenterm Rhai 应用包（Thin Base + Rhai App Pack，历史原稿）
 
 | 字段 | 值 |
 |------|-----|

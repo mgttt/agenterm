@@ -1,4 +1,10 @@
-# /goal — CLI 输入面与跨平台封装收口
+# ⚠️ 已归档：CLI 输入面与跨平台封装收口 goal
+
+> **归档于 2026-08-10。** 已完成与残余 parity 工作由
+> [`../agent-human-parity-audit.md`](../agent-human-parity-audit.md)、UI action catalog 和 owning PRD
+> 接管。本文是历史 goal 快照，不得再作为活跃 `/goal` 执行。
+
+# /goal — CLI 输入面与跨平台封装收口（历史快照）
 
 > 用法：把下面 `--- GOAL ---` 之间的内容整段发给 agent 即可。
 > 目标是可以「执行到底」的，不需要中途回答问题；遇到产品口径分歧时按文末规则处理。

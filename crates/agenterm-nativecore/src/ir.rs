@@ -1,7 +1,7 @@
 //! Neutral IR — ported from `research/dynamic-core/assembled/ir.rs` (Q1/Q22),
 //! this time WITHOUT the cut logic-pack made. `plan/design-dynacore-logic-pack.md`
 //! kept only `fleet_call` and removed raw-memory access + the seven Win32-bound
-//! `Intent`s; `plan/design-dynacore-native-core.md` (this crate) is the other
+//! `Intent`s; `plan/archive/design-dynacore-native-core.md` (this crate) is the other
 //! half — it keeps `Op::Rodata`/`Inst::Store8`/`StoreW`/`Op::Load8`/`LoadW` and
 //! all seven native intents (`Alloc`/`FileOpen`/`FileRead`/`FileClose`/
 //! `WriteStdout`/`SpawnWait`/`FileWrite`) because those intents genuinely need
@@ -25,7 +25,7 @@
 //! `contract_arity()`, closing that gap at produce time (see `verify.rs`'s
 //! header and the `IntentArityMismatch` fault).
 //!
-//! **v2 addition (`plan/design-dynacore-native-core.md` §9, Q23-derived):**
+//! **v2 addition (`plan/archive/design-dynacore-native-core.md` §9, Q23-derived):**
 //! `RegExternDecl` + `Inst::CallReg` — a SECOND, additional way for a pack to
 //! name a native call, by a registry symbol NAME instead of one of the seven
 //! compile-time `Intent` variants above. This does not touch `Intent`,

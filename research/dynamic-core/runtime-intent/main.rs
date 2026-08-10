@@ -1,6 +1,6 @@
 //! Q23 — Runtime-declared native intents — clean-room probe.
 //!
-//! Question (from `plan/design-dynacore-native-core.md` §8): can a native
+//! Question (from `plan/archive/design-dynacore-native-core.md` §8): can a native
 //! intent's calling contract be declared at *pack-load time* instead of baked
 //! into the interpreter's source at compile time, while preserving F1-class
 //! verification strength — i.e. `verify()` checking the REAL call contract, not

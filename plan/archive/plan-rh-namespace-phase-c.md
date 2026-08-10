@@ -1,4 +1,11 @@
-# Phase C prep: retire live `rhai::` namespace
+# ⚠️ Archived: Phase C `rhai::` namespace retirement plan
+
+> Archived on 2026-08-10. Phase C/M42f8 was completed; current Rh execution work and
+> evidence are owned by `plan/plan-rh-3.md` and `prd/PRD_02_10_rhai_scripting.md`.
+> Unchecked historical rows below were superseded by the completed M42f8 evidence and
+> must not be revived as active leaves from this file.
+
+# Phase C prep: retire live `rhai::` namespace (historical plan)
 
 Tip baseline: `a21ac868` — Wave 4.1 landed at codegen **rev83** — script-smoke / remote-ui
 Native + AOT `pack=ok` (locked); fresh-clone / workbench / unix / working-context

@@ -1,6 +1,6 @@
 # Q15 RESULTS — 解释器作为 agent 产出代码的策略执行点（Windows/x86_64，实测）
 
-**规格**：[`plan/design-policy-enforcement-experiment.md`](../../../plan/design-policy-enforcement-experiment.md)
+**规格**：[`plan/archive/design-policy-enforcement-experiment.md`](../../../plan/archive/design-policy-enforcement-experiment.md)
 
 Q9/Q12 测的是**可用性**（体积/速度/覆盖/硬化平台可运行），从未测过**安全性**。审稿抓出「解释器更安全」
 从未被测量。本实验补这一刀：解释器能否成为 agent 产出代码的**执行时策略控制点**——能拦什么、拦不住什么、

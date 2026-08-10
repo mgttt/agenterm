@@ -1,6 +1,6 @@
 # Q9 RESULTS — 解释执行作为一等后端（Windows/x86_64，实测）
 
-**规格**：[`plan/design-interpreter-backend-experiment.md`](../../../plan/design-interpreter-backend-experiment.md)
+**规格**：[`plan/archive/design-interpreter-backend-experiment.md`](../../../plan/archive/design-interpreter-backend-experiment.md)
 
 Q8 把四原语劈成两组：①②（生成新代码）在 ACG/硬化进程/iOS 下脆弱，③④（够到已有代码）稳固，
 结论是「解释执行必须从第一天就是一等退路」。本实验建一个**跑同一份 Q1 中立 IR 的解释器后端**，

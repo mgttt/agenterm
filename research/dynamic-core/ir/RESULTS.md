@@ -1,6 +1,6 @@
 # Neutral-IR experiment — RESULTS
 
-Decisive experiment for [`plan/design-neutral-ir-experiment.md`](../../../plan/design-neutral-ir-experiment.md):
+Decisive experiment for [`plan/archive/design-neutral-ir-experiment.md`](../../../plan/archive/design-neutral-ir-experiment.md):
 **can a single IR artifact defer ALL ABI and layout decisions to lowering, and be
 independently lowered to two genuinely incompatible ABIs (SysV x86_64 and Win64) that
 both run correctly?** Measured, not argued. Clean-room; no prior implementation or

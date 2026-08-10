@@ -3,32 +3,34 @@
 **产品真理**在 `PRD.md` / `prd/`；**结构 SSOT** 在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。  
 本目录只放**执行投影**（排序、风险、交接、证据）。过期叙事进 [`archive/`](archive/)。
 
-## 现行（agent 默认只读这些）
+## 现行（agent 默认先读这些）
 
 | 文件 | 角色 |
 |------|------|
-| [`plan-v0.1.16.md`](plan-v0.1.16.md) | **在制版本**工作树（多 GUI 产品化 + Unix 多实例 + 0.1.15 尾账） |
-| [`plan-v0.1.15.md`](plan-v0.1.15.md) | 上版证据与推迟表全文（must-ship 主波已合 main；未公开发版） |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层 / 热文件 / 结构禁令 |
-| [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix **可见行为**差距地图 |
-| [`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) | 平台 UX 证据矩阵（+ template） |
-| [`precision-audit.md`](precision-audit.md) | 窄域正确性审计表（L2/L3 等） |
-| [`agent-human-parity-audit.md`](agent-human-parity-audit.md) | **Agent↔Human 交互面**对齐审计（键鼠/声音/截图/结构树）+ 待办与决策项 |
-| [`plan-control-center-ux.md`](plan-control-center-ux.md) | L-CC / v0.2.0 UX 任务书 |
-| [`design-control-center-ux.md`](design-control-center-ux.md) | CC 布局/IA 设计 SSOT（实现级） |
-| [`plan-cc-automation-cli.md`](plan-cc-automation-cli.md) | CC 自动化 CLI 设计稿（未实现） |
+| [`plan-v0.1.16.md`](plan-v0.1.16.md) | **当前代码线/发布链修复**；是否发布仍服从 exact-SHA 授权 |
+| [`plan-v0.1.17.md`](plan-v0.1.17.md) | **下一列车收口树**；承接 v0.1.16 最终仍未闭合的产品与证据叶 |
+| [`plan-v0.1.18.md`](plan-v0.1.18.md) | **草案**：Portable App Substrate；App Pack 架构、Phase 0 与后续去向已收敛于此 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层、热文件与结构禁令 SSOT |
+| [`plan-rh-3.md`](plan-rh-3.md) | Rh 当前执行与证据轨；已归档 namespace/trace 文档不得替代它 |
+| [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix 可见行为差距地图 |
+| [`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) | 平台 UX 证据矩阵（含 templates） |
+| [`precision-audit.md`](precision-audit.md) | 窄域正确性审计与仍开放项 |
+| [`agent-human-parity-audit.md`](agent-human-parity-audit.md) | Agent↔Human 输入/观察 parity 的现行审计与剩余叶 |
+| [`goal-crate-platform.md`](goal-crate-platform.md) / [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) | platform crate 边界、机制漏点与固定执行句式 |
+| [`goal-agenterm-osx.md`](goal-agenterm-osx.md) | macOS 原生证据与安装尾账 goal |
 | [`plan-multiplatform-gui.md`](plan-multiplatform-gui.md) | Linux/macOS GUI 交付里程碑 |
-| [`plan-mobile.md`](plan-mobile.md) | 移动端占位（未授权开工） |
-| [`goal-crate-platform.md`](goal-crate-platform.md) | **/goal** 可执行：platform crate 跨平台封装收口（边界 SSOT + 机制 gap + catalog 闸） |
-| [`goal-agenterm-osx.md`](goal-agenterm-osx.md) | **/goal** OSX 泳道：O-fix / O1b / con blackbox / 抽象小切片（落盘须脱敏，见根 `Agents.md` Document redaction） |
-| [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) | 机制封装漏点表 + 跨平台任务执行句式（G1 breakaway 已收） |
-| [`design-rh-aot.md`](design-rh-aot.md) | **rh 并行 AOT 轨**（check / transpile / backend 切换） |
-| [`design-dynamic-core-experiment.md`](design-dynamic-core-experiment.md) | **研究轨**（非产品范围）：动态核 1 层 vs 2 层的判决性实验 → **已判决：2 层**；实现在 `research/dynamic-core/` |
-| [`design-neutral-ir-experiment.md`](design-neutral-ir-experiment.md) | **研究轨**：中立 IR 能否把 ABI/布局推迟给降级（同 ISA 双 ABI 隔离）；承接上条 §7 |
-| [`design-os-interface-as-data-experiment.md`](design-os-interface-as-data-experiment.md) | **研究轨**：Q7 —— OS 接口内容能否从每目标手写代码变成数据表（固定编组器）；承接 Q1 泄漏 L1–L5 → **已判决：有边界可达**；实现在 `research/dynamic-core/tables/` |
-| [`reference-cross-target-execution.md`](reference-cross-target-execution.md) | **研究轨参考**（常驻，非任务单）：跨目标执行技术空间综述 —— 中立 IR 失败史与根因、二进制翻译、验证型字节码、OS 轴、装载机制；含「与动态核架构的对照」 |
-| [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) | **产品设计——`agenterm-dynacore`，名字定了不再改**：fleet_call-only 的二进制形态脚本。曾经有过"这个该改名让位"的判断，已被用户明确推翻（2026-08-09，反复的命名混淆代价 > 改名收益）——这是「dynacore」这个名字往后唯一的所指，后续投入方向 |
-| [`design-dynacore-native-core.md`](design-dynacore-native-core.md) | **已归档（2026-08-09）**：不靠编译器、不靠可执行内存的原生 API 解释器，`crate agenterm-nativecore`，功能完整、38 测试全绿，但不再是「dynacore」这个名字的候选，也不再主动投入——保留作历史记录 |
+| [`plan-control-center-ux.md`](plan-control-center-ux.md) / [`design-control-center-ux.md`](design-control-center-ux.md) | Control Center 任务书与实现级设计 |
+| [`plan-cc-automation-cli.md`](plan-cc-automation-cli.md) | CC 自动化 CLI 未实现设计 |
+| [`design-rh-aot.md`](design-rh-aot.md) | Rh Build/CI AOT 轨；不是 product App Engine |
+| [`design-dynacore-logic-pack.md`](design-dynacore-logic-pack.md) | `agenterm-dynacore` 当前产品方向 |
+| [`design-dynacore-emulated-guest-core.md`](design-dynacore-emulated-guest-core.md) | emulated guest core 待实现设计 |
+| [`reference-cross-target-execution.md`](reference-cross-target-execution.md) | 常驻跨目标执行参考；已完成实验规格在 archive |
+
+### 过渡保留（不是默认派工入口）
+
+- [`plan-v0.1.15.md`](plan-v0.1.15.md)：上版证据/推迟表；待 v0.1.16 最终发布审计确认全部叶去向后单独归档。
+- [`ci-green-handoff.md`](ci-green-handoff.md) 与 [`claude-analyze-ci.md`](claude-analyze-ci.md)：当前 v0.1.16 CI 战役输入；只能作为带时点的观察材料，战役收口后同批归档。
+- `research/dynamic-core/` 是已封闭研究的结果 SSOT；对应 Q0–Q15 实验规格现位于 `archive/`。
 
 ## 已归档（勿当任务单）
 
@@ -38,6 +40,10 @@
 - 已落地专题：`plan-agenterm-server-mode`、`plan-skins-v1`、`plan-platform-facade-v4`、`osx-cpu-improve`
 - 已完成 goal 快照：`goal-v0.1.15-server-instance-s-prime`
 - 历史过程文：`platform-ui-ux-boundary-tree`（superseded by ARCHITECTURE）
+- App Pack 历史讨论：`agenterm-rhai-app`、`plan-agenterm-app-pack`（现行版本投影为 `plan-v0.1.18`）
+- dynamic-core Q0–Q15 已判决实验规格（综合结论在 `research/dynamic-core/SYNTHESIS.md`）
+- Rh namespace/trace 历史三件套与已落地的 Script subcommand 设计
+- 已被现行 parity/CC 文档吸收的旧 goal 与 feeder analysis
 
 ## 归档规则（短）
 

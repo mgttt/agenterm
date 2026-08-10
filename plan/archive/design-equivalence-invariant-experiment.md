@@ -1,4 +1,10 @@
-# 等价不变量：能否把「一份中立 IR 经不同路径降级须行为等价」做成**结构性**不变量？
+# ⚠️ 已归档：dynamic-core 已判决实验规格
+
+> **归档于 2026-08-10。** Q0–Q23 研究轨已经封闭，综合结论与重新开启条件由
+> `research/dynamic-core/SYNTHESIS.md` 和 `research/dynamic-core/README.md` 拥有。
+> 本文件只保存该问题的实验前判据与历史结果，不是活跃版本任务。
+
+# 等价不变量：能否把「一份中立 IR 经不同路径降级须行为等价」做成**结构性**不变量？（历史规格）
 
 > ⚠️ **不是 AgenTerm 产品范围。** 独立研究轨（dynamic-core Q4），实现落在
 > `research/dynamic-core/equiv/`。承接 [`design-neutral-ir-experiment.md`](design-neutral-ir-experiment.md)

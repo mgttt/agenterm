@@ -1,6 +1,6 @@
 # Q2 RESULTS — 最小可用 IR→原生降级器的字节数 X，以及核内/核外
 
-**规格**：[`plan/design-lowering-cost-experiment.md`](../../../plan/design-lowering-cost-experiment.md)
+**规格**：[`plan/archive/design-lowering-cost-experiment.md`](../../../plan/archive/design-lowering-cost-experiment.md)
 （规格与 `README.md` 内部沿用早期编号「Q3」；**问题板上的编号是 Q2**，本文件按板上编号。）
 
 > **本文件的来源与授权。** 本实验原先**没有 RESULTS.md**——结论散在
@@ -251,7 +251,7 @@ grep -cvE '^\s*(//.*)?$' lower.rs                       # 301
 
 | 本文件的内容 | 来源 |
 |---|---|
-| ①②③④ 的全部数值、判决 trace、与规格不符 1–6 | 规格 [§8 实验结论回填](../../../plan/design-lowering-cost-experiment.md)（2026-08-08 写入，提交 `9092acf4`） |
+| ①②③④ 的全部数值、判决 trace、与规格不符 1–6 | 规格 [§8 实验结论回填](../../../plan/archive/design-lowering-cost-experiment.md)（2026-08-08 写入，提交 `9092acf4`） |
 | ① 的 4089/1086、③ 的 3112+4881 | 规格 §8 逐字 |
 | ④ 核内 6200/6360/6376、内核基线重建表 (a)(b)(b′) | `build/build_lowering{.ps1,_linux.sh}` 的产物 + 本机 `out/` 现存构建输出（`out/` 已 gitignore，须重跑上面的脚本复现） |
 | ② 的行范围与 LOC 口径复算 | `lower.rs` 的 `[X86_64]`/`[SHARED]` 横幅 + 上面的 `grep -cvE` 命令 |

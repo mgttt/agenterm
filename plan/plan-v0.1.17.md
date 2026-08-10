@@ -366,7 +366,7 @@ R′. Evidence closeout
 | [`plan-v0.1.15.md`](plan-v0.1.15.md) | 上上版证据与推迟表全文 |
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Unix 对齐地图 |
 | [`plan-rh-3.md`](plan-rh-3.md) | rh 并行轨细节 |
-| [`../prd/PRD_02_10_script_runtime.md`](../prd/PRD_02_10_script_runtime.md) | QJS-M6 operation catalog 权威 |
+| [`../prd/PRD_02_10_rhai_scripting.md`](../prd/PRD_02_10_rhai_scripting.md) | QJS-M6 operation catalog 与 Script Runtime 权威 |
 | [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md) | 脚本引擎 L2 契约 |
 | [`design-script-engine-trait.md`](design-script-engine-trait.md) | trait 统一设计 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 热文件 / 分层 |

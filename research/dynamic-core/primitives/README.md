@@ -1,6 +1,6 @@
 # primitives — Q6: is the four-primitive floor stable?
 
-Decisive experiment: [`plan/design-primitive-completeness-experiment.md`](../../../plan/design-primitive-completeness-experiment.md).
+Decisive experiment: [`plan/archive/design-primitive-completeness-experiment.md`](../../../plan/archive/design-primitive-completeness-experiment.md).
 Numbers and verdict: [`RESULTS.md`](./RESULTS.md).
 
 Adds three capabilities of divergent arg-count/shape — **memory-mapped file** (arity 7, no

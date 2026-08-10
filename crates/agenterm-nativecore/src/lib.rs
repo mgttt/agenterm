@@ -1,10 +1,10 @@
-//! agenterm-nativecore — **ARCHIVED (2026-08-09), see `plan/design-dynacore-native-core.md`'s
+//! agenterm-nativecore — **ARCHIVED (2026-08-09), see `plan/archive/design-dynacore-native-core.md`'s
 //! header.** An interpreter that reaches real native OS APIs directly, with no compiler in the
 //! loop and no executable memory ever requested. This crate is NOT "dynacore" — that name
 //! belongs permanently to `crates/agenterm-dynacore` (a settled decision, not a placeholder;
 //! the two crates are unrelated, do not share IR/Op definitions, and neither depends on the
 //! other). Code here stays (tested, opt-in, zero cost when unconfigured) but receives no
-//! further investment. See `plan/design-dynacore-native-core.md` for the full design and
+//! further investment. See `plan/archive/design-dynacore-native-core.md` for the full design and
 //! `research/dynamic-core/assembled/` (Q22) for the prior research this crate revives with a
 //! produce-time contract-arity fix (`verify.rs`'s F1 fix) and a bake-and-detect layout
 //! self-check (`declare.rs`, Q13's pattern) added from day one.

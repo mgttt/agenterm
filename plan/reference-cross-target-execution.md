@@ -1,8 +1,8 @@
 # 跨目标执行：技术空间参考
 
 > ⚠️ **不是 AgenTerm 产品范围。** 这是动态核研究轨的**常驻参考资料**，不是一次性报告。
-> 服务对象是 [`design-dynamic-core-experiment.md`](design-dynamic-core-experiment.md)、
-> [`design-neutral-ir-experiment.md`](design-neutral-ir-experiment.md) 及其后续实验。
+> 历史服务对象是 [`archive/design-dynamic-core-experiment.md`](archive/design-dynamic-core-experiment.md)、
+> [`archive/design-neutral-ir-experiment.md`](archive/design-neutral-ir-experiment.md) 及其后续已归档实验。
 > 不进任何版本 plan，不改 `PRD.md` 能力状态。
 
 | 字段 | 值 |
@@ -364,7 +364,7 @@ CIL 在 v2 把泛型加进了格式）。PNaCl 的冻结是最清楚的真实实
    推迟（ANDF、EBC、CIL 的 JIT 那一半）要求你去建模**所有宿主变化的并集**——一个无界义务；
    钦定要求宿主来适应你——一个有界义务，**由宿主付，每宿主付一次**。
    > **钦定的价签是一条硬 FFI 边界，而每一个赢家都显式、可见地付了这笔钱。**
-   > **这是本节对 `design-neutral-ir-experiment.md` 最有决策价值的一条。** 见 §9.4 与 §10.1。
+   > **这是本节对 `archive/design-neutral-ir-experiment.md` 最有决策价值的一条。** 见 §9.4 与 §10.1。
 3. **两个靠「推迟布局」成功的中立格式（EBC、CIL 的托管内部），都处在一个原生 ABI 从不需要被满足的域里**
    （固件 init 路径；托管到托管的调用）。**推迟只在围墙花园里存活。**
 
@@ -825,7 +825,7 @@ Cosmo 的 6-OS/2-arch fat `dash` 比 Alpine 的（只支持 x86-Linux 且动态�
 > 它还需要 "a minor ABI change, where C preprocessor macros relating to system interfaces need to be symbolic"
 > ——**即常量不能烘焙进去，与 BTF 的 `#define` 缺口是同一个问题（§4.1e）。**
 >
-> **净判断**：我们的 `design-dynamic-core-experiment.md` §6 已经以「它给你一个 POSIX」为由排除了这条路线，
+> **净判断**：我们的 `archive/design-dynamic-core-experiment.md` §6 已经以「它给你一个 POSIX」为由排除了这条路线，
 > **这个排除是对的，本次调研只是补上了机制细节与价签。可借鉴的是三样具体东西**：
 > ① 运行时 OS 探测 + 查表（不带 POSIX 那部分）；② `apelink` 的按 OS 分段惰性换入布局；
 > ③ **「常量必须符号化」这条 ABI 要求——它对我们的中立 IR 同样成立，且我们还没写进任何文档。**
@@ -1214,7 +1214,7 @@ target datalayout、指针/整型宽度、对齐、结构体字段偏移、聚�
 
 **这条根因命中我们，而且已经在数据里了。** 本轨层数实验的变体 B，其「载荷 blob」是
 **用 Rust 按 ELF 目标编译出的机器码展平**——编译器早已做完全部 ABI 与布局决定，
-内核只是在边界打补丁（`sysv64→win64` 桥接、红区警告）。`design-neutral-ir-experiment.md` §0
+内核只是在边界打补丁（`sysv64→win64` 桥接、红区警告）。`archive/design-neutral-ir-experiment.md` §0
 已经诚实地写了这一点（「那不是中立，是选一个 ABI 然后打补丁」），历史只是确认它：
 **这正是 Bitcode 的失败形态，一字不差。**
 
@@ -1242,7 +1242,7 @@ PNaCl 为了把 LLVM IR 冻结成一个稳定中立子集，必须跑一串 **AB
 消除 `byval`、把结构体参数拆成标量、legalize 类型、去掉不稳定的 intrinsic。
 换句话说，**「让 IR 中立」在工程上等价于「从 IR 里删掉聚合体按值传递与 varargs」**。
 
-这**预先回答**了 `design-neutral-ir-experiment.md` §3 判据 ④ 要测的东西：
+这**预先回答**了 `archive/design-neutral-ir-experiment.md` §3 判据 ④ 要测的东西：
 结论大概率是「结构体按值传参/返回、varargs 会被禁掉，替代形态是**强制过内存**
 （调用方分配缓冲，传指针，由降级决定实际放法）」。实验仍值得跑（要量代价），
 但**不应把这个发现当作意外**。
@@ -1255,7 +1255,7 @@ PNaCl 为了把 LLVM IR 冻结成一个稳定中立子集，必须跑一串 **AB
 > 推迟要求你建模「所有宿主变化的并集」（无界义务）；钦定要求宿主适应你（有界义务，每宿主付一次）。
 > **钦定的价签是一条硬 FFI 边界，每个赢家都显式付了。**
 
-`design-neutral-ir-experiment.md` §1.1 目前的写法是**纯推迟派**：IR 不得编码任何 ABI/布局事实，
+`archive/design-neutral-ir-experiment.md` §1.1 目前的写法是**纯推迟派**：IR 不得编码任何 ABI/布局事实，
 一切交给降级。**按这张表，纯推迟派的历史战绩是 ANDF（死）+ EBC/CIL 托管内部（只在
 「原生 ABI 从不需要被满足」的围墙花园里活）。** 这不是说实验白做——而是说**实验的边界条件应当改一下**：
 
@@ -1483,7 +1483,7 @@ ISA 与特性位、页尺寸与分配粒度、ABI 变体（SysV vs Win64 vs Appl
 | **自建验证器** | 内核 eBPF verifier 20,065 行、持续产 CVE；用户态 eBPF 运行时**根本不做**（rbpf 的 `verifier.rs` 只有 13 KB）。**要 eBPF 的安全就得不到 eBPF 的体积。**（§4.1f、§8.5） |
 | **PCC / 携带证明的代码** | 证明体积、TCB 其实不小、只有 certifying compiler 产得出证明（**那你已经控制生产者了，签名便宜得多**）、而且人们真正怕的东西不是形式安全性质。（§8.5） |
 | **Futamura 投影 / 部分求值（直接用）** | 结构性地是大运行时的想法。**但 copy-and-patch 是它的 KB 级形态，见 10.1。**（§8.1） |
-| **Cosmopolitan 路线** | 已被 `design-dynamic-core-experiment.md` §6 排除（它给你一个 POSIX）。**本次调研确认该排除正确**，并补上了三样可单独借鉴的机制（§6.2） |
+| **Cosmopolitan 路线** | 已被 `archive/design-dynamic-core-experiment.md` §6 排除（它给你一个 POSIX）。**本次调研确认该排除正确**，并补上了三样可单独借鉴的机制（§6.2） |
 | **polyglot 可执行文件** | 解决格式，不解决 ISA/ABI/布局；只有一种格式能拥有偏移 0；宿主启动器是敌对表面（§6.3） |
 | **跨 ISA 代码去重以打败 fat 的 N×** | **从未有系统做到，且在字节层面不可能。** 唯一真实的缓解是「把选择推到分发时」与「砍掉旧架构」（§5） |
 | **CHERI 适配（现在就做）** | 无主流应用处理器发货。**但 10.6 的保险费几乎免费，现在就付。**（§8.4） |

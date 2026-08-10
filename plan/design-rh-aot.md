@@ -5,7 +5,7 @@
 | **文档** | pack 专用 **rh** 语言 + AOT 到机器码；与 upstream Rhai **并行**，能力对齐后 **薄切换** |
 | 日期 | 2026-08-06 |
 | 状态 | **rh-3 compat 轨**：58/58 task check + delegating pack（host v4） |
-| 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/agenterm-rhai-app.md`、`plan/design-rhai-rust-boundary.md` |
+| 关联 | `plan/research-rhai-kernel-depth.md` §11、`plan/plan-v0.1.18.md`（product App 使用 QJS）、`plan/design-rhai-rust-boundary.md` |
 
 ---
 

@@ -1,4 +1,10 @@
-# Q12 — 落地关卡：跳进去之后，硬件与运行时会不会真的让字节跑
+# ⚠️ 已归档：dynamic-core 已判决实验规格
+
+> **归档于 2026-08-10。** Q0–Q23 研究轨已经封闭，综合结论与重新开启条件由
+> `research/dynamic-core/SYNTHESIS.md` 和 `research/dynamic-core/README.md` 拥有。
+> 本文件只保存该问题的实验前判据与历史结果，不是活跃版本任务。
+
+# Q12 — 落地关卡：跳进去之后，硬件与运行时会不会真的让字节跑（历史规格）
 
 > ⚠️ **不是 AgenTerm 产品范围。** 动态核研究轨的一条实验（见
 > `research/dynamic-core/README.md` 的 Q 索引）。不进任何版本 plan 的 must-ship，
@@ -9,7 +15,7 @@
 | **日期** | 2026-08-08 |
 | **目的** | Q8 只测了第一关"能不能拿到可执行内存并跳进去"。综述（§7.2/§7.4）指出还有**第二关**：就算页面标成可执行、就算你跳进去了，**硬件与运行时仍可能拒绝执行那些字节**（CET-IBT/ENDBR64 落地指令、I-cache 一致性、Windows unwind 注册、放置 ±2GB 静默截断）。本实验**实测**：这些"第二关"里哪些在今天的真机上真的咬人，我们现有产物（Q2 降级器 / Q9 解释器）踩到了哪几条 |
 | **实现位置** | `research/dynamic-core/landing/`（**不挂进根 workspace**） |
-| **前置阅读** | `plan/reference-cross-target-execution.md` §7.2/§7.4（发现来源，**§11 注明未联网核对**）；`plan/design-executable-memory-floor-experiment.md` + `platform/RESULTS.md`（Q8，本实验的第一半）；`.claude/skills/decisive-experiment/SKILL.md` |
+| **前置阅读** | `plan/reference-cross-target-execution.md` §7.2/§7.4（发现来源，**§11 注明未联网核对**）；`plan/archive/design-executable-memory-floor-experiment.md` + `platform/RESULTS.md`（Q8，本实验的第一半）；`.claude/skills/decisive-experiment/SKILL.md` |
 | **来源纪律** | **从零探索。** 不照搬任何既有实现源码（含 Q9 解释器）；Win32/CPUID 契约取自公开文档与本机 SDK |
 | **可信度纪律** | 本机 Windows Server 2022 / x86_64 真机——x86 侧必须实测。ARM（BTI/PAC/IC-DSB-ISB）本机无硬件，明确标"未验证的转述"，**不把综述未核实论断升级成结论** |
 

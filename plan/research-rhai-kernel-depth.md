@@ -5,7 +5,7 @@
 | **文档** | 在不替代 L1 前提下，Rhai/pack **最多能挤多深** 的探索图 |
 | 日期 | 2026-08-06 |
 | 状态 | 研究稿 rev1（非承诺路线图） |
-| 关联 | `plan/design-rhai-rust-boundary.md`、`plan/agenterm-rhai-app.md`、`plan/design-scripting-boundary-comparison.md` §6.1 |
+| 关联 | `plan/design-rhai-rust-boundary.md`、`plan/plan-v0.1.18.md`、`plan/design-scripting-boundary-comparison.md` §6.1 |
 
 ---
 
@@ -155,7 +155,7 @@ D0 ─────────────────────────�
 - L1 清单：`plan/design-rhai-rust-boundary.md` §2.1  
 - 边界八条：`plan/design-rhai-rust-boundary.md` §3  
 - JIT：`plan/design-scripting-boundary-comparison.md` §6.1  
-- App Pack：`plan/agenterm-rhai-app.md`  
+- App Pack 现行方向：`plan/plan-v0.1.18.md`（QJS product App；本文 Rh 深度只作历史研究输入）
 
 ---
 
@@ -259,4 +259,3 @@ D0 ─────────────────────────�
 **「能挤多深」≈ min(架构允许深度 D, 编译跑得动的 D)。**  
 编译器 **抬高 D3–D6 的实用上限**，**不抬高 H 硬顶**。  
 当前 Rhai 解释执行：**先把 D3–D4 做稳**；若黑科技要继续挤，**优先 N1 缓存 + N6 WASM 算子**，再谈 JIT——而不是假设「全原生 Rhai = 可以接管 parser」。
-

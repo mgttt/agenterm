@@ -1,4 +1,10 @@
-# Q10 — Copy-and-patch stencil lowering: does it shrink X and dissolve Q2's tradeoff?
+# ⚠️ 已归档：dynamic-core 已判决实验规格
+
+> **归档于 2026-08-10。** Q0–Q23 研究轨已经封闭，综合结论与重新开启条件由
+> `research/dynamic-core/SYNTHESIS.md` 和 `research/dynamic-core/README.md` 拥有。
+> 本文件只保存该问题的实验前判据与历史结果，不是活跃版本任务。
+
+# Q10 — Copy-and-patch stencil lowering: does it shrink X and dissolve Q2's tradeoff?（历史规格）
 
 > ⚠️ **Not AgenTerm product scope.** Independent research track; implementation in
 > `research/dynamic-core/stencil/`. Succeeds [`design-lowering-cost-experiment.md`](design-lowering-cost-experiment.md)
@@ -135,7 +141,7 @@ research/dynamic-core/stencil/       ← NOT wired into the root workspace
 ## 8. Conclusion backfill (2026-08-08, measured)
 
 Implementation + all numbers + third-party reproduce:
-[`research/dynamic-core/stencil/RESULTS.md`](../research/dynamic-core/stencil/RESULTS.md).
+[`research/dynamic-core/stencil/RESULTS.md`](../../research/dynamic-core/stencil/RESULTS.md).
 
 **Verdict: copy-and-patch is NOT worth it at this scale; the tradeoff is NOT dissolved.**
 

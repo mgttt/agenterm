@@ -1,4 +1,10 @@
-# Q6 — 四原语的地板稳不稳：原语完备性的判决性实验
+# ⚠️ 已归档：dynamic-core 已判决实验规格
+
+> **归档于 2026-08-10。** Q0–Q23 研究轨已经封闭，综合结论与重新开启条件由
+> `research/dynamic-core/SYNTHESIS.md` 和 `research/dynamic-core/README.md` 拥有。
+> 本文件只保存该问题的实验前判据与历史结果，不是活跃版本任务。
+
+# Q6 — 四原语的地板稳不稳：原语完备性的判决性实验（历史规格）
 
 > ⚠️ **不是 AgenTerm 产品范围。** 动态核研究轨（`research/dynamic-core/`）的一条独立实验。
 > 不进任何版本 plan 的 must-ship，不占泳道，不改 `PRD.md` 能力状态。

@@ -1,6 +1,6 @@
 # Adapter-reuse experiment — RESULTS
 
-Decisive experiment for `plan/design-adapter-reuse-experiment.md` (the track's Q3 —
+Decisive experiment for `plan/archive/design-adapter-reuse-experiment.md` (the track's Q3 —
 the user prompt labeled it "Q5"; same question, same `reuse/` directory): **can an
 adapter package be *reused* — not merely coexist — without a central registry
 anointing an official one?** Measured, not argued. Clean-room; no prior implementation

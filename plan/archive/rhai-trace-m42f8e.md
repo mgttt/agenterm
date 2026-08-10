@@ -1,4 +1,10 @@
-# M42f8e Rhai operational trace audit (read-only)
+# ⚠️ Archived: M42f8e Rhai operational trace audit (read-only)
+
+> Archived on 2026-08-10. The migration completed and current evidence lives in
+> `plan/plan-rh-3.md`, `prd/PRD_02_10_rhai_scripting.md`, and the caller-inventory guards.
+> This file is a historical snapshot, not a live migration checklist.
+
+# M42f8e Rhai operational trace audit (historical snapshot)
 
 > Durable copy of the read-only audit handoff. Cleanup (Phase A/B/C) remains gated on Native+pack flips; do not treat this file as permission to flip `agenterm.tasks.json` early.
 

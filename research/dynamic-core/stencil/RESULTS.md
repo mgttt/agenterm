@@ -1,6 +1,6 @@
 # Q10 — copy-and-patch stencil lowering: does it dissolve Q2's in/out-kernel tradeoff?
 
-Spec + pinned criteria: [`plan/design-stencil-lowering-experiment.md`](../../../plan/design-stencil-lowering-experiment.md).
+Spec + pinned criteria: [`plan/archive/design-stencil-lowering-experiment.md`](../../../plan/archive/design-stencil-lowering-experiment.md).
 Clean-room: built from the public description of copy-and-patch only; **no prior
 implementation (incl. CPython's) was read**. Parallel to and independent of Q9/Q6.
 

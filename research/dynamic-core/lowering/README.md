@@ -1,6 +1,6 @@
 # Q3 — Lowering cost: how big is the minimal usable IR→native lowerer, and where does it go?
 
-Spec + pinned criteria + verdict: [`plan/design-lowering-cost-experiment.md`](../../../plan/design-lowering-cost-experiment.md).
+Spec + pinned criteria + verdict: [`plan/archive/design-lowering-cost-experiment.md`](../../../plan/archive/design-lowering-cost-experiment.md).
 **Full results, 口径 labels, execution status and reproduce commands: [`RESULTS.md`](./RESULTS.md).**
 Clean-room; no prior implementation was consulted. Parallel to and independent of Q1 (`../ir/`).
 

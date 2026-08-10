@@ -5,7 +5,7 @@
 | **文档** | wasmtime 整合对脚本层统一的影响分析：能否用 WASM 替代 QJS+rh 双引擎 |
 | **日期** | 2026-08-10（rev2：推翻"做不了"的草率判断，JIT/AOT/FFI 在手里没有做不了的） |
 | **状态** | 分析稿 |
-| **前置** | `plan/plan-agenterm-app-pack.md` §7、`crates/agenterm-wasmcore/README.md`、`plan/ARCHITECTURE.md` |
+| **前置** | `plan/plan-v0.1.18.md` §1.5/§1.9、`crates/agenterm-wasmcore/README.md`、`plan/ARCHITECTURE.md` |
 
 ---
 
@@ -243,7 +243,7 @@ WASM生态      依赖体积
 
 ## 9. 交叉引用
 
-- **引擎策略 SSOT**: `plan/plan-agenterm-app-pack.md` §7
+- **引擎策略 SSOT**: `plan/plan-v0.1.18.md` §1.5/§1.9
 - **wasmcore 机制验证**: `crates/agenterm-wasmcore/README.md`
 - **wasmcore ABI 规格**: `crates/agenterm-wasmcore/README.md` "fleet_call calling convention"
 - **结构总图**: `plan/ARCHITECTURE.md`

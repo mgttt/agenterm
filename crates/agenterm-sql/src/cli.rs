@@ -1,5 +1,5 @@
 //! agenterm-sql CLI logic — extracted from `main.rs` (SUB-M1, see
-//! `plan/design-script-engine-subcommands.md` §2/§5) so the root `agenterm`
+//! `plan/archive/design-script-engine-subcommands.md` §2/§5) so the root `agenterm`
 //! binary can later call [`run`] directly as a subcommand entry point
 //! without spawning a separate process (SUB-M3, not this pass). CLI verb
 //! shape aligned with `agenterm-rh`/`agenterm-lua`/`agenterm-qjs`

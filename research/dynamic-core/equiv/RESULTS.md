@@ -1,6 +1,6 @@
 # Equivalence-invariant experiment (Q4) — RESULTS
 
-Decisive experiment for [`plan/design-equivalence-invariant-experiment.md`](../../../plan/design-equivalence-invariant-experiment.md):
+Decisive experiment for [`plan/archive/design-equivalence-invariant-experiment.md`](../../../plan/archive/design-equivalence-invariant-experiment.md):
 **can "one neutral IR, lowered by two independent paths, must be behaviourally
 equivalent" be made a STRUCTURAL invariant — one that cannot be forgotten because a
 violation blocks producing runnable bytes — rather than an after-the-fact check? At what

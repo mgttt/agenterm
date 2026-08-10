@@ -1,6 +1,6 @@
 # Q5 ISA-axis experiment — RESULTS
 
-Decisive experiment for [`plan/design-isa-axis-experiment.md`](../../../plan/design-isa-axis-experiment.md):
+Decisive experiment for [`plan/archive/design-isa-axis-experiment.md`](../../../plan/archive/design-isa-axis-experiment.md):
 **add a second ISA (aarch64) beside Q1's x86-64 — is the neutral IR still neutral on
 the ISA axis, and does "N kernels, one per ISA" stay bounded?** Measured, not argued.
 Clean-room: the AArch64 encoder is written from the published ARM ARM A64 encodings;

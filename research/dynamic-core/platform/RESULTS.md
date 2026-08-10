@@ -1,6 +1,6 @@
 # Q8 RESULTS — 可执行内存地基的实测（Windows/x86_64）
 
-**规格**：[`plan/design-executable-memory-floor-experiment.md`](../../../plan/design-executable-memory-floor-experiment.md)
+**规格**：[`plan/archive/design-executable-memory-floor-experiment.md`](../../../plan/archive/design-executable-memory-floor-experiment.md)
 
 ## 度量条件
 

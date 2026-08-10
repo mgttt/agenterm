@@ -1,4 +1,10 @@
-# 超控智能体 v7 — 下沉分析
+# ⚠️ 已归档：超控智能体 v7 下沉分析
+
+> **归档于 2026-08-10。** 接受的 ownership 边界与分期能力已经进入
+> `plan/design-cc-hyper-control-agent.md` 和 `prd/PRD_02_21_control_center.md`。
+> 本文是历史 feeder analysis，不是实现计划。
+
+# 超控智能体 v7 — 下沉分析（历史）
 
 > 2026-08-09。哪些探索成果可以脱离「超控智能体」这一特定 UI 面，下沉为 agenterm 的通用基础设施。
 

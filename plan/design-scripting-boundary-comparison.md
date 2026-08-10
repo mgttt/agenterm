@@ -5,7 +5,7 @@
 | **文档** | Lua / Python / Node / Bun 等与 AgenTerm Rhai↔Rust 边界的对照分析 |
 | 日期 | 2026-08-06 |
 | 状态 | 设计稿 rev1 |
-| 关联 | `plan/design-rhai-rust-boundary.md`、`plan/agenterm-rhai-app.md`、`prd/PRD_02_10_rhai_scripting.md` |
+| 关联 | `plan/design-rhai-rust-boundary.md`、`plan/plan-v0.1.18.md`、`prd/PRD_02_10_rhai_scripting.md` |
 
 ---
 
@@ -238,7 +238,7 @@ AgenTerm **不应** 对标 Redis 脚本模型做默认 pack；Fleet 权威与 GU
 | 行业说法 | AgenTerm 文档 |
 |----------|----------------|
 | C extension / native addon | L1 内核 §2.1 + `agenterm-platform` |
-| Python 业务 / JS 应用代码 | L3 Rhai App Pack |
+| Python 业务 / JS 应用代码 | L3 QJS `agenterm.app`；见 `plan-v0.1.18.md` |
 | Node `fs`/`net` 式 API | L2 `fleet.*` / `std.*` / 未来 `product.*` |
 | npm 热更包 | sealed `.agp` pack（非 npm 模型，见 `design-release-base-vs-apps.md` §4.4） |
 | Redis 脚本进内核 | **非目标**；若要做 = 新模块单独立项 |
@@ -249,17 +249,17 @@ AgenTerm **不应** 对标 Redis 脚本模型做默认 pack；Fleet 权威与 GU
 
 | ID | 问题 |
 |----|------|
-| BC-1 | 是否需要 **Neovim 式**「用户插件 Rhai」与 **产品 pack** 分 channel？ |
+| BC-1 | 是否需要 **Neovim 式**用户 Script pack 与官方 QJS product pack 分 channel？ |
 | BC-2 | 是否研究 **xterm.js 式** grid 在 Wasm（L1 仍 native blit）？ |
 | BC-3 | Fleet 内 **短脚本原子 op**（Redis 类）是否单独 PRD，默认 pack 禁止？ |
-| BC-4 | 是否投资 Rhai/AOT/JIT 仅放大 L3，**明确不** 作为 L1 迁移理由？ |
+| BC-4 | 是否投资 Rh/AOT 只服务 Build/CI 与通用自动化，**明确不** 作为 L1 或 product App 迁移理由？ |
 
 ---
 
 ## 10. 交叉引用
 
 - L1 内核清单：`plan/design-rhai-rust-boundary.md` §2.1  
-- App Pack / Strangler：`plan/agenterm-rhai-app.md`  
+- App Pack / Strangler：`plan/plan-v0.1.18.md`
 - 发布分轨：`plan/design-release-base-vs-apps.md`  
 - Script 契约：`prd/PRD_02_10_rhai_scripting.md`  
 - 架构三层：`plan/ARCHITECTURE.md` §1.0  

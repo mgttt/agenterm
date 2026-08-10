@@ -1,6 +1,6 @@
 # Q23 — Runtime-declared native intents — RESULTS
 
-Targets `plan/design-dynacore-native-core.md` §8. Reads against the F1 finding
+Targets `plan/archive/design-dynacore-native-core.md` §8. Reads against the F1 finding
 (`research/dynamic-core/assembled/RESULTS.md` §② F1), the bake-and-detect
 discipline (Q13, `declare/RESULTS.md`), and behavioural naming verification
 (Q14, `naming/RESULTS.md` / SYNTHESIS R3). Clean-room per

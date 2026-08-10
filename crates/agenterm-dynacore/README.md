@@ -157,7 +157,7 @@ track and having superficially similar names. As of the current design doc
 (`plan/design-dynacore-logic-pack.md`, 2026-08-09): **`agenterm-dynacore` keeps the name
 "dynacore" permanently** — this is a settled decision, not pending a future rename — **and
 `agenterm-nativecore` is archived** (its own design doc,
-[`plan/design-dynacore-native-core.md`](../../plan/design-dynacore-native-core.md), records it
+[`plan/archive/design-dynacore-native-core.md`](../../plan/archive/design-dynacore-native-core.md), records it
 as feature-complete, 38 tests green, but no longer receiving investment or considered a
 candidate for the "dynacore" name). If you find older material asserting the reverse
 direction (that `agenterm-nativecore` is the "real" dynacore pending a rename of this crate),

@@ -7,7 +7,7 @@
   **这个名字从 2026-08-09 起永久确定，不再计划改名**（曾有过"该让位给真身 nativecore"
   的判断，已被用户明确推翻——反复的命名混淆本身消耗的沟通代价，被判定超过改名收益）。
   「dynacore」这个名字往后**唯一**指这个 crate，后续投入（含测试套件加固）都在这里 |
-| **相关但已归档** | [`design-dynacore-native-core.md`](design-dynacore-native-core.md)——
+| **相关但已归档** | [`archive/design-dynacore-native-core.md`](archive/design-dynacore-native-core.md)——
   另一个 crate（`agenterm-nativecore`，原生 Win32 调用，不靠编译器不靠可执行内存），
   功能完整、38 测试全绿，但已归档、不再投入，也不再是"dynacore"这个名字的候选。
   两个 crate 是平行关系，不互相依赖，IR/Op 定义不共享，只共享少量 intent 无关的机制

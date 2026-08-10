@@ -1,6 +1,6 @@
 # Neutral-IR experiment
 
-Implements [`plan/design-neutral-ir-experiment.md`](../../../plan/design-neutral-ir-experiment.md):
+Implements [`plan/archive/design-neutral-ir-experiment.md`](../../../plan/archive/design-neutral-ir-experiment.md):
 **can one IR artifact defer ALL ABI/layout decisions to lowering, and be independently
 lowered to SysV x86_64 and Win64 so both run correctly?**
 

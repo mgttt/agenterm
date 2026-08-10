@@ -4,7 +4,7 @@
 //! root `agenterm` PE (`crates/agenterm-{rh,lua,qjs,sql}` remain as library
 //! crates, just no longer packaged as their own executables) — see
 //! `src/bin/agenterm.rs`'s `dispatch_engine` and
-//! `plan/design-script-engine-subcommands.md`.
+//! `plan/archive/design-script-engine-subcommands.md`.
 //!
 //! The capability-alignment contract (`plan/plan-v0.1.16.md` §1 Rh: "CLI
 //! 动词对齐 ... 同样的 typed JSON 输出、退出码") has lib-level parity coverage
@@ -103,7 +103,7 @@
 //! lua's track is separate) — tracked as rh/lua's own residue, not
 //! re-litigated by this file.
 //!
-//! # Invocation axis (SUB-M4, `plan/design-script-engine-subcommands.md` §4)
+//! # Invocation axis (SUB-M4, `plan/archive/design-script-engine-subcommands.md` §4)
 //!
 //! Now that the standalone `agenterm-<engine>` binaries are retired, both
 //! axis members are just the two ways `agenterm.rs`'s own dispatch reaches
@@ -210,7 +210,7 @@ fn engines() -> [Engine; 4] {
     [RH, LUA, QJS, SQL]
 }
 
-/// SUB-M4's invocation axis (`plan/design-script-engine-subcommands.md`
+/// SUB-M4's invocation axis (`plan/archive/design-script-engine-subcommands.md`
 /// §4), now that the standalone `agenterm-<engine>` binaries are retired:
 /// every scenario runs each engine both through the internal marker
 /// directly and through the public `agenterm <engine> <args>` alias — the

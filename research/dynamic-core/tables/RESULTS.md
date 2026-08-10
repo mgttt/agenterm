@@ -1,6 +1,6 @@
 # Q7 — OS-interface content as DATA — RESULTS
 
-Decisive experiment for [`plan/design-os-interface-as-data-experiment.md`](../../../plan/design-os-interface-as-data-experiment.md):
+Decisive experiment for [`plan/archive/design-os-interface-as-data-experiment.md`](../../../plan/archive/design-os-interface-as-data-experiment.md):
 **can Q1's one seam — the OS-interface content (leaks L1–L5) — stop being per-target
 hand-written code and become DATA (tables) interpreted by one fixed marshaller?**
 Measured on Q1's exact IR + payloads, reused verbatim. Clean-room within the track; no

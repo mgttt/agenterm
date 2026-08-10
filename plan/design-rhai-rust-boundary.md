@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |------|-----|
-| **文档** | Native 内核与 Rhai App Pack 之间 **清晰、严格、可证明** 的边界 SSOT |
+| **文档** | Native 内核与通用 Rh Script Runtime 之间清晰、严格、可证明的历史边界设计；product App 的现行 Host ABI 见 v0.1.18 |
 | **日期** | 2026-08-06 |
 | **状态** | 设计稿 rev1 |
 | **受众** | 产品、Script 运行时、GUI/CC、发布/证据 |
-| **关联** | `plan/design-scripting-boundary-comparison.md`（**行业边界对照**）、`plan/agenterm-rhai-app.md`、`plan/ARCHITECTURE.md`、`docs/agenterm-rhai-runtime.md`、`prd/PRD_02_10_rhai_scripting.md`、`AGENTS.md` |
+| **关联** | `plan/design-scripting-boundary-comparison.md`（**行业边界对照**）、`plan/plan-v0.1.18.md`、`plan/ARCHITECTURE.md`、`docs/agenterm-rh-runtime.md`、`prd/PRD_02_10_rhai_scripting.md`、`AGENTS.md` |
 
 ---
 
@@ -21,7 +21,7 @@
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│  L3  Rhai App Pack / 用户脚本 / Logic Pack                  │
+│  L3  QJS product App / Rh 用户与 Build 脚本 / Logic Pack     │
 │      产品语义、路由、文案、Hub 策略、编排                     │
 │      禁止：实现内核；禁止：per-cell/per-byte 热循环          │
 └───────────────────────────┬─────────────────────────────────┘
@@ -131,7 +131,7 @@
 
 这是 **L2 的宿主**，不是 pack 内容；用户/pack **脚本** 跑在其上。
 
-### 2.1.8 明确 **不属于** 内核（可迁 Rhai App Pack，L3）
+### 2.1.8 明确 **不属于** 内核（产品语义可迁 QJS App，自动化可留 Rh，L3）
 
 | 区域 | 说明 | 代码锚点（初始在 Rust） |
 |------|------|-------------------------|
@@ -327,7 +327,7 @@ Facade 读写作 **server 投影**；Rhai/pack **不得** 持久化 Fleet truth 
 
 ## 9. 交叉引用
 
-- App Pack 总方案：`plan/agenterm-rhai-app.md`
+- App Pack 总方案：`plan/plan-v0.1.18.md`
 - 架构三层：`plan/ARCHITECTURE.md` §1.0
 - Script 契约：`prd/PRD_02_10_rhai_scripting.md`
 - **行业对照（Lua/Python/Node/Bun）：** `plan/design-scripting-boundary-comparison.md`

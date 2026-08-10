@@ -1,4 +1,10 @@
-# agenterm 产品设计 Review
+# ⚠️ 已归档：agenterm 产品设计 Review
+
+> **归档于 2026-08-10。** Task/Pipeline/rules 结论已由
+> `plan/design-cc-hyper-control-agent.md` 与 `prd/PRD_02_21_control_center.md` 吸收。
+> 本文只保留决策背景，不是活跃产品计划。
+
+# agenterm 产品设计 Review（历史分析）
 
 > 2026-08-09。基于 `src/` + `crates/` + `plan/ARCHITECTURE.md` 的完整阅读。
 > 角度：产品设计，非代码质量。问的是「这个产品现在是什么，缺什么，往哪走」。

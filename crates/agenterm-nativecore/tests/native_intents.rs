@@ -1,5 +1,5 @@
 //! Real-machine black-box acceptance tests for
-//! `plan/design-dynacore-native-core.md` §5. Every test in this file either
+//! `plan/archive/design-dynacore-native-core.md` §5. Every test in this file either
 //! (a) drives the FULL public pipeline (build IR -> `pack::pack` into a real
 //! `store::Store` on disk -> `pack::load` back -> `verify::verify` ->
 //! `eval_core::run`), exercising real Win32 APIs through `seam.rs`, or (b)

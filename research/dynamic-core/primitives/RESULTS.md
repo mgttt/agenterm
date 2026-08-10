@@ -1,6 +1,6 @@
 # Q6 — Primitive completeness: is the four-primitive floor stable? — RESULTS
 
-Decisive experiment for [`plan/design-primitive-completeness-experiment.md`](../../../plan/design-primitive-completeness-experiment.md).
+Decisive experiment for [`plan/archive/design-primitive-completeness-experiment.md`](../../../plan/archive/design-primitive-completeness-experiment.md).
 Adds three capabilities of divergent arg-count/shape (memory-mapped file, directory
 traversal, socket bind) using **only** Q0's four primitives (③ sym + ④ call + ①② memory),
 on real Windows/x86_64. Clean-room; reuses only the `core/` four-primitive **contract**.

@@ -1,5 +1,5 @@
 //! `agenterm-lua` CLI logic — extracted from `main.rs` (SUB-M1, see
-//! `plan/design-script-engine-subcommands.md` §2/§5) so the root `agenterm`
+//! `plan/archive/design-script-engine-subcommands.md` §2/§5) so the root `agenterm`
 //! binary can later call [`run`] directly as a subcommand entry point
 //! without going through a separate process (SUB-M3, not this pass).
 //!
