@@ -1186,6 +1186,23 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 &["crypto_sha256_file"],
             ),
         ),
+        shipped_local_entry(
+            "rh.crypto.tree-metadata-digest",
+            "data/crypto/tree-metadata-digest",
+            "rh::crypto::tree_metadata_digest",
+            Some("sha2::Sha256"),
+            RustMapping::Adapted,
+            "rh::crypto::tree_metadata_digest(path) -> #{ ok, identity }",
+            (
+                &[
+                    "sorted_metadata_records",
+                    "lowercase_hex",
+                    "sha256",
+                    "no_file_contents",
+                ],
+                &["crypto_tree_metadata_digest"],
+            ),
+        ),
         shipped_local_entry_with_design(
             shipped_local_entry(
                 "rh.hash.fnv1a64",

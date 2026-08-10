@@ -281,10 +281,18 @@ agenterm-rhai (compatibility shim)
 │  │  ├─ sha256(bytes)
 │  │  │  Returns the lowercase SHA-256 digest of one typed `Bytes` value.
 │  │  │  [shipped; stable; designed 2026-07-29]
-│  │  └─ sha256_file(path)
-│  │     Streams one explicit file in bounded chunks and returns its lowercase
-│  │     SHA-256 digest.
-│  │     [shipped; stable; designed 2026-07-29]
+│  │  ├─ sha256_file(path)
+│  │  │  Streams one explicit file in bounded chunks and returns its lowercase
+│  │  │  SHA-256 digest.
+│  │  │  [shipped; stable; designed 2026-07-29]
+│  │  └─ tree_metadata_digest(path)
+│  │     Digests the metadata SHAPE of a directory tree -- kind, relative path,
+│  │     size and mtime of every entry, sorted, with no file contents -- and
+│  │     returns `#{ ok, identity }`. Native packs route this through the host
+│  │     call `crypto.tree_metadata_digest` rather than reimplementing it in
+│  │     the prelude, so the digest stays byte-identical to the incremental
+│  │     build wrapper that records these identities.
+│  │     [shipped; stable; designed 2026-08-11]
 │  │
 │  ├─ hash::
 │  │  Deterministic non-cryptographic wire and content hashes.
@@ -822,9 +830,21 @@ must retain the returned value for the whole mutation and must treat a missing,
 indirect, malformed, or unopenable lock file as a failure rather than an
 unlocked resource.
 
+In a native pack the attempt is a value that OWNS the locked handle, so the
+same rule applies with Rust scoping: the lock is released when the binding goes
+out of scope. Holding several locks at once therefore does not need a lock-set
+surface -- take each lock in its own recursive frame and every enclosing frame
+still holds its lock while the innermost frame does the work.
+`scripts/rh/lib/prune_target_incremental.rh` uses exactly that shape to hold one
+lock per rustc session before removing a compilation-unit root.
+
 Filesystem failures MUST carry a stable error code. Safe diagnostics MAY
 include the final file name but MUST NOT automatically retain a full
-secret-bearing path.
+secret-bearing path. The `std::fs::try_*` calls are the deliberate exception:
+`try_remove_file`, `try_remove_dir_all`, `try_copy`, `try_create_dir_all` and
+`try_rename` return `1` on success and `0` on any failure instead of aborting
+the task, for callers whose next step depends on whether the operation won a
+race.
 
 ### 7.2 Paths
 

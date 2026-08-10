@@ -572,6 +572,11 @@ extern "C" fn host_json_call(
             .map(crate::script_process::process_platform_facts_json)
             .ok_or(-5),
         "process.list" => crate::script_process::process_list_json().map_err(|_| -5),
+        "crypto.tree_metadata_digest" => input
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(-5)
+            .map(|path| crate::incremental_wrapper::tree_metadata_digest_json(Path::new(path))),
         "image.inspect_png" => input
             .get("path")
             .and_then(serde_json::Value::as_str)

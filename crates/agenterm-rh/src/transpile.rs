@@ -37,6 +37,10 @@ enum ValueKind {
     WindowRect,
     Stream,
     Bytes,
+    /// `std::fs::try_lock_exclusive` attempt. The binding OWNS the locked file
+    /// handle, so the lock is held for the binding's scope exactly like the
+    /// hosted `FileLockAttempt` value.
+    FileLock,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,7 +202,8 @@ impl EmitCtx {
                 | ValueKind::WindowControl
                 | ValueKind::WindowRect
                 | ValueKind::Stream
-                | ValueKind::Bytes => {
+                | ValueKind::Bytes
+                | ValueKind::FileLock => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
                     ));
@@ -234,6 +239,7 @@ impl EmitCtx {
                     | ValueKind::WindowRect
                     | ValueKind::Stream
                     | ValueKind::Bytes
+                    | ValueKind::FileLock
             ) {
                 out.push_str("\"{}\"");
             } else if matches!(kind, ValueKind::Char) {
@@ -2121,6 +2127,8 @@ fn expr_uses_string_param(expr: &Expr, param: &str) -> bool {
         || std_fs_read_dir_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_remove_file_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_try_remove_file_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_try_remove_dir_all_arg(expr).is_some_and(|path| is_param_var(path, param))
+        || std_fs_try_lock_exclusive_arg(expr).is_some_and(|path| is_param_var(path, param))
         || std_fs_copy_args(expr)
             .is_some_and(|(src, dst)| is_param_var(src, param) || is_param_var(dst, param))
         || std_fs_try_copy_args(expr)
@@ -3320,7 +3328,8 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
         | ValueKind::Metadata
         | ValueKind::SystemTime
         | ValueKind::DirEntry
-        | ValueKind::Stream => None,
+        | ValueKind::Stream
+        | ValueKind::FileLock => None,
     }
 }
 
@@ -3456,6 +3465,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if string_method_on_path_display(expr, ctx).is_some() => ValueKind::String,
         _ if path_buf_from_arg(expr).is_some() => ValueKind::Path,
         _ if std_fs_symlink_metadata_arg(expr).is_some() => ValueKind::Metadata,
+        _ if std_fs_try_lock_exclusive_arg(expr).is_some() => ValueKind::FileLock,
         _ if std_fs_metadata_arg(expr).is_some() => ValueKind::Metadata,
         _ if dir_entry_metadata_binding(expr, ctx).is_some() => ValueKind::Metadata,
         _ if metadata_modified_binding(expr, ctx).is_some()
@@ -3468,6 +3478,8 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
             || dir_entry_metadata_modified_unix_millis(expr, ctx).is_some()
             || dir_entry_metadata_len(expr, ctx).is_some()
             || fs_metadata_len_arg(expr).is_some()
+            || file_lock_property_binding(expr, ctx).is_some()
+            || file_lock_call_property(expr).is_some()
             || metadata_property_binding(expr, ctx).is_some_and(|(_, name)| name == "len") =>
         {
             ValueKind::Int
@@ -3480,6 +3492,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_parse_file_arg(expr).is_some() => ValueKind::Json,
         _ if image_inspect_png_arg(expr).is_some() => ValueKind::Json,
+        _ if crypto_tree_metadata_digest_arg(expr).is_some() => ValueKind::Json,
         _ if clipboard_get_text_arg(expr) => ValueKind::String,
         _ if std_time_system_time_now_unix_millis(expr) => ValueKind::Int,
         _ if std_process_list(expr) => ValueKind::Json,
@@ -4036,6 +4049,10 @@ fn std_fs_metadata_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "metadata")
 }
 
+fn std_fs_try_lock_exclusive_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "try_lock_exclusive")
+}
+
 fn path_buf_from_arg(expr: &Expr) -> Option<&Expr> {
     let Expr::FnCall(call, ..) = expr else {
         return None;
@@ -4204,6 +4221,10 @@ fn std_fs_remove_file_arg(expr: &Expr) -> Option<&Expr> {
 
 fn std_fs_try_remove_file_arg(expr: &Expr) -> Option<&Expr> {
     std_fs_single_arg(expr, "try_remove_file")
+}
+
+fn std_fs_try_remove_dir_all_arg(expr: &Expr) -> Option<&Expr> {
+    std_fs_single_arg(expr, "try_remove_dir_all")
 }
 
 fn std_fs_copy_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
@@ -4412,6 +4433,13 @@ fn std_process_list(expr: &Expr) -> bool {
         return false;
     };
     call.namespace.to_string() == "std::process" && call.name == "list" && call.args.is_empty()
+}
+
+fn crypto_tree_metadata_digest_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    is_host_api_call(call, "crypto", "tree_metadata_digest", 1).then(|| &call.args[0])
 }
 
 fn image_inspect_png_arg(expr: &Expr) -> Option<&Expr> {
@@ -7019,6 +7047,31 @@ fn metadata_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a s
     .then_some((ident.1.as_str(), name))
 }
 
+fn file_lock_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<&'a str> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::FileLock) {
+        return None;
+    }
+    (dot_property_name(&boxed.rhs)? == "acquired").then_some(ident.1.as_str())
+}
+
+/// `std::fs::try_lock_exclusive(path).acquired` -- the direct form. It releases
+/// the lock immediately (the temporary drops at the end of the statement), so it
+/// only answers "was anyone holding this?". Binding the attempt first is what
+/// HOLDS the lock.
+fn file_lock_call_property(expr: &Expr) -> Option<&Expr> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let path = std_fs_try_lock_exclusive_arg(&boxed.lhs)?;
+    (dot_property_name(&boxed.rhs)? == "acquired").then_some(path)
+}
+
 fn system_time_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
     let Expr::Dot(boxed, ..) = expr else {
         return None;
@@ -8201,6 +8254,17 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("}))");
             return Ok(());
         }
+        if let Some(path) = crypto_tree_metadata_digest_arg(expr) {
+            // Host call, not a prelude reimplementation: the digest must stay
+            // byte-identical to the incremental wrapper that produced the
+            // recorded identity, so there is only ever one implementation.
+            out.push_str(
+                "rh_host_json_call(\"crypto.tree_metadata_digest\", &serde_json::json!({\"path\": ",
+            );
+            emit_stringish(out, path, ctx)?;
+            out.push_str("}))");
+            return Ok(());
+        }
         if clipboard_get_text_arg(expr) {
             out.push_str("rh_clipboard_get_text()");
             return Ok(());
@@ -8260,6 +8324,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         }
         if let Some(path) = std_fs_try_remove_file_arg(expr)
             && emit_std_fs_try_remove_file(out, path, ctx)?
+        {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_try_remove_dir_all_arg(expr)
+            && emit_std_fs_try_remove_dir_all(out, path, ctx)?
         {
             return Ok(());
         }
@@ -8369,6 +8438,14 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             out.push_str("rh_path_is_absolute(&");
             out.push_str(binding);
             out.push(')');
+            return Ok(());
+        }
+        if emit_file_lock_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if let Some(path) = std_fs_try_lock_exclusive_arg(expr)
+            && emit_std_fs_try_lock_exclusive(out, path, ctx)?
+        {
             return Ok(());
         }
         if let Some(path) = std_fs_symlink_metadata_arg(expr)
@@ -10413,6 +10490,41 @@ fn emit_std_fs_metadata(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Res
     Ok(true)
 }
 
+fn emit_std_fs_try_lock_exclusive(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_try_lock_exclusive(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_file_lock_property(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    if let Some(binding) = file_lock_property_binding(expr, ctx) {
+        out.push_str(binding);
+        out.push_str(".acquired");
+        return Ok(true);
+    }
+    let Some(path) = file_lock_call_property(expr) else {
+        return Ok(false);
+    };
+    if !emit_std_fs_try_lock_exclusive(out, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str(".acquired");
+    Ok(true)
+}
+
 fn emit_path_buf_from(out: &mut String, path: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     // PathBuf is represented as a UTF-8 path string in native packs.
     // Clone existing String/Path bindings so later uses of the same name remain valid.
@@ -10484,6 +10596,21 @@ fn emit_std_fs_try_remove_file(
         return Ok(false);
     }
     out.push_str("rh_try_remove_file(");
+    out.push_str(&path_expr);
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_std_fs_try_remove_dir_all(
+    out: &mut String,
+    path: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_try_remove_dir_all(");
     out.push_str(&path_expr);
     out.push(')');
     Ok(true)

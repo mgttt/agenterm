@@ -198,6 +198,7 @@ pub(crate) fn build_local_modules(engine: &mut Engine) -> (Module, Module) {
     let mut crypto = Module::new();
     crypto.set_native_fn("sha256", crypto_sha256);
     crypto.set_native_fn("sha256_file", crypto_sha256_file);
+    crypto.set_native_fn("tree_metadata_digest", crypto_tree_metadata_digest);
 
     let mut hash = Module::new();
     hash.set_native_fn("fnv1a64", hash_fnv1a64);
@@ -285,6 +286,16 @@ fn crypto_sha256_file(path: &str) -> Result<String, Box<EvalAltResult>> {
         digest.update(&buffer[..count]);
     }
     Ok(sha256_hex(digest.finalize()))
+}
+
+/// `{ ok: bool, identity: string }` -- the metadata-shape digest of a directory
+/// tree (kind, relative path, size and mtime of every entry; no file contents).
+/// Native packs reach the same implementation through the
+/// `crypto.tree_metadata_digest` host call, so hosted and native runs agree
+/// with each other AND with the incremental wrapper that records these values.
+fn crypto_tree_metadata_digest(path: &str) -> Result<Dynamic, Box<EvalAltResult>> {
+    let value = crate::incremental_wrapper::tree_metadata_digest_json(std::path::Path::new(path));
+    rhai::serde::to_dynamic(value).map_err(|error| format!("json_dynamic: {error}").into())
 }
 
 fn hash_fnv1a64(value: ScriptBytes) -> Result<String, Box<EvalAltResult>> {

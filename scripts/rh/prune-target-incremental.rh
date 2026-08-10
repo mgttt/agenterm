@@ -57,21 +57,11 @@ fn entry() {
         return 0;
     }
 
-    // Everything past this point probes cargo's advisory locks through
-    // python3 + fcntl.flock (see lib/prune_target_incremental.rh) — POSIX
-    // by construction; fcntl does not exist on Windows Python. Skip
-    // honestly on Windows instead of dying on process_spawn: pruning is
-    // disk hygiene, and skipping only defers reclamation. Host probe uses
-    // the same idiom as package-client-release.rh (default windows unless
-    // /proc or CoreServices exists).
-    let posix_host = std::fs::exists("/proc")
-        || std::fs::exists("/System/Library/CoreServices");
-    if !posix_host {
-        print(
-            "Cargo incremental prune: skipped (posix-only lock probe; no windows backend yet)"
-        );
-        return 0;
-    }
+    // This used to skip every non-POSIX host: the advisory-lock probe went
+    // through python3 + fcntl.flock, and fcntl does not exist on Windows
+    // Python. The probe is now `std::fs::try_lock_exclusive`, which is
+    // `std::fs::File::try_lock` on every platform, so the prune runs
+    // everywhere and Windows finally reclaims its incremental cache too.
     prune::direct_directory(debug_profile, "incremental_prune_debug");
     prune::direct_directory(incremental, "incremental_prune_root");
 

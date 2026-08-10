@@ -1,8 +1,13 @@
 // Shared incremental target prune helpers (INT-only native pack).
 //
-// Locking, recursive delete, tree inspection, and metadata identity use
-// python3 fcntl/shutil/hashlib via command_status because the matching
-// std::fs APIs are not native yet.
+// Locking, recursive delete, and tree inspection are implemented in rh with
+// `std::fs::try_lock_exclusive`, `std::fs::try_remove_dir_all` and recursive
+// `std::fs::read_dir` walks. No third-party interpreter is involved.
+//
+// Holding several advisory locks at once (a compilation-unit root has one
+// `.lock` per session) is done by taking each lock in its own recursive frame:
+// a `try_lock_exclusive` binding owns the locked handle, so every enclosing
+// frame still holds its lock while the innermost frame removes the tree.
 
 
 fn exact_repo_root(repo) {
@@ -45,18 +50,11 @@ fn direct_file(path) {
     }
 }
 
+// A lock that is acquired and released again only answers "was anyone holding
+// this just now?" -- that is exactly the pre-flight question this asks.
 fn lock_available(path) {
     require(path != "", "lock_available_empty");
-    let code = std::process::command_status(
-        "python3",
-        [
-            "-c",
-            "import fcntl,sys; f=open(sys.argv[1],'a'); fcntl.flock(f.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)",
-            path
-        ],
-        10000
-    );
-    if code == 0 {
+    if std::fs::try_lock_exclusive(path).acquired {
         1
     } else {
         0
@@ -65,45 +63,68 @@ fn lock_available(path) {
 
 fn remove_tree(path) {
     require(path != "", "remove_tree_empty");
-    let code = std::process::command_status(
-        "python3",
-        [
-            "-c",
-            "import shutil,sys; shutil.rmtree(sys.argv[1])",
-            path
-        ],
-        120000
-    );
-    if code == 0 {
-        1
-    } else {
-        0
+    std::fs::try_remove_dir_all(path)
+}
+
+fn has_working_directory(root) {
+    require(root != "", "has_working_directory_empty");
+    for entry in std::fs::read_dir(root) {
+        if entry.is_dir {
+            let name = "" + entry.file_name;
+            if name.ends_with("-working") {
+                return 1;
+            }
+        }
     }
+    0
+}
+
+// The index-th direct `.lock` file under root, or "" once they are exhausted.
+fn nth_lock_path(root, index) {
+    require(root != "", "nth_lock_path_empty");
+    let seen = 0;
+    for entry in std::fs::read_dir(root) {
+        if !entry.is_dir {
+            let name = "" + entry.file_name;
+            if name.ends_with(".lock") {
+                if seen == index {
+                    return entry.path.display;
+                }
+                seen += 1;
+            }
+        }
+    }
+    ""
+}
+
+// One frame per lock: the `attempt` binding owns the locked handle, so by the
+// time the innermost frame removes the tree EVERY lock is still held. Releasing
+// each lock before removing would leave a window for cargo to re-acquire it.
+// Returns 1 removed, 2 lock contention, 3 remove failure.
+fn lock_and_remove(root, index) {
+    require(root != "", "lock_and_remove_empty");
+    let lock_path = nth_lock_path(root, index);
+    if lock_path == "" {
+        if remove_tree(root) == 0 {
+            return 3;
+        }
+        return 1;
+    }
+    let attempt = std::fs::try_lock_exclusive(lock_path);
+    if !attempt.acquired {
+        return 2;
+    }
+    lock_and_remove(root, index + 1)
 }
 
 // Acquire every direct .lock under root, then remove the whole compilation-unit root.
 // Returns 1 removed, 0 shape/identity failure, 2 lock/working contention, 3 remove failure.
 fn remove_incremental_root(crate_path) {
     require(crate_path != "", "remove_incremental_root_empty");
-    let code = std::process::command_status(
-        "python3",
-        [
-            "-c",
-            "import fcntl,os,shutil,sys\nroot=sys.argv[1]\nlocks=[]\nfor name in os.listdir(root):\n  path=os.path.join(root,name)\n  if os.path.isdir(path) and name.endswith('-working'):\n    sys.exit(2)\n  if os.path.isfile(path) and name.endswith('.lock'):\n    handle=open(path,'a')\n    try:\n      fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\n    except OSError:\n      sys.exit(2)\n    locks.append(handle)\ntry:\n  shutil.rmtree(root)\nexcept OSError:\n  sys.exit(3)\n",
-            crate_path
-        ],
-        120000
-    );
-    if code == 0 {
-        return 1;
-    }
-    if code == 2 {
+    if has_working_directory(crate_path) != 0 {
         return 2;
     }
-    if code == 3 {
-        return 3;
-    }
-    0
+    lock_and_remove(crate_path, 0)
 }
 
 fn decimal_parse(text) {
@@ -151,28 +172,38 @@ fn decimal_parse(text) {
     }
 }
 
-// Returns -1 invalid tree, else files * 1000000 * 1000000 + bytes.
-fn inspect_tree(root) {
-    require(root != "", "inspect_tree_empty");
-    let stdout_path = root + ".inspect-tree.stdout.tmp";
-    let code = std::process::command_stdout_file(
-        "python3",
-        [
-            "-c",
-            "import os,sys\nroot=sys.argv[1]\nout=sys.argv[2]\nfiles=0\nbytes=0\npending=[root]\nwhile pending:\n  d=pending.pop()\n  for name in os.listdir(d):\n    p=os.path.join(d,name)\n    if os.path.islink(p):\n      open(out,'w').write('-1')\n      sys.exit(0)\n    if os.path.isdir(p):\n      pending.append(p)\n    elif os.path.isfile(p):\n      files+=1\n      bytes+=os.path.getsize(p)\n    else:\n      open(out,'w').write('-1')\n      sys.exit(0)\nopen(out,'w').write(str(files*1000000*1000000+bytes))\n",
-            root,
-            stdout_path
-        ],
-        120000,
-        stdout_path
-    );
-    if code != 0 {
+// Returns -1 invalid tree, else files * 1000000 * 1000000 + bytes. Each file
+// contributes one file unit plus its byte count, so the packed sum matches the
+// original "count files, sum sizes, then pack" formulation exactly.
+fn inspect_tree_walk(root, depth) {
+    if depth > 64 {
         return -1;
     }
-    let text = std::fs::read_to_string(stdout_path);
-    std::fs::try_remove_file(stdout_path);
-    text.trim();
-    decimal_parse(text)
+    let total = 0;
+    for entry in std::fs::read_dir(root) {
+        let path = entry.path.display;
+        let metadata = std::fs::symlink_metadata(path);
+        if metadata.is_symlink || metadata.is_reparse_point {
+            return -1;
+        }
+        if metadata.is_dir {
+            let nested = inspect_tree_walk(path, depth + 1);
+            if nested < 0 {
+                return -1;
+            }
+            total += nested;
+        } else if metadata.is_file {
+            total += 1000000 * 1000000 + metadata.len;
+        } else {
+            return -1;
+        }
+    }
+    total
+}
+
+fn inspect_tree(root) {
+    require(root != "", "inspect_tree_empty");
+    inspect_tree_walk(root, 0)
 }
 
 fn safe_root_name(value) {
@@ -225,33 +256,60 @@ fn safe_invocation_id(value) {
     1
 }
 
+// A live session marks its compilation-unit root with a `*-working` directory
+// at some depth. Identity is only meaningful for a quiet root, so the walk stops
+// at the first one it sees.
+fn has_working_tree(root, depth) {
+    if depth > 64 {
+        return 0;
+    }
+    for entry in std::fs::read_dir(root) {
+        if entry.is_dir {
+            let name = "" + entry.file_name;
+            if name.ends_with("-working") {
+                return 1;
+            }
+            if has_working_tree(entry.path.display, depth + 1) != 0 {
+                return 1;
+            }
+        }
+    }
+    0
+}
+
 // Returns 0 invalid, 1 working, 2 ok; writes identity hash to output_path on ok.
+//
+// The digest itself comes from `rh::crypto::tree_metadata_digest`, which is the
+// SAME Rust function the incremental wrapper used to record the identity being
+// verified. `maximum_entries` is kept for the caller contract; the real entry,
+// depth and relative-path caps are enforced by that host surface.
 fn metadata_identity(root, maximum_entries, output_path) {
     require(root != "", "metadata_identity_empty_root");
     require(output_path != "", "metadata_identity_empty_output");
     if maximum_entries <= 0 {
         return 0;
     }
-    let code = std::process::command_status(
-        "python3",
-        [
-            "-c",
-            "import hashlib,json,os,sys\nroot,out=sys.argv[1:3]\nmax_entries=100000\nrecords=[]\npending=[(root,'',0)]\ntry:\n  st=os.lstat(root)\nexcept OSError:\n  sys.exit(0)\nif not os.path.isdir(root) or os.path.islink(root):\n  sys.exit(0)\nrecords.append('d|.|%d|%d' % (st.st_size,int(st.st_mtime*1000)))\nwhile pending:\n  path,relative,depth=pending.pop()\n  if depth>=64:\n    sys.exit(0)\n  for name in os.listdir(path):\n    if len(records)>=max_entries:\n      sys.exit(0)\n    rel=name if relative=='' else relative+'/'+name\n    if len(rel)>4096:\n      sys.exit(0)\n    child=os.path.join(path,name)\n    try:\n      st=os.lstat(child)\n    except OSError:\n      sys.exit(0)\n    if os.path.islink(child):\n      sys.exit(0)\n    if os.path.isdir(child):\n      if name.endswith('-working'):\n        sys.exit(1)\n      records.append('d|%s|%d|%d' % (rel,st.st_size,int(st.st_mtime*1000)))\n      pending.append((child,rel,depth+1))\n    elif os.path.isfile(child):\n      records.append('f|%s|%d|%d' % (rel,st.st_size,int(st.st_mtime*1000)))\n    else:\n      sys.exit(0)\nrecords.sort()\npayload=json.dumps(records,separators=(',',':'))\nopen(out,'w').write(hashlib.sha256(payload.encode()).hexdigest())\nsys.exit(2)\n",
-            root,
-            output_path
-        ],
-        120000
-    );
-    if code == 0 {
+    if direct_file(root) != 0 {
         return 0;
     }
-    if code == 1 {
+    if !std::fs::exists(root) {
+        return 0;
+    }
+    let root_metadata = std::fs::symlink_metadata(root);
+    if !root_metadata.is_dir
+            || root_metadata.is_symlink
+            || root_metadata.is_reparse_point {
+        return 0;
+    }
+    if has_working_tree(root, 0) != 0 {
         return 1;
     }
-    if code == 2 {
-        return 2;
+    let digest = rh::crypto::tree_metadata_digest(root);
+    if !digest.ok {
+        return 0;
     }
-    0
+    rh::runtime::atomic_write(output_path, digest.identity);
+    2
 }
 
 fn validate_root_manifest(path, invocation, target, incremental) {
@@ -339,48 +397,63 @@ fn session_is_valid(name) {
     }
 }
 
-fn session_lock_present(crate_path, session_name) {
-    require(crate_path != "", "session_lock_present_empty_crate");
-    require(session_name != "", "session_lock_present_empty_name");
-    let code = std::process::command_status(
-        "python3",
-        [
-            "-c",
-            "import os,sys\ncrate,name=sys.argv[1:3]\nparts=name.split('-')\nif len(parts)!=4 or parts[0]!='s' or not parts[1] or not parts[2] or not parts[3] or parts[3]=='working': sys.exit(2)\nlock=os.path.join(crate,'s-%s-%s.lock'%(parts[1],parts[2]))\nmeta=os.lstat(lock)\nif not os.path.isfile(lock) or os.path.islink(lock): sys.exit(1)\nsys.exit(0)\n",
-            crate_path,
-            session_name
-        ],
-        10000
-    );
-    if code == 0 {
-        1
-    } else {
-        0
+// `s-<base36>-<id>-<suffix>` names its own lock file `s-<base36>-<id>.lock`.
+// Returns "" for any name this helper will not vouch for.
+fn session_lock_path(crate_path, session_name) {
+    require(crate_path != "", "session_lock_path_empty_crate");
+    require(session_name != "", "session_lock_path_empty_name");
+    if session_timestamp_micros(session_name) < 0 {
+        return "";
     }
+    let parts = session_name.split("-");
+    let lock_name = "s-" + parts[1] + "-" + parts[2] + ".lock";
+    std::path::join(crate_path, lock_name).display
 }
 
+fn session_lock_present(crate_path, session_name) {
+    let lock_path = session_lock_path(crate_path, session_name);
+    if lock_path == "" {
+        return 0;
+    }
+    direct_file(lock_path)
+}
+
+fn session_modified_millis(path) {
+    let metadata = std::fs::symlink_metadata(path);
+    let modified = metadata.modified;
+    modified.unix_millis
+}
+
+// Removes a finalized session tree while HOLDING its session lock, and only if
+// the tree was not touched between the two stats -- a live cargo would have
+// bumped the mtime. Returns 1 removed, 2 raced (mtime moved), 0 otherwise.
 fn remove_session_tree(crate_path, session_name, session_path) {
     require(crate_path != "", "remove_session_tree_empty_crate");
     require(session_name != "", "remove_session_tree_empty_name");
     require(session_path != "", "remove_session_tree_empty_path");
-    let code = std::process::command_status(
-        "python3",
-        [
-            "-c",
-            "import fcntl,os,shutil,sys\ncrate,name,tree=sys.argv[1:4]\nparts=name.split('-')\nif len(parts)!=4 or parts[0]!='s' or not parts[1] or not parts[2] or not parts[3] or parts[3]=='working': sys.exit(3)\nlock=os.path.join(crate,'s-%s-%s.lock'%(parts[1],parts[2]))\ntry:\n  before=os.lstat(tree)\nexcept OSError:\n  sys.exit(5)\nhandle=open(lock,'a')\ntry:\n  fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept OSError:\n  sys.exit(1)\ntry:\n  after=os.lstat(tree)\nexcept OSError:\n  sys.exit(5)\nif int(before.st_mtime*1000)!=int(after.st_mtime*1000):\n  sys.exit(4)\nshutil.rmtree(tree)\n",
-            crate_path,
-            session_name,
-            session_path
-        ],
-        120000
-    );
-    if code == 0 {
-        return 1;
+    let lock_path = session_lock_path(crate_path, session_name);
+    if lock_path == "" {
+        return 0;
     }
-    if code == 4 {
+    if !std::fs::exists(session_path) {
+        return 0;
+    }
+    let before = session_modified_millis(session_path);
+    let attempt = std::fs::try_lock_exclusive(lock_path);
+    if !attempt.acquired {
+        return 0;
+    }
+    if !std::fs::exists(session_path) {
+        return 0;
+    }
+    let after = session_modified_millis(session_path);
+    if before != after {
         return 2;
     }
-    0
+    if remove_tree(session_path) == 0 {
+        return 0;
+    }
+    1
 }
 
 fn base36(value) {

@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 93;
+pub const RH_CODEGEN_REVISION: u32 = 94;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -656,6 +656,39 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
+         // Mirrors the hosted `FileLockAttempt`: the value OWNS the locked\n\
+         // handle, so the lock lives exactly as long as the rh binding does.\n\
+         // A caller that needs several locks held at once takes them in\n\
+         // nested frames (rh packs support recursion), which is why there is\n\
+         // no lock-set surface.\n\
+         struct RhFileLock {\n\
+             acquired: INT,\n\
+             #[allow(dead_code)]\n\
+             file: Option<std::fs::File>,\n\
+         }\n\n\
+         fn rh_try_lock_exclusive(path: &str) -> RhFileLock {\n\
+             let opened = std::fs::OpenOptions::new()\n\
+                 .read(true)\n\
+                 .write(true)\n\
+                 .open(path);\n\
+             let file = match opened {\n\
+                 Ok(file) => file,\n\
+                 Err(error) => {\n\
+                     let _ = rh_fail(&format!(\"fs_try_lock_exclusive: {path}: {error}\"));\n\
+                     return RhFileLock { acquired: 0, file: None };\n\
+                 }\n\
+             };\n\
+             match file.try_lock() {\n\
+                 Ok(()) => RhFileLock { acquired: 1, file: Some(file) },\n\
+                 Err(std::fs::TryLockError::WouldBlock) => {\n\
+                     RhFileLock { acquired: 0, file: None }\n\
+                 }\n\
+                 Err(std::fs::TryLockError::Error(error)) => {\n\
+                     let _ = rh_fail(&format!(\"fs_try_lock_exclusive: {path}: {error}\"));\n\
+                     RhFileLock { acquired: 0, file: None }\n\
+                 }\n\
+             }\n\
+         }\n\n\
          fn rh_metadata(path: &str) -> RhMetadata {\n\
              match std::fs::metadata(path) {\n\
                  Ok(metadata) => RhMetadata {\n\
@@ -709,6 +742,9 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_try_remove_file(path: &str) -> INT {\n\
              i64::from(std::fs::remove_file(path).is_ok())\n\
+         }\n\n\
+         fn rh_try_remove_dir_all(path: &str) -> INT {\n\
+             i64::from(std::fs::remove_dir_all(path).is_ok())\n\
          }\n\n\
          fn rh_copy(src: &str, dst: &str) -> INT {\n\
              match std::fs::copy(src, dst) {\n\

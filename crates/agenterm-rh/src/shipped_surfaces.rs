@@ -113,6 +113,7 @@ pub const SHIPPED_SURFACE_PATHS: &[&str] = &[
     "rh::clipboard::set_text",
     "rh::crypto::sha256",
     "rh::crypto::sha256_file",
+    "rh::crypto::tree_metadata_digest",
     "rh::hash::fnv1a64",
     "rh::http::request",
     "rh::http::start",

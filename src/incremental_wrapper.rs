@@ -158,6 +158,21 @@ fn incremental_metadata_identity(root: &Path) -> anyhow::Result<String> {
         .collect())
 }
 
+/// The digest behind `rh::crypto::tree_metadata_digest`.
+///
+/// The prune task re-derives the identity that this wrapper recorded, and the
+/// two values are compared for equality. Any drift between a producer and a
+/// re-implementation silently disables pruning, so both sides call THIS
+/// function -- there is exactly one definition of the algorithm. It used to be
+/// transliterated into python3 inside `scripts/rh/lib/prune_target_incremental.rh`,
+/// which is precisely the duplication this avoids.
+pub(crate) fn tree_metadata_digest_json(root: &Path) -> serde_json::Value {
+    match incremental_metadata_identity(root) {
+        Ok(identity) => serde_json::json!({ "ok": true, "identity": identity }),
+        Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }),
+    }
+}
+
 fn snapshot_incremental_roots(root: &Path) -> anyhow::Result<Vec<IncrementalRootSnapshot>> {
     anyhow::ensure!(
         direct_directory(root),
