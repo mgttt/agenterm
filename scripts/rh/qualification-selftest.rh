@@ -317,7 +317,12 @@ fn entry() {
     let check_source = std::fs::read_to_string(
         std::path::join(repo, "scripts/rh/check.rh").display
     );
-    let lint_marker = "let lint_gate = run_gate(";
+    // `run_gate_two(` since 6881c5e4 (call-site StringList/Json param
+    // upgrades for check.rh Native emit) -- the gate and its position in the
+    // order below are unchanged, only the helper it calls. Matched without
+    // the trailing `(` so a future arity change does not silently break this
+    // ordering assertion again.
+    let lint_marker = "let lint_gate = run_gate";
     let decl_marker = "sequence = assert_declarations(";
     let rustfmt_marker = "let rustfmt_gate = run_gate(";
     let artifact_marker = "\"artifact-build\",";
