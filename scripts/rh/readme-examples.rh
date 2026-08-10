@@ -156,9 +156,14 @@ fn entry() {
             );
         }
 
+        // Through the `cli` subcommand, like the list-commands probe above:
+        // the standalone mux/mcp PEs were dropped in 7b930b9c ("CLI
+        // subcommands only"), so bare `agenterm.exe mux ...` now falls
+        // through to the GUI launcher's argument handling and never runs the
+        // command. That probe was missed by that migration.
         let mux_code = std::process::command_stdout_file(
             cli_path,
-            ["mux", "compatibility", "--json"],
+            ["cli", "mux", "compatibility", "--json"],
             10000,
             stdout_path,
             no_activate
