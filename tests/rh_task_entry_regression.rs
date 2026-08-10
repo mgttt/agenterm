@@ -1291,14 +1291,14 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
 #[test]
 fn control_center_linux_smoke_passes_complete_endpoint_arguments() {
     let (source, output) = transpile_project_entry("scripts/rh/control-center-linux-smoke.rh");
-    assert!(source.contains("[\"server\", \"--endpoint\", \"\" + endpoint]"));
+    let compact_source = source.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(compact_source.contains("[\"server\", \"--endpoint\", \"\" + endpoint]"));
     assert!(
-        source.contains("\"cli\", \"--endpoint\", endpoint_text, \"protocol-info\", \"--running\"")
+        compact_source
+            .contains("\"cli\", \"--endpoint\", endpoint_text, \"protocol-info\", \"--running\"")
     );
-    assert!(source.contains("\"cli\", \"--endpoint\", endpoint_text,\n            \"new-window\""));
-    assert!(source.contains(
-        "[\n            \"cli\", \"--endpoint\", \"\" + endpoint, \"shutdown\"\n        ]"
-    ));
+    assert!(compact_source.contains("\"cli\", \"--endpoint\", endpoint_text, \"new-window\""));
+    assert!(compact_source.contains("[ \"cli\", \"--endpoint\", \"\" + endpoint, \"shutdown\" ]"));
     assert!(source.contains("for attempt in 0..600"));
     assert!(source.contains(":server_stderr="));
     assert!(!source.contains("fn push_endpoint("));

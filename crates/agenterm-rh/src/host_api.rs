@@ -1812,6 +1812,13 @@ pub fn emit_host_runtime(out: &mut String) {
                  Some(serde_json::Value::Array(items)) => {\n\
                      items.iter().any(|item| item == needle) as INT\n\
                  }\n\
+                 Some(serde_json::Value::Object(items)) => match needle.as_str() {\n\
+                     Some(key) => items.contains_key(key) as INT,\n\
+                     None => {\n\
+                         let _ = rh_fail(&format!(\"json_object_contains: {}\", path.join(\".\")));\n\
+                         0\n\
+                     }\n\
+                 },\n\
                  Some(_) | None => {\n\
                      let _ = rh_fail(&format!(\"json_contains_path: {}\", path.join(\".\")));\n\
                      0\n\
@@ -2021,5 +2028,10 @@ mod tests {
         assert!(reader < wait, "pipes must drain while the child is alive");
         assert!(runtime.contains("limit.saturating_sub(bytes.len())"));
         assert!(!runtime.contains("if bytes.len() >= limit"));
+        assert!(
+            runtime.contains("Some(serde_json::Value::Object(items)) => match needle.as_str()"),
+            "JSON object contains must preserve Rhai Map key-membership semantics"
+        );
+        assert!(runtime.contains("items.contains_key(key) as INT"));
     }
 }

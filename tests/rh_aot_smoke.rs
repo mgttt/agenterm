@@ -143,3 +143,31 @@ fn stdlib_fixture_qualifies_with_std_exists_fast_path() {
     assert_eq!(value, 42);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn json_object_contains_qualifies_as_map_key_membership() {
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-json-object-contains-smoke-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let source = r#"
+fn entry() {
+    let document = rh::json::parse(`{"rendered_snapshot":{"last_native_input":{}}}`);
+    if document.contains("rendered_snapshot") == 0 {
+        return 0;
+    }
+    if document.rendered_snapshot.contains("last_native_input") == 0 {
+        return 0;
+    }
+    42
+}
+
+fn cc_lines() {
+    ["json object contains", "map key membership"]
+}
+"#;
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    assert_eq!(receipt.entry_value, 42);
+    let _ = std::fs::remove_dir_all(&dir);
+}
