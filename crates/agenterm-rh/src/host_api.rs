@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 94;
+pub const RH_CODEGEN_REVISION: u32 = 95;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -1093,6 +1093,28 @@ pub fn emit_host_runtime(out: &mut String) {
                  None => (String::new(), false),\n\
              }\n\
          }\n\n\
+         // Last 1200 chars of what a killed child managed to say, newlines\n\
+         // flattened so the whole thing survives as one diagnostic line.\n\
+         fn rh_output_tail(stdout: &str, stderr: &str) -> String {\n\
+             let mut combined = String::new();\n\
+             combined.push_str(stdout.trim_end());\n\
+             if !stderr.trim_end().is_empty() {\n\
+                 if !combined.is_empty() {\n\
+                     combined.push_str(\" | \");\n\
+                 }\n\
+                 combined.push_str(stderr.trim_end());\n\
+             }\n\
+             if combined.is_empty() {\n\
+                 return String::from(\"<no output>\");\n\
+             }\n\
+             let flattened = combined.replace('\\n', \" \").replace('\\r', \"\");\n\
+             let limit = 1200_usize;\n\
+             if flattened.chars().count() <= limit {\n\
+                 return flattened;\n\
+             }\n\
+             let skipped = flattened.chars().count() - limit;\n\
+             flattened.chars().skip(skipped).collect()\n\
+         }\n\n\
          fn rh_finish_process_output(\n\
              mut child: std::process::Child,\n\
              timeout: std::time::Duration,\n\
@@ -1116,13 +1138,22 @@ pub fn emit_host_runtime(out: &mut String) {
                          if std::time::Instant::now() >= deadline {\n\
                              let _ = child.kill();\n\
                              let _ = child.wait();\n\
-                             // Name the culprit: a bare label made CI\n\
-                             // timeouts undiagnosable. Args identify which\n\
-                             // task a staged worker copy was running.\n\
+                             // Name the culprit AND say how far it got. A bare\n\
+                             // label made CI timeouts undiagnosable; args\n\
+                             // identify which task a staged worker copy was\n\
+                             // running, and the output tail shows where a long\n\
+                             // child (a cargo test run, a gate chain) actually\n\
+                             // stalled instead of leaving every guess to a\n\
+                             // fresh CI round trip.\n\
+                             let (timeout_stdout, _) =\n\
+                                 rh_finish_pipe_reader(stdout_reader.take());\n\
+                             let (timeout_stderr, _) =\n\
+                                 rh_finish_pipe_reader(stderr_reader.take());\n\
                              let _ = rh_fail(&format!(\n\
-                                 \"process_timeout: {program} {:?} after {}ms\",\n\
+                                 \"process_timeout: {program} {:?} after {}ms; tail={}\",\n\
                                  args_preview,\n\
-                                 timeout.as_millis()\n\
+                                 timeout.as_millis(),\n\
+                                 rh_output_tail(&timeout_stdout, &timeout_stderr)\n\
                              ));\n\
                              return RhOutput {\n\
                                  success: 0,\n\
