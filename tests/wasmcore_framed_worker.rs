@@ -48,6 +48,48 @@ use agenterm::script_protocol::{
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// Whether this toolchain can actually build `wasm32-wasip1` guests.
+///
+/// These tests compile a real guest with `rustc --target wasm32-wasip1`,
+/// which needs that target's std installed (`rustup target add
+/// wasm32-wasip1`). Unlike `crates/agenterm-wasmcore/tests/*` — a
+/// different package, so a bare `cargo test` at the workspace root never
+/// runs them — this file lives in the ROOT package's `tests/`, so it runs
+/// in the Windows quality gate's full `cargo test --all-features`, on a
+/// runner that does not install the target. Probing keeps that lane honest
+/// (skip, loudly, on a toolchain that cannot express the test) instead of
+/// reporting a wasmcore product failure that is really a missing target.
+///
+/// `rustc --print target-libdir` resolves the path for any *known* target
+/// spec whether or not its std is installed, so the directory's existence
+/// — not the command's exit status — is what actually answers the question.
+fn wasip1_target_available() -> bool {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+    let Ok(output) = Command::new(&rustc)
+        .args(["--print", "target-libdir", "--target", "wasm32-wasip1"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let libdir = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    !libdir.is_empty() && Path::new(&libdir).is_dir()
+}
+
+/// Emits the skip notice these tests share, so a skipped run says why.
+fn skip_without_wasip1(test: &str) -> bool {
+    if wasip1_target_available() {
+        return false;
+    }
+    eprintln!(
+        "SKIP {test}: this toolchain has no wasm32-wasip1 std \
+         (`rustup target add wasm32-wasip1` enables it)"
+    );
+    true
+}
+
 /// Compiles `agenterm-wasmcore`'s own verification guest to a real `.wasm`
 /// file exactly once per test binary run, reused across every `#[test]`
 /// here. Mirrors `crates/agenterm-wasmcore/tests/fleet_call_roundtrip.rs`'s
@@ -155,6 +197,11 @@ fn unknown_op_response() -> ScriptBrokerResponse {
 
 #[test]
 fn framed_worker_wasmcore_runs_real_wasm_guest_with_fleet_bridge_round_trip() {
+    if skip_without_wasip1(
+        "framed_worker_wasmcore_runs_real_wasm_guest_with_fleet_bridge_round_trip",
+    ) {
+        return;
+    }
     with_wasmcore_backend(|| {
         let wasm_path = compiled_guest_wasm();
 
@@ -277,6 +324,10 @@ fn framed_worker_wasmcore_runs_real_wasm_guest_with_fleet_bridge_round_trip() {
 
 #[test]
 fn framed_worker_wasmcore_check_validates_real_binary_and_rejects_garbage() {
+    if skip_without_wasip1("framed_worker_wasmcore_check_validates_real_binary_and_rejects_garbage")
+    {
+        return;
+    }
     with_wasmcore_backend(|| {
         let wasm_path = compiled_guest_wasm();
 
