@@ -40,12 +40,47 @@ fn cleanup_fixture(fixture, owned_root) {
     0
 }
 
+fn expect_package_rejection(worker, repo, fixture, output_relative, code) {
+    // The rejection legs must run `package-qualified` in a CHILD process.
+    // In-process (`package_qualified::build_package(...)`) cannot work: that
+    // library validates with `require(...)`, which a native pack emits as a
+    // fail-return through `rh_fail` -- it aborts the whole task rather than
+    // returning a non-zero code to the caller, so the very rejection this
+    // self-test wants to observe would kill the self-test. That is why this
+    // self-test never passed as drafted (e0043efb, "no tasks.json flip yet").
+    let stdout_path = fixture + ".package_selftest_reject.stdout.tmp";
+    let reject_code = std::process::command_stdout_file(
+        worker,
+        [
+            "rh", "run", "scripts/rh/package-qualified.rh", "--",
+            fixture,
+            "target/qualification/receipt.json",
+            output_relative
+        ],
+        180000,
+        stdout_path,
+        #{ current_dir: repo }
+    );
+    let reject_output = std::fs::read_to_string(stdout_path);
+    std::fs::try_remove_file(stdout_path);
+    assert_ok(
+        reject_code != 0,
+        "package_selftest_expected_rejection:" + code + ":" + reject_output
+    );
+    0
+}
+
+
 fn entry() {
     if args.len != 1 {
         return rh::fail("expected: REPO");
     }
 
     let repo = std::path::absolute(args[0]).display;
+    // Same front door the other self-tests use for spawning: the staged
+    // console forwarder. Needed because the rejection legs must observe a
+    // child's exit code (see `expect_package_rejection`).
+    let worker = std::path::join(repo, "dist/agenterm.com").display;
     let owned_root =
         std::path::join(repo, "target/qualification").display;
     std::fs::create_dir_all(owned_root);
@@ -298,9 +333,17 @@ fn entry() {
     std::fs::try_remove_file(tar_stdout);
     let archive_names = [];
     for line in listing.split("\n") {
+        // The archive is built with `tar -C <staging> .`, so members are
+        // listed as `./<name>` and the staging root shows up as a bare `./`
+        // entry. Strip that prefix and drop the root entry so this compares
+        // the plain member names the expectation below uses -- rather than
+        // teaching the expectation about tar's directory-entry convention,
+        // or changing how the shipped archive is packed (which would alter
+        // published layout).
         let name = line;
         name.trim();
-        if name != "" {
+        name.replace("./", "");
+        if name != "" && name != "." && name != "/" {
             archive_names.push(name);
         }
     }
@@ -316,9 +359,20 @@ fn entry() {
     expected_names.push("LICENSE-MIT");
     expected_names.push("THIRD_PARTY_NOTICES.md");
     expected_names.push("package-manifest.json");
+    // Carries both lists: a bare pass/fail here costs a full CI round trip
+    // to learn *which* member differs, which is exactly what happened.
+    let expected_joined = "";
+    for name in expected_names {
+        expected_joined = expected_joined + "," + name;
+    }
+    let archive_joined = "";
+    for name in archive_names {
+        archive_joined = archive_joined + "," + name;
+    }
     assert_ok(
         package_qualified::exact_values(expected_names, archive_names) != 0,
-        "package_selftest_archive_members"
+        "package_selftest_archive_members: expected[" + expected_joined +
+            "] archive[" + archive_joined + "]"
     );
 
     let release_output =
@@ -381,14 +435,12 @@ fn entry() {
         receipt_path,
         rh::json::stringify_pretty(rejected_cargo_receipt) + "\n"
     );
-    let reject_cargo_code = package_qualified::build_package(
+    expect_package_rejection(
+        worker,
+        repo,
         fixture,
-        "target/qualification/receipt.json",
-        "target/qualification/rejected-cargo"
-    );
-    assert_ok(
-        reject_cargo_code != 0,
-        "package_selftest_expected_rejection:package_receipt_cargo_lock_hash"
+        "target/qualification/rejected-cargo",
+        "package_receipt_cargo_lock_hash"
     );
     let bad_manifest_hash =
         "0000000000000000000000000000000000000000000000000000000000000000";
@@ -412,14 +464,12 @@ fn entry() {
         receipt_path,
         rh::json::stringify_pretty(rejected_manifest_receipt) + "\n"
     );
-    let reject_manifest_code = package_qualified::build_package(
+    expect_package_rejection(
+        worker,
+        repo,
         fixture,
-        "target/qualification/receipt.json",
-        "target/qualification/rejected-manifest"
-    );
-    assert_ok(
-        reject_manifest_code != 0,
-        "package_selftest_expected_rejection:package_receipt_artifact_manifest_hash"
+        "target/qualification/rejected-manifest",
+        "package_receipt_artifact_manifest_hash"
     );
     rh::runtime::atomic_write(
         receipt_path,
@@ -433,15 +483,12 @@ fn entry() {
         first_path,
         first_bytes + "tampered\n"
     );
-    let reject_output_code = package_qualified::build_package(
+    expect_package_rejection(
+        worker,
+        repo,
         fixture,
-        "target/qualification/receipt.json",
-        "target/qualification/rejected-output"
-    );
-    assert_ok(
-        reject_output_code != 0,
-        "package_selftest_expected_rejection:package_executable_hash:" +
-            first_name
+        "target/qualification/rejected-output",
+        "package_executable_hash"
     );
     let bad_head = "0000000000000000000000000000000000000000";
     let rejected_head_receipt = #{
@@ -464,14 +511,12 @@ fn entry() {
         receipt_path,
         rh::json::stringify_pretty(rejected_head_receipt) + "\n"
     );
-    let reject_head_code = package_qualified::build_package(
+    expect_package_rejection(
+        worker,
+        repo,
         fixture,
-        "target/qualification/receipt.json",
-        "target/qualification/rejected-head"
-    );
-    assert_ok(
-        reject_head_code != 0,
-        "package_selftest_expected_rejection:package_receipt_head_mismatch"
+        "target/qualification/rejected-head",
+        "package_receipt_head_mismatch"
     );
 
     let lib_path = std::path::join(
