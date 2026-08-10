@@ -1248,12 +1248,12 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
         source.contains("[\"cli\", \"--instance\", \"dev\", \"protocol-info\", \"--running\"]")
     );
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
-    assert!(
+    assert_eq!(
         output
             .rust
             .matches("rh_json_array_len(&selected, &[\"connected_server\", \"tabs\"])")
-            .count()
-            >= 2,
+            .count(),
+        1,
         "{}",
         output.rust
     );
