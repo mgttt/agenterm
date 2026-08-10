@@ -4,6 +4,8 @@ pub(crate) fn hosted_script_worker_available() -> bool {
     matches!(
         agenterm_platform::platform_kind(),
         agenterm_platform::PlatformKind::Windows
+            | agenterm_platform::PlatformKind::Linux
+            | agenterm_platform::PlatformKind::Macos
     )
 }
 
@@ -99,12 +101,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn worker_availability_tracks_windows() {
+    fn worker_availability_tracks_supported_hosts() {
         assert_eq!(
             hosted_script_worker_available(),
             matches!(
                 agenterm_platform::platform_kind(),
                 agenterm_platform::PlatformKind::Windows
+                    | agenterm_platform::PlatformKind::Linux
+                    | agenterm_platform::PlatformKind::Macos
             )
         );
     }

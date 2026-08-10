@@ -315,6 +315,8 @@ mod tests {
             matches!(
                 agenterm_platform::platform_kind(),
                 agenterm_platform::PlatformKind::Windows
+                    | agenterm_platform::PlatformKind::Linux
+                    | agenterm_platform::PlatformKind::Macos
             )
         );
     }

@@ -1833,8 +1833,8 @@ mod tests {
         // A non-GUI child never owns a top-level window. Observation support is
         // a host capability (Windows always; Linux when X11 is reachable;
         // macOS when the window server answers) and must not be confused with
-        // hosted_script_worker_available(), which remains Windows-only for
-        // agenterm cli script hosting.
+        // hosted_script_worker_available(), which covers every supported
+        // product host for agenterm cli script hosting.
         assert!(!facts.top_level_window_present);
         assert_eq!(facts.top_level_window_id, 0);
         assert!(!facts.top_level_window_is_foreground);
