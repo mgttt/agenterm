@@ -1217,7 +1217,7 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
     let (source, output) = transpile_project_entry("scripts/rh/control-center-macos-smoke.rh");
     assert!(source.contains("fn entry("));
     assert!(
-        source.contains("for attempt in 0..600"),
+        source.contains("for attempt in 0..1200"),
         "macOS cold-start protocol readiness must retain its bounded ARM runner budget"
     );
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);

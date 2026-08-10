@@ -200,10 +200,10 @@ fn invoke_activate(context, program, registry, runtime, arguments) {
 }
 
 fn wait_protocol(context, cli, registry, runtime, child, code) {
-    // Hosted Apple Silicon can need more than five seconds to make the first
+    // Hosted Apple Silicon can need more than fifteen seconds to make the first
     // cold-start protocol probe observable. Keep this bounded, while retaining
     // the immediate child-exit diagnostic below.
-    for attempt in 0..600 {
+    for attempt in 0..1200 {
         let output = native_command(
             context,
             cli,
