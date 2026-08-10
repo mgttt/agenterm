@@ -8,6 +8,34 @@ fn rh_host_api_version_is_thirteen() {
 }
 
 #[test]
+fn native_process_output_drains_beyond_capture_limit() {
+    let executable = std::env::current_exe().expect("current test executable");
+    let program = serde_json::to_string(&executable.to_string_lossy()).expect("program literal");
+    let source = format!(
+        r#"fn entry() {{
+            let command = std::process::command({program});
+            command.args(["--list"]);
+            command.timeout(std::time::Duration::from_secs(10));
+            command.capture_limit(1024);
+            let output = command.output();
+            let stdout = output.stdout_text();
+            if output.success == 0 {{ return 20; }}
+            if stdout.len != 1024 {{ return 21; }}
+            0
+        }}"#
+    );
+    let directory = std::env::temp_dir().join(format!(
+        "agenterm-rh-large-process-output-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&directory);
+    let receipt = agenterm_rh::qualify_pack_dir(&source, &directory)
+        .expect("qualify large process output pack");
+    let _ = std::fs::remove_dir_all(&directory);
+    assert_eq!(receipt.entry_value, 0);
+}
+
+#[test]
 fn check_accepts_all_fixtures() {
     for (name, source) in [
         ("entry", include_str!("../fixtures/rh/entry.rh")),

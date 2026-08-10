@@ -37,6 +37,10 @@ fn output_stderr_text(output) {
     output.stderr_text()
 }
 
+fn output_text(output) {
+    output.stdout_text() + output.stderr_text()
+}
+
 fn remote_ui_write(path, content) {
     rh::runtime::atomic_write(path, content);
 }
@@ -67,6 +71,49 @@ fn configured_gui_command(
     command.timeout(std::time::Duration::from_secs(60));
     command.capture_limit(262144);
     command
+}
+
+fn configured_server_command(context, server_exe) {
+    let command = std::process::command(server_exe);
+    command.args(["server", "--address", context.address]);
+    command.env("AGENTERM_IPC_ADDRESS", context.address);
+    command.env("AGENTERM_WORKSPACE_PATH", context.workspace_path);
+    command.env("AGENTERM_SETTINGS_PATH", context.settings_path);
+    command.env(
+        "AGENTERM_INSTANCE_DIR",
+        context.instance_directory
+    );
+    command.env("AGENTERM_NO_ACTIVATE", "1");
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    command
+}
+
+fn wait_for_protocol(context, cli, code) {
+    let last = "";
+    for attempt in 0..30 {
+        let arguments = [
+            "--address", context.address, "protocol-info", "--running"
+        ];
+        let command = test_harness::configured_cli_command(
+            context, cli, arguments
+        );
+        command.timeout(std::time::Duration::from_secs(5));
+        let output = command.output();
+        last = output_text(output);
+        if output.success != 0 {
+            test_harness::append_command_record(
+                context,
+                ["protocol-info", "--running"],
+                output,
+                0,
+                []
+            );
+            return rh::json::parse(output.stdout_text());
+        }
+        rh::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw code + ":" + last;
 }
 
 fn wheel_message_lparam(gui) {
@@ -690,7 +737,21 @@ let clipboard_restore_text = "";
 let clipboard_restore_needed = 0;
 
 try {
-    print("STEP start replaceable UI and let it start the independent server");
+    print("STEP start the independent server and wait through public protocol");
+    let initial_server_command = configured_server_command(context, gui_exe);
+    let initial_server = initial_server_command.start();
+    let initial_protocol = wait_for_protocol(
+        context,
+        cli,
+        "remote_ui_server_timeout"
+    );
+    test_harness::require(
+        initial_protocol.pid == initial_server.id,
+        "remote_ui_server_identity_invalid"
+    );
+    owned_children.push(initial_server);
+
+    print("STEP start replaceable UI against the ready independent server");
     let gui_command = configured_gui_command(
         gui_exe,
         context.address,
@@ -915,6 +976,7 @@ try {
     test_harness::require(
         bootstrap.schema_version == 2
             && ui.server_pid == bootstrap.server_pid
+            && bootstrap.server_pid == initial_server.id
             && bootstrap.server_pid != gui.id
             && bootstrap.tabs.len >= 1
             && lease.client_build.protocol_version == 1

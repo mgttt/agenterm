@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 88;
+pub const RH_CODEGEN_REVISION: u32 = 89;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -954,25 +954,38 @@ pub fn emit_host_runtime(out: &mut String) {
              let mut chunk = [0_u8; 8192];\n\
              let mut truncated = false;\n\
              loop {\n\
-                 if bytes.len() >= limit {\n\
-                     truncated = true;\n\
-                     break;\n\
-                 }\n\
                  match reader.read(&mut chunk) {\n\
                      Ok(0) => break,\n\
                      Ok(count) => {\n\
-                         let room = limit - bytes.len();\n\
+                         let room = limit.saturating_sub(bytes.len());\n\
                          let take = count.min(room);\n\
                          bytes.extend_from_slice(&chunk[..take]);\n\
                          if take < count {\n\
                              truncated = true;\n\
-                             break;\n\
                          }\n\
                      }\n\
                      Err(_) => break,\n\
                  }\n\
              }\n\
              (String::from_utf8(bytes).unwrap_or_default(), truncated)\n\
+         }\n\n\
+         fn rh_start_pipe_reader<R>(\n\
+             reader: Option<R>,\n\
+             limit: usize,\n\
+         ) -> Option<std::thread::JoinHandle<(String, bool)>>\n\
+         where\n\
+             R: std::io::Read + Send + 'static,\n\
+         {\n\
+             reader.map(|pipe| {\n\
+                 std::thread::spawn(move || rh_read_pipe_limited(pipe, limit))\n\
+             })\n\
+         }\n\n\
+         fn rh_finish_pipe_reader(\n\
+             reader: Option<std::thread::JoinHandle<(String, bool)>>,\n\
+         ) -> (String, bool) {\n\
+             reader\n\
+                 .and_then(|reader| reader.join().ok())\n\
+                 .unwrap_or_else(|| (String::new(), false))\n\
          }\n\n\
          fn rh_finish_process_output(\n\
              mut child: std::process::Child,\n\
@@ -981,8 +994,14 @@ pub fn emit_host_runtime(out: &mut String) {
              program: &str,\n\
              args_preview: &str,\n\
          ) -> RhOutput {\n\
-             let stdout_pipe = child.stdout.take();\n\
-             let stderr_pipe = child.stderr.take();\n\
+             // Drain both pipes while the child is alive. Waiting first can\n\
+             // deadlock as soon as either stream fills the OS pipe buffer.\n\
+             // Readers continue discarding after the capture limit so a\n\
+             // deliberately bounded result never blocks an unbounded child.\n\
+             let mut stdout_reader =\n\
+                 rh_start_pipe_reader(child.stdout.take(), capture_limit);\n\
+             let mut stderr_reader =\n\
+                 rh_start_pipe_reader(child.stderr.take(), capture_limit);\n\
              let deadline = std::time::Instant::now() + timeout;\n\
              let status = loop {\n\
                  match child.try_wait() {\n\
@@ -1021,14 +1040,8 @@ pub fn emit_host_runtime(out: &mut String) {
                      }\n\
                  }\n\
              };\n\
-             let (stdout, _) = match stdout_pipe {\n\
-                 Some(pipe) => rh_read_pipe_limited(pipe, capture_limit),\n\
-                 None => (String::new(), false),\n\
-             };\n\
-             let (stderr, _) = match stderr_pipe {\n\
-                 Some(pipe) => rh_read_pipe_limited(pipe, capture_limit),\n\
-                 None => (String::new(), false),\n\
-             };\n\
+             let (stdout, _) = rh_finish_pipe_reader(stdout_reader.take());\n\
+             let (stderr, _) = rh_finish_pipe_reader(stderr_reader.take());\n\
              RhOutput {\n\
                  success: i64::from(status.success()),\n\
                  exit_code: status.code().unwrap_or(-1) as INT,\n\
@@ -1991,3 +2004,22 @@ pub fn emit_host_runtime(out: &mut String) {
 
 // Back-compat alias used by older tests/docs.
 pub const RH_HOST_FLEET_OUT_CAP: u32 = RH_HOST_OUT_CAP;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn generated_process_output_drains_pipes_before_waiting() {
+        let mut runtime = String::new();
+        super::emit_host_runtime(&mut runtime);
+
+        let reader = runtime
+            .find("rh_start_pipe_reader(child.stdout.take()")
+            .expect("stdout reader starts");
+        let wait = runtime
+            .find("match child.try_wait()")
+            .expect("child wait loop");
+        assert!(reader < wait, "pipes must drain while the child is alive");
+        assert!(runtime.contains("limit.saturating_sub(bytes.len())"));
+        assert!(!runtime.contains("if bytes.len() >= limit"));
+    }
+}

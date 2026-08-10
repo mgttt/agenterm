@@ -610,51 +610,40 @@ fn reserve_loopback_address() {
     "127.0.0.1:" + ("" + port)
 }
 
-fn resolve_script_executable(executable_directory) {
-    // The standalone agenterm-rh binary retired; the rh engine lives in
-    // the main PE and is reached via the `rh` subcommand (the eval spawn
-    // below passes it).
-    let hosted_candidate = std::path::join(
-        executable_directory,
-        "agenterm.exe"
+fn build_incompatible_peer(context, repo, run_directory) {
+    let source = std::path::join(
+        repo, "tests/fixtures/incompatible_ipc_peer.rs"
     ).display;
-    if std::fs::exists(hosted_candidate) {
-        return hosted_candidate;
-    }
-    throw "control_center_smoke_script_missing";
+    let executable = std::path::join(
+        run_directory, "incompatible-ipc-peer.exe"
+    ).display;
+    let command = test_harness::configured_command(
+        context,
+        "rustc",
+        [source, "-O", "-o", executable]
+    );
+    command.timeout(std::time::Duration::from_secs(60));
+    let output = command.output();
+    test_harness::require(
+        output.success,
+        "control_center_incompatible_peer_build:" + output.stderr_text()
+    );
+    executable
 }
 
 fn incompatible_sibling(
-        context, script_executable, address, ready_path, stop_path, code) {
+        context, probe_executable, address, ready_path, stop_path, code) {
     if std::fs::exists(ready_path) {
         std::fs::remove_file(ready_path);
     }
     if std::fs::exists(stop_path) {
         std::fs::remove_file(stop_path);
     }
-    let source =
-        "let listener = std::net::TcpListener::bind(args[0]); " +
-        "std::fs::write(args[1], \"ready\"); " +
-        "loop { if std::fs::exists(args[2]) != 0 { break; } " +
-        "try { let stream = listener.accept_timeout(" +
-        "std::time::Duration::from_millis(100)); " +
-        "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
-        "catch (error) { if error.to_string().contains(" +
-        "\"net_accept_timeout\") == 0 { throw error; } } }";
-    let eval_args = ["cli", "script", "eval"];
-    eval_args.push(source);
-    eval_args.push("--timeout-ms");
-    eval_args.push("30000");
-    eval_args.push("--max-operations");
-    eval_args.push("10000000");
-    eval_args.push("--");
-    eval_args.push("" + address);
-    eval_args.push("" + ready_path);
-    eval_args.push("" + stop_path);
+    let probe_args = ["" + address, "" + ready_path, "" + stop_path];
     let command = test_harness::configured_command(
         context,
-        script_executable,
-        eval_args
+        probe_executable,
+        probe_args
     );
     command.timeout(std::time::Duration::from_secs(15));
     let child = command.start();
@@ -802,7 +791,6 @@ fn entry() {
         executable_directory,
         "agenterm.exe"
     ).display;
-    let script_executable = resolve_script_executable(executable_directory);
     let gui_executable = std::path::join(
         executable_directory,
         "agenterm.exe"
@@ -826,6 +814,9 @@ fn entry() {
 
     let context = test_harness::new_context(repo, "control-center");
     let run_directory = context.run_directory;
+    let incompatible_peer = build_incompatible_peer(
+        context, repo, run_directory
+    );
     let evidence_parent = std::path::parent(context.evidence_path).display;
     let registry = std::path::join(
         run_directory,
@@ -1648,7 +1639,7 @@ fn entry() {
         );
         let incompatible_probe = incompatible_sibling(
             context,
-            script_executable,
+            incompatible_peer,
             incompatible_address,
             incompatible_probe_ready,
             incompatible_probe_stop,
@@ -1719,7 +1710,7 @@ fn entry() {
         ).display;
         let incompatible_renderer = incompatible_sibling(
             context,
-            script_executable,
+            incompatible_peer,
             incompatible_address,
             incompatible_renderer_ready,
             incompatible_renderer_stop,

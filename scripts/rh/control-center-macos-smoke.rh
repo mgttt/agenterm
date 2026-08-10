@@ -507,21 +507,30 @@ fn wait_incompatible_capture(
     throw code + "_timeout:last_frame=" + last;
 }
 
-fn resolve_script_executable(executable_directory) {
-    // The standalone agenterm-rh binary retired. The main PE's direct
-    // `rh eval` command accepts a file and is available on every host.
-    let hosted_candidate = std::path::join(
-        executable_directory,
-        "agenterm"
+fn build_incompatible_peer(context, repo, run_directory) {
+    let source = "" + std::path::join(
+        repo, "tests/fixtures/incompatible_ipc_peer.rs"
     ).display;
-    if std::fs::exists(hosted_candidate) {
-        return hosted_candidate;
-    }
-    throw "control_center_macos_script_missing";
+    let executable = "" + std::path::join(
+        run_directory, "incompatible-ipc-peer"
+    ).display;
+    let command = test_harness::configured_command(
+        context,
+        "rustc",
+        [source, "-O", "-o", executable]
+    );
+    command.timeout(std::time::Duration::from_secs(60));
+    let output = command.output();
+    test_harness::require(
+        output.success != 0,
+        "control_center_macos_incompatible_peer_build:" +
+            output.stderr_text()
+    );
+    executable
 }
 
 fn incompatible_listener(
-    context, script_executable, address, ready_path, stop_path, code
+    context, probe_executable, address, ready_path, stop_path, code
 ) {
     let address_text = "" + address;
     test_harness::require(
@@ -534,29 +543,11 @@ fn incompatible_listener(
     if std::fs::exists(stop_path) != 0 {
         std::fs::remove_file(stop_path);
     }
-    let source =
-        "let listener = std::net::TcpListener::bind(args[0]); " +
-        "std::fs::write(args[1], \"ready\"); " +
-        "loop { if std::fs::exists(args[2]) != 0 { break; } " +
-        "try { let stream = listener.accept_timeout(" +
-        "std::time::Duration::from_millis(100)); " +
-        "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
-        "catch (error) { if error.to_string().contains(" +
-        "\"net_accept_timeout\") == 0 { throw error; } } }";
-    let eval_args = ["cli", "script", "eval"];
-    eval_args.push(source);
-    eval_args.push("--timeout-ms");
-    eval_args.push("20000");
-    eval_args.push("--max-operations");
-    eval_args.push("10000000");
-    eval_args.push("--");
-    eval_args.push(address_text);
-    eval_args.push("" + ready_path);
-    eval_args.push("" + stop_path);
+    let probe_args = [address_text, "" + ready_path, "" + stop_path];
     let command = test_harness::configured_command(
         context,
-        "" + script_executable,
-        eval_args
+        "" + probe_executable,
+        probe_args
     );
     command.timeout(std::time::Duration::from_secs(22));
     let child = command.start();
@@ -722,9 +713,6 @@ fn entry() {
     let server_executable =
         "" + std::path::absolute(server_executable_value).display;
     let cli_executable = "" + std::path::absolute(cli_executable_value).display;
-    let script_executable = resolve_script_executable(
-        "" + std::path::parent(control_center).display
-    );
     test_harness::require(
         std::fs::exists(control_center) != 0,
         "control_center_macos_executable_missing:" + control_center
@@ -738,16 +726,15 @@ fn entry() {
         "control_center_macos_executable_missing:" + cli_executable
     );
     test_harness::require(
-        std::fs::exists(script_executable) != 0,
-        "control_center_macos_script_missing"
-    );
-    test_harness::require(
         std::fs::exists("/System/Library/CoreServices") != 0,
         "control_center_macos_host_required"
     );
 
     let context = test_harness::new_context(repo, "control-center-macos");
     let run_directory = "" + context.run_directory;
+    let incompatible_peer = build_incompatible_peer(
+        context, repo, run_directory
+    );
     let evidence_parent = "" + std::path::parent(context.evidence_path).display;
     let runtime =
         "/private/tmp/agt-cc-" + ("" + std::process::id()) + "-" +
@@ -1185,7 +1172,7 @@ fn entry() {
         ).display;
         let incompatible_probe = incompatible_listener(
             context,
-            script_executable,
+            incompatible_peer,
             "" + context.address,
             incompatible_probe_ready,
             incompatible_probe_stop,
@@ -1223,7 +1210,7 @@ fn entry() {
         ).display;
         let incompatible_renderer = incompatible_listener(
             context,
-            script_executable,
+            incompatible_peer,
             "" + context.address,
             incompatible_renderer_ready,
             incompatible_renderer_stop,

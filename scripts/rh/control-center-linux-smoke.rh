@@ -289,8 +289,19 @@ fn invoke_activate(
     );
 }
 
+fn read_diagnostic_file(path) {
+    if std::fs::exists(path) == 0 {
+        return "<missing>";
+    }
+    test_harness::bounded_record_text(
+        std::fs::read_to_string(path),
+        2048
+    )
+}
+
 fn wait_protocol(
-    context, cli, registry, endpoint, backend, child, code
+    context, cli, registry, endpoint, backend, child, stdout_path,
+    stderr_path, code
 ) {
     let endpoint_text = "" + endpoint;
     let code_text = "" + code;
@@ -326,13 +337,17 @@ fn wait_protocol(
         backend,
         diagnostic_arguments
     ).output();
-    print(
-        "DIAGNOSTIC protocol readiness timeout: pid=" + child.id +
-            " state=" + child.state +
-            " stdout=" + diagnostic_output.stdout_text() +
-            " stderr=" + diagnostic_output.stderr_text()
-    );
-    throw code_text + "_timeout";
+    let registry_exists = 0;
+    if std::fs::exists(registry) != 0 {
+        registry_exists = 1;
+    }
+    throw code_text + "_timeout:pid=" + child.id +
+        ":state=" + child.state +
+        ":registry_exists=" + registry_exists +
+        ":probe_stdout=" + diagnostic_output.stdout_text() +
+        ":probe_stderr=" + diagnostic_output.stderr_text() +
+        ":server_stdout=" + read_diagnostic_file(stdout_path) +
+        ":server_stderr=" + read_diagnostic_file(stderr_path);
 }
 
 fn wait_registry(path, expected_pid, child, code) {
@@ -896,6 +911,14 @@ fn entry() {
             backend,
             server_args
         );
+        let server_stdout = std::path::join(
+            run_directory, "server.stdout.log"
+        ).display;
+        let server_stderr = std::path::join(
+            run_directory, "server.stderr.log"
+        ).display;
+        server_command.stdout_file(server_stdout);
+        server_command.stderr_file(server_stderr);
         let server = server_command.start();
         owned_children.push(server);
         let protocol = wait_protocol(
@@ -905,6 +928,8 @@ fn entry() {
             endpoint,
             backend,
             server,
+            server_stdout,
+            server_stderr,
             "control_center_linux_server"
         );
         test_harness::require(
@@ -1359,6 +1384,14 @@ fn entry() {
             backend,
             replacement_server_args
         );
+        let replacement_server_stdout = std::path::join(
+            run_directory, "replacement-server.stdout.log"
+        ).display;
+        let replacement_server_stderr = std::path::join(
+            run_directory, "replacement-server.stderr.log"
+        ).display;
+        replacement_server_command.stdout_file(replacement_server_stdout);
+        replacement_server_command.stderr_file(replacement_server_stderr);
         let replacement_server = replacement_server_command.start();
         owned_children.push(replacement_server);
         let replacement_protocol = wait_protocol(
@@ -1368,6 +1401,8 @@ fn entry() {
             endpoint,
             backend,
             replacement_server,
+            replacement_server_stdout,
+            replacement_server_stderr,
             "control_center_linux_replacement_server"
         );
         let recovery_open_args = [

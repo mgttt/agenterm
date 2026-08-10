@@ -672,6 +672,8 @@ fn unix_frontend_smoke_uses_native_bundled_execution() {
 fn remote_ui_smoke_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/remote-ui-smoke.rh");
     assert!(source.contains("fn entry("));
+    assert!(source.contains("[\"server\", \"--address\", context.address]"));
+    assert!(source.contains("bootstrap.server_pid == initial_server.id"));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
@@ -1207,7 +1209,8 @@ fn check_uses_native_bundled_pack() {
 fn control_center_smoke_uses_native_bundled_pack() {
     let source = std::fs::read_to_string(repo().join("scripts/rh/control-center-smoke.rh"))
         .expect("control center smoke source");
-    assert!(source.contains("[\"cli\", \"script\", \"eval\"]"));
+    assert!(source.contains("tests/fixtures/incompatible_ipc_peer.rs"));
+    assert!(!source.contains("std::net::TcpListener::bind"));
     assert_native_bundled_pack(
         "scripts/rh/control-center-smoke.rh",
         &[
@@ -1225,7 +1228,8 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
     assert!(!source.contains("control_center_macos_frontmost_unavailable"));
     assert!(!source.contains("PASS: macOS caller-selected UDS"));
     assert!(source.contains("NO_ACTIVATE_BASELINE_UNAVAILABLE"));
-    assert!(source.contains("[\"cli\", \"script\", \"eval\"]"));
+    assert!(source.contains("tests/fixtures/incompatible_ipc_peer.rs"));
+    assert!(!source.contains("std::net::TcpListener::bind"));
     assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
     assert!(
         source.contains("for attempt in 0..600"),
@@ -1280,7 +1284,7 @@ fn control_center_linux_smoke_passes_complete_endpoint_arguments() {
     let (source, output) = transpile_project_entry("scripts/rh/control-center-linux-smoke.rh");
     assert!(source.contains("[\"server\", \"--endpoint\", \"\" + endpoint]"));
     assert!(source.contains("for attempt in 0..600"));
-    assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
+    assert!(source.contains(":server_stderr="));
     assert!(!source.contains("fn push_endpoint("));
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
     assert!(
