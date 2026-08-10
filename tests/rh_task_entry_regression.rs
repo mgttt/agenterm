@@ -1218,6 +1218,7 @@ fn control_center_smoke_uses_native_bundled_pack() {
 fn control_center_macos_smoke_uses_native_bundled_pack() {
     let (source, output) = transpile_project_entry("scripts/rh/control-center-macos-smoke.rh");
     assert!(source.contains("fn entry("));
+    assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
     assert!(
         source.contains("for attempt in 0..1200"),
         "macOS cold-start protocol readiness must retain its bounded ARM runner budget"
@@ -1236,4 +1237,12 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
     }
     assert!(!output.rust.contains("cc.inner.borrow().pid"));
     assert_bundled_pack_builds("scripts/rh/control-center-macos-smoke.rh");
+}
+
+#[test]
+fn control_center_linux_smoke_passes_complete_endpoint_arguments() {
+    let (source, output) = transpile_project_entry("scripts/rh/control-center-linux-smoke.rh");
+    assert!(source.contains("[\"server\", \"--endpoint\", \"\" + endpoint]"));
+    assert!(!source.contains("fn push_endpoint("));
+    assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
 }

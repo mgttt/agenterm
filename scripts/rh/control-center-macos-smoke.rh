@@ -229,6 +229,19 @@ fn wait_protocol(context, cli, registry, runtime, child, code) {
         }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
+    let diagnostic_output = native_command(
+        context,
+        cli,
+        registry,
+        runtime,
+        ["--instance", "dev", "protocol-info", "--running"]
+    ).output();
+    print(
+        "DIAGNOSTIC protocol readiness timeout: pid=" + child.id +
+            " state=" + child.state +
+            " stdout=" + diagnostic_output.stdout_text() +
+            " stderr=" + diagnostic_output.stderr_text()
+    );
     throw code + "_timeout";
 }
 

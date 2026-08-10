@@ -376,6 +376,7 @@ fn cargo_unit_primary_spec(environment) {
         // in their generated Cargo build and must not consume this broad
         // unit lane's five-minute process budget a second time.
         "--skip", "uses_bundled_pack",
+        "--skip", "uses_native_bundled_pack",
         "--skip", "pack_builds"
     ];
     spec("cargo", arguments, 300000, environment, 0)

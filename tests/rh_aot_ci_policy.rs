@@ -246,6 +246,7 @@ fn rh_rides_the_main_binary_with_no_standalone_bin_target() {
 #[test]
 fn expensive_task_entry_packs_have_one_dedicated_ci_owner() {
     assert!(CHECK.contains("\"--skip\", \"uses_bundled_pack\""));
+    assert!(CHECK.contains("\"--skip\", \"uses_native_bundled_pack\""));
     assert!(CHECK.contains("\"--skip\", \"pack_builds\""));
     assert!(UNIX_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
     assert!(WINDOWS_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));

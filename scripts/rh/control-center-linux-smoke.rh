@@ -57,11 +57,6 @@ fn remove_path_if_exists(path) {
     0
 }
 
-fn push_endpoint(arguments, endpoint) {
-    arguments.push("" + endpoint);
-    0
-}
-
 fn has_nonempty_env(name) {
     if std::env::has(name) == 0 {
         return 0;
@@ -875,8 +870,7 @@ fn entry() {
 
     try {
         print("STEP start caller-selected native Unix IPC authority and PTY");
-        let server_args = ["server", "--endpoint"];
-        push_endpoint(server_args, endpoint);
+        let server_args = ["server", "--endpoint", "" + endpoint];
         let server_command = native_command(
             context,
             server_executable,
@@ -914,8 +908,9 @@ fn entry() {
             "native-input"
         );
 
-        let snapshot_args = ["snapshot", "--json", "--endpoint"];
-        push_endpoint(snapshot_args, endpoint);
+        let snapshot_args = [
+            "snapshot", "--json", "--endpoint", "" + endpoint
+        ];
         let selected = json_command(
             context,
             control_center,
@@ -953,8 +948,9 @@ fn entry() {
         }
 
         print("STEP no-activate opens one renderer and publishes exact frame evidence");
-        let open_args = ["open", "--no-activate", "--endpoint"];
-        push_endpoint(open_args, endpoint);
+        let open_args = [
+            "open", "--no-activate", "--endpoint", "" + endpoint
+        ];
         let cc_command = native_command(
             context,
             control_center,
@@ -1202,8 +1198,9 @@ fn entry() {
                 "control_center_linux_wayland_input_not_typed_unsupported:" +
                     input_failure
             );
-            let unchanged_args = ["snapshot", "--json", "--endpoint"];
-            push_endpoint(unchanged_args, endpoint);
+            let unchanged_args = [
+                "snapshot", "--json", "--endpoint", "" + endpoint
+            ];
             let unchanged = json_command(
                 context,
                 control_center,
@@ -1226,8 +1223,9 @@ fn entry() {
         }
 
         print("STEP repeated no-activate and focus requests reuse the same owner");
-        let reuse_open_args = ["open", "--no-activate", "--endpoint"];
-        push_endpoint(reuse_open_args, endpoint);
+        let reuse_open_args = [
+            "open", "--no-activate", "--endpoint", "" + endpoint
+        ];
         invoke(
             context,
             control_center,
@@ -1257,8 +1255,7 @@ fn entry() {
                 "control_center_linux_reused_no_activate_stole_focus"
             );
         }
-        let activate_args = ["open", "--endpoint"];
-        push_endpoint(activate_args, endpoint);
+        let activate_args = ["open", "--endpoint", "" + endpoint];
         invoke_activate(
             context,
             control_center,
@@ -1306,8 +1303,9 @@ fn entry() {
         wait_process_gone(
             prior_server_pid, "control_center_linux_server_kill_orphan"
         );
-        let loss_open_args = ["open", "--no-activate", "--endpoint"];
-        push_endpoint(loss_open_args, endpoint);
+        let loss_open_args = [
+            "open", "--no-activate", "--endpoint", "" + endpoint
+        ];
         invoke(
             context,
             control_center,
@@ -1335,8 +1333,9 @@ fn entry() {
             "control_center_linux_server_loss_truth"
         );
 
-        let replacement_server_args = ["server", "--endpoint"];
-        push_endpoint(replacement_server_args, endpoint);
+        let replacement_server_args = [
+            "server", "--endpoint", "" + endpoint
+        ];
         let replacement_server_command = native_command(
             context,
             server_executable,
@@ -1356,8 +1355,9 @@ fn entry() {
             replacement_server,
             "control_center_linux_replacement_server"
         );
-        let recovery_open_args = ["open", "--no-activate", "--endpoint"];
-        push_endpoint(recovery_open_args, endpoint);
+        let recovery_open_args = [
+            "open", "--no-activate", "--endpoint", "" + endpoint
+        ];
         invoke(
             context,
             control_center,
@@ -1378,8 +1378,9 @@ fn entry() {
             "connected",
             "control_center_linux_server_recovery"
         );
-        let replacement_snapshot_args = ["snapshot", "--json", "--endpoint"];
-        push_endpoint(replacement_snapshot_args, endpoint);
+        let replacement_snapshot_args = [
+            "snapshot", "--json", "--endpoint", "" + endpoint
+        ];
         let replacement_selected = json_command(
             context,
             control_center,
@@ -1429,8 +1430,9 @@ fn entry() {
             "after-renderer-kill"
         );
 
-        let recovered_open_args = ["open", "--no-activate", "--endpoint"];
-        push_endpoint(recovered_open_args, endpoint);
+        let recovered_open_args = [
+            "open", "--no-activate", "--endpoint", "" + endpoint
+        ];
         let recovered_command = native_command(
             context,
             control_center,
@@ -1505,9 +1507,7 @@ fn entry() {
         );
         emit_linux_evidence(context, "control-center.linux-process-isolation");
 
-        let shutdown_args = ["--endpoint"];
-        push_endpoint(shutdown_args, endpoint);
-        shutdown_args.push("shutdown");
+        let shutdown_args = ["--endpoint", "" + endpoint, "shutdown"];
         invoke(
             context,
             cli_executable,
