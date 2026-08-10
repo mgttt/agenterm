@@ -158,6 +158,11 @@ impl WasmCoreHost {
     /// import is always registered so a module doesn't fail to
     /// instantiate just because this particular host run has no bridge to
     /// offer it).
+    ///
+    /// This always compiles `wasm_path`'s bytes with the Cranelift JIT from
+    /// scratch (`Module::from_file`) -- see [`Self::run_precompiled_module`]
+    /// for the AOT alternative and `README.md`'s "AOT precompilation"
+    /// section for when that trade is (and is not) worth it.
     pub fn run_module(
         &self,
         wasm_path: impl AsRef<Path>,
@@ -173,6 +178,105 @@ impl WasmCoreHost {
             .join()
             .map_err(|_| anyhow!("agenterm-wasmcore guest-run worker thread panicked"))?
     }
+
+    /// Load and run a `wasm32-wasip1` guest module from in-memory bytes
+    /// (`Module::from_binary`) instead of from a file path. Same worker
+    /// thread, stack size, WASI setup, `fleet_call` wiring, stdout capture,
+    /// and exit handling as [`Self::run_module`] -- this is a genuine
+    /// alternate loading path through the exact same host/bridge code.
+    pub fn run_module_from_bytes(
+        &self,
+        wasm_bytes: &[u8],
+        fleet_bridge: Option<WasmFleetBridgeFn>,
+    ) -> Result<GuestRunResult> {
+        let engine = self.engine.clone();
+        let wasm_bytes = wasm_bytes.to_vec();
+        let handle = std::thread::Builder::new()
+            .stack_size(WORKER_STACK_BYTES)
+            .spawn(move || {
+                let module = Module::from_binary(&engine, &wasm_bytes)
+                    .context("loading wasm module from bytes")?;
+                run_loaded_module(&engine, &module, fleet_bridge)
+            })
+            .context("spawning agenterm-wasmcore guest-run worker thread")?;
+        handle
+            .join()
+            .map_err(|_| anyhow!("agenterm-wasmcore guest-run worker thread panicked"))?
+    }
+
+    /// Validate WASM binary bytes without executing them. Returns `Ok(())`
+    /// if the bytes form a valid `wasm32-wasip1` module, or `Err` with a
+    /// descriptive message if validation fails.
+    pub fn validate_binary(&self, wasm_bytes: &[u8]) -> Result<()> {
+        wasmtime::Module::validate(&self.engine, wasm_bytes)
+            .context("validating wasm binary")
+    }
+
+    /// One-time AOT precompile: compiles `wasm_path`'s bytes for this
+    /// host's [`Engine`] target/settings and returns the serialized bytes
+    /// (`wasmtime::Engine::precompile_module`) a caller can write to a
+    /// `.cwasm` file and later load back with [`Self::run_precompiled_module`].
+    /// This is the exact same compilation [`Self::run_module`] performs
+    /// internally via `Module::from_file` -- this method just exposes the
+    /// serialized result instead of running it immediately, so the
+    /// (potentially expensive, one-time) compile can happen ahead of a
+    /// guest run rather than on every guest run's critical path. See
+    /// `README.md` for the measured cost of this step and the portability
+    /// caveat on its output (a `.cwasm` is native code for this `Engine`'s
+    /// exact target/settings, not a portable artifact like the source
+    /// `.wasm`).
+    pub fn precompile_module(&self, wasm_path: impl AsRef<Path>) -> Result<Vec<u8>> {
+        let wasm_path = wasm_path.as_ref();
+        let wasm_bytes = std::fs::read(wasm_path)
+            .with_context(|| format!("reading wasm module {}", wasm_path.display()))?;
+        self.engine
+            .precompile_module(&wasm_bytes)
+            .with_context(|| format!("precompiling wasm module {}", wasm_path.display()))
+    }
+
+    /// Load a previously AOT-precompiled `.cwasm` (produced by
+    /// [`Self::precompile_module`]/`Engine::precompile_module`, or by
+    /// `Module::serialize`) via `Module::deserialize_file` instead of
+    /// JIT-compiling a `.wasm` from scratch, then run it through the exact
+    /// same instantiate/execute machinery [`Self::run_module`] uses --
+    /// same worker thread, stack size, WASI setup, `fleet_call` wiring,
+    /// stdout capture, and exit handling. This is a genuine alternate
+    /// loading path through the same host/bridge code, not a separate
+    /// mechanism: see `README.md`'s "AOT precompilation" section for the
+    /// measured round trip proving identical guest-observable behavior on
+    /// both paths.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as `wasmtime::Module::deserialize_file`: `cwasm_path`
+    /// must contain the unmodified output of a real
+    /// `Engine::precompile_module`/`Module::serialize` call (from this or a
+    /// prior process), not arbitrary/untrusted bytes -- deserializing
+    /// crafted input can lead to arbitrary code execution, because (unlike
+    /// `Module::from_file`) the artifact's compiled code is only lightly
+    /// validated, not fully re-verified, before being mapped executable.
+    /// The file must also remain unchanged for the lifetime of the
+    /// returned run (it is mapped into memory, not copied).
+    pub unsafe fn run_precompiled_module(
+        &self,
+        cwasm_path: impl AsRef<Path>,
+        fleet_bridge: Option<WasmFleetBridgeFn>,
+    ) -> Result<GuestRunResult> {
+        let cwasm_path = cwasm_path.as_ref().to_path_buf();
+        let engine = self.engine.clone();
+        let handle = std::thread::Builder::new()
+            .stack_size(WORKER_STACK_BYTES)
+            .spawn(move || {
+                // SAFETY: forwarding this function's own safety contract to
+                // the worker thread; the caller of `run_precompiled_module`
+                // already accepted it.
+                unsafe { run_precompiled_module_on_worker_thread(&engine, &cwasm_path, fleet_bridge) }
+            })
+            .context("spawning agenterm-wasmcore guest-run worker thread")?;
+        handle
+            .join()
+            .map_err(|_| anyhow!("agenterm-wasmcore guest-run worker thread panicked"))?
+    }
 }
 
 fn run_module_on_worker_thread(
@@ -182,7 +286,34 @@ fn run_module_on_worker_thread(
 ) -> Result<GuestRunResult> {
     let module = Module::from_file(engine, wasm_path)
         .with_context(|| format!("loading wasm module {}", wasm_path.display()))?;
+    run_loaded_module(engine, &module, fleet_bridge)
+}
 
+/// # Safety
+/// Same contract as `wasmtime::Module::deserialize_file` -- see
+/// [`WasmCoreHost::run_precompiled_module`]'s doc comment for the full
+/// requirement this function's caller must uphold.
+unsafe fn run_precompiled_module_on_worker_thread(
+    engine: &Engine,
+    cwasm_path: &Path,
+    fleet_bridge: Option<WasmFleetBridgeFn>,
+) -> Result<GuestRunResult> {
+    // SAFETY: forwarded from this function's own (identical) safety
+    // contract.
+    let module = unsafe { Module::deserialize_file(engine, cwasm_path) }
+        .with_context(|| format!("deserializing precompiled module {}", cwasm_path.display()))?;
+    run_loaded_module(engine, &module, fleet_bridge)
+}
+
+/// Shared instantiate/run machinery for both the JIT (`Module::from_file`)
+/// and AOT (`Module::deserialize_file`) loading paths -- proves the AOT
+/// path is a genuine alternate route through the exact same host/bridge
+/// code, not a second, separately-tested mechanism.
+fn run_loaded_module(
+    engine: &Engine,
+    module: &Module,
+    fleet_bridge: Option<WasmFleetBridgeFn>,
+) -> Result<GuestRunResult> {
     let mut linker: Linker<WasmCoreState> = Linker::new(engine);
     p1::add_to_linker_sync(&mut linker, |state: &mut WasmCoreState| &mut state.wasi)
         .context("registering WASI p1 imports")?;
@@ -198,7 +329,7 @@ fn run_module_on_worker_thread(
     let mut store = Store::new(engine, state);
 
     let instance = linker
-        .instantiate(&mut store, &module)
+        .instantiate(&mut store, module)
         .context("instantiating wasm module")?;
     let start = instance
         .get_typed_func::<(), ()>(&mut store, "_start")

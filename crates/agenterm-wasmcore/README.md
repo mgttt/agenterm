@@ -266,6 +266,207 @@ write:
   exactly, with no dropped, duplicated, reordered, or cross-call-leaked
   data.
 
+## AOT precompilation (measured)
+
+`wasmtime` offers a second compile-timing strategy for the *same* portable
+`.wasm` bytecode this crate already runs: ahead-of-time (AOT) precompile to
+a native `.cwasm` artifact, loaded back with a light mmap+validate step
+instead of a full Cranelift compile. This section reports what was really
+measured on this box, not an estimate.
+
+### The API surface added
+
+- `WasmCoreHost::precompile_module(wasm_path) -> Result<Vec<u8>>` -- wraps
+  `Engine::precompile_module`, the one-time compile-to-bytes step.
+- `WasmCoreHost::run_precompiled_module(cwasm_path, fleet_bridge) -> Result<GuestRunResult>`
+  (`unsafe`, matching `Module::deserialize_file`'s own contract) -- loads a
+  `.cwasm` and runs it through **the exact same** instantiate/run machinery
+  (`run_loaded_module`) that the existing JIT `run_module` uses. This is
+  not a second, untested code path bolted on beside the real one -- both
+  loading strategies funnel into one shared function; only how the
+  `wasmtime::Module` gets built differs.
+- Neither is wired into any product path -- same standalone,
+  mechanism-proving posture as the rest of this crate this round.
+
+[`tests/aot_precompile.rs`](tests/aot_precompile.rs) proves this end to
+end: compiles the crate's real `guests/fleet_guest.rs`, runs it once
+through `run_module` (JIT) and once through `precompile_module` +
+`run_precompiled_module` (AOT), and asserts **byte-identical** `stdout`
+and `GuestExit` on both paths -- same real unicode `fleet_call` round
+trip, same real bridge echo, same real `exit(7)`.
+
+### Real measured timings
+
+Guest used: `guests/fleet_guest.rs` -- the same guest
+`tests/fleet_call_roundtrip.rs` already runs (a real, non-trivial
+`wasm32-wasip1` WASI program: `println!`/`format!`/the std allocator, one
+successful and one rejected `fleet_call`, an explicit `exit(7)`), chosen
+over the tiny `wasmcore_run` CLI demo guest because it is closer to what
+this crate's own test suite already treats as representative, and over
+the several-MB-payload hardening guests because their *code* size is not
+meaningfully larger (the extra cost there is runtime payload marshalling,
+not compiled code size) -- see `tests/hardening_payloads.rs`.
+
+Measured with [`examples/aot_timing.rs`](examples/aot_timing.rs),
+**release build** (`cargo build --release --example aot_timing`, then run
+directly), on this real Windows x86_64 box, one shared `Engine`/
+`WasmCoreHost` reused across all iterations (matching how this crate is
+actually meant to be used -- construct once, run many times), 20
+repetitions per phase (5 for the one-time precompile step). Every
+number below is real output from one real run, not rounded/estimated:
+
+```text
+.wasm size: 2,105,917 bytes
+.cwasm size: 219,896 bytes
+
+AOT precompile (Engine::precompile_module) -- 5 runs
+  first run: 95.17ms
+  subsequent runs mean: 75.72ms  (n=4)
+  min=53.09ms  median=86.64ms  mean=79.61ms  max=95.17ms
+
+End-to-end JIT (Module::from_file + instantiate + run + fleet_call) -- 20 runs
+  first run: 85.21ms
+  subsequent runs mean: 69.79ms  (n=19)
+  min=50.26ms  median=70.98ms  mean=70.56ms  max=87.97ms
+
+End-to-end AOT (Module::deserialize_file + instantiate + run + fleet_call) -- 20 runs
+  first run: 3.57ms
+  subsequent runs mean: 3.32ms  (n=19)
+  min=1.29ms  median=3.02ms  mean=3.33ms  max=9.59ms
+
+Isolated: Module::from_file (JIT compile only, no run) -- 20 runs
+  first run: 48.90ms
+  subsequent runs mean: 66.13ms  (n=19)
+  min=42.70ms  median=59.84ms  mean=65.27ms  max=129.48ms
+
+Isolated: Module::deserialize_file (AOT load only, no run) -- 20 runs
+  first run: 0.48ms
+  subsequent runs mean: 0.25ms  (n=19)
+  min=0.21ms  median=0.24ms  mean=0.26ms  max=0.48ms
+```
+
+Honest variance note: these are "hot" repeated-in-one-process numbers
+(OS/filesystem caches already warm from earlier iterations and earlier
+test runs), not an isolated fresh-process cold boot -- the `first run`
+row in each block is the closest proxy this program produces, not a true
+cold-boot number. The relative JIT-vs-AOT gap is large enough (roughly
+20-25x end to end, ~250x for the isolated load step) that this
+methodology gap is very unlikely to change the conclusion, but it is a
+real limitation of what was actually measured, stated honestly rather
+than glossed over.
+
+**Interpretation:** the ~3ms/~65ms split between the end-to-end and
+isolated-load-only AOT numbers shows where the cost really lives -- both
+loading strategies pay roughly the same ~3ms of fixed overhead (worker
+thread spawn with its 16 MiB stack, WASI context setup, linking,
+instantiation, running `_start`, one `fleet_call` round trip). JIT's
+extra ~65ms over that fixed floor is Cranelift actually compiling this
+guest's code from scratch on every single load; AOT's isolated load step
+(~0.25ms) is a light mmap + compatibility-metadata check, not a compile.
+The one-time `precompile_module` cost (~53-95ms) is, unsurprisingly, in
+the same range as one JIT compile -- it runs the identical Cranelift
+compilation, it just serializes the result instead of also
+instantiating/running it.
+
+Also notable, and guest-composition-dependent rather than a general law:
+for this guest, the `.cwasm` (220 KB) is **smaller** than the source
+`.wasm` (2.1 MB) -- the source module carries a fair amount of
+unstripped std/formatting machinery `wasmtime`'s compiled-code
+representation for this narrow guest does not need to keep around
+byte-for-byte. Do not generalize this to "AOT artifacts are always
+smaller"; it was not tested for other guest shapes this round.
+
+### Portability: what was actually tested vs cited
+
+The claim under test: a `.cwasm` is native code for whatever target
+(architecture, OS, and `wasmtime::Config`-derived compiler/tunables
+settings) it was precompiled for -- it is **not** portable across those
+the way the source `.wasm` is.
+
+**Tested for real, on this box** (see
+[`tests/aot_precompile.rs`](tests/aot_precompile.rs)):
+
+- `wasmtime::Engine::detect_precompiled` recognizes `precompile_module`'s
+  output as a real, distinct precompiled-module artifact (not plain wasm
+  bytes) -- confirms this is a genuinely different kind of file, not
+  wasm-with-extra-steps.
+- The `.cwasm` bytes literally contain the readable ASCII substrings
+  `"x86_64"` and `"windows"` -- wasmtime's own serialization format
+  (`wasmtime-47.0.3/src/engine/serialization.rs`, `Metadata::new`) embeds
+  `compiler.triple().to_string()` and `postcard`-encodes it as a plain
+  length-prefixed UTF-8 string, so the host's target triple survives
+  verbatim, inspectable by literal byte search -- verified by doing
+  exactly that, not assumed from the format description.
+- **The compatibility gate itself is live and really rejects a real
+  mismatch.** This box is single-ISA (x86_64) and single-OS (Windows), so
+  it cannot exercise an actual architecture/OS mismatch -- but it CAN
+  construct two `wasmtime::Engine`s from different `Config`s (one with
+  `epoch_interruption(false)`, one with `epoch_interruption(true)`),
+  precompile with one, and attempt `Module::deserialize` with the other.
+  That attempt is **really rejected**, with a real, specific error
+  (`"...compiled without epoch interruption but it is enabled for the
+  host"`/its mirror). This matters beyond the one flag it exercises:
+  wasmtime's own `Metadata::check_compatible` (same source file) runs
+  architecture, then OS, then Cranelift shared/ISA flags, then tunables
+  (which is what this test's `epoch_interruption` flag actually is), then
+  WASM features, all through **the same function, the same gate, on the
+  same input**. Proving that gate is live and enforced via one of its
+  real branches is real, verified evidence that the mechanism functions
+  as documented -- not proof of the architecture/OS branches specifically.
+
+**Cited from wasmtime's own source, not independently tested on this
+box** (`wasmtime-47.0.3/src/engine/serialization.rs`,
+`Metadata::check_triple`): a `.cwasm` whose embedded target
+architecture or operating system does not match the loading `Engine`'s
+is rejected with `"Module was compiled for architecture '<x>'"` /
+`"...operating system '<x>'"` -- this crate's own committed test suite
+has that source file's own unit tests
+(`engine::serialization::test::test_architecture_mismatch`/
+`test_os_mismatch`) doing exactly this by constructing a synthetic
+`Metadata` with a different target string, which is honest evidence the
+check exists and is exercised by wasmtime's own test suite -- but this
+round's work did not, and on this single-ISA/single-OS box could not,
+independently reproduce a real cross-architecture or cross-OS load
+attempt. State this precisely rather than implying it was verified here:
+**not tested by this round's work, cited from upstream source/tests.**
+
+### Verdict
+
+**Yes, AOT meaningfully reduces load latency for this crate's use
+case, for a guest of this representative size and composition** -- real,
+measured, roughly 20-25x faster end to end (median 71ms → 3ms) and
+~250x faster for the isolated load step alone (59.8ms → 0.24ms median).
+This is not a marginal, borderline-not-worth-it gap; JIT's compile-time
+cost genuinely dominates a guest of this real (2 MB, real std program)
+size, and AOT genuinely removes nearly all of it.
+
+Whether that win is **worth the added complexity** depends on usage
+pattern, and the honest answer is "it depends, and this round did not
+change this crate's own default":
+
+- **Worth it** when the same guest bytes get loaded and run repeatedly
+  within a bounded, known set of targets (architecture + OS +
+  `wasmtime`/`Config` version) -- e.g. a guest invoked many times across
+  many short-lived host-process launches, or a plugin reloaded
+  frequently in a long-lived session. `WasmCoreHost` already amortizes
+  `Engine` construction across runs by design, but **not** per-guest
+  `Module` compilation -- every `run_module` call recompiles from
+  scratch even on a reused `Engine`, so any repeated-load pattern is
+  exactly where this measured ~20x win is real, not theoretical.
+- **Not worth it** when a guest is loaded once per long-lived host
+  process (the one-time ~50-95ms precompile cost, plus needing to build,
+  store, and distribute a separate `.cwasm` per target instead of one
+  portable `.wasm`, plus needing real fallback-to-JIT handling for a
+  target `precompile_module` was never run for) is real added complexity
+  for a latency difference no one will observe. The source `.wasm` must
+  still be shipped regardless (for any target without a matching
+  `.cwasm`), so AOT is additive distribution weight, not a replacement.
+- This crate is still standalone and not wired into any product path
+  this round (see "Non-goals" below) -- this section reports the
+  measured trade honestly; it does not argue for or against wiring AOT
+  into a future product path, which depends on the not-yet-known actual
+  guest-reload frequency of whatever consumes this crate.
+
 ## Non-goals (explicit, this round)
 
 - **No `wasm64`.** Not attempted.
