@@ -374,7 +374,15 @@ fn cargo_unit_primary_spec(environment) {
         "--skip", "_executes_natively_without_interpreter",
         "--skip", "native_pack_executes_without_interpreter"
     ];
-    spec("cargo", arguments, 300000, environment, 0)
+    // Strictly more work than the Clippy gate above -- same `--all-features`
+    // compile of every target, plus linking and running every test binary --
+    // yet it had half of Clippy's 600s. Any commit touching the root package
+    // rebuilds all of its test targets, which put this right on the 300s edge:
+    // it passed at 2d782408 and timed out at 54b7ec3e with the SAME warm cache
+    // key. `check.rh` records real durations in timing.json, so a budget that
+    // tolerates a rebuild does not hide slowness; it stops reporting a rebuild
+    // as a correctness failure.
+    spec("cargo", arguments, 900000, environment, 0)
 }
 
 fn cargo_unit_migration_spec(environment) {
@@ -384,7 +392,10 @@ fn cargo_unit_migration_spec(environment) {
         "quality_timing_is_complete_on_success_and_failure_and_renders_markdown",
         "--", "--nocapture"
     ];
-    spec("cargo", arguments, 120000, environment, 0)
+    // Runs right after the primary gate, so it is usually warm -- but it is the
+    // same `--all-features` graph, so a cold or invalidated target makes 120s
+    // unreachable for reasons that have nothing to do with this test.
+    spec("cargo", arguments, 300000, environment, 0)
 }
 
 fn build_artifact_timeout_ms(release) {
