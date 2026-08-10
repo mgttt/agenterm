@@ -369,7 +369,8 @@ fn set_native_clipboard(context, platform, text) {
     if platform == "linux" {
         let command = std::process::command("xclip");
         command.args([
-            "-selection", "clipboard", "-loops", "2", "-silent"
+            "-selection", "clipboard", "-target", "UTF8_STRING",
+            "-loops", "2", "-silent"
         ]);
         command.stdin_text(text);
         command.timeout(std::time::Duration::from_secs(30));
@@ -406,12 +407,17 @@ fn wait_linux_clipboard_owner(context, expected, owner) {
                 output.stderr_text();
         }
         let command = std::process::command("xclip");
-        command.args(["-selection", "clipboard", "-o"]);
+        command.args([
+            "-selection", "clipboard", "-target", "UTF8_STRING", "-o"
+        ]);
         command.timeout(std::time::Duration::from_secs(2));
         let output = command.output();
         test_harness::append_command_record(
             context,
-            ["xclip", "-selection", "clipboard", "-o"],
+            [
+                "xclip", "-selection", "clipboard", "-target",
+                "UTF8_STRING", "-o"
+            ],
             output,
             output.success == 0,
             []
@@ -829,7 +835,8 @@ fn entry() {
         if platform == "linux" {
             let clipboard_command = std::process::command("xclip");
             clipboard_command.args([
-                "-selection", "clipboard", "-loops", "2", "-silent"
+                "-selection", "clipboard", "-target", "UTF8_STRING",
+                "-loops", "2", "-silent"
             ]);
             clipboard_command.stdin_text(clipboard_text);
             clipboard_command.timeout(std::time::Duration::from_secs(30));

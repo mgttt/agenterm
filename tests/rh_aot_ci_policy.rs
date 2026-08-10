@@ -165,6 +165,7 @@ fn linux_clipboard_smoke_feeds_xclip_through_stdin() {
     let source = include_str!("../scripts/rh/unix-frontend-smoke.rh");
     assert!(source.contains("clipboard_command.stdin_text(clipboard_text)"));
     assert!(source.contains("command.stdin_text(text)"));
+    assert!(source.contains("\"-target\", \"UTF8_STRING\""));
     assert!(!source.contains("\"-silent\", payload_path"));
 }
 

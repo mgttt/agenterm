@@ -358,26 +358,16 @@ fn entry() {
             ",\"control\":{\"schema_version\":1,\"request_id\":\"" + request_id +
             "\",\"operation_id\":\"tabs.set-note\",\"payload_fingerprint\":\"" +
             fingerprint + "\",\"intent\":\"mutation\",\"deadline_unix_ms\":0}}\n";
-        let response_path =
-            std::path::join(context.run_directory, "wake-expired-response.jsonl").display;
-        let ps =
-            "$req='" + request_text + "'; "
-            + "$c=New-Object Net.Sockets.TcpClient('" + ctx_address + "'); "
-            + "$s=$c.GetStream(); "
-            + "$w=New-Object IO.StreamWriter($s); "
-            + "$w.Write($req); $w.Flush(); "
-            + "$r=New-Object IO.StreamReader($s); "
-            + "$r.ReadLine(); "
-            + "$c.Close()";
-        let tcp_code = std::process::command_stdout_file(
-            "powershell",
-            ["-NoProfile", "-Command", ps],
-            30000,
-            response_path,
-            #{}
+        let stream = std::net::TcpStream::connect_timeout(
+            ctx_address,
+            std::time::Duration::from_secs(5)
         );
-        test_harness::require(tcp_code == 0, "wake_smoke_expired_tcp_failed");
-        let response_text = std::fs::read_to_string(response_path);
+        stream.set_read_timeout(std::time::Duration::from_secs(5));
+        stream.set_write_timeout(std::time::Duration::from_secs(5));
+        stream.write_all(request_text);
+        stream.flush();
+        let response_text = stream.read_line(65536);
+        stream.shutdown();
         response_text.trim();
         let expired = rh::json::parse(response_text);
         test_harness::require(

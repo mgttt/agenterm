@@ -340,8 +340,15 @@ pub(crate) fn map_error(error: ClipboardError) -> crate::contract::clipboard::Cl
 const WL_COPY: &[&str] = &["wl-copy"];
 const WL_PASTE: &[&str] = &["wl-paste", "--no-newline"];
 const WL_PASTE_TYPES: &[&str] = &["wl-paste", "--list-types"];
-const XCLIP_WRITE: &[&str] = &["xclip", "-selection", "clipboard"];
-const XCLIP_READ: &[&str] = &["xclip", "-selection", "clipboard", "-o"];
+const XCLIP_WRITE: &[&str] = &["xclip", "-selection", "clipboard", "-target", "UTF8_STRING"];
+const XCLIP_READ: &[&str] = &[
+    "xclip",
+    "-selection",
+    "clipboard",
+    "-target",
+    "UTF8_STRING",
+    "-o",
+];
 const XCLIP_TARGETS: &[&str] = &["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"];
 const XSEL_WRITE: &[&str] = &["xsel", "--clipboard", "--input"];
 const XSEL_READ: &[&str] = &["xsel", "--clipboard", "--output"];
@@ -916,6 +923,25 @@ mod tests {
         assert!(clipboard_types_indicate_unicode_text(wl_types));
         assert!(!clipboard_types_indicate_unicode_text("TIMESTAMP\n"));
         assert!(!clipboard_types_indicate_unicode_text(""));
+    }
+
+    #[test]
+    fn xclip_commands_negotiate_the_same_unicode_target() {
+        assert_eq!(
+            XCLIP_WRITE,
+            ["xclip", "-selection", "clipboard", "-target", "UTF8_STRING"]
+        );
+        assert_eq!(
+            XCLIP_READ,
+            [
+                "xclip",
+                "-selection",
+                "clipboard",
+                "-target",
+                "UTF8_STRING",
+                "-o"
+            ]
+        );
     }
 
     #[test]

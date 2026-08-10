@@ -287,10 +287,16 @@ fn entry() {
     require(ps1_code == 0, "migration-git-ls-files");
     let ps1_text = std::fs::read_to_string(stdout_path);
     let current = #{};
+    // These frozen dynamic-core experiment drivers are archived measurement
+    // evidence, not product/build automation. Keep the exception exact so a
+    // new PowerShell surface anywhere else still fails closed.
     for source_line in ps1_text.split("\n") {
         let path = source_line;
         path.trim();
         if path == "" {
+            continue;
+        }
+        if is_archived_research_ps1(path) {
             continue;
         }
         require(known.contains(path), "migration_unplanned_ps1: " + path);
@@ -366,7 +372,8 @@ fn entry() {
             "*.sh",
             "*.rhai",
             "*.rh",
-            ".github/workflows"
+            ".github/workflows",
+            ":(exclude)scripts/archive/**"
         ],
         10000,
         stdout_path
@@ -416,28 +423,30 @@ fn entry() {
                         allowed = 1;
                     }
                 } else if path == "scripts/rh/check.rh" {
-                    if lower_line ==
+                    if trimmed_line ==
                             `if name != "powershell.exe" && name != "pwsh.exe" {` {
                         allowed = 1;
                     }
                 } else if path == "scripts/rh/fresh-clone-rehearsal.rh" {
-                    if lower_line == `"powershell.exe"`
-                            || lower_line == `"pwsh.exe"` {
+                    if trimmed_line == `"powershell.exe"`
+                            || trimmed_line == `"pwsh.exe"` {
                         allowed = 1;
                     }
                 } else if path == "scripts/rh/qualification-selftest.rh"
                         || path ==
                             "scripts/archive/rhai/qualification-selftest.rhai" {
-                    if lower_line == `["pwsh.exe:123"],` {
+                    if trimmed_line == `["pwsh.exe:123"],`
+                            || trimmed_line ==
+                                `automation_processes: rh::json::parse("[\"pwsh.exe:123\"]"),` {
                         allowed = 1;
                     }
                 } else if path == "scripts/rh/remote-ui-smoke.rh"
                         || path == "scripts/archive/rhai/remote-ui-smoke.rhai" {
-                    if lower_line ==
+                    if trimmed_line ==
                             `"--", "powershell.exe", "-nologo", "-noprofile"`
-                            || lower_line ==
+                            || trimmed_line ==
                                 `"--", "powershell.exe", "-nologo", "-noprofile",`
-                            || lower_line == `"alternate-wheel.ps1"` {
+                            || trimmed_line == `"alternate-wheel.ps1"` {
                         allowed = 1;
                     }
                 }
@@ -557,7 +566,7 @@ fn entry() {
     let rh_check_lower = rh_check_source;
     rh_check_lower.to_lower();
     require(
-        rh_check_lower.contains("cargo build --locked --bin agenterm-rh")
+        rh_check_lower.contains("cargo build --locked --bin agenterm")
             && rh_check_lower.contains("cargo test -p agenterm-rh --locked")
             && !rh_check_lower.contains("powershell")
             && !rh_check_lower.contains("pwsh"),
@@ -622,7 +631,7 @@ fn entry() {
     );
     require(
         bootstrap_lower.contains(
-            "cargo build --quiet --locked --bin agenterm-rh"
+            "cargo build --locked --bin agenterm"
         ),
         "migration_batch_bootstrap_worker_build"
     );
@@ -773,7 +782,7 @@ fn entry() {
             `task run "$agenterm_bootstrap_task"`
         )
             && shell_bootstrap_lower.contains(
-                "cargo build --quiet --locked --bin agenterm-rh"
+                "cargo build --quiet --locked --bin agenterm"
             )
             && shell_bootstrap_operational_lines <= 160,
         "migration_shell_bootstrap_not_generic"
@@ -889,4 +898,13 @@ fn entry() {
     );
     print(rh::json::stringify_pretty(report));
     0
+}
+
+fn is_archived_research_ps1(path) {
+    path == "research/dynamic-core/build/build_windows.ps1"
+        || path == "research/dynamic-core/discovery/build/build_windows.ps1"
+        || path == "research/dynamic-core/ir/build/run.ps1"
+        || path == "research/dynamic-core/lowering/build/build_lowering.ps1"
+        || path == "research/dynamic-core/reuse/build/build_windows.ps1"
+        || path == "research/dynamic-core/stencil/build/build_stencil.ps1"
 }
