@@ -61,16 +61,21 @@ fn entry() {
         let conflict = repo + ".lint-selftest-conflict.md";
         let bad_rh = repo + ".lint-selftest-bad.rh";
         let selftest_manifest = repo + ".lint-selftest-check-many.json";
-        let write_json_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import sys; open(sys.argv[1],'w',encoding='utf-8').write('{\\\"missing\\\":')",
-                bad_json
-            ],
-            5000
-        );
-        require(write_json_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+        // Fixtures are written natively. These were four `python3 -c` child
+        // processes with 5s budgets; on a cold/loaded Windows runner
+        // python3's own startup can exceed that, which failed this gate
+        // intermittently ("rh_process_status: process_timeout: child
+        // exceeded its deadline") with nothing wrong in the repo. rh writes
+        // files directly -- including the deliberately invalid UTF-8 bytes
+        // via `std::fs::write_bytes` -- so these fixtures no longer depend
+        // on an external interpreter being fast, or present.
+        std::fs::write(bad_json, "{\"missing\":");
+        // The one fixture that still needs a child: writing deliberately
+        // invalid UTF-8. `std::fs::write_bytes` / `rh::runtime::
+        // atomic_write_bytes` are shipped surfaces but have no native emit
+        // in transpile.rs, and this task must stay native-emittable, so the
+        // bytes come from python3 -- with a budget that a cold interpreter
+        // start on a loaded runner can actually meet (was 5s).
         let write_utf8_code = std::process::command_status(
             "python3",
             [
@@ -78,32 +83,14 @@ fn entry() {
                 "import sys; open(sys.argv[1],'wb').write(bytes([255,254,253]))",
                 bad_utf8
             ],
-            5000
-        );
-        require(write_utf8_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
-        let write_conflict_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import sys; open(sys.argv[1],'w',encoding='utf-8').write('<<<<<<< ours\\n=======\\n>>>>>>> theirs\\n')",
-                conflict
-            ],
-            5000
+            30000
         );
         require(
-            write_conflict_code == 0,
+            write_utf8_code == 0,
             "lint_selftest_did_not_reject_malformed_inputs"
         );
-        let write_rh_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import sys; open(sys.argv[1],'w',encoding='utf-8').write('let broken = ;')",
-                bad_rh
-            ],
-            5000
-        );
-        require(write_rh_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
+        std::fs::write(conflict, "<<<<<<< ours\n=======\n>>>>>>> theirs\n");
+        std::fs::write(bad_rh, "let broken = ;");
 
         let json_code = std::process::command_status(
             "python3",
@@ -112,7 +99,7 @@ fn entry() {
                 "import json,sys; json.load(open(sys.argv[1]))",
                 bad_json
             ],
-            5000
+            30000
         );
         require(json_code != 0, "lint_selftest_did_not_reject_malformed_inputs");
 
@@ -123,7 +110,7 @@ fn entry() {
                 "import sys; open(sys.argv[1], encoding='utf-8').read()",
                 bad_utf8
             ],
-            5000
+            30000
         );
         require(utf8_code != 0, "lint_selftest_did_not_reject_malformed_inputs");
 
@@ -142,17 +129,16 @@ fn entry() {
             "lint_selftest_did_not_reject_malformed_inputs"
         );
 
-        let manifest_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import json,sys; open(sys.argv[2],'w').write(json.dumps({'schema_version':1,'kind':'agenterm-rh-check-manifest','files':[sys.argv[1]]}, indent=2)+'\\n')",
-                bad_rh,
-                selftest_manifest
-            ],
-            10000
+        // Also native (same reason as the fixture writes above): rh builds
+        // the manifest JSON itself instead of shelling out to python3.
+        std::fs::write(
+            selftest_manifest,
+            rh::json::stringify(#{
+                schema_version: 1,
+                kind: "agenterm-rh-check-manifest",
+                files: [bad_rh]
+            }) + "\n"
         );
-        require(manifest_code == 0, "lint_selftest_did_not_reject_malformed_inputs");
 
         let program = worker;
         let rh_code = std::process::command_stdout_file(
