@@ -936,6 +936,7 @@ fn entry() {
             backend,
             snapshot_args
         );
+        let selected_epoch = "" + selected.connected_server.epoch;
         test_harness::require(
             selected.server_state == "connected"
                 && selected.connected_server.pid == protocol.pid
@@ -1071,15 +1072,14 @@ fn entry() {
                 cc,
                 native_input_tab,
                 server.id,
-                selected.connected_server.epoch,
+                selected_epoch,
                 "control_center_linux_native_keyboard_navigation"
             );
             test_harness::require(
                 keyboard_selected.connected_server.active_tab_id
                         == native_input_tab
                     && keyboard_selected.connected_server.pid == server.id
-                    && keyboard_selected.connected_server.epoch
-                        == selected.connected_server.epoch
+                    && keyboard_selected.connected_server.epoch == selected_epoch
                     && keyboard_selected.connected_server.endpoint == endpoint
                     && cc.state == "running"
                     && registry_owner_pid(registry) == cc.id
@@ -1155,14 +1155,13 @@ fn entry() {
                 cc,
                 pointer_target,
                 server.id,
-                selected.connected_server.epoch,
+                selected_epoch,
                 "control_center_linux_native_pointer_navigation"
             );
             test_harness::require(
                 pointer_selected.connected_server.active_tab_id == pointer_target
                     && pointer_selected.connected_server.pid == server.id
-                    && pointer_selected.connected_server.epoch
-                        == selected.connected_server.epoch
+                    && pointer_selected.connected_server.epoch == selected_epoch
                     && pointer_selected.connected_server.endpoint == endpoint
                     && cc.state == "running"
                     && registry_owner_pid(registry) == cc.id
@@ -1230,8 +1229,7 @@ fn entry() {
                 unchanged.connected_server.active_tab_id
                         == selected.connected_server.active_tab_id
                     && unchanged.connected_server.pid == server.id
-                    && unchanged.connected_server.epoch
-                        == selected.connected_server.epoch
+                    && unchanged.connected_server.epoch == selected_epoch
                     && unchanged.connected_server.endpoint == endpoint
                     && cc.state == "running"
                     && registry_owner_pid(registry) == cc.id,
@@ -1314,7 +1312,7 @@ fn entry() {
 
         print("STEP server loss is explicit and replacement has a new epoch");
         let prior_server_pid = server.id;
-        let prior_epoch = selected.connected_server.epoch;
+        let prior_epoch = selected_epoch;
         server.kill();
         wait_exit(server, "control_center_linux_server_kill_timeout");
         wait_process_gone(

@@ -1245,6 +1245,17 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
         "{}",
         output.rust
     );
+    assert!(
+        !output.rust.split("rh_json_int_path(").skip(1).any(|tail| {
+            tail.split(')')
+                .next()
+                .is_some_and(|call| call.contains("\"epoch\""))
+        }) && output
+            .rust
+            .contains("rh_json_string_path(&selected, &[\"connected_server\", \"epoch\"])",),
+        "{}",
+        output.rust
+    );
     for needle in [
         "rh_process_stdout_file(",
         "rh_host_json_call(\"process.list\"",
@@ -1270,6 +1281,17 @@ fn control_center_linux_smoke_passes_complete_endpoint_arguments() {
     assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
     assert!(
         !output.rust.contains("\"tabs\", \"len\""),
+        "{}",
+        output.rust
+    );
+    assert!(
+        !output.rust.split("rh_json_int_path(").skip(1).any(|tail| {
+            tail.split(')')
+                .next()
+                .is_some_and(|call| call.contains("\"epoch\""))
+        }) && output
+            .rust
+            .contains("rh_json_string_path(&selected, &[\"connected_server\", \"epoch\"])",),
         "{}",
         output.rust
     );

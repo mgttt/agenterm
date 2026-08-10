@@ -811,6 +811,7 @@ fn entry() {
             runtime,
             ["snapshot", "--json", "--instance", "dev"]
         );
+        let selected_epoch = "" + selected.connected_server.epoch;
         test_harness::require(
             selected.server_state == "connected"
                 && selected.connected_server.pid == protocol.pid
@@ -968,8 +969,7 @@ fn entry() {
             input_owner == cc.id
                 && preserves_background(cc, foreground_before)
                 && input_baseline.connected_server.pid == server.id
-                && input_baseline.connected_server.epoch
-                    == selected.connected_server.epoch
+                && input_baseline.connected_server.epoch == selected_epoch
                 && input_baseline.connected_server.endpoint == protocol.endpoint,
             "control_center_macos_native_input_baseline_changed"
         );
@@ -992,7 +992,7 @@ fn entry() {
                 cc,
                 native_input_tab,
                 server.id,
-                selected.connected_server.epoch,
+                selected_epoch,
                 "control_center_macos_native_keyboard_navigation"
             );
             let pointer_failure = "";
@@ -1014,15 +1014,14 @@ fn entry() {
                     cc,
                     pointer_target,
                     server.id,
-                    selected.connected_server.epoch,
+                    selected_epoch,
                     "control_center_macos_native_pointer_navigation"
                 );
                 test_harness::require(
                     pointer_selected.connected_server.active_tab_id
                             == pointer_target
                         && pointer_selected.connected_server.pid == server.id
-                        && pointer_selected.connected_server.epoch
-                            == selected.connected_server.epoch
+                        && pointer_selected.connected_server.epoch == selected_epoch
                         && pointer_selected.connected_server.endpoint
                             == protocol.endpoint,
                     "control_center_macos_native_pointer_navigation_truth"
@@ -1050,8 +1049,7 @@ fn entry() {
                     pointer_unchanged.connected_server.active_tab_id
                             == native_input_tab
                         && pointer_unchanged.connected_server.pid == server.id
-                        && pointer_unchanged.connected_server.epoch
-                            == selected.connected_server.epoch
+                        && pointer_unchanged.connected_server.epoch == selected_epoch
                         && pointer_unchanged.connected_server.endpoint
                             == protocol.endpoint,
                     "control_center_macos_native_pointer_unsupported_changed_state"
@@ -1065,8 +1063,7 @@ fn entry() {
                 keyboard_selected.connected_server.active_tab_id
                         == native_input_tab
                     && keyboard_selected.connected_server.pid == server.id
-                    && keyboard_selected.connected_server.epoch
-                        == selected.connected_server.epoch
+                    && keyboard_selected.connected_server.epoch == selected_epoch
                     && keyboard_selected.connected_server.endpoint
                         == protocol.endpoint
                     && cc.state == "running"
@@ -1096,8 +1093,7 @@ fn entry() {
             test_harness::require(
                 unchanged.connected_server.active_tab_id == initial_active_tab
                     && unchanged.connected_server.pid == server.id
-                    && unchanged.connected_server.epoch
-                        == selected.connected_server.epoch
+                    && unchanged.connected_server.epoch == selected_epoch
                     && unchanged.connected_server.endpoint == protocol.endpoint
                     && cc.state == "running"
                     && registry_owner_pid(registry) == input_owner
@@ -1149,7 +1145,7 @@ fn entry() {
 
         print("STEP server loss is explicit; replacement has a new epoch");
         let prior_pid = server.id;
-        let prior_epoch = selected.connected_server.epoch;
+        let prior_epoch = selected_epoch;
         server.kill();
         wait_exit(server, "control_center_macos_server_kill_timeout");
         wait_process_gone(
