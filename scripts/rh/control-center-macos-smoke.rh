@@ -508,8 +508,8 @@ fn wait_incompatible_capture(
 }
 
 fn resolve_script_executable(executable_directory) {
-    // The standalone agenterm-rh binary retired. Inline expressions use the
-    // public hosted Script CLI; the direct `rh eval` command accepts a file.
+    // The standalone agenterm-rh binary retired. The main PE's direct
+    // `rh eval` command accepts a file and is available on every host.
     let hosted_candidate = std::path::join(
         executable_directory,
         "agenterm"
@@ -535,30 +535,28 @@ fn incompatible_listener(
         std::fs::remove_file(stop_path);
     }
     let source =
-        "let listener = std::net::TcpListener::bind(args[0]); " +
-        "std::fs::write(args[1], \"ready\"); " +
-        "loop { if std::fs::exists(args[2]) != 0 { break; } " +
+        "let listener = std::net::TcpListener::bind(" +
+        "std::env::get(\"AGENTERM_INCOMPATIBLE_ADDRESS\")); " +
+        "std::fs::write(std::env::get(\"AGENTERM_INCOMPATIBLE_READY\"), " +
+        "\"ready\"); loop { if std::fs::exists(" +
+        "std::env::get(\"AGENTERM_INCOMPATIBLE_STOP\")) != 0 { break; } " +
         "try { let stream = listener.accept_timeout(" +
         "std::time::Duration::from_millis(100)); " +
         "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
         "catch (error) { if error.to_string().contains(" +
         "\"net_accept_timeout\") == 0 { throw error; } } }";
-    let eval_args = ["cli", "script", "eval"];
-    eval_args.push(source);
-    eval_args.push("--timeout-ms");
-    eval_args.push("20000");
-    eval_args.push("--max-operations");
-    eval_args.push("10000000");
-    eval_args.push("--");
-    eval_args.push(address_text);
-    eval_args.push("" + ready_path);
-    eval_args.push("" + stop_path);
+    let source_path = "" + ready_path + ".rh";
+    rh::runtime::atomic_write(source_path, source);
+    let eval_args = ["rh", "eval", source_path];
     let command = test_harness::configured_command(
         context,
         "" + script_executable,
         eval_args
     );
-    command.timeout(std::time::Duration::from_secs(22));
+    command.env("AGENTERM_INCOMPATIBLE_ADDRESS", address_text);
+    command.env("AGENTERM_INCOMPATIBLE_READY", "" + ready_path);
+    command.env("AGENTERM_INCOMPATIBLE_STOP", "" + stop_path);
+    command.timeout(std::time::Duration::from_secs(60));
     let child = command.start();
     for attempt in 0..400 {
         if std::fs::exists(ready_path) != 0 {
