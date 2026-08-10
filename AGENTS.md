@@ -315,31 +315,6 @@ The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
 forwarder); investigate dependency or feature growth
 instead of raising them casually.
 
-### Windows PATH management (persistent lesson, 2026-08-10)
-
-Installing a CLI tool on Windows and making it available in **new terminals**
-(not just the current shell) is not trivial. The three attempts below were
-tried in order; only #3 worked immediately.
-
-| Approach | Mechanism | Result |
-|----------|-----------|--------|
-| `[Environment]::SetEnvironmentVariable("Path", ..., "User")` | .NET API writes registry | ❌ No broadcast; new cmd windows don't pick it up |
-| `setx Path "..."` | Writes registry + sends `WM_SETTINGCHANGE` | ❌ Broadcast unreliable; running shells cache old PATH |
-| **Symlink into a directory already on PATH** | `New-Item -Type SymbolicLink` | ✅ Instant; no registry/broadcast dependency |
-
-**Rule:** when adding a new CLI tool to a Windows host, prefer a symlink into a
-directory already in the active PATH (e.g. `~/.local/bin`) over editing the
-PATH variable. If the tool updates via its own installer, bind the symlink to
-the installed binary:
-
-```powershell
-New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\.local\bin\gh.exe" `
-    -Target "$env:LOCALAPPDATA\Programs\gh\bin\gh.exe" -Force
-```
-
-Avoid `setx` for PATH unless the user explicitly accepts that a logout/login
-cycle is required. Do not ask a user to log out.
-
 ## Runtime control and observation
 
 Discover the live interface instead of duplicating a long command manual:
