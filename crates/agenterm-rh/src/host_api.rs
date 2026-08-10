@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 89;
+pub const RH_CODEGEN_REVISION: u32 = 90;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -969,22 +969,39 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
              (String::from_utf8(bytes).unwrap_or_default(), truncated)\n\
          }\n\n\
+         // Drain grace after the child is reaped. A `join()` here would be\n\
+         // UNBOUNDED: a child that forks a background process (xclip holding\n\
+         // an X selection, any daemonizing helper) leaves the grandchild\n\
+         // holding the inherited pipe write end, so the reader thread never\n\
+         // observes EOF even though the child we spawned has exited. That\n\
+         // hangs the whole worker until its host deadline kills it. The\n\
+         // hosted script-process path already learned this (see\n\
+         // `OUTPUT_DRAIN_GRACE` / `output_drain_deadline` in\n\
+         // `src/script_process.rs`); this is the same bound for generated\n\
+         // packs. A reader that misses the window is abandoned, not joined:\n\
+         // the captured output is reported as empty rather than blocking.\n\
+         const RH_OUTPUT_DRAIN_GRACE: std::time::Duration =\n\
+             std::time::Duration::from_secs(2);\n\n\
          fn rh_start_pipe_reader<R>(\n\
              reader: Option<R>,\n\
              limit: usize,\n\
-         ) -> Option<std::thread::JoinHandle<(String, bool)>>\n\
+         ) -> Option<std::sync::mpsc::Receiver<(String, bool)>>\n\
          where\n\
              R: std::io::Read + Send + 'static,\n\
          {\n\
              reader.map(|pipe| {\n\
-                 std::thread::spawn(move || rh_read_pipe_limited(pipe, limit))\n\
+                 let (sender, receiver) = std::sync::mpsc::channel();\n\
+                 std::thread::spawn(move || {\n\
+                     let _ = sender.send(rh_read_pipe_limited(pipe, limit));\n\
+                 });\n\
+                 receiver\n\
              })\n\
          }\n\n\
          fn rh_finish_pipe_reader(\n\
-             reader: Option<std::thread::JoinHandle<(String, bool)>>,\n\
+             reader: Option<std::sync::mpsc::Receiver<(String, bool)>>,\n\
          ) -> (String, bool) {\n\
              reader\n\
-                 .and_then(|reader| reader.join().ok())\n\
+                 .and_then(|reader| reader.recv_timeout(RH_OUTPUT_DRAIN_GRACE).ok())\n\
                  .unwrap_or_else(|| (String::new(), false))\n\
          }\n\n\
          fn rh_finish_process_output(\n\
