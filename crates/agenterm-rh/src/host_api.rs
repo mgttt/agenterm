@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 91;
+pub const RH_CODEGEN_REVISION: u32 = 92;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -688,7 +688,17 @@ pub fn emit_host_runtime(out: &mut String) {
                  }\n\
              }\n\
          }\n\n\
-         fn rh_remove_file(path: &str) -> INT {\n\
+         fn rh_std_fs_write_bytes(path: &str, bytes: &RhBytes) -> INT {
+\n             match std::fs::write(path, &bytes.bytes) {
+\n                 Ok(()) => 0,
+\n                 Err(error) => {
+\n                     let _ = rh_fail(&format!(\"fs_write_bytes: {error}\"));
+\n                     0
+\n                 }
+\n             }
+\n         }
+
+\n         fn rh_remove_file(path: &str) -> INT {\n\
              match std::fs::remove_file(path) {\n\
                  Ok(()) => 0,\n\
                  Err(error) => {\n\

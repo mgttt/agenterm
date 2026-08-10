@@ -70,49 +70,12 @@ fn entry() {
         // via `std::fs::write_bytes` -- so these fixtures no longer depend
         // on an external interpreter being fast, or present.
         std::fs::write(bad_json, "{\"missing\":");
-        // The one fixture that still needs a child: writing deliberately
-        // invalid UTF-8. `std::fs::write_bytes` / `rh::runtime::
-        // atomic_write_bytes` are shipped surfaces but have no native emit
-        // in transpile.rs, and this task must stay native-emittable, so the
-        // bytes come from python3 -- with a budget that a cold interpreter
-        // start on a loaded runner can actually meet (was 5s).
-        let write_utf8_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import sys; open(sys.argv[1],'wb').write(bytes([255,254,253]))",
-                bad_utf8
-            ],
-            30000
-        );
-        require(
-            write_utf8_code == 0,
-            "lint_selftest_did_not_reject_malformed_inputs"
-        );
+        // Deliberately invalid UTF-8, written natively: `std::fs::write_bytes`
+        // gained native emit for exactly this (codegen 92) so no external
+        // interpreter is needed to put a few bytes on disk.
+        std::fs::write_bytes(bad_utf8, rh::bytes::from_array([255, 254, 253]));
         std::fs::write(conflict, "<<<<<<< ours\n=======\n>>>>>>> theirs\n");
         std::fs::write(bad_rh, "let broken = ;");
-
-        let json_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import json,sys; json.load(open(sys.argv[1]))",
-                bad_json
-            ],
-            30000
-        );
-        require(json_code != 0, "lint_selftest_did_not_reject_malformed_inputs");
-
-        let utf8_code = std::process::command_status(
-            "python3",
-            [
-                "-c",
-                "import sys; open(sys.argv[1], encoding='utf-8').read()",
-                bad_utf8
-            ],
-            30000
-        );
-        require(utf8_code != 0, "lint_selftest_did_not_reject_malformed_inputs");
 
         let conflict_text = std::fs::read_to_string(conflict);
         let conflict_bad = 0;
@@ -156,6 +119,49 @@ fn entry() {
         );
         require(
             rh_code != 0,
+            "lint_selftest_did_not_reject_malformed_inputs"
+        );
+
+        // Malformed JSON and invalid UTF-8 are now proven rejected by OUR
+        // OWN binary instead of by python's parsers: `check-many` reads its
+        // `--manifest` as JSON text, so handing it each bad fixture directly
+        // exercises agenterm's json parse and utf-8 read paths and must exit
+        // non-zero. The python legs this replaces only ever proved that
+        // *python* rejects those bytes, which said nothing about agenterm --
+        // so this is a stronger assertion with one fewer dependency.
+        let bad_json_code = std::process::command_stdout_file(
+            program,
+            [
+                "rh", "check-many", "--manifest", bad_json,
+                "--profile", "local",
+                "--project-root", repo,
+                "--timeout-ms", "10000",
+                "--max-operations", "1000000"
+            ],
+            60000,
+            stdout_path,
+            #{ current_dir: repo }
+        );
+        require(
+            bad_json_code != 0,
+            "lint_selftest_did_not_reject_malformed_inputs"
+        );
+
+        let bad_utf8_code = std::process::command_stdout_file(
+            program,
+            [
+                "rh", "check-many", "--manifest", bad_utf8,
+                "--profile", "local",
+                "--project-root", repo,
+                "--timeout-ms", "10000",
+                "--max-operations", "1000000"
+            ],
+            60000,
+            stdout_path,
+            #{ current_dir: repo }
+        );
+        require(
+            bad_utf8_code != 0,
             "lint_selftest_did_not_reject_malformed_inputs"
         );
 

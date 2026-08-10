@@ -3423,6 +3423,7 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if std_process_kill_arg(expr).is_some() => ValueKind::Int,
         _ if std_fs_write_args(expr).is_some() => ValueKind::Int,
+        _ if std_fs_write_bytes_args(expr).is_some() => ValueKind::Int,
         _ if parse_string_method_call(expr, ctx)
             .is_some_and(|(_, call)| call.name == "index_of" && call.args.len() == 1) =>
         {
@@ -4353,6 +4354,10 @@ fn std_process_kill_arg(expr: &Expr) -> Option<&Expr> {
 
 fn std_fs_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
     std_fs_two_arg(expr, "write")
+}
+
+fn std_fs_write_bytes_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    std_fs_two_arg(expr, "write_bytes")
 }
 
 fn runtime_atomic_write_args(expr: &Expr) -> Option<(&Expr, &Expr)> {
@@ -8258,6 +8263,11 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         {
             return Ok(());
         }
+        if let Some((path, bytes)) = std_fs_write_bytes_args(expr)
+            && emit_std_fs_write_bytes(out, path, bytes, ctx)?
+        {
+            return Ok(());
+        }
         if let Some((path, contents)) = std_fs_write_args(expr)
             && emit_std_fs_write(out, path, contents, ctx)?
         {
@@ -10493,6 +10503,33 @@ fn emit_std_fs_write(
     out.push_str(&path_expr);
     out.push_str(", &");
     emit_stringish(out, contents, ctx)?;
+    out.push(')');
+    Ok(true)
+}
+
+/// `std::fs::write_bytes(path, bytes)` -- the byte-exact sibling of
+/// `emit_std_fs_write`. Needed for content a UTF-8 rh string literally
+/// cannot express (a fixture of deliberately invalid UTF-8, for one), which
+/// previously forced scripts to shell out to an external interpreter just to
+/// put a few bytes on disk.
+fn emit_std_fs_write_bytes(
+    out: &mut String,
+    path: &Expr,
+    bytes: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut path_expr = String::new();
+    if !emit_native_string(&mut path_expr, path, ctx)? {
+        return Ok(false);
+    }
+    let mut bytes_expr = String::new();
+    if !emit_bytes_value(&mut bytes_expr, bytes, ctx)? {
+        return Ok(false);
+    }
+    out.push_str("rh_std_fs_write_bytes(");
+    out.push_str(&path_expr);
+    out.push_str(", &");
+    out.push_str(&bytes_expr);
     out.push(')');
     Ok(true)
 }
