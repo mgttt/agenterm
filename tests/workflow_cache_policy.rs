@@ -5,7 +5,7 @@ static WORKFLOW: LazyLock<String> =
 
 const CACHE_SHA: &str = "0400d5f644dc74513175e3cd8d07132dd4860809";
 const SAVE_CONDITION: &str =
-    "if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'";
+    "if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
 const INPUT_HASH: &str = "${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', \
                           'build.rs', 'scripts/artifacts.json') }}";
 
@@ -154,14 +154,25 @@ fn platform_contract_download_cache_is_pinned_fail_safe_and_bounded() {
 }
 
 #[test]
-fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
+fn cache_keys_separate_downloads_targets_and_dependency_generations() {
     let windows = job("windows");
     let linux = job("linux-x86_64");
     let linux_aarch64 = job("linux-aarch64");
     let macos = job("macos");
     let windows_aarch64 = job("windows-aarch64");
 
-    for (pilot, cell) in [(windows, "windows-x86_64-native"), (linux, "linux-x86_64")] {
+    for (pilot, cell, target_prefix) in [
+        (
+            windows,
+            "windows-x86_64-native",
+            "cargo-target-v3-windows-x86_64-native-slim-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-",
+        ),
+        (
+            linux,
+            "linux-x86_64",
+            "cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-",
+        ),
+    ] {
         let download_prefix =
             format!("cargo-home-v2-{cell}-${{{{ runner.os }}}}-${{{{ runner.arch }}}}-rust1.97-");
         assert!(
@@ -179,17 +190,16 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
             "cargo-home cache must not be duplicated for every source revision"
         );
 
-        let target_base = format!(
-            "cargo-target-v2-{cell}-${{{{ runner.os }}}}-${{{{ runner.arch }}}}-rust1.97-debug-{INPUT_HASH}-"
+        let target_key = format!("{target_prefix}{INPUT_HASH}");
+        assert!(
+            pilot.contains(&format!("key: {target_key}")),
+            "missing dependency-generation cargo-target key for {cell}"
         );
         assert!(
-            pilot.contains(&format!("key: {target_base}${{{{ github.sha }}}}")),
-            "missing revision-specific cargo-target key for {cell}"
+            pilot.contains(&format!("restore-keys: |\n            {target_key}-")),
+            "missing migration restore base for {cell}"
         );
-        assert!(
-            pilot.contains(&format!("restore-keys: |\n            {target_base}")),
-            "missing revision-independent target restore base for {cell}"
-        );
+        assert!(!pilot.contains("key: cargo-target-") || !pilot.contains("github.sha"));
     }
 
     let linux_aarch64_download =
@@ -207,10 +217,8 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
         "missing compatible cargo-home restore prefix for linux-aarch64"
     );
     assert!(
-        linux_aarch64.contains(&format!(
-            "key: {linux_aarch64_target}{INPUT_HASH}-${{{{ github.sha }}}}"
-        )),
-        "missing revision-specific cargo-target key for linux-aarch64"
+        linux_aarch64.contains(&format!("key: {linux_aarch64_target}{INPUT_HASH}")),
+        "missing dependency-generation cargo-target key for linux-aarch64"
     );
 
     let macos_download =
@@ -225,10 +233,8 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
         "missing compatible cargo-home restore prefix for macos"
     );
     assert!(
-        macos.contains(&format!(
-            "key: {macos_target}{INPUT_HASH}-${{{{ github.sha }}}}"
-        )),
-        "missing revision-specific cargo-target key for macos"
+        macos.contains(&format!("key: {macos_target}{INPUT_HASH}")),
+        "missing dependency-generation cargo-target key for macos"
     );
 
     let windows_aarch64_download = "cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-";
@@ -244,11 +250,19 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
         "missing compatible cargo-home restore prefix for windows-aarch64"
     );
     assert!(
-        windows_aarch64.contains(&format!(
-            "key: {windows_aarch64_target}{INPUT_HASH}-${{{{ github.sha }}}}"
-        )),
-        "missing revision-specific cargo-target key for windows-aarch64"
+        windows_aarch64.contains(&format!("key: {windows_aarch64_target}{INPUT_HASH}")),
+        "missing dependency-generation cargo-target key for windows-aarch64"
     );
+
+    for pilot in [windows, linux, linux_aarch64, macos, windows_aarch64] {
+        assert!(
+            pilot
+                .lines()
+                .filter(|line| line.trim_start().starts_with("key: cargo-target-"))
+                .all(|line| !line.contains("github.sha")),
+            "cargo-target caches must not mint one entry per source SHA"
+        );
+    }
 }
 
 #[test]
@@ -262,12 +276,20 @@ fn cache_paths_are_exact_and_exclude_product_or_release_evidence() {
         "~/.cargo/registry/index/",
         "~/.cargo/registry/cache/",
         "~/.cargo/git/db/",
-        "target/debug/",
         "target/.rustc_info.json",
     ] {
         assert!(windows_paths.iter().any(|path| path == required));
         assert!(linux_paths.iter().any(|path| path == required));
     }
+    for required in [
+        "target/debug/deps/",
+        "target/debug/build/",
+        "target/debug/.fingerprint/",
+        "target/debug/incremental/",
+    ] {
+        assert!(windows_paths.iter().any(|path| path == required));
+    }
+    assert!(linux_paths.iter().any(|path| path == "target/debug/"));
     assert!(
         !windows_paths
             .iter()

@@ -377,7 +377,13 @@ fn cargo_unit_primary_spec(environment) {
         // unit lane's five-minute process budget a second time.
         "--skip", "uses_bundled_pack",
         "--skip", "uses_native_bundled_pack",
-        "--skip", "pack_builds"
+        "--skip", "pack_builds",
+        "--skip", "native_pack_",
+        "--skip", "source_cache_is_stable_for_same_source",
+        "--skip", "script_engine_exec_parity_",
+        "--skip", "native_for_fixtures_qualify_with_expected_entry_values",
+        "--skip", "_executes_natively_without_interpreter",
+        "--skip", "native_pack_executes_without_interpreter"
     ];
     spec("cargo", arguments, 300000, environment, 0)
 }

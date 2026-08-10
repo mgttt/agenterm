@@ -106,7 +106,7 @@ fn not_enabled_message(backend: ScriptBackend) -> String {
 // ---------------------------------------------------------------------
 
 #[test]
-fn trivial_entry_value() {
+fn script_engine_exec_parity_trivial_entry_value() {
     let _guard = ENV_LOCK.lock().expect("lock");
 
     // rh: `fn entry() { 42 }` — verified fixture from src/script_engine.rs tests.
@@ -167,7 +167,7 @@ fn trivial_entry_value() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn stdout_capture() {
+fn script_engine_exec_parity_stdout_capture() {
     let _guard = ENV_LOCK.lock().expect("lock");
 
     // rh: `print(...)` is a real builtin (`rh_print` -> host utility
@@ -237,7 +237,7 @@ fn stdout_capture() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn check_accepts_valid_rejects_broken() {
+fn script_engine_exec_parity_check_accepts_valid_rejects_broken() {
     let _guard = ENV_LOCK.lock().expect("lock");
 
     struct CheckFixture {
@@ -314,7 +314,7 @@ fn check_accepts_valid_rejects_broken() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn execute_missing_entry_fails_closed() {
+fn script_engine_exec_parity_execute_missing_entry_fails_closed() {
     let _guard = ENV_LOCK.lock().expect("lock");
 
     // rh: no `fn entry()` at all. `agenterm_rh::check()` (used by
@@ -388,7 +388,7 @@ fn execute_missing_entry_fails_closed() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn disabled_backend_errors() {
+fn script_engine_exec_parity_disabled_backend_errors() {
     let _guard = ENV_LOCK.lock().expect("lock");
 
     for &enabled in &ENGINES {
@@ -429,7 +429,7 @@ fn disabled_backend_errors() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn error_not_panic() {
+fn script_engine_exec_parity_error_not_panic() {
     let _guard = ENV_LOCK.lock().expect("lock");
 
     // rh: calling an undefined function. rh is AOT-compiled to native
@@ -528,7 +528,7 @@ fn error_not_panic() {
 /// test because sql's `value` shape for a trivial program is an array of
 /// row objects, not a bare scalar (design doc §2.1/§4).
 #[test]
-fn sql_trivial_select_value() {
+fn script_engine_exec_parity_sql_trivial_select_value() {
     let _guard = ENV_LOCK.lock().expect("lock");
     let _env = EnvGuard::set("sql");
 
@@ -548,7 +548,7 @@ fn sql_trivial_select_value() {
 /// unconditionally empty rather than a print-and-capture result (design
 /// doc §2.1: "SQL 没有 print() 概念").
 #[test]
-fn sql_stdout_is_empty() {
+fn script_engine_exec_parity_sql_stdout_is_empty() {
     let _guard = ENV_LOCK.lock().expect("lock");
     let _env = EnvGuard::set("sql");
 
@@ -575,7 +575,7 @@ fn sql_stdout_is_empty() {
 /// sql uses `None`, not a fabricated `0`, to keep "no result" distinguishable
 /// from "a result that happens to be falsy/zero").
 #[test]
-fn sql_execute_no_result_set_is_none_not_error() {
+fn script_engine_exec_parity_sql_execute_no_result_set_is_none_not_error() {
     let _guard = ENV_LOCK.lock().expect("lock");
     let _env = EnvGuard::set("sql");
     let engine = engine_for(ScriptBackend::Sql);

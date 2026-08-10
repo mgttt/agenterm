@@ -247,6 +247,16 @@ fn rh_rides_the_main_binary_with_no_standalone_bin_target() {
 fn expensive_task_entry_packs_have_one_dedicated_ci_owner() {
     assert!(CHECK.contains("\"--skip\", \"uses_bundled_pack\""));
     assert!(CHECK.contains("\"--skip\", \"uses_native_bundled_pack\""));
+    assert!(CHECK.contains("\"--skip\", \"native_pack_\""));
+    assert!(CHECK.contains("\"--skip\", \"source_cache_is_stable_for_same_source\""));
+    assert!(CHECK.contains("\"--skip\", \"script_engine_exec_parity_\""));
+    assert!(
+        CHECK.contains("\"--skip\", \"native_for_fixtures_qualify_with_expected_entry_values\"")
+    );
+    assert!(CHECK.contains("\"--skip\", \"_executes_natively_without_interpreter\""));
+    assert!(CHECK.contains("\"--skip\", \"native_pack_executes_without_interpreter\""));
+    assert!(UNIX_RH_CHECK.contains("--test script_engine_exec_parity"));
+    assert!(WINDOWS_RH_CHECK.contains("--test script_engine_exec_parity"));
     assert!(CHECK.contains("\"--skip\", \"pack_builds\""));
     assert!(UNIX_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
     assert!(WINDOWS_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
@@ -255,7 +265,7 @@ fn expensive_task_entry_packs_have_one_dedicated_ci_owner() {
 #[test]
 fn macos_control_center_lifecycle_has_bounded_full_journey_budget() {
     let budget = &TASK_MANIFEST["contracts"]["control-center-macos-smoke"]["budget"];
-    assert_eq!(budget["timeout_ms"], 420_000);
+    assert_eq!(budget["timeout_ms"], 300_000);
     assert_eq!(budget["max_operations"], 10_000_000);
     assert_eq!(budget["max_output_bytes"], 1_048_576);
 }

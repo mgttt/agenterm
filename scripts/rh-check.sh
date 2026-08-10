@@ -28,6 +28,9 @@ cargo test --locked \
   --test script_check_many \
   --test performance_experiment_policy
 
+echo "== all-engine execution parity =="
+cargo test --locked --all-features --test script_engine_exec_parity
+
 echo "== rh task-entry native packs =="
 cargo test --locked --test rh_task_entry_regression
 
