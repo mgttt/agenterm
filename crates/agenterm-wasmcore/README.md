@@ -481,44 +481,26 @@ change this crate's own default":
   "prove the mechanism standalone first" discipline every other crate in
   this session followed.
 
-## Relationship to the other `agenterm-*core` crates
+## Relationship to the archived `agenterm-*core` crates
 
-Four deliberately non-overlapping approaches to "let a script/guest reach
-a capability the host controls," not competing implementations of the
-same idea:
-
-| Crate | Mechanism | Portability | Executable memory | Guest source requirement |
-|---|---|---|---|---|
-| `agenterm-nativecore` | Direct native Win32 calls behind a typed `Intent` seam | Windows-native only | Never | N/A (host-side library) |
-| `agenterm-guestcore` | Hand-rolled x86_64 machine-code *interpreter*, translating a Linux syscall subset to `agenterm-nativecore` | Same-ISA only (x86_64 guest on x86_64 host); runs **existing** Linux x86_64 binaries unmodified | Never -- guest bytes are read as data, never executed by the host CPU | None -- runs real, already-compiled ELF binaries as-is |
-| `agenterm-dynacore` | A custom bytecode VM + `Intent`-shaped IR, its own pack format | ISA-neutral by construction (it's not machine code at all) | Never | Guest logic must be authored against dynacore's own IR/pack format |
-| **`agenterm-wasmcore`** (this crate) | A mature, reused JIT runtime (`wasmtime`) executing real `wasm32-wasip1` bytecode | **Genuinely ISA-neutral** -- any `wasm32-wasip1` toolchain output runs unmodified on any host `wasmtime` supports | **Yes, deliberately** -- Cranelift JIT | Guest source must specifically target WASM (`wasm32-wasip1`) -- unlike guestcore, this does *not* run an arbitrary pre-existing Linux binary |
-
-What is unique about this crate: it is the only one of the four that
-reuses an existing, independently-maintained, mature runtime rather than
-implementing its own interpreter/VM -- which is a large engineering-cost
-reduction, at the explicit, accepted cost of depending on that runtime's
-JIT and its executable-memory requirement. It is also the only one whose
-"bytecode" is a real, independently-specified, portable ISA (WebAssembly)
-rather than this project's own invention (dynacore's IR) or an existing
-*hardware* ISA re-interpreted in software (guestcore's x86_64 decoder) --
-in exchange, a guest has to be built for WASM specifically; you cannot
-point this crate at an arbitrary already-compiled Linux binary the way
-`agenterm-guestcore` can.
+Three earlier exploration crates — `agenterm-nativecore`, `agenterm-guestcore`,
+and `agenterm-dynacore` — were independent, non-overlapping approaches to "let
+a script/guest reach a capability the host controls." They were removed from
+the workspace (`fef91b2d`, 2026-08-09) and archived (2026-08-10, see
+`plan/archive/crates-archived/`). This crate (`agenterm-wasmcore`) is the
+approach that shipped: a mature, reused JIT runtime (`wasmtime`) executing real
+`wasm32-wasip1` bytecode, genuinely ISA-neutral, with Cranelift JIT.
 
 ## Why standalone (not a root-workspace member)
 
 `Cargo.toml` carries its own empty `[workspace]` table rather than being
 added to the root `Cargo.toml`'s `members` list. Two reasons:
 
-1. **Precedent already reversed once.** `agenterm-nativecore`,
-   `agenterm-dynacore`, and `agenterm-guestcore` were briefly root-workspace
-   members and were removed the same day this crate was built (`git log --
-   Cargo.toml`, commit `fef91b2d` "cleanup: remove dynacore/nativecore
-   integration") by a concurrent session's large refactor. Following that
-   same, freshly-reaffirmed direction rather than re-adding a fourth
-   specialized crate back into the root workspace is the safer, more
-   consistent choice.
+1. **Precedent.** Earlier `agenterm-*core` crates were root-workspace members
+   briefly, then removed (`fef91b2d`, 2026-08-09) and later archived
+   (`plan/archive/crates-archived/`). Following that same direction, this
+   crate joins the root workspace only when it has a product-facing integration
+   point (which it now does, via `script-wasmcore` feature).
 2. **Build isolation.** `wasmtime` is a heavy dependency tree (Cranelift,
    `wasmtime-wasi`, and their transitive graph). Keeping it out of the
    root `Cargo.lock` avoids bloating every other crate's build in this

@@ -102,7 +102,20 @@ impl Default for ScriptBudgets {
 impl ScriptBudgets {
     pub fn hard_limits() -> Self {
         Self {
-            source_bytes: 256 * 1024,
+            // Every other field here keeps real headroom above its
+            // `Default` (operations: 100x, string_bytes: 32x, output_bytes:
+            // 16x, wall_time_ms: 1800x, ...) so an opt-in CLI override can
+            // actually raise the budget. `source_bytes` used to be pinned
+            // at exactly the default (256 KiB == 256 KiB), which is why
+            // `agenterm cli script run` could never accept a compiled
+            // `.wasm` guest even with a `--max-*` override: there was no
+            // ceiling headroom to override into. 16 MiB restores that
+            // headroom (64x default, same order of magnitude as the other
+            // fields' multipliers) without raising the *default* itself —
+            // `Default::default().source_bytes` below is untouched, so a
+            // script invocation that omits the override keeps the exact
+            // 256 KiB behavior it always had.
+            source_bytes: 16 * 1024 * 1024,
             operations: 100_000_000,
             call_depth: 128,
             expression_depth: 128,

@@ -11,12 +11,10 @@
 //!
 //! `wasmtime`'s default [`Engine`] uses the Cranelift JIT (real native
 //! code, real RW->RX memory) -- this is an explicit, accepted design
-//! choice for this crate, and a deliberate *contrast* with
-//! `agenterm-nativecore`/`agenterm-guestcore`'s "never touch executable
-//! memory" discipline. This crate's value proposition is "genuinely
-//! portable, safe-by-import-model, low engineering cost via a mature
-//! runtime" -- not "hardened-platform immunity" (that is guestcore's job).
-//! See `README.md` "Relationship to the other `agenterm-*core` crates".
+//! choice for this crate. Earlier exploration crates (nativecore, guestcore,
+//! dynacore) took a "never touch executable memory" approach; they are
+//! archived at `plan/archive/crates-archived/`.
+//! See `README.md` for the full ABI spec.
 //!
 //! # Calling convention (summary -- see `README.md` for the full ABI spec)
 //!

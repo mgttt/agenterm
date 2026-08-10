@@ -327,8 +327,8 @@ fn script_help_text() -> &'static str {
            agenterm rh task check [TASK] [--manifest PATH] [--json]\n\
            agenterm rh task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
          Options: --timeout-ms N --max-operations N --max-collection-items N \
-         --max-string-bytes N --max-output-bytes N --project-root DIR \
-         --manifest FILE --json"
+         --max-string-bytes N --max-output-bytes N --max-source-bytes N \
+         --project-root DIR --manifest FILE --json"
 }
 
 fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
@@ -1553,6 +1553,17 @@ fn run_script_command_with_context(
             }
         }
     }
+    if let Some(value) = option_value(arguments, "--max-source-bytes") {
+        match value.parse::<usize>() {
+            Ok(value) if (1..=hard_limits.source_bytes).contains(&value) => {
+                budgets.source_bytes = value;
+            }
+            _ => {
+                cli_eprintln!("script --max-source-bytes must be from 1 to 16777216");
+                return 2;
+            }
+        }
+    }
 
     let operand = script_operand(arguments);
     let (source_label, source) = match operation {
@@ -1594,18 +1605,34 @@ fn run_script_command_with_context(
                     );
                     return 3;
                 }
-                let file = match std::fs::File::open(&canonical) {
-                    Ok(file) => file,
-                    Err(error) => {
-                        cli_eprintln!("failed to read script {path}: {error}");
-                        return 1;
-                    }
-                };
-                match read_script_source(file, budgets.source_bytes) {
-                    Ok(source) => (canonical.display().to_string(), source),
-                    Err((code, error)) => {
-                        cli_eprintln!("failed to read script {path}: {error}");
-                        return code;
+                // Path-carrying backends (currently only wasmcore's compiled
+                // `.wasm` guests) get the canonical path itself as `source`,
+                // not decoded file content: `WasmcoreEngineBackend::check`/
+                // `execute` (src/script_engine.rs) already treat `source` as
+                // a filesystem path (`std::fs::read(source)`), and a real
+                // compiled wasm binary is never valid UTF-8 text, so the
+                // ordinary content-decoding branch below can never succeed
+                // for it regardless of the source-byte budget. Every text
+                // engine (rh/lua/qjs/sql) is unaffected: `from_entry_path`
+                // only returns the wasmcore variant for a `.wasm` entry.
+                if crate::script_backend::ScriptBackend::from_entry_path(path).as_str()
+                    == "wasmcore"
+                {
+                    (canonical.display().to_string(), canonical.display().to_string())
+                } else {
+                    let file = match std::fs::File::open(&canonical) {
+                        Ok(file) => file,
+                        Err(error) => {
+                            cli_eprintln!("failed to read script {path}: {error}");
+                            return 1;
+                        }
+                    };
+                    match read_script_source(file, budgets.source_bytes) {
+                        Ok(source) => (canonical.display().to_string(), source),
+                        Err((code, error)) => {
+                            cli_eprintln!("failed to read script {path}: {error}");
+                            return code;
+                        }
                     }
                 }
             }
@@ -3327,6 +3354,7 @@ fn script_operand(arguments: &[String]) -> Option<&str> {
             | "--max-collection-items"
             | "--max-string-bytes"
             | "--max-output-bytes"
+            | "--max-source-bytes"
             | "--cwd"
             | "--project-root"
             | "--manifest" => position += 2,
