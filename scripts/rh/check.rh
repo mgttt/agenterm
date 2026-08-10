@@ -266,27 +266,16 @@ fn smoke_timeout_ms(id) {
     300000
 }
 
-fn evidence_list_spec(worker_program, suite_path, repo) {
+fn evidence_list_spec(worker_program, suite_path) {
     let suite = "" + suite_path;
-    let repo_path = "" + repo;
-    // Hosted-engine argv: the standalone agenterm-rh binary retired with
-    // the engine-binary wave, so every worker is agenterm(.exe) and the
-    // verbs live under the `rh` subcommand (same shape bootstrap.cmd uses).
-    let arguments = ["rh", "run"];
+    // Declaration discovery is static and data-only. Compiling every large
+    // smoke pack merely to enter its --list-evidence branch made the ordinary
+    // Windows lane spend minutes before rustfmt and could poison later gates
+    // when an AOT timeout recorded the first host error.
+    let arguments = ["rh", "evidence-list"];
     arguments.push(suite);
-    arguments.push("--profile");
-    arguments.push("local");
-    arguments.push("--project-root");
-    arguments.push(repo_path);
-    arguments.push("--timeout-ms");
-    arguments.push("10000");
-    arguments.push("--");
-    arguments.push("--list-evidence");
     let _arg_count = 0 + arguments.len;
-    // The wall must absorb cold AOT pack compiles (~30s each on CI, where
-    // the cache is always cold) before the suite even starts listing —
-    // 120s still popped when several scripts compiled back-to-back.
-    spec(worker_program, arguments, 300000, empty_environment(), 0)
+    spec(worker_program, arguments, 10000, empty_environment(), 0)
 }
 
 fn cmd_build_bat_spec(repo, profile, timeout_ms, environment) {
@@ -1123,7 +1112,7 @@ fn assert_declarations(context, worker, repo, scratch, sequence, gate_manifest) 
         );
         let worker_program = "" + worker;
         let result = execute(
-            evidence_list_spec(worker_program, suite_path, repo),
+            evidence_list_spec(worker_program, suite_path),
             repo,
             scratch,
             sequence_value

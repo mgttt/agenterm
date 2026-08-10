@@ -319,6 +319,7 @@ fn script_help_text() -> &'static str {
            agenterm-rh api [MODULE] [--status STATE] [--tree|--json]\n\
            agenterm-rh check [OPTIONS] FILE.rh|-\n\
            agenterm-rh check-many --manifest FILE [OPTIONS]\n\
+           agenterm-rh evidence-list FILE.rh\n\
            agenterm-rh eval [OPTIONS] EXPRESSION|-- FILE.rh [--] [ARGS...]\n\
            agenterm-rh run [OPTIONS] FILE.rh|- [--] [ARGS...]\n\
            agenterm-rh task list [--manifest PATH] [--json]\n\

@@ -30,7 +30,7 @@ use agenterm_rh::{
     CallerInventoryOptions, CorpusScanOptions, RH_VERSION, RhError, build_pack_dir, check,
     check_with_project_validation, compile_native, hash_file, load_and_call_entry,
     parse_check_many_cli, qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory,
-    scan_rh_directory, transpile, write_receipt,
+    scan_rh_directory, static_evidence_declarations, transpile, write_receipt,
 };
 
 /// Entry point for the `agenterm-rh` CLI, callable from the thin
@@ -159,6 +159,18 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
             let source = read_source(&path)?;
             check(&source)?;
             println!("rh check ok: {}", path.display());
+        }
+        "evidence-list" => {
+            let path = require_path(&mut args, "evidence-list")?;
+            if let Some(argument) = args.next() {
+                return Err(RhError::Parse(format!(
+                    "unexpected evidence-list argument `{argument}`"
+                )));
+            }
+            let source = read_source(&path)?;
+            for evidence in static_evidence_declarations(&source)? {
+                println!("{evidence}");
+            }
         }
         "corpus-scan" => {
             run_corpus_scan_command(&mut args)?;
@@ -671,6 +683,7 @@ fn print_usage() {
          commands:\n\
            check <file>                      validate rh subset\n\
            check-many --manifest FILE        bounded multi-file rh subset check\n\
+           evidence-list <file>              list static task evidence declarations\n\
            corpus-scan [--root PATH] [--dir REL|--tasks [MANIFEST]]  scan .rh scripts or task entries\n\
            caller-inventory [--root PATH]            report agenterm-rh operational references\n\
            transpile <file> [-o rs]            emit Rust source for AOT\n\

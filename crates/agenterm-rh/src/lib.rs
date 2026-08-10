@@ -6,6 +6,7 @@ pub mod check_many;
 pub mod compile;
 pub mod corpus;
 pub mod error;
+pub mod evidence;
 pub mod expr_print;
 pub mod fleet;
 pub mod host_api;
@@ -36,6 +37,7 @@ pub use corpus::{
     scan_rh_directory, scan_task_manifest,
 };
 pub use error::RhError;
+pub use evidence::static_evidence_declarations;
 pub use host_api::{
     RH_CODEGEN_REVISION, RH_HOST_API_ROOT, RH_HOST_API_VERSION, RH_HOST_FLEET_OUT_CAP,
     RH_HOST_FS_READ_CAP, RH_HOST_OUT_CAP, RH_HOST_UTILITY_EXISTS_CASE_EXACT, RH_HOST_UTILITY_FAIL,
