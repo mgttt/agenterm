@@ -440,6 +440,32 @@ fn entry() {
                                 `automation_processes: rh::json::parse("[\"pwsh.exe:123\"]"),` {
                         allowed = 1;
                     }
+                } else if path == "scripts/rh/wake-smoke.rh" {
+                    // wake-smoke's "expired mutation is a typed no-op"
+                    // step must send ONE raw newline-delimited IPC request
+                    // with `deadline_unix_ms: 0` — something the typed CLI
+                    // deliberately cannot express (it computes its own
+                    // deadlines), so the step needs a raw socket.
+                    //
+                    // The natural rh spelling is
+                    // `std::net::TcpStream::connect_timeout`, which IS a
+                    // shipped surface (shipped_surfaces.rs:159) but has NO
+                    // native-emit support in transpile.rs — and this script
+                    // is required to be native-emittable by
+                    // tests/rh_task_entry_regression.rs's
+                    // wake_smoke_uses_bundled_pack /
+                    // wake_smoke_uses_native_bundled_pack. Switching this
+                    // line to TcpStream (attempted in b0045922, never CI-
+                    // validated) fails those tests with "unsupported
+                    // expression in native pack".
+                    //
+                    // So this ONE pre-existing line stays PowerShell until
+                    // native emit covers TcpStream. Scoped to the exact
+                    // program-name literal: any other PowerShell reference
+                    // in this file still fails closed.
+                    if trimmed_line == `"powershell",` {
+                        allowed = 1;
+                    }
                 } else if path == "scripts/rh/remote-ui-smoke.rh"
                         || path == "scripts/archive/rhai/remote-ui-smoke.rhai" {
                     if trimmed_line ==

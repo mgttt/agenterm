@@ -96,14 +96,60 @@ mod unix {
         );
     }
 
+    /// `agenterm cli script` hosting is LIVE on Unix as of 644e4cf9
+    /// ("fix(platform): enable hosted Script workers on Unix", which added
+    /// Linux/macOS to `hosted_script_worker_available`). This replaces an
+    /// earlier `..._remains_stubbed` test that asserted the pre-644e4cf9
+    /// "not yet available on this platform; invoke agenterm rh directly"
+    /// message — that expectation is what the platform change deliberately
+    /// invalidated, so the test now pins the new contract instead: a real
+    /// script really evaluates, and the stub message is gone.
+    ///
+    /// (The `cli script` spelling itself is a deprecated alias slated for
+    /// removal in v0.1.17 — see a1a020ac. Until then it must work, not
+    /// half-work.)
     #[test]
-    fn agenterm_cli_script_hosting_remains_stubbed() {
+    fn agenterm_cli_script_hosting_is_live() {
+        let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
         let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
-            .args(["cli", "script", "eval", "1"])
+            .args(["cli", "script", "eval", "fn entry() { 42 }"])
+            .current_dir(repo_root())
             .output()
             .expect("spawn agenterm cli");
-        assert_eq!(output.status.code(), Some(2));
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("invoke agenterm rh directly"));
+        assert_eq!(output.status.code(), Some(0), "{}", format_output(&output));
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("42"),
+            "hosted eval did not return the entry value: {}",
+            format_output(&output)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("not yet available"),
+            "hosting still reports itself unavailable: {}",
+            format_output(&output)
+        );
+    }
+
+    /// The same hosted path still fails closed, with rh's typed diagnostic,
+    /// for a source that is not a valid rh entry point — proving the live
+    /// path is really rh, not a permissive shim.
+    #[test]
+    fn agenterm_cli_script_hosting_fails_closed_without_an_entry_point() {
+        let _guard = SCRIPT_CLI_LOCK.lock().expect("script cli lock");
+        let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
+            .args(["cli", "script", "eval", "1"])
+            .current_dir(repo_root())
+            .output()
+            .expect("spawn agenterm cli");
+        assert_eq!(output.status.code(), Some(2), "{}", format_output(&output));
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            combined.contains("cdylib pack requires fn entry()"),
+            "unexpected diagnostic: {}",
+            format_output(&output)
+        );
     }
 }

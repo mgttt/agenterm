@@ -397,8 +397,9 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 └── 7.2.3 结论：QJS-Default 是 Phase 0 的前置 gate，且排在最前
     ├── 它与 CC/pack 逻辑完全解耦 → 先做，失败也不浪费 Phase 0 的工作
     ├── 它顺带复验 v0.1.16 修好的两格交叉编译是否真稳
-    └── 若某格编不过：退路是 pack 引擎回退到 rh（§9 决策表已列为备选），
-        代价是失去"一份源码跑三端"，Phase 0 需重写为 rh 形态
+    └── 若某格编不过：按 `plan-v0.1.18.md` 的 Q0a/G2 停门，先在修工具链、
+        独立 Runtime Component 或调整范围之间复核；不自动回退到目标相关的 rh AOT App，
+        否则会失去“一包六格”的版本结果
 ```
 
 ---
@@ -427,7 +428,7 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 ├── 把 `script-qjs` 转入根 `Cargo.toml` 的 `default`
 ├── 六格矩阵全绿（含 cargo-xwin 下的 aarch64-pc-windows-msvc 编 QuickJS C 源码）
 ├── 出数：二进制体积增量、冷编译墙钟增量、third-party notices 增补
-└── 不过则停：Phase 0 不开工，先决定回退 rh 还是修工具链
+└── 不过则停：Phase 0 不开工，按版本计划复核工具链或宿主形态；不自动回退 rh App
 │
 8.1 Phase 0 — 占位 pack + 自解包（最小可行链路）
 │
@@ -624,12 +625,12 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 ├── QJS-Default：把 `script-qjs` 转为默认 feature（**Gate 0，见 §7.2 / §8.0.1**）
 │   └── 排在 QJS-M6 之前：surface 校验做得再全，编不出来也上不了船
 │
-├── QJS-M6：`shipped_surfaces` 级 API 静态校验（Phase 0 前置条件）
-│   ├── 对齐 `crates/agenterm-rh/src/shipped_surfaces.rs` 的 **171 条** `SHIPPED_SURFACE_PATHS`
-│   │   └── ⚠️ rev1 写的是 76 条，低估了一倍多；QJS-M6 的工作量按 171 估
-│   ├── qjs `check` 增加 `--shipped-surfaces` 模式
-│   ├── CI gate：qjs check 不得有 stale 声明
-│   └── 这是 QJS 作为 product pack 引擎的"出厂资格"——在此之前 rh 仍是 Build/CI 唯一可用引擎
+├── QJS-M6：App Host ABI literal operation 静态校验（Phase 0 前置条件）
+│   ├── 以版本化 App Host ABI catalog 与共享 `OPERATION_CATALOG` 中实际暴露给 App 的子集为权威
+│   ├── Rh 的 `SHIPPED_SURFACE_PATHS` 只作历史对账输入，不是要求 App 暴露的数量目标
+│   ├── 已知 literal 在 qjs `check`/`check-many` 通过；未知 literal typed fail-closed；
+│   │   动态表达式标为不可静态证明，不虚报通过
+│   └── 这是 QJS 作为 product pack 引擎的出厂资格；`capability` 仍仅表示发现/兼容元数据
 │
 ├── QJS-Embed：嵌入模式接入（Phase 0 同步做）
 │   ├── `AppPackEngine` 按 manifest.engine 选择 ScriptEngineBackend
@@ -661,7 +662,7 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 
 | 问题 | 选项 | 决定 | 理由 |
 |------|------|------|------|
-| v1 引擎 | rh 单轨 / QJS 单轨 / 双轨 | **QJS 进 app pack，rh 留 Build/CI**（备选：Gate 0 失败则回退 rh） | QJS 跨平台源码一份、hot reload 秒级、CC Phase C WebView 互通；rh AOT 在构建 task 才是主场 |
+| v1 引擎 | rh 单轨 / QJS 单轨 / 双轨 | **QJS 进 app pack，rh 留 Build/CI**；Gate 0 失败则停门复核宿主形态 | QJS 跨平台源码一份、hot reload 秒级、CC Phase C WebView 互通；目标相关的 rh AOT 不满足“一包六格” |
 | QJS 默认化时机 | Phase 0 内做 / Phase 0 之前 / 留到 Phase 2 | **Phase 0 之前，Gate 0** | 与产品逻辑解耦；失败可零损失回退引擎选型（§7.2） |
 | CC 独立 PE 取 pack 语义 | CC 自建 Engine / IPC 拉静态语义 / 逐帧 IPC | **IPC 拉静态语义 + CC 侧缓存** | 自建 Engine 破单 Engine 纪律；逐帧 IPC 把渲染拉进脚本层（§8.3.0） |
 | 迁移后的 fallback 语义 | 永远等价 Rust 实现 / 两段式 | **两段式**（Phase 0–1 等价，Phase 2 起最小安全态） | "等价"与"迁完删 Rust"逻辑互斥（I5 细则） |
@@ -758,7 +759,7 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 |-------|---------|--------|
 | **Gate 0** | matrix | `script-qjs` 默认开启后，六格矩阵全绿（含 cargo-xwin 下编 QuickJS C 源码） |
 | **Gate 0** | 体积/时间 | 记录二进制体积增量与冷编译墙钟增量；third-party notices 含 QuickJS |
-| QJS-M6 | CI | qjs `check --shipped-surfaces` 对齐 171 条，不得有 stale 声明 |
+| QJS-M6 | CI | qjs `check` 对齐版本化 App Host ABI/实际公开 operation 子集；未知 literal typed fail-closed，不继承 Rh 全量 surface 数量 |
 | Phase 0 | smoke | `scripts/qjs/app-pack-smoke.js`：启动→pack loaded→reload→pack reloaded |
 | Phase 0 | snapshot | `ui-snapshot` 含 `app_pack_version` 字段 |
 | Phase 0 | CLI | `app-pack status` 打印 version / engine: qjs / origin / path（路径由 policy 解析，非硬编码） |
@@ -794,6 +795,7 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 | `plan/design-script-engine-trait.md` | `ScriptEngineBackend` trait 设计 |
 | `plan/ARCHITECTURE.md` | 现行结构 SSOT；三层边界 |
 | `plan/plan-v0.1.17.md` | v0.1.17 收口版；本计划在其后执行 |
+| `plan/plan-v0.1.18.md` | v0.1.18 版本执行投影；拥有该版本的范围、Gate 与验收口径，本文继续拥有 App Pack 架构和 Phase 细节 |
 | `prd/PRD_02_10_rhai_scripting.md` | Script 引擎家族产品归属 |
 | `prd/PRD_02_02_executable_family.md` | 可执行文件家族 |
 | `plan/design-llm-gateway-rhai-logic-pack.md` | LLM Logic Pack（与 CC pack 可并行） |
@@ -802,7 +804,7 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 | `src/platform/policy/paths.rs` | 数据目录解析 SSOT（`local_data_root_for_product_directory`） |
 | `src/platform/boundary_tests.rs` | 平台边界策略，约束 app_pack 模块不得自带 cfg/硬编码路径 |
 | `src/operations.rs` | `OPERATION_CATALOG`（44 个操作）；`product.*` 不并入此表 |
-| `crates/agenterm-rh/src/shipped_surfaces.rs` | `SHIPPED_SURFACE_PATHS`（171 条），QJS-M6 的对齐目标 |
+| `crates/agenterm-rh/src/shipped_surfaces.rs` | Rh 历史 surface 盘点输入；不是 App Host ABI 或 QJS-M6 的数量目标 |
 
 ---
 
@@ -818,12 +820,12 @@ v0.1.17（收口版）
 ├── 本计划占用：0（仅文档对齐）
 └── 为 v0.1.18 做准备：A0 定稿 + A1 开放问题收口（含 RA-6 CC 取语义方式、RA-7 密钥方案）
 
-v0.1.18（建议：Gate 0 + App Pack Phase 0）
-├── 主题：QJS 默认化 + 占位 pack + 自解包 + 嵌入 Engine
-├── 顺序：**Gate 0（§8.0.1）→ QJS-M6 → Phase 0（§8.1）**
-├── 范围：本计划 §8.0.1 + §8.1 全部 + QJS-M6 收口
-└── 交付：六格矩阵在 QJS 默认下全绿 + smoke 通过 + snapshot 含 app_pack_version
-    └── Gate 0 不过则本版只交付"引擎选型复核"结论，Phase 0 顺延
+v0.1.18（Portable App Substrate）
+├── 版本范围、依赖树与验收：见 plan/plan-v0.1.18.md（版本执行 SSOT）
+├── 本文拥有的实现细节：Gate 0 + Phase 0；实际开工仍服从版本计划逐 Gate 收敛
+├── 决定性证据：同一 `.agp` SHA 被六格消费，App-only lane 不调用 Cargo/不重编 Base
+└── QJS 采用门不过则停止 Phase 0 并重新选择宿主形态
+    └── 不自动回退到目标相关的 Rh AOT App，也不虚报“一包六格”
 
 v0.1.19+（按 Phase 推进）
 ├── Phase 1：接一条竖线（QJS callback → CC footer）+ 中断保护 + 熔断 + 可观测
