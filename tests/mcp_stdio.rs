@@ -1369,6 +1369,8 @@ fn force_killed_client_closes_its_active_backend_wait() {
             .expect("report backend connection state");
     });
     let mut child = start_mcp(&address);
+    let mut child_tree = agenterm_platform::process::ProcessTreeGuard::attach(&child)
+        .expect("attach containment to isolated MCP client");
     let stdout = child.stdout.take().expect("piped stdout");
     let (sender, receiver) = mpsc::channel();
     let reader = spawn_stdout_reader(stdout, sender);
@@ -1378,7 +1380,9 @@ fn force_killed_client_closes_its_active_backend_wait() {
     accepted_receiver
         .recv_timeout(Duration::from_secs(3))
         .expect("wait became active before client kill");
-    child.kill().expect("force-kill isolated MCP client");
+    child_tree
+        .terminate()
+        .expect("force-kill isolated MCP client tree");
     let output = child.wait_with_output().expect("reap killed MCP client");
     drop(stdin);
     reader.join().expect("join stdout reader");
@@ -1677,7 +1681,10 @@ fn directory_entry_names(directory: &Path) -> Vec<String> {
 }
 
 fn start_mcp(address: &str) -> std::process::Child {
-    mcp_command(&["--address", address, "serve", "--stdio"])
+    let mut command = mcp_command(&["--address", address, "serve", "--stdio"]);
+    agenterm_platform::process::configure_owned_command(&mut command)
+        .expect("configure owned MCP client process tree");
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

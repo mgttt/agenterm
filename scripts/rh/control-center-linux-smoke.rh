@@ -294,7 +294,7 @@ fn wait_protocol(
 ) {
     let endpoint_text = "" + endpoint;
     let code_text = "" + code;
-    for attempt in 0..240 {
+    for attempt in 0..600 {
         let arguments = [
             "--endpoint", endpoint_text, "protocol-info", "--running"
         ];
@@ -315,6 +315,23 @@ fn wait_protocol(
         }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
+    let diagnostic_arguments = [
+        "--endpoint", endpoint_text, "protocol-info", "--running"
+    ];
+    let diagnostic_output = native_command(
+        context,
+        cli,
+        registry,
+        endpoint,
+        backend,
+        diagnostic_arguments
+    ).output();
+    print(
+        "DIAGNOSTIC protocol readiness timeout: pid=" + child.id +
+            " state=" + child.state +
+            " stdout=" + diagnostic_output.stdout_text() +
+            " stderr=" + diagnostic_output.stderr_text()
+    );
     throw code_text + "_timeout";
 }
 

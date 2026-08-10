@@ -332,11 +332,7 @@ const HEADLESS_MAX_EDGE: i32 = 16_384;
 /// published rather than left for a caller to guess. Routed through the
 /// platform-kind policy fact instead of a `cfg` split (boundary policy).
 fn headless_composer_height() -> i32 {
-    if crate::platform::is_windows_host() {
-        104
-    } else {
-        64
-    }
+    crate::platform::headless_composer_height()
 }
 const HEADLESS_STATUS_HEIGHT: i32 = 26;
 const HEADLESS_SERVER_STRIP_HEIGHT: i32 = 34;

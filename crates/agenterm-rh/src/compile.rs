@@ -197,7 +197,9 @@ fn generated_cargo_toml(crate_name: &str) -> String {
          crate-type = [\"cdylib\"]\n\n\
          [dependencies]\n\
          serde_json = \"1\"\n\
-         sha2 = \"0.10\"\n"
+         sha2 = \"0.10\"\n\n\
+         [target.'cfg(windows)'.dependencies]\n\
+         windows-sys = {{ version = \"0.61\", features = [\"Win32_Foundation\", \"Win32_Storage_FileSystem\"] }}\n"
     )
 }
 

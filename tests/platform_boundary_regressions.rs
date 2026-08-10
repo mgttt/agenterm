@@ -22,6 +22,17 @@ const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 12] = [
     ),
 ];
 
+// These four thin subsystem launchers are the target-selection boundary by
+// design. The stronger native-boundary audit still rejects raw OS APIs in the
+// three Rust-runtime entrypoints and separately constrains the size-bounded,
+// no_std CUI trampoline.
+const HOST_BRANCH_ENTRYPOINT_EXEMPTIONS: &[&str] = &[
+    "src/bin/agenterm.rs",
+    "src/bin/agenterm-cc.rs",
+    "src/bin/agenterm-con.rs",
+    "src/bin/agenterm-com.rs",
+];
+
 #[test]
 fn non_platform_src_has_no_runtime_host_branching_references() {
     let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -30,6 +41,14 @@ fn non_platform_src_has_no_runtime_host_branching_references() {
 
     let mut violations = Vec::new();
     for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .expect("source is below repository root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if HOST_BRANCH_ENTRYPOINT_EXEMPTIONS.contains(&relative.as_str()) {
+            continue;
+        }
         let content = fs::read_to_string(&file).expect("read source file");
         for (line_index, line) in content.lines().enumerate() {
             let mut violations_in_line = Vec::new();

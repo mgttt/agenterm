@@ -5,7 +5,7 @@ const BUILD: &str = include_str!("../scripts/rh/build.rh");
 #[test]
 fn release_cleanup_reclaims_both_repo_targets_after_staging() {
     let release_cleanup = BUILD
-        .split("if profile == \"release\" && !external_target {")
+        .split("if profile == \"release\" && external_target == 0 {")
         .nth(1)
         .expect("release cleanup branch");
     assert!(release_cleanup.contains("build_target_clean"));
@@ -44,7 +44,8 @@ fn bootstrap_builds_caches_and_executes_only_the_rh_worker() {
             "AGENTERM_BOOTSTRAP_CACHE_WORKER=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\agenterm.exe"
         )
     );
-    assert!(BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm"));
+    assert!(BOOTSTRAP.contains("cargo build --locked --bin agenterm"));
+    assert!(!BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm"));
     assert!(!BOOTSTRAP.contains("--bin agenterm-rh"));
     assert!(!BOOTSTRAP.contains("cargo build --quiet --locked --bin agenterm-rhai"));
     assert!(!BOOTSTRAP.contains("agenterm-rhai.exe"));

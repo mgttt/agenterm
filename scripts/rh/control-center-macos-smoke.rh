@@ -200,21 +200,20 @@ fn invoke_activate(context, program, registry, runtime, arguments) {
 }
 
 fn wait_protocol(context, cli, registry, runtime, child, code) {
-    // Hosted Apple Silicon can need more than fifteen seconds to make the first
-    // cold-start protocol probe observable. Keep this bounded, while retaining
-    // the immediate child-exit diagnostic below.
-    for attempt in 0..1200 {
+    // Keep loaded runners bounded while retaining the immediate child-exit
+    // diagnostic below.
+    for attempt in 0..600 {
         let output = native_command(
             context,
             cli,
             registry,
             runtime,
-            ["--instance", "dev", "protocol-info", "--running"]
+            ["cli", "--instance", "dev", "protocol-info", "--running"]
         ).output();
         if output.success != 0 {
             test_harness::append_command_record(
                 context,
-                ["--instance", "dev", "protocol-info", "--running"],
+                ["cli", "--instance", "dev", "protocol-info", "--running"],
                 output,
                 0,
                 []
@@ -234,7 +233,7 @@ fn wait_protocol(context, cli, registry, runtime, child, code) {
         cli,
         registry,
         runtime,
-        ["--instance", "dev", "protocol-info", "--running"]
+        ["cli", "--instance", "dev", "protocol-info", "--running"]
     ).output();
     print(
         "DIAGNOSTIC protocol readiness timeout: pid=" + child.id +
@@ -598,7 +597,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
         registry,
         runtime,
         [
-            "--instance", "dev",
+            "cli", "--instance", "dev",
             "new-window", "-d", "-P", "-F", "#{window_id}",
             "-n", "cc-" + label + "-" + context.run_id,
             "--", "/bin/sh"
@@ -617,7 +616,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
         registry,
         runtime,
         [
-            "--instance", "dev", "send-keys", "-t", tab_id,
+            "cli", "--instance", "dev", "send-keys", "-t", tab_id,
             "-l", "echo " + marker
         ],
         0
@@ -627,7 +626,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
         cli,
         registry,
         runtime,
-        ["--instance", "dev", "send-keys", "-t", tab_id, "Enter"],
+        ["cli", "--instance", "dev", "send-keys", "-t", tab_id, "Enter"],
         0
     );
     invoke(
@@ -636,7 +635,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
         registry,
         runtime,
         [
-            "--instance", "dev",
+            "cli", "--instance", "dev",
             "wait-pane", "-t", tab_id,
             "--contains", marker,
             "--timeout-ms", "5000"
@@ -649,7 +648,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
         registry,
         runtime,
         [
-            "--instance", "dev",
+            "cli", "--instance", "dev",
             "capture-pane", "-p", "-t", tab_id,
             "--max-bytes", "16384"
         ],
@@ -1425,7 +1424,7 @@ fn entry() {
             cli_executable,
             registry,
             runtime,
-            ["--instance", "dev", "shutdown"],
+            ["cli", "--instance", "dev", "shutdown"],
             0
         );
         let server_output = wait_exit(

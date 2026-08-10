@@ -232,7 +232,7 @@ fn assert_native_only(name: &str, needles: &[&str], anti_needles: &[&str]) {
 
 #[test]
 fn codegen_revision_is_eighty_seven() {
-    assert_eq!(RH_CODEGEN_REVISION, 87);
+    assert_eq!(RH_CODEGEN_REVISION, 88);
 }
 
 #[test]

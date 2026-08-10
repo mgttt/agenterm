@@ -28,7 +28,7 @@ pub(crate) use policy::input::{
 
 #[allow(unused_imports)]
 pub(crate) use policy::host::{
-    is_macos_host, is_unix_host, is_windows_host, shell_command_for_host,
+    headless_composer_height, is_macos_host, is_unix_host, is_windows_host, shell_command_for_host,
 };
 pub(crate) use policy::paths::{
     default_audit_path, default_workspace_path, instance_registry_directory_root,

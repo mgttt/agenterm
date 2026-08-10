@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 87;
+pub const RH_CODEGEN_REVISION: u32 = 88;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -481,6 +481,36 @@ pub fn emit_host_runtime(out: &mut String) {
                  None => chars.iter().skip(start).collect(),\n\
              }\n\
          }\n\n\
+         #[cfg(windows)]\n\
+         fn rh_replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {\n\
+             use std::os::windows::ffi::OsStrExt;\n\
+             use std::time::Duration;\n\
+             use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION};\n\
+             use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};\n\
+             let source = std::fs::canonicalize(source)?;\n\
+             let parent = destination.parent().ok_or_else(|| std::io::Error::other(\"destination parent required\"))?;\n\
+             let destination = std::fs::canonicalize(parent)?\n\
+                 .join(destination.file_name().ok_or_else(|| std::io::Error::other(\"destination name required\"))?);\n\
+             let source = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();\n\
+             let destination = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();\n\
+             const ATTEMPTS: usize = 32;\n\
+             for attempt in 0..ATTEMPTS {\n\
+                 if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } != 0 {\n\
+                     return Ok(());\n\
+                 }\n\
+                 let error = std::io::Error::last_os_error();\n\
+                 let retryable = matches!(error.raw_os_error(), Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_SHARING_VIOLATION as i32 || code == ERROR_LOCK_VIOLATION as i32);\n\
+                 if !retryable || attempt + 1 == ATTEMPTS {\n\
+                     return Err(error);\n\
+                 }\n\
+                 std::thread::sleep(Duration::from_millis(2));\n\
+             }\n\
+             unreachable!(\"bounded replacement loop always returns\")\n\
+         }\n\n\
+         #[cfg(not(windows))]\n\
+         fn rh_replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {\n\
+             std::fs::rename(source, destination)\n\
+         }\n\n\
          fn rh_atomic_write(path: &str, value: &str) -> INT {\n\
              use std::io::Write;\n\
              use std::sync::atomic::{AtomicU64, Ordering};\n\
@@ -524,7 +554,7 @@ pub fn emit_host_runtime(out: &mut String) {
                  return 0;\n\
              }\n\
              drop(output);\n\
-             if let Err(error) = std::fs::rename(&temporary, &destination) {\n\
+             if let Err(error) = rh_replace_file(&temporary, &destination) {\n\
                  let _ = std::fs::remove_file(&cleanup_path);\n\
                  let _ = rh_fail(&format!(\"runtime_atomic_write_promote: {path}: {error}\"));\n\
                  return 0;\n\

@@ -1021,15 +1021,7 @@ fn build_manifest(
         unsigned_macos_readmes: readme_entries
     };
     let staging_manifest = output_path + ".staging";
-    let output_parts = output_path.split("/");
-    let output_parent = output_path;
-    if output_parts.len > 1 {
-        let output_dir = output_parts[0];
-        for index in 1..output_parts.len - 1 {
-            output_dir = output_dir + "/" + output_parts[index];
-        }
-        output_parent = output_dir;
-    }
+    let output_parent = std::path::parent(output_path).display;
     std::fs::create_dir_all(output_parent);
     rh::runtime::atomic_write(
         staging_manifest,

@@ -25,6 +25,10 @@ pub(crate) fn is_unix_host() -> bool {
     )
 }
 
+pub(crate) fn headless_composer_height() -> i32 {
+    if is_windows_host() { 104 } else { 64 }
+}
+
 #[allow(dead_code)]
 pub(crate) fn shell_command_for_host<'a>(
     windows_command: &'a str,
