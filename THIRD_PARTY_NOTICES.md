@@ -10,18 +10,27 @@ Copyright and license terms remain with their respective authors.
 | `ab_glyph` | Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
 | `libc` | MIT OR Apache-2.0 |
+| `libloading` | ISC |
+| `mlua` | MIT |
 | `objc2-app-kit` | MIT |
 | `objc2-foundation` | MIT |
 | `png` | MIT OR Apache-2.0 |
 | `rhai` | MIT OR Apache-2.0 |
 | `rmux-pty` | MIT OR Apache-2.0 |
+| `rquickjs` | MIT |
+| `rusqlite` | MIT |
 | `serde` | MIT OR Apache-2.0 |
 | `serde_json` | MIT OR Apache-2.0 |
 | `sha2` | MIT OR Apache-2.0 |
 | `softbuffer` | MIT OR Apache-2.0 |
-| `ureq` | MIT OR Apache-2.0 |
+| `sqlparser` | Apache-2.0 |
+| `tempfile` | MIT OR Apache-2.0 |
 | `unicode-width` | MIT OR Apache-2.0 |
+| `ureq` | MIT OR Apache-2.0 |
 | `vt100` | MIT |
+| `walkdir` | Unlicense/MIT |
+| `wasmtime` | Apache-2.0 WITH LLVM-exception |
+| `wasmtime-wasi` | Apache-2.0 WITH LLVM-exception |
 | `windows-sys` | MIT OR Apache-2.0 |
 | `winit` | Apache-2.0 |
 | `winresource` (build dependency) | MIT |

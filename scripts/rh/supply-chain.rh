@@ -113,20 +113,35 @@ fn entry() {
     );
 
     let allowed = #{
+        "(Apache-2.0 OR MIT) AND BSD-3-Clause": true,
         "(MIT OR Apache-2.0) AND Unicode-3.0": true,
         "0BSD OR MIT OR Apache-2.0": true,
         "Apache-2.0": true,
+        "Apache-2.0 / MIT": true,
         "Apache-2.0 AND ISC": true,
         "Apache-2.0 AND MIT": true,
         "Apache-2.0 OR ISC OR MIT": true,
         "Apache-2.0 OR MIT": true,
+        // Bare form of the already-reviewed
+        // "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT": the
+        // cranelift/wasmtime family (38 packages) ships it without the
+        // OR-alternatives. Same permissive Apache-2.0 terms plus the LLVM
+        // exception, which only widens what linking is permitted.
+        "Apache-2.0 WITH LLVM-exception": true,
         "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT": true,
         "BSD-2-Clause": true,
         "BSD-2-Clause OR Apache-2.0 OR MIT": true,
+        "BSD-2-Clause OR MIT OR Apache-2.0": true,
         "BSD-3-Clause": true,
         "BSD-3-Clause OR MIT OR Apache-2.0": true,
         "CC0-1.0": true,
         "CDLA-Permissive-2.0": true,
+        // Dual license, and we take the BSD-3-Clause option (already
+        // reviewed above). Reached only through wasmtime's optional Intel
+        // VTune profiling support (ittapi / ittapi-sys). Recorded
+        // explicitly because one of its alternatives is GPL-2.0-only: the
+        // choice of the permissive option is deliberate, not an oversight.
+        "GPL-2.0-only OR BSD-3-Clause": true,
         "ISC": true,
         "MIT": true,
         "MIT OR Apache-2.0": true,
@@ -135,8 +150,13 @@ fn entry() {
         "MIT OR Zlib OR Apache-2.0": true,
         "MIT/Apache-2.0": true,
         "MPL-2.0+": true,
+        // Bare form of the already-reviewed
+        // "(MIT OR Apache-2.0) AND Unicode-3.0": the ICU4X crates (18
+        // packages) carry Unicode-3.0 alone.
+        "Unicode-3.0": true,
         "Unlicense/MIT": true,
         "Unlicense OR MIT": true,
+        "Zlib": true,
         "Zlib OR Apache-2.0 OR MIT": true
     };
 
@@ -152,12 +172,22 @@ fn entry() {
     }
     let dependencies = [];
     let roots = [];
+    // Counted here instead of reading `dependencies.len` at the end: these
+    // arrays hold JSON objects, so native emit types them as JSON values.
+    // In comparison/range position `.len` correctly becomes
+    // `rh_json_array_len`, but as an assignment RHS it is emitted as a JSON
+    // *path* read -- `rh_json_get_path(&dependencies, &["len"])` -- which
+    // fails at runtime with `json_path: len`. A plain int counter avoids the
+    // gap (transpiler-side fix belongs to the rh track, not a release
+    // unblock).
+    let dep_count = 0;
     for pkg in metadata.packages {
         let pkg_id = "" + pkg.id;
         if workspace_ids.contains(pkg_id) {
             roots.push(pkg);
         } else if resolved_ids.contains(pkg_id) {
             dependencies.push(pkg);
+            dep_count += 1;
         }
     }
     require(dependencies.len > 0, "supply_chain_dependencies_empty");
@@ -407,7 +437,6 @@ fn entry() {
         output,
         rh::json::stringify_pretty(document) + "\n"
     );
-    let dep_count = dependencies.len;
     print(
         "PASS: wrote deterministic SPDX inventory for " +
             dep_count +
