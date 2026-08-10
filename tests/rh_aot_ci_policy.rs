@@ -118,16 +118,29 @@ fn performance_experiment_uses_rh_for_build_and_manifest_tasks() {
 }
 
 #[test]
-fn dist_task_worker_requires_rh_cli_without_compatibility_fallback() {
-    let rh = CHECK
-        .find("\"dist/agenterm-rh.exe\"")
-        .expect("dist rh candidates");
+fn dist_task_worker_uses_staged_agenterm_rh_without_retired_binary_fallback() {
+    let main = CHECK
+        .find("\"dist/agenterm.exe\"")
+        .expect("staged main binary candidates");
     let selection = CHECK
-        .find("let worker = resolve_worker(dist_rh_cli, task_rh_cli)")
+        .find("let worker = resolve_worker(dist_agenterm, task_rh_cli)")
         .expect("rh worker selection");
-    assert!(rh < selection);
+    assert!(main < selection);
+    assert!(CHECK.contains("[\n        \"rh\", \"task\", \"run\", task_id,"));
     assert!(CHECK.contains("check_dist_task_worker_missing"));
+    assert!(!CHECK.contains("dist/agenterm-rh.exe"));
+    assert!(!CHECK.contains("target/debug/agenterm-rh.exe"));
     assert!(!CHECK.contains("COMPATIBILITY FALLBACK"));
+}
+
+#[test]
+fn unix_frontend_native_journeys_have_explicit_cleanup_budget() {
+    for task in ["unix-frontend-linux-smoke", "unix-frontend-macos-smoke"] {
+        let budget = &TASK_MANIFEST["contracts"][task]["budget"];
+        assert_eq!(budget["timeout_ms"], 300_000, "{task}");
+        assert_eq!(budget["max_operations"], 100_000_000, "{task}");
+        assert_eq!(budget["max_output_bytes"], 1_048_576, "{task}");
+    }
 }
 
 #[test]

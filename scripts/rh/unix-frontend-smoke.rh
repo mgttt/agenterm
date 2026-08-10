@@ -490,6 +490,16 @@ fn wait_exit(child, code) {
     throw code;
 }
 
+fn record_phase(context, phase) {
+    let phase_text = "" + phase;
+    rh::runtime::atomic_write(
+        std::path::join(context.run_directory, "phase.txt").display,
+        phase_text + "\n"
+    );
+    print("STEP " + phase_text);
+    0
+}
+
 fn retain_failure_snapshot(context, cli) {
     std::fs::create_dir_all(context.failure_directory);
     let output = test_harness::run_cli(
@@ -654,7 +664,10 @@ fn entry() {
     let succeeded = 0;
     let failure = "";
     try {
-        print("STEP no-activate launch preserves an independent native foreground witness");
+        record_phase(
+            context,
+            "no-activate launch preserves an independent native foreground witness"
+        );
         let gui_command = test_harness::configured_command(
             context, gui_exe, ["--no-activate"]
         );
@@ -705,7 +718,10 @@ fn entry() {
             "ux.unix-frontend-" + platform + "-no-activate"
         );
 
-        print("STEP semantic activation waits for native focus and compositor truth");
+        record_phase(
+            context,
+            "semantic activation waits for native focus and compositor truth"
+        );
         json_cli(context, cli_exe, ["ui-action", "window-activate"]);
         let native_window_id = "";
         if platform == "linux" {
@@ -741,7 +757,10 @@ fn entry() {
             wait_macos_agenterm_active(context);
         }
 
-        print("STEP renderer-owned snapshot and PNG describe one event position");
+        record_phase(
+            context,
+            "renderer-owned snapshot and PNG describe one event position"
+        );
         let before_capture = json_cli(context, cli_exe, ["ui-snapshot"]);
         let screenshot_path = std::path::join(
             std::path::parent(context.evidence_path).display,
@@ -799,7 +818,10 @@ fn entry() {
             "ux.unix-frontend-" + platform + "-workbench"
         );
 
-        print("STEP real native clipboard text is asynchronously pasted into the PTY");
+        record_phase(
+            context,
+            "real native clipboard text is asynchronously pasted into the PTY"
+        );
         let active_tab = focused.active_window_id;
         let paste_marker = "AGENTERM_NATIVE_PASTE_" + context.run_id;
         let clipboard_text = "echo " + paste_marker;
@@ -876,7 +898,10 @@ fn entry() {
             "ux.unix-frontend-" + platform + "-native-clipboard"
         );
 
-        print("STEP a delayed clipboard result cannot cross an active-tab boundary");
+        record_phase(
+            context,
+            "a delayed clipboard result cannot cross an active-tab boundary"
+        );
         let peer = text_cli(
             context,
             cli_exe,
@@ -943,7 +968,10 @@ fn entry() {
             "ux.unix-frontend-" + platform + "-stale-paste"
         );
 
-        print("STEP public close choice terminates the owned GUI/server cleanly");
+        record_phase(
+            context,
+            "public close choice terminates the owned GUI/server cleanly"
+        );
         json_cli(context, cli_exe, ["ui-action", "close-window"]);
         json_cli(context, cli_exe, ["ui-action", "stop-server-and-exit"]);
         let exit = wait_exit(gui, "unix_frontend_shutdown_timeout");

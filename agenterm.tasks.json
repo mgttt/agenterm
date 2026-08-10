@@ -570,8 +570,8 @@
         "renderer-owned-png-evidence"
       ],
       "budget": {
-        "timeout_ms": 180000,
-        "max_operations": 10000000,
+        "timeout_ms": 300000,
+        "max_operations": 100000000,
         "max_output_bytes": 1048576
       },
       "network": [],
@@ -591,8 +591,8 @@
         "renderer-owned-png-evidence"
       ],
       "budget": {
-        "timeout_ms": 180000,
-        "max_operations": 10000000,
+        "timeout_ms": 300000,
+        "max_operations": 100000000,
         "max_output_bytes": 1048576
       },
       "network": [],

@@ -514,6 +514,16 @@ jobs:
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
           echo "linux_x86_64_unix_frontend_smoke_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload failed Linux workbench diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-workbench-failure-${{ github.run_id }}
+          path: |
+            target/smoke/test-runs/unix-frontend-linux-*
+            target/unix-frontend-openbox.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
       - name: Validate isolated agenterm-net research loop

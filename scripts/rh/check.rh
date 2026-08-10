@@ -1058,19 +1058,19 @@ fn compute_quick_native_bin_root(repo, quick_target) {
     std::path::join(base, "debug").display
 }
 
-fn resolve_task_rh_cli(dist_rh_cli, repo) {
-    if dist_rh_cli != "" {
-        return dist_rh_cli;
+fn resolve_task_rh_cli(dist_agenterm, repo) {
+    if dist_agenterm != "" {
+        return dist_agenterm;
     }
     first_nonempty_file(
         repo,
-        "target/debug/agenterm-rh.exe",
-        "target/debug/agenterm-rh"
+        "target/debug/agenterm.exe",
+        "target/debug/agenterm"
     )
 }
 
-fn resolve_worker(dist_rh_cli, task_rh_cli) {
-    let dist_text = "" + dist_rh_cli;
+fn resolve_worker(dist_agenterm, task_rh_cli) {
+    let dist_text = "" + dist_agenterm;
     let task_text = "" + task_rh_cli;
     if dist_text != "" {
         return dist_text;
@@ -1078,8 +1078,8 @@ fn resolve_worker(dist_rh_cli, task_rh_cli) {
     task_text
 }
 
-fn resolve_dist_lint_cli(dist_rh_cli, lint_worker) {
-    let dist_text = "" + dist_rh_cli;
+fn resolve_dist_lint_cli(dist_agenterm, lint_worker) {
+    let dist_text = "" + dist_agenterm;
     let lint_text = "" + lint_worker;
     if dist_text != "" {
         return dist_text;
@@ -1816,15 +1816,15 @@ let build_gate = run_gate(
 context = map_context(build_gate);
 timing = map_timing(build_gate);
 sequence = map_sequence(build_gate);
-let dist_rh_cli = first_nonempty_file(
+let dist_agenterm = first_nonempty_file(
     repo,
-    "dist/agenterm-rh.exe",
-    "dist/agenterm-rh"
+    "dist/agenterm.exe",
+    "dist/agenterm"
 );
-let task_rh_cli = resolve_task_rh_cli(dist_rh_cli, repo);
+let task_rh_cli = resolve_task_rh_cli(dist_agenterm, repo);
 require(task_rh_cli != "", "check_dist_task_worker_missing");
-let worker = resolve_worker(dist_rh_cli, task_rh_cli);
-let dist_lint_cli = resolve_dist_lint_cli(dist_rh_cli, lint_worker);
+let worker = resolve_worker(dist_agenterm, task_rh_cli);
+let dist_lint_cli = resolve_dist_lint_cli(dist_agenterm, lint_worker);
 let artifact_verification_mode =
     resolve_artifact_verification_mode(release);
 
