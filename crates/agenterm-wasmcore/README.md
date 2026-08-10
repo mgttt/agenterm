@@ -171,6 +171,101 @@ the guest on a dedicated worker thread with a 16 MiB stack for this
 reason -- every caller gets the fix automatically instead of needing to
 know about it.
 
+## CLI example: `wasmcore_run`
+
+[`examples/wasmcore_run.rs`](examples/wasmcore_run.rs) is the
+CLI-triggerable entry point for this crate:
+
+```sh
+cargo run --example wasmcore_run -- path/to/guest.wasm   # run an existing guest
+cargo run --example wasmcore_run                         # zero-setup demo
+```
+
+With no path, it compiles a small self-contained demo guest at run time
+(a real `rustc --target wasm32-wasip1` invocation, same mechanism as
+`tests/fleet_call_roundtrip.rs`), so the command works out of the box with
+no `.wasm` file to hand it first. Either way, the guest runs against a
+built-in demo `fleet_call` bridge that recognizes every `operation_id` and
+echoes its params back inside `{"received": <params_json>}` -- this crate
+has no dependency on the `agenterm` product crate, so this is an honest
+demo of the ABI round trip, not a stand-in for a real product operation.
+The example prints the guest's real stdout and its real `GuestExit`
+status, and propagates a guest's explicit `exit(code)` as its own process
+exit code.
+
+## Hardening / adversarial testing
+
+Beyond the happy-path round trip in `tests/fleet_call_roundtrip.rs`, this
+crate carries two adversarial test files --
+[`tests/hardening_link_and_bounds.rs`](tests/hardening_link_and_bounds.rs)
+and
+[`tests/hardening_payloads.rs`](tests/hardening_payloads.rs) -- that each
+build a REAL malicious/malformed `wasm32-wasip1` guest via a real `rustc`
+invocation and run it through the real `WasmCoreHost`, then assert on the
+*actually observed* host behavior (not just reasoned-about). Headline
+result: **no memory-safety gap was found.** Every adversarial scenario
+below produces a clean `Result::Err` (surfaced to the guest as a WASI
+trap), never a host-process crash/hang and never an out-of-bounds host
+write:
+
+- **Missing/wrong-signature `wasmcore_alloc` export.** A guest that does
+  not export `wasmcore_alloc` at all is rejected the first time the host
+  needs it (`... does not export \`wasmcore_alloc\``) -- this is a
+  call-time rejection (the export is looked up lazily), not an
+  instantiation-time one. A guest that exports it with the wrong
+  signature (`(i32, i32) -> i32` instead of `(i32) -> i32`) is rejected
+  just as cleanly via `wasmtime`'s own `Func::typed` check (`... wrong
+  signature ... type mismatch with parameters: expected 1 types, found
+  2`).
+- **Wrong-signature `fleet_call` *import*.** The real link-time
+  counterpart: a guest that imports `fleet_call` itself with a mismatched
+  signature (one argument short) fails at `Linker::instantiate` --
+  `_start` never runs at all (`instantiating wasm module: incompatible
+  import type for \`agenterm::fleet_call\`: types incompatible: ...`).
+  This is where "wasmtime's own type-checking" genuinely applies; the
+  guest-export case above is a related but distinct call-time check this
+  crate performs itself.
+- **`wasmcore_alloc` returning an out-of-bounds pointer (the single most
+  safety-critical path in this crate: the host writing into
+  guest-claimed memory).** A guest whose allocator returns `i32::MAX`, a
+  moderately-OOB value, or a pointer just **2 bytes** before the guest's
+  real current memory end (so the host's write payload overruns the real
+  end by only a few dozen bytes) is rejected in every case by
+  `wasmtime`'s own bounds-checked `Memory::write` (`writing fleet_call
+  result bytes into guest memory: out of bounds memory access`) -- exact,
+  byte-accurate, not merely catching implausibly huge values. This crate's
+  own explicit `ptr < 0` guard in `write_guest_result` catches negative
+  pointers; `Memory::write`'s own bounds check independently catches
+  every positive-but-out-of-bounds one. A guest whose allocator returns
+  **0** is a distinct, non-crash case: address 0 is an ordinary in-bounds
+  guest address (not a protected native null page), so the host accepts
+  it and the write round-trips correctly -- verified, not assumed. This
+  is correct per the ABI (only negative pointers are documented as
+  invalid); a real guest allocator that carelessly returns 0 risks
+  clobbering its own low memory, but that is the guest's own allocator
+  bug, not a host-side hole.
+- **A guest lying about its own `operation_id`/`params_json` lengths (the
+  input-side counterpart).** A guest claiming a 50,000,000-byte
+  `params_json` when its real buffer is 2 bytes, a negative `op_len`, and
+  a small, realistic overrun (a real near-the-end pointer claimed a few
+  KiB too long) are all rejected by `slice_bytes`/`read_guest_string`
+  with exact, reported bounds (`guest range 1048613..51048613 out of
+  bounds (guest memory size 1114112)`) -- and a call-counting bridge
+  confirms the fleet bridge is **never invoked** for a call whose own
+  params could not be read.
+- **Several-MB payloads, both directions.** A 5 MiB `params_json` and a
+  (deliberately differently-sized) 6 MiB `result_json` round-trip with
+  independently-computed checksums matching exactly on both the
+  host-received and guest-read-back sides -- proving no truncation and no
+  `usize`/`i32` length-arithmetic edge under WASM's i32-only ABI on this
+  64-bit host.
+- **200 sequential `fleet_call` invocations from one guest run,** reusing
+  the same two guest-owned out-parameter locals across every call (the
+  realistic pattern a long-lived guest would use) -- every call's bridge
+  invocation and every call's echoed stdout line match their own index
+  exactly, with no dropped, duplicated, reordered, or cross-call-leaked
+  data.
+
 ## Non-goals (explicit, this round)
 
 - **No `wasm64`.** Not attempted.
