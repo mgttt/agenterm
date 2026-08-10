@@ -1633,7 +1633,9 @@ if release != 0 {
             bootstrap_worker,
             manifest,
             "preflight-benchmark",
-            60000,
+            // 5 iterations of a task whose own target is 15s each: 60s could not
+            // cover a passing run, let alone a slow one.
+            240000,
             five_task_extra(
                 bootstrap_worker,
                 manifest,

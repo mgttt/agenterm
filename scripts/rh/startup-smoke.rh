@@ -288,14 +288,16 @@ fn entry() {
         second_command.capture_limit(262144);
         let second = second_command.start();
         owned_children.push(second);
-        // A launcher that is refused says so on stderr and then opens its own
-        // window, i.e. it never exits. Read that reason instead of reporting a
-        // bare timeout: the bare version cost a full CI round trip per guess.
+        // A launcher that is refused the handoff opens its own window instead,
+        // i.e. it never exits. Report what it printed rather than a bare
+        // timeout: the bare version cost a full CI round trip per guess. The
+        // guidance line is written by every launcher, so this returns the whole
+        // stderr accumulated so far, including any refusal detail.
         let handed_off = exited_within(second, 1000);
         if handed_off == 0 {
             let declined = read_until(
                 second.stderr,
-                "Launcher handoff declined",
+                "More CLI commands",
                 1500
             );
             test_harness::require(

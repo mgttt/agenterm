@@ -347,11 +347,7 @@ impl Default for GuiLaunchParsePolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GuiHandoffResult {
     HandedOff,
-    /// Carry WHY the launcher fell through. A refusal used to be
-    /// indistinguishable from "there is no server here": the launcher silently
-    /// opened a second window, and the only symptom was a smoke waiting for an
-    /// exit that was never coming.
-    Continue(Option<String>),
+    Continue,
     Blocked(String),
 }
 
@@ -380,7 +376,7 @@ pub(crate) fn attempt_gui_handoff(
     skip_when_in_server: bool,
 ) -> GuiHandoffResult {
     if skip_when_in_server && std::env::var_os("AGENTERM_SERVER").is_some() {
-        return GuiHandoffResult::Continue(None);
+        return GuiHandoffResult::Continue;
     }
     let handoff = if no_activate {
         UI_CLIENT_COMMAND_SHOW_NO_ACTIVATE
@@ -393,13 +389,10 @@ pub(crate) fn attempt_gui_handoff(
             if response.error_code == "ui_client_unavailable"
                 || response.error_code == "server_command_unsupported" =>
         {
-            GuiHandoffResult::Continue(Some(format!("{}: {}", response.error_code, response.error)))
+            GuiHandoffResult::Continue
         }
         Ok(response) => GuiHandoffResult::Blocked(response.error),
-        // No reachable server is the ordinary first-launch path, not a refusal:
-        // narrating it would be noise on every cold start (and it broke the
-        // exact-match stderr contract the startup smoke asserts).
-        Err(_) => GuiHandoffResult::Continue(None),
+        Err(_) => GuiHandoffResult::Continue,
     }
 }
 

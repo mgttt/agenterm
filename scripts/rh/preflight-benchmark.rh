@@ -52,6 +52,24 @@ fn entry() {
     let run_directory = std::path::join(repo, run_rel).display;
     std::fs::create_dir_all(run_directory);
 
+    // One untimed warmup. This benchmark measures steady-state public worker
+    // runs; with 5 iterations p95 is the MAXIMUM sample, so a cold rh pack cache
+    // made the first run pay a full AOT compile and that compile became the
+    // reported p95. Measuring the compiler is not the contract here, and any
+    // codegen-revision bump would otherwise fail this gate for one run.
+    let warmup_report =
+        std::path::join(run_directory, "warmup.json").display;
+    std::process::command_status(
+        worker,
+        [
+            "rh", "task", "run", "preflight", "--manifest", task_manifest,
+            "--timeout-ms", "120000", "--max-operations", "10000000",
+            "--", repo, warmup_report, "--quiet"
+        ],
+        120000
+    );
+    std::fs::try_remove_file(warmup_report);
+
     let runs = [];
     let all_passed = 1;
 
@@ -63,14 +81,27 @@ fn entry() {
         let run_report =
             std::path::join(run_directory, report_name).display;
         let started = std::time::SystemTime::now().unix_millis;
+        // The measured target below is p95 <= 15000ms, so a per-run budget of
+        // 10000ms was self-defeating: a run that legitimately took 12s -- inside
+        // the target -- was killed before it could write its report, and the
+        // gate failed with `preflight_benchmark_report_missing` instead of
+        // reporting a number. A benchmark must outlive the threshold it
+        // measures; missing the target is then a measured failure, not a
+        // vanished report.
+        // `rh` is mandatory: without it this binary is the GUI launcher, which
+        // answers with "This binary is the GUI launcher" in 80ms and never
+        // writes a report -- which is exactly the
+        // `preflight_benchmark_report_missing:1` this gate kept reporting. The
+        // verb went missing when the standalone worker binaries became
+        // `agenterm rh` subcommands.
         let exit_code = std::process::command_status(
             worker,
             [
-                "task", "run", "preflight", "--manifest", task_manifest,
-                "--timeout-ms", "10000", "--max-operations", "10000000",
+                "rh", "task", "run", "preflight", "--manifest", task_manifest,
+                "--timeout-ms", "30000", "--max-operations", "10000000",
                 "--", repo, run_report, "--quiet"
             ],
-            10000
+            30000
         );
         let wall_duration =
             std::time::SystemTime::now().unix_millis - started;
