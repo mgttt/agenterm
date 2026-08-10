@@ -641,7 +641,7 @@ fn incompatible_sibling(
         "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
         "catch (error) { if error.to_string().contains(" +
         "\"net_accept_timeout\") == 0 { throw error; } } }";
-    let eval_args = ["rh", "eval"];
+    let eval_args = ["cli", "script", "eval"];
     eval_args.push(source);
     eval_args.push("--timeout-ms");
     eval_args.push("30000");

@@ -508,9 +508,8 @@ fn wait_incompatible_capture(
 }
 
 fn resolve_script_executable(executable_directory) {
-    // The standalone agenterm-rh binary retired; the rh engine lives in
-    // the main PE and is reached via the `rh` subcommand (the eval spawn
-    // below passes it).
+    // The standalone agenterm-rh binary retired. Inline expressions use the
+    // public hosted Script CLI; the direct `rh eval` command accepts a file.
     let hosted_candidate = std::path::join(
         executable_directory,
         "agenterm"
@@ -544,7 +543,7 @@ fn incompatible_listener(
         "stream.write_all(\"not-json\\n\"); stream.flush(); } " +
         "catch (error) { if error.to_string().contains(" +
         "\"net_accept_timeout\") == 0 { throw error; } } }";
-    let eval_args = ["rh", "eval"];
+    let eval_args = ["cli", "script", "eval"];
     eval_args.push(source);
     eval_args.push("--timeout-ms");
     eval_args.push("20000");

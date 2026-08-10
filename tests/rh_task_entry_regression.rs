@@ -1205,6 +1205,10 @@ fn check_uses_native_bundled_pack() {
 
 #[test]
 fn control_center_smoke_uses_native_bundled_pack() {
+    let source = std::fs::read_to_string(repo().join("scripts/rh/control-center-smoke.rh"))
+        .expect("control center smoke source");
+    assert!(source.contains("[\"cli\", \"script\", \"eval\"]"));
+    assert!(!source.contains("[\"rh\", \"eval\"]"));
     assert_native_bundled_pack(
         "scripts/rh/control-center-smoke.rh",
         &[
@@ -1222,6 +1226,8 @@ fn control_center_macos_smoke_uses_native_bundled_pack() {
     assert!(!source.contains("control_center_macos_frontmost_unavailable"));
     assert!(!source.contains("PASS: macOS caller-selected UDS"));
     assert!(source.contains("NO_ACTIVATE_BASELINE_UNAVAILABLE"));
+    assert!(source.contains("[\"cli\", \"script\", \"eval\"]"));
+    assert!(!source.contains("[\"rh\", \"eval\"]"));
     assert!(source.contains("DIAGNOSTIC protocol readiness timeout"));
     assert!(
         source.contains("for attempt in 0..600"),
