@@ -29,8 +29,40 @@ if ($env:AGENTERM_SKIP_INCREMENTAL_PRUNE) {
 $repo = git rev-parse --show-toplevel 2>$null
 if (-not $repo) { exit 0 }
 
+# Cargo target directories are not only `<repo>\target`: nested workspaces
+# (crates\*\target, research evidence runs) have their own, and inside one the
+# incremental cache sits at a varying depth -- `debug\incremental` for the host
+# target but `<triple>\debug\incremental` for cross builds and
+# `size-report\release-fast\incremental` for the profile-specific ones. Walk
+# the source tree to find every target root, never descending *into* one (they
+# hold millions of files), then probe the three known depths.
+function Get-TargetRoots([string]$root) {
+    $roots = New-Object System.Collections.Generic.List[string]
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push($root)
+    while ($pending.Count -gt 0) {
+        $dir = $pending.Pop()
+        $children = Get-ChildItem -LiteralPath $dir -Directory -Force -ErrorAction SilentlyContinue
+        foreach ($child in $children) {
+            if ($child.Name -eq ".git" -or $child.Name -eq "node_modules") { continue }
+            if ($child.Name -like "target*") { $roots.Add($child.FullName); continue }
+            $pending.Push($child.FullName)
+        }
+    }
+    return $roots
+}
+
 $removed = 0
-$targets = Get-ChildItem -Path (Join-Path $repo "target*\*\incremental") -Directory -ErrorAction SilentlyContinue
+$targets = @()
+foreach ($targetRoot in (Get-TargetRoots $repo)) {
+    foreach ($depth in @("*", "*\*", "*\*\*")) {
+        $targets += Get-ChildItem -Path (Join-Path $targetRoot "$depth\incremental") `
+            -Directory -ErrorAction SilentlyContinue
+    }
+}
+$targets = $targets |
+    Where-Object { $_.Name -eq "incremental" -and $_.FullName -notmatch "\\incremental\\" } |
+    Sort-Object FullName -Unique
 if (-not $targets) {
     Write-Host "Cargo incremental prune: skipped (no incremental directories found)"
     exit 0
@@ -70,8 +102,11 @@ foreach ($incremental in $targets) {
     }
 }
 
+# The `incremental` directories themselves are never removed -- only the stale
+# `<crate>-<hash>` units inside them -- so report the unit count, which is the
+# only number that moves.
 if ($removed -gt 0) {
-    Write-Host "Cargo incremental prune: removed $removed stale cache unit(s)"
+    Write-Host "Cargo incremental prune: removed $removed stale cache unit(s) from $($targets.Count) cache dir(s)"
 } else {
-    Write-Host "Cargo incremental prune: nothing to remove"
+    Write-Host "Cargo incremental prune: nothing to remove ($($targets.Count) cache dir(s) scanned)"
 }

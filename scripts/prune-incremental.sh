@@ -36,7 +36,20 @@ REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
 removed=0
 
-for incremental in "$REPO"/target*/*/incremental; do
+# Target directories are not only `<repo>/target`: nested workspaces
+# (crates/*/target, research evidence runs) have their own. Inside one, the
+# incremental cache depth varies too -- `debug/incremental` for the host
+# target, `<triple>/debug/incremental` for cross builds,
+# `size-report/release-fast/incremental` for profile-specific ones. Locate
+# every target root without descending into it (they hold millions of files),
+# then probe the three known depths.
+#
+# A here-doc feeds the roots in rather than a pipeline, because a pipeline
+# would run the loop in a subshell and lose `removed`.
+while IFS= read -r root; do
+    [ -n "$root" ] || continue
+    for incremental in "$root"/*/incremental "$root"/*/*/incremental \
+            "$root"/*/*/*/incremental; do
     [ -d "$incremental" ] || continue
 
     # Crate name is the unit directory minus its trailing `-<hash>`.
@@ -65,7 +78,11 @@ for incremental in "$REPO"/target*/*/incremental; do
             removed=$((removed + 1))
         fi
     done
-done
+    done
+done <<EOF
+$(find "$REPO" -name .git -prune -o -name node_modules -prune -o \
+    -type d -name 'target*' -print -prune 2>/dev/null)
+EOF
 
 if [ "$removed" -gt 0 ]; then
     printf 'pruned %d stale incremental cache unit(s)\n' "$removed" >&2
