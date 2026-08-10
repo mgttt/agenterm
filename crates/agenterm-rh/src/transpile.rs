@@ -3000,9 +3000,14 @@ fn emit_stmt(
         }
         Stmt::TryCatch(boxed, ..) if ctx.cdylib => {
             let flow = boxed.as_ref();
-            // Statement-form try must discard the INT result; a bare `match`
-            // arm value is not a valid Rust statement expression.
-            out.push_str("    let _ = match (|| -> Result<INT, INT> {\n");
+            // A final try/catch is an expression in Rhai and owns the
+            // function's implicit return. Non-final statement-form try still
+            // discards its INT result after preserving catch side effects.
+            if implicit_return {
+                out.push_str("    return match (|| -> Result<INT, INT> {\n");
+            } else {
+                out.push_str("    let _ = match (|| -> Result<INT, INT> {\n");
+            }
             let mut try_ctx = ctx.clone().enter_try();
             emit_try_block(out, &flow.body, &mut try_ctx)?;
             out.push_str("    })() {\n");
@@ -3018,13 +3023,21 @@ fn emit_stmt(
                 out.push_str(name);
                 out.push_str(") => {\n");
                 let mut catch_ctx = ctx.clone().with_binding(name.as_str(), ValueKind::Int);
-                emit_catch_block_stmts(out, &flow.branch, &mut catch_ctx)?;
-                out.push_str("            0\n");
+                if implicit_return {
+                    emit_catch_block_value(out, &flow.branch, &mut catch_ctx)?;
+                } else {
+                    emit_catch_block_stmts(out, &flow.branch, &mut catch_ctx)?;
+                    out.push_str("            0\n");
+                }
                 out.push_str("        }\n");
             } else {
                 out.push_str("        Err(_) => {\n");
-                emit_catch_block_stmts(out, &flow.branch, ctx)?;
-                out.push_str("            0\n");
+                if implicit_return {
+                    emit_catch_block_value(out, &flow.branch, ctx)?;
+                } else {
+                    emit_catch_block_stmts(out, &flow.branch, ctx)?;
+                    out.push_str("            0\n");
+                }
                 out.push_str("        }\n");
             }
             out.push_str("    };\n");
@@ -3138,6 +3151,29 @@ fn emit_catch_block_stmts(
             out.push('\n');
         }
     }
+    Ok(())
+}
+
+fn emit_catch_block_value(
+    out: &mut String,
+    block: &StmtBlock,
+    ctx: &mut EmitCtx,
+) -> Result<(), RhError> {
+    if block.is_empty() {
+        out.push_str("            0\n");
+        return Ok(());
+    }
+    // Keep `return` local to a small closure so the catch arm itself remains
+    // an INT expression for the surrounding match.
+    out.push_str("            (|| -> INT {\n");
+    let mut inner = String::new();
+    emit_block(&mut inner, block, ctx, true)?;
+    for line in inner.lines() {
+        out.push_str("            ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("            })()\n");
     Ok(())
 }
 

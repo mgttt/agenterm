@@ -150,7 +150,7 @@ fn framed_worker_run_entry_fixture_with_rh_backend() {
 }
 
 #[test]
-fn framed_worker_captures_compat_fallback_print_output() {
+fn framed_worker_rejects_retired_whole_script_compat_fallback() {
     with_rh_backend(|| {
         let source = std::fs::read_to_string("scripts/archive/rhai/lint.rhai")
             .expect("read lint task source");
@@ -211,11 +211,18 @@ fn framed_worker_captures_compat_fallback_print_output() {
         };
         let _ = child.wait();
 
-        assert!(result.ok, "expected ok result, got {:?}", result.failure);
+        assert!(!result.ok, "retired compat source unexpectedly ran");
         assert!(
-            result.stdout.starts_with("PASS: repository lint ("),
-            "unexpected captured stdout: {:?}",
-            result.stdout
+            result.stdout.is_empty(),
+            "rejected source polluted framed stdout: {:?}",
+            result.stdout,
+        );
+        let failure = result.failure.expect("typed compat rejection");
+        assert_eq!(failure.code, "rh_backend");
+        assert!(
+            failure.message.contains("cdylib pack requires fn entry()"),
+            "unexpected compat rejection: {}",
+            failure.message,
         );
     });
 }

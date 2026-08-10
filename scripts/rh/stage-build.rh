@@ -3,8 +3,8 @@
 // Args:
 //   REPO SOURCE_DIRECTORY DESTINATION_DIRECTORY PROFILE
 //
-// stage/stage_as return INT 0/1 (direct copy / park-replace). Callers discard
-// that INT and must not assume the old Rhai #{ destination, parked } map.
+// stage returns INT 0/1 (direct copy / park-replace). Callers discard that INT
+// and must not assume the old Rhai #{ destination, parked } map.
 
 import "scripts/rh/lib/artifact_files" as artifact_files;
 import "scripts/rh/lib/build_metadata" as build_metadata;

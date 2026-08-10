@@ -1,12 +1,14 @@
 //! Fast black-box coverage for the rh public CLI, invoked through a
-//! hard-linked, isolated copy of the main `agenterm` PE
+//! isolated hard-link or byte copy of the main `agenterm` PE
 //! (`__agenterm-internal-engine rh <args>`).
 //!
-//! Historically this hard-linked the standalone `agenterm-rh` binary; that
+//! Historically this isolated the standalone `agenterm-rh` binary; that
 //! binary is retired (`agenterm rh`/`__agenterm-internal-engine rh` are now
 //! the only entry points), so this hard-links `CARGO_BIN_EXE_agenterm`
 //! instead and always prepends the internal-engine marker + `rh` token. The
-//! file name/scenario names still say "standalone" — kept this round so a
+//! A hard link is preferred, with a copy fallback when the host temp and
+//! Cargo target directories are on different filesystems. The file
+//! name/scenario names still say "standalone" — kept this round so a
 //! concurrent packaging/CI migration isn't confused by a rename; rename to
 //! something like `rh_cli_contract.rs` in a later cleanup pass.
 
@@ -40,8 +42,10 @@ impl StandaloneCli {
         fs::create_dir(&root).expect("create standalone CLI directory");
 
         let executable = root.join(binary_name("agenterm"));
-        fs::hard_link(env!("CARGO_BIN_EXE_agenterm"), &executable)
-            .expect("hard-link isolated agenterm PE");
+        let source = Path::new(env!("CARGO_BIN_EXE_agenterm"));
+        if fs::hard_link(source, &executable).is_err() {
+            fs::copy(source, &executable).expect("copy isolated agenterm PE");
+        }
 
         for stale_name in [root.join("agenterm-rhai"), root.join("agenterm-rhai.exe")] {
             assert!(

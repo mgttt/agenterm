@@ -209,7 +209,6 @@ fn stage_artifact_uses_native_bundled_execution() {
     assert!(source.contains("fn entry("));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("__stage("), "{}", output.rust);
-    assert!(output.rust.contains("__stage_as("), "{}", output.rust);
     assert!(output.rust.contains("rh_try_copy("), "{}", output.rust);
     assert!(!output.rust.contains("rh_host_run_script(RH_SCRIPT_SOURCE)"));
     assert!(!output.rust.contains("compat delegating"));

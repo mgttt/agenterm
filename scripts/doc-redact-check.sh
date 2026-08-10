@@ -13,7 +13,7 @@ fi
 pattern='(^|[^~])(/Users/|/home/|[A-Za-z]:\\Users\\)|%USERPROFILE%|%UserProfile%|\$env:USERPROFILE|@gmail\.com|@qq\.com|@163\.com'
 
 if command -v rg >/dev/null 2>&1; then
-  if rg -nE "$pattern" --glob '!target/**' --glob '!**/node_modules/**' "$@"; then
+  if rg -n -e "$pattern" --glob '!target/**' --glob '!**/node_modules/**' "$@"; then
     echo "doc-redact-check: hits above must become repo-relative or ~/..." >&2
     exit 1
   fi

@@ -64,6 +64,7 @@ jobs:
             jq -r '.sbom.name, .qualification.name' "$manifest"
             jq -r '.unsigned_macos_readmes[].name' "$manifest"
             basename "$manifest"
+            echo releases.json
           } | sort >"$expected"
           find "$release" -maxdepth 1 -type f -printf '%f\n' |
             sort >"$actual"
@@ -72,6 +73,54 @@ jobs:
           release_manifest="$release/$(basename "$manifest")"
           [[ "$(sha256sum "$release_manifest" | cut -d' ' -f1)" == \
             "$(sha256sum "$manifest" | cut -d' ' -f1)" ]]
+          manifest_sha="$(sha256sum "$manifest" | cut -d' ' -f1)"
+          jq -e \
+            --arg source_sha "$source_sha" \
+            --arg version "$version" \
+            --arg tag "$tag" \
+            --arg manifest_sha "$manifest_sha" \
+            --slurpfile manifest "$manifest" '
+              .schema_version == 1
+              and .kind == "agenterm-releases-index"
+              and .product == "AgenTerm"
+              and .source.kind == "agenterm-release-candidate"
+              and .source.source_sha == $source_sha
+              and .source.version == $version
+              and .source.tag == $tag
+              and .source.manifest_sha256 == $manifest_sha
+              and (.releases | length) == 1
+              and .releases[0].version == $version
+              and .releases[0].tag == $tag
+              and .releases[0].source_commit == $source_sha
+              and (.releases[0].artifacts | length) == 6
+              and (
+                [.releases[0].artifacts[] |
+                  {
+                    name,
+                    os,
+                    arch,
+                    sha256,
+                    source_commit,
+                    source_tag,
+                    checksum,
+                    provenance
+                  }
+                ] | sort_by(.name)
+              ) == (
+                [$manifest[0].assets[] |
+                  {
+                    name,
+                    os,
+                    arch,
+                    sha256,
+                    source_commit: $source_sha,
+                    source_tag: $tag,
+                    checksum,
+                    provenance
+                  }
+                ] | sort_by(.name)
+              )
+            ' "$release/releases.json" >/dev/null
           sbom_name="$(jq -r .sbom.name "$manifest")"
           receipt_name="$(jq -r .qualification.name "$manifest")"
           [[ "$(sha256sum "$release/$sbom_name" | cut -d' ' -f1)" == \

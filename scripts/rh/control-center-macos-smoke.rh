@@ -295,42 +295,21 @@ fn wait_process_gone(pid, code) {
     throw code;
 }
 
-fn frontmost_application(context) {
-    let command = std::process::command("osascript");
-    command.args([
-        "-e",
-        "tell application \"System Events\" to get name of first application process whose frontmost is true"
-    ]);
-    command.timeout(std::time::Duration::from_secs(3));
-    let output = command.output();
-    let frontmost_expected_failure = 0;
-    if output.success == 0 {
-        frontmost_expected_failure = 1;
-    }
-    test_harness::append_command_record(
-        context,
-        ["-e", "frontmost application query"],
-        output,
-        frontmost_expected_failure,
-        []
-    );
-    let application = "" + output.stdout_text();
-    application.trim();
-    test_harness::require(
-        output.success != 0 && application != "",
-        "control_center_macos_frontmost_unavailable"
-    );
-    application
+fn foreground_window_id(child) {
+    let facts = child.platform_facts;
+    0 + facts.foreground_window_id
 }
 
-fn wait_frontmost_change(context, previous, code) {
-    let previous_text = "" + previous;
+fn wait_child_foreground(child, previous, code) {
+    let previous_id = 0 + previous;
     let code_text = "" + code;
     for attempt in 0..100 {
-        let current = frontmost_application(context);
-        if current != previous_text
-                && current.to_lower().contains("agenterm") != 0 {
-            return current;
+        let facts = child.platform_facts;
+        if facts.top_level_window_present != 0
+                && facts.top_level_window_is_foreground != 0
+                && facts.top_level_window_id != previous_id
+                && facts.foreground_window_id == facts.top_level_window_id {
+            return 0 + facts.foreground_window_id;
         }
         rh::task::sleep(std::time::Duration::from_millis(20));
     }
@@ -814,7 +793,11 @@ fn entry() {
         emit_macos_evidence(context, "control-center.macos-caller-instance");
 
         print("STEP no-activate opens one native renderer without stealing focus");
-        let foreground_before = frontmost_application(context);
+        let foreground_before = foreground_window_id(server);
+        test_harness::require(
+            foreground_before != 0,
+            "control_center_macos_frontmost_unavailable"
+        );
         let cc_command = native_command(
             context,
             control_center,
@@ -837,7 +820,7 @@ fn entry() {
             "connected",
             "control_center_macos_first_frame"
         );
-        let foreground_after = frontmost_application(context);
+        let foreground_after = foreground_window_id(cc);
         let rendered = rh::image::inspect_png(cockpit_png);
         let tab_count = 0 + selected.connected_server.tabs.len;
         let expected_tabs = "" + tab_count + " tabs";
@@ -950,7 +933,7 @@ fn entry() {
             ["snapshot", "--json", "--instance", "dev"]
         );
         let input_owner = registry_owner_pid(registry);
-        let input_frontmost = frontmost_application(context);
+        let input_frontmost = foreground_window_id(cc);
         let initial_active_tab = input_baseline.connected_server.active_tab_id;
         test_harness::require(
             input_owner == cc.id
@@ -1059,7 +1042,7 @@ fn entry() {
                         == protocol.endpoint
                     && cc.state == "running"
                     && registry_owner_pid(registry) == input_owner
-                    && frontmost_application(context) == input_frontmost,
+                    && foreground_window_id(cc) == input_frontmost,
                 "control_center_macos_native_keyboard_navigation_truth"
             );
             print(
@@ -1089,7 +1072,7 @@ fn entry() {
                     && unchanged.connected_server.endpoint == protocol.endpoint
                     && cc.state == "running"
                     && registry_owner_pid(registry) == input_owner
-                    && frontmost_application(context) == input_frontmost,
+                    && foreground_window_id(cc) == input_frontmost,
                 "control_center_macos_tcc_denial_changed_state"
             );
             print(
@@ -1128,29 +1111,10 @@ fn entry() {
             runtime,
             ["open", "--instance", "dev"]
         );
-        wait_frontmost_change(
-            context,
+        wait_child_foreground(
+            cc,
             foreground_before,
             "control_center_macos_focus_timeout"
-        );
-        let restore = std::process::command("open");
-        restore.args(["-a", foreground_before]);
-        restore.timeout(std::time::Duration::from_secs(3));
-        let restored = restore.output();
-        let restore_expected_failure = 0;
-        if restored.success == 0 {
-            restore_expected_failure = 1;
-        }
-        test_harness::append_command_record(
-            context,
-            ["-a", "prior foreground application"],
-            restored,
-            restore_expected_failure,
-            []
-        );
-        test_harness::require(
-            restored.success != 0,
-            "control_center_macos_focus_restore"
         );
         emit_macos_evidence(context, "control-center.macos-no-activate-focus");
 

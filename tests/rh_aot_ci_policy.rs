@@ -21,6 +21,8 @@ static ROOT_MANIFEST: &str = include_str!("../Cargo.toml");
 static RH_MANIFEST: &str = include_str!("../crates/agenterm-rh/Cargo.toml");
 static UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
 static WINDOWS_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
+static UNIX_RH_CHECK: &str = include_str!("../scripts/rh-check.sh");
+static WINDOWS_RH_CHECK: &str = include_str!("../scripts/rh-check.cmd");
 static ARTIFACT_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../scripts/artifacts.json"))
         .expect("scripts/artifacts.json must be valid JSON")
@@ -174,7 +176,7 @@ fn client_smoke_fail_closes_rh_version_probe_from_platform_manifest() {
     assert!(CLIENT_SMOKE.contains("std::process::command_status("));
     assert!(CLIENT_SMOKE.contains("std::process::command_stdout_file("));
     assert!(CLIENT_SMOKE.contains("banner == \"agenterm-rh \" + package_version"));
-    assert!(CLIENT_SMOKE.contains("rh_dev_cli_count == 1"));
+    assert!(CLIENT_SMOKE.contains("rh_dev_cli_count == 0"));
     assert!(!CLIENT_SMOKE.contains("scripting_cli_count"));
     assert!(!CLIENT_SMOKE.contains("executable_role == \"scripting-cli\""));
 }
@@ -224,10 +226,23 @@ fn rh_rides_the_main_binary_with_no_standalone_bin_target() {
     assert!(RH_MANIFEST.contains("autobins = false"));
     assert!(!RH_MANIFEST.contains("[[bin]]"));
 
-    let root_build = "cargo build --quiet --locked --bin agenterm";
+    let unix_root_build = "cargo build --quiet --locked --bin agenterm";
+    let windows_root_build = "cargo build --locked --bin agenterm";
     let retired_build = "--bin agenterm-rh";
-    assert!(UNIX_BOOTSTRAP.contains(root_build));
-    assert!(WINDOWS_BOOTSTRAP.contains(root_build));
+    assert!(UNIX_BOOTSTRAP.contains(unix_root_build));
+    assert!(WINDOWS_BOOTSTRAP.contains(windows_root_build));
     assert!(!UNIX_BOOTSTRAP.contains(retired_build));
     assert!(!WINDOWS_BOOTSTRAP.contains(retired_build));
+    assert!(UNIX_RH_CHECK.contains("cargo build --locked --bin agenterm"));
+    assert!(WINDOWS_RH_CHECK.contains("cargo build --locked --bin agenterm"));
+    assert!(!UNIX_RH_CHECK.contains(retired_build));
+    assert!(!WINDOWS_RH_CHECK.contains(retired_build));
+}
+
+#[test]
+fn expensive_task_entry_packs_have_one_dedicated_ci_owner() {
+    assert!(CHECK.contains("\"--skip\", \"uses_bundled_pack\""));
+    assert!(CHECK.contains("\"--skip\", \"pack_builds\""));
+    assert!(UNIX_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
+    assert!(WINDOWS_RH_CHECK.contains("cargo test --locked --test rh_task_entry_regression"));
 }

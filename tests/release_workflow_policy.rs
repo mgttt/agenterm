@@ -100,7 +100,11 @@ fn candidate_cargo_home_caches_are_platform_isolated_and_revision_reusable() {
             .expect("candidate Cargo-home cache step");
         assert!(step.contains(CACHE_SHA));
         assert!(!step.contains("inputs.source_sha"));
-        assert!(!step.contains("restore-keys:"));
+        if step_name.starts_with("Restore") {
+            assert!(step.contains("restore-keys:"));
+        } else {
+            assert!(!step.contains("restore-keys:"));
+        }
     }
 
     for step_name in [
@@ -132,6 +136,10 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(!PROMOTION.contains("build-releases-index.rhai"));
     assert!(PROMOTION.contains("candidate/releases.json"));
     assert!(PROMOTION.contains("Derive releases.json index"));
+    assert!(INTEGRITY.contains("echo releases.json"));
+    assert!(INTEGRITY.contains("agenterm-releases-index"));
+    assert!(INTEGRITY.contains(".source.manifest_sha256 == $manifest_sha"));
+    assert!(INTEGRITY.contains("(.releases[0].artifacts | length) == 6"));
     assert!(PROMOTION.contains("environment: release"));
     assert!(PROMOTION.contains("contents: write"));
     assert!(PROMOTION.contains("repos/$GITHUB_REPOSITORY/git/refs"));

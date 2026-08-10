@@ -28,6 +28,9 @@ cargo test --locked \
   --test script_check_many \
   --test performance_experiment_policy
 
+echo "== rh task-entry native packs =="
+cargo test --locked --test rh_task_entry_regression
+
 echo "== rh host + cache lib tests =="
 cargo test -p agenterm --locked --lib script_rh_host
 cargo test -p agenterm --locked --lib script_rh_cache

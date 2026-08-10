@@ -370,7 +370,13 @@ fn cargo_unit_primary_spec(environment) {
         "--skip", "rhai_harness_cleanup_owns_only_registered_children",
         "--skip", "migration_audit_rejects_operational_references_to_deleted_scripts",
         "--skip", "rhai_qualification_contract_fails_closed_and_cleans_owned_scratch",
-        "--skip", "rhai_qualified_package_accepts_only_the_exact_receipt_bytes"
+        "--skip", "rhai_qualified_package_accepts_only_the_exact_receipt_bytes",
+        // Native pack compilation is intentionally owned by rh-check.sh.
+        // Large bundled entries (notably remote-ui-smoke) can spend minutes
+        // in their generated Cargo build and must not consume this broad
+        // unit lane's five-minute process budget a second time.
+        "--skip", "uses_bundled_pack",
+        "--skip", "pack_builds"
     ];
     spec("cargo", arguments, 300000, environment, 0)
 }

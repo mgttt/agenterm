@@ -238,13 +238,13 @@ fn exact_terminal_payload(observed, typed) {
     let first_len = 0 + first.len;
     let second_len = 0 + second.len;
     assert_ok(
-        first_len == second_len && first_len <= 1,
+        terminal_payload_shape_is_valid(first_len, second_len) != 0,
         "fresh_clone_terminal_payload_not_unique:" +
             int_text(first_len) + ":" + int_text(second_len)
     );
     if first_len == 1 {
         assert_ok(
-            first[0] == second[0],
+            terminal_payload_values_match(first[0], second[0]) != 0,
             "fresh_clone_untyped_powershell:" +
                 joined(first) + ":" + joined(second)
         );
@@ -256,11 +256,25 @@ fn exact_terminal_payload(observed, typed) {
     }
 }
 
+fn terminal_payload_shape_is_valid(first_len, second_len) {
+    first_len == second_len && first_len <= 1
+}
+
+fn terminal_payload_values_match(first, second) {
+    let first_text = "" + first;
+    let second_text = "" + second;
+    first_text == second_text
+}
+
+fn release_archive_name_is_local(archive) {
+    std::path::PathBuf::from(archive).file_name == archive
+}
+
 fn release_archive_path(report) {
     let archive_name =
         std::path::PathBuf::from(report.archive).file_name;
     assert_ok(
-        archive_name == report.archive,
+        release_archive_name_is_local(report.archive) != 0,
         "fresh_clone_package_archive_name"
     );
     std::path::join(report.package_directory, archive_name).display
@@ -338,22 +352,6 @@ fn live_observed_processes(identities) {
     live
 }
 
-fn error_contains(error, needle) {
-    let text = "" + error;
-    if needle.len == 0 || needle.len > text.len {
-        return 0;
-    }
-    let index = 0;
-    let last = text.len - needle.len;
-    while index <= last {
-        if text.sub_string(index, needle.len) == needle {
-            return 1;
-        }
-        index += 1;
-    }
-    0
-}
-
 fn bump_scan_count(evidence) {
     let prior = evidence.process_observation.scan_count;
     evidence.process_observation.scan_count = prior + 1;
@@ -368,45 +366,18 @@ fn run_self_test() {
     assert_ok(accepted.observed.len == 1, "fresh_clone_selftest_accept");
     let absent = exact_terminal_payload([], []);
     assert_ok(absent.observed.len == 0, "fresh_clone_selftest_absent");
-    let rejected_wrong = 0;
-    try {
-        exact_terminal_payload(
-            [terminal_compatibility_executable() + ":101"],
-            [terminal_compatibility_executable() + ":202"]
-        );
-        0;
-    } catch (error) {
-        assert_ok(
-            error_contains(error, "fresh_clone_untyped_powershell"),
-            "fresh_clone_selftest_wrong_rejection:" + error
-        );
-        rejected_wrong = 1;
-        0;
-    }
     assert_ok(
-        rejected_wrong,
+        terminal_payload_values_match(
+            terminal_compatibility_executable() + ":101",
+            terminal_compatibility_executable() + ":202"
+        ) == 0,
         "fresh_clone_selftest_expected_rejection:fresh_clone_untyped_powershell"
     );
-    let rejected_not_unique = 0;
-    try {
-        exact_terminal_payload(
-            [
-                terminal_compatibility_executable() + ":101",
-                alternate_powershell_executable() + ":202"
-            ],
-            [terminal_compatibility_executable() + ":101"]
-        );
-        0;
-    } catch (error) {
-        assert_ok(
-            error_contains(error, "fresh_clone_terminal_payload_not_unique"),
-            "fresh_clone_selftest_wrong_rejection:" + error
-        );
-        rejected_not_unique = 1;
-        0;
-    }
     assert_ok(
-        rejected_not_unique,
+        terminal_payload_shape_is_valid(
+            2,
+            1
+        ) == 0,
         "fresh_clone_selftest_expected_rejection:fresh_clone_terminal_payload_not_unique"
     );
     let self_test_directory = std::env::current_dir().display;
@@ -418,23 +389,8 @@ fn run_self_test() {
         std::path::PathBuf::from(archive).file_name == "candidate.zip",
         "fresh_clone_selftest_archive"
     );
-    let rejected_archive = 0;
-    try {
-        release_archive_path(#{
-            archive: "../candidate.zip",
-            package_directory: self_test_directory
-        });
-        0;
-    } catch (error) {
-        assert_ok(
-            error_contains(error, "fresh_clone_package_archive_name"),
-            "fresh_clone_selftest_wrong_rejection:" + error
-        );
-        rejected_archive = 1;
-        0;
-    }
     assert_ok(
-        rejected_archive,
+        release_archive_name_is_local("../candidate.zip") == 0,
         "fresh_clone_selftest_expected_rejection:fresh_clone_package_archive_name"
     );
     print("PASS: fresh-clone process policy fails closed");
@@ -510,6 +466,11 @@ let origin =
 let push_origin = git_output(["-C", source, "remote", "get-url", "--push", "origin"], source, 120000, "fresh_clone_push_origin");
 let version = package_version(source);
 let tag = "v" + version;
+let qualification_contract = rh::json::parse_file(
+    std::path::join(source, "scripts/qualification-gates.json").display
+);
+let expected_gate_count = 0 + qualification_contract.required_gates.len;
+assert_ok(expected_gate_count > 0, "fresh_clone_qualification_contract_empty");
 
 let qualification_root =
     std::path::join(source, "target/qualification").display;
@@ -576,7 +537,7 @@ let evidence = #{
         powershell_policy: pending_value
     },
     qualification: #{
-        expected_gate_count: 34,
+        expected_gate_count: expected_gate_count,
         gate_count: 0,
         all_passed: 0,
         stress_included: 0,
@@ -727,7 +688,7 @@ try {
         let bootstrap_worker =
             std::path::join(
                 clone_target,
-                "debug/agenterm-rh.exe"
+                "debug/agenterm.exe"
             ).display;
         if worker_observed == 0
                 && std::fs::exists(bootstrap_worker) {
@@ -742,7 +703,7 @@ try {
         if list_has_value(names, "rustc.exe") != 0 {
             evidence.stage0.rustc_observed = 1;
         }
-        if list_has_value(names, "agenterm-rh.exe") != 0 {
+        if list_has_value(names, "agenterm.exe") != 0 {
             evidence.stage0.script_worker_observed = 1;
         }
         if now >= next_timeline {
@@ -818,7 +779,7 @@ try {
         }
     }
     assert_ok(
-        receipt.gates.len == 34
+        receipt.gates.len == expected_gate_count
             && evidence.qualification.all_passed
             && receipt.release
             && receipt.stress_included
@@ -826,7 +787,7 @@ try {
             && !receipt.provenance.source_dirty,
         "fresh_clone_qualification_invalid"
     );
-    evidence.delivery_sequence.push("qualification_34_of_34");
+    evidence.delivery_sequence.push("qualification_all_required");
     assert_ok(
         receipt.process_observation.automation_processes.len == 0,
         "fresh_clone_inner_automation_powershell"
