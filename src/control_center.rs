@@ -125,6 +125,7 @@ struct ScreenshotDocument {
     height: u32,
     bytes: u64,
     sha256: String,
+    capture_strategy: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     rendered_snapshot: Option<RendererSnapshot>,
 }
@@ -1636,6 +1637,7 @@ fn capture_direct_native_screenshot(output: &Path) -> Result<ScreenshotDocument>
         height,
         bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
         sha256,
+        capture_strategy: "direct-native-window",
         rendered_snapshot: None,
     })
 }
@@ -1735,6 +1737,7 @@ fn capture_renderer_requested_screenshot(output: &Path) -> Result<ScreenshotDocu
         height,
         bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
         sha256,
+        capture_strategy: "renderer-request",
         rendered_snapshot: Some(snapshot),
     })
 }

@@ -93,10 +93,15 @@ fn rh_backend_eval_runs_source_without_prebuilt_pack() {
 #[test]
 fn rh_backend_eval_stdlib_fixture_via_std_exists_fast_path() {
     with_rh_backend(|| {
-        let source = include_str!("../fixtures/rh/stdlib.rh");
+        // `/tmp` is not a portable existence witness once the native host
+        // callback is installed: Windows correctly resolves it on the
+        // current drive, where that directory need not exist. Bind the
+        // fixture probe to this host's actual temporary directory.
+        let source = include_str!("../fixtures/rh/stdlib.rh")
+            .replace("`/tmp`", &format!("`{}`", std::env::temp_dir().display()));
         let result = try_execute_rh_invocation(
             ScriptOperation::Eval,
-            source,
+            &source,
             RhInvocationOptions::default(),
             None,
         )

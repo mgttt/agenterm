@@ -459,6 +459,7 @@ fn wait_capture(
     let endpoint_text = "" + endpoint;
     let required_state_text = "" + required_state;
     let code_text = "" + code;
+    let last_document = "no successful screenshot response";
     for attempt in 0..40 {
         let arguments = ["screenshot", "--output", output_path, "--json"];
         let capture = native_command(
@@ -474,8 +475,14 @@ fn wait_capture(
                 context, arguments, capture, 0, [endpoint]
             );
             let document = json_from_output(capture);
-            if document.rendered_snapshot.server_state == required_state_text {
+            last_document = rh::json::stringify(document);
+            if document.contains("rendered_snapshot") != 0
+                    && document.rendered_snapshot.server_state == required_state_text {
                 return document;
+            }
+            if document.contains("capture_strategy") != 0
+                    && document.capture_strategy != "renderer-request" {
+                throw code_text + "_wrong_capture_strategy:" + last_document;
             }
         }
         if child.state == "exited" {
@@ -486,7 +493,7 @@ fn wait_capture(
         }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code_text + "_timeout";
+    throw code_text + "_timeout:" + last_document;
 }
 
 fn prove_pty(
