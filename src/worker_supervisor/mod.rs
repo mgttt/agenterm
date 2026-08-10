@@ -78,12 +78,19 @@ impl WorkerSupervisor {
     {
         let _permit = try_acquire_permit()?;
         let mut command = Command::new(executable);
+        let worker_stderr = if std::env::var_os("AGENTERM_SCRIPT_WORKER_STDERR")
+            .is_some_and(|value| value == "inherit")
+        {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
         command
             .args(SCRIPT_WORKER_ENGINE_ARGS)
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(worker_stderr);
         platform::configure_worker_command(&mut command)
             .map_err(|error| SupervisorError::Spawn(error.message))?;
         configure_script_backend(&mut command);
