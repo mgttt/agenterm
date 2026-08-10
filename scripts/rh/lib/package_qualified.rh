@@ -417,21 +417,13 @@ fn build_package_mode(
         rh::json::stringify_pretty(result) + "\n";
     rh::runtime::atomic_write(result_path, result_json);
     if std::fs::exists(staging) {
-        let cleanup_stdout =
-            staging + ".package-qualified.cleanup.stdout.tmp";
-        let cleanup_code = std::process::command_stdout_file(
-            "python3",
-            [
-                "-c",
-                "import shutil,sys; shutil.rmtree(sys.argv[1])",
-                staging
-            ],
-            120000,
-            cleanup_stdout,
-            #{}
+        // Native recursive removal instead of `python3 -c shutil.rmtree`:
+        // `std::fs::remove_dir_all` is a shipped surface with native emit.
+        std::fs::remove_dir_all(staging);
+        require(
+            !std::fs::exists(staging),
+            "package_staging_cleanup:" + staging
         );
-        std::fs::try_remove_file(cleanup_stdout);
-        require(cleanup_code == 0, "package_staging_cleanup:" + staging);
     }
     let latest_run_path = output_root + "/.latest-package-run";
     rh::runtime::atomic_write(latest_run_path, run_directory + "\n");

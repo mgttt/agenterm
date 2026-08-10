@@ -459,21 +459,13 @@ fn entry() {
         archive_hash + "  " + archive_name + "\n"
     );
     if std::fs::exists(scratch) {
-        let cleanup_stdout =
-            scratch + ".package-client-release.cleanup.stdout.tmp";
-        let cleanup_code = std::process::command_stdout_file(
-            "python3",
-            [
-                "-c",
-                "import shutil,sys; shutil.rmtree(sys.argv[1])",
-                scratch
-            ],
-            120000,
-            cleanup_stdout,
-            #{}
+        // Native recursive removal instead of `python3 -c shutil.rmtree`:
+        // `std::fs::remove_dir_all` is a shipped surface with native emit.
+        std::fs::remove_dir_all(scratch);
+        require(
+            !std::fs::exists(scratch),
+            "package_client_scratch_cleanup"
         );
-        std::fs::try_remove_file(cleanup_stdout);
-        require(cleanup_code == 0, "package_client_scratch_cleanup");
     }
     print("PACKAGED " + archive);
     0

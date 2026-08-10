@@ -28,22 +28,12 @@ fn cleanup_fixture(fixture, owned_root) {
         "package_selftest_fixture_outside_owned_root"
     );
     if std::fs::exists(resolved) {
-        let cleanup_stdout =
-            resolved + ".package_selftest.cleanup.stdout.tmp";
-        let cleanup_code = std::process::command_stdout_file(
-            "python3",
-            [
-                "-c",
-                "import shutil,sys; shutil.rmtree(sys.argv[1])",
-                resolved
-            ],
-            120000,
-            cleanup_stdout,
-            #{}
-        );
-        std::fs::try_remove_file(cleanup_stdout);
+        // Native recursive removal instead of `python3 -c shutil.rmtree`:
+        // `std::fs::remove_dir_all` is a shipped surface with native emit,
+        // so this needs no external interpreter to be installed or fast.
+        std::fs::remove_dir_all(resolved);
         assert_ok(
-            cleanup_code == 0,
+            !std::fs::exists(resolved),
             "package_selftest_fixture_cleanup"
         );
     }
