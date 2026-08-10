@@ -398,13 +398,21 @@ fn set_native_clipboard(context, platform, text) {
 }
 
 fn wait_linux_clipboard_owner(context, expected, owner) {
-    for attempt in 0..100 {
-        if owner.state == "exited" {
-            let output = owner.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
-            throw "unix_frontend_xclip_owner_exited:" +
-                output.stderr_text();
+    // `xclip` DAEMONIZES: it forks a background process that owns the X
+    // selection and the process we spawned exits immediately, cleanly. This
+    // loop used to treat that exit as fatal ("unix_frontend_xclip_owner_
+    // exited:" with an empty stderr — the signature of a clean exit), which
+    // fails on any run where the parent is reaped before the first probe.
+    // The selection becoming readable is the only real readiness signal, so
+    // record the exit and keep polling; report it only if readiness never
+    // arrives.
+    let owner_exited = 0;
+    for attempt in 0..250 {
+        if owner_exited == 0 && owner.state == "exited" {
+            // Reap it once so the child is not left unwaited; its output is
+            // not the signal we are waiting for.
+            owner.wait_with_output(std::time::Duration::from_secs(2));
+            owner_exited = 1;
         }
         let command = std::process::command("xclip");
         command.args([
@@ -428,6 +436,11 @@ fn wait_linux_clipboard_owner(context, expected, owner) {
             return 0;
         }
         rh::task::sleep(std::time::Duration::from_millis(20));
+    }
+    if owner_exited != 0 {
+        throw "unix_frontend_xclip_owner_readiness_timeout: the spawned " +
+            "xclip exited (expected: it daemonizes) and no background owner " +
+            "ever published the selection";
     }
     throw "unix_frontend_xclip_owner_readiness_timeout";
 }
