@@ -307,7 +307,7 @@ fn wait_protocol(
     let code_text = "" + code;
     for attempt in 0..600 {
         let arguments = [
-            "--endpoint", endpoint_text, "protocol-info", "--running"
+            "cli", "--endpoint", endpoint_text, "protocol-info", "--running"
         ];
         let output = native_command(
             context, cli, registry, endpoint, backend, arguments
@@ -327,7 +327,7 @@ fn wait_protocol(
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
     let diagnostic_arguments = [
-        "--endpoint", endpoint_text, "protocol-info", "--running"
+        "cli", "--endpoint", endpoint_text, "protocol-info", "--running"
     ];
     let diagnostic_output = native_command(
         context,
@@ -502,7 +502,7 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint_text,
+            "cli", "--endpoint", endpoint_text,
             "new-window", "-d", "-P", "-F", "#{window_id}",
             "-n", "cc-" + label_text + "-" + context.run_id,
             "--", "/bin/sh"
@@ -523,7 +523,7 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint_text,
+            "cli", "--endpoint", endpoint_text,
             "send-keys", "-t", tab_id,
             "-l", "echo " + marker
         ],
@@ -535,7 +535,10 @@ fn prove_pty(
         registry,
         endpoint,
         backend,
-        ["--endpoint", endpoint_text, "send-keys", "-t", tab_id, "Enter"],
+        [
+            "cli", "--endpoint", endpoint_text,
+            "send-keys", "-t", tab_id, "Enter"
+        ],
         0
     );
     invoke(
@@ -545,7 +548,7 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint_text,
+            "cli", "--endpoint", endpoint_text,
             "wait-pane", "-t", tab_id,
             "--contains", marker,
             "--timeout-ms", "5000"
@@ -559,7 +562,7 @@ fn prove_pty(
         endpoint,
         backend,
         [
-            "--endpoint", endpoint_text,
+            "cli", "--endpoint", endpoint_text,
             "capture-pane", "-p", "-t", tab_id,
             "--max-bytes", "16384"
         ],
@@ -1557,7 +1560,9 @@ fn entry() {
         );
         emit_linux_evidence(context, "control-center.linux-process-isolation");
 
-        let shutdown_args = ["--endpoint", "" + endpoint, "shutdown"];
+        let shutdown_args = [
+            "cli", "--endpoint", "" + endpoint, "shutdown"
+        ];
         invoke(
             context,
             cli_executable,
