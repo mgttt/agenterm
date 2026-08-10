@@ -482,6 +482,8 @@ fn preflight_benchmark_uses_native_bundled_execution() {
 fn cross_platform_automation_audit_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/cross-platform-automation-audit.rh");
     assert!(source.contains("fn entry("));
+    assert!(source.contains("batch_count == 7"));
+    assert!(source.contains("scripts/rh-check.cmd"));
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("rh_json_parse("), "{}", output.rust);
     assert!(
