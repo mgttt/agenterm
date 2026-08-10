@@ -1214,11 +1214,20 @@ fn control_center_smoke_uses_native_bundled_pack() {
 
 #[test]
 fn control_center_macos_smoke_uses_native_bundled_pack() {
-    assert_native_bundled_pack(
-        "scripts/rh/control-center-macos-smoke.rh",
-        &[
-            "rh_process_stdout_file(",
-            "rh_host_json_call(\"process.list\"",
-        ],
-    );
+    let (source, output) = transpile_project_entry("scripts/rh/control-center-macos-smoke.rh");
+    assert!(source.contains("fn entry("));
+    assert_eq!(output.execution_mode.as_str(), "native", "{}", output.rust);
+    for needle in [
+        "rh_process_stdout_file(",
+        "rh_host_json_call(\"process.list\"",
+        "wait_registry(registry.clone(), rh_child_pid(&cc), cc.clone()",
+    ] {
+        assert!(
+            output.rust.contains(needle),
+            "missing {needle}: {}",
+            output.rust
+        );
+    }
+    assert!(!output.rust.contains("cc.inner.borrow().pid"));
+    assert_bundled_pack_builds("scripts/rh/control-center-macos-smoke.rh");
 }

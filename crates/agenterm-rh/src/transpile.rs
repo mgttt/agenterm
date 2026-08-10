@@ -5889,8 +5889,13 @@ fn emit_child_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<b
         out.push_str(binding);
         out.push(')');
     } else if property == "id" {
+        // Keep the RefCell borrow inside a helper call. Emitting
+        // `child.inner.borrow().pid` directly as a caller argument extends
+        // the Ref guard through the callee, so a callee that reads
+        // `child.state` panics with `RefCell already borrowed`.
+        out.push_str("rh_child_pid(&");
         out.push_str(binding);
-        out.push_str(".inner.borrow().pid");
+        out.push(')');
     } else {
         out.push_str(binding);
         out.push('.');
@@ -14273,6 +14278,39 @@ fn entry() {
             output.rust
         );
         assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
+    }
+
+    #[test]
+    fn child_id_argument_drops_refcell_borrow_before_callee() {
+        let source = r#"
+fn observe(expected_pid, child) {
+    if expected_pid == child.id && child.state == "running" {
+        return 1;
+    }
+    0
+}
+
+fn entry() {
+    let command = std::process::command("agenterm");
+    let child = command.start();
+    observe(child.id, child)
+}
+"#;
+        let output = transpile_cdylib_with_mode(source).expect("transpile");
+        assert_eq!(
+            output.execution_mode,
+            CdylibExecutionMode::Native,
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("observe(rh_child_pid(&child), child.clone())"),
+            "{}",
+            output.rust
+        );
+        assert!(!output.rust.contains("observe(child.inner.borrow().pid"));
     }
 
     #[test]
