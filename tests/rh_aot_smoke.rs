@@ -125,8 +125,13 @@ fn native_for_fixtures_qualify_with_expected_entry_values() {
 fn stdlib_fixture_qualifies_with_std_exists_fast_path() {
     let dir = std::env::temp_dir().join(format!("agenterm-rh-stdlib-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let source = include_str!("../fixtures/rh/stdlib.rh");
-    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify");
+    // `/tmp` is not a portable existence witness: after the native host
+    // callback is registered, Windows correctly resolves it on the current
+    // drive where that directory need not exist. Keep the fixture shape but
+    // bind its probe to this host's real temporary directory.
+    let source = include_str!("../fixtures/rh/stdlib.rh")
+        .replace("`/tmp`", &format!("`{}`", std::env::temp_dir().display()));
+    let receipt = agenterm_rh::qualify_pack_dir(&source, &dir).expect("qualify");
     assert_eq!(receipt.entry_value, 42);
     let native = dir.join(format!("pack.{}", agenterm_rh::compile::native_extension()));
     let value = agenterm::script_rh_host::call_pack_entry_with_host(
