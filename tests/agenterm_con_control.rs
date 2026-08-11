@@ -96,9 +96,33 @@ fn tab_id(value: &Value) -> &str {
     value.as_str().expect("tab ID must be a string")
 }
 
+/// Resolve `agenterm-con` next to the test executable.
+///
+/// `CARGO_BIN_EXE_agenterm-con` only exists for bins declared in the *same*
+/// package, and `agenterm-con` moved to its own workspace package -- the
+/// compile error that produces is what took linux-x86_64 red at the all-target
+/// Clippy gate. An integration test runs from `target/<profile>/deps/`, so the
+/// binary sits one directory up. Same resolution as `tests/agenterm_con_blackbox.rs`.
+fn agenterm_con_binary() -> PathBuf {
+    let mut path = std::env::current_exe().expect("test executable path");
+    path.pop();
+    path.pop();
+    path.push(format!("agenterm-con{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        path.is_file(),
+        "agenterm-con is missing at {}; build it with \
+         `cargo build -p agenterm-con --bin agenterm-con`. It left this package \
+         in the lightweight-package split, so a bare `cargo test -p agenterm` no \
+         longer builds it as a side effect.",
+        path.display()
+    );
+    path
+}
+
 #[test]
 fn gui_control_surface_isolated_multitab_black_box() {
-    let exe = Path::new(env!("CARGO_BIN_EXE_agenterm-con"));
+    let exe = agenterm_con_binary();
+    let exe = exe.as_path();
     let suffix = unique_suffix();
     let endpoint = format!(r"pipe:\\.\pipe\agenterm-con-test-{suffix}");
     let screenshot = std::env::temp_dir().join(format!("agenterm-con-{suffix}.png"));

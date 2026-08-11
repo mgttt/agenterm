@@ -29,7 +29,30 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_agenterm-con")
+    // `agenterm-con` is its own workspace package now, so
+    // `CARGO_BIN_EXE_agenterm-con` is no longer defined when compiling this
+    // package's tests -- that variable only covers bins declared in the *same*
+    // package, and the compile error it produces took linux-x86_64 red at the
+    // all-target Clippy gate. Resolve the path at run time instead: an
+    // integration test executes from `target/<profile>/deps/`, so the sibling
+    // binary is one directory up.
+    static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let mut path = std::env::current_exe().expect("test executable path");
+        path.pop();
+        path.pop();
+        path.push(format!("agenterm-con{}", std::env::consts::EXE_SUFFIX));
+        assert!(
+            path.is_file(),
+            "agenterm-con is missing at {}; build it with \
+             `cargo build -p agenterm-con --bin agenterm-con`. It left this \
+             package in the lightweight-package split, so a bare \
+             `cargo test -p agenterm` no longer builds it as a side effect.",
+            path.display()
+        );
+        path.to_string_lossy().into_owned()
+    })
+    .as_str()
 }
 
 /// Real GUI/PTY-spawning tests in this file get measurably flakier the more
