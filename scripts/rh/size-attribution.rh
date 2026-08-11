@@ -29,12 +29,20 @@ fn entry() {
     let strip_env = "";
     if profile == "release-fast" {
         strip_env = "CARGO_PROFILE_RELEASE_FAST_STRIP";
+    } else if profile == "con-release-fast" {
+        strip_env = "CARGO_PROFILE_CON_RELEASE_FAST_STRIP";
     } else if profile == "release" {
         strip_env = "CARGO_PROFILE_RELEASE_STRIP";
+    } else if profile == "con-release" {
+        strip_env = "CARGO_PROFILE_CON_RELEASE_STRIP";
     } else if profile == "dev" {
         strip_env = "CARGO_PROFILE_DEV_STRIP";
     } else {
         return rh::fail("size_attribution_profile_invalid:" + profile);
+    }
+    if (profile == "con-release-fast" || profile == "con-release") &&
+            bin != "agenterm-con" {
+        return rh::fail("size_attribution_con_profile_requires_agenterm_con");
     }
 
     let dist = std::path::join(repo, "dist").display;
@@ -54,16 +62,21 @@ fn entry() {
         env_remove: ["NoDefaultCurrentDirectoryInExePath"],
     };
 
+    let cargo_args = ["bloat", "--profile", profile];
+    if bin == "agenterm-con" {
+        cargo_args.push("--package");
+        cargo_args.push("agenterm-con");
+    }
+    cargo_args.push("--bin");
+    cargo_args.push(bin);
+    cargo_args.push("--crates");
+    cargo_args.push("-n");
+    cargo_args.push("0");
+    cargo_args.push("--message-format");
+    cargo_args.push("json");
     let code = std::process::command_stdout_file(
         "cargo",
-        [
-            "bloat",
-            "--profile", profile,
-            "--bin", bin,
-            "--crates",
-            "-n", "0",
-            "--message-format", "json"
-        ],
+        cargo_args,
         1200000,
         stdout_path,
         options
@@ -111,14 +124,20 @@ fn entry() {
     }
     std::fs::try_remove_file(commit_stdout);
 
+    let note = "symbols kept (strip=none) for attribution; shipped strip=true " +
+        "binaries are smaller than file_size here";
+    if profile == "con-release-fast" || profile == "con-release" {
+        note = "symbols kept (strip=none) and host std used for attribution; " +
+            "official con staging also uses its custom-std path, so crate ranks " +
+            "are comparable but file_size is not release evidence";
+    }
     let output = #{
         kind: "agenterm-size-attribution",
         schema_version: 1,
         git_commit: commit,
         profile: profile,
         bin: bin,
-        note: "symbols kept (strip=none) for attribution; shipped strip=true \
-               binaries are smaller than file_size here",
+        note: note,
         file_size: file_size,
         text_section_size: text_size,
         crates: report.crates,

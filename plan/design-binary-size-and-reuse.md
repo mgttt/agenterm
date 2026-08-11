@@ -148,9 +148,20 @@ frontend core 的重复,值得单独一轮 platform-ux-parity 视角的审计—
 - **逐 crate 归因**:`scripts/rh/size-attribution.rh`(rh run 直跑)在专用
   `target/size-report` 目录用 cargo-bloat(--message-format json)产出
   `dist/size-attribution.json` 并打印 top-N 表。依赖 `cargo install cargo-bloat`,
-  未安装时给出明确提示而非静默跳过。
+  未安装时给出明确提示而非静默跳过。脚本接受 con 专属的
+  `con-release-fast` / `con-release` profile，并为 `agenterm-con` 显式选择
+  workspace package；con 的 strip=none 归因样本使用 host std，官方 staging
+  另走 custom-std，因此 crate 排名用于选刀，样本文件大小不作为发布证据。
 - 注意:dist 里 dev 与 release-fast 产物会被不同 lane 轮流暂存,**对比体积必须
   先对齐 profile**(size-history 每行都带 profile 字段,别跨行直接比)。
+
+2026-08-12 的 con-release-fast 首个可归因样本给出 `.text` 排名：`std`
+160,329 B、`agenterm_con` 140,160 B、`agenterm_platform` 98,046 B、`vt100`
+16,901 B、`agenterm_ui_core` 4,178 B。最大单函数是 control dispatch 20,994 B，
+其次是主事件分派 15,693 B；CLI run/parse 合计 12,643 B。正式 strip+custom-std
+x64 PE 同期仍为 619,520 B（`.text` 404,348 B），不得把归因样本的 434,200 B
+汇总值与正式节区直接相减。该证据否决继续优先微调像素 ISA，下一轮先审计
+control/CLI 的重复状态机和错误格式化。
 
 ### 5.2 死代码灰度归档流程
 编译器已经在持续报告死代码——先把信号清单化,再按"冷却期"分级处置,
