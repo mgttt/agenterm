@@ -220,7 +220,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   unrelated active-tab paints, and remaining backlog yields to input before
   self-scheduling another turn. `perf-stats` and
   `reset-perf-stats` expose frame latency plus PTY drain/yield counters through
-  the same public CLI for repeatable interactive profiling. The same counters now expose conservative full/partial raster-candidate frames and dirty/frame pixel totals; they do not claim retained rendering or native partial present. Its local chrome
+  the same public CLI for repeatable interactive profiling. The same counters now expose conservative full/partial raster-candidate frames and dirty/frame pixel totals; they do not claim retained rendering or native partial present. One public CLI probe observed 2/5 partial candidates at about 60.0% dirty pixels for blink/idle, falling to 2/13 and about 84.6% after mixed PTY output. Its local chrome
   now owns a vertically scrollable left tree with row-level close targets and
   top `z`/`Z` font controls, plus a distinct bottom composer input and send
   action. The default 15 logical-pixel terminal font corresponds to roughly
