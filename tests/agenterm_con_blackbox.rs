@@ -10,13 +10,10 @@
 //! same idea one layer up — spawn the real process, drive it, check what it
 //! actually produced.
 //!
-//! This is possible at all because of `--script`/`--emit-snapshot`
-//! (`src/bin/agenterm-con/agent_interface.rs`): without them, verifying this
-//! binary meant a human (or an agent standing in for one) capturing a
-//! screenshot and reading pixels by eye, which is what most of this
-//! session's manual verification actually was. These flags exist so that
-//! stops being the only option — for tests, and for any other agent that
-//! wants to drive or inspect a session programmatically.
+//! The public control CLI drives the real session while `--emit-snapshot`
+//! supplies structured observation. Journey JSON exists only in this test
+//! harness and is translated into ordinary `agenterm-con cli` invocations;
+//! the product binary intentionally has no script runtime.
 //!
 //! Known gap, stated plainly rather than left implicit: these tests cover
 //! the *text* that ends up on screen, not that it was *painted correctly* in
@@ -27,6 +24,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+
+const TEST_JOURNEY_ARG: &str = "--test-control-journey";
 
 fn binary() -> &'static str {
     // `agenterm-con` is its own workspace package now, so
@@ -97,10 +96,10 @@ fn command_shell_args(command: &str) -> Vec<String> {
     ]
 }
 
-fn interactive_shell_args(script: &Path) -> Vec<String> {
+fn interactive_shell_args(journey: &Path) -> Vec<String> {
     let mut args = vec![
-        "--script".to_owned(),
-        script.to_string_lossy().into_owned(),
+        TEST_JOURNEY_ARG.to_owned(),
+        journey.to_string_lossy().into_owned(),
         "-e".to_owned(),
         shell_program(),
     ];
@@ -179,10 +178,175 @@ fn scratch_dir(label: &str) -> PathBuf {
     dir
 }
 
-fn write_script(dir: &Path, commands_json: &str) -> PathBuf {
-    let path = dir.join("script.json");
-    std::fs::write(&path, commands_json).expect("write script");
+fn write_journey(dir: &Path, commands_json: &str) -> PathBuf {
+    let path = dir.join("control-journey.json");
+    std::fs::write(&path, commands_json).expect("write control journey");
     path
+}
+
+fn unique_control_endpoint(dir: &Path) -> String {
+    if cfg!(windows) {
+        return format!(
+            r"pipe:\\.\pipe\agenterm-con-blackbox-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        );
+    }
+    format!("unix:{}", dir.join("control.sock").to_string_lossy())
+}
+
+fn invoke_control(endpoint: &str, args: &[String]) -> Result<(), String> {
+    let output = Command::new(binary())
+        .arg("cli")
+        .arg("--control")
+        .arg(endpoint)
+        .args(args)
+        .output()
+        .map_err(|error| format!("launch control command {args:?}: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "control command {args:?} failed ({:?}): {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if invoke_control(endpoint, &["list-tabs".to_owned()]).is_ok() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err("control endpoint did not become ready".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let bytes = std::fs::read(path).map_err(|error| format!("read journey: {error}"))?;
+    let commands: Vec<serde_json::Value> =
+        serde_json::from_slice(&bytes).map_err(|error| format!("parse journey: {error}"))?;
+    for command in commands {
+        let object = command
+            .as_object()
+            .ok_or_else(|| "journey command must be an object".to_owned())?;
+        if let Some(text) = object.get("text").and_then(serde_json::Value::as_str) {
+            invoke_control(endpoint, &["send-text".to_owned(), text.to_owned()])?;
+        } else if let Some(text) = object.get("paste").and_then(serde_json::Value::as_str) {
+            invoke_control(endpoint, &["send-paste".to_owned(), text.to_owned()])?;
+        } else if let Some(key) = object.get("key").and_then(serde_json::Value::as_str) {
+            let mut spec = String::new();
+            for (field, name) in [("ctrl", "Ctrl"), ("alt", "Alt"), ("shift", "Shift")] {
+                if object.get(field).and_then(serde_json::Value::as_bool) == Some(true) {
+                    spec.push_str(name);
+                    spec.push('+');
+                }
+            }
+            spec.push_str(key);
+            invoke_control(endpoint, &["send-keys".to_owned(), spec])?;
+        } else if let Some(ms) = object.get("wait_ms").and_then(serde_json::Value::as_u64) {
+            std::thread::sleep(Duration::from_millis(ms));
+        } else if let Some(text) = object.get("wait_text").and_then(serde_json::Value::as_str) {
+            let timeout = object
+                .get("timeout_ms")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(10_000);
+            invoke_control(
+                endpoint,
+                &[
+                    "wait-text".to_owned(),
+                    "--timeout-ms".to_owned(),
+                    timeout.to_string(),
+                    text.to_owned(),
+                ],
+            )?;
+        } else if let Some(path) = object.get("screenshot").and_then(serde_json::Value::as_str) {
+            invoke_control(
+                endpoint,
+                &[
+                    "screenshot-pane".to_owned(),
+                    "--output".to_owned(),
+                    path.to_owned(),
+                ],
+            )?;
+        } else if let Some(point) = object.get("mouse_move") {
+            invoke_mouse(endpoint, "move", "none", point)?;
+        } else if let Some(point) = object.get("click") {
+            invoke_mouse(endpoint, "click", mouse_button(point), point)?;
+        } else if let Some(point) = object.get("mouse_down") {
+            invoke_mouse(endpoint, "press", mouse_button(point), point)?;
+        } else if let Some(point) = object.get("mouse_up") {
+            invoke_mouse(endpoint, "release", mouse_button(point), point)?;
+        } else if let Some(wheel) = object.get("wheel") {
+            let row = journey_u64(wheel, "row")?;
+            let column = journey_u64(wheel, "col")?;
+            let notches = journey_i64(wheel, "notches")?;
+            let mut args = vec![
+                "send-wheel".to_owned(),
+                "--column".to_owned(),
+                column.to_string(),
+                "--row".to_owned(),
+                row.to_string(),
+                "--notches".to_owned(),
+                notches.to_string(),
+            ];
+            if object.get("ctrl").and_then(serde_json::Value::as_bool) == Some(true) {
+                args.push("--ctrl".to_owned());
+            }
+            invoke_control(endpoint, &args)?;
+        } else {
+            return Err(format!("unknown journey command: {command}"));
+        }
+    }
+    Ok(())
+}
+
+fn journey_u64(value: &serde_json::Value, field: &str) -> Result<u64, String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| format!("journey field {field} must be an unsigned integer"))
+}
+
+fn journey_i64(value: &serde_json::Value, field: &str) -> Result<i64, String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| format!("journey field {field} must be an integer"))
+}
+
+fn mouse_button(value: &serde_json::Value) -> &str {
+    value
+        .get("button")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("left")
+}
+
+fn invoke_mouse(
+    endpoint: &str,
+    action: &str,
+    button: &str,
+    point: &serde_json::Value,
+) -> Result<(), String> {
+    invoke_control(
+        endpoint,
+        &[
+            "send-mouse".to_owned(),
+            "--action".to_owned(),
+            action.to_owned(),
+            "--button".to_owned(),
+            button.to_owned(),
+            "--column".to_owned(),
+            journey_u64(point, "col")?.to_string(),
+            "--row".to_owned(),
+            journey_u64(point, "row")?.to_string(),
+        ],
+    )
 }
 
 /// Owns a spawned `agenterm-con` child and guarantees it is killed even if
@@ -191,6 +355,8 @@ fn write_script(dir: &Path, commands_json: &str) -> PathBuf {
 struct ConSession {
     child: Child,
     snapshot_path: PathBuf,
+    driver: Option<std::thread::JoinHandle<()>>,
+    driver_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl ConSession {
@@ -199,18 +365,51 @@ impl ConSession {
     /// `-e` consumes the remainder of the command line verbatim.
     fn spawn<S: AsRef<std::ffi::OsStr>>(dir: &Path, extra_args: &[S]) -> Self {
         let snapshot_path = dir.join("snapshot.json");
-        let child = Command::new(binary())
+        let mut child_args: Vec<std::ffi::OsString> = extra_args
+            .iter()
+            .map(|argument| argument.as_ref().to_owned())
+            .collect();
+        let journey = child_args
+            .iter()
+            .position(|argument| argument == TEST_JOURNEY_ARG)
+            .map(|index| {
+                assert!(index + 1 < child_args.len(), "test journey path is missing");
+                let path = PathBuf::from(child_args.remove(index + 1));
+                child_args.remove(index);
+                path
+            });
+        let endpoint = unique_control_endpoint(dir);
+        let mut command = Command::new(binary());
+        command
             .arg("--no-activate")
             .arg("--emit-snapshot")
-            .arg(&snapshot_path)
-            .args(extra_args)
+            .arg(&snapshot_path);
+        if journey.is_some() {
+            command.arg("--control").arg(&endpoint);
+        }
+        let child = command
+            .args(&child_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn agenterm-con");
+        let driver_error = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let driver = journey.map(|journey| {
+            let endpoint = endpoint.clone();
+            let error_slot = std::sync::Arc::clone(&driver_error);
+            std::thread::spawn(move || {
+                if let Err(error) = replay_control_journey(&endpoint, &journey) {
+                    *error_slot
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error);
+                }
+            })
+        });
         Self {
             child,
             snapshot_path,
+            driver,
+            driver_error,
         }
     }
 
@@ -227,6 +426,14 @@ impl ConSession {
         let deadline = Instant::now() + timeout;
         let mut last_seen: Option<serde_json::Value> = None;
         loop {
+            if let Some(error) = self
+                .driver_error
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+            {
+                panic!("control journey failed: {error}");
+            }
             if let Ok(bytes) = std::fs::read(&self.snapshot_path)
                 && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
             {
@@ -269,6 +476,9 @@ impl Drop for ConSession {
         // teardown, not for a real session.
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(driver) = self.driver.take() {
+            let _ = driver.join();
+        }
     }
 }
 
@@ -298,8 +508,12 @@ fn version_and_help_are_synchronous_and_never_open_a_window() {
     assert!(help.status.success());
     let help_text = String::from_utf8_lossy(&help.stdout);
     assert!(
-        help_text.contains("--script"),
-        "help must document --script"
+        !help_text.contains("--script"),
+        "con must not expose scripts"
+    );
+    assert!(
+        help_text.contains("send-paste"),
+        "help must expose control paste"
     );
     assert!(
         help_text.contains("--emit-snapshot"),
@@ -308,13 +522,11 @@ fn version_and_help_are_synchronous_and_never_open_a_window() {
 }
 
 #[test]
-fn bad_command_line_fails_fast_without_opening_a_window() {
-    // A malformed --script must be caught before a window opens — if it
-    // weren't, a test (or an agent) driving agenterm-con with a typo'd
-    // script would hang waiting on a session that silently never started
-    // instead of getting an immediate, readable error.
+fn removed_script_flag_fails_fast_without_opening_a_window() {
+    // The lightweight host must reject the old script runtime before opening
+    // a window; automation belongs to the public control CLI.
     let dir = scratch_dir("bad-script");
-    let script_path = write_script(&dir, "{not valid json");
+    let script_path = write_journey(&dir, "{not valid json");
     let output = Command::new(binary())
         .arg("--no-activate")
         .arg("--script")
@@ -323,7 +535,7 @@ fn bad_command_line_fails_fast_without_opening_a_window() {
         .expect("run with a broken script");
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("script"), "{stderr}");
+    assert!(stderr.contains("unknown argument '--script'"), "{stderr}");
 }
 
 #[test]
@@ -389,14 +601,14 @@ fn nonexistent_program_via_dash_e_exits_cleanly_instead_of_hanging() {
 }
 
 #[test]
-fn scripted_text_and_paste_both_reach_the_pty() {
+fn controlled_text_and_paste_both_reach_the_pty() {
     let _guard = gui_test_guard();
     // Closes a gap this session's own retrospective flagged: paste had unit
     // coverage for its byte-level encoding, but the wiring from
     // ConTerminal::paste_text to a live session was never exercised
     // end-to-end. `paste` in a script goes through that exact function.
     let dir = scratch_dir("text-and-paste");
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"text": "echo TYPED_MARKER\r"},
@@ -514,7 +726,7 @@ fn typed_input_echoes_back_well_under_one_blink_cycle() {
     // fixes (verified manually while diagnosing: reverting the
     // `PixelWindowEvent::Wake` arm reproduces multi-hundred-ms echo delay).
     let dir = scratch_dir("typing-latency");
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"text": "echo LATENCY_READY\r"},
@@ -558,7 +770,7 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
     // line editor must move exactly two cells; falling back to byte-only VT
     // injection or splitting console-attachment authority regresses this.
     let dir = scratch_dir("key-wiring");
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"text": "echo ABCDE"},
@@ -586,17 +798,17 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
 }
 
 #[test]
-fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
+fn controlled_click_produces_a_local_selection_at_the_clicked_cell() {
     let _guard = gui_test_guard();
     // Closes the gap this session's own plan doc flagged in plain writing:
-    // "--script has no mouse commands yet." cmd.exe never negotiates mouse
+    // the original hidden driver had no mouse commands. cmd.exe never negotiates mouse
     // reporting (DECSET 1000/1002/1003), so a real click here always falls
     // through `handle_pointer_button`'s local path — a single left click
     // selects exactly the clicked cell (both selection endpoints equal),
     // which is state a script/agent can observe nowhere except this
     // wiring: the encoder-level pieces (`register_click`, `hit_test`) are
     // already unit-tested in isolation, but never through a live session
-    // driven by `--script`.
+    // driven through the public control endpoint.
     let dir = scratch_dir("click-selection");
     // `wait_text`, not a guessed `wait_ms`: `drain_pty` clears the selection
     // on any new output ("new output clears stale selection"), so a click
@@ -604,7 +816,7 @@ fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
     // before any snapshot can observe it. A fixed duration passes on a fast
     // box and failed on a loaded CI runner (windows lane, run 31400784754);
     // this sequences on the output actually being on screen instead.
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"text": "echo CLICK_MARKER\r"},
@@ -627,7 +839,7 @@ fn scripted_click_produces_a_local_selection_at_the_clicked_cell() {
 }
 
 #[test]
-fn scripted_press_drag_release_extends_a_local_selection() {
+fn controlled_press_drag_release_extends_a_local_selection() {
     let _guard = gui_test_guard();
     // Closes a gap this session's own plan doc flagged: `click` is atomic
     // press+release and cannot express a drag, so drag-selection —
@@ -638,7 +850,7 @@ fn scripted_press_drag_release_extends_a_local_selection() {
     // selection followed the drag rather than staying pinned to the press
     // point the way a single `click` always does.
     let dir = scratch_dir("drag-selection");
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"text": "echo DRAG_MARKER\r"},
@@ -652,7 +864,13 @@ fn scripted_press_drag_release_extends_a_local_selection() {
     );
     let mut session = ConSession::spawn(
         &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+        &[
+            TEST_JOURNEY_ARG,
+            script.to_str().unwrap(),
+            "-e",
+            "cmd.exe",
+            "/k",
+        ],
     );
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
         snapshot["selection"].is_array()
@@ -676,7 +894,7 @@ fn scripted_press_drag_release_extends_a_local_selection() {
 }
 
 #[test]
-fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
+fn controlled_wheel_moves_the_real_scrollback_offset_up_then_down() {
     let _guard = gui_test_guard();
     // Same gap as above, the scroll half: proves a scripted `wheel` reaches
     // `handle_wheel`'s local-scrollback branch in a live session, not just
@@ -691,7 +909,7 @@ fn scripted_wheel_moves_the_real_scrollback_offset_up_then_down() {
     } else {
         "i=1; while [ $i -le 120 ]; do echo SCROLL_LINE_$i; i=$((i+1)); done"
     };
-    let script = write_script(
+    let script = write_journey(
         &dir,
         &format!(
             r#"[
@@ -752,7 +970,7 @@ fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
     // (1600 individual, back-to-back `zoom_font` calls — no `wait_ms`
     // between them, deliberately, to match a fast real wheel spin rather
     // than a gentle one) through `wheel` with `ctrl: true` (added alongside
-    // this test specifically because `--script` had no way to reach the
+    // this test specifically because the original driver had no way to reach the
     // Ctrl+wheel code path at all before now).
     //
     // Result of this investigation, stated plainly: did not reproduce. An
@@ -784,7 +1002,7 @@ fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
     commands.push(r#"{"text": "echo ZOOM_DONE\r"}"#.to_owned());
     commands.push(r#"{"wait_ms": 300}"#.to_owned());
     let script_json = format!("[{}]", commands.join(","));
-    let script = write_script(&dir, &script_json);
+    let script = write_journey(&dir, &script_json);
 
     let args = interactive_shell_args(script.as_path());
     let mut session = ConSession::spawn(&dir, &args);
@@ -839,7 +1057,7 @@ fn real_tui_less_scrolls_via_character_and_space_keys() {
     };
     let dir = scratch_dir("less-jk-space");
     let lines_path = write_numbered_lines(&dir, "LESS_LINE_", 300);
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"wait_ms": 500},
@@ -854,7 +1072,7 @@ fn real_tui_less_scrolls_via_character_and_space_keys() {
     let mut session = ConSession::spawn(
         &dir,
         &[
-            "--script",
+            TEST_JOURNEY_ARG,
             script.to_str().unwrap(),
             "-e",
             less.to_str().unwrap(),
@@ -906,7 +1124,7 @@ fn real_tui_less_arrow_keys_and_alt_screen_wheel_scroll() {
     };
     let dir = scratch_dir("less-arrows-wheel");
     let lines_path = write_numbered_lines(&dir, "LESS_LINE_", 300);
-    let script = write_script(
+    let script = write_journey(
         &dir,
         r#"[
             {"wait_ms": 500},
@@ -920,7 +1138,7 @@ fn real_tui_less_arrow_keys_and_alt_screen_wheel_scroll() {
     let mut session = ConSession::spawn(
         &dir,
         &[
-            "--script",
+            TEST_JOURNEY_ARG,
             script.to_str().unwrap(),
             "-e",
             less.to_str().unwrap(),
@@ -938,7 +1156,7 @@ fn real_tui_less_arrow_keys_and_alt_screen_wheel_scroll() {
 }
 
 #[test]
-fn scripted_screenshot_produces_a_valid_nonempty_png() {
+fn controlled_screenshot_produces_a_valid_nonempty_png() {
     let _guard = gui_test_guard();
     // --emit-snapshot proves text; this proves the *feedback* half the
     // product's north star calls out by name — screenshots, not just
@@ -948,7 +1166,7 @@ fn scripted_screenshot_produces_a_valid_nonempty_png() {
     // driving agent needs to trust before it looks at the image at all.
     let dir = scratch_dir("screenshot");
     let png_path = dir.join("out.png");
-    let script = write_script(
+    let script = write_journey(
         &dir,
         &format!(
             r#"[
@@ -1010,11 +1228,17 @@ fn zooming_in_while_the_shell_is_actively_producing_output_survives() {
         commands.push(r#"{"wait_ms": 15}"#.to_owned());
     }
     commands.push(r#"{"wait_ms": 500}"#.to_owned());
-    let script = write_script(&dir, &format!("[{}]", commands.join(",")));
+    let script = write_journey(&dir, &format!("[{}]", commands.join(",")));
 
     let mut session = ConSession::spawn(
         &dir,
-        &["--script", script.to_str().unwrap(), "-e", "cmd.exe", "/k"],
+        &[
+            TEST_JOURNEY_ARG,
+            script.to_str().unwrap(),
+            "-e",
+            "cmd.exe",
+            "/k",
+        ],
     );
     // Doesn't wait to observe LINE_1 specifically: the loop can outrun the
     // first poll (a real, observed race — see the `less` tests' comments
@@ -1073,12 +1297,12 @@ fn rapid_ctrl_wheel_zoom_burst_against_a_repainting_tui_survives() {
         commands.push(r#"{"wheel": {"row": 0, "col": 0, "notches": 1}, "ctrl": true}"#.to_owned());
     }
     commands.push(r#"{"wait_ms": 1000}"#.to_owned());
-    let script = write_script(&dir, &format!("[{}]", commands.join(",")));
+    let script = write_journey(&dir, &format!("[{}]", commands.join(",")));
 
     let mut session = ConSession::spawn(
         &dir,
         &[
-            "--script",
+            TEST_JOURNEY_ARG,
             script.to_str().unwrap(),
             "-e",
             less.to_str().unwrap(),

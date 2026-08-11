@@ -273,6 +273,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   667,648 B 降至 653,824 B（-13,824 B）。多标签行为继续由同一 90 unit、18
   black-box 与 1 control journey 覆盖。这个结果也固化尺寸工作的选择准则：先删除
   不需要的通用机制，只有反汇编证据指向的窄叶子才进入汇编或原生 FFI。
+- `agenterm-con` 不再包含 `--script` JSON parser、command queue、wait scheduler 或
+  script-only screenshot state。自动化权威统一为公开 compact control wire：原有
+  text/key/mouse/wheel/wait/screenshot 加上 bracketed-paste-aware `send-paste`，测试侧
+  journey 只负责调用这些真实 CLI，不进入产品 PE。隔离 PE 从 638.5 KiB 降至
+  609.0 KiB、`.text` 从 419.0 KiB 降至 398.5 KiB；官方 release-fast PE 从
+  653,824 B 降至 623,616 B（-30,208 B）。81 unit、18 public-control GUI
+  black-box 与 1 isolated multitab control journey 通过；Win x64 Clippy、Win ARM64
+  和 Linux x64 编译门保持绿色。这是产品边界与尺寸优化同向的案例：删除平行机制
+  优先于把它改写成汇编。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

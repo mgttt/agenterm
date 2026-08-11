@@ -341,6 +341,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   multitab control test remain green. Future assembly or native FFI work must
   likewise start from linked-symbol or disassembly evidence rather than from
   mechanism preference.
+  The standalone host now enforces its no-script boundary in the binary:
+  `--script`, its JSON command decoder, command queue, wait scheduler and
+  script-only screenshot state are removed. Automation uses the public compact
+  control protocol exclusively; `send-paste` joins text, key, pointer, wheel,
+  wait and screenshot commands and reaches the same bracketed-paste-aware path
+  as clipboard input. Test-only journey JSON invokes those public commands and
+  is not linked into the product. The isolated PE falls from 638.5 to 609.0
+  KiB, `.text` from 419.0 to 398.5 KiB, and the official release-fast PE from
+  653,824 to 623,616 bytes. Evidence is 81 unit tests, 18 GUI black-box journeys
+  driven through the public control CLI, one isolated multitab control journey,
+  Win x64 Clippy, Win ARM64 check and Linux x64 check.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

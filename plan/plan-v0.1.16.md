@@ -180,6 +180,12 @@ C. Console host (agenterm-con.exe)
 └─ [ ] C10d 未做的超越面 → **已迁 v0.1.17**（回看搜索、OSC 8 超链接、脏行重绘）
 ```
 
+> **2026-08-12 后续边界收敛：**C11 记录的是当时交付历史，不再代表当前公开面。
+> `agenterm-con` 已删除 `--script` parser/runtime；原有黑盒 journey 迁移为测试侧调用
+> `agenterm-con cli` 的 text/paste/key/mouse/wheel/wait/screenshot 公共 control 命令。
+> `--emit-snapshot` 仍是结构化观察接口。当前真值以 `plan/ARCHITECTURE.md` 和
+> `prd/PRD_02_01_terminal_runtime.md` 为准。
+
 **里程碑状态（2026-08-08，二次复核后）**：C1–C3、C5–C9、C10a–c、C11 均已完成，
 **且第二轮复核（人工要求"反思，别轻易以为完成了"）额外挖出并修了一个真 bug**
 （见 C11 的 child-exit）。`agenterm-con` 现状：可编译可运行、40 项单测 + 8 项

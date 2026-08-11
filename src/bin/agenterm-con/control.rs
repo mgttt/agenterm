@@ -86,6 +86,10 @@ pub enum CliCommand {
         target: Option<TabId>,
         text: String,
     },
+    SendPaste {
+        target: Option<TabId>,
+        text: String,
+    },
     SendKeys {
         target: Option<TabId>,
         keys: Vec<String>,
@@ -192,6 +196,14 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             cursor.finish()?;
             CliCommand::SendText { target, text }
         }
+        "send-paste" => {
+            let target = cursor.optional_target()?;
+            let text = cursor
+                .next()
+                .ok_or_else(|| "send-paste requires TEXT".to_owned())?;
+            cursor.finish()?;
+            CliCommand::SendPaste { target, text }
+        }
         "send-keys" => {
             let target = cursor.optional_target()?;
             let mut keys = Vec::new();
@@ -270,7 +282,7 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
 }
 
 pub fn usage() -> String {
-    "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
+    "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
 }
 
 struct Cursor<'a> {
@@ -719,6 +731,11 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
             wire.optional_tab(target);
             wire.string(&text)?;
         }
+        CliCommand::SendPaste { target, text } => {
+            wire.byte(13);
+            wire.optional_tab(target);
+            wire.string(&text)?;
+        }
         CliCommand::SendKeys { target, keys } => {
             wire.byte(9);
             wire.optional_tab(target);
@@ -887,6 +904,10 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
                 timeout_ms,
             }
         }
+        13 => CliCommand::SendPaste {
+            target: wire.optional_tab()?,
+            text: wire.string()?,
+        },
         _ => return Err("unknown control command opcode".to_owned()),
     };
     wire.finish()?;
@@ -1207,6 +1228,10 @@ mod tests {
             CliCommand::SendText {
                 target: None,
                 text: "hello".to_owned(),
+            },
+            CliCommand::SendPaste {
+                target: Some(TabId::new(4)),
+                text: "pasted\ntext".to_owned(),
             },
             CliCommand::SendKeys {
                 target: None,

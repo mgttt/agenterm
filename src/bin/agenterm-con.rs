@@ -34,13 +34,12 @@ mod ui;
 #[path = "agenterm-con/workspace.rs"]
 mod workspace;
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButton};
+use agent_interface::ScreenSnapshot;
 use agenterm_platform::contract::pixel_present::PixelPresentStats;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
@@ -300,8 +299,6 @@ struct ConArgs {
     command: Option<Vec<String>>,
     /// `--emit-snapshot`: see `agent_interface` module docs.
     snapshot_path: Option<PathBuf>,
-    /// `--script`: see `agent_interface` module docs.
-    script_path: Option<PathBuf>,
 }
 
 /// Parses arguments, returning the message to print on failure.
@@ -338,12 +335,6 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
                 parsed.snapshot_path =
                     Some(PathBuf::from(rest.next().cloned().ok_or_else(|| {
                         "error: --emit-snapshot requires a path\n".to_owned()
-                    })?));
-            }
-            "--script" => {
-                parsed.script_path =
-                    Some(PathBuf::from(rest.next().cloned().ok_or_else(|| {
-                        "error: --script requires a path\n".to_owned()
                     })?));
             }
             // Everything after -e is the command line, verbatim. Consuming the
@@ -419,32 +410,8 @@ fn main() {
         control_endpoint,
         command,
         snapshot_path,
-        script_path,
     } = parsed;
     no_activate |= std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
-
-    // A bad script must fail before a window ever opens, not silently run
-    // partway then stall — same "loud, specific, fail fast" philosophy as
-    // the rest of this parser.
-    let script = script_path
-        .map(|path| {
-            let bytes = std::fs::read(&path).map_err(|error| {
-                format!(
-                    "error: could not read --script {}: {error}\n",
-                    path.display()
-                )
-            })?;
-            agent_interface::parse_script(&bytes)
-                .map_err(|error| format!("error: --script {}: {error}\n", path.display()))
-        })
-        .transpose();
-    let script = match script {
-        Ok(script) => script,
-        Err(message) => {
-            let _ = agenterm_platform::parent_console::write_stderr(&message);
-            std::process::exit(2);
-        }
-    };
 
     // Load config file: CLI flags override config, config overrides defaults.
     let config = load_config();
@@ -454,7 +421,6 @@ fn main() {
     let session = app.active_session_mut().expect("initial terminal session");
     session.command = command;
     session.snapshot_path = snapshot_path;
-    session.script = script.unwrap_or_default().into();
     // Config values (lowest priority)
     if let Some(fs) = config.font_size {
         session.font_size_logical = fs.clamp(8.0, 36.0);
@@ -513,6 +479,7 @@ Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   ... capture-pane [--target TAB] [--max-bytes N]
   ... screenshot-pane [--target TAB] --output PATH
   ... send-text [--target TAB] TEXT
+  ... send-paste [--target TAB] TEXT
   ... send-keys [--target TAB] KEY...
   ... send-mouse [--target TAB] --action press|release|move|click
                  --button none|left|middle|right --column N --row N
@@ -537,19 +504,9 @@ Mouse coordinates are zero-based terminal cells. Positive wheel notches scroll u
 
   --emit-snapshot PATH
                  Write a JSON snapshot of screen text/cursor/selection to
-                 PATH after each render (atomic write). For scripts, tests,
+                 PATH after each render (atomic write). For CLI clients, tests,
                  and other agents that need to inspect a session without
                  capturing pixels.
-
-  --script PATH  Read a JSON array of input commands from PATH and play them
-                 back through the real keyboard/paste/mouse code paths —
-                 text, paste, key (with ctrl/alt/shift), wait_ms, click
-                 (row/col/button, with ctrl/alt/shift), mouse_down/mouse_up
-                 (same shape as click, for press-drag-release gestures),
-                 mouse_move (row/col), wheel (row/col/notches, or ctrl:true
-                 for font-size zoom). Lets a test or another agent drive a
-                 session without OS-level input injection. See
-                 src/bin/agenterm-con/agent_interface.rs.
 
 Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 ~/.config (Unix) with keys: font_size, cols, rows (all optional).
@@ -618,17 +575,6 @@ struct ConTerminal {
     /// `--emit-snapshot`: written after each render when set. See
     /// `agent_interface` module docs.
     snapshot_path: Option<PathBuf>,
-    /// `--script`: commands not yet executed, in order.
-    script: VecDeque<ScriptCommand>,
-    /// When the next queued `WaitMs` elapses. `None` when nothing is queued
-    /// or the next command is ready to run immediately.
-    script_wait_until: Option<Instant>,
-    /// Deadline for the in-flight `WaitText`, set the first time that command
-    /// is seen so re-polling it does not restart its own timeout.
-    script_wait_text_deadline: Option<Instant>,
-    /// Set by a script `Screenshot` command; captured and cleared by the
-    /// next `render()`, since pixel data only exists transiently there.
-    pending_screenshot: Option<PathBuf>,
     pending_control_screenshot: Option<(PathBuf, control::ReplySender)>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
@@ -1804,6 +1750,14 @@ impl ConApp {
                 session.write_pty(text.as_bytes());
                 Ok(json::object([("sent_bytes", text.len().into())]))
             }),
+            CliCommand::SendPaste { target, text } => self.control_target(target).and_then(|id| {
+                let session = self
+                    .sessions
+                    .get_mut(&id)
+                    .ok_or_else(|| "terminal disappeared".to_owned())?;
+                session.paste_text(&text);
+                Ok(json::object([("sent_bytes", text.len().into())]))
+            }),
             CliCommand::SendKeys { target, keys } => self.control_target(target).and_then(|id| {
                 let session = self
                     .sessions
@@ -1811,7 +1765,7 @@ impl ConApp {
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
                 for key in &keys {
                     let (key, ctrl, alt, shift) = parse_control_key(key)?;
-                    session.execute_script_key(key, ctrl, alt, shift);
+                    session.inject_key(key, ctrl, alt, shift);
                 }
                 Ok(json::object([("sent_keys", keys.len().into())]))
             }),
@@ -1833,13 +1787,10 @@ impl ConApp {
                     ));
                 }
                 match action {
-                    control::MouseAction::Move => {
-                        session.execute_script_mouse_move(window, row, column)
-                    }
+                    control::MouseAction::Move => session.inject_mouse_move(window, row, column),
                     control::MouseAction::Click => {
                         let button = control_mouse_button(button)?;
-                        session
-                            .execute_script_click(window, row, column, button, false, false, false);
+                        session.inject_click(window, row, column, button);
                     }
                     control::MouseAction::Press | control::MouseAction::Release => {
                         let button = control_mouse_button(button)?;
@@ -1848,9 +1799,7 @@ impl ConApp {
                         } else {
                             PointerButtonState::Released
                         };
-                        session.execute_script_pointer_button(
-                            window, row, column, button, false, false, false, state,
-                        );
+                        session.inject_pointer_button(window, row, column, button, state);
                     }
                 }
                 Ok(json::object([("delivered", true.into())]))
@@ -1872,7 +1821,7 @@ impl ConApp {
                         session.rows, session.cols
                     ));
                 }
-                session.execute_script_wheel(window, row, column, f32::from(notches), ctrl);
+                session.inject_wheel(window, row, column, f32::from(notches), ctrl);
                 Ok(json::object([("delivered_notches", notches.into())]))
             }),
             CliCommand::ScreenshotPane { target, output } => {
@@ -2239,10 +2188,6 @@ impl ConTerminal {
             command: None,
             current_title: String::new(),
             snapshot_path: None,
-            script: VecDeque::new(),
-            script_wait_until: None,
-            script_wait_text_deadline: None,
-            pending_screenshot: None,
             pending_control_screenshot: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
@@ -3190,8 +3135,8 @@ impl ConTerminal {
     /// on `point` when hit-tested. Targets the cell's center, not its
     /// top-left corner, so the result is robust to `hit_test`'s truncating
     /// division rather than sitting exactly on a rounding boundary. This is
-    /// what lets `--script` mouse commands take cell coordinates (what a
-    /// script author actually thinks in) while still driving the same
+    /// what lets control commands take cell coordinates (what a CLI caller
+    /// actually thinks in) while still driving the same
     /// pixel-position-based handlers real pointer events go through.
     fn terminal_point_to_logical(&self, point: TerminalPoint) -> LogicalPoint {
         let phys_x = f64::from(self.content_left_px)
@@ -3227,7 +3172,7 @@ impl ConTerminal {
     }
 
     /// The paste path proper, independent of where the text came from — the
-    /// OS clipboard (`paste_clipboard`) or a `--script` `paste` command. Both
+    /// OS clipboard (`paste_clipboard`) or a control `send-paste` command. Both
     /// must go through the same normalization and bracketing, which is the
     /// point of factoring this out: a scripted test exercises the exact
     /// logic a real Ctrl+V does, not a lookalike.
@@ -3247,7 +3192,7 @@ impl ConTerminal {
     }
 
     /// Whether `needle` appears in any rendered row right now. Used by the
-    /// script `wait_text` command to sequence on real output instead of a
+    /// control `wait-text` command to sequence on real output instead of a
     /// guessed duration.
     fn screen_contains(&self, needle: &str) -> bool {
         let screen = self.parser.screen();
@@ -3255,142 +3200,11 @@ impl ConTerminal {
         screen.rows(0, cols).any(|row| row.contains(needle))
     }
 
-    /// Runs every `--script` command that is due, pacing `WaitMs` through the
-    /// same `about_to_wait` scheduling the resize debounce and cursor blink
-    /// use rather than blocking the thread — a blocking sleep here would
-    /// freeze rendering and PTY draining for the wait's whole duration.
-    ///
-    /// Returns the instant to next wake for the caller to fold into its own
-    /// `WaitUntil` decision, or `None` when the queue is empty and nothing
-    /// is scheduled.
-    fn drain_script(&mut self, window: &PixelWindow, now: Instant) -> Option<Instant> {
-        if let Some(until) = self.script_wait_until {
-            if now < until {
-                return Some(until);
-            }
-            self.script_wait_until = None;
-        }
-        while let Some(command) = self.script.pop_front() {
-            match command {
-                ScriptCommand::Text(text) => {
-                    self.scroll_to_bottom();
-                    self.write_pty(text.as_bytes());
-                }
-                ScriptCommand::Paste(text) => self.paste_text(&text),
-                ScriptCommand::Key {
-                    key,
-                    ctrl,
-                    alt,
-                    shift,
-                } => {
-                    self.execute_script_key(key, ctrl, alt, shift);
-                }
-                ScriptCommand::WaitMs(ms) => {
-                    let until = now + Duration::from_millis(ms);
-                    self.script_wait_until = Some(until);
-                    return Some(until);
-                }
-                ScriptCommand::WaitText { text, timeout_ms } => {
-                    let deadline = *self
-                        .script_wait_text_deadline
-                        .get_or_insert(now + Duration::from_millis(timeout_ms));
-                    if self.screen_contains(&text) {
-                        self.script_wait_text_deadline = None;
-                    } else if now >= deadline {
-                        // Fail loudly: a silently-skipped wait would hand the
-                        // next command exactly the race this command exists
-                        // to remove.
-                        eprintln!(
-                            "agenterm-con: script wait_text timed out after {timeout_ms}ms                              waiting for {text:?}"
-                        );
-                        std::process::exit(3);
-                    } else {
-                        // Re-poll soon; PTY draining and rendering continue
-                        // between wakes because this returns to the event loop
-                        // instead of sleeping here.
-                        self.script
-                            .push_front(ScriptCommand::WaitText { text, timeout_ms });
-                        let until = now + Duration::from_millis(20);
-                        self.script_wait_until = Some(until);
-                        return Some(until);
-                    }
-                }
-                ScriptCommand::Screenshot(path) => {
-                    // Pixels only exist transiently inside render(); stash the
-                    // path and let about_to_wait force the redraw that
-                    // actually produces a frame to capture.
-                    self.pending_screenshot = Some(path);
-                }
-                ScriptCommand::Click {
-                    row,
-                    col,
-                    button,
-                    ctrl,
-                    alt,
-                    shift,
-                } => {
-                    self.execute_script_click(window, row, col, button, ctrl, alt, shift);
-                }
-                ScriptCommand::MouseDown {
-                    row,
-                    col,
-                    button,
-                    ctrl,
-                    alt,
-                    shift,
-                } => {
-                    self.execute_script_pointer_button(
-                        window,
-                        row,
-                        col,
-                        button,
-                        ctrl,
-                        alt,
-                        shift,
-                        PointerButtonState::Pressed,
-                    );
-                }
-                ScriptCommand::MouseUp {
-                    row,
-                    col,
-                    button,
-                    ctrl,
-                    alt,
-                    shift,
-                } => {
-                    self.execute_script_pointer_button(
-                        window,
-                        row,
-                        col,
-                        button,
-                        ctrl,
-                        alt,
-                        shift,
-                        PointerButtonState::Released,
-                    );
-                }
-                ScriptCommand::MouseMove { row, col } => {
-                    self.execute_script_mouse_move(window, row, col);
-                }
-                ScriptCommand::Wheel {
-                    row,
-                    col,
-                    notches,
-                    ctrl,
-                } => {
-                    self.execute_script_wheel(window, row, col, notches, ctrl);
-                }
-            }
-        }
-        None
-    }
-
-    /// Synthesizes a [`NormalizedKeyEvent`] for a script `key` command and
+    /// Synthesizes a [`NormalizedKeyEvent`] for a control key command and
     /// forwards it through [`ConTerminal::forward_key`] — the exact path a
     /// real keystroke takes, including host shortcuts and the live
-    /// DECCKM/modifier-aware encoder. A script is a *test* of that wiring,
-    /// not a shortcut around it.
-    fn execute_script_key(&mut self, key: ScriptKey, ctrl: bool, alt: bool, shift: bool) {
+    /// DECCKM/modifier-aware encoder.
+    fn inject_key(&mut self, key: InjectedKey, ctrl: bool, alt: bool, shift: bool) {
         let modifiers = ModifierState {
             control: ctrl,
             alt,
@@ -3398,15 +3212,15 @@ impl ConTerminal {
             meta: false,
         };
         let logical = match key {
-            ScriptKey::Named(named) => LogicalKey::Named(named),
-            ScriptKey::Char(ch) => LogicalKey::Character(ch.to_string()),
+            InjectedKey::Named(named) => LogicalKey::Named(named),
+            InjectedKey::Char(ch) => LogicalKey::Character(ch.to_string()),
         };
         let text = match key {
-            ScriptKey::Named(_) => None,
+            InjectedKey::Named(_) => None,
             // Only offered as `text` when unmodified, matching how a real
             // backend reports a plain character key versus a shortcut.
-            ScriptKey::Char(ch) if !ctrl && !alt => Some(ch.to_string()),
-            ScriptKey::Char(_) => None,
+            InjectedKey::Char(ch) if !ctrl && !alt => Some(ch.to_string()),
+            InjectedKey::Char(_) => None,
         };
         let event = NormalizedKeyEvent {
             logical,
@@ -3419,95 +3233,57 @@ impl ConTerminal {
         self.forward_key(&event);
     }
 
-    /// Presses then releases a mouse button at a cell coordinate for a
-    /// `--script` `click` command, through the same `handle_pointer_button`
-    /// path a real click takes (application mouse reporting first, local
-    /// click-counting/selection second) — see [`ScriptCommand::Click`].
-    #[allow(clippy::too_many_arguments)]
-    fn execute_script_click(
+    /// Presses then releases a mouse button at a control cell coordinate
+    /// through the same path used by a physical click.
+    fn inject_click(
         &mut self,
         window: &PixelWindow,
         row: u16,
         col: u16,
-        button: ScriptMouseButton,
-        ctrl: bool,
-        alt: bool,
-        shift: bool,
+        button: InjectedMouseButton,
     ) {
-        self.execute_script_pointer_button(
-            window,
-            row,
-            col,
-            button,
-            ctrl,
-            alt,
-            shift,
-            PointerButtonState::Pressed,
-        );
-        self.execute_script_pointer_button(
-            window,
-            row,
-            col,
-            button,
-            ctrl,
-            alt,
-            shift,
-            PointerButtonState::Released,
-        );
+        self.inject_pointer_button(window, row, col, button, PointerButtonState::Pressed);
+        self.inject_pointer_button(window, row, col, button, PointerButtonState::Released);
     }
 
-    /// One half of a press-drag-release gesture — see
-    /// [`ScriptCommand::MouseDown`]/[`ScriptCommand::MouseUp`], and shared
-    /// by [`Self::execute_script_click`] for the atomic press+release case.
-    #[allow(clippy::too_many_arguments)]
-    fn execute_script_pointer_button(
+    /// One half of a control press-drag-release gesture, shared by
+    /// [`Self::inject_click`] for the atomic press+release case.
+    fn inject_pointer_button(
         &mut self,
         window: &PixelWindow,
         row: u16,
         col: u16,
-        button: ScriptMouseButton,
-        ctrl: bool,
-        alt: bool,
-        shift: bool,
+        button: InjectedMouseButton,
         state: PointerButtonState,
     ) {
-        let modifiers = ModifierState {
-            control: ctrl,
-            alt,
-            shift,
-            meta: false,
-        };
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
         let platform_button = match button {
-            ScriptMouseButton::Left => PointerButton::Left,
-            ScriptMouseButton::Middle => PointerButton::Middle,
-            ScriptMouseButton::Right => PointerButton::Right,
+            InjectedMouseButton::Left => PointerButton::Left,
+            InjectedMouseButton::Middle => PointerButton::Middle,
+            InjectedMouseButton::Right => PointerButton::Right,
         };
-        self.handle_pointer_button(window, platform_button, state, Some(position), &modifiers);
+        self.handle_pointer_button(
+            window,
+            platform_button,
+            state,
+            Some(position),
+            &ModifierState::default(),
+        );
     }
 
-    /// Moves the pointer to a cell coordinate for a `--script` `mouse_move`
-    /// command, through `handle_pointer_moved` — see
-    /// [`ScriptCommand::MouseMove`].
-    fn execute_script_mouse_move(&mut self, window: &PixelWindow, row: u16, col: u16) {
+    /// Moves the pointer to a control cell coordinate through the physical
+    /// pointer-motion path.
+    fn inject_mouse_move(&mut self, window: &PixelWindow, row: u16, col: u16) {
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
         self.handle_pointer_moved(window, position, &ModifierState::default());
     }
 
-    /// One wheel notch's worth of scroll at a cell coordinate for a
-    /// `--script` `wheel` command, through `handle_wheel` — see
-    /// [`ScriptCommand::Wheel`]. `handle_wheel` itself never requests a
+    /// Sends wheel input at a control cell coordinate through `handle_wheel`.
+    /// `handle_wheel` itself never requests a
     /// redraw (real wheel events get that from the `MouseWheel` dispatch
     /// arm that calls it), so this mirrors that call site rather than
     /// leaving a scripted scroll invisible until the next unrelated redraw.
-    fn execute_script_wheel(
-        &mut self,
-        window: &PixelWindow,
-        row: u16,
-        col: u16,
-        notches: f32,
-        ctrl: bool,
-    ) {
+    fn inject_wheel(&mut self, window: &PixelWindow, row: u16, col: u16, notches: f32, ctrl: bool) {
         if ctrl {
             // Mirrors the real event: one `zoom_font` call per whole notch,
             // not one call scaled by magnitude — a real Ctrl+wheel session
@@ -3648,7 +3424,7 @@ impl ConTerminal {
     /// One Ctrl+wheel notch's worth of font-size zoom: `grow = true` is one
     /// step larger, `false` one step smaller, clamped to `[8.0, 36.0]`
     /// logical px. Factored out of the `MouseWheel` event arm so a
-    /// `--script` `wheel` command with `ctrl: true` drives the identical
+    /// control `send-wheel --ctrl` command drives the identical
     /// path a real Ctrl+wheel notch does — this is the exact repeated,
     /// cumulative resize path a reported "zoom past a certain size and the
     /// process exits" crash needs a live session (not an isolated
@@ -3827,7 +3603,7 @@ impl ConTerminal {
     /// Routes a pointer move: an application gesture in flight keeps
     /// ownership so its press/release stay paired; otherwise extends local
     /// selection, or reports hover motion under `ANY_MOTION` (1003).
-    /// Factored out of the `PointerMoved` event arm so a `--script`
+    /// Factored out of the `PointerMoved` event arm so a control command
     /// `mouse_move` command drives the identical logic a real OS pointer
     /// move does, not a lookalike.
     fn handle_pointer_moved(
@@ -4264,13 +4040,10 @@ impl ConTerminal {
             fold_wake(self.last_blink_at + BLINK_INTERVAL);
         }
 
-        if let Some(deadline) = self.drain_script(window, now) {
-            fold_wake(deadline);
-        }
         // A pending screenshot needs an actual render to happen — pixels
         // only exist transiently inside render() — so it must force a
         // redraw even when nothing else did.
-        if self.pending_screenshot.is_some() || self.pending_control_screenshot.is_some() {
+        if self.pending_control_screenshot.is_some() {
             redraw = true;
         }
 
@@ -4607,32 +4380,12 @@ impl PixelWindowApplication for ConApp {
             self.retained.mark_valid();
             directive
         };
-        let (pending_screenshot, pending_control_screenshot) = {
+        let pending_control_screenshot = {
             let session = render_try!(self.sessions.get_mut(&active_id).ok_or_else(|| {
                 PixelWindowError::failed("con_session_missing", "active terminal session missing")
             }));
-            (
-                session.pending_screenshot.take(),
-                session.pending_control_screenshot.take(),
-            )
+            session.pending_control_screenshot.take()
         };
-        if let Some(path) = pending_screenshot {
-            if host_retains_pixels {
-                let _ = agent_interface::write_png_atomic(
-                    path.as_path(),
-                    frame.pixels_mut(),
-                    width,
-                    height,
-                );
-            } else {
-                let _ = agent_interface::write_png_atomic(
-                    path.as_path(),
-                    self.retained.pixels(),
-                    width,
-                    height,
-                );
-            }
-        }
         if let Some((path, reply)) = pending_control_screenshot {
             let encode_started = Instant::now();
             let write_result = if host_retains_pixels {
@@ -4740,7 +4493,20 @@ impl PixelWindowApplication for ConApp {
     }
 }
 
-fn parse_control_key(spec: &str) -> Result<(ScriptKey, bool, bool, bool), String> {
+#[derive(Clone, Copy)]
+enum InjectedKey {
+    Named(NamedKey),
+    Char(char),
+}
+
+#[derive(Clone, Copy)]
+enum InjectedMouseButton {
+    Left,
+    Middle,
+    Right,
+}
+
+fn parse_control_key(spec: &str) -> Result<(InjectedKey, bool, bool, bool), String> {
     let mut parts: Vec<_> = spec.split('+').collect();
     let key_name = parts
         .pop()
@@ -4761,6 +4527,7 @@ fn parse_control_key(spec: &str) -> Result<(ScriptKey, bool, bool, bool), String
         "enter" | "return" => Some(NamedKey::Enter),
         "escape" | "esc" => Some(NamedKey::Escape),
         "tab" => Some(NamedKey::Tab),
+        "space" => Some(NamedKey::Space),
         "backspace" => Some(NamedKey::Backspace),
         "delete" | "del" => Some(NamedKey::Delete),
         "insert" | "ins" => Some(NamedKey::Insert),
@@ -4772,26 +4539,38 @@ fn parse_control_key(spec: &str) -> Result<(ScriptKey, bool, bool, bool), String
         "down" | "arrowdown" => Some(NamedKey::ArrowDown),
         "left" | "arrowleft" => Some(NamedKey::ArrowLeft),
         "right" | "arrowright" => Some(NamedKey::ArrowRight),
+        "f1" => Some(NamedKey::F1),
+        "f2" => Some(NamedKey::F2),
+        "f3" => Some(NamedKey::F3),
+        "f4" => Some(NamedKey::F4),
+        "f5" => Some(NamedKey::F5),
+        "f6" => Some(NamedKey::F6),
+        "f7" => Some(NamedKey::F7),
+        "f8" => Some(NamedKey::F8),
+        "f9" => Some(NamedKey::F9),
+        "f10" => Some(NamedKey::F10),
+        "f11" => Some(NamedKey::F11),
+        "f12" => Some(NamedKey::F12),
         _ => None,
     };
     let key = if let Some(named) = named {
-        ScriptKey::Named(named)
+        InjectedKey::Named(named)
     } else {
         let mut chars = key_name.chars();
         let character = chars.next().ok_or_else(|| "empty key".to_owned())?;
         if chars.next().is_some() {
             return Err(format!("unknown key {key_name:?}"));
         }
-        ScriptKey::Char(character)
+        InjectedKey::Char(character)
     };
     Ok((key, ctrl, alt, shift))
 }
 
-fn control_mouse_button(button: control::MouseButton) -> Result<ScriptMouseButton, String> {
+fn control_mouse_button(button: control::MouseButton) -> Result<InjectedMouseButton, String> {
     match button {
-        control::MouseButton::Left => Ok(ScriptMouseButton::Left),
-        control::MouseButton::Middle => Ok(ScriptMouseButton::Middle),
-        control::MouseButton::Right => Ok(ScriptMouseButton::Right),
+        control::MouseButton::Left => Ok(InjectedMouseButton::Left),
+        control::MouseButton::Middle => Ok(InjectedMouseButton::Middle),
+        control::MouseButton::Right => Ok(InjectedMouseButton::Right),
         control::MouseButton::None => Err("press/release requires a mouse button".to_owned()),
     }
 }
@@ -5507,7 +5286,7 @@ mod tests {
         // comment says so), not the available range — so the bound was
         // always `2 * scroll_offset`, i.e. always 0 from a fresh view, and
         // wheel-up silently never worked in a live session. Only caught by
-        // a black-box `--script` `wheel` test against a real session with
+        // a black-box control `send-wheel` test against a real session with
         // actual scrolled-off lines; this pins the same fact as a fast unit
         // test so it can't regress silently again.
         let mut app = ConTerminal::new(None);
@@ -6044,7 +5823,7 @@ mod tests {
         // downstream of write_pty, not in event construction or encoding.
         let mut app = ConTerminal::new(None);
         app.master = None; // no real PTY; we only care what bytes WOULD be sent
-        // Reconstruct exactly what execute_script_key builds, bypassing
+        // Reconstruct exactly what inject_key builds, bypassing
         // forward_key's PTY write so we can inspect the encoder's output
         // directly via the same TerminalKeyMode computation forward_key uses.
         let mode = TerminalKeyMode {

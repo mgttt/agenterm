@@ -17,21 +17,10 @@ pub enum JsonValue {
 }
 
 impl JsonValue {
-    pub fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
     pub fn into_object(self, context: &str) -> Result<Vec<(String, Self)>, String> {
         match self {
             Self::Object(fields) => Ok(fields),
             _ => Err(format!("{context} must be a JSON object")),
-        }
-    }
-
-    pub fn into_array(self, context: &str) -> Result<Vec<Self>, String> {
-        match self {
-            Self::Array(values) => Ok(values),
-            _ => Err(format!("{context} must be a JSON array")),
         }
     }
 }
@@ -464,32 +453,6 @@ pub fn take(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Option<JsonValu
     Some(fields.swap_remove(index).1)
 }
 
-pub fn reject_unknown(fields: Vec<(String, JsonValue)>, context: &str) -> Result<(), String> {
-    match fields.first() {
-        Some((key, _)) => Err(format!("{context}: unknown field {key:?}")),
-        None => Ok(()),
-    }
-}
-
-pub fn take_string(
-    fields: &mut Vec<(String, JsonValue)>,
-    key: &str,
-) -> Result<Option<String>, String> {
-    match take(fields, key) {
-        None | Some(JsonValue::Null) => Ok(None),
-        Some(JsonValue::String(value)) => Ok(Some(value)),
-        Some(_) => Err(format!("{key} must be a string")),
-    }
-}
-
-pub fn take_bool(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<bool>, String> {
-    match take(fields, key) {
-        None | Some(JsonValue::Null) => Ok(None),
-        Some(JsonValue::Bool(value)) => Ok(Some(value)),
-        Some(_) => Err(format!("{key} must be a boolean")),
-    }
-}
-
 fn take_number(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<String>, String> {
     match take(fields, key) {
         None | Some(JsonValue::Null) => Ok(None),
@@ -516,7 +479,6 @@ macro_rules! number_take {
 }
 
 number_take!(take_u16, u16);
-number_take!(take_u64, u64);
 
 pub fn take_f64(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<f64>, String> {
     let value = take_number(fields, key)?
