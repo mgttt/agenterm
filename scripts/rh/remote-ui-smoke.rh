@@ -25,6 +25,23 @@ fn parse_int_text(value) {
     digits.parse_int()
 }
 
+// Every step announcement carries a wall-clock stamp, appended so the existing
+// `STEP <text>` prefix still matches anything that reads these lines.
+//
+// This exists because "where did the time go" was unanswerable: the smoke used to
+// finish all four release-lane journeys in ~40s total (windows job, 2026-08-04,
+// Rhai era) and now cannot finish alone in 1200s, with essentially the same
+// script -- 27 steps then, 28 now; 28 wait loops then, 29 now. Per-iteration
+// costs do not explain it: a captured child invocation is ~105ms in a native pack
+// vs ~74ms from a shell, and `rh::task::sleep(25ms)` measures 25.8ms. Without
+// per-step timing every diagnosis was a 20-minute guess.
+fn step(label) {
+    print(
+        "STEP " + label + " @" +
+            std::time::SystemTime::now().rfc3339
+    );
+}
+
 fn assert_window_control(gui, control_id, name) {
     let control = gui.window_control(control_id);
     if control.visible == 0 {
@@ -776,7 +793,7 @@ let clipboard_restore_text = "";
 let clipboard_restore_needed = 0;
 
 try {
-    print("STEP start the independent server and wait through public protocol");
+    step("start the independent server and wait through public protocol");
     let initial_server_command = configured_server_command(context, gui_exe);
     let initial_server = initial_server_command.start();
     let initial_protocol = wait_for_protocol(
@@ -790,7 +807,7 @@ try {
     );
     owned_children.push(initial_server);
 
-    print("STEP start replaceable UI against the ready independent server");
+    step("start replaceable UI against the ready independent server");
     let gui_command = configured_gui_command(
         gui_exe,
         context.address,
@@ -809,7 +826,7 @@ try {
     owned_children.push(gui);
     let lease = json_cli(context, cli, ["ui-lease", "status"]);
 
-    print("STEP observe the lease-owned GUI projection through public CLI");
+    step("observe the lease-owned GUI projection through public CLI");
     let ui = wait_projection(context, cli, "replaceable_ui_client");
     test_harness::require(
         ui.schema_version == 1
@@ -837,7 +854,7 @@ try {
         "ux-parity.remote-ui.replaceable-client"
     );
 
-    print("STEP drive semantic window state and client resize");
+    step("drive semantic window state and client resize");
     let original_width = ui.window.client_width;
     let original_height = ui.window.client_height;
     let original_rows = ui.layout.terminal.rows;
@@ -928,7 +945,7 @@ try {
         ]
     );
 
-    print("STEP relay typed UI actions to the exact live GUI lease");
+    step("relay typed UI actions to the exact live GUI lease");
     let hidden = json_cli(context, cli, ["ui-action", "tabs-hide"]);
     test_harness::require(
         hidden.projection == "replaceable_ui_client"
@@ -1002,7 +1019,7 @@ try {
         ).display
     );
 
-    print("STEP prove GUI and server are different process roles");
+    step("prove GUI and server are different process roles");
     let bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
     let protocol = json_cli(
         context,
@@ -1029,7 +1046,7 @@ try {
         "remote_ui_process_role_separation_invalid"
     );
 
-    print("STEP prove the server-owned PTY remains interactive");
+    step("prove the server-owned PTY remains interactive");
     let tab_id = "" + bootstrap.active_tab_id;
     let marker = "AGENTERM_REMOTE_UI_" + context.run_id;
     text_cli(
@@ -1050,7 +1067,7 @@ try {
     let rendered = json_cli(context, cli, ["ui-bootstrap"]);
     wait_observed(context, cli, rendered.position.sequence);
 
-    print("STEP close only the GUI and retain server, PTY, and workspace");
+    step("close only the GUI and retain server, PTY, and workspace");
     let composer_editor = assert_window_control(gui, 2101, "composer_editor");
     // Acquired WITHOUT `assert_window_control`: that helper reports "missing"
     // when `visible == 0`, and these three are created hidden and only shown
@@ -1131,7 +1148,7 @@ try {
         "remote_ui_headless_projection_invalid"
     );
 
-    print("STEP replace the GUI and recover the same live server state");
+    step("replace the GUI and recover the same live server state");
     let replacement_gui_command = configured_gui_command(
         gui_exe,
         context.address,
@@ -1179,7 +1196,7 @@ try {
         "remote_ui_replacement_state_invalid"
     );
 
-    print("STEP recover hidden Tabs from toolbar, system menu, and status bar");
+    step("recover hidden Tabs from toolbar, system menu, and status bar");
     let tabs_button = assert_window_control(replacement_gui, 2104, "tabs_button");
     let control_center_button = assert_window_control(replacement_gui, 2138, "control_center_button");
     let settings_button = assert_window_control(replacement_gui, 2112, "settings_button");
@@ -1257,7 +1274,7 @@ try {
         "remote_ui_status_tabs_recovery_invalid"
     );
 
-    print("STEP configure a new terminal before creation");
+    step("configure a new terminal before creation");
     let initial_command = assert_window_control(replacement_gui, 2124, "initial_command");
     let http_proxy = assert_window_control(replacement_gui, 2125, "http_proxy");
     let https_proxy = assert_window_control(replacement_gui, 2126, "https_proxy");
@@ -1348,7 +1365,7 @@ try {
         ]
     );
 
-    print("STEP navigate Terminal, Composer, and Tabs without the mouse");
+    step("navigate Terminal, Composer, and Tabs without the mouse");
     let focus_message = 0x8003;
     let shortcut_message = 0x8002;
     test_harness::require(
@@ -1409,7 +1426,7 @@ try {
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
 
-    print("STEP preview, cancel, and apply client-owned Settings");
+    step("preview, cancel, and apply client-owned Settings");
     let replacement_composer = assert_window_control(replacement_gui, 2101, "replacement_composer");
     let settings_font = assert_window_control(replacement_gui, 2113, "settings_font");
     let settings_size = assert_window_control(replacement_gui, 2114, "settings_size");
@@ -1465,7 +1482,7 @@ try {
         "remote_ui_settings_cancel_rollback_invalid"
     );
 
-    print("STEP compare counterbalanced Dark and Light render cost");
+    step("compare counterbalanced Dark and Light render cost");
     // Each timed sample starts from the opposite palette, then performs the
     // same target click, synchronous public screenshot, and renderer-counter
     // sample.  AB/BA order counterbalances warmup and phase-order effects.
@@ -1663,7 +1680,7 @@ try {
         "remote_ui_terminal_font_inheritance_invalid"
     );
 
-    print("STEP edit CWD through the bottom workbench segment");
+    step("edit CWD through the bottom workbench segment");
     let cwd_snapshot = wait_projection(
         context,
         cli,
@@ -1718,7 +1735,7 @@ try {
         "remote_ui_cwd_cancel_changed_draft"
     );
 
-    print("STEP prove CWD modal, safe preparation, and OSC 7 truth");
+    step("prove CWD modal, safe preparation, and OSC 7 truth");
     let cwd_editor = json_cli(
         context,
         cli,
@@ -1956,7 +1973,7 @@ try {
     text_cli(context, cli, ["kill-window", "-t", unknown_id]);
     text_cli(context, cli, ["set-composer", "-t", tab_id, ""]);
 
-    print("STEP resize Tabs locally and resize the server-owned viewport");
+    step("resize Tabs locally and resize the server-owned viewport");
     text_cli(context, cli, ["ui-action", "tabs-show"]);
     let before_resize = json_cli(context, cli, ["ui-snapshot"]);
     let rows_before = before_resize.layout.terminal.rows;
@@ -1999,7 +2016,7 @@ try {
         "remote_ui_tabs_resize_invalid"
     );
 
-    print("STEP add and close a child through the typed replaceable Tabs tree");
+    step("add and close a child through the typed replaceable Tabs tree");
     let root_ui = json_cli(context, cli, ["ui-snapshot"]);
     text_cli(
         context,
@@ -2043,7 +2060,7 @@ try {
     );
     child_edit_cancel.click();
 
-    print("STEP collapse and expand the server-owned tab tree");
+    step("collapse and expand the server-owned tab tree");
     text_cli(
         context,
         cli,
@@ -2113,7 +2130,7 @@ try {
         confirmed_close.position.sequence
     );
 
-    print("STEP reject a hierarchy cycle and promote a closing parent's child");
+    step("reject a hierarchy cycle and promote a closing parent's child");
     let hierarchy_child_id = text_cli(
         context,
         cli,
@@ -2245,7 +2262,7 @@ try {
         hierarchy_clean.position.sequence
     );
 
-    print("STEP edit title and note in place with Save and Cancel");
+    step("edit title and note in place with Save and Cancel");
     let edited_title = "remote-edited-" + context.run_id;
     let edited_note = "note-" + context.run_id;
     double_click_tab_text(context, cli, replacement_gui, tab_id);
@@ -2302,7 +2319,7 @@ try {
         "remote_ui_inline_cancel_invalid"
     );
 
-    print("STEP scroll a dense Tabs army through its visible scrollbar");
+    step("scroll a dense Tabs army through its visible scrollbar");
     let sidebar_fixture_ids = [];
     for index in 1..9 {
         let fixture_id = text_cli(
@@ -2394,7 +2411,7 @@ try {
         );
     }
 
-    print("STEP drag and wheel the terminal scrollbar");
+    step("drag and wheel the terminal scrollbar");
     let render_before_output = sample_render_activity(
         context,
         cli,
@@ -2578,7 +2595,7 @@ try {
         "remote_ui_wheel_down_invalid"
     );
 
-    print("STEP forward wheel input to a raw full-screen application");
+    step("forward wheel input to a raw full-screen application");
     let alternate_fixture = std::path::join(
         context.run_directory,
         "alternate-wheel.ps1"
@@ -2704,7 +2721,7 @@ try {
     text_cli(context, cli, ["select-window", "-t", tab_id]);
     text_cli(context, cli, ["kill-window", "-t", alternate_id]);
 
-    print("STEP select terminal text, Copy, and Paste through the UI");
+    step("select terminal text, Copy, and Paste through the UI");
     try {
         clipboard_restore_text = rh::clipboard::get_text();
         clipboard_restore_needed = 1;
@@ -2917,7 +2934,7 @@ try {
         ]
     );
 
-    print("STEP preserve bracketed-paste framing through the UI worker");
+    step("preserve bracketed-paste framing through the UI worker");
     let bracketed_fixture = std::path::join(
         context.run_directory,
         // Reuse the audited, run-owned PowerShell fixture path after the wheel
@@ -3095,7 +3112,7 @@ try {
     text_cli(context, cli, ["select-window", "-t", tab_id]);
     text_cli(context, cli, ["kill-window", "-t", bracketed_id]);
 
-    print("STEP close remains local and GUI recovers its missing server");
+    step("close remains local and GUI recovers its missing server");
     let reconnect_gui_pid = replacement_gui.id;
     let reconnect_facts = replacement_gui.platform_facts;
     let reconnect_window_id = reconnect_facts.top_level_window_id;
@@ -3186,7 +3203,7 @@ try {
         "remote_ui_replacement_lease_leaked"
     );
 
-    print("STEP stop the server through the third close choice");
+    step("stop the server through the third close choice");
     let stop_gui_command = configured_gui_command(
         gui_exe,
         context.address,
