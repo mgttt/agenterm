@@ -239,6 +239,14 @@ jobs:
         shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
+          # 54b7ec3e removed this on the theory that it caused remote-ui-smoke's
+          # timeout. That was a false correlation: with the variable already gone,
+          # remote-ui-smoke still burned its full budget (05:19:43 -> 05:29:43 on
+          # 7daf4e8b) and a local run without it times out identically. What the
+          # removal did cost is real -- the task runner buffers a smoke's stdout,
+          # so a hard timeout leaves this step with ZERO output and every
+          # diagnosis has to be reproduced locally first.
+          AGENTERM_SCRIPT_WORKER_STDERR: inherit
         run: |
           set -euo pipefail
           start_ms=$(date +%s%3N)
