@@ -520,8 +520,19 @@ fn entry() {
     let executable_entries = [];
     if cross_client != 0 || unix_bootstrap != 0 {
         executable_entries = platform_executables(repo, os_name, arch);
+        // Both owning packages. `agenterm-con` is its own workspace package, so
+        // it is excluded from the `--bin` list below (a bare `--bin agenterm-con`
+        // resolves only within the selected packages) -- but it still has to be
+        // SELECTED, or the cross build simply never produces it. The artifact
+        // manifest lists `agenterm-con.exe` for windows-aarch64, so packaging
+        // then failed with `package_client_binary_missing` (Candidate run
+        // 31540288943). This was fixed once in bb77ebb2 and lost to a later edit
+        // of this file; the assertion that catches it lives in packaging, four
+        // steps downstream, which is why it costs a full Candidate round.
         cargo_args.push("--package");
         cargo_args.push("agenterm");
+        cargo_args.push("--package");
+        cargo_args.push("agenterm-con");
         for executable in executable_entries {
             let executable_name = "" + executable.name;
             if executable_name != "agenterm-con"
