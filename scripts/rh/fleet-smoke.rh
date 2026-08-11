@@ -1063,12 +1063,22 @@ try {
         capture.contains("AGENTERM_TAB_ID=" + environment_tab_id);
     let capture_has_session =
         capture.contains("AGENTERM_SESSION=agenterm");
+    // Four independent facts behind one tag: which one failed decided whether
+    // the miss was in the pane capture or in `inspect`'s environment_names, and
+    // the bare tag said neither. This fires only on the CI runner, so name the
+    // observations here rather than paying another round trip to learn them.
     test_harness::require(
         capture_has_role != 0
             && capture_has_tab_id != 0
             && capture_has_session != 0
             && tab_inspect_has_role != 0,
-        "fleet_tab_environment"
+        "fleet_tab_environment:role_in_capture=" + capture_has_role
+            + ":tab_id_in_capture=" + capture_has_tab_id
+            + ":session_in_capture=" + capture_has_session
+            + ":role_in_inspect=" + tab_inspect_has_role
+            + ":want_tab_id=" + environment_tab_id
+            + ":capture=" + capture.sub_string(0, 384)
+            + ":inspect_env=" + rh::json::stringify(tab_inspect_env)
     );
     test_harness::emit_evidence(
         harness,
@@ -1404,6 +1414,7 @@ try {
     let agent_inspect_has_https = agent_inspect_env.contains("HTTPS_PROXY");
     let agent_inspect_has_http = agent_inspect_env.contains("HTTP_PROXY");
     let agent_inspect_has_no_proxy_env = agent_inspect_env.contains("NO_PROXY");
+    // Six facts behind one tag; same reasoning as `fleet_tab_environment`.
     test_harness::require(
         agent_capture_has_no_proxy != 0
             && agent_capture_has_tab_id != 0
@@ -1411,7 +1422,16 @@ try {
             && agent_inspect_has_https == 0
             && agent_inspect_has_http == 0
             && agent_inspect_has_no_proxy_env != 0,
-        "fleet_codex_proxy_context"
+        "fleet_codex_proxy_context:no_proxy_in_capture="
+            + agent_capture_has_no_proxy
+            + ":tab_id_in_capture=" + agent_capture_has_tab_id
+            + ":yolo_leaked=" + agent_capture_has_yolo
+            + ":https_leaked=" + agent_inspect_has_https
+            + ":http_leaked=" + agent_inspect_has_http
+            + ":no_proxy_in_inspect=" + agent_inspect_has_no_proxy_env
+            + ":want_tab_id=" + agent_tab_id
+            + ":capture=" + agent_capture.sub_string(0, 384)
+            + ":inspect_env=" + rh::json::stringify(agent_inspect_env)
     );
     test_harness::emit_evidence(
         harness,
