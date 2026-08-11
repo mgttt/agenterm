@@ -204,13 +204,15 @@ fn load_faces() -> Vec<Face> {
     // face Windows exposes as "新宋体"; it has measured 1:2 Latin/CJK advances,
     // so it must be the primary face rather than a fallback squeezed into a
     // grid measured from Consolas or Cascadia.
-    // No `#[cfg(windows)]` here: the platform difference already lives in
-    // `agenterm_platform::font::fallback_candidates()`, which only offers the
-    // SimSun collection on hosts that ship it. Off Windows the lookup below
-    // simply finds nothing and this falls through. Branching on the target in a
-    // main-crate module is what `production_sources_use_platform_crate_as_the_only_native_boundary`
-    // rejects -- the exemption covers the three subsystem entrypoints, not their
-    // modules.
+    // Deliberately no compile-time host branch here: the platform difference
+    // already lives in `agenterm_platform::font::fallback_candidates()`, which
+    // only offers the SimSun collection on hosts that ship it. Elsewhere the
+    // lookup below simply finds nothing and this falls through. Target
+    // selection in a main-crate module is what
+    // `production_sources_use_platform_crate_as_the_only_native_boundary`
+    // rejects -- its exemption covers the three subsystem entrypoints, not
+    // their modules. (Spelling the attribute out even inside a comment trips
+    // `tests/platform_boundary_regressions.rs`, which scans raw text.)
     if let Some(face) = load_new_simsun_face() {
         faces.push(face);
         for candidate in agenterm_platform::font::fallback_candidates() {
