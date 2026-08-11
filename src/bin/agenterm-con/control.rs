@@ -327,6 +327,30 @@ pub fn usage() -> String {
     "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
 }
 
+#[inline(never)]
+fn parse_u64_decimal(value: &str) -> Option<u64> {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    if bytes.first().copied() == Some(b'+') {
+        index = 1;
+    }
+    if index == bytes.len() {
+        return None;
+    }
+
+    let mut parsed = 0u64;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        parsed = parsed.checked_mul(10)?;
+        parsed = parsed.checked_add(u64::from(byte - b'0'))?;
+        index += 1;
+    }
+    Some(parsed)
+}
+
 struct Cursor<'a> {
     args: &'a [String],
     position: usize,
@@ -377,11 +401,14 @@ impl<'a> Cursor<'a> {
         let value = self
             .next()
             .ok_or_else(|| format!("{flag} requires @TAB_ID"))?;
-        let id = value
-            .strip_prefix('@')
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|id| *id != 0)
-            .ok_or_else(|| format!("invalid tab target {value:?}; expected @TAB_ID"))?;
+        let digits = match value.strip_prefix('@') {
+            Some(digits) => digits,
+            None => return Err(format!("invalid tab target {value:?}; expected @TAB_ID")),
+        };
+        let id = match parse_u64_decimal(digits) {
+            Some(id) if id != 0 => id,
+            _ => return Err(format!("invalid tab target {value:?}; expected @TAB_ID")),
+        };
         Ok(Some(TabId::new(id)))
     }
 
@@ -402,10 +429,14 @@ impl<'a> Cursor<'a> {
         let value = self
             .next()
             .ok_or_else(|| format!("{flag} requires a value"))?;
-        value
-            .parse::<usize>()
-            .map(Some)
-            .map_err(|_| format!("{flag} must be an unsigned integer"))
+        let value = match parse_u64_decimal(&value) {
+            Some(value) => value,
+            None => return Err(format!("{flag} must be an unsigned integer")),
+        };
+        match usize::try_from(value) {
+            Ok(value) => Ok(Some(value)),
+            Err(_) => Err(format!("{flag} must be an unsigned integer")),
+        }
     }
 
     fn optional_u64(&mut self, flag: &str) -> Result<Option<u64>, String> {
@@ -420,16 +451,19 @@ impl<'a> Cursor<'a> {
         let value = self
             .next()
             .ok_or_else(|| format!("{flag} requires a value"))?;
-        value
-            .parse::<u64>()
-            .map(Some)
-            .map_err(|_| format!("{flag} must be an unsigned integer"))
+        match parse_u64_decimal(&value) {
+            Some(value) => Ok(Some(value)),
+            None => Err(format!("{flag} must be an unsigned integer")),
+        }
     }
 
     fn required_u16(&mut self, flag: &str) -> Result<u16, String> {
-        self.required_value(flag)?
-            .parse::<u16>()
-            .map_err(|_| format!("{flag} must be an unsigned 16-bit integer"))
+        let value = self.required_value(flag)?;
+        let value = match parse_u64_decimal(&value) {
+            Some(value) => value,
+            None => return Err(format!("{flag} must be an unsigned 16-bit integer")),
+        };
+        u16::try_from(value).map_err(|_| format!("{flag} must be an unsigned 16-bit integer"))
     }
 
     fn required_i16(&mut self, flag: &str) -> Result<i16, String> {
@@ -1226,6 +1260,54 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn parse_u64_decimal_covers_unsigned_cli_edges() {
+        assert_eq!(parse_u64_decimal("0"), Some(0));
+        assert_eq!(parse_u64_decimal("00042"), Some(42));
+        assert_eq!(parse_u64_decimal("+1"), Some(1));
+        assert_eq!(parse_u64_decimal("18446744073709551615"), Some(u64::MAX));
+        assert_eq!(parse_u64_decimal("18446744073709551616"), None);
+        assert_eq!(parse_u64_decimal("-0"), None);
+        assert_eq!(parse_u64_decimal(""), None);
+        assert_eq!(parse_u64_decimal("+"), None);
+        assert_eq!(parse_u64_decimal("12x"), None);
+        assert_eq!(parse_u64_decimal("\u{FF11}"), None);
+    }
+
+    #[test]
+    fn numeric_cursor_preserves_u16_usize_and_target_bounds() {
+        let u16_max_args = vec!["--row".to_owned(), u16::MAX.to_string()];
+        let mut u16_max_cursor = Cursor::new(&u16_max_args);
+        assert_eq!(u16_max_cursor.required_u16("--row"), Ok(u16::MAX));
+
+        let u16_overflow_args = vec!["--row".to_owned(), "65536".to_owned()];
+        let mut u16_overflow_cursor = Cursor::new(&u16_overflow_args);
+        assert_eq!(
+            u16_overflow_cursor.required_u16("--row"),
+            Err("--row must be an unsigned 16-bit integer".to_owned())
+        );
+
+        let usize_max_args = vec!["--max-bytes".to_owned(), usize::MAX.to_string()];
+        let mut usize_max_cursor = Cursor::new(&usize_max_args);
+        assert_eq!(
+            usize_max_cursor.optional_usize("--max-bytes"),
+            Ok(Some(usize::MAX))
+        );
+
+        let mut usize_overflow = usize::MAX.to_string();
+        usize_overflow.push('0');
+        let usize_overflow_args = vec!["--max-bytes".to_owned(), usize_overflow];
+        let mut usize_overflow_cursor = Cursor::new(&usize_overflow_args);
+        assert_eq!(
+            usize_overflow_cursor.optional_usize("--max-bytes"),
+            Err("--max-bytes must be an unsigned integer".to_owned())
+        );
+
+        let target_args = vec!["--target".to_owned(), "@+1".to_owned()];
+        let mut target_cursor = Cursor::new(&target_args);
+        assert_eq!(target_cursor.optional_target(), Ok(Some(TabId::new(1))));
     }
 
     #[test]

@@ -320,6 +320,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   404,572 B（-32 B），其他 section 不变。该项按协议漂移预防保留，并明确记为 artifact
   size-neutral；81 unit、18 public-control black-box、1 multitab control journey、
   Windows x64 Clippy 和 Linux x64 check 通过。
+- con CLI 的 unsigned decimal schema 由一个 93 B、非泛型、无分配 ASCII kernel 解析，
+  `optional_u64`、`optional_usize`、`required_u16` 和 `@TAB_ID` 共用 checked multiply/add，
+  再由目标类型 `TryFrom` 收敛位宽。它保留标准 `FromStr` 的单前导 `+`、前导零、溢出和
+  非数字行为以及现有逐 flag 错误文本；有符号 `i16` 仍使用标准库，不扩大自研 parser
+  权威。官方 release-fast PE 从 620,032 B 降至 619,520 B（-512 B），`.text` 从
+  404,572 B 降至 404,348 B（-224 B），`.rdata +16 B`，其余 section 不变。83 unit、
+  18 public-control black-box、1 multitab control journey、Windows x64 Clippy 和 Linux
+  x64 check 通过。
   filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
   每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制

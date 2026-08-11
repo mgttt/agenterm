@@ -397,6 +397,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   404,604 to 404,572 bytes; this is retained as protocol-drift prevention and
   reported as artifact-size-neutral. The same control and cross-platform
   evidence remains green.
+  Fixed-schema unsigned CLI values now share one 93-byte, allocation-free ASCII
+  decimal parser with checked overflow and target-width conversion. `u64`,
+  `usize`, `u16`, and `@TAB_ID` preserve leading-plus, leading-zero, invalid,
+  overflow, and existing per-flag error behavior; signed `i16` deliberately
+  remains on standard `FromStr`. The official release-fast PE falls from
+  620,032 to 619,520 bytes, with `.text` down from 404,572 to 404,348 bytes and
+  `.rdata` up 16 bytes. Evidence is 83 unit tests, 18 public-control GUI
+  black-box journeys, one multitab control journey, Windows x64 Clippy, and
+  Linux x64 compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

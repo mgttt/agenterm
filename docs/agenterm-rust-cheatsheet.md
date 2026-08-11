@@ -227,6 +227,14 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   mouse tag unification removed 32 B of `.text`, but PE file alignment kept the
   artifact byte count unchanged, so it is a consistency win rather than a PE
   size claim.
+- A fixed CLI schema does not require one generic integer parser instance per
+  target type. A single non-generic checked ASCII-to-`u64` kernel can feed
+  `TryFrom` for unsigned widths while callers retain their exact error text. It
+  must preserve details such as one leading `+`, leading zeroes, empty input,
+  non-ASCII rejection, and overflow. In con this kernel emitted as 93 B,
+  reduced `.text` by 224 B, and crossed one PE alignment block for a 512 B
+  artifact reduction. Keep signed parsing on `FromStr` until its separate
+  grammar and range semantics have matching evidence.
 - Do not change an unwind-enabled native host to `panic = "abort"` merely to
   remove runtime bytes. `agenterm-con` catches panics at WNDPROC, deferred-work,
   and native-thread FFI boundaries; abort changes that containment contract
