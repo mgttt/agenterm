@@ -105,10 +105,16 @@ fn stage(source_directory_value, destination_directory_value, name_value) {
     let destination_directory =
         std::path::absolute(destination_directory_value).display;
     let name = "" + name_value;
+    // `agenterm-con.exe` joined the staged set when it became its own workspace
+    // package; it was added to `scripts/artifacts.json` but not to this
+    // allowlist, so every `build.bat` run died with
+    // `stage_artifact_name_invalid:agenterm-con.exe` *after* a successful cargo
+    // build -- the staging step, not the compile.
     require(
         name == "agenterm.exe"
             || name == "agenterm.com"
             || name == "agenterm-cc.exe"
+            || name == "agenterm-con.exe"
             || name == "agenterm-rh.exe",
         "stage_artifact_name_invalid:" + name
     );

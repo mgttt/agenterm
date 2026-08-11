@@ -86,12 +86,22 @@ fn validate(path) {
             "artifact_manifest_offline_probe_invalid:" + name
         );
         if subsystem == 2 {
-            if role == "control-center-gui" || role == "gui-cli" {
-                // Both GUI-subsystem roles define side-effect-free
+            if role == "control-center-gui"
+                || role == "gui-cli"
+                || role == "lightweight-terminal-host"
+            {
+                // These GUI-subsystem roles define side-effect-free
                 // informational commands (`--version`, `cli --version` via
                 // the same-PE forwarder). Command::output supplies redirected
                 // handles and waits for a Windows-subsystem child, so this is
                 // a real offline entrypoint gate.
+                //
+                // `lightweight-terminal-host` (`agenterm-con.exe`) joined that
+                // set when it became its own package. Its probe is real --
+                // `agenterm-con.exe --version` prints `agenterm-con 0.1.16` and
+                // exits 0, verified directly -- so the manifest was right and
+                // this allowlist was simply out of date, failing every staging
+                // run with `artifact_manifest_gui_probe_forbidden`.
                 require(
                     entry.offline_probe.len > 0,
                     "artifact_manifest_gui_probe_required:" + name
