@@ -308,6 +308,39 @@ fn entry() {
         cargo_output = std::path::join(repo, "target-release").display;
     }
     let development_target = std::path::join(repo, "target").display;
+    // `-Z build-std` needs an explicit target even for a native build. Without
+    // one Cargo can compile compiler_builtins with host-dependency semantics,
+    // leaving target intrinsics unresolved at the final link.
+    let con_target = target;
+    if con_target == "" {
+        let rustc_host_path = repo + ".build-rustc-host.tmp";
+        let rustc_host_code = std::process::command_stdout_file(
+            "rustc",
+            ["-vV"],
+            10000,
+            rustc_host_path,
+            #{ current_dir: repo }
+        );
+        require(rustc_host_code == 0, "build_con_rustc_host");
+        let rustc_metadata = std::fs::read_to_string(rustc_host_path);
+        std::fs::try_remove_file(rustc_host_path);
+        for source_line in rustc_metadata.split("\n") {
+            let line = source_line;
+            line.trim();
+            if line.starts_with("host: ") {
+                con_target = line;
+                con_target.replace("host: ", "");
+                con_target.trim();
+                break;
+            }
+        }
+        require(con_target != "", "build_con_rustc_host_missing");
+        let con_facts = target_facts(con_target);
+        require(
+            con_facts.os != "",
+            "build_con_rustc_host_unsupported:" + con_target
+        );
+    }
     let profile_name = profile;
     if profile == "dev" {
         profile_name = "debug";
@@ -319,8 +352,10 @@ fn entry() {
     let profile_directory =
         std::path::join(cargo_profile_root, profile_name).display;
     let con_profile_name = "con-" + profile;
+    let con_profile_root =
+        std::path::join(cargo_output, con_target).display;
     let con_profile_directory =
-        std::path::join(cargo_profile_root, con_profile_name).display;
+        std::path::join(con_profile_root, con_profile_name).display;
 
     let identity = build_identity::facts(repo, profile);
     let environment = build_identity::environment(identity);
@@ -588,13 +623,17 @@ fn entry() {
         con_cargo_args.push("xwin");
     }
     con_cargo_args.push(action);
+    con_cargo_args.push("-Z");
+    con_cargo_args.push("build-std=std,panic_unwind");
+    con_cargo_args.push("-Z");
+    con_cargo_args.push(
+        "build-std-features=panic-unwind,backtrace-trace-only"
+    );
     con_cargo_args.push("--locked");
     con_cargo_args.push("--profile");
     con_cargo_args.push(con_profile_name);
-    if target != "" {
-        con_cargo_args.push("--target");
-        con_cargo_args.push(target);
-    }
+    con_cargo_args.push("--target");
+    con_cargo_args.push(con_target);
     con_cargo_args.push("--package");
     con_cargo_args.push("agenterm-con");
     if action == "clippy" {
@@ -608,6 +647,9 @@ fn entry() {
     con_cargo_command.current_dir(repo);
     con_cargo_command.timeout(std::time::Duration::from_millis(3600000));
     con_cargo_command.stdout_file(stdout_path);
+    // Cargo 1.97 keeps build-std unstable. Scope the bootstrap escape hatch to
+    // this pinned-toolchain con subprocess; the workbench build remains stable.
+    con_cargo_command.env("RUSTC_BOOTSTRAP", "1");
     if stream_stderr != 0 {
         con_cargo_command.stderr_inherit();
     } else {

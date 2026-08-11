@@ -371,6 +371,12 @@ profile directory before the single staging task. Never qualify or distribute a
 direct `dev` / `release-fast` / `release` con artifact; those workspace profiles
 abort and cannot satisfy the native callback containment contract. Panic tests
 must run under the matching `con-*` profile, not only Cargo's test profile.
+The pinned toolchain includes `rust-src`; the con subprocess uses an explicit
+target plus Rust 1.97 `build-std` with `panic-unwind` and
+`backtrace-trace-only`. Keep that target explicit even for native builds, and
+keep the scoped `RUSTC_BOOTSTRAP` out of workbench compilation. This preserves
+FFI panic containment while omitting std backtrace symbolization from the con
+artifact.
 Build-identity freezing first reuses an existing compatible Script worker and
 falls back to bootstrapping one only when it is absent or incompatible. Do not
 restore an unconditional pre-identity worker build: compile-time
