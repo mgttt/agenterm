@@ -6,6 +6,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     ffi::c_void,
     mem,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -18,6 +19,7 @@ use std::{
     time::Instant,
 };
 
+use windows_sys::Win32::Graphics::Gdi::ValidateRect;
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi::{
@@ -43,13 +45,15 @@ use windows_sys::Win32::{
             RegisterClassW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
             SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
             SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-            TranslateMessage, WM_APP, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
-            WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_IME_CHAR, WM_IME_COMPOSITION,
-            WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-            WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
-            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP,
-            WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            TranslateMessage, WM_ACTIVATE, WM_APP, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CHAR,
+            WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_IME_CHAR,
+            WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION,
+            WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+            WM_MBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCACTIVATE,
+            WM_NCCALCSIZE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
+            WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SETTEXT, WM_SHOWWINDOW, WM_SIZE,
+            WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING,
+            WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     },
 };
@@ -79,6 +83,9 @@ const MOUSE_LEAVE_MESSAGE: u32 = 0x02a3;
 const WAIT_TIMER_ID: usize = 0x41;
 const CLASS_NAME: &str = "AgenTermNativePixelWindow";
 const WIN32_MAX_COORD: u32 = i32::MAX as u32;
+const ERROR_CLASS_ALREADY_EXISTS_CODE: i32 = 1410;
+const MAX_NATIVE_DEFERRED: usize = 256;
+const MAX_NATIVE_DRAIN: usize = 512;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Win32Rect {
@@ -93,6 +100,207 @@ enum RedrawInvalidation {
     Empty,
     Full,
     Rect(Win32Rect),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DispatchPhase {
+    Idle,
+    NativeMessage,
+    ApplicationOpened,
+    ApplicationEvent,
+    Rendering,
+    AboutToWait,
+    Draining,
+    Closing,
+}
+
+enum NativeCommand {
+    SetTitle(String),
+    Show(i32),
+    Focus,
+    SetWindowSize { width: i32, height: i32 },
+    ApplyDpiRect(Win32Rect),
+    SetImeCursor { x: i32, y: i32 },
+    SetImeAllowed(bool),
+    ReleaseCapture,
+}
+
+enum PendingNativeEvent {
+    CloseRequested,
+    Destroy,
+    Size {
+        minimized: bool,
+    },
+    DpiChanged {
+        suggested: Option<Win32Rect>,
+    },
+    FocusChanged(bool),
+    ImeComposition {
+        message: u32,
+        active: bool,
+        text: String,
+        cursor: Option<(usize, usize)>,
+    },
+    ImeChar(u16),
+    Keyboard(NormalizedKeyEvent),
+    Char {
+        unit: u16,
+        modifiers: ModifierState,
+    },
+    PointerMoved {
+        position: LogicalPoint,
+        modifiers: ModifierState,
+    },
+    PointerLeft,
+    CaptureChanged {
+        new_owner: HWND,
+    },
+    CancelMode,
+    PointerButton {
+        button: PointerButton,
+        state: PointerButtonState,
+        position: LogicalPoint,
+        modifiers: ModifierState,
+    },
+    MouseWheel {
+        delta: WheelDelta,
+        modifiers: ModifierState,
+    },
+    Wake,
+    WaitTimer,
+    CaptureRelease,
+    ImeAllowed(bool),
+}
+
+enum DeferredNative {
+    Command(NativeCommand),
+    Event(PendingNativeEvent),
+}
+
+struct NativeControl {
+    phase: Cell<DispatchPhase>,
+    deferred: RefCell<VecDeque<DeferredNative>>,
+    paint_pending: Cell<bool>,
+    closed: Cell<bool>,
+    exit_requested: Cell<bool>,
+    last_dpi_rect: Cell<Option<Win32Rect>>,
+    failure_latched: Cell<bool>,
+    failure: RefCell<Option<PixelWindowError>>,
+}
+
+impl NativeControl {
+    fn new() -> Self {
+        Self {
+            phase: Cell::new(DispatchPhase::Idle),
+            deferred: RefCell::new(VecDeque::new()),
+            paint_pending: Cell::new(false),
+            closed: Cell::new(false),
+            exit_requested: Cell::new(false),
+            last_dpi_rect: Cell::new(None),
+            failure_latched: Cell::new(false),
+            failure: RefCell::new(None),
+        }
+    }
+
+    fn has_deferred(&self) -> bool {
+        self.deferred
+            .try_borrow()
+            .map(|queue| !queue.is_empty())
+            .unwrap_or(true)
+    }
+
+    fn record_failure(&self, error: PixelWindowError) {
+        self.failure_latched.set(true);
+        self.exit_requested.set(true);
+        if let Ok(mut failure) = self.failure.try_borrow_mut()
+            && failure.is_none()
+        {
+            *failure = Some(error);
+        }
+    }
+
+    fn take_failure(&self) -> Option<PixelWindowError> {
+        let latched = self.failure_latched.replace(false);
+        if let Ok(mut failure) = self.failure.try_borrow_mut() {
+            return failure.take().or_else(|| {
+                latched.then(|| {
+                    PixelWindowError::failed(
+                        "pixel_window_native_control_failure",
+                        "native window control state became unavailable",
+                    )
+                })
+            });
+        }
+        latched.then(|| {
+            PixelWindowError::failed(
+                "pixel_window_native_control_failure",
+                "native window control state became unavailable",
+            )
+        })
+    }
+
+    fn enqueue(&self, item: DeferredNative) -> Result<(), PixelWindowError> {
+        if self.closed.get() {
+            return Err(closed_error());
+        }
+        let Ok(mut queue) = self.deferred.try_borrow_mut() else {
+            let error = native_queue_failure("pixel_window_native_queue_borrow_failed");
+            self.record_failure(native_queue_failure(
+                "pixel_window_native_queue_borrow_failed",
+            ));
+            return Err(error);
+        };
+        if queue.len() >= MAX_NATIVE_DEFERRED {
+            let error = native_queue_failure("pixel_window_native_queue_overflow");
+            drop(queue);
+            self.record_failure(native_queue_failure("pixel_window_native_queue_overflow"));
+            return Err(error);
+        }
+        queue.push_back(item);
+        Ok(())
+    }
+
+    fn enqueue_dpi_rect(&self, rect: Win32Rect) -> Result<(), PixelWindowError> {
+        if self.last_dpi_rect.get() == Some(rect) {
+            return Ok(());
+        }
+        self.last_dpi_rect.set(Some(rect));
+        self.enqueue(DeferredNative::Command(NativeCommand::ApplyDpiRect(rect)))
+    }
+
+    fn pop(&self) -> Option<DeferredNative> {
+        self.deferred.try_borrow_mut().ok()?.pop_front()
+    }
+
+    fn push_front(&self, item: DeferredNative) -> Result<(), PixelWindowError> {
+        let Ok(mut queue) = self.deferred.try_borrow_mut() else {
+            return Err(native_queue_failure(
+                "pixel_window_native_queue_borrow_failed",
+            ));
+        };
+        queue.push_front(item);
+        Ok(())
+    }
+
+    fn clear_deferred(&self) {
+        if let Ok(mut queue) = self.deferred.try_borrow_mut() {
+            queue.clear();
+        }
+    }
+}
+
+struct NativeWindowUserData {
+    host: RefCell<HostState>,
+    control: Rc<NativeControl>,
+    backend: Rc<Backend>,
+}
+
+struct NativeMessageSnapshot {
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    event: Option<PendingNativeEvent>,
+    call_default: bool,
 }
 
 fn win32_invalidation_for_damage(damage: PixelRect, width: u32, height: u32) -> RedrawInvalidation {
@@ -225,8 +433,29 @@ struct Backend {
     metrics: RefCell<PixelWindowMetrics>,
     present: RefCell<PixelPresentLedger>,
     alive: Arc<AtomicBool>,
+    control: Rc<NativeControl>,
     capture_active: Cell<bool>,
     ime_allowed: Cell<bool>,
+}
+
+impl Backend {
+    fn submit_command(&self, command: NativeCommand) -> Result<(), PixelWindowError> {
+        if self.control.closed.get() {
+            return Err(closed_error());
+        }
+        if self.control.phase.get() == DispatchPhase::Idle && !self.control.has_deferred() {
+            return apply_native_command(self, command);
+        }
+        self.control.enqueue(DeferredNative::Command(command))
+    }
+
+    fn submit_void_command(&self, command: NativeCommand) {
+        if let Err(error) = self.submit_command(command)
+            && !self.control.closed.get()
+        {
+            self.control.record_failure(error);
+        }
+    }
 }
 
 impl PixelWindowBackend for Backend {
@@ -283,42 +512,31 @@ impl PixelWindowBackend for Backend {
     }
 
     fn set_minimized(&self, minimized: bool) {
-        let hwnd = self.hwnd.get();
-        if !hwnd.is_null() {
-            unsafe { ShowWindow(hwnd, if minimized { SW_MINIMIZE } else { SW_RESTORE }) };
-        }
+        self.submit_void_command(NativeCommand::Show(if minimized {
+            SW_MINIMIZE
+        } else {
+            SW_RESTORE
+        }));
     }
 
     fn set_maximized(&self, maximized: bool) {
-        let hwnd = self.hwnd.get();
-        if !hwnd.is_null() {
-            unsafe { ShowWindow(hwnd, if maximized { SW_MAXIMIZE } else { SW_RESTORE }) };
-        }
+        self.submit_void_command(NativeCommand::Show(if maximized {
+            SW_MAXIMIZE
+        } else {
+            SW_RESTORE
+        }));
     }
 
     fn set_visible(&self, visible: bool) {
-        let hwnd = self.hwnd.get();
-        if !hwnd.is_null() {
-            unsafe { ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE }) };
-        }
+        self.submit_void_command(NativeCommand::Show(if visible { SW_SHOW } else { SW_HIDE }));
     }
 
     fn focus(&self) {
-        let hwnd = self.hwnd.get();
-        if !hwnd.is_null() {
-            unsafe {
-                SetForegroundWindow(hwnd);
-                SetFocus(hwnd);
-            }
-        }
+        self.submit_void_command(NativeCommand::Focus);
     }
 
     fn set_title(&self, title: &str) {
-        let hwnd = self.hwnd.get();
-        if !hwnd.is_null() {
-            let title = wide_null(title);
-            unsafe { SetWindowTextW(hwnd, title.as_ptr()) };
-        }
+        self.submit_void_command(NativeCommand::SetTitle(title.to_owned()));
     }
 
     fn set_pointer_cursor(&self, cursor: PixelPointerCursor) -> Result<(), PixelWindowError> {
@@ -357,21 +575,10 @@ impl PixelWindowBackend for Backend {
         let chrome_h = (outer.bottom - outer.top) - (client.bottom - client.top);
         let width = (size.width * metrics.scale_factor).round() as i32 + chrome_w;
         let height = (size.height * metrics.scale_factor).round() as i32 + chrome_h;
-        if unsafe {
-            SetWindowPos(
-                hwnd,
-                ptr::null_mut(),
-                0,
-                0,
-                width.max(1),
-                height.max(1),
-                SWP_NOACTIVATE | SWP_NOZORDER,
-            )
-        } == 0
-        {
-            return Err(last_error("pixel_window_resize_failed"));
-        }
-        Ok(())
+        self.submit_command(NativeCommand::SetWindowSize {
+            width: width.max(1),
+            height: height.max(1),
+        })
     }
 
     fn set_pointer_capture(&self, captured: bool) -> Result<(), PixelWindowError> {
@@ -380,8 +587,13 @@ impl PixelWindowBackend for Backend {
             return Err(closed_error());
         }
         if captured {
-            unsafe { SetCapture(hwnd) };
+            // SetCapture returns the previous owner, not a success flag. The
+            // ownership check is the authoritative result. If a previous
+            // owner synchronously reenters this HWND, window_proc takes the
+            // RefCell/queue path; it cannot create a second HostState borrow.
+            let _previous_owner = unsafe { SetCapture(hwnd) };
             if unsafe { GetCapture() } != hwnd {
+                self.capture_active.set(false);
                 return Err(PixelWindowError::failed(
                     "pixel_window_pointer_capture_failed",
                     "SetCapture did not transfer pointer capture to the pixel window",
@@ -400,18 +612,20 @@ impl PixelWindowBackend for Backend {
     fn set_ime_allowed(&self, allowed: bool) {
         self.ime_allowed.set(allowed);
         let hwnd = self.hwnd.get();
-        if !hwnd.is_null() {
-            unsafe { PostMessageW(hwnd, IME_ALLOWED_MESSAGE, usize::from(allowed), 0) };
+        if !hwnd.is_null()
+            && unsafe { PostMessageW(hwnd, IME_ALLOWED_MESSAGE, usize::from(allowed), 0) } == 0
+        {
+            self.control
+                .record_failure(last_error("pixel_window_ime_allowed_post_failed"));
         }
     }
 
     fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError> {
         let scale = self.metrics.borrow().scale_factor;
-        crate::selected::ime::set_anchor_position(
-            (area.origin.x * scale).round() as i32,
-            (area.origin.y * scale).round() as i32,
-        );
-        Ok(())
+        self.submit_command(NativeCommand::SetImeCursor {
+            x: (area.origin.x * scale).round() as i32,
+            y: (area.origin.y * scale).round() as i32,
+        })
     }
 }
 
@@ -451,7 +665,13 @@ pub(crate) fn run_pixel_window(
         ..unsafe { mem::zeroed() }
     };
     if unsafe { RegisterClassW(&window_class) } == 0 {
-        return Err(last_error("pixel_window_class_register_failed"));
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(ERROR_CLASS_ALREADY_EXISTS_CODE) {
+            return Err(PixelWindowError::failed(
+                "pixel_window_class_register_failed",
+                error,
+            ));
+        }
     }
 
     let scale = 1.0;
@@ -462,12 +682,14 @@ pub(crate) fn run_pixel_window(
         scale_factor: scale,
     };
     let alive = Arc::new(AtomicBool::new(true));
+    let control = Rc::new(NativeControl::new());
     let backend = Rc::new(Backend {
         hwnd: Cell::new(ptr::null_mut()),
         wake_hwnd: Arc::new(AtomicIsize::new(0)),
         metrics: RefCell::new(initial_metrics),
         present: RefCell::new(PixelPresentLedger::new()),
         alive: Arc::clone(&alive),
+        control: control.clone(),
         capture_active: Cell::new(false),
         ime_allowed: Cell::new(options.ime_allowed),
     });
@@ -484,7 +706,7 @@ pub(crate) fn run_pixel_window(
         Ok(())
     }));
     let window = PixelWindow::new(backend.clone(), waker);
-    let mut state = Box::new(HostState {
+    let state = HostState {
         application,
         backend: backend.clone(),
         window,
@@ -500,7 +722,13 @@ pub(crate) fn run_pixel_window(
         frame_width: 0,
         frame_height: 0,
         frame_scale_bits: 0,
+    };
+    let user_data = Box::new(NativeWindowUserData {
+        host: RefCell::new(state),
+        control: control.clone(),
+        backend: backend.clone(),
     });
+    let user_data_ptr = Box::into_raw(user_data);
     let title = wide_null(&options.title);
     let hwnd = unsafe {
         CreateWindowExW(
@@ -515,36 +743,52 @@ pub(crate) fn run_pixel_window(
             ptr::null_mut(),
             ptr::null_mut(),
             instance,
-            (&mut *state as *mut HostState).cast::<c_void>(),
+            user_data_ptr.cast::<c_void>(),
         )
     };
     if hwnd.is_null() {
+        unsafe { drop(Box::from_raw(user_data_ptr)) };
         return Err(last_error("pixel_window_create_failed"));
     }
+    let user_data = unsafe { Box::from_raw(user_data_ptr) };
     backend.hwnd.set(hwnd);
     backend.wake_hwnd.store(hwnd as isize, Ordering::Release);
     apply_ime_allowed(hwnd, options.ime_allowed);
-    update_metrics(&mut state, GeometryChange::Resized, false);
-    let opened = catch_application("opened", || state.application.opened(&state.window));
-    apply_directive(&mut state, opened);
-    state.opened = true;
-    unsafe {
-        ShowWindow(
-            hwnd,
-            if options.no_activate {
-                SW_SHOWNOACTIVATE
-            } else {
-                SW_SHOW
-            },
-        )
-    };
+    {
+        let Ok(mut state) = user_data.host.try_borrow_mut() else {
+            control.record_failure(native_queue_failure("pixel_window_host_borrow_failed"));
+            return Err(native_queue_failure("pixel_window_host_borrow_failed"));
+        };
+        update_metrics(&mut state, GeometryChange::Resized, false);
+        let previous = control.phase.replace(DispatchPhase::ApplicationOpened);
+        let state = &mut *state;
+        let HostState {
+            application,
+            window,
+            ..
+        } = state;
+        let opened = catch_application("opened", || application.opened(window));
+        apply_directive(state, opened);
+        state.opened = true;
+        control.phase.set(previous);
+    }
+    if let Err(error) = control.enqueue(DeferredNative::Command(NativeCommand::Show(
+        if options.no_activate {
+            SW_SHOWNOACTIVATE
+        } else {
+            SW_SHOW
+        },
+    ))) {
+        control.record_failure(error);
+    }
     backend.request_redraw();
+    drain_native(&user_data, hwnd);
 
-    while !state.exit {
+    while !host_should_exit(&user_data) {
         let mut message: MSG = unsafe { mem::zeroed() };
         let result = unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) };
         if result == -1 {
-            state.deferred_error = Some(last_error("pixel_window_message_loop_failed"));
+            control.record_failure(last_error("pixel_window_message_loop_failed"));
             break;
         }
         if result == 0 || message.message == WM_QUIT {
@@ -554,36 +798,58 @@ pub(crate) fn run_pixel_window(
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        while !state.exit
+        drain_native(&user_data, hwnd);
+        while !host_should_exit(&user_data)
             && unsafe { PeekMessageW(&mut message, ptr::null_mut(), 0, 0, PM_REMOVE) } != 0
         {
             if message.message == WM_QUIT {
-                state.exit = true;
+                control.exit_requested.set(true);
                 break;
             }
             unsafe {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+            drain_native(&user_data, hwnd);
         }
-        if state.exit {
+        if host_should_exit(&user_data) {
             break;
         }
-        let directive = catch_application("about_to_wait", || {
-            state
-                .application
-                .about_to_wait(&state.window, Instant::now())
-        });
-        apply_directive(&mut state, directive);
+        {
+            let Ok(mut state) = user_data.host.try_borrow_mut() else {
+                control.record_failure(native_queue_failure("pixel_window_host_borrow_failed"));
+                break;
+            };
+            let previous = control.phase.replace(DispatchPhase::AboutToWait);
+            let state = &mut *state;
+            let HostState {
+                application,
+                window,
+                ..
+            } = state;
+            let directive = catch_application("about_to_wait", || {
+                application.about_to_wait(window, Instant::now())
+            });
+            apply_directive(state, directive);
+            control.phase.set(previous);
+        }
+        drain_native(&user_data, hwnd);
     }
 
+    control.phase.set(DispatchPhase::Closing);
     alive.store(false, Ordering::Release);
     backend.wake_hwnd.store(0, Ordering::Release);
     let remaining_hwnd = backend.hwnd.replace(ptr::null_mut());
     if !remaining_hwnd.is_null() {
         unsafe { DestroyWindow(remaining_hwnd) };
     }
-    state.deferred_error.map_or(Ok(()), Err)
+    surface_control_failure(&user_data);
+    user_data
+        .host
+        .try_borrow_mut()
+        .ok()
+        .and_then(|mut state| state.deferred_error.take())
+        .map_or(Ok(()), Err)
 }
 
 unsafe extern "system" fn window_proc(
@@ -595,148 +861,382 @@ unsafe extern "system" fn window_proc(
     if message == WM_NCCREATE {
         let create = lparam as *const CREATESTRUCTW;
         if !create.is_null() {
-            let state = unsafe { (*create).lpCreateParams } as *mut HostState;
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize) };
+            let user_data = unsafe { (*create).lpCreateParams } as *mut NativeWindowUserData;
+            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, user_data as isize) };
         }
-    }
-    let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut HostState;
-    if state.is_null() {
         return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
     }
-    let result = catch_unwind(AssertUnwindSafe(|| unsafe {
-        dispatch_message(&mut *state, hwnd, message, wparam, lparam)
-    }));
-    match result {
-        Ok(value) => value,
-        Err(_) => {
-            let state = unsafe { &mut *state };
-            state.frame_state.invalidate();
-            if state.deferred_error.is_none() {
-                state.deferred_error = Some(PixelWindowError::failed(
-                    "pixel_window_host_panic",
-                    "native pixel-window callback panicked",
-                ));
+
+    if message == WM_ERASEBKGND {
+        return 1;
+    }
+    if message == WM_IME_SETCONTEXT {
+        const IS_SHOWUICOMPOSITIONWINDOW: isize = 0x0002;
+        return unsafe {
+            DefWindowProcW(hwnd, message, wparam, lparam & !IS_SHOWUICOMPOSITIONWINDOW)
+        };
+    }
+    if is_stateless_message(message) || !is_stateful_message(message) {
+        return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+    }
+
+    let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut NativeWindowUserData;
+    if user_data.is_null() {
+        return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+    }
+    let user_data = unsafe { &*user_data };
+    if message == WM_NCDESTROY {
+        return unsafe { handle_nc_destroy(user_data, hwnd, message, wparam, lparam) };
+    }
+
+    if message == WM_PAINT {
+        return match user_data.host.try_borrow_mut() {
+            Ok(mut state) => {
+                let previous = user_data
+                    .control
+                    .phase
+                    .replace(DispatchPhase::NativeMessage);
+                let result = catch_unwind(AssertUnwindSafe(|| paint(&mut state, hwnd)));
+                user_data.control.phase.set(previous);
+                match result {
+                    Ok(Ok(())) => 0,
+                    Ok(Err(error)) => {
+                        state.frame_state.invalidate();
+                        if state.deferred_error.is_none() {
+                            state.deferred_error = Some(error);
+                        }
+                        state.exit = true;
+                        user_data.control.exit_requested.set(true);
+                        0
+                    }
+                    Err(_) => {
+                        state.frame_state.invalidate();
+                        if state.deferred_error.is_none() {
+                            state.deferred_error = Some(PixelWindowError::failed(
+                                "pixel_window_host_panic",
+                                "native pixel-window callback panicked",
+                            ));
+                        }
+                        state.exit = true;
+                        user_data.control.exit_requested.set(true);
+                        0
+                    }
+                }
             }
-            state.exit = true;
-            0
+            Err(_) => {
+                consume_reentrant_paint(user_data, hwnd);
+                0
+            }
+        };
+    }
+
+    let snapshot = match catch_unwind(AssertUnwindSafe(|| unsafe {
+        snapshot_native_message(hwnd, message, wparam, lparam, &user_data.backend)
+    })) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+        Err(_) => {
+            user_data.control.record_failure(PixelWindowError::failed(
+                "pixel_window_native_message_snapshot_panic",
+                "native message snapshot panicked",
+            ));
+            return 0;
+        }
+    };
+    let call_default = snapshot.call_default;
+    match user_data.host.try_borrow_mut() {
+        Ok(mut state) => {
+            let previous = user_data
+                .control
+                .phase
+                .replace(DispatchPhase::NativeMessage);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                dispatch_snapshot(&mut state, hwnd, snapshot)
+            }));
+            user_data.control.phase.set(previous);
+            match result {
+                Ok(value) => value,
+                Err(_) => {
+                    state.frame_state.invalidate();
+                    if state.deferred_error.is_none() {
+                        state.deferred_error = Some(PixelWindowError::failed(
+                            "pixel_window_host_panic",
+                            "native pixel-window callback panicked",
+                        ));
+                    }
+                    state.exit = true;
+                    user_data.control.exit_requested.set(true);
+                    0
+                }
+            }
+        }
+        Err(_) => {
+            if let Some(event) = snapshot.event
+                && let Err(error) = user_data.control.enqueue(DeferredNative::Event(event))
+            {
+                user_data.control.record_failure(error);
+            }
+            if call_default {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            } else {
+                0
+            }
         }
     }
 }
 
-unsafe fn dispatch_message(
-    state: &mut HostState,
+fn is_stateless_message(message: u32) -> bool {
+    matches!(
+        message,
+        WM_SETTEXT
+            | WM_WINDOWPOSCHANGING
+            | WM_WINDOWPOSCHANGED
+            | WM_MOVE
+            | WM_SHOWWINDOW
+            | WM_ACTIVATE
+            | WM_NCACTIVATE
+            | WM_NCCALCSIZE
+            | WM_GETMINMAXINFO
+            | WM_SETCURSOR
+            | WM_MOUSEACTIVATE
+    )
+}
+
+fn is_stateful_message(message: u32) -> bool {
+    matches!(
+        message,
+        WM_PAINT
+            | WM_CLOSE
+            | WM_DESTROY
+            | WM_NCDESTROY
+            | WM_SIZE
+            | WM_DPICHANGED
+            | WM_SETFOCUS
+            | WM_KILLFOCUS
+            | WM_IME_STARTCOMPOSITION
+            | WM_IME_COMPOSITION
+            | WM_IME_ENDCOMPOSITION
+            | WM_IME_CHAR
+            | WAKE_MESSAGE
+            | WM_KEYDOWN
+            | WM_SYSKEYDOWN
+            | WM_KEYUP
+            | WM_SYSKEYUP
+            | WM_CHAR
+            | WM_MOUSEMOVE
+            | MOUSE_LEAVE_MESSAGE
+            | WM_CAPTURECHANGED
+            | WM_CANCELMODE
+            | WM_LBUTTONDOWN
+            | WM_LBUTTONUP
+            | WM_RBUTTONDOWN
+            | WM_RBUTTONUP
+            | WM_MBUTTONDOWN
+            | WM_MBUTTONUP
+            | WM_MOUSEWHEEL
+            | WM_TIMER
+            | CAPTURE_MESSAGE
+            | IME_ALLOWED_MESSAGE
+    )
+}
+
+fn copied_suggested_rect(lparam: LPARAM) -> Option<Win32Rect> {
+    let suggested = lparam as *const RECT;
+    if suggested.is_null() {
+        return None;
+    }
+    let rect = unsafe { *suggested };
+    suggested_rect_geometry(&rect).map(|(x, y, width, height)| Win32Rect {
+        left: x,
+        top: y,
+        right: x + width,
+        bottom: y + height,
+    })
+}
+
+fn current_scale(backend: &Backend) -> f64 {
+    backend
+        .metrics
+        .try_borrow()
+        .map(|metrics| metrics.scale_factor.max(f64::EPSILON))
+        .unwrap_or(1.0)
+}
+
+unsafe fn snapshot_native_message(
     hwnd: HWND,
     message: u32,
     wparam: WPARAM,
     lparam: LPARAM,
-) -> LRESULT {
-    match message {
-        WM_PAINT => {
-            if let Err(error) = paint(state, hwnd) {
-                if state.deferred_error.is_none() {
-                    state.deferred_error = Some(error);
-                }
-                state.exit = true;
-            }
-            0
-        }
-        WM_ERASEBKGND => 1,
-        WM_CLOSE => {
-            dispatch_event(state, PixelWindowEvent::CloseRequested);
-            0
-        }
-        WM_DESTROY => {
-            state.exit = true;
-            0
-        }
-        WM_NCDESTROY => {
-            state.backend.alive.store(false, Ordering::Release);
-            state.backend.wake_hwnd.store(0, Ordering::Release);
-            state.backend.hwnd.set(ptr::null_mut());
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
-            0
-        }
-        WM_SIZE => {
-            if wparam != 1 {
-                update_metrics(state, GeometryChange::Resized, true);
-            }
-            0
-        }
-        WM_DPICHANGED => {
-            apply_dpi_suggested_rect(hwnd, lparam);
-            update_metrics(state, GeometryChange::ScaleFactorChanged, true);
-            0
-        }
-        WM_SETFOCUS => {
-            dispatch_event(state, PixelWindowEvent::FocusChanged(true));
-            if state.backend.ime_allowed.get() {
-                dispatch_event(
-                    state,
-                    PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Enabled),
-                );
-            }
-            0
-        }
-        WM_KILLFOCUS => {
-            state.ime_composing = false;
-            crate::selected::ime::refresh_from_message(hwnd, WM_IME_ENDCOMPOSITION);
-            dispatch_event(
-                state,
-                PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Disabled),
-            );
-            dispatch_event(state, PixelWindowEvent::FocusChanged(false));
-            0
-        }
-        WM_IME_SETCONTEXT => {
-            const IS_SHOWUICOMPOSITIONWINDOW: isize = 0x0002;
-            unsafe { DefWindowProcW(hwnd, message, wparam, lparam & !IS_SHOWUICOMPOSITIONWINDOW) }
-        }
+    backend: &Backend,
+) -> Option<NativeMessageSnapshot> {
+    let scale = current_scale(backend);
+    let snapshot = match message {
+        WM_CLOSE => PendingNativeEvent::CloseRequested,
+        WM_DESTROY => PendingNativeEvent::Destroy,
+        WM_SIZE => PendingNativeEvent::Size {
+            minimized: wparam == 1,
+        },
+        WM_DPICHANGED => PendingNativeEvent::DpiChanged {
+            suggested: copied_suggested_rect(lparam),
+        },
+        WM_SETFOCUS => PendingNativeEvent::FocusChanged(true),
+        WM_KILLFOCUS => PendingNativeEvent::FocusChanged(false),
         WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
             crate::selected::ime::refresh_from_message(hwnd, message);
             let composition = crate::selected::ime::composition();
-            state.ime_composing = message != WM_IME_ENDCOMPOSITION && composition.is_some();
-            let (text, cursor) = composition.map_or_else(
-                || (String::new(), None),
+            let (active, text, cursor) = composition.map_or_else(
+                || (false, String::new(), None),
                 |composition| {
                     let cursor = composition.cursor;
-                    (composition.text, Some((cursor, cursor)))
+                    (true, composition.text, Some((cursor, cursor)))
                 },
             );
+            PendingNativeEvent::ImeComposition {
+                message,
+                active: message != WM_IME_ENDCOMPOSITION && active,
+                text,
+                cursor,
+            }
+        }
+        WM_IME_CHAR => PendingNativeEvent::ImeChar(wparam as u16),
+        WAKE_MESSAGE => PendingNativeEvent::Wake,
+        WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
+            let event = key_event(wparam, lparam, message);
+            let call_default = event.is_none();
+            return Some(NativeMessageSnapshot {
+                message,
+                wparam,
+                lparam,
+                event: event.map(PendingNativeEvent::Keyboard),
+                call_default,
+            });
+        }
+        WM_CHAR => PendingNativeEvent::Char {
+            unit: wparam as u16,
+            modifiers: modifiers(),
+        },
+        WM_MOUSEMOVE => PendingNativeEvent::PointerMoved {
+            position: point(lparam, scale),
+            modifiers: modifiers(),
+        },
+        MOUSE_LEAVE_MESSAGE => PendingNativeEvent::PointerLeft,
+        WM_CAPTURECHANGED => PendingNativeEvent::CaptureChanged {
+            new_owner: lparam as HWND,
+        },
+        WM_CANCELMODE => PendingNativeEvent::CancelMode,
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
+        | WM_MBUTTONUP => {
+            let button = match message {
+                WM_LBUTTONDOWN | WM_LBUTTONUP => PointerButton::Left,
+                WM_RBUTTONDOWN | WM_RBUTTONUP => PointerButton::Right,
+                _ => PointerButton::Middle,
+            };
+            let pressed = matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN);
+            PendingNativeEvent::PointerButton {
+                button,
+                state: if pressed {
+                    PointerButtonState::Pressed
+                } else {
+                    PointerButtonState::Released
+                },
+                position: point(lparam, scale),
+                modifiers: modifiers(),
+            }
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam >> 16) as u16 as i16) as f32 / 120.0;
+            PendingNativeEvent::MouseWheel {
+                delta: WheelDelta::Lines { x: 0.0, y: delta },
+                modifiers: modifiers(),
+            }
+        }
+        WM_TIMER if wparam == WAIT_TIMER_ID => PendingNativeEvent::WaitTimer,
+        CAPTURE_MESSAGE => PendingNativeEvent::CaptureRelease,
+        IME_ALLOWED_MESSAGE => PendingNativeEvent::ImeAllowed(wparam != 0),
+        _ => return None,
+    };
+    Some(NativeMessageSnapshot {
+        message,
+        wparam,
+        lparam,
+        event: Some(snapshot),
+        call_default: matches!(
+            message,
+            WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION
+        ),
+    })
+}
+
+fn dispatch_pending_event(state: &mut HostState, hwnd: HWND, event: PendingNativeEvent) {
+    match event {
+        PendingNativeEvent::CloseRequested => {
+            dispatch_event(state, PixelWindowEvent::CloseRequested);
+        }
+        PendingNativeEvent::Destroy => state.exit = true,
+        PendingNativeEvent::Size { minimized } => {
+            if !minimized {
+                update_metrics(state, GeometryChange::Resized, true);
+            }
+        }
+        PendingNativeEvent::DpiChanged { suggested } => {
+            if let Some(rect) = suggested
+                && let Err(error) = state.backend.control.enqueue_dpi_rect(rect)
+            {
+                state.backend.control.record_failure(error);
+            }
+            update_metrics(state, GeometryChange::ScaleFactorChanged, true);
+        }
+        PendingNativeEvent::FocusChanged(focused) => {
+            if focused {
+                dispatch_event(state, PixelWindowEvent::FocusChanged(true));
+                if state.backend.ime_allowed.get() {
+                    dispatch_event(
+                        state,
+                        PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Enabled),
+                    );
+                }
+            } else {
+                state.ime_composing = false;
+                crate::selected::ime::refresh_from_message(hwnd, WM_IME_ENDCOMPOSITION);
+                dispatch_event(
+                    state,
+                    PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Disabled),
+                );
+                dispatch_event(state, PixelWindowEvent::FocusChanged(false));
+            }
+        }
+        PendingNativeEvent::ImeComposition {
+            message,
+            active,
+            text,
+            cursor,
+        } => {
+            state.ime_composing = active;
             dispatch_event(
                 state,
                 PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Preedit { text, cursor }),
             );
-            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            let _ = message;
         }
-        WM_IME_CHAR => {
+        PendingNativeEvent::ImeChar(unit) => {
             if let crate::contract::input::KeyClassification::TextCommit(text) =
-                state.ime_decoder.push(wparam as u16)
+                state.ime_decoder.push(unit)
             {
                 dispatch_event(
                     state,
                     PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Commit(text)),
                 );
             }
-            0
         }
-        WAKE_MESSAGE => {
-            dispatch_event(state, PixelWindowEvent::Wake);
-            0
+        PendingNativeEvent::Keyboard(event) => {
+            dispatch_event(state, PixelWindowEvent::Keyboard(event));
         }
-        WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
-            if let Some(event) = key_event(wparam, lparam, message) {
-                dispatch_event(state, PixelWindowEvent::Keyboard(event));
-                0
-            } else {
-                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
-            }
-        }
-        WM_CHAR => {
+        PendingNativeEvent::Char { unit, modifiers } => {
             if state.ime_composing {
-                return 0;
+                return;
             }
             if let crate::contract::input::KeyClassification::TextCommit(text) =
-                state.decoder.push(wparam as u16)
+                state.decoder.push(unit)
                 && text.chars().any(|character| !character.is_control())
             {
                 let event = NormalizedKeyEvent {
@@ -745,13 +1245,15 @@ unsafe fn dispatch_message(
                     text: Some(text),
                     state: KeyPressState::Pressed,
                     repeat: false,
-                    modifiers: modifiers(),
+                    modifiers,
                 };
                 dispatch_event(state, PixelWindowEvent::Keyboard(event));
             }
-            0
         }
-        WM_MOUSEMOVE => {
+        PendingNativeEvent::PointerMoved {
+            position,
+            modifiers,
+        } => {
             if !state.tracking_mouse {
                 let mut tracking = TRACKMOUSEEVENT {
                     cbSize: mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -761,86 +1263,309 @@ unsafe fn dispatch_message(
                 };
                 state.tracking_mouse = unsafe { TrackMouseEvent(&mut tracking) } != 0;
             }
-            let scale_factor = state.backend.metrics.borrow().scale_factor;
             dispatch_event(
                 state,
                 PixelWindowEvent::PointerMoved {
-                    position: point(lparam, scale_factor),
-                    modifiers: modifiers(),
+                    position,
+                    modifiers,
                 },
             );
-            0
         }
-        MOUSE_LEAVE_MESSAGE => {
+        PendingNativeEvent::PointerLeft => {
             state.tracking_mouse = false;
             dispatch_event(state, PixelWindowEvent::PointerLeft);
-            0
         }
-        WM_CAPTURECHANGED => {
-            if state.backend.capture_active.replace(false) && lparam as HWND != hwnd {
+        PendingNativeEvent::CaptureChanged { new_owner } => {
+            if state.backend.capture_active.replace(false) && new_owner != hwnd {
                 dispatch_event(state, PixelWindowEvent::PointerCaptureLost);
             }
-            0
         }
-        WM_CANCELMODE => {
+        PendingNativeEvent::CancelMode => {
             if state.backend.capture_active.replace(false) {
-                unsafe { ReleaseCapture() };
                 dispatch_event(state, PixelWindowEvent::PointerCaptureLost);
+                if let Err(error) = state
+                    .backend
+                    .control
+                    .enqueue(DeferredNative::Command(NativeCommand::ReleaseCapture))
+                {
+                    state.backend.control.record_failure(error);
+                }
             }
-            0
         }
-        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
-        | WM_MBUTTONUP => {
-            let button = match message {
-                WM_LBUTTONDOWN | WM_LBUTTONUP => PointerButton::Left,
-                WM_RBUTTONDOWN | WM_RBUTTONUP => PointerButton::Right,
-                _ => PointerButton::Middle,
-            };
-            let pressed = matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN);
-            let scale_factor = state.backend.metrics.borrow().scale_factor;
-            dispatch_event(
-                state,
-                PixelWindowEvent::PointerButton {
-                    button,
-                    state: if pressed {
-                        PointerButtonState::Pressed
-                    } else {
-                        PointerButtonState::Released
-                    },
-                    position: Some(point(lparam, scale_factor)),
-                    modifiers: modifiers(),
-                },
-            );
-            0
-        }
-        WM_MOUSEWHEEL => {
-            let delta = ((wparam >> 16) as u16 as i16) as f32 / 120.0;
-            dispatch_event(
-                state,
-                PixelWindowEvent::MouseWheel {
-                    delta: WheelDelta::Lines { x: 0.0, y: delta },
-                    position: None,
-                    modifiers: modifiers(),
-                },
-            );
-            0
-        }
-        WM_TIMER if wparam == WAIT_TIMER_ID => {
+        PendingNativeEvent::PointerButton {
+            button,
+            state: button_state,
+            position,
+            modifiers,
+        } => dispatch_event(
+            state,
+            PixelWindowEvent::PointerButton {
+                button,
+                state: button_state,
+                position: Some(position),
+                modifiers,
+            },
+        ),
+        PendingNativeEvent::MouseWheel { delta, modifiers } => dispatch_event(
+            state,
+            PixelWindowEvent::MouseWheel {
+                delta,
+                position: None,
+                modifiers,
+            },
+        ),
+        PendingNativeEvent::Wake => dispatch_event(state, PixelWindowEvent::Wake),
+        PendingNativeEvent::WaitTimer => {
             unsafe { KillTimer(hwnd, WAIT_TIMER_ID) };
             dispatch_event(state, PixelWindowEvent::Wake);
-            0
         }
-        CAPTURE_MESSAGE => {
-            if unsafe { GetCapture() } == hwnd {
-                unsafe { ReleaseCapture() };
+        PendingNativeEvent::CaptureRelease => {
+            if unsafe { GetCapture() } == hwnd
+                && let Err(error) = state
+                    .backend
+                    .control
+                    .enqueue(DeferredNative::Command(NativeCommand::ReleaseCapture))
+            {
+                state.backend.control.record_failure(error);
             }
-            0
         }
-        IME_ALLOWED_MESSAGE => {
-            apply_ime_allowed(hwnd, wparam != 0);
-            0
+        PendingNativeEvent::ImeAllowed(allowed) => {
+            if let Err(error) = state.backend.control.enqueue(DeferredNative::Command(
+                NativeCommand::SetImeAllowed(allowed),
+            )) {
+                state.backend.control.record_failure(error);
+            }
         }
-        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+    }
+}
+
+fn dispatch_snapshot(
+    state: &mut HostState,
+    hwnd: HWND,
+    snapshot: NativeMessageSnapshot,
+) -> LRESULT {
+    if let Some(event) = snapshot.event {
+        dispatch_pending_event(state, hwnd, event);
+    }
+    if snapshot.call_default {
+        unsafe { DefWindowProcW(hwnd, snapshot.message, snapshot.wparam, snapshot.lparam) }
+    } else {
+        0
+    }
+}
+
+unsafe fn handle_nc_destroy(
+    user_data: &NativeWindowUserData,
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    user_data.control.closed.set(true);
+    user_data.control.exit_requested.set(true);
+    user_data.control.paint_pending.set(false);
+    user_data.control.clear_deferred();
+    user_data.backend.alive.store(false, Ordering::Release);
+    user_data.backend.wake_hwnd.store(0, Ordering::Release);
+    user_data.backend.hwnd.set(ptr::null_mut());
+    if let Ok(mut state) = user_data.host.try_borrow_mut() {
+        state.frame_state.invalidate();
+        state.exit = true;
+    }
+    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
+    unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+}
+
+fn consume_reentrant_paint(user_data: &NativeWindowUserData, hwnd: HWND) {
+    user_data.control.paint_pending.set(true);
+    if unsafe { ValidateRect(hwnd, ptr::null()) } == 0 {
+        user_data
+            .control
+            .record_failure(last_error("pixel_window_reentrant_paint_validate_failed"));
+    }
+}
+
+fn apply_native_command(backend: &Backend, command: NativeCommand) -> Result<(), PixelWindowError> {
+    let hwnd = backend.hwnd.get();
+    if hwnd.is_null() {
+        return Err(closed_error());
+    }
+    match command {
+        NativeCommand::SetTitle(title) => {
+            let title = wide_null(&title);
+            if unsafe { SetWindowTextW(hwnd, title.as_ptr()) } == 0 {
+                return Err(last_error("pixel_window_title_failed"));
+            }
+        }
+        NativeCommand::Show(command) => unsafe {
+            ShowWindow(hwnd, command);
+        },
+        NativeCommand::Focus => unsafe {
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+        },
+        NativeCommand::SetWindowSize { width, height } => {
+            if unsafe {
+                SetWindowPos(
+                    hwnd,
+                    ptr::null_mut(),
+                    0,
+                    0,
+                    width,
+                    height,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                )
+            } == 0
+            {
+                return Err(last_error("pixel_window_resize_failed"));
+            }
+        }
+        NativeCommand::ApplyDpiRect(rect) => {
+            let width = rect.right.checked_sub(rect.left).ok_or_else(|| {
+                PixelWindowError::failed(
+                    "pixel_window_dpi_rect_invalid",
+                    "DPI suggested rectangle width overflowed",
+                )
+            })?;
+            let height = rect.bottom.checked_sub(rect.top).ok_or_else(|| {
+                PixelWindowError::failed(
+                    "pixel_window_dpi_rect_invalid",
+                    "DPI suggested rectangle height overflowed",
+                )
+            })?;
+            if width <= 0 || height <= 0 {
+                return Ok(());
+            }
+            if unsafe {
+                SetWindowPos(
+                    hwnd,
+                    ptr::null_mut(),
+                    rect.left,
+                    rect.top,
+                    width,
+                    height,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                )
+            } == 0
+            {
+                return Err(last_error("pixel_window_dpi_resize_failed"));
+            }
+        }
+        NativeCommand::SetImeCursor { x, y } => {
+            crate::selected::ime::set_anchor_position(x, y);
+        }
+        NativeCommand::SetImeAllowed(allowed) => apply_ime_allowed(hwnd, allowed),
+        NativeCommand::ReleaseCapture => {
+            if unsafe { GetCapture() } == hwnd && unsafe { ReleaseCapture() } == 0 {
+                return Err(last_error("pixel_window_pointer_release_failed"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn drain_native(user_data: &NativeWindowUserData, hwnd: HWND) {
+    if user_data.control.closed.get() {
+        surface_control_failure(user_data);
+        return;
+    }
+    let previous = user_data.control.phase.replace(DispatchPhase::Draining);
+    let mut steps = 0;
+    while steps < MAX_NATIVE_DRAIN
+        && !user_data.control.exit_requested.get()
+        && !host_state_exit(user_data)
+    {
+        let Some(item) = user_data.control.pop() else {
+            break;
+        };
+        steps += 1;
+        match item {
+            DeferredNative::Command(command) => {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    apply_native_command(&user_data.backend, command)
+                }));
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => user_data.control.record_failure(error),
+                    Err(_) => user_data.control.record_failure(PixelWindowError::failed(
+                        "pixel_window_native_command_panic",
+                        "deferred native command panicked",
+                    )),
+                }
+            }
+            DeferredNative::Event(event) => match user_data.host.try_borrow_mut() {
+                Ok(mut state) => {
+                    let event_phase = user_data
+                        .control
+                        .phase
+                        .replace(DispatchPhase::NativeMessage);
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        dispatch_pending_event(&mut state, hwnd, event)
+                    }));
+                    user_data.control.phase.set(event_phase);
+                    if result.is_err() {
+                        state.frame_state.invalidate();
+                        if state.deferred_error.is_none() {
+                            state.deferred_error = Some(PixelWindowError::failed(
+                                "pixel_window_deferred_event_panic",
+                                "deferred native event panicked",
+                            ));
+                        }
+                        state.exit = true;
+                        user_data.control.exit_requested.set(true);
+                    }
+                }
+                Err(_) => {
+                    user_data
+                        .control
+                        .record_failure(native_queue_failure("pixel_window_drain_borrow_failed"));
+                    let _ = user_data.control.push_front(DeferredNative::Event(event));
+                }
+            },
+        }
+    }
+    if steps == MAX_NATIVE_DRAIN && user_data.control.has_deferred() {
+        user_data.control.record_failure(native_queue_failure(
+            "pixel_window_native_drain_nonconvergent",
+        ));
+    }
+    if !user_data.control.exit_requested.get()
+        && user_data.control.paint_pending.replace(false)
+        && unsafe { InvalidateRect(hwnd, ptr::null(), 0) } == 0
+    {
+        user_data
+            .control
+            .record_failure(last_error("pixel_window_reentrant_paint_reschedule_failed"));
+    }
+    user_data.control.phase.set(previous);
+    surface_control_failure(user_data);
+}
+
+fn host_state_exit(user_data: &NativeWindowUserData) -> bool {
+    user_data
+        .host
+        .try_borrow()
+        .map(|state| state.exit)
+        .unwrap_or(false)
+}
+
+fn host_should_exit(user_data: &NativeWindowUserData) -> bool {
+    user_data.control.exit_requested.get() || host_state_exit(user_data)
+}
+
+fn surface_control_failure(user_data: &NativeWindowUserData) {
+    let Ok(mut state) = user_data.host.try_borrow_mut() else {
+        return;
+    };
+    if let Some(error) = user_data.control.take_failure() {
+        state.frame_state.invalidate();
+        if state.deferred_error.is_none() {
+            state.deferred_error = Some(error);
+        }
+        state.exit = true;
+    }
+    if user_data.control.exit_requested.get() {
+        state.exit = true;
     }
 }
 
@@ -864,6 +1589,11 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
                 )
             })?;
         state.pixels.resize(count, 0);
+        let previous_phase = state
+            .backend
+            .control
+            .phase
+            .replace(DispatchPhase::Rendering);
         let render_result = {
             let mut frame = XrgbPixelFrame::new(
                 &mut state.pixels,
@@ -884,6 +1614,7 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
                 Err(error) => Err(error),
             }
         };
+        state.backend.control.phase.set(previous_phase);
         let directive = match render_result {
             Ok((directive, _receipt)) => directive,
             Err(error) => {
@@ -893,6 +1624,9 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
             }
         };
         apply_directive(state, Ok(directive));
+        if state.backend.control.closed.get() {
+            return Ok(());
+        }
 
         let paint_rect = session.paint_rect();
         let Some(geometry) =
@@ -1067,27 +1801,6 @@ fn update_metrics(state: &mut HostState, change: GeometryChange, notify: bool) {
     }
 }
 
-fn apply_dpi_suggested_rect(hwnd: HWND, lparam: LPARAM) {
-    let suggested = lparam as *const RECT;
-    if suggested.is_null() {
-        return;
-    }
-    let rect = unsafe { &*suggested };
-    if let Some((x, y, width, height)) = suggested_rect_geometry(rect) {
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                ptr::null_mut(),
-                x,
-                y,
-                width,
-                height,
-                SWP_NOACTIVATE | SWP_NOZORDER,
-            )
-        };
-    }
-}
-
 fn suggested_rect_geometry(rect: &RECT) -> Option<(i32, i32, i32, i32)> {
     let width = rect.right.checked_sub(rect.left)?;
     let height = rect.bottom.checked_sub(rect.top)?;
@@ -1096,6 +1809,10 @@ fn suggested_rect_geometry(rect: &RECT) -> Option<(i32, i32, i32, i32)> {
 
 fn apply_ime_allowed(hwnd: HWND, allowed: bool) {
     let flags = if allowed { IACE_DEFAULT } else { 0 };
+    // IMM32 is optional on Windows installations without East Asian input
+    // support. PixelWindowBackend::set_ime_allowed is deliberately best-effort
+    // and has no failure channel; absence must not terminate an otherwise
+    // functional terminal window.
     unsafe { ImmAssociateContextEx(hwnd, ptr::null_mut(), flags) };
 }
 
@@ -1103,8 +1820,11 @@ fn dispatch_event(state: &mut HostState, event: PixelWindowEvent) {
     if !state.opened || state.exit {
         return;
     }
+    let control = state.backend.control.clone();
+    let previous = control.phase.replace(DispatchPhase::ApplicationEvent);
     let result = catch_application("event", || state.application.event(&state.window, event));
     apply_directive(state, result);
+    control.phase.set(previous);
 }
 
 fn catch_application<T>(
@@ -1250,6 +1970,10 @@ fn point(lparam: LPARAM, scale: f64) -> LogicalPoint {
 
 fn closed_error() -> PixelWindowError {
     PixelWindowError::failed("pixel_window_event_loop_closed", "native window is closed")
+}
+
+fn native_queue_failure(code: &'static str) -> PixelWindowError {
+    PixelWindowError::failed(code, "native window deferred control queue failed")
 }
 
 fn last_error(code: &'static str) -> PixelWindowError {
@@ -1457,5 +2181,80 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
         assert_eq!(validate_stretch_copy(50, 50).expect("complete copy"), 50);
+    }
+
+    #[test]
+    fn native_control_defers_in_callback_phase_and_preserves_fifo() {
+        let control = NativeControl::new();
+        control.phase.set(DispatchPhase::ApplicationEvent);
+        control
+            .enqueue(DeferredNative::Command(NativeCommand::SetTitle(
+                "queued".to_owned(),
+            )))
+            .expect("callback command fits");
+        control
+            .enqueue(DeferredNative::Event(PendingNativeEvent::FocusChanged(
+                true,
+            )))
+            .expect("reentrant event fits");
+        assert!(control.has_deferred());
+        assert!(matches!(control.pop(), Some(DeferredNative::Command(_))));
+        assert!(matches!(control.pop(), Some(DeferredNative::Event(_))));
+        assert!(!control.has_deferred());
+    }
+
+    #[test]
+    fn native_control_overflow_is_a_typed_failure() {
+        let control = NativeControl::new();
+        for _ in 0..MAX_NATIVE_DEFERRED {
+            control
+                .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+                .expect("queue capacity");
+        }
+        let error = control
+            .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+            .expect_err("overflow must fail");
+        match error {
+            PixelWindowError::Failed { code, .. } => {
+                assert_eq!(code, "pixel_window_native_queue_overflow");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(control.exit_requested.get());
+        assert!(control.take_failure().is_some());
+    }
+
+    #[test]
+    fn default_window_messages_are_classified_before_state_borrow() {
+        assert!(is_stateless_message(WM_SETTEXT));
+        assert!(is_stateless_message(WM_WINDOWPOSCHANGING));
+        assert!(is_stateless_message(WM_WINDOWPOSCHANGED));
+        assert!(is_stateless_message(WM_NCCALCSIZE));
+        assert!(!is_stateless_message(WM_SIZE));
+        assert!(is_stateful_message(WM_SIZE));
+        assert!(is_stateful_message(WM_CAPTURECHANGED));
+    }
+
+    #[test]
+    fn dpi_lparam_is_copied_before_deferred_processing() {
+        let mut rect = RECT {
+            left: 10,
+            top: 20,
+            right: 810,
+            bottom: 620,
+        };
+        let copied = copied_suggested_rect((&mut rect as *mut RECT).cast::<c_void>() as LPARAM)
+            .expect("valid DPI rectangle");
+        rect.right = 11;
+        assert_ne!(copied.right, rect.right);
+        assert_eq!(
+            copied,
+            Win32Rect {
+                left: 10,
+                top: 20,
+                right: 810,
+                bottom: 620,
+            }
+        );
     }
 }

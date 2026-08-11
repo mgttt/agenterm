@@ -137,4 +137,74 @@ mod tests {
             .with_no_activate(true);
         run_pixel_window(options, Box::new(ExitOnOpen)).expect("native runner must exit cleanly");
     }
+
+    #[cfg(all(windows, feature = "native-pixel-window"))]
+    #[test]
+    fn native_windows_runner_defers_synchronous_commands_until_callbacks_release_state() {
+        struct ReentrantCommands {
+            rendered: bool,
+        }
+
+        impl ReentrantCommands {
+            fn issue(window: &PixelWindow, suffix: &str) -> Result<(), PixelWindowError> {
+                window.set_title(&format!("native-reentrant-{suffix}"));
+                window.focus();
+                window.set_visible(true);
+                window.request_logical_inner_size(LogicalSize::new(72.0, 72.0))?;
+                window.set_ime_allowed(true);
+                window.set_ime_cursor_area(LogicalRect::new(2.0, 3.0, 1.0, 16.0))
+            }
+        }
+
+        impl PixelWindowApplication for ReentrantCommands {
+            fn opened(
+                &mut self,
+                window: &PixelWindow,
+            ) -> Result<PixelWindowDirective, PixelWindowError> {
+                Self::issue(window, "opened")?;
+                window.request_redraw();
+                Ok(PixelWindowDirective::Continue)
+            }
+
+            fn event(
+                &mut self,
+                window: &PixelWindow,
+                _event: PixelWindowEvent,
+            ) -> Result<PixelWindowDirective, PixelWindowError> {
+                window.set_title("native-reentrant-event");
+                Ok(PixelWindowDirective::Continue)
+            }
+
+            fn render(
+                &mut self,
+                window: &PixelWindow,
+                frame: &mut XrgbPixelFrame<'_>,
+            ) -> Result<PixelWindowDirective, PixelWindowError> {
+                Self::issue(window, "render")?;
+                frame.pixels_mut().fill(0x0010_2030);
+                frame
+                    .commit(PixelFrameWrite::Full)
+                    .map_err(|error| PixelWindowError::failed("native_reentrant_frame", error))?;
+                self.rendered = true;
+                Ok(PixelWindowDirective::Continue)
+            }
+
+            fn about_to_wait(
+                &mut self,
+                _window: &PixelWindow,
+                _now: Instant,
+            ) -> Result<PixelWindowDirective, PixelWindowError> {
+                Ok(if self.rendered {
+                    PixelWindowDirective::Exit
+                } else {
+                    PixelWindowDirective::Continue
+                })
+            }
+        }
+
+        let options = PixelWindowOptions::new("native-reentrant", LogicalSize::new(64.0, 64.0))
+            .with_no_activate(true);
+        run_pixel_window(options, Box::new(ReentrantCommands { rendered: false }))
+            .expect("synchronous native commands must not reenter borrowed host state");
+    }
 }
