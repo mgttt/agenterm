@@ -2161,21 +2161,29 @@ fn assert_supervisor(
         cli,
         [
             "script", "eval", interrupted_source,
-            "--timeout-ms", "10000",
+            // Must cover a cargo build: this source is its own cdylib pack.
+            "--timeout-ms", "180000",
             "--max-operations", "10000000"
         ],
         audit_path
     );
     let nested_pid = 0;
-    for attempt in 0..600 {
+    // Real early return, and a wall-clock bound. `require` records and
+    // continues, so a fixture that died before writing its pid used to record
+    // this failure on all 600 iterations -- 586 of the 789 failures in one run
+    // were this single loop restating one fact.
+    let nested_deadline = std::time::SystemTime::now().unix_millis + 30000;
+    for attempt in 0..4000 {
         if std::fs::exists(pid_path) {
             nested_pid = nested_pid_from_path(pid_path);
             break;
         }
-        test_harness::require(
-            child_is_running(interrupted),
-            "script_supervisor_parent_fixture_early_exit"
-        );
+        if !child_is_running(interrupted) {
+            return rh::fail("script_supervisor_parent_fixture_early_exit");
+        }
+        if std::time::SystemTime::now().unix_millis > nested_deadline {
+            break;
+        }
         rh::task::sleep(std::time::Duration::from_millis(5));
     }
     test_harness::require(nested_pid > 0, "script_supervisor_nested_pid_missing");
