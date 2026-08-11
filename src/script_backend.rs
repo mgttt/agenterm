@@ -163,8 +163,11 @@ pub fn try_execute_rh_invocation(
             // Production handed the expression through unwrapped, so
             // `script eval '1 + 1'` answered `cdylib pack requires fn entry()`
             // -- the worker's own test helper had always wrapped it, which is why
-            // no unit test noticed. `Run` is deliberately left alone: a file with
-            // no `entry` should still say so.
+            // no unit test noticed.
+            //
+            // The `Eval` arm is not a reliable signal that this really is an
+            // eval: `ScriptEngineBackend::execute` passes `Eval` for `script run`
+            // as well. `eval_source_needs_entry` carries that burden.
             let eval_source = match operation {
                 ScriptOperation::Eval if eval_source_needs_entry(source) => {
                     std::borrow::Cow::Owned(format!("fn entry() {{ {source} }}"))
@@ -203,13 +206,23 @@ pub fn try_execute_rh_invocation(
 
 /// Whether an `eval` expression should be wrapped in `fn entry() { .. }`.
 ///
-/// `entry()` returns `INT`, so only a source whose value is an integer can be
-/// its body. A map or array literal has to keep failing the way it always did
-/// until the typed entry-value channel (`RhHostEntryValue`) is wired to the AOT
-/// pack -- wrapping it produces `expected i64, found Value` from rustc, which is
-/// strictly worse than the existing message.
+/// Deliberately conservative, because the caller cannot be trusted to be an
+/// eval at all: `ScriptEngineBackend::execute` passes `ScriptOperation::Eval`
+/// for `script run` too (see script_engine.rs), so this sees whole-script
+/// sources as well as expressions.
+///
+/// - A source that defines any function is a script, not an expression. Wrapping
+///   one nests its definitions and turns the honest
+///   `cdylib pack requires fn entry()` into `Function definitions must be at
+///   global level`, which is how it first showed up: a retired whole-script
+///   fixture started being rejected for the wrong reason.
+/// - `entry()` returns `INT`, so only a source whose value is an integer can be
+///   its body. A map or array literal keeps failing the way it always did until
+///   the typed entry-value channel (`RhHostEntryValue`) is wired to the AOT
+///   pack; wrapping it yields `expected i64, found Value` from rustc, which is
+///   strictly worse than the existing message.
 fn eval_source_needs_entry(source: &str) -> bool {
-    if source.contains("fn entry") {
+    if source.contains("fn ") {
         return false;
     }
     let trimmed = source.trim_start();
@@ -527,5 +540,24 @@ mod tests {
     #[test]
     fn wasmcore_backend_as_str() {
         assert_eq!(ScriptBackend::Wasmcore.as_str(), "wasmcore");
+    }
+
+    #[test]
+    fn eval_entry_wrapper_only_takes_expressions() {
+        // A bare expression needs the wrapper: without it, `script eval '1 + 1'`
+        // answered `cdylib pack requires fn entry()`.
+        assert!(super::eval_source_needs_entry("1 + 1"));
+        assert!(super::eval_source_needs_entry("  let x = 2; x + 1"));
+        // A whole script must not be wrapped. `ScriptEngineBackend::execute`
+        // reports every run as Eval, so this also sees legacy sources full of
+        // top-level definitions; nesting them reports `Function definitions must
+        // be at global level` instead of the missing entry.
+        assert!(!super::eval_source_needs_entry(
+            "fn require(condition, message) { if !condition { throw message; } }"
+        ));
+        assert!(!super::eval_source_needs_entry("fn entry() { 1 }"));
+        // `entry()` returns INT, so a map or array value stays unwrapped.
+        assert!(!super::eval_source_needs_entry("#{ value: 1 }"));
+        assert!(!super::eval_source_needs_entry("[1, 2]"));
     }
 }
