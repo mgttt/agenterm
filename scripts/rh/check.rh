@@ -339,7 +339,16 @@ fn cargo_clippy_all_spec(environment) {
 
 fn cargo_unit_primary_spec(environment) {
     let arguments = [
-        "test", "--quiet", "--locked", "--all-features", "--",
+        // `-p agenterm-con` is load-bearing, not tidiness: `agenterm-con`
+        // became its own workspace package, and a bare `cargo test` (which
+        // resolves to the root package here) therefore no longer builds
+        // `agenterm-con.exe`. The 16 black-box tests in
+        // `tests/agenterm_con_blackbox.rs` spawn that real binary, so on
+        // windows every one of them failed with "agenterm-con is missing at
+        // target/debug/agenterm-con.exe". Naming both packages builds the
+        // binary and keeps the tests where they are.
+        "test", "--quiet", "--locked", "--all-features",
+        "-p", "agenterm", "-p", "agenterm-con", "--",
         "--skip", "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
         "--skip", "preflight_benchmark_task_measures_clean_public_worker_runs",
         "--skip", "prd_alignment_task_matches_public_catalogs_and_fails_closed",
