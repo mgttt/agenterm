@@ -46,17 +46,20 @@ use windows_sys::Win32::{
             RegisterClassW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
             SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
             SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-            TranslateMessage, WM_ACTIVATE, WM_APP, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CHAR,
-            WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_IME_CHAR,
-            WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION,
-            WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-            WM_MBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCACTIVATE,
-            WM_NCCALCSIZE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
-            WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SETTEXT, WM_SHOWWINDOW, WM_SIZE,
-            WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING,
-            WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            TranslateMessage, WM_APP, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
+            WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_IME_CHAR, WM_IME_COMPOSITION,
+            WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+            WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
+            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP,
+            WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     },
+};
+
+#[cfg(test)]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    WM_NCCALCSIZE, WM_SETTEXT, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING,
 };
 
 use crate::contract::{
@@ -113,6 +116,13 @@ enum DispatchPhase {
     AboutToWait,
     Draining,
     Closing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeMessageClass {
+    Default,
+    Paint,
+    Stateful,
 }
 
 enum NativeCommand {
@@ -856,6 +866,36 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    match catch_unwind(AssertUnwindSafe(|| unsafe {
+        window_proc_inner(hwnd, message, wparam, lparam)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            let user_data =
+                unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut NativeWindowUserData;
+            if !user_data.is_null() {
+                let user_data = unsafe { &*user_data };
+                let error = match user_data.control.phase.get() {
+                    DispatchPhase::Rendering
+                    | DispatchPhase::ApplicationOpened
+                    | DispatchPhase::ApplicationEvent
+                    | DispatchPhase::AboutToWait => PixelWindowError::failed(
+                        "pixel_window_application_panic",
+                        "application callback panicked",
+                    ),
+                    _ => PixelWindowError::failed(
+                        "pixel_window_host_panic",
+                        "native pixel-window callback panicked",
+                    ),
+                };
+                user_data.control.record_failure(error);
+            }
+            0
+        }
+    }
+}
+
+unsafe fn window_proc_inner(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if message == WM_NCCREATE {
         let create = lparam as *const CREATESTRUCTW;
         if !create.is_null() {
@@ -874,7 +914,9 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(hwnd, message, wparam, lparam & !IS_SHOWUICOMPOSITIONWINDOW)
         };
     }
-    if is_stateless_message(message) || !is_stateful_message(message) {
+
+    let class = classify_native_message(message);
+    if class == NativeMessageClass::Default {
         return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
     }
 
@@ -887,33 +929,21 @@ unsafe extern "system" fn window_proc(
         return unsafe { handle_nc_destroy(user_data, hwnd, message, wparam, lparam) };
     }
 
-    if message == WM_PAINT {
+    if class == NativeMessageClass::Paint {
         return match user_data.host.try_borrow_mut() {
             Ok(mut state) => {
                 let previous = user_data
                     .control
                     .phase
                     .replace(DispatchPhase::NativeMessage);
-                let result = catch_unwind(AssertUnwindSafe(|| paint(&mut state, hwnd)));
+                let result = paint(&mut state, hwnd);
                 user_data.control.phase.set(previous);
                 match result {
-                    Ok(Ok(())) => 0,
-                    Ok(Err(error)) => {
+                    Ok(()) => 0,
+                    Err(error) => {
                         state.frame_state.invalidate();
                         if state.deferred_error.is_none() {
                             state.deferred_error = Some(error);
-                        }
-                        state.exit = true;
-                        user_data.control.exit_requested.set(true);
-                        0
-                    }
-                    Err(_) => {
-                        state.frame_state.invalidate();
-                        if state.deferred_error.is_none() {
-                            state.deferred_error = Some(PixelWindowError::failed(
-                                "pixel_window_host_panic",
-                                "native pixel-window callback panicked",
-                            ));
                         }
                         state.exit = true;
                         user_data.control.exit_requested.set(true);
@@ -928,19 +958,12 @@ unsafe extern "system" fn window_proc(
         };
     }
 
-    let snapshot = match catch_unwind(AssertUnwindSafe(|| unsafe {
-        snapshot_native_message(hwnd, message, wparam, lparam, &user_data.backend)
-    })) {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
-        Err(_) => {
-            user_data.control.record_failure(PixelWindowError::failed(
-                "pixel_window_native_message_snapshot_panic",
-                "native message snapshot panicked",
-            ));
-            return 0;
-        }
-    };
+    let snapshot =
+        match unsafe { snapshot_native_message(hwnd, message, wparam, lparam, &user_data.backend) }
+        {
+            Some(snapshot) => snapshot,
+            None => return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+        };
     let call_default = snapshot.call_default;
     match user_data.host.try_borrow_mut() {
         Ok(mut state) => {
@@ -948,25 +971,9 @@ unsafe extern "system" fn window_proc(
                 .control
                 .phase
                 .replace(DispatchPhase::NativeMessage);
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                dispatch_snapshot(&mut state, hwnd, snapshot)
-            }));
+            let result = dispatch_snapshot(&mut state, hwnd, snapshot);
             user_data.control.phase.set(previous);
-            match result {
-                Ok(value) => value,
-                Err(_) => {
-                    state.frame_state.invalidate();
-                    if state.deferred_error.is_none() {
-                        state.deferred_error = Some(PixelWindowError::failed(
-                            "pixel_window_host_panic",
-                            "native pixel-window callback panicked",
-                        ));
-                    }
-                    state.exit = true;
-                    user_data.control.exit_requested.set(true);
-                    0
-                }
-            }
+            result
         }
         Err(_) => {
             if let Some(event) = snapshot.event
@@ -983,59 +990,44 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-fn is_stateless_message(message: u32) -> bool {
-    matches!(
-        message,
-        WM_SETTEXT
-            | WM_WINDOWPOSCHANGING
-            | WM_WINDOWPOSCHANGED
-            | WM_MOVE
-            | WM_SHOWWINDOW
-            | WM_ACTIVATE
-            | WM_NCACTIVATE
-            | WM_NCCALCSIZE
-            | WM_GETMINMAXINFO
-            | WM_SETCURSOR
-            | WM_MOUSEACTIVATE
-    )
-}
-
-fn is_stateful_message(message: u32) -> bool {
-    matches!(
-        message,
-        WM_PAINT
-            | WM_CLOSE
-            | WM_DESTROY
-            | WM_NCDESTROY
-            | WM_SIZE
-            | WM_DPICHANGED
-            | WM_SETFOCUS
-            | WM_KILLFOCUS
-            | WM_IME_STARTCOMPOSITION
-            | WM_IME_COMPOSITION
-            | WM_IME_ENDCOMPOSITION
-            | WM_IME_CHAR
-            | WAKE_MESSAGE
-            | WM_KEYDOWN
-            | WM_SYSKEYDOWN
-            | WM_KEYUP
-            | WM_SYSKEYUP
-            | WM_CHAR
-            | WM_MOUSEMOVE
-            | MOUSE_LEAVE_MESSAGE
-            | WM_CAPTURECHANGED
-            | WM_CANCELMODE
-            | WM_LBUTTONDOWN
-            | WM_LBUTTONUP
-            | WM_RBUTTONDOWN
-            | WM_RBUTTONUP
-            | WM_MBUTTONDOWN
-            | WM_MBUTTONUP
-            | WM_MOUSEWHEEL
-            | WM_TIMER
-            | CAPTURE_MESSAGE
-            | IME_ALLOWED_MESSAGE
-    )
+fn classify_native_message(message: u32) -> NativeMessageClass {
+    match message {
+        WM_PAINT => NativeMessageClass::Paint,
+        WM_CLOSE
+        | WM_DESTROY
+        | WM_NCDESTROY
+        | WM_SIZE
+        | WM_DPICHANGED
+        | WM_SETFOCUS
+        | WM_KILLFOCUS
+        | WM_IME_STARTCOMPOSITION
+        | WM_IME_COMPOSITION
+        | WM_IME_ENDCOMPOSITION
+        | WM_IME_CHAR
+        | WAKE_MESSAGE
+        | WM_KEYDOWN
+        | WM_SYSKEYDOWN
+        | WM_KEYUP
+        | WM_SYSKEYUP
+        | WM_CHAR
+        | WM_MOUSEMOVE
+        | MOUSE_LEAVE_MESSAGE
+        | WM_CAPTURECHANGED
+        | WM_CANCELMODE
+        | WM_LBUTTONDOWN
+        | WM_LBUTTONUP
+        | WM_RBUTTONDOWN
+        | WM_RBUTTONUP
+        | WM_MBUTTONDOWN
+        | WM_MBUTTONUP
+        | WM_MOUSEWHEEL
+        | WM_TIMER
+        | CAPTURE_MESSAGE
+        | IME_ALLOWED_MESSAGE => NativeMessageClass::Stateful,
+        // Pointer-backed and all unknown messages remain in the original
+        // callback/default-processing path, before any HostState borrow.
+        _ => NativeMessageClass::Default,
+    }
 }
 
 fn copied_suggested_rect(lparam: LPARAM) -> Option<Win32Rect> {
@@ -1462,6 +1454,29 @@ fn apply_native_command(backend: &Backend, command: NativeCommand) -> Result<(),
     Ok(())
 }
 
+fn apply_deferred_item(
+    user_data: &NativeWindowUserData,
+    hwnd: HWND,
+    item: DeferredNative,
+) -> Result<(), PixelWindowError> {
+    match item {
+        DeferredNative::Command(command) => apply_native_command(&user_data.backend, command),
+        DeferredNative::Event(event) => {
+            let Ok(mut state) = user_data.host.try_borrow_mut() else {
+                user_data.control.push_front(DeferredNative::Event(event))?;
+                return Err(native_queue_failure("pixel_window_drain_borrow_failed"));
+            };
+            let previous = user_data
+                .control
+                .phase
+                .replace(DispatchPhase::NativeMessage);
+            dispatch_pending_event(&mut state, hwnd, event);
+            user_data.control.phase.set(previous);
+            Ok(())
+        }
+    }
+}
+
 fn drain_native(user_data: &NativeWindowUserData, hwnd: HWND) {
     if user_data.control.closed.get() {
         surface_control_failure(user_data);
@@ -1477,49 +1492,25 @@ fn drain_native(user_data: &NativeWindowUserData, hwnd: HWND) {
             break;
         };
         steps += 1;
-        match item {
-            DeferredNative::Command(command) => {
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    apply_native_command(&user_data.backend, command)
-                }));
-                match result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => user_data.control.record_failure(error),
-                    Err(_) => user_data.control.record_failure(PixelWindowError::failed(
-                        "pixel_window_native_command_panic",
-                        "deferred native command panicked",
-                    )),
-                }
-            }
-            DeferredNative::Event(event) => match user_data.host.try_borrow_mut() {
-                Ok(mut state) => {
-                    let event_phase = user_data
-                        .control
-                        .phase
-                        .replace(DispatchPhase::NativeMessage);
-                    let result = catch_unwind(AssertUnwindSafe(|| {
-                        dispatch_pending_event(&mut state, hwnd, event)
-                    }));
-                    user_data.control.phase.set(event_phase);
-                    if result.is_err() {
-                        state.frame_state.invalidate();
-                        if state.deferred_error.is_none() {
-                            state.deferred_error = Some(PixelWindowError::failed(
-                                "pixel_window_deferred_event_panic",
-                                "deferred native event panicked",
-                            ));
-                        }
-                        state.exit = true;
-                        user_data.control.exit_requested.set(true);
-                    }
-                }
-                Err(_) => {
-                    user_data
-                        .control
-                        .record_failure(native_queue_failure("pixel_window_drain_borrow_failed"));
-                    let _ = user_data.control.push_front(DeferredNative::Event(event));
-                }
-            },
+        let (panic_code, panic_message) = match &item {
+            DeferredNative::Command(_) => (
+                "pixel_window_native_command_panic",
+                "deferred native command panicked",
+            ),
+            DeferredNative::Event(_) => (
+                "pixel_window_deferred_event_panic",
+                "deferred native event panicked",
+            ),
+        };
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            apply_deferred_item(user_data, hwnd, item)
+        }));
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => user_data.control.record_failure(error),
+            Err(_) => user_data
+                .control
+                .record_failure(PixelWindowError::failed(panic_code, panic_message)),
         }
     }
     if steps == MAX_NATIVE_DRAIN && user_data.control.has_deferred() {
@@ -1600,9 +1591,7 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
                 metrics.scale_factor,
                 &mut state.frame_state,
             );
-            match catch_application("render", || {
-                state.application.render(&state.window, &mut frame)
-            }) {
+            match state.application.render(&state.window, &mut frame) {
                 Ok(directive) => frame
                     .write_receipt()
                     .map(|receipt| (directive, receipt))
@@ -2224,13 +2213,35 @@ mod tests {
 
     #[test]
     fn default_window_messages_are_classified_before_state_borrow() {
-        assert!(is_stateless_message(WM_SETTEXT));
-        assert!(is_stateless_message(WM_WINDOWPOSCHANGING));
-        assert!(is_stateless_message(WM_WINDOWPOSCHANGED));
-        assert!(is_stateless_message(WM_NCCALCSIZE));
-        assert!(!is_stateless_message(WM_SIZE));
-        assert!(is_stateful_message(WM_SIZE));
-        assert!(is_stateful_message(WM_CAPTURECHANGED));
+        assert_eq!(
+            classify_native_message(WM_SETTEXT),
+            NativeMessageClass::Default
+        );
+        assert_eq!(
+            classify_native_message(WM_WINDOWPOSCHANGING),
+            NativeMessageClass::Default
+        );
+        assert_eq!(
+            classify_native_message(WM_WINDOWPOSCHANGED),
+            NativeMessageClass::Default
+        );
+        assert_eq!(
+            classify_native_message(WM_NCCALCSIZE),
+            NativeMessageClass::Default
+        );
+        assert_eq!(
+            classify_native_message(WM_SIZE),
+            NativeMessageClass::Stateful
+        );
+        assert_eq!(
+            classify_native_message(WM_CAPTURECHANGED),
+            NativeMessageClass::Stateful
+        );
+        assert_eq!(classify_native_message(WM_PAINT), NativeMessageClass::Paint);
+        assert_eq!(
+            classify_native_message(WM_QUIT),
+            NativeMessageClass::Default
+        );
     }
 
     #[test]
