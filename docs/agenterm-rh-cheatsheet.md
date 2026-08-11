@@ -188,12 +188,20 @@ prune::exact_repo_root(repo);
 
 These are places where the same `.rh` behaves differently once `mode=native`.
 
-1. **A missing JSON field aborts; it is not `()`.** `type_of(x.field) == "()"`
-   probing works in the interpreter and becomes `rh_fail: json_path: field`
-   natively. Use `obj.contains("field")` for existence, and
-   `rh::json::stringify(value) == "null"` for a null sentinel. Note that
-   `json_is_present(tab.title)` cannot guard anything — the argument is
-   evaluated before the call.
+1. **Reading a missing JSON field is a failure, not `()`.** `"" + x.field` on an
+   absent path is `rh_fail: json_path: field`. Use `obj.contains("field")` for
+   existence and `rh::json::stringify(value) == "null"` for a null sentinel.
+
+   `type_of(binding.path) == "()"` is the **one** probe that does work: the
+   transpiler lowers it to `rh_json_type_name`, which returns `"()"` for a
+   missing or null path on purpose, so optional probes stay native. But it only
+   lowers when the transpiler can see the argument as a JSON path on a binding —
+   hand it something it cannot resolve that way (a loop variable, an inlined
+   call result) and it falls back to a path that does fail. Bind first, and
+   re-check with `mode_probe`.
+
+   Either way, wrapping it in a helper cannot guard anything:
+   `json_is_present(tab.title)` evaluates `tab.title` **before** the call.
 2. **Objects do not stringify by concatenation.** `"" + tab.working_context`
    fails with `json_string_path`. Use `rh::json::stringify(binding)`, and bind
    first — an inline expression perturbs type inference.
