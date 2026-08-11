@@ -16,7 +16,6 @@ Copyright and license terms remain with their respective authors.
 | `objc2-foundation` | MIT |
 | `png` | MIT OR Apache-2.0 |
 | `rhai` | MIT OR Apache-2.0 |
-| `rmux-pty` | MIT OR Apache-2.0 |
 | `rquickjs` | MIT |
 | `rusqlite` | MIT |
 | `serde` | MIT OR Apache-2.0 |

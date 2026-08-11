@@ -321,9 +321,30 @@ fn entry() {
             }
         }
     }
+    // Name the difference. A bare count mismatch says only "these two sets are
+    // different sizes", so every occurrence cost a manual diff of
+    // `cargo metadata` against THIRD_PARTY_NOTICES.md -- and the loop below,
+    // which does name the missing ones, is never reached because this fires
+    // first. Report both directions here.
+    let missing_notices = [];
+    for name in direct_names.keys() {
+        if !notice_names.contains(name) {
+            missing_notices.push("" + name);
+        }
+    }
+    let stale_notices = [];
+    for name in notice_names.keys() {
+        if !direct_names.contains(name) {
+            stale_notices.push("" + name);
+        }
+    }
     require(
         direct_names.keys().len == notice_names.keys().len,
-        "supply_chain_notice_count"
+        "supply_chain_notice_count:direct=" + direct_names.keys().len
+            + ":notices=" + notice_names.keys().len
+            + ":missing_from_notices=" + rh::json::stringify(missing_notices)
+            + ":notices_without_dependency="
+            + rh::json::stringify(stale_notices)
     );
     for name in direct_names.keys() {
         require(
