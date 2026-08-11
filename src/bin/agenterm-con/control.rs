@@ -5,8 +5,8 @@
 
 use std::io::{Read as _, Write as _};
 use std::str::FromStr as _;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -28,6 +28,37 @@ const ACCEPT_POLL: Duration = Duration::from_millis(200);
 pub struct CliRequest {
     pub control: String,
     pub command: CliCommand,
+}
+
+#[cfg(test)]
+mod compact_channel_tests {
+    use super::*;
+
+    #[test]
+    fn dropping_reply_sender_wakes_receiver_without_waiting_for_timeout() {
+        let (sender, receiver) = reply_channel();
+        drop(sender);
+        let started = std::time::Instant::now();
+        assert!(receiver.recv_timeout(Duration::from_secs(10)).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn closed_request_queue_rejects_and_releases_a_waiter() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let queue = RequestQueue::new(alive);
+        queue.close();
+        let (reply, receiver) = reply_channel();
+        assert!(
+            queue
+                .push(IncomingRequest {
+                    command: CliCommand::ListTabs,
+                    reply,
+                })
+                .is_err()
+        );
+        assert!(receiver.recv_timeout(Duration::from_secs(1)).is_err());
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -404,7 +435,113 @@ fn parse_mouse_button(value: &str) -> Result<MouseButton, String> {
 }
 
 pub type Reply = Result<JsonValue, String>;
-pub type ReplySender = mpsc::Sender<Reply>;
+pub struct ReplySender(Arc<ReplySlot>);
+
+struct ReplyReceiver(Arc<ReplySlot>);
+
+struct ReplySlot {
+    value: std::sync::Mutex<Option<Reply>>,
+    ready: std::sync::Condvar,
+    sender_alive: AtomicBool,
+}
+
+impl Default for ReplySlot {
+    fn default() -> Self {
+        Self {
+            value: std::sync::Mutex::new(None),
+            ready: std::sync::Condvar::new(),
+            sender_alive: AtomicBool::new(true),
+        }
+    }
+}
+
+impl ReplySender {
+    pub fn send(&self, value: Reply) -> Result<(), Reply> {
+        let mut slot = self
+            .0
+            .value
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.is_some() {
+            return Err(value);
+        }
+        *slot = Some(value);
+        self.0.ready.notify_one();
+        Ok(())
+    }
+}
+
+impl ReplyReceiver {
+    fn recv_timeout(&self, timeout: Duration) -> Result<Reply, ()> {
+        let slot = self
+            .0
+            .value
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut slot, _) = self
+            .0
+            .ready
+            .wait_timeout_while(slot, timeout, |slot| {
+                slot.is_none() && self.0.sender_alive.load(Ordering::Acquire)
+            })
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        slot.take().ok_or(())
+    }
+}
+
+impl Drop for ReplySender {
+    fn drop(&mut self) {
+        self.0.sender_alive.store(false, Ordering::Release);
+        self.0.ready.notify_one();
+    }
+}
+
+fn reply_channel() -> (ReplySender, ReplyReceiver) {
+    let slot = Arc::new(ReplySlot::default());
+    (ReplySender(Arc::clone(&slot)), ReplyReceiver(slot))
+}
+
+struct RequestQueue {
+    items: std::sync::Mutex<std::collections::VecDeque<IncomingRequest>>,
+    alive: Arc<AtomicBool>,
+}
+
+impl RequestQueue {
+    fn new(alive: Arc<AtomicBool>) -> Self {
+        Self {
+            items: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            alive,
+        }
+    }
+
+    fn push(&self, request: IncomingRequest) -> Result<(), IncomingRequest> {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.alive.load(Ordering::Acquire) {
+            return Err(request);
+        }
+        items.push_back(request);
+        Ok(())
+    }
+
+    fn pop(&self) -> Option<IncomingRequest> {
+        self.items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+    }
+
+    fn close(&self) {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.alive.store(false, Ordering::Release);
+        items.clear();
+    }
+}
 
 pub struct IncomingRequest {
     pub command: CliCommand,
@@ -412,16 +549,16 @@ pub struct IncomingRequest {
 }
 
 pub struct ControlServer {
-    requests: mpsc::Receiver<IncomingRequest>,
-    alive: Arc<AtomicBool>,
+    requests: Arc<RequestQueue>,
 }
 
 impl ControlServer {
     pub fn bind(endpoint: &str, wake: impl Fn() + Send + Sync + 'static) -> Result<Self, String> {
         let endpoint = parse_native_endpoint(endpoint)?;
         let mut listener = NativeListener::bind(&endpoint).map_err(|error| error.to_string())?;
-        let (request_tx, requests) = mpsc::channel();
         let alive = Arc::new(AtomicBool::new(true));
+        let requests = Arc::new(RequestQueue::new(Arc::clone(&alive)));
+        let request_tx = Arc::clone(&requests);
         let worker_alive = Arc::clone(&alive);
         let wake = Arc::new(wake);
         thread::Builder::new()
@@ -443,17 +580,17 @@ impl ControlServer {
                 }
             })
             .map_err(|error| format!("control listener thread: {error}"))?;
-        Ok(Self { requests, alive })
+        Ok(Self { requests })
     }
 
     pub fn try_recv(&self) -> Option<IncomingRequest> {
-        self.requests.try_recv().ok()
+        self.requests.pop()
     }
 }
 
 impl Drop for ControlServer {
     fn drop(&mut self) {
-        self.alive.store(false, Ordering::Release);
+        self.requests.close();
     }
 }
 
@@ -473,14 +610,14 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
 
 fn serve_one(
     mut stream: NativeStream,
-    request_tx: mpsc::Sender<IncomingRequest>,
+    request_tx: Arc<RequestQueue>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
     let _ = stream.set_io_timeout(GUI_RESPONSE_TIMEOUT);
     let response = read_wire_request(&mut stream).and_then(|command| {
-        let (reply, response_rx) = mpsc::channel();
+        let (reply, response_rx) = reply_channel();
         request_tx
-            .send(IncomingRequest { command, reply })
+            .push(IncomingRequest { command, reply })
             .map_err(|_| "terminal window is closing".to_owned())?;
         wake();
         response_rx

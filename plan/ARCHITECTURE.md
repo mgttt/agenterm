@@ -233,6 +233,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `main` / offline 入口；这些既有可测边界显式禁止内联，并以固定 8-byte 数组装配
   `ATC1` header，避免通用可变尾切片。官方同 profile PE 从 737,280 B 降至
   733,184 B（-4,096 B），其中 `.text -2,896 B`、`.rdata -536 B`，`.rsrc` 不变。
+  隔离 bloat 随后定位到控制线程为请求队列和每请求回复分别单态化两套通用
+  `std::sync::mpsc`。con 现以互斥保护的 FIFO 和一次性 Condvar 回复槽表达实际协议：
+  每请求线程仍可并发，`wait-text` 不会阻塞后续客户端；队列关闭在同一临界区原子
+  拒绝新请求并释放待处理回复，发送端丢弃会立即唤醒等待者。隔离 PE 从 716 KiB
+  降至 698 KiB、`.text` 从 473.5 KiB 降至 459.0 KiB；官方 release-fast PE 从
+  733,184 B 降至 714,752 B（-18,432 B）。普通 profile 与 build-std con profile
+  也不得共用默认 target：即使包/profile 名相同，不同 rustc flags 仍会污染
+  core/compiler_builtins fingerprint；诊断构建同样必须使用隔离 `--target-dir`。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

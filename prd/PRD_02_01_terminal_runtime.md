@@ -289,13 +289,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   GDI leaf accepts one UTF-16 unit and returns a missing glyph for supplementary
   scalars rather than splitting a surrogate pair; broader emoji fallback is an
   explicit later DirectWrite tradeoff, not a false shipped claim.
-  Configuration, scripted interaction, atomic snapshots and the local control
-  protocol now share one strict bounded JSON codec instead of four serde/ad-hoc
-  paths. It accepts UTF-8, JSON escapes and valid surrogate pairs while bounding
-  input bytes, nesting, nodes, object fields and strings; duplicate keys,
-  isolated surrogates, malformed/non-finite numbers and trailing data fail
-  locally. `serde_json` remains a dev-only interoperability oracle and is absent
-  from the production graph.
+  Configuration, scripted interaction, atomic snapshots and public JSON output
+  now share one strict bounded JSON codec instead of four serde/ad-hoc paths. It
+  accepts UTF-8, JSON escapes and valid surrogate pairs while bounding input
+  bytes, nesting, nodes, object fields and strings; duplicate keys, isolated
+  surrogates, malformed/non-finite numbers and trailing data fail locally.
+  `serde_json` remains a dev-only interoperability oracle and is absent from the
+  production graph. The private local control wire instead uses the versioned,
+  length-prefixed typed `ATC1` frame described above. Its GUI handoff preserves
+  concurrent request workers without linking two generic `mpsc` instances: a
+  mutex-owned FIFO carries requests and a one-shot Condvar slot carries each
+  reply. Closing the GUI atomically rejects new queue entries, drops pending
+  senders, and wakes reply waiters rather than making them consume the full
+  timeout. The official release-fast PE falls from 733,184 to 714,752 bytes;
+  90 binary unit tests, 18 Windows black-box tests and the isolated multitab
+  control journey pass, including explicit sender-drop and closed-queue tests.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
