@@ -173,7 +173,19 @@ fn entry() {
             for executable in candidate.executables {
                 let name = "" + executable.name;
                 executable_names.push(name);
-                let source = std::path::join(binary_directory, name).display;
+                // Cargo emits the console forwarder as `agenterm-com.exe`; the
+                // shipped name is `agenterm.com`. `artifact_files::stage_artifact`
+                // already maps this when staging into `dist/`, but this packager
+                // reads `target/<triple>/release/` directly and had no mapping,
+                // so the windows-aarch64 Candidate leg failed with
+                // `package_client_binary_missing:target/aarch64-pc-windows-msvc/release/agenterm.com`
+                // -- a file cargo never produces under that name.
+                let source_name = name;
+                if name == "agenterm.com" {
+                    source_name = "agenterm-com.exe";
+                }
+                let source =
+                    std::path::join(binary_directory, source_name).display;
                 let staged_binary = std::path::join(staging, name).display;
                 let hidden_name = "." + name + ".bin";
                 let staged_hidden =
