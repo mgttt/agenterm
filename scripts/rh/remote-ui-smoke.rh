@@ -355,7 +355,12 @@ fn wait_effective_font_size(context, cli, size, overridden) {
     let last_effective = -1;
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        if snapshot.settings != json_null() && snapshot.settings.effective != json_null() {
+        // `.settings` is absent from the projection for a frame after a theme
+        // apply, and *reading* an absent key records a failure -- so this guard
+        // used to log `json_path: settings` on every such poll even when the
+        // loop then succeeded. `contains` asks without reading.
+        if snapshot.contains("settings")
+                && snapshot.settings.effective != json_null() {
             let terminal_override = snapshot.settings.current_terminal_override;
             last_effective = 0 + snapshot.settings.effective.terminal_font_size;
             if snapshot.settings.effective.terminal_font_size == size
@@ -421,7 +426,8 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
     let required_sequence = after_sequence;
     if required_sequence == 0 {
         let current = json_cli(context, cli, ["ui-snapshot"]);
-        if current.render_activity != json_null() {
+        if current.contains("render_activity")
+                && current.render_activity != json_null() {
             required_sequence = 0 + current.render_activity.sequence;
         }
     }
@@ -441,11 +447,15 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
     let last_sequence = -1;
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let activity = snapshot.render_activity;
-        if activity != json_null() {
-            last_sequence = 0 + activity.sequence;
-            if last_sequence > required_sequence {
-                return activity;
+        // `render_activity` is absent until the client answers the sample
+        // request, and reading an absent key records a failure -- ask first.
+        if snapshot.contains("render_activity") {
+            let activity = snapshot.render_activity;
+            if activity != json_null() {
+                last_sequence = 0 + activity.sequence;
+                if last_sequence > required_sequence {
+                    return activity;
+                }
             }
         }
         if std::time::SystemTime::now().unix_millis > sample_deadline {
@@ -652,21 +662,101 @@ fn repeat_text(value, count) {
 }
 
 fn tab_text_geometry(context, cli, id) {
+    // Read the tab first: `tab.render` on an absent tab records a failure every
+    // iteration, so a tab that will never appear used to cost 600 polls (~78s)
+    // and 1200 recorded failures before saying anything useful. Bound by wall
+    // clock and name what the snapshot actually held.
+    let deadline = std::time::SystemTime::now().unix_millis + 15000;
+    let observed = "no snapshot read";
     for attempt in 0..600 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let tab = find_tab(snapshot, id);
-        let render = tab.render;
-        let text = render["text"];
-        if tab != json_null()
-                && render != json_null()
-                && text != json_null()
-                && 0 + text.width > 0
-                && 0 + text.height > 0 {
-            return text;
+        if tab == json_null() {
+            observed = "tab " + id + " absent from snapshot";
+        } else {
+            let render = tab["render"];
+            if render == json_null() {
+                observed = "tab has no render geometry: "
+                    + rh::json::stringify(tab);
+            } else {
+                let text = render["text"];
+                if text != json_null()
+                        && 0 + text.width > 0
+                        && 0 + text.height > 0 {
+                    return text;
+                }
+                observed = "render=" + rh::json::stringify(render);
+            }
+        }
+        if std::time::SystemTime::now().unix_millis > deadline {
+            break;
         }
         rh::task::sleep(std::time::Duration::from_millis(50));
     }
-    throw "remote_ui_tab_text_geometry_missing";
+    throw "remote_ui_tab_text_geometry_missing:" + observed;
+}
+
+/// Pixel rect of a tab row's Close affordance, straight from the snapshot.
+///
+/// The close click used to be a hardcoded `(330, 64)`. That is not a contract:
+/// row height, indent, and action density all move it, so the click silently
+/// landed somewhere else and the confirm dialog never opened -- after which the
+/// rest of the run operated on a tree it had already lost track of. The
+/// projection publishes `tabs[].actions.close` for exactly this purpose.
+fn tab_close_rect(context, cli, id) {
+    let deadline = std::time::SystemTime::now().unix_millis + 15000;
+    let observed = "no snapshot read";
+    for attempt in 0..600 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let tab = find_tab(snapshot, id);
+        if tab == json_null() {
+            observed = "tab " + id + " absent from snapshot";
+        } else {
+            let actions = tab["actions"];
+            if actions == json_null() {
+                observed = "tab has no action geometry: "
+                    + rh::json::stringify(tab);
+            } else {
+                let rect = actions["close"];
+                if rect != json_null()
+                        && 0 + rect.width > 0
+                        && 0 + rect.height > 0 {
+                    return rect;
+                }
+                observed = "actions=" + rh::json::stringify(actions);
+            }
+        }
+        if std::time::SystemTime::now().unix_millis > deadline {
+            break;
+        }
+        rh::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "remote_ui_tab_close_geometry_missing:" + observed;
+}
+
+/// Published track/thumb geometry of the terminal scrollbar.
+///
+/// Only present once the active tab has scrollback, so poll rather than racing
+/// the first read after the output burst.
+fn wait_terminal_scrollbar(context, cli) {
+    let deadline = std::time::SystemTime::now().unix_millis + 15000;
+    let observed = "no snapshot read";
+    for attempt in 0..600 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let terminal = snapshot.layout.terminal;
+        if terminal.contains("scrollbar")
+                && terminal.scrollbar != json_null()
+                && 0 + terminal.scrollbar.track.height > 0
+                && 0 + terminal.scrollbar.thumb.height > 0 {
+            return terminal.scrollbar;
+        }
+        observed = "terminal=" + rh::json::stringify(terminal);
+        if std::time::SystemTime::now().unix_millis > deadline {
+            break;
+        }
+        rh::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "remote_ui_terminal_scrollbar_missing:" + observed;
 }
 
 fn parse_json_text(text) {
@@ -1461,9 +1551,14 @@ try {
     if std::fs::exists(context.settings_path) {
         let cancelled_settings =
             rh::json::parse_file(context.settings_path);
+        // `color_theme` was renamed to `appearance_preset` (light ->
+        // "classic-day", dark -> "classic-night"); the old key is only a serde
+        // read alias, so nothing writes it any more and every assertion on it
+        // had been unsatisfiable since the rename.
         test_harness::require(
-            cancelled_settings.color_theme != "light",
-            "remote_ui_settings_cancel_persisted_preview"
+            cancelled_settings.appearance_preset != "classic-day",
+            "remote_ui_settings_cancel_persisted_preview:persisted="
+                + rh::json::stringify(cancelled_settings)
         );
     }
 
@@ -1475,12 +1570,15 @@ try {
     let applied_settings =
         rh::json::parse_file(context.settings_path);
     test_harness::require(
-        applied_settings.color_theme == "light"
+        applied_settings.appearance_preset == "classic-day"
             && applied_settings.terminal_font_family == "Consolas"
             && applied_settings.terminal_font_size == 14
             && !settings_font.visible
             && replacement_composer.visible,
-        "remote_ui_settings_apply_invalid"
+        "remote_ui_settings_apply_invalid:persisted="
+            + rh::json::stringify(applied_settings)
+            + ":font_dialog_visible=" + settings_font.visible
+            + ":composer_visible=" + replacement_composer.visible
     );
     settings_button.click();
     settings_dark.click();
@@ -1488,8 +1586,9 @@ try {
     let cancelled_dark =
         rh::json::parse_file(context.settings_path);
     test_harness::require(
-        cancelled_dark.color_theme == "light",
-        "remote_ui_settings_cancel_rollback_invalid"
+        cancelled_dark.appearance_preset == "classic-day",
+        "remote_ui_settings_cancel_rollback_invalid:persisted="
+            + rh::json::stringify(cancelled_dark)
     );
 
     step("compare counterbalanced Dark and Light render cost");
@@ -1606,10 +1705,12 @@ try {
         zoom_redraws <= 96 && zoom_paints <= 96,
         "remote_ui_zoom_repaint_storm"
     );
+    let idle_started = std::time::SystemTime::now().unix_millis;
     for attempt in 0..20 {
         json_cli(context, cli, ["ui-snapshot"]);
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
+    let idle_elapsed = std::time::SystemTime::now().unix_millis - idle_started;
     let render_after_idle = sample_render_activity(
         context,
         cli,
@@ -1620,9 +1721,19 @@ try {
         render_after_idle.redraw_requests - render_after_zoom.redraw_requests;
     let idle_paints =
         render_after_idle.parent_paints - render_after_zoom.parent_paints;
+    // The sidebar clock repaints once per second by design ("tick redraws when
+    // the second changes"), so the ceiling has to scale with how long this window
+    // actually took -- 20 `ui-snapshot` children cost ~2.6s in a debug build and
+    // well under that in a release one. A fixed `<= 3` therefore measured build
+    // speed, not repaint discipline. Allow two per second plus slack; a genuine
+    // storm is orders of magnitude above this.
+    let idle_budget = 3 + ((idle_elapsed * 2) / 1000);
     test_harness::require(
-        idle_redraws <= 3 && idle_paints <= 3,
-        "remote_ui_idle_repaint_storm"
+        idle_redraws <= idle_budget && idle_paints <= idle_budget,
+        "remote_ui_idle_repaint_storm:idle_redraws=" + idle_redraws
+            + ":idle_paints=" + idle_paints
+            + ":budget=" + idle_budget
+            + ":elapsed_ms=" + idle_elapsed
     );
     test_harness::require(
         render_after_idle.control_bounds_updates
@@ -1724,12 +1835,19 @@ try {
         ["show-composer", "-t", tab_id]
     );
     cwd_composer = trimmed(cwd_composer);
+    // The composer holds the *prepared shell command*, not the bare path -- for
+    // cmd that is `cd /d "<path>"`. Asserting equality with the path could never
+    // hold; what the step actually proves is that the request is pending and the
+    // prepared command carries the requested directory.
     test_harness::require(
         cwd_tab != json_null()
             && cwd_tab.working_context.cwd == cwd_path
             && cwd_tab.working_context.cwd_request_pending
-            && cwd_composer == cwd_path,
-        "remote_ui_cwd_prepare_invalid"
+            && cwd_composer.contains(cwd_path),
+        "remote_ui_cwd_prepare_invalid:want=" + cwd_path
+            + ":working_context="
+            + rh::json::stringify(cwd_tab.working_context)
+            + ":composer=" + cwd_composer
     );
     replacement_gui.window_pointer("click", cwd_x, cwd_y);
     replacement_composer.set_text("must-not-prepare");
@@ -2097,12 +2215,24 @@ try {
         "remote_ui_tree_expand_invalid"
     );
 
-    replacement_gui.window_pointer("click", 330, 64);
+    let child_close = tab_close_rect(context, cli, child_id);
+    // Bind each component first, the way the scrollbar steps do. Nesting the
+    // json reads inside one arithmetic expression puts `+` in the string lane.
+    let child_close_left = 0 + child_close.x;
+    let child_close_width = 0 + child_close.width;
+    let child_close_top = 0 + child_close.y;
+    let child_close_height = 0 + child_close.height;
+    let child_close_x = child_close_left + (child_close_width / 2);
+    let child_close_y = child_close_top + (child_close_height / 2);
+    replacement_gui.window_pointer("click", child_close_x, child_close_y);
     let tab_close_confirm = assert_window_control(replacement_gui, 2119, "tab_close_confirm");
     let tab_close_cancel = assert_window_control(replacement_gui, 2120, "tab_close_cancel");
     test_harness::require(
         tab_close_confirm.visible && tab_close_cancel.visible,
-        "remote_ui_tab_close_modal_missing"
+        "remote_ui_tab_close_modal_missing:close_rect="
+            + rh::json::stringify(child_close)
+            + ":confirm_visible=" + tab_close_confirm.visible
+            + ":cancel_visible=" + tab_close_cancel.visible
     );
     tab_close_cancel.click();
     let cancelled_close = json_cli(
@@ -2115,10 +2245,20 @@ try {
             && !tab_close_confirm.visible,
         "remote_ui_tab_close_cancel_invalid"
     );
-    replacement_gui.window_pointer("click", 330, 64);
+    let child_close_again = tab_close_rect(context, cli, child_id);
+    let reopen_left = 0 + child_close_again.x;
+    let reopen_width = 0 + child_close_again.width;
+    let reopen_top = 0 + child_close_again.y;
+    let reopen_height = 0 + child_close_again.height;
+    replacement_gui.window_pointer(
+        "click",
+        reopen_left + (reopen_width / 2),
+        reopen_top + (reopen_height / 2)
+    );
     test_harness::require(
         tab_close_confirm.visible && tab_close_cancel.visible,
-        "remote_ui_tab_close_modal_reopen_missing"
+        "remote_ui_tab_close_modal_reopen_missing:close_rect="
+            + rh::json::stringify(child_close_again)
     );
     tab_close_confirm.click();
     let confirmed_close = json_cli(
@@ -2132,7 +2272,10 @@ try {
             && confirmed_first_tab["id"] == tab_id
             && confirmed_close.active_tab_id == tab_id
             && !tab_close_confirm.visible,
-        "remote_ui_tab_close_confirm_invalid"
+        "remote_ui_tab_close_confirm_invalid:want_only=" + tab_id
+            + ":tabs=" + rh::json::stringify(confirmed_close.tabs)
+            + ":active=" + confirmed_close.active_tab_id
+            + ":confirm_visible=" + tab_close_confirm.visible
     );
     wait_observed(
         context,
@@ -2531,21 +2674,25 @@ try {
         "remote_ui_scrollback_bound_missing"
     );
     replacement_gui.window_message(0x0113, 0, 0);
-    let client_rect = replacement_gui.window_client_rect();
-    let track_height = client_rect.bottom - 26 - 104;
-    let visible_rows = scroll_tab.screen.rows;
     let maximum_scroll = scroll_tab.screen.max_scrollback;
-    let thumb_height =
-        track_height * visible_rows / (visible_rows + maximum_scroll);
-    if thumb_height < 24 {
-        thumb_height = 24;
-    }
-    if thumb_height > track_height {
-        thumb_height = track_height;
-    }
-    let scrollbar_x = client_rect.right - 6;
-    let bottom_thumb_y = track_height - thumb_height / 2;
-    let top_thumb_y = thumb_height / 2;
+    // This used to re-derive the scrollbar from the client rect with the
+    // renderer's constants inlined (`bottom - 26 - 104`, `right - 6`, and a copy
+    // of the thumb-height formula) and then treat the track as if it started at
+    // y=0. It does not -- it starts 104px down -- so every y was short by the
+    // track origin. Dragging "up" still clamped to the top and reached history,
+    // which is why only the return-to-live leg failed; the wheel assertions then
+    // inherited a viewport that was never live. The projection publishes the
+    // real track and thumb, so ask it.
+    let terminal_scrollbar = wait_terminal_scrollbar(context, cli);
+    let scroll_track_top = 0 + terminal_scrollbar.track.top;
+    let scroll_track_height = 0 + terminal_scrollbar.track.height;
+    let scroll_track_left = 0 + terminal_scrollbar.track.left;
+    let scroll_track_width = 0 + terminal_scrollbar.track.width;
+    let scroll_thumb_height = 0 + terminal_scrollbar.thumb.height;
+    let scrollbar_x = scroll_track_left + (scroll_track_width / 2);
+    let top_thumb_y = scroll_track_top + (scroll_thumb_height / 2);
+    let bottom_thumb_y = scroll_track_top + scroll_track_height
+        - (scroll_thumb_height / 2);
     let top_snapshot = json_cli(
         context,
         cli,
@@ -2564,7 +2711,7 @@ try {
     let dragged_top_window = dragged_top.windows[0];
     test_harness::require(
         dragged_top_window.scrollback_offset == maximum_scroll,
-        "remote_ui_scrollbar_did_not_reach_history"
+        "remote_ui_scrollbar_did_not_reach_history:want=" + maximum_scroll + ":offset=" + dragged_top_window.scrollback_offset + ":from_y=" + bottom_thumb_y + ":to_y=" + top_thumb_y
     );
     let live_snapshot = json_cli(
         context,
@@ -2584,7 +2731,7 @@ try {
     let dragged_live_window = dragged_live.windows[0];
     test_harness::require(
         dragged_live_window.scrollback_offset == 0,
-        "remote_ui_scrollbar_did_not_return_live"
+        "remote_ui_scrollbar_did_not_return_live:offset=" + dragged_live_window.scrollback_offset + ":from_y=" + top_thumb_y + ":to_y=" + bottom_thumb_y
     );
     let wheel_up_snapshot = json_cli(
         context,
@@ -2608,7 +2755,7 @@ try {
     let wheel_up_window = wheel_up_inspect.windows[0];
     test_harness::require(
         wheel_up_window.scrollback_offset > 0,
-        "remote_ui_wheel_up_invalid"
+        "remote_ui_wheel_up_invalid:offset=" + wheel_up_window.scrollback_offset
     );
     let wheel_down_snapshot = json_cli(
         context,
@@ -2632,7 +2779,7 @@ try {
     let wheel_down_window = wheel_down_inspect.windows[0];
     test_harness::require(
         wheel_down_window.scrollback_offset == 0,
-        "remote_ui_wheel_down_invalid"
+        "remote_ui_wheel_down_invalid:offset=" + wheel_down_window.scrollback_offset
     );
 
     step("forward wheel input to a raw full-screen application");
@@ -2804,22 +2951,30 @@ try {
     let marker_column_base = 0 + marker_run.column;
     let marker_offset = marker_text_offset(marker_text, copy_marker);
     let marker_column = marker_column_base + marker_offset;
-    let selection_rect = replacement_gui.window_client_rect();
-    let terminal_left = 360;
-    let rect_right = 0 + selection_rect.right;
-    let rect_bottom = 0 + selection_rect.bottom;
-    let screen_columns = 0 + selection_tab.screen.columns;
-    let screen_rows = 0 + selection_tab.screen.rows;
-    let terminal_width = rect_right - terminal_left - 12;
-    let terminal_height = rect_bottom - 26 - 104;
+    // Cell geometry from the published terminal layout, not re-derived from the
+    // client rect. The old form hardcoded `terminal_left = 360`, computed
+    // `terminal_height = bottom - 26 - 104` (which is the terminal's *bottom*,
+    // 591, not its height, 511), and then omitted the terminal's top origin
+    // from `selection_y` entirely. The row was therefore wrong and the drag
+    // selected the echoed command line -- the clipboard came back as
+    // `D:\dev\agenterm>echo REMOTE_COP` instead of the marker.
+    let selection_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let terminal_layout = selection_snapshot.layout.terminal;
+    let terminal_left = 0 + terminal_layout.bounds.left;
+    let terminal_top = 0 + terminal_layout.bounds.top;
+    let screen_columns = 0 + terminal_layout.cols;
+    let screen_rows = 0 + terminal_layout.rows;
+    let terminal_width = 0 + terminal_layout.viewport_width;
+    let terminal_height = 0 + terminal_layout.height;
     let cell_width = terminal_width / screen_columns;
     let cell_height = terminal_height / screen_rows;
     test_harness::require(
         cell_width > 0 && cell_height > 0,
-        "remote_ui_selection_cell_geometry_invalid"
+        "remote_ui_selection_cell_geometry_invalid:terminal="
+            + rh::json::stringify(terminal_layout)
     );
     let selection_y =
-        marker_row_value * cell_height + cell_height / 2;
+        terminal_top + marker_row_value * cell_height + cell_height / 2;
     let selection_start_x =
         terminal_left + (0 + marker_column) * cell_width + (cell_width / 2);
     let selection_end_x =

@@ -148,8 +148,23 @@ inference corrupts a serialized field.
 Three consequences that cost real debugging time:
 
 1. **`rh_fail` records and continues.** Only the *first* recorded failure is
-   reported. A task can print `PASS: ...` and still fail, because the recording
+   *returned*. A task can print `PASS: ...` and still fail, because the recording
    happened earlier in a helper.
+
+   Every failure is nonetheless **traced in order** to the same channels as
+   `print`, so run with `AGENTERM_SCRIPT_WORKER_STDERR=inherit` and read them all
+   at once rather than fixing one per run:
+
+   ```
+   RH_FAIL[1] rh_fail: json_path: tabs.len
+   RH_FAIL[2] rh_fail: json_integer_value
+   RH_FAIL[3] rh_fail: remote_ui_new_modal_invalid
+   ```
+
+   `RH_FAIL[1]` is the one to fix; interleave the list with the `STEP` lines and
+   the cascade is usually obvious. A count in the thousands means a polling loop
+   is asserting on a path that cannot appear — bound such loops by wall clock,
+   not by attempt count.
 2. **`require` inside a helper does not stop the caller.** The helper returns a
    typed default (`""`, `0`, `Value::Null`, `Vec::new()`, ...) and the caller
    keeps running with that default. If a leg must abort the whole task, put the
@@ -222,6 +237,27 @@ These are places where the same `.rh` behaves differently once `mode=native`.
    `[]` that you push strings into is JSON-backed, so `items[9]` on a short list
    is a clean `rh_fail: json_array_index: 9`. A list of Children
    (`ValueKind::ChildList`) is a real Rust `Vec`, so the same index is a **panic**.
+8. **Do not nest JSON reads inside one arithmetic expression.** Write
+
+   ```rust
+   let left = 0 + rect.x;              // one read per binding
+   let width = 0 + rect.width;
+   let centre = left + (width / 2);
+   ```
+
+   not `(0 + rect.x) + ((0 + rect.width) / 2)`. The outer `+` sees two
+   parenthesised sub-expressions containing JSON paths, picks the **string**
+   lane, and emits `format!(...)` — which then fails to compile as an `INT`
+   argument. Every scrollbar step in `remote-ui-smoke.rh` binds components first
+   for exactly this reason.
+
+These three used to be traps and are now fixed in codegen 98 — they work, and
+you should use them freely:
+
+- `let n = doc.items.len;` in a bare `let` (it used to lower to a path get for
+  the literal key `len` and silently produce null; comparisons always worked).
+- Booleans in string concatenation: `"visible=" + control.visible`.
+- `rh::json::stringify(doc.tabs)` on a **path**, not just on a bare binding.
 
 ## 7a. When a script panics
 
