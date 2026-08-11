@@ -195,6 +195,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code
+- [~] `agenterm-con` evolves as a single-GUI-process, lightweight terminal
+  host: each tree tab owns an independent PTY, parser, viewport and failure
+  state; closing a parent promotes its direct children instead of terminating
+  them. It is explicitly not a mux, persistent workspace, Fleet authority or
+  script runtime. Its fixed GUI-lifetime local CLI uses stable `@N` tab IDs for
+  `list-tabs`, `new-tab`, `select-tab`, `close-tab`, `capture-pane`,
+  `screenshot-pane`, `send-text`, `send-keys`, cell-addressed mouse
+  press/release/move/click, `send-wheel`, and bounded `wait-text`. The CLI
+  connects only to an explicitly configured local pipe or Unix-socket endpoint;
+  requests and responses are size/time bounded, screenshot success is returned
+  only after atomic PNG output, and a malformed request or failed child may
+  only fail that request/session, never terminate unrelated sessions or the
+  window. The owning suite now includes 62 binary unit tests plus a Windows
+  public-CLI black-box journey covering isolated parent/child PTYs, raw text,
+  key, mouse and wheel delivery, bounded wait failure, capture isolation,
+  renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
 - [x] explicit tab/server close cancels I/O, closes ConPTY ownership, and
   waits within a 750 ms bound for the process-wait and reader workers; success
   is reported only after both workers finish, while an incomplete shutdown

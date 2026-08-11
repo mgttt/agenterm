@@ -1,10 +1,9 @@
 //! `agenterm-con` — a minimal console host (conhost equivalent).
 //!
 //! Like Windows `conhost.exe`, it owns the terminal window, renders cells
-//! into a pixel surface, and forwards keyboard input to a shell running
-//! inside a PTY. It does not implement tab/workspace/Fleet/server — it is a
-//! lightweight, standalone console host for when the full agenterm GUI is
-//! unavailable or being rebuilt.
+//! into a pixel surface, and forwards keyboard input to shells running inside
+//! independent PTYs. It has an in-window tab tree, but deliberately does not
+//! implement a persisted workspace, Fleet, mux, server, or script runtime.
 //!
 //! Design priority: **stability**. The terminal that TUI agents and CLI tools
 //! crash inside most often dies during resize storms or VT-sequence floods, so
@@ -20,12 +19,16 @@
 
 #[path = "agenterm-con/agent_interface.rs"]
 mod agent_interface;
+#[path = "agenterm-con/control.rs"]
+mod control;
 #[path = "agenterm-con/font.rs"]
 mod font;
 #[path = "agenterm-con/palette.rs"]
 mod palette;
+#[path = "agenterm-con/workspace.rs"]
+mod workspace;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -208,7 +211,9 @@ const SCROLLBACK: usize = 4000;
 /// Logical (DIP) font size. conhost defaults to ~12px at 96 DPI, but
 /// ab_glyph outline metrics tend to produce taller cells than GDI, so we
 /// use a slightly smaller value to match the visual size.
-const DEFAULT_FONT_PX: f64 = 10.0;
+// 11pt is the practical default for a professional terminal on Windows:
+// readable CJK at ordinary DPI without sacrificing useful rows/columns.
+const DEFAULT_FONT_PX: f64 = 11.0;
 
 /// Configuration loaded from `agenterm-con.json` (analogous to conhost
 /// "Defaults" — persist font size, window geometry, etc. without a GUI dialog).
@@ -271,6 +276,7 @@ struct ConArgs {
     font_size: Option<f64>,
     cols: Option<u16>,
     rows: Option<u16>,
+    control_endpoint: Option<String>,
     command: Option<Vec<String>>,
     /// `--emit-snapshot`: see `agent_interface` module docs.
     snapshot_path: Option<PathBuf>,
@@ -302,6 +308,11 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
             }
             "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
             "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
+            "--control" => {
+                parsed.control_endpoint = Some(rest.next().cloned().ok_or_else(|| {
+                    "error: --control requires pipe:<name> or unix:<absolute-path>\n".to_owned()
+                })?);
+            }
             "--emit-snapshot" => {
                 parsed.snapshot_path =
                     Some(PathBuf::from(rest.next().cloned().ok_or_else(|| {
@@ -384,6 +395,7 @@ fn main() {
         font_size,
         cols: initial_cols,
         rows: initial_rows,
+        control_endpoint,
         command,
         snapshot_path,
         script_path,
@@ -416,30 +428,31 @@ fn main() {
     // Load config file: CLI flags override config, config overrides defaults.
     let config = load_config();
 
-    let mut app = ConTerminal::new(working_dir.clone());
-    let command_failed = Arc::clone(&app.command_failed);
-    app.command = command;
-    app.snapshot_path = snapshot_path;
-    app.script = script.unwrap_or_default().into();
+    let mut app = ConApp::new(working_dir.clone(), control_endpoint);
+    let command_failed = app.command_failed();
+    let session = app.active_session_mut().expect("initial terminal session");
+    session.command = command;
+    session.snapshot_path = snapshot_path;
+    session.script = script.unwrap_or_default().into();
     // Config values (lowest priority)
     if let Some(fs) = config.font_size {
-        app.font_size_logical = fs.clamp(8.0, 36.0);
+        session.font_size_logical = fs.clamp(8.0, 36.0);
     }
     if let Some(cols) = config.cols {
-        app.cols = cols.max(2);
+        session.cols = cols.max(2);
     }
     if let Some(rows) = config.rows {
-        app.rows = rows.max(2);
+        session.rows = rows.max(2);
     }
     // CLI flags override config
     if let Some(fs) = font_size {
-        app.font_size_logical = fs.clamp(8.0, 36.0);
+        session.font_size_logical = fs.clamp(8.0, 36.0);
     }
     if let Some(cols) = initial_cols {
-        app.cols = cols.max(2);
+        session.cols = cols.max(2);
     }
     if let Some(rows) = initial_rows {
-        app.rows = rows.max(2);
+        session.rows = rows.max(2);
     }
     // IME must stay on: without it CJK cannot be typed at all, which no
     // console host on Windows gets to call acceptable. An earlier fix disabled
@@ -464,12 +477,38 @@ fn main() {
 const USAGE: &str = "\
 Usage: agenterm-con [--no-activate] [--working-dir DIR]
                    [--font-size N] [--cols N] [--rows N]
-                   [--emit-snapshot PATH] [--script PATH]
+                   [--control ENDPOINT] [--emit-snapshot PATH]
                    [-e PROGRAM [ARGS...]]
        agenterm-con --version
        agenterm-con --help
+       agenterm-con cli --control ENDPOINT COMMAND [ARGS...]
 
-A standalone console host (conhost equivalent). No tabs, no server, no Fleet.
+A standalone console host (conhost equivalent). No server, mux, or Fleet.
+
+Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
+  agenterm-con --control pipe:\\\\.\\pipe\\agenterm-con-test
+  agenterm-con cli --control pipe:\\\\.\\pipe\\agenterm-con-test list-tabs
+  ... new-tab [--parent TAB]
+  ... select-tab --target TAB | close-tab --target TAB
+  ... capture-pane [--target TAB] [--max-bytes N]
+  ... screenshot-pane [--target TAB] --output PATH
+  ... send-text [--target TAB] TEXT
+  ... send-keys [--target TAB] KEY...
+  ... send-mouse [--target TAB] --action press|release|move|click
+                 --button none|left|middle|right --column N --row N
+  ... send-wheel [--target TAB] --column N --row N --notches N [--ctrl]
+  ... wait-text [--target TAB] [--timeout-ms N] TEXT
+
+Keys use names such as Enter, Escape, Tab, Up, F1 or modifiers such as Ctrl+C.
+Mouse coordinates are zero-based terminal cells. Positive wheel notches scroll up.
+
+  Ctrl+Shift+T       New root terminal
+  Ctrl+Shift+N       New child terminal below the active tab
+  Ctrl+Shift+W       Close active terminal (children are promoted)
+  Ctrl+Shift+[ / ]   Switch terminal tabs
+  Ctrl+Shift+I       Focus the external input area
+  Click a tab to select it. Click the bottom input area; Enter sends its
+  text to the active terminal.
 
   -e, --command  Run PROGRAM instead of the default shell. Everything after
                  -e is passed through verbatim, so it must come last:
@@ -497,8 +536,35 @@ Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 CLI flags override config; config overrides defaults.
 Ctrl+wheel adjusts font size at runtime.";
 
+const TREE_PANEL_LOGICAL_WIDTH: f64 = 224.0;
+const TREE_HEADER_LOGICAL_HEIGHT: f64 = 32.0;
+const TREE_ROW_LOGICAL_HEIGHT: f64 = 30.0;
+const COMPOSER_LOGICAL_HEIGHT: f64 = 54.0;
+
 /// Flags that must not open a window. Returns `Some(exit_code)` when handled.
+fn write_offline_stdout(text: &str) {
+    let _ = agenterm_platform::process::write_parent_console_stdout(text);
+}
+
+fn write_offline_stderr(text: &str) {
+    let _ = agenterm_platform::process::write_parent_console_stderr(text);
+}
+
 fn offline_cli_exit(args: &[String]) -> Option<i32> {
+    if args.first().is_some_and(|arg| arg == "cli") {
+        return Some(match control::run_cli(args) {
+            Ok(output) => {
+                if !output.is_empty() {
+                    write_offline_stdout(&output);
+                }
+                0
+            }
+            Err(error) => {
+                write_offline_stderr(&format!("agenterm-con cli: {error}\n"));
+                2
+            }
+        });
+    }
     let alone = args.len() == 1;
     match args.first().map(String::as_str) {
         Some("--version" | "-V") if alone => {
@@ -548,6 +614,7 @@ struct ConTerminal {
     /// Set by a script `Screenshot` command; captured and cleared by the
     /// next `render()`, since pixel data only exists transiently there.
     pending_screenshot: Option<PathBuf>,
+    pending_control_screenshot: Option<(PathBuf, control::ReplySender)>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser<ConCallbacks>,
@@ -635,6 +702,653 @@ struct ConTerminal {
     last_click: Option<(Instant, TerminalPoint, u8)>,
     /// Current scale factor (for pointer hit-test DIP→pixel conversion).
     scale: f64,
+    /// Physical space owned by the outer tab tree and composer.
+    content_left_px: u32,
+    content_top_px: u32,
+    content_bottom_px: u32,
+}
+
+/// One lightweight GUI process containing several isolated terminal sessions.
+///
+/// The wrapper owns tree identity and routing only. A `ConTerminal` still owns
+/// its own PTY, reader/waiter threads, parser, viewport and input state, so a
+/// dead child or malformed output cannot corrupt another session's state.
+struct ConApp {
+    workspace: workspace::Workspace,
+    sessions: BTreeMap<workspace::TabId, ConTerminal>,
+    composer: String,
+    composer_preedit: String,
+    composer_focused: bool,
+    exit: bool,
+    control_endpoint: Option<String>,
+    control_server: Option<control::ControlServer>,
+    control_waits: Vec<PendingControlWait>,
+}
+
+struct PendingControlWait {
+    target: workspace::TabId,
+    text: String,
+    deadline: Instant,
+    reply: control::ReplySender,
+}
+
+impl ConApp {
+    fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
+        let mut workspace = workspace::Workspace::default();
+        let initial = workspace.add_root("terminal".to_owned());
+        let mut sessions = BTreeMap::new();
+        sessions.insert(initial, ConTerminal::new(working_dir));
+        Self {
+            workspace,
+            sessions,
+            composer: String::new(),
+            composer_preedit: String::new(),
+            composer_focused: false,
+            exit: false,
+            control_endpoint,
+            control_server: None,
+            control_waits: Vec::new(),
+        }
+    }
+
+    fn command_failed(&mut self) -> Arc<AtomicBool> {
+        Arc::clone(
+            &self
+                .active_session_mut()
+                .expect("initial terminal session")
+                .command_failed,
+        )
+    }
+
+    fn active_session_mut(&mut self) -> Result<&mut ConTerminal, PixelWindowError> {
+        let id = self.workspace.active().ok_or_else(|| {
+            PixelWindowError::failed("con_session_missing", "no active terminal session")
+        })?;
+        self.sessions.get_mut(&id).ok_or_else(|| {
+            PixelWindowError::failed(
+                "con_session_missing",
+                format!("active terminal session @{} is unavailable", id.get()),
+            )
+        })
+    }
+
+    fn active_session(&self) -> Result<&ConTerminal, PixelWindowError> {
+        let id = self.workspace.active().ok_or_else(|| {
+            PixelWindowError::failed("con_session_missing", "no active terminal session")
+        })?;
+        self.sessions.get(&id).ok_or_else(|| {
+            PixelWindowError::failed(
+                "con_session_missing",
+                format!("active terminal session @{} is unavailable", id.get()),
+            )
+        })
+    }
+
+    fn refresh_title(&self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+        let session = self.active_session()?;
+        let id = self.workspace.active().ok_or_else(|| {
+            PixelWindowError::failed("con_session_missing", "no active terminal session")
+        })?;
+        window.set_title(&format!("{} [@{}]", session.current_title, id.get()));
+        Ok(())
+    }
+
+    fn close_active_session(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+        let id = self.workspace.active().ok_or_else(|| {
+            PixelWindowError::failed("con_session_missing", "no active terminal session")
+        })?;
+        self.sessions.remove(&id);
+        self.workspace.close(id);
+        if self.workspace.active().is_none() {
+            self.exit = true;
+            return Ok(());
+        }
+        let metrics = window.metrics()?;
+        let session = self.active_session_mut()?;
+        Self::configure_chrome(session, metrics.scale_factor);
+        session.apply_resize(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        self.composer_focused = false;
+        self.refresh_title(window)?;
+        window.request_redraw();
+        Ok(())
+    }
+
+    fn configure_chrome(session: &mut ConTerminal, scale: f64) {
+        let scale = scale.max(1.0);
+        session.set_content_insets(
+            (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32,
+            0,
+            (COMPOSER_LOGICAL_HEIGHT * scale).round() as u32,
+        );
+    }
+
+    fn open_session(&mut self, window: &PixelWindow, child: bool) -> Result<(), PixelWindowError> {
+        let (working_dir, command, font_size_logical, cols, rows) = {
+            let current = self.active_session()?;
+            (
+                current.working_dir.clone(),
+                current.command.clone(),
+                current.font_size_logical,
+                current.cols,
+                current.rows,
+            )
+        };
+        let parent = self.workspace.active();
+        let id = match (child, parent) {
+            (true, Some(parent)) => self.workspace.add_child(parent, "terminal".to_owned()),
+            _ => Some(self.workspace.add_root("terminal".to_owned())),
+        }
+        .ok_or_else(|| {
+            PixelWindowError::failed("con_tab_create", "active parent is unavailable")
+        })?;
+
+        let mut session = ConTerminal::new(working_dir);
+        session.command = command;
+        session.font_size_logical = font_size_logical;
+        session.cols = cols;
+        session.rows = rows;
+        Self::configure_chrome(&mut session, window.metrics()?.scale_factor);
+        if let Err(error) = session.opened(window) {
+            self.workspace.close(id);
+            return Err(error);
+        }
+        self.sessions.insert(id, session);
+        self.refresh_title(window)
+    }
+
+    fn select_relative(
+        &mut self,
+        window: &PixelWindow,
+        direction: isize,
+    ) -> Result<(), PixelWindowError> {
+        let ids: Vec<_> = self.workspace.nodes().iter().map(|node| node.id).collect();
+        let Some(active) = self.workspace.active() else {
+            return Ok(());
+        };
+        let Some(index) = ids.iter().position(|id| *id == active) else {
+            return Err(PixelWindowError::failed(
+                "con_session_missing",
+                "active tab is not in the tree",
+            ));
+        };
+        let next = (index as isize + direction).rem_euclid(ids.len() as isize) as usize;
+        self.workspace.set_active(ids[next]);
+        let metrics = window.metrics()?;
+        let session = self.active_session_mut()?;
+        Self::configure_chrome(session, metrics.scale_factor);
+        session.apply_resize(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        self.refresh_title(window)?;
+        window.focus();
+        window.request_redraw();
+        Ok(())
+    }
+
+    fn handle_workspace_shortcut(
+        &mut self,
+        window: &PixelWindow,
+        key: &NormalizedKeyEvent,
+    ) -> Result<bool, PixelWindowError> {
+        if key.state != KeyPressState::Pressed || !key.modifiers.control || !key.modifiers.shift {
+            return Ok(false);
+        }
+        let LogicalKey::Character(text) = &key.logical else {
+            return Ok(false);
+        };
+        if text.eq_ignore_ascii_case("t") {
+            self.open_session(window, false)?;
+            return Ok(true);
+        }
+        if text.eq_ignore_ascii_case("n") {
+            self.open_session(window, true)?;
+            return Ok(true);
+        }
+        if text.eq_ignore_ascii_case("w") {
+            self.close_active_session(window)?;
+            return Ok(true);
+        }
+        if text.eq_ignore_ascii_case("i") {
+            self.composer_focused = true;
+            self.update_composer_ime_anchor(window)?;
+            window.request_redraw();
+            return Ok(true);
+        }
+        if text == "[" {
+            self.select_relative(window, -1)?;
+            return Ok(true);
+        }
+        if text == "]" {
+            self.select_relative(window, 1)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn select_tab_at(
+        &mut self,
+        window: &PixelWindow,
+        position: &LogicalPoint,
+    ) -> Result<bool, PixelWindowError> {
+        let metrics = window.metrics()?;
+        let scale = metrics.scale_factor.max(1.0);
+        let left = (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32;
+        let physical_x = (position.x * scale).max(0.0) as u32;
+        if physical_x >= left {
+            return Ok(false);
+        }
+        let header = (TREE_HEADER_LOGICAL_HEIGHT * scale).round() as u32;
+        let row_height = (TREE_ROW_LOGICAL_HEIGHT * scale).round().max(1.0) as u32;
+        let physical_y = (position.y * scale).max(0.0) as u32;
+        if physical_y < header {
+            return Ok(true);
+        }
+        let ids: Vec<_> = self.workspace.nodes().iter().map(|node| node.id).collect();
+        if ids.is_empty() {
+            return Ok(true);
+        }
+        let index = ((physical_y - header) / row_height) as usize;
+        if index >= ids.len() {
+            return Ok(true);
+        }
+        self.workspace.set_active(ids[index]);
+        let session = self.active_session_mut()?;
+        Self::configure_chrome(session, metrics.scale_factor);
+        session.apply_resize(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        self.composer_focused = false;
+        self.refresh_title(window)?;
+        window.focus();
+        window.request_redraw();
+        Ok(true)
+    }
+
+    fn composer_hit(&self, window: &PixelWindow, position: &LogicalPoint) -> Result<bool, PixelWindowError> {
+        let metrics = window.metrics()?;
+        let scale = metrics.scale_factor.max(1.0);
+        let left = (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32;
+        let bottom = (COMPOSER_LOGICAL_HEIGHT * scale).round() as u32;
+        Ok((position.x * scale).max(0.0) as u32 >= left
+            && (position.y * scale).max(0.0) as u32 >= metrics.physical_height.saturating_sub(bottom))
+    }
+
+    fn update_composer_ime_anchor(&self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+        let metrics = window.metrics()?;
+        let scale = metrics.scale_factor.max(1.0);
+        let x = TREE_PANEL_LOGICAL_WIDTH + 92.0 + self.composer.chars().count() as f64 * 8.0;
+        let y = metrics.physical_height as f64 / scale - 25.0;
+        let _ = window.set_ime_cursor_area(agenterm_platform::window_host::LogicalRect::new(
+            x, y, 2.0, 20.0,
+        ));
+        Ok(())
+    }
+
+    fn handle_composer_key(&mut self, window: &PixelWindow, key: &NormalizedKeyEvent) -> bool {
+        if key.state != KeyPressState::Pressed {
+            return true;
+        }
+        match &key.logical {
+            LogicalKey::Named(NamedKey::Enter) => {
+                if !self.composer.is_empty() {
+                    let mut input = std::mem::take(&mut self.composer);
+                    input.push('\r');
+                    if let Ok(session) = self.active_session_mut() {
+                        session.scroll_to_bottom();
+                        session.write_pty(input.as_bytes());
+                    }
+                }
+                self.composer.clear();
+                self.composer_preedit.clear();
+            }
+            LogicalKey::Named(NamedKey::Backspace) => {
+                self.composer.pop();
+            }
+            LogicalKey::Named(NamedKey::Escape) => {
+                self.composer_focused = false;
+                self.composer_preedit.clear();
+            }
+            LogicalKey::Character(text)
+                if !key.modifiers.control && !key.modifiers.alt && !text.is_empty() =>
+            {
+                self.composer.push_str(text);
+            }
+            _ => return false,
+        }
+        let _ = self.update_composer_ime_anchor(window);
+        window.request_redraw();
+        true
+    }
+
+    fn handle_composer_ime(&mut self, window: &PixelWindow, event: agenterm_platform::ime::ImeEvent) {
+        use agenterm_platform::ime::{ImeAction, classify_event};
+        match classify_event(event, true) {
+            ImeAction::UpdatePreedit { text, .. } => self.composer_preedit = text,
+            ImeAction::ClearPreedit => self.composer_preedit.clear(),
+            ImeAction::CommitText(text) => {
+                self.composer_preedit.clear();
+                self.composer.push_str(&text);
+            }
+            ImeAction::None => {}
+            _ => self.composer_preedit.clear(),
+        }
+        let _ = self.update_composer_ime_anchor(window);
+        window.request_redraw();
+    }
+
+    fn control_target(&self, target: Option<workspace::TabId>) -> Result<workspace::TabId, String> {
+        let id = target
+            .or_else(|| self.workspace.active())
+            .ok_or_else(|| "no active terminal".to_owned())?;
+        self.sessions
+            .contains_key(&id)
+            .then_some(id)
+            .ok_or_else(|| format!("terminal @{} does not exist", id.get()))
+    }
+
+    fn dispatch_control(&mut self, window: &PixelWindow, request: control::IncomingRequest) {
+        use control::CliCommand;
+        let mut reply = Some(request.reply);
+        let result = match request.command {
+            CliCommand::ListTabs => {
+                let active = self.workspace.active();
+                let tabs: Vec<_> = self
+                    .workspace
+                    .nodes()
+                    .iter()
+                    .map(|node| {
+                        let session = self.sessions.get(&node.id);
+                        serde_json::json!({
+                            "id": format!("@{}", node.id.get()),
+                            "parent": node.parent.map(|id| format!("@{}", id.get())),
+                            "title": session.map_or(node.title.as_str(), |session| session.current_title.as_str()),
+                            "active": active == Some(node.id),
+                            "child_alive": session.is_some_and(|session| !session.child_gone),
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "tabs": tabs }))
+            }
+            CliCommand::NewTab { parent } => (|| {
+                if let Some(parent) = parent {
+                    self.control_target(Some(parent))?;
+                    self.workspace.set_active(parent);
+                }
+                self.open_session(window, parent.is_some())
+                    .map_err(|error| error.to_string())?;
+                let id = self.workspace.active()
+                    .ok_or_else(|| "new terminal was not activated".to_owned())?;
+                Ok(serde_json::json!({
+                    "id": format!("@{}", id.get()),
+                    "parent": parent.map(|id| format!("@{}", id.get())),
+                }))
+            })(),
+            CliCommand::SelectTab { target } => self.control_target(Some(target)).map(|id| {
+                self.workspace.set_active(id);
+                window.request_redraw();
+                serde_json::json!({ "active": format!("@{}", id.get()) })
+            }),
+            CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
+                self.workspace.set_active(id);
+                self.close_active_session(window).map_err(|error| error.to_string())?;
+                Ok(serde_json::json!({ "closed": format!("@{}", id.get()) }))
+            }),
+            CliCommand::CapturePane { target, max_bytes } => self
+                .control_target(target)
+                .and_then(|id| {
+                    let session = self.sessions.get_mut(&id)
+                        .ok_or_else(|| "terminal disappeared".to_owned())?;
+                    session.drain_pty();
+                    let mut text = session.build_snapshot().rows_text.join("\n");
+                    if text.len() > max_bytes {
+                        let mut end = max_bytes;
+                        while end > 0 && !text.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        text.truncate(end);
+                    }
+                    Ok(serde_json::Value::String(text))
+                }),
+            CliCommand::SendText { target, text } => self.control_target(target).and_then(|id| {
+                let session = self.sessions.get_mut(&id)
+                    .ok_or_else(|| "terminal disappeared".to_owned())?;
+                session.scroll_to_bottom();
+                session.write_pty(text.as_bytes());
+                Ok(serde_json::json!({ "sent_bytes": text.len() }))
+            }),
+            CliCommand::SendKeys { target, keys } => self.control_target(target).and_then(|id| {
+                let session = self.sessions.get_mut(&id)
+                    .ok_or_else(|| "terminal disappeared".to_owned())?;
+                for key in &keys {
+                    let (key, ctrl, alt, shift) = parse_control_key(key)?;
+                    session.execute_script_key(key, ctrl, alt, shift);
+                }
+                Ok(serde_json::json!({ "sent_keys": keys.len() }))
+            }),
+            CliCommand::SendMouse { target, action, button, column, row } => {
+                self.control_target(target).and_then(|id| {
+                    let session = self.sessions.get_mut(&id)
+                        .ok_or_else(|| "terminal disappeared".to_owned())?;
+                    if row >= session.rows || column >= session.cols {
+                        return Err(format!("mouse cell {row},{column} is outside {}x{}", session.rows, session.cols));
+                    }
+                    match action {
+                        control::MouseAction::Move => session.execute_script_mouse_move(window, row, column),
+                        control::MouseAction::Click => {
+                            let button = control_mouse_button(button)?;
+                            session.execute_script_click(window, row, column, button, false, false, false);
+                        }
+                        control::MouseAction::Press | control::MouseAction::Release => {
+                            let button = control_mouse_button(button)?;
+                            let state = if action == control::MouseAction::Press {
+                                PointerButtonState::Pressed
+                            } else {
+                                PointerButtonState::Released
+                            };
+                            session.execute_script_pointer_button(window, row, column, button, false, false, false, state);
+                        }
+                    }
+                    Ok(serde_json::json!({ "delivered": true }))
+                })
+            }
+            CliCommand::SendWheel { target, column, row, notches, ctrl } => {
+                self.control_target(target).and_then(|id| {
+                    let session = self.sessions.get_mut(&id)
+                        .ok_or_else(|| "terminal disappeared".to_owned())?;
+                    if row >= session.rows || column >= session.cols {
+                        return Err(format!("mouse cell {row},{column} is outside {}x{}", session.rows, session.cols));
+                    }
+                    session.execute_script_wheel(window, row, column, f32::from(notches), ctrl);
+                    Ok(serde_json::json!({ "delivered_notches": notches }))
+                })
+            }
+            CliCommand::ScreenshotPane { target, output } => self.control_target(target).and_then(|id| {
+                if self.workspace.active() != Some(id) {
+                    self.workspace.set_active(id);
+                }
+                let session = self.sessions.get_mut(&id)
+                    .ok_or_else(|| "terminal disappeared".to_owned())?;
+                if session.pending_control_screenshot.is_some() {
+                    return Err("a screenshot is already pending for this terminal".to_owned());
+                }
+                session.pending_control_screenshot = Some((
+                    PathBuf::from(output),
+                    reply.take().expect("control reply available"),
+                ));
+                window.request_redraw();
+                Ok(serde_json::Value::Null)
+            }),
+            CliCommand::WaitText { target, text, timeout_ms } => self.control_target(target).and_then(|id| {
+                if self.control_waits.len() >= 32 {
+                    return Err("too many pending wait-text requests".to_owned());
+                }
+                if self.sessions.get(&id).is_some_and(|session| session.screen_contains(&text)) {
+                    return Ok(serde_json::json!({ "matched": true }));
+                }
+                self.control_waits.push(PendingControlWait {
+                    target: id,
+                    text,
+                    deadline: Instant::now() + Duration::from_millis(timeout_ms),
+                    reply: reply.take().expect("control reply available"),
+                });
+                Ok(serde_json::Value::Null)
+            }),
+        };
+        if let Some(reply) = reply {
+            let _ = reply.send(result);
+        }
+    }
+
+    fn drain_control(&mut self, window: &PixelWindow, now: Instant) -> Option<Instant> {
+        loop {
+            let request = self.control_server.as_ref().and_then(control::ControlServer::try_recv);
+            let Some(request) = request else { break };
+            self.dispatch_control(window, request);
+        }
+        let mut pending = Vec::new();
+        let mut next = None;
+        for wait in std::mem::take(&mut self.control_waits) {
+            let matched = self
+                .sessions
+                .get(&wait.target)
+                .is_some_and(|session| session.screen_contains(&wait.text));
+            if matched {
+                let _ = wait.reply.send(Ok(serde_json::json!({ "matched": true })));
+            } else if now >= wait.deadline {
+                let _ = wait.reply.send(Err(format!("wait-text timed out waiting for {:?}", wait.text)));
+            } else {
+                next = Some(next.map_or(wait.deadline, |current: Instant| current.min(wait.deadline)));
+                pending.push(wait);
+            }
+        }
+        self.control_waits = pending;
+        next
+    }
+
+    fn paint_chrome(&self, frame: &mut XrgbPixelFrame<'_>) -> Result<(), PixelWindowError> {
+        let session = self.active_session()?;
+        let width = frame.width();
+        let height = frame.height();
+        let mut surface = Surface {
+            pixels: frame.pixels_mut(),
+            width,
+            height,
+        };
+        let tree_width = session.content_left_px.min(width);
+        let scale = session.scale.max(1.0);
+        let header_height = (TREE_HEADER_LOGICAL_HEIGHT * scale).round() as u32;
+        let row_height = (TREE_ROW_LOGICAL_HEIGHT * scale).round().max(1.0) as u32;
+        let tree_bg = Rgb(0x18, 0x1C, 0x1F);
+        let tree_rule = Rgb(0x36, 0x3E, 0x42);
+        let branch = Rgb(0x58, 0x65, 0x69);
+        let active_bg = Rgb(0x24, 0x3B, 0x43);
+        let accent = Rgb(0x58, 0xC7, 0xB0);
+        let composer_bg = Rgb(0x10, 0x14, 0x17);
+        let text = Rgb(0xE7, 0xE4, 0xDA);
+        let muted = Rgb(0x91, 0x9A, 0x9C);
+        surface.fill_rect(0, 0, tree_width, height, tree_bg.to_xrgb());
+        surface.fill_rect(tree_width.saturating_sub(1), 0, 1, height, tree_rule.to_xrgb());
+        surface.fill_rect(
+            tree_width,
+            height.saturating_sub(session.content_bottom_px),
+            width.saturating_sub(tree_width),
+            session.content_bottom_px,
+            composer_bg.to_xrgb(),
+        );
+        surface.fill_rect(
+            tree_width,
+            height.saturating_sub(session.content_bottom_px),
+            width.saturating_sub(tree_width),
+            1,
+            tree_rule.to_xrgb(),
+        );
+
+        paint_chrome_text(
+            &mut surface,
+            14,
+            9,
+            "TERMINALS",
+            muted,
+            12,
+            tree_width.saturating_sub(28),
+        );
+
+        let nodes = self.workspace.nodes();
+        for (index, node) in nodes.iter().enumerate() {
+            let y = header_height + index as u32 * row_height;
+            if y >= height {
+                break;
+            }
+            let mut depth = 0u32;
+            let mut parent = node.parent;
+            while let Some(parent_id) = parent {
+                depth = depth.saturating_add(1).min(8);
+                parent = nodes.iter().find(|candidate| candidate.id == parent_id)
+                    .and_then(|candidate| candidate.parent);
+            }
+            let indent = 14 + depth * 18;
+            if self.workspace.active() == Some(node.id) {
+                surface.fill_rect(0, y, tree_width, row_height, active_bg.to_xrgb());
+                surface.fill_rect(0, y, 3, row_height, accent.to_xrgb());
+            }
+            if depth > 0 {
+                let branch_x = indent.saturating_sub(10);
+                surface.fill_rect(branch_x, y, 1, row_height / 2 + 1, branch.to_xrgb());
+                surface.fill_rect(branch_x, y + row_height / 2, 8, 1, branch.to_xrgb());
+            }
+            let title = self.sessions.get(&node.id)
+                .map(|terminal| terminal.current_title.as_str())
+                .filter(|title| !title.is_empty())
+                .unwrap_or(node.title.as_str());
+            paint_chrome_text(
+                &mut surface,
+                indent,
+                y + 7,
+                &format!("@{}  {}", node.id.get(), title),
+                text,
+                14,
+                tree_width.saturating_sub(indent + 10),
+            );
+        }
+
+        let active_id = self.workspace.active().map(|id| id.get()).unwrap_or(0);
+        let input_y = height.saturating_sub(session.content_bottom_px);
+        paint_chrome_text(
+            &mut surface,
+            tree_width + 12,
+            input_y + 6,
+            &format!("SEND TO @{}", active_id),
+            if self.composer_focused { accent } else { muted },
+            11,
+            90,
+        );
+        let mut composer = if self.composer.is_empty() && self.composer_preedit.is_empty() {
+            "Type here, then press Enter".to_owned()
+        } else {
+            format!("{}{}", self.composer, self.composer_preedit)
+        };
+        if self.composer_focused {
+            composer.push('|');
+        }
+        paint_chrome_text(
+            &mut surface,
+            tree_width + 104,
+            input_y + 19,
+            &composer,
+            text,
+            15,
+            width.saturating_sub(tree_width + 116),
+        );
+        Ok(())
+    }
 }
 
 impl ConTerminal {
@@ -654,6 +1368,7 @@ impl ConTerminal {
             script_wait_until: None,
             script_wait_text_deadline: None,
             pending_screenshot: None,
+            pending_control_screenshot: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
@@ -685,7 +1400,16 @@ impl ConTerminal {
             ime_attached: false,
             last_click: None,
             scale: 1.0,
+            content_left_px: 0,
+            content_top_px: 0,
+            content_bottom_px: 0,
         }
+    }
+
+    fn set_content_insets(&mut self, left: u32, top: u32, bottom: u32) {
+        self.content_left_px = left;
+        self.content_top_px = top;
+        self.content_bottom_px = bottom;
     }
 
     /// Computes grid dimensions from physical pixels and current cell metrics.
@@ -874,7 +1598,11 @@ impl ConTerminal {
     fn apply_resize(&mut self, phys_w: u32, phys_h: u32, scale: f64) {
         self.scale = scale;
         self.recompute_metrics(scale);
-        let (cols, rows) = Self::compute_grid(phys_w, phys_h, self.cell_w, self.cell_h);
+        let usable_w = phys_w.saturating_sub(self.content_left_px);
+        let usable_h = phys_h
+            .saturating_sub(self.content_top_px)
+            .saturating_sub(self.content_bottom_px);
+        let (cols, rows) = Self::compute_grid(usable_w, usable_h, self.cell_w, self.cell_h);
         if cols == self.cols && rows == self.rows {
             return;
         }
@@ -1034,7 +1762,7 @@ impl ConTerminal {
     /// returns how many cells it occupied, so the caller can push the cursor
     /// past it. Wide (CJK) characters take two cells, matching the grid.
     fn draw_preedit(&self, surface: &mut Surface<'_>, cursor: (u16, u16)) -> u32 {
-        let y0 = u32::from(cursor.0) * self.cell_h;
+        let y0 = self.content_top_px + u32::from(cursor.0) * self.cell_h;
         let mut advance = 0u32;
         // Inverted so the provisional text is unmistakable against committed
         // output, plus an underline in the conventional IME style.
@@ -1044,7 +1772,7 @@ impl ConTerminal {
         for character in self.ime_preedit.chars() {
             let wide = unicode_width::UnicodeWidthChar::width(character).unwrap_or(1) > 1;
             let cells = if wide { 2 } else { 1 };
-            let x0 = (u32::from(cursor.1) + advance) * self.cell_w;
+            let x0 = self.content_left_px + (u32::from(cursor.1) + advance) * self.cell_w;
             if x0 >= surface.width || y0 >= surface.height {
                 break;
             }
@@ -1076,8 +1804,8 @@ impl ConTerminal {
     fn update_ime_anchor(&self, window: &PixelWindow) {
         let (row, col) = self.parser.screen().cursor_position();
         let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
-        let x = f64::from(u32::from(col) * self.cell_w) / scale;
-        let y = f64::from(u32::from(row) * self.cell_h) / scale;
+        let x = f64::from(self.content_left_px + u32::from(col) * self.cell_w) / scale;
+        let y = f64::from(self.content_top_px + u32::from(row) * self.cell_h) / scale;
         let _ = window.set_ime_cursor_area(agenterm_platform::window_host::LogicalRect::new(
             x,
             y,
@@ -1097,10 +1825,11 @@ impl ConTerminal {
         self.blink_visible = true;
         self.last_blink_at = Instant::now();
 
-        // Keys that feed an active composition belong to the IME, not the PTY.
-        // Forwarding them too would double-type the Latin keys behind a
-        // Chinese/Japanese composition.
-        if !self.ime_preedit.is_empty() {
+        // If IME composition is in progress, suppress keys without committed
+        // text because they are still editing the preedit candidate. Keys that
+        // already carry committed text (including some winit IME commit
+        // representations) must still be forwarded.
+        if !self.ime_preedit.is_empty() && event.text.as_deref().is_none_or(str::is_empty) {
             return;
         }
 
@@ -1209,10 +1938,10 @@ impl ConTerminal {
 
     /// Converts a logical (DIP) pointer position to terminal cell coordinates.
     fn hit_test(&self, pos: &LogicalPoint) -> TerminalPoint {
-        let phys_x = pos.x * self.scale;
-        let phys_y = pos.y * self.scale;
+        let phys_x = (pos.x * self.scale - f64::from(self.content_left_px)).max(0.0);
+        let phys_y = (pos.y * self.scale - f64::from(self.content_top_px)).max(0.0);
         TerminalPoint {
-            row: (phys_y / self.cell_h as f64) as u16,
+            row: ((phys_y / self.cell_h as f64) as u16).min(self.rows.saturating_sub(1)),
             col: (phys_x / self.cell_w as f64) as u16,
         }
     }
@@ -1225,8 +1954,12 @@ impl ConTerminal {
     /// script author actually thinks in) while still driving the same
     /// pixel-position-based handlers real pointer events go through.
     fn terminal_point_to_logical(&self, point: TerminalPoint) -> LogicalPoint {
-        let phys_x = f64::from(point.col) * self.cell_w as f64 + self.cell_w as f64 / 2.0;
-        let phys_y = f64::from(point.row) * self.cell_h as f64 + self.cell_h as f64 / 2.0;
+        let phys_x = f64::from(self.content_left_px)
+            + f64::from(point.col) * self.cell_w as f64
+            + self.cell_w as f64 / 2.0;
+        let phys_y = f64::from(self.content_top_px)
+            + f64::from(point.row) * self.cell_h as f64
+            + self.cell_h as f64 / 2.0;
         let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
         LogicalPoint {
             x: phys_x / scale,
@@ -1869,7 +2602,7 @@ impl ConTerminal {
     }
 }
 
-impl PixelWindowApplication for ConTerminal {
+impl ConTerminal {
     fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = if metrics.scale_factor.is_finite() && metrics.scale_factor > 0.0 {
@@ -1884,8 +2617,11 @@ impl PixelWindowApplication for ConTerminal {
         // Request keyboard focus so winit delivers KeyboardInput events on Windows.
         window.focus();
         let (cols, rows) = Self::compute_grid(
-            metrics.physical_width,
-            metrics.physical_height,
+            metrics.physical_width.saturating_sub(self.content_left_px),
+            metrics
+                .physical_height
+                .saturating_sub(self.content_top_px)
+                .saturating_sub(self.content_bottom_px),
             self.cell_w,
             self.cell_h,
         );
@@ -2041,7 +2777,7 @@ impl PixelWindowApplication for ConTerminal {
         // way — this is parity, not an enhancement — but getting it right
         // matters for vim/nvim, which switch shape *and* blink per mode.
         let cursor_visible_now = !screen.cursor_blinking() || self.blink_visible;
-        paint_cells(
+        paint_cells_at(
             &mut surface,
             screen,
             self.selection,
@@ -2050,6 +2786,8 @@ impl PixelWindowApplication for ConTerminal {
             self.default_fg,
             self.default_bg,
             self.font_size_px,
+            self.content_left_px,
+            self.content_top_px,
         );
 
         // IME composition, drawn over the cells to the right of the cursor and
@@ -2066,8 +2804,8 @@ impl PixelWindowApplication for ConTerminal {
         // application is no longer writing to) or mid-blink-off.
         if !cursor_hidden && self.scroll_offset == 0 && cursor_visible_now {
             let cursor_col = u32::from(cursor.1) + preedit_cells;
-            let cx = cursor_col * self.cell_w;
-            let cy = u32::from(cursor.0) * self.cell_h;
+            let cx = self.content_left_px + cursor_col * self.cell_w;
+            let cy = self.content_top_px + u32::from(cursor.0) * self.cell_h;
             if cx < fw && cy < fh {
                 // A wide (CJK) glyph under the cursor must be covered whole,
                 // otherwise a block cursor would bisect it.
@@ -2126,14 +2864,6 @@ impl PixelWindowApplication for ConTerminal {
 
         self.write_snapshot_if_requested();
 
-        if let Some(path) = self.pending_screenshot.take() {
-            // Errors are swallowed like the snapshot path: a bad path from a
-            // script must not crash the session it's trying to observe. A
-            // real agent driving this checks for the file; a missing one is
-            // itself the signal something went wrong.
-            let _ = agent_interface::write_png_atomic(path.as_path(), surface.pixels, fw, fh);
-        }
-
         Ok(PixelWindowDirective::Continue)
     }
 
@@ -2143,8 +2873,16 @@ impl PixelWindowApplication for ConTerminal {
         now: Instant,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         // (see impl ConTerminal::draw_preedit for the composition renderer)
-        if self.exit || self.child_gone {
+        if self.exit {
             return Ok(PixelWindowDirective::Exit);
+        }
+
+        // A session with an exited child remains drawable and selectable. The
+        // outer ConApp may still host live siblings; closing the entire GUI
+        // here made an ordinary child failure indistinguishable from a host
+        // crash and discarded unrelated terminals.
+        if self.child_gone {
+            return Ok(PixelWindowDirective::Wait);
         }
 
         // Three independent timers can all have work pending at once (a
@@ -2188,7 +2926,7 @@ impl PixelWindowApplication for ConTerminal {
         // A pending screenshot needs an actual render to happen — pixels
         // only exist transiently inside render() — so it must force a
         // redraw even when nothing else did.
-        if self.pending_screenshot.is_some() {
+        if self.pending_screenshot.is_some() || self.pending_control_screenshot.is_some() {
             redraw = true;
         }
 
@@ -2197,6 +2935,189 @@ impl PixelWindowApplication for ConTerminal {
         }
 
         Ok(next_wake.map_or(PixelWindowDirective::Wait, PixelWindowDirective::WaitUntil))
+    }
+}
+
+impl PixelWindowApplication for ConApp {
+    fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
+        let metrics = window.metrics()?;
+        Self::configure_chrome(self.active_session_mut()?, metrics.scale_factor);
+        let directive = self.active_session_mut()?.opened(window)?;
+        if let Some(endpoint) = self.control_endpoint.clone() {
+            let waker = window.waker();
+            self.control_server = Some(
+                control::ControlServer::bind(&endpoint, move || {
+                    let _ = waker.wake();
+                })
+                .map_err(|error| PixelWindowError::failed("con_control_bind", error))?,
+            );
+        }
+        self.refresh_title(window)?;
+        Ok(directive)
+    }
+
+    fn event(
+        &mut self,
+        window: &PixelWindow,
+        event: PixelWindowEvent,
+    ) -> Result<PixelWindowDirective, PixelWindowError> {
+        if self.exit {
+            return Ok(PixelWindowDirective::Exit);
+        }
+        if let PixelWindowEvent::GeometryChanged { metrics, .. } = &event {
+            Self::configure_chrome(self.active_session_mut()?, metrics.scale_factor);
+        }
+        if let PixelWindowEvent::Keyboard(key) = &event
+            && self.handle_workspace_shortcut(window, key)?
+        {
+            return Ok(PixelWindowDirective::Continue);
+        }
+        if let PixelWindowEvent::PointerButton {
+            position: Some(position),
+            ..
+        } = &event
+        {
+            if self.select_tab_at(window, position)? {
+                return Ok(PixelWindowDirective::Continue);
+            }
+            if self.composer_hit(window, position)? {
+                self.composer_focused = true;
+                self.update_composer_ime_anchor(window)?;
+                window.focus();
+                window.request_redraw();
+                return Ok(PixelWindowDirective::Continue);
+            }
+            self.composer_focused = false;
+        }
+        if self.composer_focused {
+            match event {
+                PixelWindowEvent::Keyboard(key) if self.handle_composer_key(window, &key) => {
+                    return Ok(PixelWindowDirective::Continue);
+                }
+                PixelWindowEvent::Ime(ime) => {
+                    self.handle_composer_ime(window, ime);
+                    return Ok(PixelWindowDirective::Continue);
+                }
+                _ => {}
+            }
+        }
+        self.active_session_mut()?.event(window, event)
+    }
+
+    fn render(
+        &mut self,
+        window: &PixelWindow,
+        frame: &mut XrgbPixelFrame<'_>,
+    ) -> Result<PixelWindowDirective, PixelWindowError> {
+        let directive = self.active_session_mut()?.render(window, frame)?;
+        self.paint_chrome(frame)?;
+        let (pending_screenshot, pending_control_screenshot) = {
+            let session = self.active_session_mut()?;
+            (
+                session.pending_screenshot.take(),
+                session.pending_control_screenshot.take(),
+            )
+        };
+        let width = frame.width();
+        let height = frame.height();
+        if let Some(path) = pending_screenshot {
+            let _ = agent_interface::write_png_atomic(
+                path.as_path(),
+                frame.pixels_mut(),
+                width,
+                height,
+            );
+        }
+        if let Some((path, reply)) = pending_control_screenshot {
+            let result = agent_interface::write_png_atomic(
+                path.as_path(),
+                frame.pixels_mut(),
+                width,
+                height,
+            )
+            .map(|()| serde_json::json!({
+                "path": path.to_string_lossy(),
+                "width": width,
+                "height": height,
+            }))
+            .map_err(|error| format!("write screenshot: {error}"));
+            let _ = reply.send(result);
+        }
+        Ok(directive)
+    }
+
+    fn about_to_wait(
+        &mut self,
+        window: &PixelWindow,
+        now: Instant,
+    ) -> Result<PixelWindowDirective, PixelWindowError> {
+        if self.exit {
+            return Ok(PixelWindowDirective::Exit);
+        }
+        let control_deadline = self.drain_control(window, now);
+        let directive = self.active_session_mut()?.about_to_wait(window, now)?;
+        Ok(match (directive, control_deadline) {
+            (PixelWindowDirective::Wait, Some(deadline)) => PixelWindowDirective::WaitUntil(deadline),
+            (PixelWindowDirective::WaitUntil(current), Some(deadline)) => {
+                PixelWindowDirective::WaitUntil(current.min(deadline))
+            }
+            (directive, _) => directive,
+        })
+    }
+}
+
+fn parse_control_key(spec: &str) -> Result<(ScriptKey, bool, bool, bool), String> {
+    let mut parts: Vec<_> = spec.split('+').collect();
+    let key_name = parts.pop().filter(|value| !value.is_empty()).ok_or_else(|| {
+        format!("invalid key specification {spec:?}")
+    })?;
+    let mut ctrl = false;
+    let mut alt = false;
+    let mut shift = false;
+    for modifier in parts {
+        match modifier.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => ctrl = true,
+            "alt" => alt = true,
+            "shift" => shift = true,
+            _ => return Err(format!("unknown key modifier {modifier:?}")),
+        }
+    }
+    let named = match key_name.to_ascii_lowercase().as_str() {
+        "enter" | "return" => Some(NamedKey::Enter),
+        "escape" | "esc" => Some(NamedKey::Escape),
+        "tab" => Some(NamedKey::Tab),
+        "backspace" => Some(NamedKey::Backspace),
+        "delete" | "del" => Some(NamedKey::Delete),
+        "insert" | "ins" => Some(NamedKey::Insert),
+        "home" => Some(NamedKey::Home),
+        "end" => Some(NamedKey::End),
+        "pageup" => Some(NamedKey::PageUp),
+        "pagedown" => Some(NamedKey::PageDown),
+        "up" | "arrowup" => Some(NamedKey::ArrowUp),
+        "down" | "arrowdown" => Some(NamedKey::ArrowDown),
+        "left" | "arrowleft" => Some(NamedKey::ArrowLeft),
+        "right" | "arrowright" => Some(NamedKey::ArrowRight),
+        _ => None,
+    };
+    let key = if let Some(named) = named {
+        ScriptKey::Named(named)
+    } else {
+        let mut chars = key_name.chars();
+        let character = chars.next().ok_or_else(|| "empty key".to_owned())?;
+        if chars.next().is_some() {
+            return Err(format!("unknown key {key_name:?}"));
+        }
+        ScriptKey::Char(character)
+    };
+    Ok((key, ctrl, alt, shift))
+}
+
+fn control_mouse_button(button: control::MouseButton) -> Result<ScriptMouseButton, String> {
+    match button {
+        control::MouseButton::Left => Ok(ScriptMouseButton::Left),
+        control::MouseButton::Middle => Ok(ScriptMouseButton::Middle),
+        control::MouseButton::Right => Ok(ScriptMouseButton::Right),
+        control::MouseButton::None => Err("press/release requires a mouse button".to_owned()),
     }
 }
 
@@ -2308,14 +3229,41 @@ fn paint_cells(
     default_bg: Rgb,
     font_size_px: u16,
 ) {
+    paint_cells_at(
+        surface,
+        screen,
+        selection,
+        cell_w,
+        cell_h,
+        default_fg,
+        default_bg,
+        font_size_px,
+        0,
+        0,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_cells_at(
+    surface: &mut Surface<'_>,
+    screen: &vt100::Screen,
+    selection: Option<(TerminalPoint, TerminalPoint)>,
+    cell_w: u32,
+    cell_h: u32,
+    default_fg: Rgb,
+    default_bg: Rgb,
+    font_size_px: u16,
+    left: u32,
+    top: u32,
+) {
     let (rows, cols) = screen.size();
     for row in 0..rows {
-        let y0 = u32::from(row) * cell_h;
+        let y0 = top + u32::from(row) * cell_h;
         if y0 >= surface.height {
             break;
         }
         for col in 0..cols {
-            let x0 = u32::from(col) * cell_w;
+            let x0 = left + u32::from(col) * cell_w;
             if x0 >= surface.width {
                 break;
             }
@@ -2391,6 +3339,41 @@ fn paint_cells(
     }
 }
 
+fn paint_chrome_text(
+    surface: &mut Surface<'_>,
+    x: u32,
+    y: u32,
+    text: &str,
+    color: Rgb,
+    font_size_px: u16,
+    max_width: u32,
+) {
+    let metrics = font::cell_metrics(font_size_px);
+    let cell_w = metrics.width.max(1);
+    let cell_h = metrics.height.max(1);
+    let mut cursor = x;
+    let limit = x.saturating_add(max_width).min(surface.width);
+    for character in text.chars() {
+        if cursor.saturating_add(cell_w) > limit {
+            break;
+        }
+        if let Some(glyph) = font::raster(character, font_size_px) {
+            surface.blit_glyph(
+                &glyph,
+                CellRect {
+                    x: cursor,
+                    y,
+                    w: cell_w,
+                    h: cell_h,
+                },
+                color,
+                0.0,
+            );
+        }
+        cursor = cursor.saturating_add(cell_w);
+    }
+}
+
 #[inline]
 fn blend_xrgb(existing: u32, fg: Rgb, alpha: u8) -> u32 {
     let a = u32::from(alpha);
@@ -2437,6 +3420,41 @@ mod tests {
     /// live (not just by this unit test): the same `claude --help`
     /// invocation that previously produced nothing now renders its full
     /// output through this binary.
+    #[test]
+    fn terminal_paint_respects_left_tree_inset() {
+        let mut parser = vt100::Parser::new_with_callbacks(
+            2,
+            4,
+            0,
+            ConCallbacks::default(),
+        );
+        parser.process(b"A");
+        let width = 64;
+        let height = 32;
+        let untouched = 0x0012_3456;
+        let mut pixels = vec![untouched; (width * height) as usize];
+        let mut surface = Surface { pixels: &mut pixels, width, height };
+        paint_cells_at(
+            &mut surface,
+            parser.screen(),
+            None,
+            8,
+            16,
+            Rgb(0xEE, 0xEE, 0xEE),
+            Rgb(0x00, 0x00, 0x00),
+            12,
+            24,
+            0,
+        );
+        for row in surface.pixels.chunks_exact(width as usize) {
+            assert!(row[..24].iter().all(|pixel| *pixel == untouched));
+        }
+        assert!((0..16).any(|y| {
+            let row = &surface.pixels[y * width as usize..(y + 1) * width as usize];
+            row[24..32].iter().any(|pixel| *pixel != untouched)
+        }));
+    }
+
     #[test]
     fn da1_query_gets_a_reply_queued_for_the_pty() {
         let mut parser = parser();

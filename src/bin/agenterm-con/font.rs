@@ -200,6 +200,21 @@ impl Renderer {
 fn load_faces() -> Vec<Face> {
     let mut faces = Vec::new();
 
+    // Windows ships SimSun and NSimSun in the same collection. NSimSun is the
+    // face Windows exposes as "新宋体"; it has measured 1:2 Latin/CJK advances,
+    // so it must be the primary face rather than a fallback squeezed into a
+    // grid measured from Consolas or Cascadia.
+    #[cfg(windows)]
+    if let Some(face) = load_new_simsun_face() {
+        faces.push(face);
+        for candidate in agenterm_platform::font::fallback_candidates() {
+            if candidate.name != "SimSun / NSimSun" {
+                push_faces(&mut faces, candidate);
+            }
+        }
+        return faces;
+    }
+
     // The primary face decides cell metrics, so only the first readable
     // monospace candidate is taken — mixing advance widths would break the
     // grid.
@@ -221,17 +236,34 @@ fn load_faces() -> Vec<Face> {
     faces
 }
 
+/// Loads the New SimSun face from the stock Windows SimSun collection.
+///
+/// Windows exposes the collection as two regular families in this order:
+/// SimSun (index 0) and NSimSun/New SimSun (index 1). Selecting by collection
+/// index here is deliberate: `ab_glyph` exposes glyph outlines but not a
+/// family-name selector, and accepting the first face would silently select
+/// SimSun instead of the requested terminal face.
+#[cfg(windows)]
+fn load_new_simsun_face() -> Option<Face> {
+    const NEW_SIMSUN_INDEX: u32 = 1;
+    let candidate = agenterm_platform::font::fallback_candidates()
+        .into_iter()
+        .find(|candidate| candidate.name == "SimSun / NSimSun")?;
+    let data = fs::read(candidate.absolute_path()).ok()?;
+    let leaked: &'static [u8] = Box::leak(data.into_boxed_slice());
+    let font = FontRef::try_from_slice_and_index(leaked, NEW_SIMSUN_INDEX).ok()?;
+    Some(Face {
+        name: "New SimSun",
+        font: FontArc::from(font),
+    })
+}
+
 /// Appends every face in a candidate file. Returns whether anything loaded.
 fn push_faces(
     faces: &mut Vec<Face>,
     candidate: agenterm_platform::font::FontFileCandidate,
 ) -> bool {
-    let path: PathBuf = candidate
-        .components
-        .iter()
-        .fold(PathBuf::from(std::path::MAIN_SEPARATOR_STR), |p, c| {
-            p.join(c)
-        });
+    let path: PathBuf = candidate.absolute_path();
     let Ok(data) = fs::read(&path) else {
         return false;
     };

@@ -52,13 +52,16 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
 /// used for missing glyphs.
 pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
     vec![
+        // SimSun's collection includes NSimSun (New Song), the traditional
+        // fixed-width Chinese terminal face. Keep it ahead of proportional UI
+        // fonts so CJK glyphs fill the terminal's two-cell-wide grid cleanly.
+        FontFileCandidate {
+            name: "SimSun / NSimSun",
+            components: &["C:", "Windows", "Fonts", "simsun.ttc"],
+        },
         FontFileCandidate {
             name: "Microsoft YaHei",
             components: &["C:", "Windows", "Fonts", "msyh.ttc"],
-        },
-        FontFileCandidate {
-            name: "SimSun",
-            components: &["C:", "Windows", "Fonts", "simsun.ttc"],
         },
         FontFileCandidate {
             name: "MS Gothic",

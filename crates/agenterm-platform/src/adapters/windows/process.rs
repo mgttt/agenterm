@@ -14,7 +14,12 @@ pub(crate) fn write_parent_console_stdout(message: &str) -> bool {
 }
 
 fn write_parent_console(message: &str, to_stderr: bool) -> bool {
-    use std::{fs::OpenOptions, io::Write as _, os::windows::fs::OpenOptionsExt};
+    use std::{
+        fs::{File, OpenOptions},
+        io::Write as _,
+        mem::ManuallyDrop,
+        os::windows::{fs::OpenOptionsExt, io::FromRawHandle as _},
+    };
     use windows_sys::Win32::{
         Foundation::INVALID_HANDLE_VALUE,
         System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
@@ -28,16 +33,13 @@ fn write_parent_console(message: &str, to_stderr: bool) -> bool {
     };
     let handle = unsafe { GetStdHandle(std_handle) };
     if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
-        if to_stderr {
-            let mut stream = std::io::stderr().lock();
-            if stream.write_all(payload.as_bytes()).is_ok() && stream.flush().is_ok() {
-                return true;
-            }
-        } else {
-            let mut stream = std::io::stdout().lock();
-            if stream.write_all(payload.as_bytes()).is_ok() && stream.flush().is_ok() {
-                return true;
-            }
+        // A windows-subsystem process can have a valid inherited pipe/file
+        // handle while Rust's stdout/stderr singleton was initialized as a
+        // sink. Write through the real Win32 handle and deliberately avoid
+        // taking ownership of the caller's std slot.
+        let mut stream = ManuallyDrop::new(unsafe { File::from_raw_handle(handle) });
+        if stream.write_all(payload.as_bytes()).is_ok() && stream.flush().is_ok() {
+            return true;
         }
     }
     let Ok(_guard) = super::console::ConsoleGuard::attach_parent() else {

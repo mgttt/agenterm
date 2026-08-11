@@ -11,10 +11,25 @@ pub struct FontFileCandidate {
 impl FontFileCandidate {
     /// Resolves the candidate below the host filesystem root.
     pub fn absolute_path(self) -> PathBuf {
-        self.components.iter().fold(
-            PathBuf::from(std::path::MAIN_SEPARATOR_STR),
-            |path, component| path.join(component),
-        )
+        let mut components = self.components.iter();
+        let first = components.next();
+        let mut path = match first {
+            // A Windows drive prefix without a root (for example `C:`) is
+            // drive-relative. Starting from `\\` and joining it used to discard
+            // that root, resolving system fonts below the process CWD instead
+            // of `C:\\Windows\\Fonts`.
+            Some(prefix) if prefix.ends_with(':') => {
+                let mut path = PathBuf::from(prefix);
+                path.push(std::path::MAIN_SEPARATOR_STR);
+                path
+            }
+            Some(component) => PathBuf::from(std::path::MAIN_SEPARATOR_STR).join(component),
+            None => PathBuf::from(std::path::MAIN_SEPARATOR_STR),
+        };
+        for component in components {
+            path.push(component);
+        }
+        path
     }
 
     pub fn exists(self) -> bool {

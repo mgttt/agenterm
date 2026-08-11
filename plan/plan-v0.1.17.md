@@ -51,6 +51,26 @@ QuickJS 引擎 M0→M5d、跨引擎共享层 Common-M1→M7），合计占掉了
 - qjs `check` 无 `shipped_surfaces` 级 API 静态校验（QJS-M6）
 - qjs `pack` 字节码 hash 是指纹而非加载依据（与 lua 同因不同由）
 - lua `check_many` 的 `--project-root`/`--timeout-ms` 已修复（Common-M7），但 lua 无 fail-closed entry 契约
+
+### 0.3 agenterm-con 轻量多会话与稳健性（新增，串行实现）
+
+用户问题：独立控制台宿主需要多个独立终端、树式标签、外置输入区及可被
+本地工具直接驱动的固定交互面；运行高输出或异常 TUI/harness 时，单会话故障
+不能带走整个窗口。
+
+不变量：一个 `agenterm-con` GUI 进程内每个 stable `@N` 标签独占 PTY、解析器、
+滚动视图和关闭状态；父标签关闭时仅提升直接子标签。控制端点只在 GUI 存活期
+监听，不登记实例、不恢复会话、不成为 server/mux/Fleet/Rhai authority。所有
+CLI 请求与输出都有尺寸、数量、时限边界；解析错误、无效目标、截图/I/O 失败、
+子进程退出和异常 VT/Unicode 输入必须返回局部错误并保持其他标签可用。
+
+| 叶 | 状态 | 可观察证据 | 排除范围 |
+|---|---|---|---|
+| C-con-tree | [~] | `ConApp` 已持有 stable ID 树和独立 `ConTerminal`/PTY 表；左侧常驻树栏按父子层级绘制并统一占用终端 left inset，可用快捷键或点击创建、切换和关闭。关闭父节点时直接子节点保持原 PTY 并提升；已有像素 offset 单测和公开 CLI 黑盒，待补树栏鼠标关闭控件 | 不引入持久工作区或 server |
+| C-con-composer | [~] | 底部外置输入区可选择焦点、支持键盘和 IME commit，Enter 经当前会话同一 PTY 写路径提交；待补粘贴、目标选择和黑盒 | 不做脚本语言或任务系统 |
+| C-con-cli | [x] | 固定 GUI-lifetime `cli --control ENDPOINT` 已实现 `list-tabs`、new/select/close、capture、screenshot、send-text、send-keys、send-mouse、send-wheel、wait-text；Windows 命名管道黑盒覆盖多 PTY 隔离、截图、异常请求、父节点提升和清理，GUI 子系统的 pipe stdout 也已修复 | 不复用主程序 mux/control plane |
+| C-con-font | [ ] | 采用主程序同一原生字体/格宽度量路径，默认优先新宋体并验证 ASCII 1 格、CJK/Unicode 宽字符 2 格 | 不在 custom rasterizer 中混拼字体 face |
+| C-con-harness | [ ] | Windows 黑盒覆盖高输出、异常 ANSI/Unicode、重入输入、并发 CLI、建关标签、resize/DPI 风暴、IME/鼠标异常；进程与非目标会话持续可用 | 不承诺不可证明的“绝对不崩” |
 - rh `shipped_surfaces.rs` 声明的 76 条 fleet.* 中有 32 条在 host `OPERATION_CATALOG` 不存在（stale 声明）
 - `agenterm cli script` 已弃用并在 v0.1.17 待删除；公开引擎入口统一为
   `agenterm rh|lua|qjs|sql`，现存调用者、help 与 catalog 仍待迁移
