@@ -972,13 +972,18 @@ impl ConApp {
         Ok(true)
     }
 
-    fn composer_hit(&self, window: &PixelWindow, position: &LogicalPoint) -> Result<bool, PixelWindowError> {
+    fn composer_hit(
+        &self,
+        window: &PixelWindow,
+        position: &LogicalPoint,
+    ) -> Result<bool, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
         let left = (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32;
         let bottom = (COMPOSER_LOGICAL_HEIGHT * scale).round() as u32;
         Ok((position.x * scale).max(0.0) as u32 >= left
-            && (position.y * scale).max(0.0) as u32 >= metrics.physical_height.saturating_sub(bottom))
+            && (position.y * scale).max(0.0) as u32
+                >= metrics.physical_height.saturating_sub(bottom))
     }
 
     fn update_composer_ime_anchor(&self, window: &PixelWindow) -> Result<(), PixelWindowError> {
@@ -1028,7 +1033,11 @@ impl ConApp {
         true
     }
 
-    fn handle_composer_ime(&mut self, window: &PixelWindow, event: agenterm_platform::ime::ImeEvent) {
+    fn handle_composer_ime(
+        &mut self,
+        window: &PixelWindow,
+        event: agenterm_platform::ime::ImeEvent,
+    ) {
         use agenterm_platform::ime::{ImeAction, classify_event};
         match classify_event(event, true) {
             ImeAction::UpdatePreedit { text, .. } => self.composer_preedit = text,
@@ -1084,7 +1093,9 @@ impl ConApp {
                 }
                 self.open_session(window, parent.is_some())
                     .map_err(|error| error.to_string())?;
-                let id = self.workspace.active()
+                let id = self
+                    .workspace
+                    .active()
                     .ok_or_else(|| "new terminal was not activated".to_owned())?;
                 Ok(serde_json::json!({
                     "id": format!("@{}", id.get()),
@@ -1098,13 +1109,15 @@ impl ConApp {
             }),
             CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
                 self.workspace.set_active(id);
-                self.close_active_session(window).map_err(|error| error.to_string())?;
+                self.close_active_session(window)
+                    .map_err(|error| error.to_string())?;
                 Ok(serde_json::json!({ "closed": format!("@{}", id.get()) }))
             }),
-            CliCommand::CapturePane { target, max_bytes } => self
-                .control_target(target)
-                .and_then(|id| {
-                    let session = self.sessions.get_mut(&id)
+            CliCommand::CapturePane { target, max_bytes } => {
+                self.control_target(target).and_then(|id| {
+                    let session = self
+                        .sessions
+                        .get_mut(&id)
                         .ok_or_else(|| "terminal disappeared".to_owned())?;
                     session.drain_pty();
                     let mut text = session.build_snapshot().rows_text.join("\n");
@@ -1116,16 +1129,21 @@ impl ConApp {
                         text.truncate(end);
                     }
                     Ok(serde_json::Value::String(text))
-                }),
+                })
+            }
             CliCommand::SendText { target, text } => self.control_target(target).and_then(|id| {
-                let session = self.sessions.get_mut(&id)
+                let session = self
+                    .sessions
+                    .get_mut(&id)
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
                 session.scroll_to_bottom();
                 session.write_pty(text.as_bytes());
                 Ok(serde_json::json!({ "sent_bytes": text.len() }))
             }),
             CliCommand::SendKeys { target, keys } => self.control_target(target).and_then(|id| {
-                let session = self.sessions.get_mut(&id)
+                let session = self
+                    .sessions
+                    .get_mut(&id)
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
                 for key in &keys {
                     let (key, ctrl, alt, shift) = parse_control_key(key)?;
@@ -1133,64 +1151,99 @@ impl ConApp {
                 }
                 Ok(serde_json::json!({ "sent_keys": keys.len() }))
             }),
-            CliCommand::SendMouse { target, action, button, column, row } => {
-                self.control_target(target).and_then(|id| {
-                    let session = self.sessions.get_mut(&id)
-                        .ok_or_else(|| "terminal disappeared".to_owned())?;
-                    if row >= session.rows || column >= session.cols {
-                        return Err(format!("mouse cell {row},{column} is outside {}x{}", session.rows, session.cols));
-                    }
-                    match action {
-                        control::MouseAction::Move => session.execute_script_mouse_move(window, row, column),
-                        control::MouseAction::Click => {
-                            let button = control_mouse_button(button)?;
-                            session.execute_script_click(window, row, column, button, false, false, false);
-                        }
-                        control::MouseAction::Press | control::MouseAction::Release => {
-                            let button = control_mouse_button(button)?;
-                            let state = if action == control::MouseAction::Press {
-                                PointerButtonState::Pressed
-                            } else {
-                                PointerButtonState::Released
-                            };
-                            session.execute_script_pointer_button(window, row, column, button, false, false, false, state);
-                        }
-                    }
-                    Ok(serde_json::json!({ "delivered": true }))
-                })
-            }
-            CliCommand::SendWheel { target, column, row, notches, ctrl } => {
-                self.control_target(target).and_then(|id| {
-                    let session = self.sessions.get_mut(&id)
-                        .ok_or_else(|| "terminal disappeared".to_owned())?;
-                    if row >= session.rows || column >= session.cols {
-                        return Err(format!("mouse cell {row},{column} is outside {}x{}", session.rows, session.cols));
-                    }
-                    session.execute_script_wheel(window, row, column, f32::from(notches), ctrl);
-                    Ok(serde_json::json!({ "delivered_notches": notches }))
-                })
-            }
-            CliCommand::ScreenshotPane { target, output } => self.control_target(target).and_then(|id| {
-                if self.workspace.active() != Some(id) {
-                    self.workspace.set_active(id);
-                }
-                let session = self.sessions.get_mut(&id)
+            CliCommand::SendMouse {
+                target,
+                action,
+                button,
+                column,
+                row,
+            } => self.control_target(target).and_then(|id| {
+                let session = self
+                    .sessions
+                    .get_mut(&id)
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
-                if session.pending_control_screenshot.is_some() {
-                    return Err("a screenshot is already pending for this terminal".to_owned());
+                if row >= session.rows || column >= session.cols {
+                    return Err(format!(
+                        "mouse cell {row},{column} is outside {}x{}",
+                        session.rows, session.cols
+                    ));
                 }
-                session.pending_control_screenshot = Some((
-                    PathBuf::from(output),
-                    reply.take().expect("control reply available"),
-                ));
-                window.request_redraw();
-                Ok(serde_json::Value::Null)
+                match action {
+                    control::MouseAction::Move => {
+                        session.execute_script_mouse_move(window, row, column)
+                    }
+                    control::MouseAction::Click => {
+                        let button = control_mouse_button(button)?;
+                        session
+                            .execute_script_click(window, row, column, button, false, false, false);
+                    }
+                    control::MouseAction::Press | control::MouseAction::Release => {
+                        let button = control_mouse_button(button)?;
+                        let state = if action == control::MouseAction::Press {
+                            PointerButtonState::Pressed
+                        } else {
+                            PointerButtonState::Released
+                        };
+                        session.execute_script_pointer_button(
+                            window, row, column, button, false, false, false, state,
+                        );
+                    }
+                }
+                Ok(serde_json::json!({ "delivered": true }))
             }),
-            CliCommand::WaitText { target, text, timeout_ms } => self.control_target(target).and_then(|id| {
+            CliCommand::SendWheel {
+                target,
+                column,
+                row,
+                notches,
+                ctrl,
+            } => self.control_target(target).and_then(|id| {
+                let session = self
+                    .sessions
+                    .get_mut(&id)
+                    .ok_or_else(|| "terminal disappeared".to_owned())?;
+                if row >= session.rows || column >= session.cols {
+                    return Err(format!(
+                        "mouse cell {row},{column} is outside {}x{}",
+                        session.rows, session.cols
+                    ));
+                }
+                session.execute_script_wheel(window, row, column, f32::from(notches), ctrl);
+                Ok(serde_json::json!({ "delivered_notches": notches }))
+            }),
+            CliCommand::ScreenshotPane { target, output } => {
+                self.control_target(target).and_then(|id| {
+                    if self.workspace.active() != Some(id) {
+                        self.workspace.set_active(id);
+                    }
+                    let session = self
+                        .sessions
+                        .get_mut(&id)
+                        .ok_or_else(|| "terminal disappeared".to_owned())?;
+                    if session.pending_control_screenshot.is_some() {
+                        return Err("a screenshot is already pending for this terminal".to_owned());
+                    }
+                    session.pending_control_screenshot = Some((
+                        PathBuf::from(output),
+                        reply.take().expect("control reply available"),
+                    ));
+                    window.request_redraw();
+                    Ok(serde_json::Value::Null)
+                })
+            }
+            CliCommand::WaitText {
+                target,
+                text,
+                timeout_ms,
+            } => self.control_target(target).and_then(|id| {
                 if self.control_waits.len() >= 32 {
                     return Err("too many pending wait-text requests".to_owned());
                 }
-                if self.sessions.get(&id).is_some_and(|session| session.screen_contains(&text)) {
+                if self
+                    .sessions
+                    .get(&id)
+                    .is_some_and(|session| session.screen_contains(&text))
+                {
                     return Ok(serde_json::json!({ "matched": true }));
                 }
                 self.control_waits.push(PendingControlWait {
@@ -1209,7 +1262,10 @@ impl ConApp {
 
     fn drain_control(&mut self, window: &PixelWindow, now: Instant) -> Option<Instant> {
         loop {
-            let request = self.control_server.as_ref().and_then(control::ControlServer::try_recv);
+            let request = self
+                .control_server
+                .as_ref()
+                .and_then(control::ControlServer::try_recv);
             let Some(request) = request else { break };
             self.dispatch_control(window, request);
         }
@@ -1223,9 +1279,13 @@ impl ConApp {
             if matched {
                 let _ = wait.reply.send(Ok(serde_json::json!({ "matched": true })));
             } else if now >= wait.deadline {
-                let _ = wait.reply.send(Err(format!("wait-text timed out waiting for {:?}", wait.text)));
+                let _ = wait.reply.send(Err(format!(
+                    "wait-text timed out waiting for {:?}",
+                    wait.text
+                )));
             } else {
-                next = Some(next.map_or(wait.deadline, |current: Instant| current.min(wait.deadline)));
+                next =
+                    Some(next.map_or(wait.deadline, |current: Instant| current.min(wait.deadline)));
                 pending.push(wait);
             }
         }
@@ -1255,7 +1315,13 @@ impl ConApp {
         let text = Rgb(0xE7, 0xE4, 0xDA);
         let muted = Rgb(0x91, 0x9A, 0x9C);
         surface.fill_rect(0, 0, tree_width, height, tree_bg.to_xrgb());
-        surface.fill_rect(tree_width.saturating_sub(1), 0, 1, height, tree_rule.to_xrgb());
+        surface.fill_rect(
+            tree_width.saturating_sub(1),
+            0,
+            1,
+            height,
+            tree_rule.to_xrgb(),
+        );
         surface.fill_rect(
             tree_width,
             height.saturating_sub(session.content_bottom_px),
@@ -1291,7 +1357,9 @@ impl ConApp {
             let mut parent = node.parent;
             while let Some(parent_id) = parent {
                 depth = depth.saturating_add(1).min(8);
-                parent = nodes.iter().find(|candidate| candidate.id == parent_id)
+                parent = nodes
+                    .iter()
+                    .find(|candidate| candidate.id == parent_id)
                     .and_then(|candidate| candidate.parent);
             }
             let indent = 14 + depth * 18;
@@ -1304,7 +1372,9 @@ impl ConApp {
                 surface.fill_rect(branch_x, y, 1, row_height / 2 + 1, branch.to_xrgb());
                 surface.fill_rect(branch_x, y + row_height / 2, 8, 1, branch.to_xrgb());
             }
-            let title = self.sessions.get(&node.id)
+            let title = self
+                .sessions
+                .get(&node.id)
                 .map(|terminal| terminal.current_title.as_str())
                 .filter(|title| !title.is_empty())
                 .unwrap_or(node.title.as_str());
@@ -3035,11 +3105,13 @@ impl PixelWindowApplication for ConApp {
                 width,
                 height,
             )
-            .map(|()| serde_json::json!({
-                "path": path.to_string_lossy(),
-                "width": width,
-                "height": height,
-            }))
+            .map(|()| {
+                serde_json::json!({
+                    "path": path.to_string_lossy(),
+                    "width": width,
+                    "height": height,
+                })
+            })
             .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
         }
@@ -3057,7 +3129,9 @@ impl PixelWindowApplication for ConApp {
         let control_deadline = self.drain_control(window, now);
         let directive = self.active_session_mut()?.about_to_wait(window, now)?;
         Ok(match (directive, control_deadline) {
-            (PixelWindowDirective::Wait, Some(deadline)) => PixelWindowDirective::WaitUntil(deadline),
+            (PixelWindowDirective::Wait, Some(deadline)) => {
+                PixelWindowDirective::WaitUntil(deadline)
+            }
             (PixelWindowDirective::WaitUntil(current), Some(deadline)) => {
                 PixelWindowDirective::WaitUntil(current.min(deadline))
             }
@@ -3068,9 +3142,10 @@ impl PixelWindowApplication for ConApp {
 
 fn parse_control_key(spec: &str) -> Result<(ScriptKey, bool, bool, bool), String> {
     let mut parts: Vec<_> = spec.split('+').collect();
-    let key_name = parts.pop().filter(|value| !value.is_empty()).ok_or_else(|| {
-        format!("invalid key specification {spec:?}")
-    })?;
+    let key_name = parts
+        .pop()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("invalid key specification {spec:?}"))?;
     let mut ctrl = false;
     let mut alt = false;
     let mut shift = false;
@@ -3422,18 +3497,17 @@ mod tests {
     /// output through this binary.
     #[test]
     fn terminal_paint_respects_left_tree_inset() {
-        let mut parser = vt100::Parser::new_with_callbacks(
-            2,
-            4,
-            0,
-            ConCallbacks::default(),
-        );
+        let mut parser = vt100::Parser::new_with_callbacks(2, 4, 0, ConCallbacks::default());
         parser.process(b"A");
         let width = 64;
         let height = 32;
         let untouched = 0x0012_3456;
         let mut pixels = vec![untouched; (width * height) as usize];
-        let mut surface = Surface { pixels: &mut pixels, width, height };
+        let mut surface = Surface {
+            pixels: &mut pixels,
+            width,
+            height,
+        };
         paint_cells_at(
             &mut surface,
             parser.screen(),

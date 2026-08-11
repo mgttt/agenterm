@@ -57,13 +57,21 @@ fn error_text(output: &Output) -> String {
 
 fn cli_json(exe: &Path, endpoint: &str, arguments: &[&str]) -> Value {
     let output = invoke(exe, endpoint, arguments);
-    assert!(output.status.success(), "CLI failed: {}", error_text(&output));
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        error_text(&output)
+    );
     serde_json::from_str(&output_text(&output)).expect("successful CLI output must be JSON")
 }
 
 fn cli_text(exe: &Path, endpoint: &str, arguments: &[&str]) -> String {
     let output = invoke(exe, endpoint, arguments);
-    assert!(output.status.success(), "CLI failed: {}", error_text(&output));
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        error_text(&output)
+    );
     output_text(&output)
 }
 
@@ -75,7 +83,11 @@ fn wait_until_ready(exe: &Path, endpoint: &str, timeout: Duration) -> Value {
             return serde_json::from_str(&output_text(&output))
                 .expect("list-tabs output must be JSON");
         }
-        assert!(Instant::now() < deadline, "control endpoint did not become ready: {}", error_text(&output));
+        assert!(
+            Instant::now() < deadline,
+            "control endpoint did not become ready: {}",
+            error_text(&output)
+        );
         thread::sleep(Duration::from_millis(25));
     }
 }
@@ -109,16 +121,54 @@ fn gui_control_surface_isolated_multitab_black_box() {
     let root = tab_id(&listed["tabs"][0]["id"]).to_owned();
     assert_eq!(listed["tabs"][0]["active"], true);
 
-    cli_json(exe, &endpoint, &["wait-text", "--target", &root, "--timeout-ms", "10000", "ROOT_READY"]);
-    cli_json(exe, &endpoint, &["send-text", "--target", &root, "echo ROOT_ONLY\r"]);
-    cli_json(exe, &endpoint, &["wait-text", "--target", &root, "ROOT_ONLY"]);
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &root,
+            "--timeout-ms",
+            "10000",
+            "ROOT_READY",
+        ],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-text", "--target", &root, "echo ROOT_ONLY\r"],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &["wait-text", "--target", &root, "ROOT_ONLY"],
+    );
 
     let created = cli_json(exe, &endpoint, &["new-tab", "--parent", &root]);
     let child_id = tab_id(&created["id"]).to_owned();
     assert_eq!(created["parent"], root);
-    cli_json(exe, &endpoint, &["send-text", "--target", &child_id, "echo KEY_EVENT"]);
-    cli_json(exe, &endpoint, &["send-keys", "--target", &child_id, "Enter"]);
-    cli_json(exe, &endpoint, &["wait-text", "--target", &child_id, "--timeout-ms", "10000", "KEY_EVENT"]);
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-text", "--target", &child_id, "echo KEY_EVENT"],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-keys", "--target", &child_id, "Enter"],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &child_id,
+            "--timeout-ms",
+            "10000",
+            "KEY_EVENT",
+        ],
+    );
 
     let root_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &root]);
     let child_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &child_id]);
@@ -126,28 +176,83 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert!(!root_text.contains("KEY_EVENT"));
     assert!(child_text.contains("KEY_EVENT"));
 
-    cli_json(exe, &endpoint, &[
-        "send-mouse", "--target", &child_id, "--action", "move", "--button", "none",
-        "--column", "1", "--row", "1",
-    ]);
-    cli_json(exe, &endpoint, &[
-        "send-mouse", "--target", &child_id, "--action", "click", "--button", "left",
-        "--column", "1", "--row", "1",
-    ]);
-    cli_json(exe, &endpoint, &[
-        "send-wheel", "--target", &child_id, "--column", "1", "--row", "1", "--notches", "1",
-    ]);
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "move",
+            "--button",
+            "none",
+            "--column",
+            "1",
+            "--row",
+            "1",
+        ],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "click",
+            "--button",
+            "left",
+            "--column",
+            "1",
+            "--row",
+            "1",
+        ],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-wheel",
+            "--target",
+            &child_id,
+            "--column",
+            "1",
+            "--row",
+            "1",
+            "--notches",
+            "1",
+        ],
+    );
 
     let screenshot_text = gui.screenshot.to_string_lossy().into_owned();
-    cli_json(exe, &endpoint, &[
-        "screenshot-pane", "--target", &child_id, "--output", &screenshot_text,
-    ]);
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "screenshot-pane",
+            "--target",
+            &child_id,
+            "--output",
+            &screenshot_text,
+        ],
+    );
     let png = fs::read(&gui.screenshot).expect("screenshot must exist after successful reply");
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
 
-    let timed_out = invoke(exe, &endpoint, &[
-        "wait-text", "--target", &child_id, "--timeout-ms", "25", "IMPOSSIBLE_TEST_MARKER",
-    ]);
+    let timed_out = invoke(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &child_id,
+            "--timeout-ms",
+            "25",
+            "IMPOSSIBLE_TEST_MARKER",
+        ],
+    );
     assert!(!timed_out.status.success(), "missing text must time out");
     let invalid = invoke(exe, &endpoint, &["capture-pane", "--target", "@999999"]);
     assert!(!invalid.status.success(), "unknown tab must fail");
@@ -159,6 +264,8 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert_eq!(after_close["tabs"][0]["id"], child_id);
     assert!(after_close["tabs"][0]["parent"].is_null());
 
-    gui.child.kill().expect("GUI must remain alive through the journey");
+    gui.child
+        .kill()
+        .expect("GUI must remain alive through the journey");
     gui.child.wait().expect("GUI process must be reapable");
 }

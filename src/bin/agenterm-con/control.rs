@@ -29,9 +29,15 @@ pub struct CliRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliCommand {
     ListTabs,
-    NewTab { parent: Option<TabId> },
-    SelectTab { target: TabId },
-    CloseTab { target: TabId },
+    NewTab {
+        parent: Option<TabId>,
+    },
+    SelectTab {
+        target: TabId,
+    },
+    CloseTab {
+        target: TabId,
+    },
     CapturePane {
         target: Option<TabId>,
         max_bytes: usize,
@@ -160,7 +166,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             let row = cursor.required_u16("--row")?;
             cursor.finish()?;
             if (action == MouseAction::Move) != (button == MouseButton::None) {
-                return Err("send-mouse move requires --button none; button actions require a button".to_owned());
+                return Err(
+                    "send-mouse move requires --button none; button actions require a button"
+                        .to_owned(),
+                );
             }
             CliCommand::SendMouse {
                 target,
@@ -180,7 +189,13 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             if notches == 0 {
                 return Err("--notches must not be zero".to_owned());
             }
-            CliCommand::SendWheel { target, column, row, notches, ctrl }
+            CliCommand::SendWheel {
+                target,
+                column,
+                row,
+                notches,
+                ctrl,
+            }
         }
         "wait-text" => {
             let target = cursor.optional_target()?;
@@ -325,7 +340,11 @@ impl<'a> Cursor<'a> {
     }
 
     fn optional_flag(&mut self, flag: &str) -> bool {
-        if self.args.get(self.position).is_some_and(|value| value == flag) {
+        if self
+            .args
+            .get(self.position)
+            .is_some_and(|value| value == flag)
+        {
             self.position += 1;
             true
         } else {
@@ -383,10 +402,7 @@ pub struct ControlServer {
 }
 
 impl ControlServer {
-    pub fn bind(
-        endpoint: &str,
-        wake: impl Fn() + Send + Sync + 'static,
-    ) -> Result<Self, String> {
+    pub fn bind(endpoint: &str, wake: impl Fn() + Send + Sync + 'static) -> Result<Self, String> {
         let endpoint = parse_native_endpoint(endpoint)?;
         let mut listener = NativeListener::bind(&endpoint).map_err(|error| error.to_string())?;
         let (request_tx, requests) = mpsc::channel();
@@ -399,7 +415,9 @@ impl ControlServer {
                 while worker_alive.load(Ordering::Acquire) {
                     let stream = match listener.accept(ACCEPT_POLL) {
                         Ok(stream) => stream,
-                        Err(error) if error.code == IpcTransportErrorCode::AcceptTimeout => continue,
+                        Err(error) if error.code == IpcTransportErrorCode::AcceptTimeout => {
+                            continue;
+                        }
                         Err(_) => break,
                     };
                     let request_tx = request_tx.clone();
@@ -435,7 +453,9 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
         .map_err(|error| error.to_string())?;
     let mut bytes = serde_json::to_vec(&wire).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    stream.write_all(&bytes).map_err(|error| error.to_string())?;
+    stream
+        .write_all(&bytes)
+        .map_err(|error| error.to_string())?;
     stream.flush().map_err(|error| error.to_string())?;
 
     let mut reader = BufReader::new(stream);
@@ -452,11 +472,15 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     if response.ok {
         Ok(match response.result {
             Some(serde_json::Value::String(text)) => text,
-            Some(value) => serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?,
+            Some(value) => {
+                serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
+            }
             None => String::new(),
         })
     } else {
-        Err(response.error.unwrap_or_else(|| "control request failed".to_owned()))
+        Err(response
+            .error
+            .unwrap_or_else(|| "control request failed".to_owned()))
     }
 }
 
@@ -512,8 +536,13 @@ fn read_wire_request(stream: &mut NativeStream) -> Result<CliCommand, String> {
 
 fn parse_native_endpoint(value: &str) -> Result<IpcEndpoint, String> {
     let endpoint = IpcEndpoint::from_str(value).map_err(|error| error.to_string())?;
-    endpoint.validate_local().map_err(|error| error.to_string())?;
-    if !matches!(endpoint, IpcEndpoint::NamedPipe(_) | IpcEndpoint::UnixSocket(_)) {
+    endpoint
+        .validate_local()
+        .map_err(|error| error.to_string())?;
+    if !matches!(
+        endpoint,
+        IpcEndpoint::NamedPipe(_) | IpcEndpoint::UnixSocket(_)
+    ) {
         return Err("agenterm-con control requires pipe:<name> or unix:<absolute-path>".to_owned());
     }
     Ok(endpoint)
@@ -547,47 +576,92 @@ struct WireResponse {
 impl From<CliCommand> for WireRequest {
     fn from(command: CliCommand) -> Self {
         let mut wire = Self {
-            command: String::new(), target: None, parent: None, text: None, keys: None, output: None,
-            max_bytes: None, action: None, button: None, column: None, row: None,
-            timeout_ms: None, notches: None, ctrl: None,
+            command: String::new(),
+            target: None,
+            parent: None,
+            text: None,
+            keys: None,
+            output: None,
+            max_bytes: None,
+            action: None,
+            button: None,
+            column: None,
+            row: None,
+            timeout_ms: None,
+            notches: None,
+            ctrl: None,
         };
         match command {
             CliCommand::ListTabs => wire.command = "list-tabs".to_owned(),
             CliCommand::NewTab { parent } => {
-                wire.command = "new-tab".to_owned(); wire.parent = parent.map(TabId::get);
+                wire.command = "new-tab".to_owned();
+                wire.parent = parent.map(TabId::get);
             }
             CliCommand::SelectTab { target } => {
-                wire.command = "select-tab".to_owned(); wire.target = Some(target.get());
+                wire.command = "select-tab".to_owned();
+                wire.target = Some(target.get());
             }
             CliCommand::CloseTab { target } => {
-                wire.command = "close-tab".to_owned(); wire.target = Some(target.get());
+                wire.command = "close-tab".to_owned();
+                wire.target = Some(target.get());
             }
             CliCommand::CapturePane { target, max_bytes } => {
-                wire.command = "capture-pane".to_owned(); wire.target = target.map(TabId::get); wire.max_bytes = Some(max_bytes);
+                wire.command = "capture-pane".to_owned();
+                wire.target = target.map(TabId::get);
+                wire.max_bytes = Some(max_bytes);
             }
             CliCommand::ScreenshotPane { target, output } => {
-                wire.command = "screenshot-pane".to_owned(); wire.target = target.map(TabId::get); wire.output = Some(output);
+                wire.command = "screenshot-pane".to_owned();
+                wire.target = target.map(TabId::get);
+                wire.output = Some(output);
             }
             CliCommand::SendText { target, text } => {
-                wire.command = "send-text".to_owned(); wire.target = target.map(TabId::get); wire.text = Some(text);
+                wire.command = "send-text".to_owned();
+                wire.target = target.map(TabId::get);
+                wire.text = Some(text);
             }
             CliCommand::SendKeys { target, keys } => {
-                wire.command = "send-keys".to_owned(); wire.target = target.map(TabId::get); wire.keys = Some(keys);
+                wire.command = "send-keys".to_owned();
+                wire.target = target.map(TabId::get);
+                wire.keys = Some(keys);
             }
-            CliCommand::SendMouse { target, action, button, column, row } => {
-                wire.command = "send-mouse".to_owned(); wire.target = target.map(TabId::get);
+            CliCommand::SendMouse {
+                target,
+                action,
+                button,
+                column,
+                row,
+            } => {
+                wire.command = "send-mouse".to_owned();
+                wire.target = target.map(TabId::get);
                 wire.action = Some(format!("{action:?}").to_ascii_lowercase());
                 wire.button = Some(format!("{button:?}").to_ascii_lowercase());
-                wire.column = Some(column); wire.row = Some(row);
+                wire.column = Some(column);
+                wire.row = Some(row);
             }
-            CliCommand::SendWheel { target, column, row, notches, ctrl } => {
-                wire.command = "send-wheel".to_owned(); wire.target = target.map(TabId::get);
-                wire.column = Some(column); wire.row = Some(row); wire.notches = Some(notches);
+            CliCommand::SendWheel {
+                target,
+                column,
+                row,
+                notches,
+                ctrl,
+            } => {
+                wire.command = "send-wheel".to_owned();
+                wire.target = target.map(TabId::get);
+                wire.column = Some(column);
+                wire.row = Some(row);
+                wire.notches = Some(notches);
                 wire.ctrl = Some(ctrl);
             }
-            CliCommand::WaitText { target, text, timeout_ms } => {
-                wire.command = "wait-text".to_owned(); wire.target = target.map(TabId::get);
-                wire.text = Some(text); wire.timeout_ms = Some(timeout_ms);
+            CliCommand::WaitText {
+                target,
+                text,
+                timeout_ms,
+            } => {
+                wire.command = "wait-text".to_owned();
+                wire.target = target.map(TabId::get);
+                wire.text = Some(text);
+                wire.timeout_ms = Some(timeout_ms);
             }
         }
         wire
@@ -601,25 +675,49 @@ impl TryFrom<WireRequest> for CliCommand {
         let target = wire.target.map(TabId::new);
         match wire.command.as_str() {
             "list-tabs" => Ok(Self::ListTabs),
-            "new-tab" => Ok(Self::NewTab { parent: wire.parent.map(TabId::new) }),
-            "select-tab" => Ok(Self::SelectTab { target: wire.target.map(TabId::new).ok_or("missing target")? }),
-            "close-tab" => Ok(Self::CloseTab { target: wire.target.map(TabId::new).ok_or("missing target")? }),
-            "capture-pane" => Ok(Self::CapturePane { target, max_bytes: wire.max_bytes.unwrap_or(DEFAULT_CAPTURE_BYTES) }),
-            "screenshot-pane" => Ok(Self::ScreenshotPane { target, output: wire.output.ok_or("missing output")? }),
-            "send-text" => Ok(Self::SendText { target, text: wire.text.ok_or("missing text")? }),
-            "send-keys" => Ok(Self::SendKeys { target, keys: wire.keys.ok_or("missing keys")? }),
+            "new-tab" => Ok(Self::NewTab {
+                parent: wire.parent.map(TabId::new),
+            }),
+            "select-tab" => Ok(Self::SelectTab {
+                target: wire.target.map(TabId::new).ok_or("missing target")?,
+            }),
+            "close-tab" => Ok(Self::CloseTab {
+                target: wire.target.map(TabId::new).ok_or("missing target")?,
+            }),
+            "capture-pane" => Ok(Self::CapturePane {
+                target,
+                max_bytes: wire.max_bytes.unwrap_or(DEFAULT_CAPTURE_BYTES),
+            }),
+            "screenshot-pane" => Ok(Self::ScreenshotPane {
+                target,
+                output: wire.output.ok_or("missing output")?,
+            }),
+            "send-text" => Ok(Self::SendText {
+                target,
+                text: wire.text.ok_or("missing text")?,
+            }),
+            "send-keys" => Ok(Self::SendKeys {
+                target,
+                keys: wire.keys.ok_or("missing keys")?,
+            }),
             "send-mouse" => Ok(Self::SendMouse {
                 target,
                 action: parse_mouse_action(wire.action.as_deref().ok_or("missing action")?)?,
                 button: parse_mouse_button(wire.button.as_deref().ok_or("missing button")?)?,
-                column: wire.column.ok_or("missing column")?, row: wire.row.ok_or("missing row")?,
+                column: wire.column.ok_or("missing column")?,
+                row: wire.row.ok_or("missing row")?,
             }),
             "send-wheel" => Ok(Self::SendWheel {
-                target, column: wire.column.ok_or("missing column")?, row: wire.row.ok_or("missing row")?,
-                notches: wire.notches.ok_or("missing notches")?, ctrl: wire.ctrl.unwrap_or(false),
+                target,
+                column: wire.column.ok_or("missing column")?,
+                row: wire.row.ok_or("missing row")?,
+                notches: wire.notches.ok_or("missing notches")?,
+                ctrl: wire.ctrl.unwrap_or(false),
             }),
             "wait-text" => Ok(Self::WaitText {
-                target, text: wire.text.ok_or("missing text")?, timeout_ms: wire.timeout_ms.unwrap_or(10_000),
+                target,
+                text: wire.text.ok_or("missing text")?,
+                timeout_ms: wire.timeout_ms.unwrap_or(10_000),
             }),
             _ => Err("unknown control command".to_owned()),
         }
@@ -687,17 +785,35 @@ mod tests {
     fn lifecycle_and_wheel_commands_keep_stable_tab_ids() {
         assert_eq!(
             parse_cli(&args(&[
-                "cli", "--control", "pipe:test", "new-tab", "--parent", "@9",
+                "cli",
+                "--control",
+                "pipe:test",
+                "new-tab",
+                "--parent",
+                "@9",
             ])),
             Ok(CliRequest {
                 control: "pipe:test".to_owned(),
-                command: CliCommand::NewTab { parent: Some(TabId::new(9)) },
+                command: CliCommand::NewTab {
+                    parent: Some(TabId::new(9))
+                },
             })
         );
         assert_eq!(
             parse_cli(&args(&[
-                "cli", "--control", "pipe:test", "send-wheel", "--target", "@9",
-                "--column", "3", "--row", "4", "--notches", "-2", "--ctrl",
+                "cli",
+                "--control",
+                "pipe:test",
+                "send-wheel",
+                "--target",
+                "@9",
+                "--column",
+                "3",
+                "--row",
+                "4",
+                "--notches",
+                "-2",
+                "--ctrl",
             ])),
             Ok(CliRequest {
                 control: "pipe:test".to_owned(),
@@ -716,13 +832,31 @@ mod tests {
     fn every_control_command_survives_wire_round_trip() {
         let commands = [
             CliCommand::ListTabs,
-            CliCommand::NewTab { parent: Some(TabId::new(1)) },
-            CliCommand::SelectTab { target: TabId::new(2) },
-            CliCommand::CloseTab { target: TabId::new(3) },
-            CliCommand::CapturePane { target: Some(TabId::new(4)), max_bytes: 4096 },
-            CliCommand::ScreenshotPane { target: None, output: "pane.png".to_owned() },
-            CliCommand::SendText { target: None, text: "hello".to_owned() },
-            CliCommand::SendKeys { target: None, keys: vec!["Ctrl+C".to_owned()] },
+            CliCommand::NewTab {
+                parent: Some(TabId::new(1)),
+            },
+            CliCommand::SelectTab {
+                target: TabId::new(2),
+            },
+            CliCommand::CloseTab {
+                target: TabId::new(3),
+            },
+            CliCommand::CapturePane {
+                target: Some(TabId::new(4)),
+                max_bytes: 4096,
+            },
+            CliCommand::ScreenshotPane {
+                target: None,
+                output: "pane.png".to_owned(),
+            },
+            CliCommand::SendText {
+                target: None,
+                text: "hello".to_owned(),
+            },
+            CliCommand::SendKeys {
+                target: None,
+                keys: vec!["Ctrl+C".to_owned()],
+            },
             CliCommand::SendMouse {
                 target: None,
                 action: MouseAction::Click,
@@ -737,7 +871,11 @@ mod tests {
                 notches: 1,
                 ctrl: false,
             },
-            CliCommand::WaitText { target: None, text: "ready".to_owned(), timeout_ms: 250 },
+            CliCommand::WaitText {
+                target: None,
+                text: "ready".to_owned(),
+                timeout_ms: 250,
+            },
         ];
         for command in commands {
             let decoded = CliCommand::try_from(WireRequest::from(command.clone())).unwrap();
