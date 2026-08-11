@@ -1,9 +1,11 @@
 //! Host-neutral interaction and rendering primitives shared by AgenTerm UIs.
 
+pub mod damage;
 pub mod glyph_cache;
 pub mod pixel;
 pub mod tree;
 
+pub use damage::{DirtyRegion, DirtyRows, PixelRect};
 pub use glyph_cache::{GlyphCache, GlyphCacheKey, GlyphCacheStats};
 pub use tree::{TreeDepthError, TreeDepthNode, compute_tree_depths, compute_tree_depths_by};
 

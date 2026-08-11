@@ -54,7 +54,8 @@ use agenterm_platform::window_host::{
     run_pixel_window,
 };
 use agenterm_ui_core::{
-    ScrollbarHit, ScrollbarThumbDrag, scrollback_for_thumb_top, scrollbar_hit_test,
+    DirtyRegion, DirtyRows, PixelRect, ScrollbarHit, ScrollbarThumbDrag, scrollback_for_thumb_top,
+    scrollbar_hit_test,
 };
 
 use palette::Rgb;
@@ -724,6 +725,13 @@ struct ConTerminal {
     content_left_px: u32,
     content_top_px: u32,
     content_bottom_px: u32,
+
+    /// Conservative raster-candidate evidence. The actual frame remains a
+    /// complete raster and the host still performs its existing full present.
+    dirty: DirtyRegion,
+    last_cursor: Option<TerminalPoint>,
+    frame_width: u32,
+    frame_height: u32,
 }
 
 impl Drop for ConTerminal {
@@ -755,6 +763,10 @@ struct ConApp {
     control_server: Option<control::ControlServer>,
     control_waits: Vec<PendingControlWait>,
     perf_stats: PerfStats,
+    chrome_dirty: DirtyRegion,
+    frame_width: u32,
+    frame_height: u32,
+    frame_scale: f64,
 }
 
 struct PendingControlWait {
@@ -767,20 +779,48 @@ struct PendingControlWait {
 #[derive(Default)]
 struct PerfStats {
     frames: u64,
+    observed_frames: u64,
     render_total_us: u128,
     render_last_us: u64,
     render_max_us: u64,
     pty_drained_bytes: u64,
     pty_budget_yields: u64,
+    full_candidate_frames: u64,
+    partial_candidate_frames: u64,
+    dirty_pixels: u64,
+    frame_pixels: u64,
 }
 
 impl PerfStats {
     fn record_frame(&mut self, elapsed: Duration) {
         let micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
         self.frames = self.frames.saturating_add(1);
+        self.observed_frames = self.observed_frames.saturating_add(1);
         self.render_total_us = self.render_total_us.saturating_add(u128::from(micros));
         self.render_last_us = micros;
         self.render_max_us = self.render_max_us.max(micros);
+    }
+
+    /// Records only after the full raster function has returned successfully.
+    /// These are candidate numbers, not claims about native present support.
+    fn record_raster_candidate(&mut self, candidate: DirtyRegion, width: u32, height: u32) {
+        let frame_pixels = u64::from(width).saturating_mul(u64::from(height));
+        self.frame_pixels = self.frame_pixels.saturating_add(frame_pixels);
+        if candidate.is_full() {
+            self.full_candidate_frames = self.full_candidate_frames.saturating_add(1);
+            self.dirty_pixels = self.dirty_pixels.saturating_add(frame_pixels);
+        } else {
+            // An empty candidate is still a valid non-full observation (for
+            // example a screenshot-only redraw) and contributes zero pixels.
+            self.partial_candidate_frames = self.partial_candidate_frames.saturating_add(1);
+            self.dirty_pixels = self
+                .dirty_pixels
+                .saturating_add(candidate.dirty_pixels(width, height));
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
     }
 
     fn json(&self) -> json::JsonValue {
@@ -791,12 +831,53 @@ impl PerfStats {
         };
         json::object([
             ("frames", self.frames.into()),
+            ("observed_frames", self.observed_frames.into()),
             ("render_last_us", self.render_last_us.into()),
             ("render_average_us", average.into()),
             ("render_max_us", self.render_max_us.into()),
             ("pty_drained_bytes", self.pty_drained_bytes.into()),
             ("pty_budget_yields", self.pty_budget_yields.into()),
+            ("full_candidate_frames", self.full_candidate_frames.into()),
+            (
+                "partial_candidate_frames",
+                self.partial_candidate_frames.into(),
+            ),
+            ("dirty_pixels", self.dirty_pixels.into()),
+            ("frame_pixels", self.frame_pixels.into()),
         ])
+    }
+}
+
+#[cfg(test)]
+mod perf_stats_tests {
+    use super::*;
+
+    #[test]
+    fn raster_candidate_fields_serialize_and_reset() {
+        let mut stats = PerfStats::default();
+        stats.record_frame(Duration::from_micros(7));
+        stats.record_raster_candidate(DirtyRegion::full_frame(10, 20), 10, 20);
+        stats.record_frame(Duration::from_micros(3));
+        let mut partial = DirtyRegion::empty();
+        partial.mark_rect(PixelRect::from_xywh(1, 2, 3, 4));
+        stats.record_raster_candidate(partial, 10, 20);
+        let serialized = String::from_utf8(json::to_vec(&stats.json())).expect("JSON is UTF-8");
+        for field in [
+            "observed_frames",
+            "full_candidate_frames",
+            "partial_candidate_frames",
+            "dirty_pixels",
+            "frame_pixels",
+        ] {
+            assert!(serialized.contains(field), "missing {field}: {serialized}");
+        }
+        assert_eq!(stats.observed_frames, 2);
+        stats.reset();
+        assert_eq!(stats.observed_frames, 0);
+        assert_eq!(stats.full_candidate_frames, 0);
+        assert_eq!(stats.partial_candidate_frames, 0);
+        assert_eq!(stats.dirty_pixels, 0);
+        assert_eq!(stats.frame_pixels, 0);
     }
 }
 
@@ -828,6 +909,10 @@ impl ConApp {
             control_server: None,
             control_waits: Vec::new(),
             perf_stats: PerfStats::default(),
+            chrome_dirty: DirtyRegion::full(),
+            frame_width: 0,
+            frame_height: 0,
+            frame_scale: 1.0,
         }
     }
 
@@ -883,6 +968,7 @@ impl ConApp {
             self.exit = true;
             return Ok(());
         }
+        self.mark_chrome_full();
         let metrics = window.metrics()?;
         let sidebar_width = self.sidebar_width_logical;
         let session = self.active_session_mut()?;
@@ -909,6 +995,68 @@ impl ConApp {
 
     fn layout(&self, width: u32, height: u32, scale: f64) -> ui::Layout {
         ui::Layout::with_sidebar_width(width, height, scale, self.sidebar_width_logical)
+    }
+
+    fn mark_chrome_full(&mut self) {
+        self.chrome_dirty.mark_full();
+    }
+
+    fn mark_chrome_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
+        if self.frame_width == 0 || self.frame_height == 0 {
+            self.mark_chrome_full();
+            return;
+        }
+        self.chrome_dirty
+            .mark_rect(PixelRect::from_xywh(x, y, width, height));
+    }
+
+    fn mark_tree_dirty(&mut self) {
+        if self.frame_width == 0 || self.frame_height == 0 {
+            self.mark_chrome_full();
+            return;
+        }
+        let layout = self.layout(self.frame_width, self.frame_height, self.frame_scale);
+        self.mark_chrome_rect(
+            layout.sidebar.x,
+            layout.sidebar.y,
+            layout.sidebar.width,
+            layout.sidebar.height,
+        );
+    }
+
+    fn mark_composer_dirty(&mut self) {
+        if self.frame_width == 0 || self.frame_height == 0 {
+            self.mark_chrome_full();
+            return;
+        }
+        let layout = self.layout(self.frame_width, self.frame_height, self.frame_scale);
+        let right = layout
+            .composer_send
+            .x
+            .saturating_add(layout.composer_send.width);
+        self.mark_chrome_rect(
+            layout.composer_input.x,
+            layout.composer_input.y,
+            right.saturating_sub(layout.composer_input.x),
+            layout.composer_input.height,
+        );
+    }
+
+    fn note_frame_dimensions(&mut self, width: u32, height: u32, scale: f64) {
+        if self.frame_width != width || self.frame_height != height || self.frame_scale != scale {
+            self.mark_chrome_full();
+        }
+        self.frame_width = width;
+        self.frame_height = height;
+        self.frame_scale = scale;
+    }
+
+    fn take_dirty_candidate(&mut self, width: u32, height: u32) -> DirtyRegion {
+        let mut candidate = std::mem::take(&mut self.chrome_dirty);
+        if let Ok(session) = self.active_session_mut() {
+            candidate = candidate.union(session.take_dirty());
+        }
+        candidate.clip(width, height)
     }
 
     fn reveal_active_tree_row(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
@@ -973,6 +1121,7 @@ impl ConApp {
             return Err(error);
         }
         self.sessions.insert(id, session);
+        self.mark_chrome_full();
         self.reveal_active_tree_row(window)?;
         self.refresh_title(window)
     }
@@ -993,6 +1142,7 @@ impl ConApp {
             ));
         };
         let next = (index as isize + direction).rem_euclid(ids.len() as isize) as usize;
+        self.mark_chrome_full();
         self.workspace.set_active(ids[next]);
         self.reveal_active_tree_row(window)?;
         let metrics = window.metrics()?;
@@ -1036,6 +1186,7 @@ impl ConApp {
         if text.eq_ignore_ascii_case("i") {
             self.composer_focused = true;
             self.update_composer_ime_anchor(window)?;
+            self.mark_composer_dirty();
             window.request_redraw();
             return Ok(true);
         }
@@ -1085,6 +1236,7 @@ impl ConApp {
             }
             ui::TreeHit::Close(index) => {
                 self.workspace.set_active(ids[index]);
+                self.mark_chrome_full();
                 self.close_active_session(window)?;
                 self.tree_scroll_offset = ui::clamp_tree_scroll(
                     self.tree_scroll_offset,
@@ -1096,6 +1248,7 @@ impl ConApp {
             ui::TreeHit::Select(index) => {
                 self.workspace.set_active(ids[index]);
                 self.reveal_active_tree_row(window)?;
+                self.mark_chrome_full();
             }
         }
         let sidebar_width = self.sidebar_width_logical;
@@ -1290,7 +1443,7 @@ impl ConApp {
             }
             CliCommand::PerfStats => Ok(self.perf_stats.json()),
             CliCommand::ResetPerfStats => {
-                self.perf_stats = PerfStats::default();
+                self.perf_stats.reset();
                 Ok(json::object([("reset", true.into())]))
             }
             CliCommand::NewTab { parent } => (|| {
@@ -1313,6 +1466,7 @@ impl ConApp {
                 ]))
             })(),
             CliCommand::SelectTab { target } => self.control_target(Some(target)).map(|id| {
+                self.mark_chrome_full();
                 self.workspace.set_active(id);
                 window.request_redraw();
                 json::object([("active", format!("@{}", id.get()).into())])
@@ -1827,13 +1981,135 @@ impl ConTerminal {
             content_left_px: 0,
             content_top_px: 0,
             content_bottom_px: 0,
+            dirty: DirtyRegion::full(),
+            last_cursor: None,
+            frame_width: 0,
+            frame_height: 0,
         }
     }
 
     fn set_content_insets(&mut self, left: u32, top: u32, bottom: u32) {
+        if self.content_left_px != left
+            || self.content_top_px != top
+            || self.content_bottom_px != bottom
+        {
+            self.dirty.mark_full();
+        }
         self.content_left_px = left;
         self.content_top_px = top;
         self.content_bottom_px = bottom;
+    }
+
+    fn take_dirty(&mut self) -> DirtyRegion {
+        std::mem::take(&mut self.dirty)
+    }
+
+    fn note_frame_dimensions(&mut self, width: u32, height: u32) {
+        if self.frame_width != width || self.frame_height != height {
+            self.dirty.mark_full();
+        }
+        self.frame_width = width;
+        self.frame_height = height;
+    }
+
+    fn mark_cell(&mut self, point: TerminalPoint) {
+        let x = self
+            .content_left_px
+            .saturating_add(u32::from(point.col).saturating_mul(self.cell_w));
+        let y = self
+            .content_top_px
+            .saturating_add(u32::from(point.row).saturating_mul(self.cell_h));
+        self.dirty.mark_rect(PixelRect::from_xywh(
+            x,
+            y,
+            self.cell_w.saturating_mul(2),
+            self.cell_h,
+        ));
+    }
+
+    fn mark_cursor_change(&mut self) {
+        if let Some(previous) = self.last_cursor {
+            self.mark_cell(previous);
+        }
+        let cursor = self.parser.screen().cursor_position();
+        self.mark_cell(TerminalPoint {
+            row: cursor.0,
+            col: cursor.1,
+        });
+    }
+
+    fn mark_ime_bounds(&mut self) {
+        let cursor = self.parser.screen().cursor_position();
+        let x = self
+            .content_left_px
+            .saturating_add(u32::from(cursor.1).saturating_mul(self.cell_w));
+        let y = self
+            .content_top_px
+            .saturating_add(u32::from(cursor.0).saturating_mul(self.cell_h));
+        let right = self
+            .content_left_px
+            .saturating_add(u32::from(self.cols).saturating_mul(self.cell_w));
+        if right > x && self.cell_h > 0 {
+            self.dirty.mark_rect(PixelRect::from_xywh(
+                x,
+                y,
+                right.saturating_sub(x),
+                self.cell_h,
+            ));
+        } else {
+            self.dirty.mark_full();
+        }
+    }
+
+    fn mark_selection(&mut self, selection: Option<(TerminalPoint, TerminalPoint)>) {
+        let Some((start, end)) = selection.map(|(a, b)| TerminalPoint::normalize(a, b)) else {
+            return;
+        };
+        let mut rows = DirtyRows::empty();
+        rows.mark_range(u32::from(start.row), u64::from(end.row).saturating_add(1));
+        if let Some(bounds) = rows.to_pixel_bounds(
+            self.content_left_px,
+            self.content_top_px,
+            self.cell_w,
+            self.cell_h,
+            self.frame_width,
+            self.frame_height,
+        ) {
+            self.dirty.mark_rect(bounds);
+        } else {
+            self.dirty.mark_full();
+        }
+    }
+
+    fn mark_selection_change(
+        &mut self,
+        previous: Option<(TerminalPoint, TerminalPoint)>,
+        current: Option<(TerminalPoint, TerminalPoint)>,
+    ) {
+        self.mark_selection(previous);
+        self.mark_selection(current);
+    }
+
+    fn mark_scrollbar_bounds(&mut self) {
+        if self.frame_width == 0 || self.frame_height == 0 {
+            self.dirty.mark_full();
+            return;
+        }
+        let (geometry, _, _) = self.scrollbar_geometry(self.frame_width, self.frame_height);
+        for rect in [geometry.track, geometry.thumb] {
+            let left = rect.left.max(0) as u32;
+            let top = rect.top.max(0) as u32;
+            let right = rect.right.max(0) as u32;
+            let bottom = rect.bottom.max(0) as u32;
+            if right > left && bottom > top {
+                self.dirty.mark_rect(PixelRect {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                });
+            }
+        }
     }
 
     /// Computes grid dimensions from physical pixels and current cell metrics.
@@ -2016,7 +2292,13 @@ impl ConTerminal {
         }
         // New output clears stale selection.
         if outcome.changed && !self.selecting {
+            self.mark_selection(self.selection);
             self.selection = None;
+        }
+        if outcome.changed {
+            // PTY output can alter arbitrary cells, cursor state, modes, and
+            // scrollback. It is not safe to infer a smaller bound here.
+            self.dirty.mark_full();
         }
         outcome
     }
@@ -2025,6 +2307,9 @@ impl ConTerminal {
     /// resize is allowed to fail (some backends reject transient bad sizes);
     /// the model still converges so the next event is consistent.
     fn apply_resize(&mut self, phys_w: u32, phys_h: u32, scale: f64) {
+        // Resize, DPI, font metrics, and grid changes all invalidate the
+        // complete terminal viewport, even when clamping preserves rows/cols.
+        self.dirty.mark_full();
         self.scale = scale;
         self.recompute_metrics(scale);
         let usable_w = phys_w
@@ -2069,13 +2354,20 @@ impl ConTerminal {
 
         match classify_event(event, true) {
             ImeAction::UpdatePreedit { text, .. } => {
+                self.mark_ime_bounds();
                 self.ime_preedit = text;
+                self.mark_ime_bounds();
                 self.update_ime_anchor(window);
             }
             ImeAction::ClearPreedit => {
+                self.mark_ime_bounds();
                 self.ime_preedit.clear();
+                self.mark_ime_bounds();
             }
             ImeAction::CommitText(text) => {
+                // The commit enters the PTY and can cause arbitrary terminal
+                // output on the next drain; do not report it as a local range.
+                self.dirty.mark_full();
                 self.ime_preedit.clear();
                 if !self.exit && !self.child_gone {
                     self.scroll_to_bottom();
@@ -2085,7 +2377,10 @@ impl ConTerminal {
             // `ImeAction` is non-exhaustive; an unknown future action must not
             // silently drop a composition, so clear rather than guess.
             ImeAction::None => {}
-            _ => self.ime_preedit.clear(),
+            _ => {
+                self.ime_preedit.clear();
+                self.dirty.mark_full();
+            }
         }
         window.request_redraw();
     }
@@ -2386,8 +2681,19 @@ impl ConTerminal {
 
     fn set_scrollback(&mut self, requested: usize) {
         if !self.parser.screen().alternate_screen() {
+            let previous = self.scroll_offset;
+            if previous != requested {
+                self.mark_scrollbar_bounds();
+            }
             self.parser.screen_mut().set_scrollback(requested);
             self.scroll_offset = self.parser.screen().scrollback();
+            if self.scroll_offset != previous {
+                // Scrolling changes the entire visible terminal viewport. The
+                // scrollbar itself is also included so its old/new thumb
+                // bounds remain observable in the candidate evidence.
+                self.dirty.mark_full();
+                self.mark_scrollbar_bounds();
+            }
         }
     }
 
@@ -2444,6 +2750,7 @@ impl ConTerminal {
                 };
                 match hit {
                     ScrollbarHit::Thumb => {
+                        self.mark_scrollbar_bounds();
                         self.scrollbar_drag =
                             Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
                         let _ = window.set_pointer_capture(true);
@@ -2455,6 +2762,7 @@ impl ConTerminal {
                         self.set_scrollback(current.saturating_sub(usize::from(self.rows).max(1)))
                     }
                 }
+                self.mark_scrollbar_bounds();
                 window.request_redraw();
                 Ok(true)
             }
@@ -2478,11 +2786,13 @@ impl ConTerminal {
                 state: PointerButtonState::Released,
                 ..
             } if self.scrollbar_drag.take().is_some() => {
+                self.mark_scrollbar_bounds();
                 let _ = window.set_pointer_capture(false);
                 window.request_redraw();
                 Ok(true)
             }
             PixelWindowEvent::PointerCaptureLost if self.scrollbar_drag.take().is_some() => {
+                self.mark_scrollbar_bounds();
                 window.request_redraw();
                 Ok(true)
             }
@@ -2978,6 +3288,7 @@ impl ConTerminal {
     fn zoom_font(&mut self, window: &PixelWindow, grow: bool) {
         let delta_size = if grow { 1.0 } else { -1.0 };
         self.font_size_logical = (self.font_size_logical + delta_size).clamp(8.0, 36.0);
+        self.dirty.mark_full();
         // Cell metrics (and therefore what glyphs look like) update right
         // away, independent of the debounce below, so the zoom still reads
         // as instant — only the expensive part (recomputing cols/rows,
@@ -3060,6 +3371,7 @@ impl ConTerminal {
         position: Option<LogicalPoint>,
         modifiers: &agenterm_platform::input::ModifierState,
     ) {
+        let old_selection = self.selection;
         let pressed = state == PointerButtonState::Pressed;
         let point = match position {
             Some(pos) => self.hit_test(&pos),
@@ -3084,6 +3396,7 @@ impl ConTerminal {
                 // The application owns this gesture; drop any stale selection
                 // so the highlight does not linger over its UI.
                 self.selection = None;
+                self.mark_selection_change(old_selection, self.selection);
                 window.request_redraw();
                 return;
             }
@@ -3133,6 +3446,7 @@ impl ConTerminal {
             }
             _ => {}
         }
+        self.mark_selection_change(old_selection, self.selection);
     }
 
     /// Routes a pointer move: an application gesture in flight keeps
@@ -3147,6 +3461,7 @@ impl ConTerminal {
         position: LogicalPoint,
         modifiers: &agenterm_platform::input::ModifierState,
     ) {
+        let old_selection = self.selection;
         let pt = self.hit_test(&position);
         if self.mouse_dragging {
             let button = self.active_button.unwrap_or(0);
@@ -3160,6 +3475,7 @@ impl ConTerminal {
             // 1003: report motion with no button held (button 3 = none).
             self.report_mouse(3, pt, true, true, modifiers);
         }
+        self.mark_selection_change(old_selection, self.selection);
     }
 
     fn cancel_pointer_gesture(&mut self, window: &PixelWindow) {
@@ -3238,6 +3554,7 @@ impl ConTerminal {
                 Ok(PixelWindowDirective::Exit)
             }
             PixelWindowEvent::GeometryChanged { change, metrics } => {
+                self.dirty.mark_full();
                 if matches!(
                     change,
                     GeometryChange::Resized | GeometryChange::ScaleFactorChanged
@@ -3255,6 +3572,7 @@ impl ConTerminal {
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::Wake => {
+                self.dirty.mark_full();
                 // Fired by the PTY reader thread's `waker.wake()` whenever
                 // new output actually arrived (see `spawn_pty`) — this is
                 // the *only* signal that a shell just echoed a keystroke or
@@ -3272,6 +3590,7 @@ impl ConTerminal {
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::Keyboard(key) => {
+                self.dirty.mark_full();
                 self.forward_key(&key);
                 // Also redraw immediately, not just on the PTY's later
                 // `Wake`: purely local effects of a keystroke (blink reset,
@@ -3291,6 +3610,7 @@ impl ConTerminal {
                 position,
                 ..
             } => {
+                self.dirty.mark_full();
                 // Ctrl+wheel adjusts font size (wave 4); plain wheel scrolls.
                 if modifiers.control {
                     let dir = match delta {
@@ -3339,7 +3659,12 @@ impl ConTerminal {
                 self.cancel_pointer_gesture(window);
                 Ok(PixelWindowDirective::Continue)
             }
-            _ => Ok(PixelWindowDirective::Continue),
+            _ => {
+                // Unknown future host events are not safe to classify as a
+                // smaller region.
+                self.dirty.mark_full();
+                Ok(PixelWindowDirective::Continue)
+            }
         }
     }
 
@@ -3375,6 +3700,10 @@ impl ConTerminal {
         let cursor = screen.cursor_position();
         let cursor_hidden = screen.hide_cursor();
         let cursor_shape = screen.cursor_shape();
+        self.last_cursor = Some(TerminalPoint {
+            row: cursor.0,
+            col: cursor.1,
+        });
         // A steady request always shows the cursor; a blinking one is gated
         // by the timer in about_to_wait. conhost draws the caret the same
         // way — this is parity, not an enhancement — but getting it right
@@ -3536,6 +3865,7 @@ impl ConTerminal {
         // wake-up cost while the application actually asked for a blink.
         if self.parser.screen().cursor_blinking() {
             if now.duration_since(self.last_blink_at) >= BLINK_INTERVAL {
+                self.mark_cursor_change();
                 self.blink_visible = !self.blink_visible;
                 self.last_blink_at = now;
                 redraw = true;
@@ -3618,9 +3948,11 @@ impl PixelWindowApplication for ConApp {
             return Ok(PixelWindowDirective::Continue);
         }
         if self.handle_sidebar_resize(window, &event)? {
+            self.mark_chrome_full();
             return Ok(PixelWindowDirective::Continue);
         }
         if let PixelWindowEvent::GeometryChanged { metrics, .. } = &event {
+            self.mark_chrome_full();
             let sidebar_width = self.sidebar_width_logical;
             Self::configure_chrome(
                 self.active_session_mut()?,
@@ -3665,6 +3997,7 @@ impl PixelWindowApplication for ConApp {
                     self.workspace.nodes().len(),
                     layout.tree_capacity(),
                 );
+                self.mark_tree_dirty();
                 window.request_redraw();
                 return Ok(PixelWindowDirective::Continue);
             }
@@ -3684,6 +4017,7 @@ impl PixelWindowApplication for ConApp {
                     self.composer_focused = true;
                     self.composer_select_all = false;
                     self.update_composer_ime_anchor(window)?;
+                    self.mark_composer_dirty();
                     window.focus();
                     window.request_redraw();
                     return Ok(PixelWindowDirective::Continue);
@@ -3692,20 +4026,24 @@ impl PixelWindowApplication for ConApp {
                     self.submit_composer();
                     self.composer_focused = true;
                     self.update_composer_ime_anchor(window)?;
+                    self.mark_composer_dirty();
                     window.request_redraw();
                     return Ok(PixelWindowDirective::Continue);
                 }
                 ui::ComposerHit::Outside => {}
             }
             self.composer_focused = false;
+            self.mark_composer_dirty();
         }
         if self.composer_focused {
             match event {
                 PixelWindowEvent::Keyboard(key) if self.handle_composer_key(window, &key) => {
+                    self.mark_composer_dirty();
                     return Ok(PixelWindowDirective::Continue);
                 }
                 PixelWindowEvent::Ime(ime) => {
                     self.handle_composer_ime(window, ime);
+                    self.mark_composer_dirty();
                     return Ok(PixelWindowDirective::Continue);
                 }
                 _ => {}
@@ -3719,6 +4057,16 @@ impl PixelWindowApplication for ConApp {
         window: &PixelWindow,
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        let width = frame.width();
+        let height = frame.height();
+        let scale = self.active_session()?.scale.max(1.0);
+        self.note_frame_dimensions(width, height, scale);
+        self.active_session_mut()?
+            .note_frame_dimensions(width, height);
+        // Consume the candidate before raster begins. Any state discovered
+        // while draining PTY output during render is treated as late/unknown
+        // and upgrades this frame to full before statistics are committed.
+        let mut candidate = self.take_dirty_candidate(width, height);
         let render_started = Instant::now();
         let directive = self.active_session_mut()?.render(window, frame)?;
         self.paint_chrome(frame)?;
@@ -3729,8 +4077,6 @@ impl PixelWindowApplication for ConApp {
                 session.pending_control_screenshot.take(),
             )
         };
-        let width = frame.width();
-        let height = frame.height();
         if let Some(path) = pending_screenshot {
             let _ = agent_interface::write_png_atomic(
                 path.as_path(),
@@ -3756,7 +4102,13 @@ impl PixelWindowApplication for ConApp {
             .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
         }
+        let late_dirty = self.active_session_mut()?.take_dirty();
+        if !late_dirty.is_empty() {
+            candidate.mark_full();
+        }
         self.perf_stats.record_frame(render_started.elapsed());
+        self.perf_stats
+            .record_raster_candidate(candidate, width, height);
         Ok(directive)
     }
 
