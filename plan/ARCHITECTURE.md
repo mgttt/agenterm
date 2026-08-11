@@ -89,7 +89,7 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；`server` = 无窗权威；`cli` = 共享控制平面入口 |
 | `agenterm-com` | `src/bin/agenterm-com.rs` | 极简 Windows Console-subsystem 转发器；交付名 `agenterm.com`，同步等待 `agenterm.exe` |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
-| `agenterm-con` | `src/bin/agenterm-con.rs` | 最小控制台宿主（conhost 等价物；单窗 ConPTY/PTY，无 server/Fleet；平台 pixel-window 直调） |
+| `agenterm-con` | `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 最小控制台宿主（conhost 等价物；单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；局部纯 UI 规则与适配状态机分离） |
 
 **2026-08-09：** `agenterm-rh` / `agenterm-lua` / `agenterm-qjs` / `agenterm-sql`
 四个独立 `[[bin]]` 已退役（commit `234b2f87`），改为主 `agenterm` PE 的
@@ -169,7 +169,21 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 5. 不要把 net / WebView / 大 Control Center 内容写进「已 shipped」除非 owning PRD 已改。  
 6. 结构变更：更新本文；版本 plan 只记叶与证据，不重画全树。  
 7. 新 `ui-action` / 产品手势：**shared-first**（`src/frontend/*` + `ui_action_catalog.rs`）；单端落地须进 `WINDOWS_ONLY_*` / `UNIX_ONLY_*` 并写 `parity-gap:`，禁止默认同端双写后甩给另一平台 agent。  
-8. 跨平台任务固定句式（机制 / 产品 / host present 判定 → 改对应层 → 证据）：见 [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) § Agent 执行句式。  
+8. 跨平台任务固定句式（机制 / 产品 / host present 判定 → 改对应层 → 证据）：见 [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) § Agent 执行句式。
+
+### 6.2 `agenterm` / `agenterm-con` 协同边界
+
+- UI/UX 可分化：主程序是 server/script/Fleet 工作台；`agenterm-con` 是随 GUI
+  生命周期结束的轻量多终端，两者不共享产品导航、持久化或 authority policy。
+- 底层机制应汇合：PTY 生命周期、VT/宽字符、字体与渲染缓存、选择/剪贴板、
+  IME/focus、鼠标/滚轮、DPI geometry、背压/调度及黑盒观测接口优先形成纯函数或
+  typed platform/frontend contract；host adapter 只 present/wake/接 OS 事件。
+- 提升顺序固定为：先在 owning 产品以单测和公开黑盒证据证明规则，再抽取无产品
+  authority 的最小契约，再让两个产品消费；不得为了“复用”把 server、脚本、Fleet
+  或 con 的 GUI-lifetime local-control 策略下沉到 platform。
+- `src/bin/agenterm-con/ui.rs` 当前是局部孵化层，只容纳无窗口后端/PTY 依赖的
+  geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
+  `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
 
 ### 6.1 跨平台任务固定执行句式
 
@@ -181,7 +195,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 
 7. 不要把 rust-analyzer / 通用 LSP 当成「结构 SSOT 已对齐」的证据；LSP 不消费本文。  
 8. 不要新开第二份「现行结构图」md；扩展对齐能力只加闸/机读清单并回写 **本节/§8**。  
-9. **文档脱敏**：仓内 → 仓库相对；用户家目录 → **`~/...`**。转换：`/Users/<name>/`、`/home/<name>/`、`%USERPROFILE%\`、`C:\Users\<name>\` **全部** → `~/`（详见 [`Agents.md`](../Agents.md) Home conversion table；自检 [`scripts/doc-redact-check.sh`](../scripts/doc-redact-check.sh)）。
+9. **文档脱敏**：仓内 → 仓库相对；各平台用户主目录的展开形式 → **`~/...`**（详见 [`Agents.md`](../Agents.md) Home conversion table；自检 [`scripts/doc-redact-check.sh`](../scripts/doc-redact-check.sh)）。
 
 ---
 

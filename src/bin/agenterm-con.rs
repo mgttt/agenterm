@@ -25,6 +25,8 @@ mod control;
 mod font;
 #[path = "agenterm-con/palette.rs"]
 mod palette;
+#[path = "agenterm-con/ui.rs"]
+mod ui;
 #[path = "agenterm-con/workspace.rs"]
 mod workspace;
 
@@ -210,12 +212,10 @@ const SCROLLBACK: usize = 4000;
 const PTY_QUEUE_CHUNKS: usize = 128;
 const PTY_DRAIN_BUDGET_BYTES: usize = 128 * 1024;
 
-/// Logical (DIP) font size. conhost defaults to ~12px at 96 DPI, but
-/// ab_glyph outline metrics tend to produce taller cells than GDI, so we
-/// use a slightly smaller value to match the visual size.
-// 11pt is the practical default for a professional terminal on Windows:
-// readable CJK at ordinary DPI without sacrificing useful rows/columns.
-const DEFAULT_FONT_PX: f64 = 11.0;
+/// Logical (DIP) font size. 15 px is approximately 11.25 pt at 96 DPI and
+/// visually matches the 14 px tree labels. The previous value `11` was
+/// pixels, not points, and therefore rendered smaller than intended.
+const DEFAULT_FONT_PX: f64 = 15.0;
 
 /// Configuration loaded from `agenterm-con.json` (analogous to conhost
 /// "Defaults" — persist font size, window geometry, etc. without a GUI dialog).
@@ -539,11 +539,6 @@ Configuration: create agenterm-con.json in %APPDATA% (Windows) or
 CLI flags override config; config overrides defaults.
 Ctrl+wheel adjusts font size at runtime.";
 
-const TREE_PANEL_LOGICAL_WIDTH: f64 = 224.0;
-const TREE_HEADER_LOGICAL_HEIGHT: f64 = 32.0;
-const TREE_ROW_LOGICAL_HEIGHT: f64 = 30.0;
-const COMPOSER_LOGICAL_HEIGHT: f64 = 54.0;
-
 /// Flags that must not open a window. Returns `Some(exit_code)` when handled.
 fn write_offline_stdout(text: &str) {
     let _ = agenterm_platform::process::write_parent_console_stdout(text);
@@ -725,6 +720,7 @@ struct ConApp {
     composer: String,
     composer_preedit: String,
     composer_focused: bool,
+    tree_scroll_offset: usize,
     exit: bool,
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
@@ -794,6 +790,7 @@ impl ConApp {
             composer: String::new(),
             composer_preedit: String::new(),
             composer_focused: false,
+            tree_scroll_offset: 0,
             exit: false,
             control_endpoint,
             control_server: None,
@@ -871,10 +868,37 @@ impl ConApp {
     fn configure_chrome(session: &mut ConTerminal, scale: f64) {
         let scale = scale.max(1.0);
         session.set_content_insets(
-            (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32,
+            (ui::SIDEBAR_WIDTH_DIP * scale).round() as u32,
             0,
-            (COMPOSER_LOGICAL_HEIGHT * scale).round() as u32,
+            (ui::COMPOSER_HEIGHT_DIP * scale).round() as u32,
         );
+    }
+
+    fn reveal_active_tree_row(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+        let Some(active) = self.workspace.active() else {
+            return Ok(());
+        };
+        let Some(index) = self
+            .workspace
+            .nodes()
+            .iter()
+            .position(|node| node.id == active)
+        else {
+            return Ok(());
+        };
+        let metrics = window.metrics()?;
+        let layout = ui::Layout::new(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        self.tree_scroll_offset = ui::reveal_tree_index(
+            self.tree_scroll_offset,
+            index,
+            self.workspace.nodes().len(),
+            layout.tree_capacity(),
+        );
+        Ok(())
     }
 
     fn open_session(&mut self, window: &PixelWindow, child: bool) -> Result<(), PixelWindowError> {
@@ -908,6 +932,7 @@ impl ConApp {
             return Err(error);
         }
         self.sessions.insert(id, session);
+        self.reveal_active_tree_row(window)?;
         self.refresh_title(window)
     }
 
@@ -928,6 +953,7 @@ impl ConApp {
         };
         let next = (index as isize + direction).rem_euclid(ids.len() as isize) as usize;
         self.workspace.set_active(ids[next]);
+        self.reveal_active_tree_row(window)?;
         let metrics = window.metrics()?;
         let session = self.active_session_mut()?;
         Self::configure_chrome(session, metrics.scale_factor);
@@ -982,33 +1008,54 @@ impl ConApp {
         Ok(false)
     }
 
-    fn select_tab_at(
+    fn handle_tree_pointer(
         &mut self,
         window: &PixelWindow,
         position: &LogicalPoint,
     ) -> Result<bool, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
-        let left = (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32;
+        let layout = ui::Layout::new(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
         let physical_x = (position.x * scale).max(0.0) as u32;
-        if physical_x >= left {
-            return Ok(false);
-        }
-        let header = (TREE_HEADER_LOGICAL_HEIGHT * scale).round() as u32;
-        let row_height = (TREE_ROW_LOGICAL_HEIGHT * scale).round().max(1.0) as u32;
         let physical_y = (position.y * scale).max(0.0) as u32;
-        if physical_y < header {
-            return Ok(true);
-        }
         let ids: Vec<_> = self.workspace.nodes().iter().map(|node| node.id).collect();
-        if ids.is_empty() {
-            return Ok(true);
+        match ui::tree_hit(
+            layout,
+            physical_x,
+            physical_y,
+            self.tree_scroll_offset,
+            ids.len(),
+            scale,
+        ) {
+            ui::TreeHit::Outside => return Ok(false),
+            ui::TreeHit::Background => return Ok(true),
+            ui::TreeHit::ZoomOut => {
+                self.active_session_mut()?.zoom_font(window, false);
+                return Ok(true);
+            }
+            ui::TreeHit::ZoomIn => {
+                self.active_session_mut()?.zoom_font(window, true);
+                return Ok(true);
+            }
+            ui::TreeHit::Close(index) => {
+                self.workspace.set_active(ids[index]);
+                self.close_active_session(window)?;
+                self.tree_scroll_offset = ui::clamp_tree_scroll(
+                    self.tree_scroll_offset,
+                    self.workspace.nodes().len(),
+                    layout.tree_capacity(),
+                );
+                return Ok(true);
+            }
+            ui::TreeHit::Select(index) => {
+                self.workspace.set_active(ids[index]);
+                self.reveal_active_tree_row(window)?;
+            }
         }
-        let index = ((physical_y - header) / row_height) as usize;
-        if index >= ids.len() {
-            return Ok(true);
-        }
-        self.workspace.set_active(ids[index]);
         let session = self.active_session_mut()?;
         Self::configure_chrome(session, metrics.scale_factor);
         session.apply_resize(
@@ -1027,21 +1074,33 @@ impl ConApp {
         &self,
         window: &PixelWindow,
         position: &LogicalPoint,
-    ) -> Result<bool, PixelWindowError> {
+    ) -> Result<ui::ComposerHit, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
-        let left = (TREE_PANEL_LOGICAL_WIDTH * scale).round() as u32;
-        let bottom = (COMPOSER_LOGICAL_HEIGHT * scale).round() as u32;
-        Ok((position.x * scale).max(0.0) as u32 >= left
-            && (position.y * scale).max(0.0) as u32
-                >= metrics.physical_height.saturating_sub(bottom))
+        let layout = ui::Layout::new(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        Ok(ui::composer_hit(
+            layout,
+            (position.x * scale).max(0.0) as u32,
+            (position.y * scale).max(0.0) as u32,
+        ))
     }
 
     fn update_composer_ime_anchor(&self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
-        let x = TREE_PANEL_LOGICAL_WIDTH + 92.0 + self.composer.chars().count() as f64 * 8.0;
-        let y = metrics.physical_height as f64 / scale - 25.0;
+        let layout = ui::Layout::new(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        let x = layout.composer_input.x as f64 / scale
+            + 10.0
+            + self.composer.chars().count() as f64 * 8.0;
+        let y = layout.composer_input.y as f64 / scale + 8.0;
         let _ = window.set_ime_cursor_area(agenterm_platform::window_host::LogicalRect::new(
             x, y, 2.0, 20.0,
         ));
@@ -1054,16 +1113,7 @@ impl ConApp {
         }
         match &key.logical {
             LogicalKey::Named(NamedKey::Enter) => {
-                if !self.composer.is_empty() {
-                    let mut input = std::mem::take(&mut self.composer);
-                    input.push('\r');
-                    if let Ok(session) = self.active_session_mut() {
-                        session.scroll_to_bottom();
-                        session.write_pty(input.as_bytes());
-                    }
-                }
-                self.composer.clear();
-                self.composer_preedit.clear();
+                self.submit_composer();
             }
             LogicalKey::Named(NamedKey::Backspace) => {
                 self.composer.pop();
@@ -1082,6 +1132,19 @@ impl ConApp {
         let _ = self.update_composer_ime_anchor(window);
         window.request_redraw();
         true
+    }
+
+    fn submit_composer(&mut self) {
+        if !self.composer.is_empty() {
+            let mut input = std::mem::take(&mut self.composer);
+            input.push('\r');
+            if let Ok(session) = self.active_session_mut() {
+                session.scroll_to_bottom();
+                session.write_pty(input.as_bytes());
+            }
+        }
+        self.composer.clear();
+        self.composer_preedit.clear();
     }
 
     fn handle_composer_ime(
@@ -1358,10 +1421,11 @@ impl ConApp {
             width,
             height,
         };
-        let tree_width = session.content_left_px.min(width);
         let scale = session.scale.max(1.0);
-        let header_height = (TREE_HEADER_LOGICAL_HEIGHT * scale).round() as u32;
-        let row_height = (TREE_ROW_LOGICAL_HEIGHT * scale).round().max(1.0) as u32;
+        let layout = ui::Layout::new(width, height, scale);
+        let tree_width = layout.sidebar.width;
+        let header_height = layout.tree_header_height;
+        let row_height = layout.tree_row_height;
         let tree_bg = Rgb(0x18, 0x1C, 0x1F);
         let tree_rule = Rgb(0x36, 0x3E, 0x42);
         let branch = Rgb(0x58, 0x65, 0x69);
@@ -1402,10 +1466,28 @@ impl ConApp {
             12,
             tree_width.saturating_sub(28),
         );
+        paint_chrome_text(
+            &mut surface,
+            layout.zoom_out.x + 6,
+            layout.zoom_out.y + 5,
+            "z",
+            muted,
+            12,
+            layout.zoom_out.width.saturating_sub(6),
+        );
+        paint_chrome_text(
+            &mut surface,
+            layout.zoom_in.x + 5,
+            layout.zoom_in.y + 4,
+            "Z",
+            accent,
+            14,
+            layout.zoom_in.width.saturating_sub(5),
+        );
 
         let nodes = self.workspace.nodes();
-        for (index, node) in nodes.iter().enumerate() {
-            let y = header_height + index as u32 * row_height;
+        for (visible_index, node) in nodes.iter().skip(self.tree_scroll_offset).enumerate() {
+            let y = header_height + visible_index as u32 * row_height;
             if y >= height {
                 break;
             }
@@ -1441,20 +1523,56 @@ impl ConApp {
                 &format!("@{}  {}", node.id.get(), title),
                 text,
                 14,
-                tree_width.saturating_sub(indent + 10),
+                tree_width.saturating_sub(indent + 38),
+            );
+            let close = layout.tree_close_rect(visible_index, scale);
+            paint_chrome_text(
+                &mut surface,
+                close.x + 6,
+                close.y + 3,
+                "x",
+                muted,
+                11,
+                close.width.saturating_sub(6),
             );
         }
 
         let active_id = self.workspace.active().map(|id| id.get()).unwrap_or(0);
-        let input_y = height.saturating_sub(session.content_bottom_px);
+        let input_y = layout.composer.y;
         paint_chrome_text(
             &mut surface,
             tree_width + 12,
-            input_y + 6,
+            input_y + 7,
             &format!("SEND TO @{}", active_id),
             if self.composer_focused { accent } else { muted },
             11,
-            90,
+            layout.composer.width.saturating_sub(24),
+        );
+        surface.fill_rect(
+            layout.composer_input.x,
+            layout.composer_input.y,
+            layout.composer_input.width,
+            layout.composer_input.height,
+            if self.composer_focused {
+                accent
+            } else {
+                tree_rule
+            }
+            .to_xrgb(),
+        );
+        surface.fill_rect(
+            layout.composer_input.x + 1,
+            layout.composer_input.y + 1,
+            layout.composer_input.width.saturating_sub(2),
+            layout.composer_input.height.saturating_sub(2),
+            composer_bg.to_xrgb(),
+        );
+        surface.fill_rect(
+            layout.composer_send.x,
+            layout.composer_send.y,
+            layout.composer_send.width,
+            layout.composer_send.height,
+            active_bg.to_xrgb(),
         );
         let mut composer = if self.composer.is_empty() && self.composer_preedit.is_empty() {
             "Type here, then press Enter".to_owned()
@@ -1466,12 +1584,21 @@ impl ConApp {
         }
         paint_chrome_text(
             &mut surface,
-            tree_width + 104,
-            input_y + 19,
+            layout.composer_input.x + 10,
+            layout.composer_input.y + 12,
             &composer,
             text,
             15,
-            width.saturating_sub(tree_width + 116),
+            layout.composer_input.width.saturating_sub(20),
+        );
+        paint_chrome_text(
+            &mut surface,
+            layout.composer_send.x + 17,
+            layout.composer_send.y + 12,
+            "SEND",
+            accent,
+            13,
+            layout.composer_send.width.saturating_sub(20),
         );
         Ok(())
     }
@@ -3141,20 +3268,68 @@ impl PixelWindowApplication for ConApp {
         {
             return Ok(PixelWindowDirective::Continue);
         }
+        if let PixelWindowEvent::MouseWheel {
+            delta,
+            position: Some(position),
+            modifiers,
+        } = &event
+        {
+            let metrics = window.metrics()?;
+            let scale = metrics.scale_factor.max(1.0);
+            let layout = ui::Layout::new(
+                metrics.physical_width,
+                metrics.physical_height,
+                metrics.scale_factor,
+            );
+            if !modifiers.control
+                && layout.sidebar.contains(
+                    (position.x * scale).max(0.0) as u32,
+                    (position.y * scale).max(0.0) as u32,
+                )
+            {
+                let rows = match delta {
+                    WheelDelta::Lines { y, .. } => y.round() as isize,
+                    WheelDelta::LogicalPixels { y, .. } => {
+                        (*y / ui::TREE_ROW_HEIGHT_DIP).round() as isize
+                    }
+                    _ => 0,
+                };
+                self.tree_scroll_offset = ui::scroll_tree(
+                    self.tree_scroll_offset,
+                    -rows,
+                    self.workspace.nodes().len(),
+                    layout.tree_capacity(),
+                );
+                window.request_redraw();
+                return Ok(PixelWindowDirective::Continue);
+            }
+        }
         if let PixelWindowEvent::PointerButton {
+            button: PointerButton::Left,
+            state: PointerButtonState::Pressed,
             position: Some(position),
             ..
         } = &event
         {
-            if self.select_tab_at(window, position)? {
+            if self.handle_tree_pointer(window, position)? {
                 return Ok(PixelWindowDirective::Continue);
             }
-            if self.composer_hit(window, position)? {
-                self.composer_focused = true;
-                self.update_composer_ime_anchor(window)?;
-                window.focus();
-                window.request_redraw();
-                return Ok(PixelWindowDirective::Continue);
+            match self.composer_hit(window, position)? {
+                ui::ComposerHit::Input => {
+                    self.composer_focused = true;
+                    self.update_composer_ime_anchor(window)?;
+                    window.focus();
+                    window.request_redraw();
+                    return Ok(PixelWindowDirective::Continue);
+                }
+                ui::ComposerHit::Send => {
+                    self.submit_composer();
+                    self.composer_focused = true;
+                    self.update_composer_ime_anchor(window)?;
+                    window.request_redraw();
+                    return Ok(PixelWindowDirective::Continue);
+                }
+                ui::ComposerHit::Outside => {}
             }
             self.composer_focused = false;
         }
