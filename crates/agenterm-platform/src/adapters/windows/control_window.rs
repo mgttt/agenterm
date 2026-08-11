@@ -15,7 +15,7 @@ use windows_sys::Win32::{
         CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
         DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, GetStockObject, InvalidateRect,
         LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY, ScreenToClient, SelectObject,
-        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, WHITE_BRUSH,
+        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, ValidateRect, WHITE_BRUSH,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
@@ -65,6 +65,7 @@ use crate::{
         PixelRect, PixelSize, PointerButton, Rgb8, TextHorizontalAlignment, TextOptions,
         WindowPresentation,
     },
+    selected::reentrant_dispatch::{BoundedQueue, QueueError},
 };
 
 const TIMER_ID: usize = 1;
@@ -72,6 +73,8 @@ const DEFERRED_CLOSE: u32 = WM_APP + 1;
 const AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
 const AUTOMATION_FOCUS_QUERY: u32 = WM_APP + 3;
 const AUTOMATION_RENDER_ACTIVITY_SAMPLE: u32 = WM_APP + 4;
+const MAX_PENDING_MESSAGES: usize = 128;
+const MAX_PENDING_DRAIN: usize = 256;
 
 // windows-sys aliases SetWindowLongPtrW to SetWindowLongW on 32-bit targets.
 #[cfg(target_pointer_width = "32")]
@@ -540,6 +543,101 @@ struct State {
     destroying: bool,
 }
 
+struct ControlWindowUserData {
+    state: RefCell<State>,
+    pending: BoundedQueue<PendingMessage, MAX_PENDING_MESSAGES>,
+    dispatching: Cell<bool>,
+    detached: Cell<bool>,
+    failure: Cell<Option<ReentrantFailure>>,
+}
+
+#[derive(Clone, Copy)]
+enum ReentrantFailure {
+    QueueBorrowed,
+    QueueFull,
+    StateBorrowed,
+    PaintReschedule,
+    DrainDidNotConverge,
+}
+
+impl ReentrantFailure {
+    fn error(self) -> ControlWindowError {
+        match self {
+            Self::QueueBorrowed => ControlWindowError::failed(
+                "control_window_reentrant_queue_borrow_failed",
+                "reentrant message queue was already borrowed",
+            ),
+            Self::QueueFull => ControlWindowError::failed(
+                "control_window_reentrant_queue_overflow",
+                "reentrant message queue reached its bounded capacity",
+            ),
+            Self::StateBorrowed => ControlWindowError::failed(
+                "control_window_reentrant_state_borrow_failed",
+                "control-window state was already mutably borrowed",
+            ),
+            Self::PaintReschedule => ControlWindowError::failed(
+                "control_window_reentrant_paint_reschedule_failed",
+                "reentrant paint could not be validated and rescheduled",
+            ),
+            Self::DrainDidNotConverge => ControlWindowError::failed(
+                "control_window_reentrant_drain_nonconvergent",
+                "reentrant message processing did not converge",
+            ),
+        }
+    }
+}
+
+enum PendingMessage {
+    Timer,
+    Resized {
+        size: PixelSize,
+        minimized: bool,
+    },
+    CloseRequested,
+    FocusChanged(bool),
+    CaptureChanged,
+    Key {
+        key: u32,
+        pressed: bool,
+        repeat: bool,
+    },
+    Char(u16),
+    #[cfg(feature = "ime")]
+    Ime {
+        message: u32,
+        wparam: usize,
+        flags: usize,
+    },
+    PointerMoved {
+        position: PixelPoint,
+        modifiers: ModifierState,
+    },
+    Pointer {
+        button: PointerButton,
+        state: ButtonState,
+        position: PixelPoint,
+        clicks: u8,
+        modifiers: ModifierState,
+    },
+    Wheel {
+        delta: f32,
+        position: PixelPoint,
+        modifiers: ModifierState,
+    },
+    Command(ControlId),
+    SystemMenuOpening,
+    SystemCommand(usize),
+    AutomationShortcut {
+        key: u32,
+        modifiers: usize,
+    },
+    AutomationFocusQuery,
+    AutomationRenderActivitySample,
+    Paint,
+    DeferredClose,
+    Destroy,
+}
+
 pub(crate) fn run_control_window(
     options: ControlWindowOptions,
     application: Box<dyn ControlWindowApplication>,
@@ -681,22 +779,28 @@ pub(crate) fn run_control_window(
         control_visibility_skips: Cell::new(0),
     });
     let window = ControlWindow(backend.clone());
-    let mut state = Box::new(State {
-        window: window.clone(),
-        backend: backend.clone(),
-        application,
-        system_menu_commands: HashMap::new(),
-        text_decoder: Utf16TextDecoder::default(),
-        ime_composing: false,
-        ime_commit_pending: 0,
-        deferred_error: None,
-        destroying: false,
+    let mut userdata = Box::new(ControlWindowUserData {
+        state: RefCell::new(State {
+            window: window.clone(),
+            backend: backend.clone(),
+            application,
+            system_menu_commands: HashMap::new(),
+            text_decoder: Utf16TextDecoder::default(),
+            ime_composing: false,
+            ime_commit_pending: 0,
+            deferred_error: None,
+            destroying: false,
+        }),
+        pending: BoundedQueue::new(),
+        dispatching: Cell::new(false),
+        detached: Cell::new(false),
+        failure: Cell::new(None),
     });
     unsafe {
         SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,
-            (&mut *state as *mut State) as NativeLongPtr,
+            (&mut *userdata as *mut ControlWindowUserData) as NativeLongPtr,
         );
     }
     let menu = unsafe { GetSystemMenu(hwnd, 0) };
@@ -740,7 +844,11 @@ pub(crate) fn run_control_window(
                 return Err(error);
             }
         }
-        state.system_menu_commands.insert(native_id, item.id);
+        userdata
+            .state
+            .get_mut()
+            .system_menu_commands
+            .insert(native_id, item.id);
     }
     if options.poll_interval_ms > 0
         && unsafe { SetTimer(hwnd, TIMER_ID, options.poll_interval_ms, None) } == 0
@@ -751,8 +859,28 @@ pub(crate) fn run_control_window(
         }
         return Err(error);
     }
-    let directive = state.application.opened(&window)?;
-    apply_directive(&mut state, directive);
+    userdata.dispatching.set(true);
+    let opened = match userdata.state.try_borrow_mut() {
+        Ok(mut state) => match state.application.opened(&window) {
+            Ok(directive) => {
+                apply_directive(&mut state, directive);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        },
+        Err(_) => {
+            record_reentrant_failure(&userdata, hwnd, ReentrantFailure::StateBorrowed);
+            Err(ReentrantFailure::StateBorrowed.error())
+        }
+    };
+    drain_pending(&userdata, hwnd);
+    userdata.dispatching.set(false);
+    if let Err(error) = opened {
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        return Err(error);
+    }
     unsafe {
         ShowWindow(
             hwnd,
@@ -773,8 +901,9 @@ pub(crate) fn run_control_window(
             break;
         }
         if msg.message == WM_KEYDOWN || msg.message == WM_KEYUP {
-            let directive = dispatch(
-                &mut state,
+            let directive = dispatch_event(
+                &userdata,
+                hwnd,
                 ControlWindowEvent::KeyPreview {
                     target: backend.focus_target(msg.hwnd),
                     event: key_event(msg.wParam as u32, msg.message == WM_KEYDOWN, msg.lParam),
@@ -792,7 +921,12 @@ pub(crate) fn run_control_window(
             DispatchMessageW(&msg);
         }
     }
-    state.deferred_error.take().map_or(Ok(()), Err)
+    userdata
+        .state
+        .get_mut()
+        .deferred_error
+        .take()
+        .map_or(Ok(()), Err)
 }
 
 fn native_menu_id(id: MenuCommandId) -> Result<u32, ControlWindowError> {
@@ -805,24 +939,6 @@ fn native_menu_id(id: MenuCommandId) -> Result<u32, ControlWindowError> {
     } else {
         Ok(native_id)
     }
-}
-
-thread_local! {
-    // Guards against re-entering the state-dispatch path for the same
-    // thread while a message is already being dispatched. `Backend`
-    // methods such as `set_presentation`/`set_client_size` call
-    // `ShowWindow`/`MoveWindow` on this same `hwnd`, and Win32 delivers the
-    // resulting WM_SIZE/WM_WINDOWPOSCHANGED/... messages synchronously and
-    // reentrantly. Without this guard, the reentrant call would dereference
-    // `state_ptr` into a second `&mut State` while the outer dispatch still
-    // holds one live through `state.application` — an aliasing violation
-    // regardless of whether it happens to behave today. Reentrant messages
-    // fall back to the default window procedure immediately so the Win32
-    // call keeps its synchronous contract, and are queued for the normal
-    // dispatch path once the outer dispatch has released `&mut State`.
-    static DISPATCHING: Cell<bool> = const { Cell::new(false) };
-    static PENDING_MESSAGES: RefCell<Vec<(u32, WPARAM, LPARAM)>> =
-        const { RefCell::new(Vec::new()) };
 }
 
 // Diagnostic aid for IME message-sequence investigations. The platform
@@ -852,9 +968,8 @@ fn trace_ime_message(msg: u32, wp: WPARAM, lp: LPARAM, composing: bool, commit_p
     };
     let path = std::env::temp_dir().join("platform-ime-msg.log");
     let line = format!(
-        "{} wp=0x{wp:x} lp=0x{lp:x} composing={composing} commit_pending={commit_pending} dispatching={dispatching}\n",
+        "{} wp=0x{wp:x} lp=0x{lp:x} composing={composing} commit_pending={commit_pending}\n",
         name,
-        dispatching = DISPATCHING.with(Cell::get),
     );
     let _ = std::fs::OpenOptions::new()
         .create(true)
@@ -867,54 +982,453 @@ fn trace_ime_message(msg: u32, wp: WPARAM, lp: LPARAM, composing: bool, commit_p
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut State;
-    if state_ptr.is_null() {
+    let userdata_ptr =
+        unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut ControlWindowUserData;
+    if userdata_ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
+    let userdata = unsafe { &*userdata_ptr };
     if msg == WM_NCDESTROY {
+        userdata.detached.set(true);
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
         }
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
-    if DISPATCHING.with(Cell::get) {
-        PENDING_MESSAGES.with(|pending| {
-            pending.borrow_mut().push((msg, wp, lp));
-        });
-        // Title-bar X / Alt+F4 must never hit DefWindowProc while we are already
-        // inside another event (paint, layout, poll). Default SC_CLOSE posts
-        // WM_CLOSE and can tear the window down before the product confirm
-        // modal is painted — the dialog then "never appears".
-        if msg == WM_CLOSE || (msg == WM_SYSCOMMAND && (wp & 0xFFF0) == 0xF060) {
-            return 0;
-        }
+    if userdata.detached.get() {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
-    DISPATCHING.with(|flag| flag.set(true));
-    let result = dispatch_window_message(hwnd, msg, wp, lp, unsafe { &mut *state_ptr }, true);
-    loop {
-        let pending = PENDING_MESSAGES.with(|messages| std::mem::take(&mut *messages.borrow_mut()));
-        if pending.is_empty() {
-            break;
+    if userdata.dispatching.get() {
+        return dispatch_reentrant_message(userdata, hwnd, msg, wp, lp);
+    }
+    dispatch_message(userdata, hwnd, msg, wp, lp)
+}
+
+fn dispatch_message(
+    userdata: &ControlWindowUserData,
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> LRESULT {
+    userdata.dispatching.set(true);
+    let result = match userdata.state.try_borrow_mut() {
+        Ok(mut state) => dispatch_window_message(hwnd, msg, wp, lp, &mut state, true),
+        Err(_) => {
+            record_reentrant_failure(userdata, hwnd, ReentrantFailure::StateBorrowed);
+            0
         }
-        for (pending_msg, pending_wp, pending_lp) in pending {
-            // Replay only delivers the application event: the queue path above
-            // already handed this message to DefWindowProcW when it arrived.
-            // Default-processing it a second time duplicates every message
-            // DefWindowProcW *generates* — WM_IME_CHAR synthesizes a WM_CHAR,
-            // so composed text arrived twice ("测试" as "测试测试").
-            let _ = dispatch_window_message(
-                hwnd,
-                pending_msg,
-                pending_wp,
-                pending_lp,
-                unsafe { &mut *state_ptr },
-                false,
-            );
+    };
+    drain_pending(userdata, hwnd);
+    userdata.dispatching.set(false);
+    result
+}
+
+fn dispatch_event(
+    userdata: &ControlWindowUserData,
+    hwnd: HWND,
+    event: ControlWindowEvent,
+) -> Option<ControlWindowDirective> {
+    userdata.dispatching.set(true);
+    let result = match userdata.state.try_borrow_mut() {
+        Ok(mut state) => dispatch(&mut state, event),
+        Err(_) => {
+            record_reentrant_failure(userdata, hwnd, ReentrantFailure::StateBorrowed);
+            None
+        }
+    };
+    drain_pending(userdata, hwnd);
+    userdata.dispatching.set(false);
+    result
+}
+
+fn drain_pending(userdata: &ControlWindowUserData, hwnd: HWND) {
+    let mut drained = 0usize;
+    loop {
+        if userdata.detached.get() {
+            let _ = userdata.pending.clear();
+            return;
+        }
+        if let Some(failure) = userdata.failure.take() {
+            match userdata.state.try_borrow_mut() {
+                Ok(mut state) => {
+                    if state.deferred_error.is_none() {
+                        state.deferred_error = Some(failure.error());
+                    }
+                    state.destroying = true;
+                    state.window.close();
+                }
+                Err(_) => {
+                    userdata.failure.set(Some(ReentrantFailure::StateBorrowed));
+                    unsafe {
+                        PostMessageW(hwnd, DEFERRED_CLOSE, 0, 0);
+                    }
+                }
+            }
+            let _ = userdata.pending.clear();
+            return;
+        }
+        let pending = match userdata.pending.pop() {
+            Ok(Some(pending)) => pending,
+            Ok(None) => return,
+            Err(QueueError::Borrowed) => {
+                record_reentrant_failure(userdata, hwnd, ReentrantFailure::QueueBorrowed);
+                continue;
+            }
+            Err(QueueError::Full) => {
+                record_reentrant_failure(userdata, hwnd, ReentrantFailure::QueueFull);
+                continue;
+            }
+        };
+        drained += 1;
+        if drained > MAX_PENDING_DRAIN {
+            record_reentrant_failure(userdata, hwnd, ReentrantFailure::DrainDidNotConverge);
+            continue;
+        }
+        match userdata.state.try_borrow_mut() {
+            Ok(mut state) => {
+                let _ = dispatch_pending_message(hwnd, pending, &mut state);
+            }
+            Err(_) => {
+                record_reentrant_failure(userdata, hwnd, ReentrantFailure::StateBorrowed);
+                return;
+            }
         }
     }
-    DISPATCHING.with(|flag| flag.set(false));
-    result
+}
+
+fn record_reentrant_failure(
+    userdata: &ControlWindowUserData,
+    hwnd: HWND,
+    failure: ReentrantFailure,
+) {
+    if userdata.failure.get().is_none() {
+        userdata.failure.set(Some(failure));
+    }
+    unsafe {
+        PostMessageW(hwnd, DEFERRED_CLOSE, 0, 0);
+    }
+}
+
+fn queue_pending(userdata: &ControlWindowUserData, hwnd: HWND, pending: PendingMessage) -> bool {
+    match userdata.pending.push(pending) {
+        Ok(()) => true,
+        Err(QueueError::Borrowed) => {
+            record_reentrant_failure(userdata, hwnd, ReentrantFailure::QueueBorrowed);
+            false
+        }
+        Err(QueueError::Full) => {
+            record_reentrant_failure(userdata, hwnd, ReentrantFailure::QueueFull);
+            false
+        }
+    }
+}
+
+fn dispatch_reentrant_message(
+    userdata: &ControlWindowUserData,
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> LRESULT {
+    // Close is application-owned. Running DefWindowProc here would post a
+    // second WM_CLOSE while a product confirmation surface is still active.
+    if msg == WM_CLOSE || (msg == WM_SYSCOMMAND && (wp & 0xFFF0) == 0xF060) {
+        if queue_pending(userdata, hwnd, PendingMessage::CloseRequested) {
+            return 0;
+        }
+        return 0;
+    }
+    if msg == WM_PAINT {
+        if !queue_pending(userdata, hwnd, PendingMessage::Paint) {
+            return 0;
+        }
+        let validated = unsafe { ValidateRect(hwnd, ptr::null()) } != 0;
+        let rescheduled = unsafe { InvalidateRect(hwnd, ptr::null(), 0) } != 0;
+        if !validated || !rescheduled {
+            record_reentrant_failure(userdata, hwnd, ReentrantFailure::PaintReschedule);
+        }
+        return 0;
+    }
+    if msg == WM_ERASEBKGND {
+        return 1;
+    }
+    if msg == WM_IME_SETCONTEXT {
+        return default_ime_set_context(hwnd, wp, lp);
+    }
+    let Some(pending) = snapshot_reentrant_message(hwnd, msg, wp, lp) else {
+        // Pointer-backed messages such as WM_WINDOWPOSCHANGING and
+        // WM_GETMINMAXINFO are intentionally not retained across callbacks.
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    };
+    if !queue_pending(userdata, hwnd, pending) {
+        return 0;
+    }
+    // Default processing is performed exactly once, while Win32 still owns
+    // the callback's pointer-backed parameters. Replay below is application
+    // dispatch only and never feeds these raw LPARAMs back to DefWindowProc.
+    unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+}
+
+fn snapshot_reentrant_message(
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> Option<PendingMessage> {
+    match msg {
+        WM_TIMER => Some(PendingMessage::Timer),
+        WM_SIZE => Some(PendingMessage::Resized {
+            size: client_size(hwnd),
+            minimized: u32::try_from(wp).ok() == Some(SIZE_MINIMIZED),
+        }),
+        WM_SETFOCUS => Some(PendingMessage::FocusChanged(true)),
+        WM_KILLFOCUS => Some(PendingMessage::FocusChanged(false)),
+        WM_CAPTURECHANGED => Some(PendingMessage::CaptureChanged),
+        WM_KEYDOWN | WM_KEYUP if unsafe { InSendMessageEx(ptr::null()) } != ISMEX_NOSEND => {
+            Some(PendingMessage::Key {
+                key: wp as u32,
+                pressed: msg == WM_KEYDOWN,
+                repeat: (lp as usize >> 30) & 1 != 0,
+            })
+        }
+        WM_CHAR => Some(PendingMessage::Char(wp as u16)),
+        #[cfg(feature = "ime")]
+        WM_IME_CHAR => Some(PendingMessage::Ime {
+            message: WM_IME_CHAR,
+            wparam: wp,
+            flags: lp as usize,
+        }),
+        #[cfg(feature = "ime")]
+        WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
+            Some(PendingMessage::Ime {
+                message: msg,
+                wparam: wp,
+                flags: lp as usize,
+            })
+        }
+        WM_MOUSEMOVE => Some(PendingMessage::PointerMoved {
+            position: point_from_lparam(lp),
+            modifiers: current_modifiers(),
+        }),
+        WM_LBUTTONDOWN => Some(PendingMessage::Pointer {
+            button: PointerButton::Left,
+            state: ButtonState::Pressed,
+            position: point_from_lparam(lp),
+            clicks: 1,
+            modifiers: current_modifiers(),
+        }),
+        WM_LBUTTONDBLCLK => Some(PendingMessage::Pointer {
+            button: PointerButton::Left,
+            state: ButtonState::Pressed,
+            position: point_from_lparam(lp),
+            clicks: 2,
+            modifiers: current_modifiers(),
+        }),
+        WM_LBUTTONUP => Some(PendingMessage::Pointer {
+            button: PointerButton::Left,
+            state: ButtonState::Released,
+            position: point_from_lparam(lp),
+            clicks: 1,
+            modifiers: current_modifiers(),
+        }),
+        WM_RBUTTONDOWN => Some(PendingMessage::Pointer {
+            button: PointerButton::Right,
+            state: ButtonState::Pressed,
+            position: point_from_lparam(lp),
+            clicks: 1,
+            modifiers: current_modifiers(),
+        }),
+        WM_RBUTTONUP => Some(PendingMessage::Pointer {
+            button: PointerButton::Right,
+            state: ButtonState::Released,
+            position: point_from_lparam(lp),
+            clicks: 1,
+            modifiers: current_modifiers(),
+        }),
+        WM_MBUTTONDOWN => Some(PendingMessage::Pointer {
+            button: PointerButton::Middle,
+            state: ButtonState::Pressed,
+            position: point_from_lparam(lp),
+            clicks: 1,
+            modifiers: current_modifiers(),
+        }),
+        WM_MBUTTONUP => Some(PendingMessage::Pointer {
+            button: PointerButton::Middle,
+            state: ButtonState::Released,
+            position: point_from_lparam(lp),
+            clicks: 1,
+            modifiers: current_modifiers(),
+        }),
+        WM_MOUSEWHEEL => {
+            let mut point = POINT {
+                x: low_i16(lp) as i32,
+                y: high_i16(lp) as i32,
+            };
+            unsafe {
+                ScreenToClient(hwnd, &mut point);
+            }
+            Some(PendingMessage::Wheel {
+                delta: f32::from(high_i16(wp as isize)) / 120.0,
+                position: PixelPoint::new(point.x, point.y),
+                modifiers: current_modifiers(),
+            })
+        }
+        WM_COMMAND => Some(PendingMessage::Command(ControlId((wp & 0xffff) as u32))),
+        WM_INITMENUPOPUP => Some(PendingMessage::SystemMenuOpening),
+        WM_SYSCOMMAND => Some(PendingMessage::SystemCommand(wp)),
+        AUTOMATION_SHORTCUT => Some(PendingMessage::AutomationShortcut {
+            key: wp as u32,
+            modifiers: lp as usize,
+        }),
+        AUTOMATION_FOCUS_QUERY => Some(PendingMessage::AutomationFocusQuery),
+        AUTOMATION_RENDER_ACTIVITY_SAMPLE => Some(PendingMessage::AutomationRenderActivitySample),
+        DEFERRED_CLOSE => Some(PendingMessage::DeferredClose),
+        WM_DESTROY => Some(PendingMessage::Destroy),
+        _ => None,
+    }
+}
+
+fn dispatch_pending_message(hwnd: HWND, pending: PendingMessage, state: &mut State) -> LRESULT {
+    match pending {
+        PendingMessage::Timer => dispatch_window_message(hwnd, WM_TIMER, 0, 0, state, false),
+        PendingMessage::Resized { size, minimized } => {
+            dispatch(state, ControlWindowEvent::Resized { size, minimized });
+            0
+        }
+        PendingMessage::CloseRequested => {
+            dispatch(state, ControlWindowEvent::CloseRequested);
+            0
+        }
+        PendingMessage::FocusChanged(focused) => {
+            if !focused {
+                state.ime_composing = false;
+                state.ime_commit_pending = 0;
+            }
+            dispatch(state, ControlWindowEvent::FocusChanged(focused));
+            0
+        }
+        PendingMessage::CaptureChanged => {
+            dispatch(state, ControlWindowEvent::CaptureChanged(false));
+            0
+        }
+        PendingMessage::Key {
+            key,
+            pressed,
+            repeat,
+        } => {
+            dispatch(
+                state,
+                ControlWindowEvent::KeyPreview {
+                    target: state.window.focused_target(),
+                    event: key_event_with_repeat(key, pressed, repeat),
+                },
+            );
+            0
+        }
+        PendingMessage::Char(value) => {
+            dispatch_window_message(hwnd, WM_CHAR, value as WPARAM, 0, state, false)
+        }
+        #[cfg(feature = "ime")]
+        PendingMessage::Ime {
+            message,
+            wparam,
+            flags,
+        } => dispatch_window_message(hwnd, message, wparam, flags as LPARAM, state, false),
+        PendingMessage::PointerMoved {
+            position,
+            modifiers,
+        } => {
+            dispatch(
+                state,
+                ControlWindowEvent::PointerMoved {
+                    position,
+                    modifiers,
+                },
+            );
+            0
+        }
+        PendingMessage::Pointer {
+            button,
+            state: button_state,
+            position,
+            clicks,
+            modifiers,
+        } => {
+            dispatch(
+                state,
+                ControlWindowEvent::PointerButton {
+                    button,
+                    state: button_state,
+                    position,
+                    clicks,
+                    modifiers,
+                },
+            );
+            0
+        }
+        PendingMessage::Wheel {
+            delta,
+            position,
+            modifiers,
+        } => {
+            dispatch(
+                state,
+                ControlWindowEvent::Wheel {
+                    delta: ControlWheelDelta::Lines(delta),
+                    position,
+                    modifiers,
+                },
+            );
+            0
+        }
+        PendingMessage::Command(id) => {
+            dispatch(state, ControlWindowEvent::Command(id));
+            0
+        }
+        PendingMessage::SystemMenuOpening => {
+            dispatch(state, ControlWindowEvent::SystemMenuOpening);
+            0
+        }
+        PendingMessage::SystemCommand(command) => {
+            dispatch_window_message(hwnd, WM_SYSCOMMAND, command, 0, state, false)
+        }
+        PendingMessage::AutomationShortcut { key, modifiers } => dispatch_window_message(
+            hwnd,
+            AUTOMATION_SHORTCUT,
+            key as WPARAM,
+            modifiers as LPARAM,
+            state,
+            false,
+        ),
+        PendingMessage::AutomationFocusQuery => {
+            dispatch_window_message(hwnd, AUTOMATION_FOCUS_QUERY, 0, 0, state, false)
+        }
+        PendingMessage::AutomationRenderActivitySample => {
+            dispatch_window_message(hwnd, AUTOMATION_RENDER_ACTIVITY_SAMPLE, 0, 0, state, false)
+        }
+        PendingMessage::Paint => {
+            paint(state, hwnd);
+            0
+        }
+        PendingMessage::DeferredClose => {
+            dispatch_window_message(hwnd, DEFERRED_CLOSE, 0, 0, state, false)
+        }
+        PendingMessage::Destroy => dispatch_window_message(hwnd, WM_DESTROY, 0, 0, state, false),
+    }
+}
+
+fn default_ime_set_context(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    #[cfg(feature = "ime")]
+    {
+        const IS_SHOWUICOMPOSITIONWINDOW: isize = 0x0002;
+        let hidden = lp & !IS_SHOWUICOMPOSITIONWINDOW;
+        unsafe { DefWindowProcW(hwnd, WM_IME_SETCONTEXT, wp, hidden) }
+    }
+    #[cfg(not(feature = "ime"))]
+    {
+        unsafe { DefWindowProcW(hwnd, WM_IME_SETCONTEXT, wp, lp) }
+    }
 }
 
 fn dispatch_window_message(
@@ -1375,6 +1889,9 @@ fn pointer_event(
     }
 }
 fn key_event(key: u32, pressed: bool, lp: LPARAM) -> NormalizedKeyEvent {
+    key_event_with_repeat(key, pressed, pressed && ((lp as usize >> 30) & 1) != 0)
+}
+fn key_event_with_repeat(key: u32, pressed: bool, repeat: bool) -> NormalizedKeyEvent {
     let (logical, physical) = normalized_key_identity(key);
     NormalizedKeyEvent {
         logical,
@@ -1385,7 +1902,7 @@ fn key_event(key: u32, pressed: bool, lp: LPARAM) -> NormalizedKeyEvent {
         } else {
             KeyPressState::Released
         },
-        repeat: pressed && ((lp as usize >> 30) & 1) != 0,
+        repeat,
         modifiers: current_modifiers(),
     }
 }

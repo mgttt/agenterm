@@ -435,6 +435,10 @@ pub(crate) mod window;
 #[path = "adapters/windows/control_window.rs"]
 pub(crate) mod control_window;
 
+#[cfg(all(feature = "window", feature = "input", windows))]
+#[path = "adapters/windows/reentrant_dispatch.rs"]
+pub(crate) mod reentrant_dispatch;
+
 #[cfg(all(feature = "window", feature = "input", target_os = "linux"))]
 #[path = "adapters/linux/control_window.rs"]
 pub(crate) mod control_window;

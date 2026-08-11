@@ -6,7 +6,6 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::VecDeque,
     ffi::c_void,
     mem,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -18,6 +17,8 @@ use std::{
     },
     time::Instant,
 };
+
+use crate::selected::reentrant_dispatch::{BoundedQueue, QueueError};
 
 use windows_sys::Win32::Graphics::Gdi::ValidateRect;
 use windows_sys::Win32::{
@@ -179,7 +180,7 @@ enum DeferredNative {
 
 struct NativeControl {
     phase: Cell<DispatchPhase>,
-    deferred: RefCell<VecDeque<DeferredNative>>,
+    deferred: BoundedQueue<DeferredNative, MAX_NATIVE_DEFERRED>,
     paint_pending: Cell<bool>,
     closed: Cell<bool>,
     exit_requested: Cell<bool>,
@@ -192,7 +193,7 @@ impl NativeControl {
     fn new() -> Self {
         Self {
             phase: Cell::new(DispatchPhase::Idle),
-            deferred: RefCell::new(VecDeque::new()),
+            deferred: BoundedQueue::new(),
             paint_pending: Cell::new(false),
             closed: Cell::new(false),
             exit_requested: Cell::new(false),
@@ -203,10 +204,7 @@ impl NativeControl {
     }
 
     fn has_deferred(&self) -> bool {
-        self.deferred
-            .try_borrow()
-            .map(|queue| !queue.is_empty())
-            .unwrap_or(true)
+        self.deferred.is_empty().map(|empty| !empty).unwrap_or(true)
     }
 
     fn record_failure(&self, error: PixelWindowError) {
@@ -243,21 +241,15 @@ impl NativeControl {
         if self.closed.get() {
             return Err(closed_error());
         }
-        let Ok(mut queue) = self.deferred.try_borrow_mut() else {
-            let error = native_queue_failure("pixel_window_native_queue_borrow_failed");
-            self.record_failure(native_queue_failure(
-                "pixel_window_native_queue_borrow_failed",
-            ));
-            return Err(error);
-        };
-        if queue.len() >= MAX_NATIVE_DEFERRED {
-            let error = native_queue_failure("pixel_window_native_queue_overflow");
-            drop(queue);
-            self.record_failure(native_queue_failure("pixel_window_native_queue_overflow"));
-            return Err(error);
-        }
-        queue.push_back(item);
-        Ok(())
+        self.deferred.push(item).map_err(|cause| {
+            let code = match cause {
+                QueueError::Borrowed => "pixel_window_native_queue_borrow_failed",
+                QueueError::Full => "pixel_window_native_queue_overflow",
+            };
+            let error = native_queue_failure(code);
+            self.record_failure(native_queue_failure(code));
+            error
+        })
     }
 
     fn enqueue_dpi_rect(&self, rect: Win32Rect) -> Result<(), PixelWindowError> {
@@ -269,23 +261,29 @@ impl NativeControl {
     }
 
     fn pop(&self) -> Option<DeferredNative> {
-        self.deferred.try_borrow_mut().ok()?.pop_front()
+        match self.deferred.pop() {
+            Ok(item) => item,
+            Err(QueueError::Borrowed) => {
+                self.record_failure(native_queue_failure(
+                    "pixel_window_native_queue_borrow_failed",
+                ));
+                None
+            }
+            Err(QueueError::Full) => unreachable!("pop cannot report a full queue"),
+        }
     }
 
     fn push_front(&self, item: DeferredNative) -> Result<(), PixelWindowError> {
-        let Ok(mut queue) = self.deferred.try_borrow_mut() else {
-            return Err(native_queue_failure(
-                "pixel_window_native_queue_borrow_failed",
-            ));
-        };
-        queue.push_front(item);
-        Ok(())
+        self.deferred.push_front(item).map_err(|cause| {
+            native_queue_failure(match cause {
+                QueueError::Borrowed => "pixel_window_native_queue_borrow_failed",
+                QueueError::Full => "pixel_window_native_queue_overflow",
+            })
+        })
     }
 
     fn clear_deferred(&self) {
-        if let Ok(mut queue) = self.deferred.try_borrow_mut() {
-            queue.clear();
-        }
+        let _ = self.deferred.clear();
     }
 }
 

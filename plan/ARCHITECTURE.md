@@ -100,6 +100,13 @@ src/platform/adapters/       主机实现（物理目录）
 pointer capture/loss 和 DPI suggested-rect；中文输入法仍需真机人工验收，不能由合成
 WM_CHAR 或文本快照替代。
 
+Windows native pixel host 与主程序 control-window host 共享 platform-internal 的
+有界重入队列机制，但保留各自的消息快照和产品事件策略。每个 HWND 拥有稳定
+userdata 与独立队列；同步 User32/IMM FFI 触发的嵌套回调不得从裸指针重建第二个
+`&mut State`，pointer-backed 参数只能在原回调内消费或复制，overflow、借用冲突和
+非收敛 drain 都 typed-fail closed。该共享边界是原生机制复用，不把 con 或工作台
+产品策略下沉到 platform。
+
 **2026-08-09：** `agenterm-rh` / `agenterm-lua` / `agenterm-qjs` / `agenterm-sql`
 四个独立 `[[bin]]` 已退役（commit `234b2f87`），改为主 `agenterm` PE 的
 argv 透传子命令：`agenterm rh|lua|qjs|sql <args>`（rh 实现仍在
@@ -187,6 +194,9 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 底层机制应汇合：PTY 生命周期、VT/宽字符、字体与渲染缓存、选择/剪贴板、
   IME/focus、鼠标/滚轮、DPI geometry、背压/调度及黑盒观测接口优先形成纯函数或
   typed platform/frontend contract；host adapter 只 present/wake/接 OS 事件。
+- Win32 host 重入机制也必须汇合：共享容量、FIFO 和借用失败合同；各 host 只保留
+  typed message snapshot、default-processing 和生命周期政策，禁止线程全局裸
+  `(WPARAM, LPARAM)` 队列跨 HWND 复用。
 - PTY 输出传输由 `agenterm-platform::pty::BoundedOutputPipe` 提供跨平台固定容量
   字节环：一次原生 read 要么整体提交、要么等待容量，关闭会唤醒生产者且已提交
   字节仍可排空。消费者按字节预算直接读取环内连续切片，不为每次 read 分配
