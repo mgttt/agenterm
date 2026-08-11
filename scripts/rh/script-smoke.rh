@@ -2146,10 +2146,16 @@ fn assert_supervisor(
             break;
         }
     }
-    test_harness::require(
-        holders.len > 0,
-        "script_supervisor_no_holder_acquired"
-    );
+    // `test_harness::require` is a module function: it RECORDS the failure and
+    // returns, so the caller keeps running. When no holder was acquired that
+    // meant falling through to `holders[0]` below -- an out-of-bounds index,
+    // which is a Rust panic in the native pack, and `rh_entry` is `extern "C"`
+    // and cannot unwind, so the whole script worker aborted with
+    // `0xC0000409` and the recorded reason was never reported. Stop here
+    // instead, so the real assertion is the one that gets read.
+    if holders.len == 0 {
+        return rh::fail("script_supervisor_no_holder_acquired");
+    }
     test_harness::require(
         denied_found != 0,
         "script_supervisor_global_limit_not_enforced"
