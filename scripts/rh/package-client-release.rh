@@ -428,7 +428,20 @@ fn entry() {
         rh::crypto::sha256_file(artifact_manifest_path);
     let cargo_lock_sha256 =
         rh::crypto::sha256_file(cargo_lock_path);
-    let sbom_sha256 = rh::crypto::sha256_file(sbom_source);
+    // Only macOS packages carry an SBOM, and only macOS lanes generate one --
+    // candidate.yml's "Generate deterministic macOS SPDX inventory" step is
+    // gated on `startsWith(matrix.platform_id, 'macos-')`, and the staging above
+    // copies it under the same condition. Hashing it unconditionally therefore
+    // failed every non-macOS Candidate build with
+    // `crypto_sha256_file: dist/agenterm-sbom.spdx.json: No such file or
+    // directory` -- the linux-x86_64, linux-aarch64 and windows-aarch64 legs of
+    // Candidate run 31517235819, which then fail-fast cancelled windows-x86_64.
+    // Record the absence explicitly rather than hashing a file this platform's
+    // package does not contain.
+    let sbom_sha256 = "";
+    if std::fs::exists(sbom_source) {
+        sbom_sha256 = rh::crypto::sha256_file(sbom_source);
+    }
     let package_manifest = #{
         schema_version: 1,
         product: "AgenTerm",
