@@ -196,7 +196,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 596,992 B；
+  1,046,528 B 降到 515,584 B，低于 512 KiB x86_64 release budget 8,704 B；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
@@ -213,7 +213,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   fields 和 1 MiB string 预算约束；重复 key、孤立 surrogate、非有限数和尾随数据
   fail closed。serde_json 仅作为 dev-only 独立 decoder oracle，Windows 生产图不再链接
   serde_json/derive；control 原有 newline framing 与 1/2 MiB request/response 预算不变。
-  后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充 512 KiB 达标。
+  Windows resource 复用现有图标的 16/32/64 PNG frames，compact ICO 为 7,658 B，
+  `.rsrc` 从 90,112 B 降到 8,704 B；build script 强制 16 KiB source-icon budget，
+  Windows shell 已成功提取 32×32 associated icon。release-fast 的 con-only one-CGU
+  override把默认 staged PE 降到 543,744 B；其无 LTO 快版不得冒充 515,584 B 发布证据。
+  后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充进展。
 
 ### 6.1 跨平台任务固定执行句式
 

@@ -99,6 +99,12 @@ lto = false
 codegen-units = 16
 incremental = true
 
+# The lightweight host is small enough that one codegen unit adds little local
+# latency but prevents the default staged development PE from fragmenting past
+# its 512 KiB product budget. Other workspace packages retain 16-way codegen.
+[profile.release-fast.package.agenterm-con]
+codegen-units = 1
+
 # Vendored with one change: macOS frames are tagged with the display's color
 # space so Core Animation presents without a per-frame vImage conversion.
 [patch.crates-io]

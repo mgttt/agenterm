@@ -321,14 +321,17 @@ itself still exists and is load-bearing — it carries the
 `aarch64-unknown-linux-gnu` linker setting the `lnx × aarch64` cell below
 depends on. Do not delete it. Default `build.bat` stages **release-fast** into
 `dist/` (optimized, no LTO, parallel codegen, incremental under
-`target/release-fast/`). Pure debug PE remains `target/debug/` via ordinary
+`target/release-fast/`; only the small `agenterm-con` package uses one codegen
+unit so its staged development PE stays close to the 512 KiB release budget).
+Pure debug PE remains `target/debug/` via ordinary
 `cargo build` or explicit `build.bat dev`. A final `release` build uses the
 dedicated repo-local `target-release/` scratch directory, stages all
 distributable files in `dist/`, and then reclaims both `target-release/` and
 development `target/`. The reusable bootstrap worker is stored outside Cargo
 output so this is safe on Windows. Dev and `release-fast` loops retain target
-output for incremental feedback. Release-only size optimization belongs in
-`[profile.release]`. The staging path is one named Rhai task; do not split it
+output for incremental feedback. Release-only LTO belongs in `[profile.release]`;
+do not remove the con-only codegen-unit override without replacing its measured
+staged-size benefit. The staging path is one named Rhai task; do not split it
 back into one interpreter startup per artifact.
 Build-identity freezing first reuses an existing compatible Script worker and
 falls back to bootstrapping one only when it is absent or incompatible. Do not

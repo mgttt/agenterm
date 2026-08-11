@@ -232,7 +232,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its release PE is 596,992 bytes versus 1,046,528 bytes
+  host; its x86_64 release PE is 515,584 bytes versus 1,046,528 bytes
   for the original portable host. Its cross-platform screenshot writer uses a
   bounded streaming stored-DEFLATE encoder with local Adler-32/CRC-32 rather
   than linking the general PNG compression stack; screenshots trade larger
@@ -253,6 +253,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   isolated surrogates, malformed/non-finite numbers and trailing data fail
   locally. `serde_json` remains a dev-only interoperability oracle and is absent
   from the production graph.
+  Its Windows resource retains the existing icon's 16/32/64 PNG frames while
+  removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
+  source ICO is capped at 16 KiB by the build script, and Windows shell icon
+  extraction succeeds. The measured release PE is 8,704 bytes below its new
+  512 KiB x86_64 artifact budget; the no-LTO release-fast PE is separately
+  reported as 543,744 bytes and is not release-size evidence.
   Evidence is 73 binary unit tests, 185 platform library tests, the isolated
   public-control GUI journey, and the Windows terminal black box at 16 passed,
   2 pre-existing ignored gaps, 0 failed. It remains non-default until native IME

@@ -41,7 +41,7 @@
       "offline_probe": [
         "--version"
       ],
-      "release_budget_bytes": 1048576
+      "release_budget_bytes": 524288
     }
   ],
   "platforms": [
@@ -90,7 +90,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 1048576
+          "release_budget_bytes": 524288
         }
       ]
     },
