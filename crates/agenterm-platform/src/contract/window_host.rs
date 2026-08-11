@@ -48,6 +48,59 @@ impl LogicalRect {
     }
 }
 
+/// A host-neutral physical-pixel rectangle.
+///
+/// Coordinates are half-open: `left <= x < right` and `top <= y < bottom`.
+/// This type deliberately contains no product meaning such as tabs, cells,
+/// selection, IME, or cursor state. Native adapters may clip or conservatively
+/// promote it to a full redraw when their coordinate domain cannot represent
+/// it safely.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PixelRect {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl PixelRect {
+    pub const fn new(left: u32, top: u32, right: u32, bottom: u32) -> Self {
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    pub const fn empty() -> Self {
+        Self::new(0, 0, 0, 0)
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.right <= self.left || self.bottom <= self.top
+    }
+
+    pub const fn width(self) -> u32 {
+        self.right.saturating_sub(self.left)
+    }
+
+    pub const fn height(self) -> u32 {
+        self.bottom.saturating_sub(self.top)
+    }
+
+    /// Clips the rectangle to a physical frame with `width x height` pixels.
+    /// Invalid or reversed edges collapse to an empty rectangle rather than
+    /// escaping the frame.
+    pub fn clip(self, width: u32, height: u32) -> Self {
+        let left = self.left.min(width);
+        let top = self.top.min(height);
+        let right = self.right.min(width).max(left);
+        let bottom = self.bottom.min(height).max(top);
+        Self::new(left, top, right, bottom)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PixelWindowMetrics {
     pub logical_size: LogicalSize,
@@ -279,6 +332,15 @@ impl std::error::Error for PixelWindowError {}
 
 pub(crate) trait PixelWindowBackend {
     fn request_redraw(&self);
+
+    /// Requests a redraw for a physical-pixel region. Backends without a
+    /// partial-present contract conservatively fall back to a full redraw.
+    fn request_redraw_rect(&self, rect: PixelRect) {
+        if !rect.is_empty() {
+            self.request_redraw();
+        }
+    }
+
     fn metrics(&self) -> Result<PixelWindowMetrics, PixelWindowError>;
     fn semantic_flags(&self) -> WindowSemanticFlags;
     fn set_minimized(&self, minimized: bool);
@@ -320,6 +382,10 @@ impl PixelWindow {
 
     pub fn request_redraw(&self) {
         self.backend.request_redraw();
+    }
+
+    pub fn request_redraw_rect(&self, rect: PixelRect) {
+        self.backend.request_redraw_rect(rect);
     }
 
     pub fn metrics(&self) -> Result<PixelWindowMetrics, PixelWindowError> {
@@ -490,5 +556,25 @@ mod tests {
             error.to_string(),
             "pixel_window_surface_present_failed: lost"
         );
+    }
+
+    #[test]
+    fn physical_pixel_rect_is_half_open_and_clips_safely() {
+        let rect = PixelRect::new(2, 3, 12, 14);
+        assert_eq!(rect.width(), 10);
+        assert_eq!(rect.height(), 11);
+        assert!(!rect.is_empty());
+        assert_eq!(rect.clip(8, 9), PixelRect::new(2, 3, 8, 9));
+        assert_eq!(
+            PixelRect::new(8, 9, 2, 3).clip(20, 20),
+            PixelRect::new(8, 9, 8, 9)
+        );
+    }
+
+    #[test]
+    fn zero_area_pixel_rect_is_safe() {
+        let rect = PixelRect::new(4, 4, 4, 10);
+        assert!(rect.is_empty());
+        assert_eq!(rect.clip(0, 0), rect);
     }
 }

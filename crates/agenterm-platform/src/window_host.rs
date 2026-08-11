@@ -3,8 +3,8 @@
 //! Native event-loop and surface types remain owned by the selected adapter.
 
 pub use crate::contract::window_host::{
-    GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelWindow,
-    PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
+    GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
+    PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
     PixelWindowMetrics, PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta,
     WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
 };

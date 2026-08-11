@@ -60,9 +60,9 @@ use crate::contract::{
         Utf16TextDecoder,
     },
     window_host::{
-        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelWindow,
-        PixelWindowApplication, PixelWindowBackend, PixelWindowDirective, PixelWindowError,
-        PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
+        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
+        PixelWindow, PixelWindowApplication, PixelWindowBackend, PixelWindowDirective,
+        PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
         PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
     },
 };
@@ -73,6 +73,91 @@ const IME_ALLOWED_MESSAGE: u32 = WM_APP + 0x43;
 const MOUSE_LEAVE_MESSAGE: u32 = 0x02a3;
 const WAIT_TIMER_ID: usize = 0x41;
 const CLASS_NAME: &str = "AgenTermNativePixelWindow";
+const WIN32_MAX_COORD: u32 = i32::MAX as u32;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Win32Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RedrawInvalidation {
+    Empty,
+    Full,
+    Rect(Win32Rect),
+}
+
+fn win32_invalidation_for_damage(damage: PixelRect, width: u32, height: u32) -> RedrawInvalidation {
+    if damage.is_empty() {
+        return RedrawInvalidation::Empty;
+    }
+    if width == 0 || height == 0 || width > WIN32_MAX_COORD || height > WIN32_MAX_COORD {
+        return RedrawInvalidation::Full;
+    }
+    if damage.left > WIN32_MAX_COORD
+        || damage.top > WIN32_MAX_COORD
+        || damage.right > WIN32_MAX_COORD
+        || damage.bottom > WIN32_MAX_COORD
+    {
+        return RedrawInvalidation::Full;
+    }
+    let clipped = damage.clip(width, height);
+    if clipped.is_empty() {
+        return RedrawInvalidation::Empty;
+    }
+    if clipped.left > WIN32_MAX_COORD
+        || clipped.top > WIN32_MAX_COORD
+        || clipped.right > WIN32_MAX_COORD
+        || clipped.bottom > WIN32_MAX_COORD
+    {
+        return RedrawInvalidation::Full;
+    }
+    RedrawInvalidation::Rect(Win32Rect {
+        left: clipped.left as i32,
+        top: clipped.top as i32,
+        right: clipped.right as i32,
+        bottom: clipped.bottom as i32,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StretchDibGeometry {
+    source: Win32Rect,
+    destination: Win32Rect,
+}
+
+/// `BITMAPINFOHEADER.biHeight` is negative below, so the XRGB buffer is a
+/// top-down DIB. The source and destination rectangles therefore share the
+/// client-coordinate Y axis without a bottom-up inversion.
+fn stretch_geometry_for_paint(
+    paint: Win32Rect,
+    width: u32,
+    height: u32,
+) -> Option<StretchDibGeometry> {
+    if width == 0 || height == 0 || width > WIN32_MAX_COORD || height > WIN32_MAX_COORD {
+        return None;
+    }
+    let left = i64::from(paint.left).max(0);
+    let top = i64::from(paint.top).max(0);
+    let right = i64::from(paint.right).min(i64::from(width));
+    let bottom = i64::from(paint.bottom).min(i64::from(height));
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let rect = Win32Rect {
+        left: left as i32,
+        top: top as i32,
+        right: right as i32,
+        bottom: bottom as i32,
+    };
+    Some(StretchDibGeometry {
+        source: rect,
+        destination: rect,
+    })
+}
 
 struct Backend {
     hwnd: Cell<HWND>,
@@ -88,6 +173,30 @@ impl PixelWindowBackend for Backend {
         let hwnd = self.hwnd.get();
         if !hwnd.is_null() {
             unsafe { InvalidateRect(hwnd, ptr::null(), 0) };
+        }
+    }
+
+    fn request_redraw_rect(&self, damage: PixelRect) {
+        let hwnd = self.hwnd.get();
+        if hwnd.is_null() {
+            return;
+        }
+        let metrics = *self.metrics.borrow();
+        match win32_invalidation_for_damage(damage, metrics.physical_width, metrics.physical_height)
+        {
+            RedrawInvalidation::Empty => {}
+            RedrawInvalidation::Full => self.request_redraw(),
+            RedrawInvalidation::Rect(rect) => {
+                let native = RECT {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                };
+                if unsafe { InvalidateRect(hwnd, &native, 0) } == 0 {
+                    self.request_redraw();
+                }
+            }
         }
     }
 
@@ -435,7 +544,12 @@ unsafe fn dispatch_message(
 ) -> LRESULT {
     match message {
         WM_PAINT => {
-            paint(state, hwnd);
+            if let Err(error) = paint(state, hwnd) {
+                if state.deferred_error.is_none() {
+                    state.deferred_error = Some(error);
+                }
+                state.exit = true;
+            }
             0
         }
         WM_ERASEBKGND => 1,
@@ -642,52 +756,90 @@ unsafe fn dispatch_message(
     }
 }
 
-fn paint(state: &mut HostState, hwnd: HWND) {
-    let metrics = *state.backend.metrics.borrow();
-    if !metrics.is_drawable() {
-        return;
-    }
-    let count = metrics.physical_width as usize * metrics.physical_height as usize;
-    state.pixels.resize(count, 0);
-    let mut frame = XrgbPixelFrame::new(
-        &mut state.pixels,
-        metrics.physical_width,
-        metrics.physical_height,
-        metrics.scale_factor,
-    );
-    let result = state.application.render(&state.window, &mut frame);
-    apply_directive(state, result);
+fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
     let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
     let dc = unsafe { BeginPaint(hwnd, &mut paint) };
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: metrics.physical_width as i32,
-            biHeight: -(metrics.physical_height as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB,
-            ..unsafe { mem::zeroed() }
-        },
-        ..unsafe { mem::zeroed() }
-    };
-    unsafe {
-        StretchDIBits(
-            dc,
-            0,
-            0,
-            metrics.physical_width as i32,
-            metrics.physical_height as i32,
-            0,
-            0,
-            metrics.physical_width as i32,
-            metrics.physical_height as i32,
-            state.pixels.as_ptr().cast(),
-            &info,
-            DIB_RGB_COLORS,
-            SRCCOPY,
+    if dc.is_null() {
+        return Err(last_error("pixel_window_begin_paint_failed"));
+    }
+
+    let result = (|| {
+        let metrics = *state.backend.metrics.borrow();
+        if !metrics.is_drawable() {
+            return Ok(());
+        }
+        let count = u64::from(metrics.physical_width)
+            .checked_mul(u64::from(metrics.physical_height))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or_else(|| {
+                PixelWindowError::failed(
+                    "pixel_window_frame_size_overflow",
+                    "physical frame dimensions do not fit in the host buffer",
+                )
+            })?;
+        state.pixels.resize(count, 0);
+        let mut frame = XrgbPixelFrame::new(
+            &mut state.pixels,
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
         );
-        EndPaint(hwnd, &paint);
+        let render_result = state.application.render(&state.window, &mut frame);
+        apply_directive(state, render_result);
+
+        let paint_rect = Win32Rect {
+            left: paint.rcPaint.left,
+            top: paint.rcPaint.top,
+            right: paint.rcPaint.right,
+            bottom: paint.rcPaint.bottom,
+        };
+        let Some(geometry) =
+            stretch_geometry_for_paint(paint_rect, metrics.physical_width, metrics.physical_height)
+        else {
+            return Ok(());
+        };
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: metrics.physical_width as i32,
+                // Negative height means top-down DIB: source Y equals client Y.
+                biHeight: -(metrics.physical_height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                ..unsafe { mem::zeroed() }
+            },
+            ..unsafe { mem::zeroed() }
+        };
+        let source = geometry.source;
+        let destination = geometry.destination;
+        let copied = unsafe {
+            StretchDIBits(
+                dc,
+                destination.left,
+                destination.top,
+                destination.right - destination.left,
+                destination.bottom - destination.top,
+                source.left,
+                source.top,
+                source.right - source.left,
+                source.bottom - source.top,
+                state.pixels.as_ptr().cast(),
+                &info,
+                DIB_RGB_COLORS,
+                SRCCOPY,
+            )
+        };
+        if copied <= 0 {
+            return Err(last_error("pixel_window_surface_present_failed"));
+        }
+        Ok(())
+    })();
+    let ended = unsafe { EndPaint(hwnd, &paint) };
+    match result {
+        Err(error) => Err(error),
+        Ok(()) if ended == 0 => Err(last_error("pixel_window_end_paint_failed")),
+        Ok(()) => Ok(()),
     }
 }
 
@@ -929,6 +1081,80 @@ mod tests {
                 bottom: 1,
             }),
             None
+        );
+    }
+
+    #[test]
+    fn damage_rect_is_clipped_and_invalid_dimensions_fall_back_full() {
+        assert_eq!(
+            win32_invalidation_for_damage(PixelRect::new(10, 20, 120, 140), 80, 90),
+            RedrawInvalidation::Rect(Win32Rect {
+                left: 10,
+                top: 20,
+                right: 80,
+                bottom: 90,
+            })
+        );
+        assert_eq!(
+            win32_invalidation_for_damage(PixelRect::new(2, 3, 2, 10), 80, 90),
+            RedrawInvalidation::Empty
+        );
+        assert_eq!(
+            win32_invalidation_for_damage(PixelRect::new(0, 0, 10, 10), 0, 90),
+            RedrawInvalidation::Full
+        );
+        assert_eq!(
+            win32_invalidation_for_damage(
+                PixelRect::new(WIN32_MAX_COORD, 0, WIN32_MAX_COORD + 1, 10),
+                WIN32_MAX_COORD,
+                90,
+            ),
+            RedrawInvalidation::Full
+        );
+    }
+
+    #[test]
+    fn paint_rect_uses_same_y_for_top_down_source_and_destination() {
+        let geometry = stretch_geometry_for_paint(
+            Win32Rect {
+                left: -10,
+                top: 20,
+                right: 50,
+                bottom: 80,
+            },
+            100,
+            100,
+        )
+        .expect("non-empty paint region");
+        assert_eq!(
+            geometry,
+            StretchDibGeometry {
+                source: Win32Rect {
+                    left: 0,
+                    top: 20,
+                    right: 50,
+                    bottom: 80,
+                },
+                destination: Win32Rect {
+                    left: 0,
+                    top: 20,
+                    right: 50,
+                    bottom: 80,
+                },
+            }
+        );
+        assert!(
+            stretch_geometry_for_paint(
+                Win32Rect {
+                    left: 90,
+                    top: 90,
+                    right: 90,
+                    bottom: 100,
+                },
+                100,
+                100,
+            )
+            .is_none()
         );
     }
 }

@@ -27,7 +27,7 @@ use crate::{
         ime::ImeEvent,
         input::ModifierState,
         window_host::{
-            GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor,
+            GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
             PixelWindow, PixelWindowApplication, PixelWindowBackend, PixelWindowDirective,
             PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions,
             PointerButton, PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker,
@@ -118,6 +118,15 @@ impl PixelWindowBackend for NativeWindowBackend {
         self.window.request_redraw();
     }
 
+    fn request_redraw_rect(&self, rect: PixelRect) {
+        // softbuffer's current contract exposes only full-buffer present. Keep
+        // the typed API consistent while making the fallback explicit; a zero
+        // area request remains a safe no-op.
+        if unix_rect_requires_full_redraw(rect) {
+            self.request_redraw();
+        }
+    }
+
     fn metrics(&self) -> Result<PixelWindowMetrics, PixelWindowError> {
         native_metrics(&self.window)
     }
@@ -206,6 +215,10 @@ impl PixelWindowBackend for NativeWindowBackend {
         );
         Ok(())
     }
+}
+
+fn unix_rect_requires_full_redraw(rect: PixelRect) -> bool {
+    !rect.is_empty()
 }
 
 struct PixelWindowRunner {
@@ -656,5 +669,16 @@ fn pointer_button(button: MouseButton) -> PointerButton {
         MouseButton::Back => PointerButton::Other(4),
         MouseButton::Forward => PointerButton::Other(5),
         MouseButton::Other(value) => PointerButton::Other(value),
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+
+    #[test]
+    fn typed_damage_explicitly_degrades_to_full_present() {
+        assert!(unix_rect_requires_full_redraw(PixelRect::new(1, 2, 3, 4)));
+        assert!(!unix_rect_requires_full_redraw(PixelRect::empty()));
     }
 }

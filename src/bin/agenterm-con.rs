@@ -48,8 +48,8 @@ use agenterm_platform::input::{
 use agenterm_platform::pty::{BoundedOutputPipe, ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::window_host::{
-    GeometryChange, LogicalPoint, LogicalSize, PixelPointerCursor, PixelWindow,
-    PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
+    GeometryChange, LogicalPoint, LogicalSize, PixelPointerCursor, PixelRect as HostPixelRect,
+    PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
     PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
     run_pixel_window,
 };
@@ -880,6 +880,24 @@ mod perf_stats_tests {
         assert_eq!(stats.dirty_pixels, 0);
         assert_eq!(stats.frame_pixels, 0);
     }
+
+    #[test]
+    fn candidate_redraw_request_converts_bounds_without_product_semantics() {
+        let mut candidate = DirtyRegion::empty();
+        candidate.mark_rect(PixelRect::from_xywh(4, 6, 16, 24));
+        assert_eq!(
+            candidate_redraw_request(candidate, 100, 80),
+            CandidateRedrawRequest::Partial(HostPixelRect::new(4, 6, 20, 30))
+        );
+        assert_eq!(
+            candidate_redraw_request(DirtyRegion::full(), 100, 80),
+            CandidateRedrawRequest::Full
+        );
+        assert_eq!(
+            candidate_redraw_request(DirtyRegion::empty(), 100, 80),
+            CandidateRedrawRequest::None
+        );
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1061,6 +1079,16 @@ impl ConApp {
         candidate.clip(width, height)
     }
 
+    fn request_dirty_redraw(&self, window: &PixelWindow) {
+        let candidate = self.chrome_dirty.union(
+            self.workspace
+                .active()
+                .and_then(|id| self.sessions.get(&id).map(|session| session.dirty))
+                .unwrap_or_else(DirtyRegion::full),
+        );
+        request_candidate_redraw(window, candidate, self.frame_width, self.frame_height);
+    }
+
     fn reveal_active_tree_row(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         let Some(active) = self.workspace.active() else {
             return Ok(());
@@ -1189,7 +1217,7 @@ impl ConApp {
             self.composer_focused = true;
             self.update_composer_ime_anchor(window)?;
             self.mark_composer_dirty();
-            window.request_redraw();
+            self.request_dirty_redraw(window);
             return Ok(true);
         }
         if text == "[" {
@@ -1333,7 +1361,6 @@ impl ConApp {
                 composer::paste(&mut self.composer, &mut self.composer_select_all, &text);
             }
             let _ = self.update_composer_ime_anchor(window);
-            window.request_redraw();
             return true;
         }
         match &key.logical {
@@ -1359,7 +1386,6 @@ impl ConApp {
             _ => {}
         }
         let _ = self.update_composer_ime_anchor(window);
-        window.request_redraw();
         true
     }
 
@@ -1368,6 +1394,9 @@ impl ConApp {
             let mut input = std::mem::take(&mut self.composer);
             input.push('\r');
             if let Ok(session) = self.active_session_mut() {
+                // Submission crosses the PTY boundary and can change arbitrary
+                // terminal cells; the composer rectangle alone is not enough.
+                session.dirty.mark_full();
                 session.scroll_to_bottom();
                 session.write_pty(input.as_bytes());
             }
@@ -1394,7 +1423,6 @@ impl ConApp {
             _ => self.composer_preedit.clear(),
         }
         let _ = self.update_composer_ime_anchor(window);
-        window.request_redraw();
     }
 
     fn control_target(&self, target: Option<workspace::TabId>) -> Result<workspace::TabId, String> {
@@ -2007,6 +2035,10 @@ impl ConTerminal {
         std::mem::take(&mut self.dirty)
     }
 
+    fn request_dirty_redraw(&self, window: &PixelWindow) {
+        request_candidate_redraw(window, self.dirty, self.frame_width, self.frame_height);
+    }
+
     fn note_frame_dimensions(&mut self, width: u32, height: u32) {
         if self.frame_width != width || self.frame_height != height {
             self.dirty.mark_full();
@@ -2385,7 +2417,7 @@ impl ConTerminal {
                 self.dirty.mark_full();
             }
         }
-        window.request_redraw();
+        self.request_dirty_redraw(window);
     }
 
     /// Records a left press and returns the click count (1, 2, or 3).
@@ -2770,7 +2802,7 @@ impl ConTerminal {
                     }
                 }
                 self.mark_scrollbar_bounds();
-                window.request_redraw();
+                self.request_dirty_redraw(window);
                 Ok(true)
             }
             PixelWindowEvent::PointerMoved { position, .. } => {
@@ -2785,7 +2817,7 @@ impl ConTerminal {
                     drag.thumb_top(y),
                     maximum,
                 ));
-                window.request_redraw();
+                self.request_dirty_redraw(window);
                 Ok(true)
             }
             PixelWindowEvent::PointerButton {
@@ -2795,12 +2827,12 @@ impl ConTerminal {
             } if self.scrollbar_drag.take().is_some() => {
                 self.mark_scrollbar_bounds();
                 let _ = window.set_pointer_capture(false);
-                window.request_redraw();
+                self.request_dirty_redraw(window);
                 Ok(true)
             }
             PixelWindowEvent::PointerCaptureLost if self.scrollbar_drag.take().is_some() => {
                 self.mark_scrollbar_bounds();
-                window.request_redraw();
+                self.request_dirty_redraw(window);
                 Ok(true)
             }
             _ => Ok(false),
@@ -3404,7 +3436,7 @@ impl ConTerminal {
                 // so the highlight does not linger over its UI.
                 self.selection = None;
                 self.mark_selection_change(old_selection, self.selection);
-                window.request_redraw();
+                self.request_dirty_redraw(window);
                 return;
             }
         } else if self.mouse_dragging {
@@ -3433,7 +3465,6 @@ impl ConTerminal {
                         self.selecting = false;
                     }
                 }
-                window.request_redraw();
             }
             (PointerButton::Left, false) => {
                 self.selecting = false;
@@ -3446,7 +3477,6 @@ impl ConTerminal {
                 if self.selection.is_some() {
                     self.copy_selection();
                     self.selection = None;
-                    window.request_redraw();
                 } else {
                     self.paste_clipboard();
                 }
@@ -3454,6 +3484,7 @@ impl ConTerminal {
             _ => {}
         }
         self.mark_selection_change(old_selection, self.selection);
+        self.request_dirty_redraw(window);
     }
 
     /// Routes a pointer move: an application gesture in flight keeps
@@ -3476,13 +3507,13 @@ impl ConTerminal {
         } else if self.selecting {
             if let Some((anchor, _)) = self.selection {
                 self.selection = Some((anchor, pt));
-                window.request_redraw();
             }
         } else if self.mouse_mode().0 == terminal_input::ApplicationMouseMode::AnyMotion {
             // 1003: report motion with no button held (button 3 = none).
             self.report_mouse(3, pt, true, true, modifiers);
         }
         self.mark_selection_change(old_selection, self.selection);
+        self.request_dirty_redraw(window);
     }
 
     fn cancel_pointer_gesture(&mut self, window: &PixelWindow) {
@@ -3862,6 +3893,7 @@ impl ConTerminal {
         // blink's ~530ms cadence, making `wait_ms: 50` in a script actually
         // take up to 530ms.
         let mut redraw = false;
+        let mut partial_redraw = false;
         let mut next_wake: Option<Instant> = None;
         let mut fold_wake = |deadline: Instant| {
             next_wake = Some(next_wake.map_or(deadline, |current| current.min(deadline)));
@@ -3885,7 +3917,7 @@ impl ConTerminal {
                 self.mark_cursor_change();
                 self.blink_visible = !self.blink_visible;
                 self.last_blink_at = now;
-                redraw = true;
+                partial_redraw = true;
             }
             fold_wake(self.last_blink_at + BLINK_INTERVAL);
         }
@@ -3902,6 +3934,8 @@ impl ConTerminal {
 
         if redraw {
             window.request_redraw();
+        } else if partial_redraw {
+            self.request_dirty_redraw(window);
         }
 
         Ok(next_wake.map_or(PixelWindowDirective::Wait, PixelWindowDirective::WaitUntil))
@@ -4015,7 +4049,7 @@ impl PixelWindowApplication for ConApp {
                     layout.tree_capacity(),
                 );
                 self.mark_tree_dirty();
-                window.request_redraw();
+                self.request_dirty_redraw(window);
                 return Ok(PixelWindowDirective::Continue);
             }
         }
@@ -4036,7 +4070,7 @@ impl PixelWindowApplication for ConApp {
                     self.update_composer_ime_anchor(window)?;
                     self.mark_composer_dirty();
                     window.focus();
-                    window.request_redraw();
+                    self.request_dirty_redraw(window);
                     return Ok(PixelWindowDirective::Continue);
                 }
                 ui::ComposerHit::Send => {
@@ -4044,23 +4078,26 @@ impl PixelWindowApplication for ConApp {
                     self.composer_focused = true;
                     self.update_composer_ime_anchor(window)?;
                     self.mark_composer_dirty();
-                    window.request_redraw();
+                    self.request_dirty_redraw(window);
                     return Ok(PixelWindowDirective::Continue);
                 }
                 ui::ComposerHit::Outside => {}
             }
             self.composer_focused = false;
             self.mark_composer_dirty();
+            self.request_dirty_redraw(window);
         }
         if self.composer_focused {
             match event {
                 PixelWindowEvent::Keyboard(key) if self.handle_composer_key(window, &key) => {
                     self.mark_composer_dirty();
+                    self.request_dirty_redraw(window);
                     return Ok(PixelWindowDirective::Continue);
                 }
                 PixelWindowEvent::Ime(ime) => {
                     self.handle_composer_ime(window, ime);
                     self.mark_composer_dirty();
+                    self.request_dirty_redraw(window);
                     return Ok(PixelWindowDirective::Continue);
                 }
                 _ => {}
@@ -4093,6 +4130,7 @@ impl PixelWindowApplication for ConApp {
         if retained_requires_full {
             self.chrome_dirty.mark_full();
             self.active_session_mut()?.dirty.mark_full();
+            window.request_redraw();
         }
 
         // Drain before consuming the candidate. PTY output can alter arbitrary
@@ -4107,6 +4145,9 @@ impl PixelWindowApplication for ConApp {
             .perf_stats
             .pty_budget_yields
             .saturating_add(u64::from(drain.backlog));
+        if drain.changed {
+            window.request_redraw();
+        }
         if drain.backlog {
             window.request_redraw();
         }
@@ -4115,6 +4156,11 @@ impl PixelWindowApplication for ConApp {
         // rasterizing. A late dirty state is therefore a programming error,
         // not an excuse to label a partial frame after the fact.
         let candidate = self.take_dirty_candidate(width, height);
+        if candidate.is_full() {
+            // A late resize, PTY drain, or invalidation must widen the native
+            // update region before a partial GDI present can be accepted.
+            window.request_redraw();
+        }
         let render_started = Instant::now();
         let active_id = self.workspace.active().ok_or_else(|| {
             PixelWindowError::failed("con_session_missing", "no active terminal session")
@@ -4297,6 +4343,44 @@ struct CellRect {
     y: u32,
     w: u32,
     h: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CandidateRedrawRequest {
+    None,
+    Full,
+    Partial(HostPixelRect),
+}
+
+fn candidate_redraw_request(
+    candidate: DirtyRegion,
+    width: u32,
+    height: u32,
+) -> CandidateRedrawRequest {
+    if candidate.is_full() || width == 0 || height == 0 {
+        return CandidateRedrawRequest::Full;
+    }
+    let Some(bounds) = candidate.clip(width, height).bounds() else {
+        return CandidateRedrawRequest::None;
+    };
+    if bounds.is_empty() {
+        CandidateRedrawRequest::None
+    } else {
+        CandidateRedrawRequest::Partial(HostPixelRect::new(
+            bounds.left,
+            bounds.top,
+            bounds.right,
+            bounds.bottom,
+        ))
+    }
+}
+
+fn request_candidate_redraw(window: &PixelWindow, candidate: DirtyRegion, width: u32, height: u32) {
+    match candidate_redraw_request(candidate, width, height) {
+        CandidateRedrawRequest::None => {}
+        CandidateRedrawRequest::Full => window.request_redraw(),
+        CandidateRedrawRequest::Partial(rect) => window.request_redraw_rect(rect),
+    }
 }
 
 fn candidate_bounds(candidate: DirtyRegion, width: u32, height: u32) -> PixelRect {
