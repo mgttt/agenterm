@@ -7,7 +7,7 @@ use std::{io, thread};
 pub(crate) fn spawn_named_detached(name: &'static str, task: ThreadTask) -> io::Result<()> {
     thread::Builder::new()
         .name(name.to_owned())
-        .spawn(move || task())
+        .spawn(task)
         .map(drop)
 }
 
