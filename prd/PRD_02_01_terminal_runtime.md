@@ -330,6 +330,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Normal, failed and fast command exits plus multitab control remain covered by
   90 unit, 18 black-box and one isolated control test. The official release-fast
   PE falls from 688,128 to 667,648 bytes.
+  Session ownership is now a product-specific compact store rather than a
+  general-purpose ordered map. `Workspace` remains the sole authority for tree
+  order, parentage and stable tab identity; the store only performs linear id
+  routing over the small interactive tab set and may swap entries on removal
+  because its physical order is unobservable. This removes ordered-tree node
+  allocation and rebalancing machinery: the isolated PE falls from 652.0 to
+  638.5 KiB, `.text` from 429.0 to 419.0 KiB, and the official release-fast PE
+  from 667,648 to 653,824 bytes. The same 90 unit, 18 black-box and one isolated
+  multitab control test remain green. Future assembly or native FFI work must
+  likewise start from linked-symbol or disassembly evidence rather than from
+  mechanism preference.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

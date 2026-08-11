@@ -265,6 +265,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   从 672 KiB 降至 652 KiB、`.text` 从 441.5 KiB 降至 429.0 KiB；官方
   release-fast PE 从 688,128 B 降至 667,648 B（-20,480 B）。正常/失败/快速命令
   退出和多标签控制仍由 90 unit、18 black-box 与 1 control journey 覆盖。
+- `agenterm-con` 的 session ownership 不再使用通用 `BTreeMap`。树顺序、父子关系和
+  stable `TabId` 的权威仍完全属于 `Workspace`；产品专用 `SessionStore` 只以小型
+  `Vec<(TabId, ConTerminal)>` 做线性路由，并在关闭时用不可观察顺序的 swap remove，
+  因而不会把节点分配、平衡和有序删除代码链接进迷你客户端。隔离 PE 从 652.0 KiB
+  降至 638.5 KiB、`.text` 从 429.0 KiB 降至 419.0 KiB；官方 release-fast PE 从
+  667,648 B 降至 653,824 B（-13,824 B）。多标签行为继续由同一 90 unit、18
+  black-box 与 1 control journey 覆盖。这个结果也固化尺寸工作的选择准则：先删除
+  不需要的通用机制，只有反汇编证据指向的窄叶子才进入汇编或原生 FFI。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

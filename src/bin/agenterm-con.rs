@@ -34,7 +34,7 @@ mod ui;
 #[path = "agenterm-con/workspace.rs"]
 mod workspace;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -743,6 +743,62 @@ impl Drop for ConTerminal {
     }
 }
 
+/// Compact session ownership for the small interactive tab sets hosted by con.
+///
+/// Tab identity and tree order belong to `Workspace`; this store only maps a
+/// stable id to its terminal. Linear lookup avoids linking the allocation and
+/// rebalancing machinery of a general-purpose ordered map into the miniature
+/// client. Removing by swap is safe because storage order is not observable.
+#[derive(Default)]
+struct SessionStore {
+    entries: Vec<(workspace::TabId, ConTerminal)>,
+}
+
+impl SessionStore {
+    fn insert(&mut self, id: workspace::TabId, session: ConTerminal) {
+        debug_assert!(!self.contains_key(&id));
+        self.entries.push((id, session));
+    }
+
+    fn get(&self, id: &workspace::TabId) -> Option<&ConTerminal> {
+        self.entries
+            .iter()
+            .find(|(candidate, _)| candidate == id)
+            .map(|(_, session)| session)
+    }
+
+    fn get_mut(&mut self, id: &workspace::TabId) -> Option<&mut ConTerminal> {
+        self.entries
+            .iter_mut()
+            .find(|(candidate, _)| candidate == id)
+            .map(|(_, session)| session)
+    }
+
+    fn remove(&mut self, id: &workspace::TabId) -> Option<ConTerminal> {
+        let index = self
+            .entries
+            .iter()
+            .position(|(candidate, _)| candidate == id)?;
+        Some(self.entries.swap_remove(index).1)
+    }
+
+    fn contains_key(&self, id: &workspace::TabId) -> bool {
+        self.entries.iter().any(|(candidate, _)| candidate == id)
+    }
+
+    fn entries_mut(&mut self) -> &mut [(workspace::TabId, ConTerminal)] {
+        self.entries.as_mut_slice()
+    }
+
+    fn values(&self) -> impl Iterator<Item = &ConTerminal> {
+        self.entries.iter().map(|(_, session)| session)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// One lightweight GUI process containing several isolated terminal sessions.
 ///
 /// The wrapper owns tree identity and routing only. A `ConTerminal` still owns
@@ -750,7 +806,7 @@ impl Drop for ConTerminal {
 /// dead child or malformed output cannot corrupt another session's state.
 struct ConApp {
     workspace: workspace::Workspace,
-    sessions: BTreeMap<workspace::TabId, ConTerminal>,
+    sessions: SessionStore,
     composer: String,
     composer_preedit: String,
     composer_focused: bool,
@@ -1124,7 +1180,7 @@ impl ConApp {
     fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
         let mut workspace = workspace::Workspace::default();
         let initial = workspace.add_root("terminal".to_owned());
-        let mut sessions = BTreeMap::new();
+        let mut sessions = SessionStore::default();
         sessions.insert(initial, ConTerminal::new(working_dir));
         Self {
             workspace,
@@ -4263,7 +4319,7 @@ impl PixelWindowApplication for ConApp {
             let active = self.workspace.active();
             let mut active_redraw = false;
             let mut backlog = false;
-            for (id, session) in &mut self.sessions {
+            for (id, session) in self.sessions.entries_mut() {
                 let outcome = session.drain_pty();
                 self.perf_stats.pty_drained_bytes = self
                     .perf_stats
