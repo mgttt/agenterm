@@ -636,10 +636,7 @@ fn entry() {
     );
     assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
 
-    let dir = std::env::temp_dir().join(format!(
-        "agenterm-rh-output-facts-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("agenterm-rh-output-facts-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify output facts pack");
     let _ = std::fs::remove_dir_all(&dir);
