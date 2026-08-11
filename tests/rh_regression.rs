@@ -601,22 +601,44 @@ fn string_fn_bundle_fixture_executes_natively_without_interpreter() {
 /// `#{ complete: output.complete }` additionally had no json-value lane.
 #[test]
 fn process_output_truncation_facts_are_native_and_json_valued() {
-    let source = r#"
-fn entry() {
-    let command = std::process::command("cmd.exe");
-    command.args(["/d", "/c", "echo probe"]);
-    command.capture_limit(4096);
-    let output = command.output();
-    let report = #{
-        complete: output.complete,
-        truncated: output.truncated
-    };
-    if output.complete == 1 && output.truncated == 0 {
+    // The test executable, not a shell: `cmd.exe` only exists on windows and
+    // this ran on every lane. `--list` prints the harness's test names, which is
+    // well over 1 KiB, so a small limit truncates and a large one does not --
+    // that is the pair this asserts.
+    let executable = std::env::current_exe().expect("current test executable");
+    let program = serde_json::to_string(&executable.to_string_lossy()).expect("program literal");
+    let source = format!(
+        r#"
+fn entry() {{
+    let complete_command = std::process::command({program});
+    complete_command.args(["--list"]);
+    complete_command.timeout(std::time::Duration::from_secs(10));
+    complete_command.capture_limit(1048576);
+    let complete_output = complete_command.output();
+
+    let truncated_command = std::process::command({program});
+    truncated_command.args(["--list"]);
+    truncated_command.timeout(std::time::Duration::from_secs(10));
+    truncated_command.capture_limit(512);
+    let truncated_output = truncated_command.output();
+
+    let report = #{{
+        complete: complete_output.complete,
+        complete_truncated: complete_output.truncated,
+        bounded: truncated_output.complete,
+        bounded_truncated: truncated_output.truncated
+    }};
+    if complete_output.complete == 1
+        && complete_output.truncated == 0
+        && truncated_output.complete == 0
+        && truncated_output.truncated == 1 {{
         return 7;
-    }
+    }}
     rh::fail("output_truncation_facts_unexpected:" + rh::json::stringify(report))
-}
-"#;
+}}
+"#
+    );
+    let source = source.as_str();
     let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile output facts");
     assert_eq!(
         output.execution_mode,
@@ -630,7 +652,9 @@ fn entry() {
         output.rust
     );
     assert!(
-        output.rust.contains("serde_json::json!(output.complete)"),
+        output
+            .rust
+            .contains("serde_json::json!(complete_output.complete)"),
         "a native int expression must be usable as a json value: {}",
         output.rust
     );
