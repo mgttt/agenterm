@@ -954,6 +954,28 @@ fn projection_worker_unavailable_snapshot() -> SnapshotDocument {
     snapshot
 }
 
+/// Decide the child's `AGENTERM_NO_ACTIVATE` instead of inheriting the GUI's.
+///
+/// Both Control Center shells read this variable from the *environment*, not
+/// only from the `--no-activate` flag, and a child inherits it. So a GUI that
+/// was itself started by automation handed its headless setting to a Control
+/// Center the user opened **by hand**: the shell created the window and never
+/// showed it, so the toolbar button looked dead. Confirmed directly against
+/// `agenterm-cc-web.exe` with identical argv — the titled window reports
+/// `visible=False` with the variable set and `visible=True` without it — after
+/// finding two such hidden windows left behind by real toolbar clicks.
+///
+/// Passing no `--no-activate` flag was not enough, which is why the toolbar
+/// handler's existing "human toolbar open always activates" note did not hold.
+fn apply_activation_environment(command: &mut Command, no_activate: bool) {
+    const ACTIVATION_ENVIRONMENT: &str = "AGENTERM_NO_ACTIVATE";
+    if no_activate {
+        command.env(ACTIVATION_ENVIRONMENT, "1");
+    } else {
+        command.env_remove(ACTIVATION_ENVIRONMENT);
+    }
+}
+
 /// Start or reuse the isolated Control Center without blocking the GUI thread.
 pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> Result<()> {
     let executable = control_center_executable()?;
@@ -983,6 +1005,7 @@ pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> R
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    apply_activation_environment(&mut command, no_activate);
     crate::platform::process::spawn_breakaway_visible_command(&mut command)
         .with_context(|| format!("failed to launch {}", executable.display()))?;
     Ok(())
@@ -3033,6 +3056,40 @@ fn platform_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A human toolbar open must not inherit the GUI's headless setting.
+    ///
+    /// The regression this pins: two Control Center windows were found alive
+    /// with the right title and `visible=False`, launched by real toolbar
+    /// clicks from a GUI whose environment carried `AGENTERM_NO_ACTIVATE=1`.
+    /// The shell reads that variable directly, so omitting `--no-activate` did
+    /// not activate anything and the button looked dead.
+    #[test]
+    fn human_open_scrubs_inherited_no_activate_and_headless_open_sets_it() {
+        const NAME: &str = "AGENTERM_NO_ACTIVATE";
+
+        let mut human = Command::new("agenterm-cc");
+        apply_activation_environment(&mut human, false);
+        let removed = human
+            .get_envs()
+            .any(|(key, value)| key == NAME && value.is_none());
+        assert!(
+            removed,
+            "a human open must clear {NAME} so an automation-launched GUI \
+             cannot hand its headless setting to the child"
+        );
+
+        let mut headless = Command::new("agenterm-cc");
+        apply_activation_environment(&mut headless, true);
+        let set_to_one = headless
+            .get_envs()
+            .any(|(key, value)| key == NAME && value == Some("1".as_ref()));
+        assert!(
+            set_to_one,
+            "a headless open must set {NAME} explicitly rather than relying on \
+             inheritance, so the smokes stay non-activating"
+        );
+    }
 
     #[test]
     fn default_command_opens_and_accepts_no_activate() {
