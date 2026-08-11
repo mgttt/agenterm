@@ -44,7 +44,14 @@ pub(crate) fn display_backend_facts() -> DisplayBackendFacts {
     }
 }
 
-#[cfg(all(feature = "input", feature = "ime"))]
+#[cfg(all(feature = "input", feature = "ime", feature = "native-pixel-window"))]
+mod native_pixel_window;
+
+#[cfg(all(
+    feature = "input",
+    feature = "ime",
+    not(feature = "native-pixel-window")
+))]
 #[path = "../unix/window_host.rs"]
 mod window_host;
 
@@ -53,7 +60,14 @@ pub(crate) fn run_pixel_window(
     options: PixelWindowOptions,
     application: Box<dyn PixelWindowApplication>,
 ) -> Result<(), PixelWindowError> {
-    window_host::run_pixel_window(options, application)
+    #[cfg(feature = "native-pixel-window")]
+    {
+        native_pixel_window::run_pixel_window(options, application)
+    }
+    #[cfg(not(feature = "native-pixel-window"))]
+    {
+        window_host::run_pixel_window(options, application)
+    }
 }
 
 pub(crate) fn run_native_text_window(

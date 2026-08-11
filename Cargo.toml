@@ -29,13 +29,14 @@ path = "src/bin/agenterm-con.rs"
 
 [features]
 default = []
+native-pixel-window = ["agenterm-platform/native-pixel-window"]
 script-lua = ["agenterm-lua"]
 script-sql = ["agenterm-sql"]
 script-qjs = ["agenterm-qjs"]
 script-wasmcore = ["agenterm-wasmcore"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("agenterm-lua", "agenterm-qjs", "agenterm-sql", "agenterm-wasmcore", "default", "script-lua", "script-qjs", "script-sql", "script-wasmcore"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("agenterm-lua", "agenterm-qjs", "agenterm-sql", "agenterm-wasmcore", "default", "native-pixel-window", "script-lua", "script-qjs", "script-sql", "script-wasmcore"))'] }
 
 [dependencies]
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }

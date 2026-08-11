@@ -603,6 +603,15 @@ integrated validation recorded below):
   past ring's build script without `x86_64-linux-gnu-gcc`, so native Unix source
   compilation remains CI/host evidence. The strict boundary report is now three
   findings: Windows remote GUI host plus the final root selector.
+- [~] The same `PixelWindowApplication` contract now has a feature-gated native
+  Windows pixel host using a User32 message loop, owned XRGB frame and GDI
+  presentation instead of winit/softbuffer. Cross-thread wake uses an atomic
+  HWND lifetime token; one Win32 timer owns WaitUntil; queued paint is drained
+  before AboutToWait so a fast child cannot report exit before its final PTY
+  output is rendered. The con owner passes 70 unit tests, its public-control GUI
+  black box, and 16 active terminal black-box cases with zero failures. This is
+  not yet the selected production host: IME preedit/candidate, pointer capture
+  loss, DPI suggested-rect and human input acceptance remain explicit gaps.
 - [x] The Windows remote GUI now consumes the frozen typed `control_window`
   boundary. The dedicated neutral host owns Win32 class/window/child
   controls, pre-translation key preview, WndProc/message loop, focus/capture,

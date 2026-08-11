@@ -228,6 +228,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   explicit ANSI application colors remain intact. Geometry, tree viewport
   bounds and hit results are pure deterministic contracts covered independently
   of Win32/PTY state; an out-of-range hit or scroll safely becomes background or
+  a bounded no-op. A feature-gated native Win32 pixel host now proves the
+  platform boundary can remove winit/softbuffer from the linked con path without
+  changing product state: its release PE is 848,896 bytes versus 1,046,528 bytes
+  for the current staged host. Evidence is 70 binary unit tests, the isolated
+  public-control GUI journey, and the Windows terminal black box at 16 passed,
+  2 pre-existing ignored gaps, 0 failed. It remains non-default until native IME
+  preedit/candidate, pointer-capture loss, DPI suggested-rect and human keyboard
+  acceptance are covered; 512 KiB remains a target, not a shipped claim.
   clamps rather than selecting/closing an unrelated terminal. Visual styling
   may intentionally differ from the workbench, while validated terminal,
   interaction and robustness mechanisms are promoted to shared typed layers
