@@ -1139,6 +1139,22 @@ fn dispatch_reentrant_message(
         }
         return 0;
     }
+    // WM_DESTROY almost always arrives reentrantly: DEFERRED_CLOSE calls
+    // `DestroyWindow` inside a dispatch, so `dispatching` is still set when
+    // Win32 sends WM_DESTROY and then WM_NCDESTROY back into this proc.
+    // Queueing it loses the quit -- WM_NCDESTROY flips `detached` before the
+    // drain runs, and the detached branch clears the queue, discarding the
+    // only message whose replay would have called `PostQuitMessage`. The
+    // message loop then waits in `GetMessageW` forever with the window
+    // already gone: every launcher close left a zombie process. Post the quit
+    // here, exactly as the non-reentrant WM_DESTROY arm does; it only sets a
+    // thread-queue flag, so it is safe at any reentrancy depth.
+    if msg == WM_DESTROY {
+        unsafe {
+            PostQuitMessage(0);
+        }
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
     if msg == WM_PAINT {
         if !queue_pending(userdata, hwnd, PendingMessage::Paint) {
             return 0;

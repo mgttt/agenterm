@@ -424,7 +424,12 @@ fn entry() {
             stop_output.success != 0,
             "startup_stop_server_failed:" + stop_output.stderr_text()
         );
-        wait_for_exit(gui, 5000, "startup_gui_shutdown_timeout");
+        // 15s, not 5s: this is a liveness bound (the GUI must exit at all
+        // after stop-server-and-exit), not a latency assertion, and a shared
+        // CI runner missed the old bound by exactly 1ms
+        // (`waited=5001ms>5000ms` on c246cbe0). A real hang still fails fast
+        // enough, and a wrongly-alive GUI fails regardless of the number.
+        wait_for_exit(gui, 15000, "startup_gui_shutdown_timeout");
 
         test_harness::emit_evidence(
             context,

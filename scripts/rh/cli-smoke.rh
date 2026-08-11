@@ -1594,7 +1594,12 @@ try {
         cli,
         ["ui-action", "stop-server-and-exit"]
     );
-    gui.wait_with_output(std::time::Duration::from_secs(5));
+    // Liveness bound, not a latency assertion: the GUI must exit at all after
+    // stop-server-and-exit. Five seconds was missed by single-digit
+    // milliseconds on loaded runners, and `wait_with_output` records a
+    // `process_timeout` failure -- so a run that had already printed PASS
+    // still exited non-zero on that one recorded fact.
+    gui.wait_with_output(std::time::Duration::from_secs(15));
 
     print(
         "PASS: typed control, UI bridge, PTY, screenshots, " +
