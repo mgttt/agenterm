@@ -6,10 +6,11 @@ pub use crate::contract::pixel_present::{
     PixelPresentOutcome, PixelPresentReceipt, PixelPresentRegion, PixelPresentStats,
 };
 pub use crate::contract::window_host::{
-    GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
-    PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
-    PixelWindowMetrics, PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta,
-    WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
+    GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelBackingRetention, PixelFrameError,
+    PixelFrameGeneration, PixelFrameInfo, PixelFrameWrite, PixelFrameWriteReceipt,
+    PixelPointerCursor, PixelRect, PixelWindow, PixelWindowApplication, PixelWindowDirective,
+    PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
+    PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
 };
 
 /// Run one native pixel window until the application requests exit or the

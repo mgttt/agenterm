@@ -33,11 +33,11 @@ use crate::{
             PixelPresentStats, elapsed_ns_since,
         },
         window_host::{
-            GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
-            PixelWindow, PixelWindowApplication, PixelWindowBackend, PixelWindowDirective,
-            PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions,
-            PointerButton, PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker,
-            XrgbPixelFrame,
+            GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelBackingRetention,
+            PixelFrameError, PixelFrameState, PixelPointerCursor, PixelRect, PixelWindow,
+            PixelWindowApplication, PixelWindowBackend, PixelWindowDirective, PixelWindowError,
+            PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
+            PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
         },
     },
     input::{NativeKeyEventExt as _, NativeModifierStateExt as _},
@@ -84,6 +84,7 @@ pub(crate) fn run_pixel_window(
         last_pointer: None,
         failure: None,
         present: Rc::new(RefCell::new(PixelPresentLedger::new())),
+        frame_state: PixelFrameState::new(unix_frame_backing_retention()),
         #[cfg(target_os = "macos")]
         detached_for_reopen: Rc::new(Cell::new(false)),
     };
@@ -245,6 +246,10 @@ fn unix_rect_requires_full_redraw(rect: PixelRect) -> bool {
     !rect.is_empty()
 }
 
+fn unix_frame_backing_retention() -> PixelBackingRetention {
+    PixelBackingRetention::Transient
+}
+
 struct PixelWindowRunner {
     options: PixelWindowOptions,
     application: Box<dyn PixelWindowApplication>,
@@ -258,6 +263,7 @@ struct PixelWindowRunner {
     last_pointer: Option<LogicalPoint>,
     failure: Option<PixelWindowError>,
     present: Rc<RefCell<PixelPresentLedger>>,
+    frame_state: PixelFrameState,
     #[cfg(target_os = "macos")]
     detached_for_reopen: Rc<Cell<bool>>,
 }
@@ -344,6 +350,7 @@ impl PixelWindowRunner {
         width: NonZeroU32,
         height: NonZeroU32,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        self.frame_state.begin_transient_frame();
         let present = Rc::clone(&self.present);
         let surface = self.surface.as_mut().ok_or_else(|| {
             PixelWindowError::failed(
@@ -362,10 +369,29 @@ impl PixelWindowRunner {
         })?;
         let frame_width = buffer.width().get();
         let frame_height = buffer.height().get();
-        let directive = {
-            let mut frame =
-                XrgbPixelFrame::new(&mut buffer, frame_width, frame_height, metrics.scale_factor);
-            catch_application("render", || self.application.render(window, &mut frame))?
+        let render_result = {
+            let mut frame = XrgbPixelFrame::new(
+                &mut buffer,
+                frame_width,
+                frame_height,
+                metrics.scale_factor,
+                &mut self.frame_state,
+            );
+            match catch_application("render", || self.application.render(window, &mut frame)) {
+                Ok(directive) => frame.write_receipt().map(|_receipt| directive).map_err(
+                    |error: PixelFrameError| {
+                        PixelWindowError::failed("pixel_window_frame_commit_failed", error)
+                    },
+                ),
+                Err(error) => Err(error),
+            }
+        };
+        let directive = match render_result {
+            Ok(directive) => directive,
+            Err(error) => {
+                self.frame_state.invalidate();
+                return Err(error);
+            }
         };
         let requested_pixels = u64::from(frame_width).saturating_mul(u64::from(frame_height));
         let started = Instant::now();
@@ -386,6 +412,9 @@ impl PixelWindowRunner {
                 PixelPresentOutcome::Failed
             },
         );
+        if present_result.is_err() {
+            self.frame_state.invalidate();
+        }
         present_result.map_err(|error| {
             PixelWindowError::failed("pixel_window_surface_present_failed", error)
         })?;
@@ -760,6 +789,14 @@ mod damage_tests {
     fn typed_damage_explicitly_degrades_to_full_present() {
         assert!(unix_rect_requires_full_redraw(PixelRect::new(1, 2, 3, 4)));
         assert!(!unix_rect_requires_full_redraw(PixelRect::empty()));
+    }
+
+    #[test]
+    fn unix_frame_backing_is_explicitly_transient() {
+        assert_eq!(
+            unix_frame_backing_retention(),
+            PixelBackingRetention::Transient
+        );
     }
 
     #[test]

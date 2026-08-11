@@ -124,6 +124,132 @@ impl PixelWindowMetrics {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PixelBackingRetention {
+    /// The host may replace or reuse the backing between frame callbacks.
+    Transient,
+    /// The host keeps the same pixel contents available across callbacks for
+    /// the current frame generation.
+    RetainedAcrossFrames,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PixelFrameGeneration(u64);
+
+impl PixelFrameGeneration {
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+
+    pub(crate) const fn initial() -> Self {
+        Self(0)
+    }
+
+    pub(crate) fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PixelFrameInfo {
+    pub retention: PixelBackingRetention,
+    pub generation: PixelFrameGeneration,
+    pub content_valid: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PixelFrameWrite {
+    None,
+    Full,
+    Partial(PixelRect),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PixelFrameWriteReceipt {
+    pub write: PixelFrameWrite,
+    pub generation: PixelFrameGeneration,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PixelFrameError {
+    TransientRequiresFull,
+    InvalidContentRequiresFull,
+    EmptyPartial,
+    PartialOutOfBounds {
+        rect: PixelRect,
+        width: u32,
+        height: u32,
+    },
+    AlreadyCommitted,
+}
+
+impl fmt::Display for PixelFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TransientRequiresFull => {
+                formatter.write_str("transient pixel backing requires a full write")
+            }
+            Self::InvalidContentRequiresFull => {
+                formatter.write_str("invalid pixel content requires a full write")
+            }
+            Self::EmptyPartial => formatter.write_str("partial pixel write cannot be empty"),
+            Self::PartialOutOfBounds {
+                rect,
+                width,
+                height,
+            } => write!(
+                formatter,
+                "partial pixel write {rect:?} is outside {width}x{height} frame"
+            ),
+            Self::AlreadyCommitted => formatter.write_str("pixel frame write already committed"),
+        }
+    }
+}
+
+impl std::error::Error for PixelFrameError {}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PixelFrameState {
+    retention: PixelBackingRetention,
+    generation: PixelFrameGeneration,
+    content_valid: bool,
+}
+
+impl PixelFrameState {
+    pub(crate) const fn new(retention: PixelBackingRetention) -> Self {
+        Self {
+            retention,
+            generation: PixelFrameGeneration::initial(),
+            content_valid: false,
+        }
+    }
+
+    pub(crate) const fn info(&self) -> PixelFrameInfo {
+        PixelFrameInfo {
+            retention: self.retention,
+            generation: self.generation,
+            content_valid: self.content_valid,
+        }
+    }
+
+    pub(crate) fn invalidate(&mut self) {
+        self.content_valid = false;
+    }
+
+    pub(crate) fn advance_generation(&mut self) {
+        self.generation = self.generation.next();
+        self.content_valid = false;
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn begin_transient_frame(&mut self) {
+        self.advance_generation();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WindowSemanticFlags {
     pub minimized: bool,
     pub maximized: bool,
@@ -239,18 +365,114 @@ pub struct XrgbPixelFrame<'a> {
     width: u32,
     height: u32,
     scale_factor: f64,
+    state: &'a mut PixelFrameState,
+    commit_state: FrameCommitState,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FrameCommitState {
+    Unspecified,
+    Accepted(PixelFrameWriteReceipt),
+    Rejected(PixelFrameError),
 }
 
 impl<'a> XrgbPixelFrame<'a> {
     // Selected Unix adapters construct frames; unsupported targets still compile
     // the neutral contract for downstream applications.
     #[allow(dead_code)]
-    pub(crate) fn new(pixels: &'a mut [u32], width: u32, height: u32, scale_factor: f64) -> Self {
+    pub(crate) fn new(
+        pixels: &'a mut [u32],
+        width: u32,
+        height: u32,
+        scale_factor: f64,
+        state: &'a mut PixelFrameState,
+    ) -> Self {
         Self {
             pixels,
             width,
             height,
             scale_factor,
+            state,
+            commit_state: FrameCommitState::Unspecified,
+        }
+    }
+
+    pub fn info(&self) -> PixelFrameInfo {
+        self.state.info()
+    }
+
+    pub fn commit(
+        &mut self,
+        write: PixelFrameWrite,
+    ) -> Result<PixelFrameWriteReceipt, PixelFrameError> {
+        if !matches!(self.commit_state, FrameCommitState::Unspecified) {
+            let error = PixelFrameError::AlreadyCommitted;
+            self.state.invalidate();
+            self.commit_state = FrameCommitState::Rejected(error);
+            return Err(error);
+        }
+
+        let validation = match write {
+            PixelFrameWrite::Full => Ok(()),
+            PixelFrameWrite::None => match self.info().retention {
+                PixelBackingRetention::Transient => Err(PixelFrameError::TransientRequiresFull),
+                PixelBackingRetention::RetainedAcrossFrames if !self.info().content_valid => {
+                    Err(PixelFrameError::InvalidContentRequiresFull)
+                }
+                PixelBackingRetention::RetainedAcrossFrames => Ok(()),
+            },
+            PixelFrameWrite::Partial(rect) => {
+                if rect.is_empty() {
+                    Err(PixelFrameError::EmptyPartial)
+                } else if rect.left > self.width
+                    || rect.top > self.height
+                    || rect.right > self.width
+                    || rect.bottom > self.height
+                {
+                    Err(PixelFrameError::PartialOutOfBounds {
+                        rect,
+                        width: self.width,
+                        height: self.height,
+                    })
+                } else {
+                    match self.info().retention {
+                        PixelBackingRetention::Transient => {
+                            Err(PixelFrameError::TransientRequiresFull)
+                        }
+                        PixelBackingRetention::RetainedAcrossFrames
+                            if !self.info().content_valid =>
+                        {
+                            Err(PixelFrameError::InvalidContentRequiresFull)
+                        }
+                        PixelBackingRetention::RetainedAcrossFrames => Ok(()),
+                    }
+                }
+            }
+        };
+
+        if let Err(error) = validation {
+            self.state.invalidate();
+            self.commit_state = FrameCommitState::Rejected(error);
+            return Err(error);
+        }
+
+        self.state.content_valid = true;
+        let receipt = PixelFrameWriteReceipt {
+            write,
+            generation: self.state.generation,
+        };
+        self.commit_state = FrameCommitState::Accepted(receipt);
+        Ok(receipt)
+    }
+
+    /// Finalizes the frame and returns the accepted write. Existing
+    /// applications that do not call `commit` retain the historical full-frame
+    /// contract.
+    pub fn write_receipt(&mut self) -> Result<PixelFrameWriteReceipt, PixelFrameError> {
+        match self.commit_state {
+            FrameCommitState::Unspecified => self.commit(PixelFrameWrite::Full),
+            FrameCommitState::Accepted(receipt) => Ok(receipt),
+            FrameCommitState::Rejected(error) => Err(error),
         }
     }
 
@@ -595,6 +817,117 @@ mod tests {
     fn zero_area_pixel_rect_is_safe() {
         let rect = PixelRect::new(4, 4, 4, 10);
         assert!(rect.is_empty());
-        assert_eq!(rect.clip(0, 0), rect);
+        assert_eq!(rect.clip(0, 0), PixelRect::empty());
+    }
+
+    #[test]
+    fn frame_write_defaults_to_full_and_reports_generation() {
+        let mut state = PixelFrameState::new(PixelBackingRetention::RetainedAcrossFrames);
+        let mut pixels = vec![0; 4];
+        let receipt = {
+            let mut frame = XrgbPixelFrame::new(&mut pixels, 2, 2, 1.0, &mut state);
+            assert_eq!(
+                frame.info(),
+                PixelFrameInfo {
+                    retention: PixelBackingRetention::RetainedAcrossFrames,
+                    generation: PixelFrameGeneration::initial(),
+                    content_valid: false,
+                }
+            );
+            frame.write_receipt().expect("implicit full write")
+        };
+
+        assert_eq!(receipt.write, PixelFrameWrite::Full);
+        assert_eq!(receipt.generation, PixelFrameGeneration::initial());
+        assert!(state.info().content_valid);
+    }
+
+    #[test]
+    fn frame_write_validation_requires_retained_valid_content_for_partial() {
+        let mut transient = PixelFrameState::new(PixelBackingRetention::Transient);
+        let mut transient_pixels = vec![0; 4];
+        let error = {
+            let mut frame = XrgbPixelFrame::new(&mut transient_pixels, 2, 2, 1.0, &mut transient);
+            frame
+                .commit(PixelFrameWrite::None)
+                .expect_err("transient backing requires full")
+        };
+        assert_eq!(error, PixelFrameError::TransientRequiresFull);
+
+        let mut retained = PixelFrameState::new(PixelBackingRetention::RetainedAcrossFrames);
+        let mut retained_pixels = vec![0; 4];
+        let error = {
+            let mut frame = XrgbPixelFrame::new(&mut retained_pixels, 2, 2, 1.0, &mut retained);
+            frame
+                .commit(PixelFrameWrite::Partial(PixelRect::new(0, 0, 1, 1)))
+                .expect_err("invalid retained content requires full")
+        };
+        assert_eq!(error, PixelFrameError::InvalidContentRequiresFull);
+
+        let mut retained = PixelFrameState::new(PixelBackingRetention::RetainedAcrossFrames);
+        let mut retained_pixels = vec![0; 4];
+        {
+            let mut frame = XrgbPixelFrame::new(&mut retained_pixels, 2, 2, 1.0, &mut retained);
+            frame.write_receipt().expect("initial full write");
+        }
+        {
+            let mut frame = XrgbPixelFrame::new(&mut retained_pixels, 2, 2, 1.0, &mut retained);
+            assert_eq!(
+                frame
+                    .commit(PixelFrameWrite::Partial(PixelRect::new(0, 0, 1, 1)))
+                    .expect("valid partial write")
+                    .write,
+                PixelFrameWrite::Partial(PixelRect::new(0, 0, 1, 1))
+            );
+        }
+        {
+            let mut frame = XrgbPixelFrame::new(&mut retained_pixels, 2, 2, 1.0, &mut retained);
+            assert_eq!(
+                frame
+                    .commit(PixelFrameWrite::None)
+                    .expect("valid no-op write")
+                    .write,
+                PixelFrameWrite::None
+            );
+        }
+    }
+
+    #[test]
+    fn partial_frame_write_rejects_empty_and_out_of_bounds_regions() {
+        let mut state = PixelFrameState::new(PixelBackingRetention::RetainedAcrossFrames);
+        let mut pixels = vec![0; 4];
+        {
+            let mut frame = XrgbPixelFrame::new(&mut pixels, 2, 2, 1.0, &mut state);
+            frame.write_receipt().expect("initial full write");
+        }
+
+        let error = {
+            let mut frame = XrgbPixelFrame::new(&mut pixels, 2, 2, 1.0, &mut state);
+            frame
+                .commit(PixelFrameWrite::Partial(PixelRect::empty()))
+                .expect_err("empty partial write")
+        };
+        assert_eq!(error, PixelFrameError::EmptyPartial);
+
+        let mut state = PixelFrameState::new(PixelBackingRetention::RetainedAcrossFrames);
+        let mut pixels = vec![0; 4];
+        {
+            let mut frame = XrgbPixelFrame::new(&mut pixels, 2, 2, 1.0, &mut state);
+            frame.write_receipt().expect("initial full write");
+        }
+        let error = {
+            let mut frame = XrgbPixelFrame::new(&mut pixels, 2, 2, 1.0, &mut state);
+            frame
+                .commit(PixelFrameWrite::Partial(PixelRect::new(1, 1, 3, 2)))
+                .expect_err("out of bounds partial write")
+        };
+        assert_eq!(
+            error,
+            PixelFrameError::PartialOutOfBounds {
+                rect: PixelRect::new(1, 1, 3, 2),
+                width: 2,
+                height: 2,
+            }
+        );
     }
 }

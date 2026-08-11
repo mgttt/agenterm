@@ -49,10 +49,10 @@ use agenterm_platform::input::{
 use agenterm_platform::pty::{BoundedOutputPipe, ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::window_host::{
-    GeometryChange, LogicalPoint, LogicalSize, PixelPointerCursor, PixelRect as HostPixelRect,
-    PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
-    PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
-    run_pixel_window,
+    GeometryChange, LogicalPoint, LogicalSize, PixelBackingRetention, PixelFrameWrite,
+    PixelPointerCursor, PixelRect as HostPixelRect, PixelWindow, PixelWindowApplication,
+    PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions, PointerButton,
+    PointerButtonState, WheelDelta, XrgbPixelFrame, run_pixel_window,
 };
 use agenterm_ui_core::{
     DirtyRegion, DirtyRows, PixelRect, RetainedXrgbFrame, ScrollbarHit, ScrollbarThumbDrag,
@@ -791,6 +791,9 @@ struct PerfStats {
     partial_candidate_frames: u64,
     dirty_pixels: u64,
     frame_pixels: u64,
+    host_direct_frames: u64,
+    host_copy_frames: u64,
+    host_copy_pixels: u64,
     platform_present: PixelPresentStats,
     present_baseline: PixelPresentStats,
     present_sequence_seen: u64,
@@ -824,6 +827,16 @@ impl PerfStats {
                 .dirty_pixels
                 .saturating_add(candidate.dirty_pixels(width, height));
         }
+    }
+
+    fn record_host_direct_frame(&mut self) {
+        self.host_direct_frames = self.host_direct_frames.saturating_add(1);
+    }
+
+    fn record_host_copy_frame(&mut self, width: u32, height: u32) {
+        self.host_copy_frames = self.host_copy_frames.saturating_add(1);
+        let pixels = u64::from(width).saturating_mul(u64::from(height));
+        self.host_copy_pixels = self.host_copy_pixels.saturating_add(pixels);
     }
 
     /// Samples the platform's cumulative ledger without adding a second
@@ -894,6 +907,9 @@ impl PerfStats {
             ),
             ("dirty_pixels", self.dirty_pixels.into()),
             ("frame_pixels", self.frame_pixels.into()),
+            ("host_direct_frames", self.host_direct_frames.into()),
+            ("host_copy_frames", self.host_copy_frames.into()),
+            ("host_copy_pixels", self.host_copy_pixels.into()),
             ("present_count", present.count.into()),
             ("present_success", present.success_count.into()),
             ("present_failure", present.failure_count.into()),
@@ -934,6 +950,9 @@ mod perf_stats_tests {
             "partial_candidate_frames",
             "dirty_pixels",
             "frame_pixels",
+            "host_direct_frames",
+            "host_copy_frames",
+            "host_copy_pixels",
         ] {
             assert!(serialized.contains(field), "missing {field}: {serialized}");
         }
@@ -944,6 +963,23 @@ mod perf_stats_tests {
         assert_eq!(stats.partial_candidate_frames, 0);
         assert_eq!(stats.dirty_pixels, 0);
         assert_eq!(stats.frame_pixels, 0);
+        assert_eq!(stats.host_direct_frames, 0);
+        assert_eq!(stats.host_copy_frames, 0);
+        assert_eq!(stats.host_copy_pixels, 0);
+    }
+
+    #[test]
+    fn host_copy_stats_count_actual_pixels_and_saturate() {
+        let mut stats = PerfStats::default();
+        stats.record_host_direct_frame();
+        stats.record_host_copy_frame(10, 20);
+        assert_eq!(stats.host_direct_frames, 1);
+        assert_eq!(stats.host_copy_frames, 1);
+        assert_eq!(stats.host_copy_pixels, 200);
+
+        stats.host_copy_pixels = u64::MAX - 1;
+        stats.record_host_copy_frame(u32::MAX, u32::MAX);
+        assert_eq!(stats.host_copy_pixels, u64::MAX);
     }
 
     #[test]
@@ -1032,6 +1068,47 @@ mod perf_stats_tests {
         assert_eq!(
             candidate_redraw_request(DirtyRegion::empty(), 100, 80),
             CandidateRedrawRequest::None
+        );
+    }
+
+    #[test]
+    fn frame_write_mapping_for_direct_and_transient_hosts() {
+        let mut partial = DirtyRegion::empty();
+        partial.mark_rect(PixelRect::from_xywh(4, 6, 16, 24));
+
+        assert_eq!(
+            frame_write_for_candidate(
+                PixelBackingRetention::RetainedAcrossFrames,
+                false,
+                partial,
+                100,
+                80,
+            ),
+            PixelFrameWrite::Full
+        );
+        assert_eq!(
+            frame_write_for_candidate(
+                PixelBackingRetention::RetainedAcrossFrames,
+                true,
+                partial,
+                100,
+                80,
+            ),
+            PixelFrameWrite::Partial(HostPixelRect::new(4, 6, 20, 30))
+        );
+        assert_eq!(
+            frame_write_for_candidate(
+                PixelBackingRetention::RetainedAcrossFrames,
+                true,
+                DirtyRegion::empty(),
+                100,
+                80,
+            ),
+            PixelFrameWrite::None
+        );
+        assert_eq!(
+            frame_write_for_candidate(PixelBackingRetention::Transient, true, partial, 100, 80,),
+            PixelFrameWrite::Full
         );
     }
 }
@@ -1903,14 +1980,14 @@ impl ConApp {
 
     fn paint_chrome(
         &self,
-        frame: &mut RetainedXrgbFrame,
+        pixels: &mut [u32],
+        width: u32,
+        height: u32,
         candidate: DirtyRegion,
     ) -> Result<(), PixelWindowError> {
         let session = self.active_session()?;
-        let width = frame.width();
-        let height = frame.height();
         let clip = candidate_bounds(candidate, width, height);
-        let mut surface = Surface::with_clip(frame.pixels_mut(), width, height, clip);
+        let mut surface = Surface::with_clip(pixels, width, height, clip);
         let scale = session.scale.max(1.0);
         let layout = self.layout(width, height, scale);
         let tree_width = layout.sidebar.width;
@@ -3924,7 +4001,9 @@ impl ConTerminal {
     fn render(
         &mut self,
         window: &PixelWindow,
-        frame: &mut RetainedXrgbFrame,
+        pixels: &mut [u32],
+        width: u32,
+        height: u32,
         candidate: DirtyRegion,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         // Apply OSC title changes (shell emits \e]0;title\a).
@@ -3933,15 +4012,15 @@ impl ConTerminal {
             window.set_title(&self.current_title);
         }
 
-        let fw = frame.width();
-        let fh = frame.height();
+        let fw = width;
+        let fh = height;
         if candidate.is_empty() {
             self.write_snapshot_if_requested();
             return Ok(PixelWindowDirective::Continue);
         }
         let bg_word = self.default_bg.to_xrgb();
         let clip = candidate_bounds(candidate, fw, fh);
-        let mut surface = Surface::with_clip(frame.pixels_mut(), fw, fh, clip);
+        let mut surface = Surface::with_clip(pixels, fw, fh, clip);
         if candidate.is_full() {
             surface.fill_rect(0, 0, fw, fh, bg_word);
         } else {
@@ -4335,18 +4414,39 @@ impl PixelWindowApplication for ConApp {
         self.perf_stats.sync_present_stats(window.present_stats());
         let width = frame.width();
         let height = frame.height();
+        let frame_info = frame.info();
+        let host_retains_pixels = matches!(
+            frame_info.retention,
+            PixelBackingRetention::RetainedAcrossFrames
+        );
+        macro_rules! render_try {
+            ($expression:expr) => {{
+                match $expression {
+                    Ok(value) => value,
+                    Err(error) => {
+                        if !host_retains_pixels {
+                            self.retained.invalidate();
+                        }
+                        return Err(error);
+                    }
+                }
+            }};
+        }
         let scale = self.active_session()?.scale.max(1.0);
         self.note_frame_dimensions(width, height, scale);
-        self.active_session_mut()?
-            .note_frame_dimensions(width, height);
-        let retained_requires_full = match self.retained.prepare(width, height) {
-            Ok(requires_full) => requires_full,
-            Err(error) => {
-                self.retained.invalidate();
-                return Err(PixelWindowError::failed(
-                    "con_retained_frame",
-                    error.to_string(),
-                ));
+        render_try!(self.active_session_mut()).note_frame_dimensions(width, height);
+        let retained_requires_full = if host_retains_pixels {
+            !frame_info.content_valid
+        } else {
+            match self.retained.prepare(width, height) {
+                Ok(requires_full) => requires_full,
+                Err(error) => {
+                    self.retained.invalidate();
+                    return Err(PixelWindowError::failed(
+                        "con_retained_frame",
+                        error.to_string(),
+                    ));
+                }
             }
         };
         if retained_requires_full {
@@ -4359,7 +4459,7 @@ impl PixelWindowApplication for ConApp {
         // cells, cursor state, modes, scrollback, and selection, so it always
         // upgrades the candidate to full before raster starts.
         let (drain, wake_pending) = {
-            let session = self.active_session_mut()?;
+            let session = render_try!(self.active_session_mut());
             let drain = session.drain_pty();
             let wake_pending = session.pty_wake_pending.load(Ordering::Acquire);
             (drain, wake_pending)
@@ -4383,63 +4483,120 @@ impl PixelWindowApplication for ConApp {
         // The candidate is complete before either product surface starts
         // rasterizing. A late dirty state is therefore a programming error,
         // not an excuse to label a partial frame after the fact.
-        let candidate = self.take_dirty_candidate(width, height);
+        let mut candidate = self.take_dirty_candidate(width, height);
+        if host_retains_pixels && !frame_info.content_valid {
+            candidate = DirtyRegion::full_frame(width, height);
+        }
         if candidate.is_full() {
             // A late resize, PTY drain, or invalidation must widen the native
             // update region before a partial GDI present can be accepted.
             window.request_redraw();
         }
         let render_started = Instant::now();
-        let active_id = self.workspace.active().ok_or_else(|| {
-            PixelWindowError::failed("con_session_missing", "no active terminal session")
-        })?;
-        let directive = {
-            let session = self.sessions.get_mut(&active_id).ok_or_else(|| {
-                PixelWindowError::failed("con_session_missing", "active terminal session missing")
-            })?;
-            match session.render(window, &mut self.retained, candidate) {
+        let active_id = match self.workspace.active() {
+            Some(id) => id,
+            None => {
+                if !host_retains_pixels {
+                    self.retained.invalidate();
+                }
+                return Err(PixelWindowError::failed(
+                    "con_session_missing",
+                    "no active terminal session",
+                ));
+            }
+        };
+        let directive = if host_retains_pixels {
+            let render_result = {
+                let session = match self.sessions.get_mut(&active_id) {
+                    Some(session) => session,
+                    None => {
+                        return Err(PixelWindowError::failed(
+                            "con_session_missing",
+                            "active terminal session missing",
+                        ));
+                    }
+                };
+                session.render(window, frame.pixels_mut(), width, height, candidate)
+            };
+            let directive = render_result?;
+            if !candidate.is_empty() {
+                self.paint_chrome(frame.pixels_mut(), width, height, candidate)?;
+            }
+            directive
+        } else {
+            let mut retained = std::mem::take(&mut self.retained);
+            let render_result = {
+                let session = match self.sessions.get_mut(&active_id) {
+                    Some(session) => session,
+                    None => {
+                        self.retained = retained;
+                        self.retained.invalidate();
+                        return Err(PixelWindowError::failed(
+                            "con_session_missing",
+                            "active terminal session missing",
+                        ));
+                    }
+                };
+                session.render(window, retained.pixels_mut(), width, height, candidate)
+            };
+            let directive = match render_result {
                 Ok(directive) => directive,
                 Err(error) => {
+                    self.retained = retained;
                     self.retained.invalidate();
                     return Err(error);
                 }
-            }
-        };
-        if !candidate.is_empty() {
-            let mut retained = std::mem::take(&mut self.retained);
-            let paint_result = self.paint_chrome(&mut retained, candidate);
-            self.retained = retained;
-            if let Err(error) = paint_result {
+            };
+            if !candidate.is_empty()
+                && let Err(error) =
+                    self.paint_chrome(retained.pixels_mut(), width, height, candidate)
+            {
+                self.retained = retained;
                 self.retained.invalidate();
                 return Err(error);
             }
-        }
-        self.retained.mark_valid();
+            self.retained = retained;
+            self.retained.mark_valid();
+            directive
+        };
         let (pending_screenshot, pending_control_screenshot) = {
-            let session = self.sessions.get_mut(&active_id).ok_or_else(|| {
+            let session = render_try!(self.sessions.get_mut(&active_id).ok_or_else(|| {
                 PixelWindowError::failed("con_session_missing", "active terminal session missing")
-            })?;
+            }));
             (
                 session.pending_screenshot.take(),
                 session.pending_control_screenshot.take(),
             )
         };
         if let Some(path) = pending_screenshot {
-            let _ = agent_interface::write_png_atomic(
-                path.as_path(),
-                self.retained.pixels(),
-                width,
-                height,
-            );
+            if host_retains_pixels {
+                let _ = agent_interface::write_png_atomic(
+                    path.as_path(),
+                    frame.pixels_mut(),
+                    width,
+                    height,
+                );
+            } else {
+                let _ = agent_interface::write_png_atomic(
+                    path.as_path(),
+                    self.retained.pixels(),
+                    width,
+                    height,
+                );
+            }
         }
         if let Some((path, reply)) = pending_control_screenshot {
             let encode_started = Instant::now();
-            let write_result = agent_interface::write_png_atomic(
-                path.as_path(),
-                self.retained.pixels(),
-                width,
-                height,
-            );
+            let write_result = if host_retains_pixels {
+                agent_interface::write_png_atomic(path.as_path(), frame.pixels_mut(), width, height)
+            } else {
+                agent_interface::write_png_atomic(
+                    path.as_path(),
+                    self.retained.pixels(),
+                    width,
+                    height,
+                )
+            };
             let encode_ns = encode_started
                 .elapsed()
                 .as_nanos()
@@ -4456,12 +4613,37 @@ impl PixelWindowApplication for ConApp {
                 .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
         }
-        if let Err(error) = self.retained.copy_to(frame.pixels_mut(), width, height) {
-            self.retained.invalidate();
-            return Err(PixelWindowError::failed(
-                "con_retained_copy",
-                error.to_string(),
-            ));
+        let write = frame_write_for_candidate(
+            frame_info.retention,
+            frame_info.content_valid,
+            candidate,
+            width,
+            height,
+        );
+        if host_retains_pixels {
+            if let Err(error) = frame.commit(write) {
+                return Err(PixelWindowError::failed(
+                    "con_frame_commit",
+                    error.to_string(),
+                ));
+            }
+            self.perf_stats.record_host_direct_frame();
+        } else {
+            if let Err(error) = self.retained.copy_to(frame.pixels_mut(), width, height) {
+                self.retained.invalidate();
+                return Err(PixelWindowError::failed(
+                    "con_retained_copy",
+                    error.to_string(),
+                ));
+            }
+            if let Err(error) = frame.commit(PixelFrameWrite::Full) {
+                self.retained.invalidate();
+                return Err(PixelWindowError::failed(
+                    "con_frame_commit",
+                    error.to_string(),
+                ));
+            }
+            self.perf_stats.record_host_copy_frame(width, height);
         }
         self.perf_stats.record_frame(render_started.elapsed());
         self.perf_stats
@@ -4607,6 +4789,23 @@ fn candidate_redraw_request(
             bounds.right,
             bounds.bottom,
         ))
+    }
+}
+
+fn frame_write_for_candidate(
+    retention: PixelBackingRetention,
+    content_valid: bool,
+    candidate: DirtyRegion,
+    width: u32,
+    height: u32,
+) -> PixelFrameWrite {
+    if matches!(retention, PixelBackingRetention::Transient) || !content_valid {
+        return PixelFrameWrite::Full;
+    }
+    match candidate_redraw_request(candidate, width, height) {
+        CandidateRedrawRequest::None => PixelFrameWrite::None,
+        CandidateRedrawRequest::Full => PixelFrameWrite::Full,
+        CandidateRedrawRequest::Partial(rect) => PixelFrameWrite::Partial(rect),
     }
 }
 
@@ -5561,6 +5760,21 @@ mod tests {
         assert_eq!(partial_pixels, full_pixels);
         assert_eq!(partial_pixels[0], 0);
         assert_eq!(partial_pixels[(7 * width + 15) as usize], 0);
+    }
+
+    #[test]
+    fn direct_host_target_pixels_match_retained_raster_pixel_for_pixel() {
+        let width = 9u32;
+        let height = 5u32;
+        let mut retained_pixels = vec![0u32; (width * height) as usize];
+        let mut direct_pixels = vec![0u32; (width * height) as usize];
+        for pixels in [&mut retained_pixels, &mut direct_pixels] {
+            let mut surface = Surface::new(pixels, width, height);
+            surface.fill_rect(0, 0, width, height, 0x0001_0203);
+            surface.fill_rect(2, 1, 4, 2, 0x000A_0B0C);
+            surface.fill_rect(6, 3, 2, 1, 0x000D_0E0F);
+        }
+        assert_eq!(direct_pixels, retained_pixels);
     }
 
     #[test]

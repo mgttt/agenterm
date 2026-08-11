@@ -64,10 +64,11 @@ use crate::contract::{
         PixelPresentStats, elapsed_ns_since,
     },
     window_host::{
-        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
-        PixelWindow, PixelWindowApplication, PixelWindowBackend, PixelWindowDirective,
-        PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
-        PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
+        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelBackingRetention,
+        PixelFrameState, PixelPointerCursor, PixelRect, PixelWindow, PixelWindowApplication,
+        PixelWindowBackend, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
+        PixelWindowMetrics, PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta,
+        WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
     },
 };
 
@@ -426,6 +427,10 @@ struct HostState {
     ime_decoder: Utf16TextDecoder,
     ime_composing: bool,
     tracking_mouse: bool,
+    frame_state: PixelFrameState,
+    frame_width: u32,
+    frame_height: u32,
+    frame_scale_bits: u64,
 }
 
 pub(crate) fn run_pixel_window(
@@ -491,6 +496,10 @@ pub(crate) fn run_pixel_window(
         ime_decoder: Utf16TextDecoder::default(),
         ime_composing: false,
         tracking_mouse: false,
+        frame_state: PixelFrameState::new(PixelBackingRetention::RetainedAcrossFrames),
+        frame_width: 0,
+        frame_height: 0,
+        frame_scale_bits: 0,
     });
     let title = wide_null(&options.title);
     let hwnd = unsafe {
@@ -601,6 +610,7 @@ unsafe extern "system" fn window_proc(
         Ok(value) => value,
         Err(_) => {
             let state = unsafe { &mut *state };
+            state.frame_state.invalidate();
             if state.deferred_error.is_none() {
                 state.deferred_error = Some(PixelWindowError::failed(
                     "pixel_window_host_panic",
@@ -840,7 +850,8 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
 
     let result = (|| {
         let metrics = *state.backend.metrics.borrow();
-        if !metrics.is_drawable() {
+        sync_frame_geometry(state, metrics);
+        if paint_should_skip(unsafe { IsIconic(hwnd) } != 0, metrics) {
             return Ok(());
         }
         let count = u64::from(metrics.physical_width)
@@ -859,14 +870,24 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
                 metrics.physical_width,
                 metrics.physical_height,
                 metrics.scale_factor,
+                &mut state.frame_state,
             );
-            catch_application("render", || {
+            match catch_application("render", || {
                 state.application.render(&state.window, &mut frame)
-            })
+            }) {
+                Ok(directive) => frame
+                    .write_receipt()
+                    .map(|receipt| (directive, receipt))
+                    .map_err(|error| {
+                        PixelWindowError::failed("pixel_window_frame_commit_failed", error)
+                    }),
+                Err(error) => Err(error),
+            }
         };
         let directive = match render_result {
-            Ok(directive) => directive,
+            Ok((directive, _receipt)) => directive,
             Err(error) => {
+                state.frame_state.invalidate();
                 apply_directive(state, Err(error));
                 return Ok(());
             }
@@ -943,10 +964,14 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
         Ok(())
     })();
     let end_result = session.finish();
-    match result {
+    let result = match result {
         Err(error) => Err(error),
         Ok(()) => end_result,
+    };
+    if result.is_err() {
+        state.frame_state.invalidate();
     }
+    result
 }
 
 fn validate_stretch_copy(
@@ -986,6 +1011,35 @@ fn present_pixels_for_geometry(
     (region, requested_pixels, completed_pixels)
 }
 
+fn frame_geometry_changed(
+    previous_width: u32,
+    previous_height: u32,
+    previous_scale_bits: u64,
+    metrics: PixelWindowMetrics,
+) -> bool {
+    previous_width != metrics.physical_width
+        || previous_height != metrics.physical_height
+        || previous_scale_bits != metrics.scale_factor.to_bits()
+}
+
+fn sync_frame_geometry(state: &mut HostState, metrics: PixelWindowMetrics) {
+    if frame_geometry_changed(
+        state.frame_width,
+        state.frame_height,
+        state.frame_scale_bits,
+        metrics,
+    ) {
+        state.frame_state.advance_generation();
+        state.frame_width = metrics.physical_width;
+        state.frame_height = metrics.physical_height;
+        state.frame_scale_bits = metrics.scale_factor.to_bits();
+    }
+}
+
+fn paint_should_skip(minimized: bool, metrics: PixelWindowMetrics) -> bool {
+    minimized || !metrics.is_drawable()
+}
+
 fn update_metrics(state: &mut HostState, change: GeometryChange, notify: bool) {
     let hwnd = state.backend.hwnd.get();
     if hwnd.is_null() {
@@ -1007,6 +1061,7 @@ fn update_metrics(state: &mut HostState, change: GeometryChange, notify: bool) {
         scale_factor: scale,
     };
     *state.backend.metrics.borrow_mut() = metrics;
+    sync_frame_geometry(state, metrics);
     if notify && state.opened && metrics.is_drawable() {
         dispatch_event(state, PixelWindowEvent::GeometryChanged { change, metrics });
     }
@@ -1357,6 +1412,39 @@ mod tests {
             present_pixels_for_geometry(partial, 100, 50, -1),
             (PixelPresentRegion::Partial, 200, 0)
         );
+    }
+
+    #[test]
+    fn frame_geometry_change_detects_scale_without_size_change() {
+        let metrics = PixelWindowMetrics {
+            logical_size: LogicalSize::new(100.0, 80.0),
+            physical_width: 100,
+            physical_height: 80,
+            scale_factor: 1.5,
+        };
+        assert!(!frame_geometry_changed(100, 80, 1.5_f64.to_bits(), metrics));
+        assert!(frame_geometry_changed(100, 80, 1.0_f64.to_bits(), metrics));
+        assert!(frame_geometry_changed(99, 80, 1.5_f64.to_bits(), metrics));
+    }
+
+    #[test]
+    fn minimized_or_nondrawable_metrics_suppress_paint() {
+        let metrics = PixelWindowMetrics {
+            logical_size: LogicalSize::new(100.0, 80.0),
+            physical_width: 100,
+            physical_height: 80,
+            scale_factor: 1.0,
+        };
+        assert!(paint_should_skip(true, metrics));
+        assert!(!paint_should_skip(false, metrics));
+        assert!(paint_should_skip(
+            false,
+            PixelWindowMetrics {
+                physical_width: 0,
+                physical_height: 80,
+                ..metrics
+            }
+        ));
     }
 
     #[test]
