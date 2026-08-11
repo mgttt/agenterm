@@ -610,8 +610,18 @@ integrated validation recorded below):
   before AboutToWait so a fast child cannot report exit before its final PTY
   output is rendered. The con owner passes 70 unit tests, its public-control GUI
   black box, and 16 active terminal black-box cases with zero failures. This is
-  not yet the selected production host: IME preedit/candidate, pointer capture
-  loss, DPI suggested-rect and human input acceptance remain explicit gaps.
+  selected con host now also consumes the existing IMM32 composition cache,
+  emits preedit/commit events, suppresses raw composing WM_CHAR echoes, anchors
+  candidate/composition windows in the client coordinate space required by
+  IMM32, captures pointer gestures and reports capture loss, tracks real mouse
+  leave, and applies checked WM_DPICHANGED suggested rectangles. GCS_CURSORPOS
+  UTF-16 units are converted to contract char indices without splitting
+  surrogate pairs. Human Chinese-IME input acceptance remains an explicit gap.
+  The owning platform lib suite is 70/70: its former Windows-unsupported runner
+  test is feature-gated correctly, while the native runner test exits from
+  `opened` and proves deterministic window destruction. This removed a real
+  harness defect that left one locked test executable after every timed-out
+  native-feature run.
 - [x] Pixel-window host selection is now a real Cargo boundary rather than a
   source-only cfg. `window` owns the typed contract and OS API surface,
   `portable-pixel-window` owns winit/softbuffer, and `native-pixel-window` owns

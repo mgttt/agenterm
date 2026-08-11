@@ -27,11 +27,13 @@ use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::{
         HiDpi::GetDpiForWindow,
+        Input::Ime::{IACE_DEFAULT, ImmAssociateContextEx},
         Input::KeyboardAndMouse::{
-            GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
-            VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12,
-            VK_HOME, VK_INSERT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
-            VK_SPACE, VK_TAB, VK_UP,
+            GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE,
+            TRACKMOUSEEVENT, TrackMouseEvent, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END,
+            VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10,
+            VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN,
+            VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
             CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
@@ -40,12 +42,13 @@ use windows_sys::Win32::{
             KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW, RegisterClassW,
             SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
             SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-            SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE,
-            WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
-            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
-            WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
-            WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW,
-            WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CANCELMODE,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
+            WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT,
+            WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+            WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE,
+            WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     },
 };
@@ -64,6 +67,8 @@ use crate::contract::{
 };
 
 const WAKE_MESSAGE: u32 = WM_APP + 0x41;
+const CAPTURE_MESSAGE: u32 = WM_APP + 0x42;
+const IME_ALLOWED_MESSAGE: u32 = WM_APP + 0x43;
 const MOUSE_LEAVE_MESSAGE: u32 = 0x02a3;
 const WAIT_TIMER_ID: usize = 0x41;
 const CLASS_NAME: &str = "AgenTermNativePixelWindow";
@@ -73,6 +78,8 @@ struct Backend {
     wake_hwnd: Arc<AtomicIsize>,
     metrics: RefCell<PixelWindowMetrics>,
     alive: Arc<AtomicBool>,
+    capture_active: Cell<bool>,
+    ime_allowed: Cell<bool>,
 }
 
 impl PixelWindowBackend for Backend {
@@ -175,7 +182,36 @@ impl PixelWindowBackend for Backend {
         Ok(())
     }
 
-    fn set_ime_allowed(&self, _allowed: bool) {}
+    fn set_pointer_capture(&self, captured: bool) -> Result<(), PixelWindowError> {
+        let hwnd = self.hwnd.get();
+        if hwnd.is_null() {
+            return Err(closed_error());
+        }
+        if captured {
+            unsafe { SetCapture(hwnd) };
+            if unsafe { GetCapture() } != hwnd {
+                return Err(PixelWindowError::failed(
+                    "pixel_window_pointer_capture_failed",
+                    "SetCapture did not transfer pointer capture to the pixel window",
+                ));
+            }
+            self.capture_active.set(true);
+        } else {
+            self.capture_active.set(false);
+            if unsafe { PostMessageW(hwnd, CAPTURE_MESSAGE, 0, 0) } == 0 {
+                return Err(last_error("pixel_window_pointer_release_post_failed"));
+            }
+        }
+        Ok(())
+    }
+
+    fn set_ime_allowed(&self, allowed: bool) {
+        self.ime_allowed.set(allowed);
+        let hwnd = self.hwnd.get();
+        if !hwnd.is_null() {
+            unsafe { PostMessageW(hwnd, IME_ALLOWED_MESSAGE, usize::from(allowed), 0) };
+        }
+    }
 
     fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError> {
         let scale = self.metrics.borrow().scale_factor;
@@ -196,6 +232,9 @@ struct HostState {
     exit: bool,
     deferred_error: Option<PixelWindowError>,
     decoder: Utf16TextDecoder,
+    ime_decoder: Utf16TextDecoder,
+    ime_composing: bool,
+    tracking_mouse: bool,
 }
 
 pub(crate) fn run_pixel_window(
@@ -232,6 +271,8 @@ pub(crate) fn run_pixel_window(
         wake_hwnd: Arc::new(AtomicIsize::new(0)),
         metrics: RefCell::new(initial_metrics),
         alive: Arc::clone(&alive),
+        capture_active: Cell::new(false),
+        ime_allowed: Cell::new(options.ime_allowed),
     });
     let wake_alive = Arc::clone(&alive);
     let wake_hwnd = Arc::clone(&backend.wake_hwnd);
@@ -255,6 +296,9 @@ pub(crate) fn run_pixel_window(
         exit: false,
         deferred_error: None,
         decoder: Utf16TextDecoder::default(),
+        ime_decoder: Utf16TextDecoder::default(),
+        ime_composing: false,
+        tracking_mouse: false,
     });
     let title = wide_null(&options.title);
     let hwnd = unsafe {
@@ -278,6 +322,7 @@ pub(crate) fn run_pixel_window(
     }
     backend.hwnd.set(hwnd);
     backend.wake_hwnd.store(hwnd as isize, Ordering::Release);
+    apply_ime_allowed(hwnd, options.ime_allowed);
     update_metrics(&mut state, GeometryChange::Resized, false);
     let opened = state.application.opened(&state.window);
     apply_directive(&mut state, opened);
@@ -402,15 +447,60 @@ unsafe fn dispatch_message(
             0
         }
         WM_DPICHANGED => {
+            apply_dpi_suggested_rect(hwnd, lparam);
             update_metrics(state, GeometryChange::ScaleFactorChanged, true);
             0
         }
         WM_SETFOCUS => {
             dispatch_event(state, PixelWindowEvent::FocusChanged(true));
+            if state.backend.ime_allowed.get() {
+                dispatch_event(
+                    state,
+                    PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Enabled),
+                );
+            }
             0
         }
         WM_KILLFOCUS => {
+            state.ime_composing = false;
+            crate::selected::ime::refresh_from_message(hwnd, WM_IME_ENDCOMPOSITION);
+            dispatch_event(
+                state,
+                PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Disabled),
+            );
             dispatch_event(state, PixelWindowEvent::FocusChanged(false));
+            0
+        }
+        WM_IME_SETCONTEXT => {
+            const IS_SHOWUICOMPOSITIONWINDOW: isize = 0x0002;
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam & !IS_SHOWUICOMPOSITIONWINDOW) }
+        }
+        WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
+            crate::selected::ime::refresh_from_message(hwnd, message);
+            let composition = crate::selected::ime::composition();
+            state.ime_composing = message != WM_IME_ENDCOMPOSITION && composition.is_some();
+            let (text, cursor) = composition.map_or_else(
+                || (String::new(), None),
+                |composition| {
+                    let cursor = composition.cursor;
+                    (composition.text, Some((cursor, cursor)))
+                },
+            );
+            dispatch_event(
+                state,
+                PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Preedit { text, cursor }),
+            );
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+        WM_IME_CHAR => {
+            if let crate::contract::input::KeyClassification::TextCommit(text) =
+                state.ime_decoder.push(wparam as u16)
+            {
+                dispatch_event(
+                    state,
+                    PixelWindowEvent::Ime(crate::contract::ime::ImeEvent::Commit(text)),
+                );
+            }
             0
         }
         WAKE_MESSAGE => {
@@ -426,6 +516,9 @@ unsafe fn dispatch_message(
             }
         }
         WM_CHAR => {
+            if state.ime_composing {
+                return 0;
+            }
             if let crate::contract::input::KeyClassification::TextCommit(text) =
                 state.decoder.push(wparam as u16)
                 && text.chars().any(|character| !character.is_control())
@@ -443,6 +536,15 @@ unsafe fn dispatch_message(
             0
         }
         WM_MOUSEMOVE => {
+            if !state.tracking_mouse {
+                let mut tracking = TRACKMOUSEEVENT {
+                    cbSize: mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
+                state.tracking_mouse = unsafe { TrackMouseEvent(&mut tracking) } != 0;
+            }
             let scale_factor = state.backend.metrics.borrow().scale_factor;
             dispatch_event(
                 state,
@@ -454,7 +556,21 @@ unsafe fn dispatch_message(
             0
         }
         MOUSE_LEAVE_MESSAGE => {
+            state.tracking_mouse = false;
             dispatch_event(state, PixelWindowEvent::PointerLeft);
+            0
+        }
+        WM_CAPTURECHANGED => {
+            if state.backend.capture_active.replace(false) && lparam as HWND != hwnd {
+                dispatch_event(state, PixelWindowEvent::PointerCaptureLost);
+            }
+            0
+        }
+        WM_CANCELMODE => {
+            if state.backend.capture_active.replace(false) {
+                unsafe { ReleaseCapture() };
+                dispatch_event(state, PixelWindowEvent::PointerCaptureLost);
+            }
             0
         }
         WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
@@ -496,6 +612,16 @@ unsafe fn dispatch_message(
         WM_TIMER if wparam == WAIT_TIMER_ID => {
             unsafe { KillTimer(hwnd, WAIT_TIMER_ID) };
             dispatch_event(state, PixelWindowEvent::Wake);
+            0
+        }
+        CAPTURE_MESSAGE => {
+            if unsafe { GetCapture() } == hwnd {
+                unsafe { ReleaseCapture() };
+            }
+            0
+        }
+        IME_ALLOWED_MESSAGE => {
+            apply_ime_allowed(hwnd, wparam != 0);
             0
         }
         _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
@@ -575,6 +701,38 @@ fn update_metrics(state: &mut HostState, change: GeometryChange, notify: bool) {
     if notify && state.opened && metrics.is_drawable() {
         dispatch_event(state, PixelWindowEvent::GeometryChanged { change, metrics });
     }
+}
+
+fn apply_dpi_suggested_rect(hwnd: HWND, lparam: LPARAM) {
+    let suggested = lparam as *const RECT;
+    if suggested.is_null() {
+        return;
+    }
+    let rect = unsafe { &*suggested };
+    if let Some((x, y, width, height)) = suggested_rect_geometry(rect) {
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                ptr::null_mut(),
+                x,
+                y,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_NOZORDER,
+            )
+        };
+    }
+}
+
+fn suggested_rect_geometry(rect: &RECT) -> Option<(i32, i32, i32, i32)> {
+    let width = rect.right.checked_sub(rect.left)?;
+    let height = rect.bottom.checked_sub(rect.top)?;
+    (width > 0 && height > 0).then_some((rect.left, rect.top, width, height))
+}
+
+fn apply_ime_allowed(hwnd: HWND, allowed: bool) {
+    let flags = if allowed { IACE_DEFAULT } else { 0 };
+    unsafe { ImmAssociateContextEx(hwnd, ptr::null_mut(), flags) };
 }
 
 fn dispatch_event(state: &mut HostState, event: PixelWindowEvent) {
@@ -723,4 +881,40 @@ fn last_error(code: &'static str) -> PixelWindowError {
 
 fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dpi_suggested_rect_requires_positive_checked_extents() {
+        assert_eq!(
+            suggested_rect_geometry(&RECT {
+                left: 10,
+                top: 20,
+                right: 810,
+                bottom: 620,
+            }),
+            Some((10, 20, 800, 600))
+        );
+        assert_eq!(
+            suggested_rect_geometry(&RECT {
+                left: 10,
+                top: 20,
+                right: 10,
+                bottom: 620,
+            }),
+            None
+        );
+        assert_eq!(
+            suggested_rect_geometry(&RECT {
+                left: i32::MIN,
+                top: 0,
+                right: i32::MAX,
+                bottom: 1,
+            }),
+            None
+        );
+    }
 }

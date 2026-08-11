@@ -174,6 +174,12 @@ impl PixelWindowBackend for NativeWindowBackend {
         Ok(())
     }
 
+    fn set_pointer_capture(&self, _captured: bool) -> Result<(), PixelWindowError> {
+        Err(PixelWindowError::unsupported(
+            "portable pixel-window pointer capture is not implemented",
+        ))
+    }
+
     fn set_ime_allowed(&self, allowed: bool) {
         self.window.set_ime_allowed(allowed);
     }

@@ -207,7 +207,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   requests and responses are size/time bounded, screenshot success is returned
   only after atomic PNG output, and a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 70 binary unit tests plus a Windows
+  window. The owning suite now includes 71 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
@@ -232,12 +232,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its release PE is 848,384 bytes versus 1,046,528 bytes
-  for the current staged host. Evidence is 70 binary unit tests, the isolated
+  host; its release PE is 851,456 bytes versus 1,046,528 bytes
+  for the original portable host. Evidence is 71 binary unit tests, the isolated
   public-control GUI journey, and the Windows terminal black box at 16 passed,
   2 pre-existing ignored gaps, 0 failed. It remains non-default until native IME
-  preedit/candidate, pointer-capture loss, DPI suggested-rect and human keyboard
-  acceptance are covered. Its 59-line resolved dependency graph contains no
+  preedit/commit from IMM32, candidate anchoring in documented client
+  coordinates, matched pointer capture/loss cancellation, and DPI suggested
+  rectangles are wired. Human Chinese-IME keyboard acceptance remains required.
+  Its 59-line resolved dependency graph contains no
   winit, softbuffer, Rhai, HTTP/TLS or script-engine dependency; 512 KiB remains
   a target, not a shipped claim.
   clamps rather than selecting/closing an unrelated terminal. Visual styling

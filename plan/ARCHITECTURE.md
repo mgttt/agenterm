@@ -92,11 +92,13 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm-con` | `crates/agenterm-con/Cargo.toml` + `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 独立最小依赖 package；conhost 等价物（单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；局部纯 UI 规则与适配状态机分离） |
 
 `agenterm-con` 的窗口机制仍只能从 `agenterm-platform` 选择。Windows 已有
-`native-pixel-window` 实验 host：直接使用 User32 消息泵、GDI XRGB buffer 与
+`native-pixel-window` host：直接使用 User32 消息泵、GDI XRGB buffer 与
 `PixelWindowApplication` 中立合同，不把 HWND 或产品策略泄漏回 con。Linux/macOS
 继续由 winit/softbuffer adapter 实现同一合同；未来原生 X11/Wayland/Cocoa host 也应
-替换 adapter，而不是分叉产品状态机。该 feature 当前不是默认交付路径，默认切换前
-必须补齐 IME preedit/candidate、pointer capture loss、DPI suggested-rect 和真机输入证据。
+替换 adapter，而不是分叉产品状态机。Windows con 已默认选择 native host；主程序仍
+选择 portable host。Native host 已实现 IMM32 preedit/commit、candidate client-anchor、
+pointer capture/loss 和 DPI suggested-rect；中文输入法仍需真机人工验收，不能由合成
+WM_CHAR 或文本快照替代。
 
 **2026-08-09：** `agenterm-rh` / `agenterm-lua` / `agenterm-qjs` / `agenterm-sql`
 四个独立 `[[bin]]` 已退役（commit `234b2f87`），改为主 `agenterm` PE 的
@@ -192,10 +194,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
   `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
 - 体积与构建隔离是两个问题：Windows 原生 pixel host 与独立
-  `crates/agenterm-con` package 已把 release PE 从 1,046,528 B 降到 848,384 B；
+  `crates/agenterm-con` package 已把 release PE 从 1,046,528 B 降到 851,456 B；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
-  PE 只比拆包前 native 实验再少 512 B，证明未使用根依赖原本已被 linker 裁掉。
+  完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
+  依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。
   后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充 512 KiB 达标。
 
 ### 6.1 跨平台任务固定执行句式

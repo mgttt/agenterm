@@ -47,7 +47,7 @@ QuickJS 引擎 M0→M5d、跨引擎共享层 Common-M1→M7），合计占掉了
 ### 0.2 v0.1.16 留下的已知缺口（非本版引入，仅记录）
 
 - agenterm-con 方向键在真实 shell 里不生效（ConPTY 翻译疑点）
-- agenterm-con IME 端到端从未自动化验证
+- agenterm-con native host 已接 IMM32 preedit/commit 与候选框 client-anchor；真实中文输入法端到端仍需人工验收
 - qjs `check` 无 `shipped_surfaces` 级 API 静态校验（QJS-M6）
 - qjs `pack` 字节码 hash 是指纹而非加载依据（与 lua 同因不同由）
 - lua `check_many` 的 `--project-root`/`--timeout-ms` 已修复（Common-M7），但 lua 无 fail-closed entry 契约
@@ -71,7 +71,7 @@ CLI 请求与输出都有尺寸、数量、时限边界；解析错误、无效�
 | C-con-cli | [x] | 固定 GUI-lifetime `cli --control ENDPOINT` 已实现 `list-tabs`、new/select/close、capture、screenshot、send-text、send-keys、send-mouse、send-wheel、wait-text、perf-stats/reset-perf-stats；Windows 命名管道黑盒覆盖多 PTY 隔离、后台 2000 行压力、截图、异常请求、父节点提升和清理。PTY 队列有界、wake 合并且每 GUI turn 有解析预算，GUI 子系统的 pipe stdout 也已修复 | 不复用主程序 mux/control plane |
 | C-con-font | [ ] | 采用主程序同一原生字体/格宽度量路径，默认优先新宋体并验证 ASCII 1 格、CJK/Unicode 宽字符 2 格 | 不在 custom rasterizer 中混拼字体 face |
 | C-con-harness | [ ] | Windows 黑盒覆盖高输出、异常 ANSI/Unicode、重入输入、并发 CLI、建关标签、resize/DPI 风暴、IME/鼠标异常；进程与非目标会话持续可用 | 不承诺不可证明的“绝对不崩” |
-| C-con-native-host | [~] | `crates/agenterm-con` 已成为独立 package，Windows 默认以 User32/GDI 实现同一 platform contract，Linux/macOS 默认 portable；resolved normal graph 59 行且无 winit/softbuffer/Rhai/HTTP/TLS/script engine。70 单测、control GUI 黑盒、terminal 黑盒 16 pass/2 known-gap ignored/0 fail；release PE 由 1,046,528 B 降至 848,384 B。待补 IME preedit/candidate、capture-loss、DPI suggested-rect 与人工输入验收 | 不把 Win32 泄漏进产品层；不宣称已达 512 KiB |
+| C-con-native-host | [~] | `crates/agenterm-con` 为独立 package，Windows 默认 User32/GDI，Linux/macOS 默认 portable；resolved normal graph 59 行且无 winit/softbuffer/Rhai/HTTP/TLS/script engine。Native 已接 IMM32 preedit/commit、候选框 client-anchor、pointer capture/loss、mouse-leave、checked DPI suggested-rect，并修复 GCS_CURSORPOS UTF-16→char。71 con 单测、70 platform lib tests、control GUI 黑盒、terminal 黑盒 16 pass/2 known-gap ignored/0 fail；旧 unsupported runner 测试造成的超时孤儿/锁文件已改为 opened→Exit 生命周期证据。release PE 851,456 B。仅剩真实中文输入法人工验收 | 不把 Win32 泄漏进产品层；不宣称已达 512 KiB |
 - rh `shipped_surfaces.rs` 声明的 76 条 fleet.* 中有 32 条在 host `OPERATION_CATALOG` 不存在（stale 声明）
 - `agenterm cli script` 已弃用并在 v0.1.17 待删除；公开引擎入口统一为
   `agenterm rh|lua|qjs|sql`，现存调用者、help 与 catalog 仍待迁移

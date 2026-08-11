@@ -4,7 +4,6 @@ use std::io::Write as _;
 use windows_sys::Win32::{
     Foundation::{HWND, POINT, RECT},
     Globalization::{GetLocaleInfoW, LOCALE_SLOCALIZEDLANGUAGENAME},
-    Graphics::Gdi::ClientToScreen,
     UI::{
         HiDpi::GetDpiForWindow,
         Input::{
@@ -47,19 +46,17 @@ pub(crate) fn capability_status(_display_available: bool) -> CapabilityStatus {
 /// to anchor the candidate window to; without this call the candidate bar
 /// appears at a default position. IMM32 positioning is honored by both legacy
 /// IMM32 IMEs and modern TSF text services (Microsoft Pinyin, MS-IME, ...).
-/// Coordinates are client-area pixels; IMM32 wants screen coordinates, so the
-/// point is converted with `ClientToScreen` before being reported.
+/// Coordinates are client-area pixels. IMM32's `CFS_POINT` coordinates are
+/// relative to the upper-left corner of the window containing the composition
+/// or candidate window; converting them to screen coordinates displaces the
+/// candidate by the native window's desktop offset.
 pub(crate) fn set_anchor_position(x: i32, y: i32) {
     let focus = unsafe { GetFocus() };
     if focus.is_null() {
         return;
     }
-    let mut point = POINT { x, y };
-    let converted = unsafe { ClientToScreen(focus, &mut point) };
-    trace_anchor(focus, x, y, &point, converted);
-    if converted == 0 {
-        return;
-    }
+    let point = POINT { x, y };
+    trace_anchor(focus, &point);
     let context = unsafe { ImmGetContext(focus) };
     if context.is_null() {
         return;
@@ -121,10 +118,27 @@ fn read_composition(hwnd: HWND) -> Option<ImeComposition> {
     text.map(|text| {
         let char_count = text.chars().count();
         ImeComposition {
+            cursor: cursor
+                .map(|units| utf16_cursor_to_char_index(&text, units))
+                .unwrap_or(char_count),
             text,
-            cursor: cursor.unwrap_or(char_count),
         }
     })
+}
+
+fn utf16_cursor_to_char_index(text: &str, units: usize) -> usize {
+    let mut consumed = 0usize;
+    text.chars()
+        .take_while(|character| {
+            let next = consumed.saturating_add(character.len_utf16());
+            if next > units {
+                false
+            } else {
+                consumed = next;
+                true
+            }
+        })
+        .count()
 }
 
 fn composition_text(context: *mut core::ffi::c_void) -> Option<String> {
@@ -164,7 +178,7 @@ fn composition_cursor(context: *mut core::ffi::c_void) -> Option<usize> {
 ///
 /// The gate is deliberately product-neutral: this crate must stay
 /// independently consumable, so it reads no product-branded environment.
-fn trace_anchor(focus: HWND, x: i32, y: i32, screen: &POINT, converted: i32) {
+fn trace_anchor(focus: HWND, client: &POINT) {
     if std::env::var_os("PLATFORM_IME_DEBUG").is_none() {
         return;
     }
@@ -176,9 +190,9 @@ fn trace_anchor(focus: HWND, x: i32, y: i32, screen: &POINT, converted: i32) {
     }
     let dpi = unsafe { GetDpiForWindow(focus) };
     let line = format!(
-        "hwnd={focus:p} client=({x},{y}) screen=({},{}) win=({},{},{},{}) cli=({},{},{},{}) dpi={dpi} cs={converted}\n",
-        screen.x,
-        screen.y,
+        "hwnd={focus:p} client=({},{}) win=({},{},{},{}) cli=({},{},{},{}) dpi={dpi}\n",
+        client.x,
+        client.y,
         window_rect.left,
         window_rect.top,
         window_rect.right,
@@ -286,4 +300,20 @@ fn layout_language_name(language_id: u32) -> String {
     // GetLocaleInfoW counts the terminating NUL in its returned length.
     let text = &buffer[..(written as usize).min(buffer.len())];
     String::from_utf16_lossy(text.strip_suffix(&[0]).unwrap_or(text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf16_cursor_to_char_index;
+
+    #[test]
+    fn composition_cursor_converts_utf16_units_without_splitting_surrogates() {
+        let text = "a𠀀中";
+        assert_eq!(utf16_cursor_to_char_index(text, 0), 0);
+        assert_eq!(utf16_cursor_to_char_index(text, 1), 1);
+        assert_eq!(utf16_cursor_to_char_index(text, 2), 1);
+        assert_eq!(utf16_cursor_to_char_index(text, 3), 2);
+        assert_eq!(utf16_cursor_to_char_index(text, 4), 3);
+        assert_eq!(utf16_cursor_to_char_index(text, usize::MAX), 3);
+    }
 }

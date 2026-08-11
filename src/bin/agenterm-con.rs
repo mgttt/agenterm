@@ -2831,6 +2831,8 @@ impl ConTerminal {
             _ => return,
         };
 
+        let _ = window.set_pointer_capture(pressed);
+
         if pressed {
             if self.report_mouse(code, point, true, false, modifiers) {
                 self.mouse_dragging = true;
@@ -2911,6 +2913,33 @@ impl ConTerminal {
             // 1003: report motion with no button held (button 3 = none).
             self.report_mouse(3, pt, true, true, modifiers);
         }
+    }
+
+    fn cancel_pointer_gesture(&mut self, window: &PixelWindow) {
+        if let Some((button, point)) = self.take_cancelled_pointer_release() {
+            let modifiers = agenterm_platform::input::ModifierState {
+                control: false,
+                shift: false,
+                alt: false,
+                meta: false,
+            };
+            self.report_mouse(button, point, false, false, &modifiers);
+        }
+        window.request_redraw();
+    }
+
+    fn take_cancelled_pointer_release(&mut self) -> Option<(u8, TerminalPoint)> {
+        let release = self.mouse_dragging.then(|| {
+            (
+                self.active_button.unwrap_or(0),
+                self.last_reported_cell
+                    .unwrap_or(TerminalPoint { row: 0, col: 0 }),
+            )
+        });
+        self.mouse_dragging = false;
+        self.active_button = None;
+        self.selecting = false;
+        release
     }
 }
 
@@ -3051,6 +3080,10 @@ impl ConTerminal {
                 ..
             } => {
                 self.handle_pointer_moved(window, position, &modifiers);
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerCaptureLost => {
+                self.cancel_pointer_gesture(window);
                 Ok(PixelWindowDirective::Continue)
             }
             _ => Ok(PixelWindowDirective::Continue),
@@ -4549,6 +4582,24 @@ mod tests {
         };
         let bytes = terminal_input::key_event_to_bytes(&event, mode);
         assert_eq!(bytes, Some(b"\x1b[D".to_vec()));
+    }
+
+    #[test]
+    fn capture_loss_cancels_local_selection_and_pairs_raw_mouse_release() {
+        let mut app = ConTerminal::new(None);
+        app.mouse_dragging = true;
+        app.selecting = true;
+        app.active_button = Some(2);
+        app.last_reported_cell = Some(TerminalPoint { row: 7, col: 11 });
+
+        assert_eq!(
+            app.take_cancelled_pointer_release(),
+            Some((2, TerminalPoint { row: 7, col: 11 }))
+        );
+        assert!(!app.mouse_dragging);
+        assert!(!app.selecting);
+        assert_eq!(app.active_button, None);
+        assert_eq!(app.take_cancelled_pointer_release(), None);
     }
 
     #[test]

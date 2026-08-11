@@ -163,6 +163,7 @@ pub enum PixelWindowEvent {
         modifiers: crate::contract::input::ModifierState,
     },
     PointerLeft,
+    PointerCaptureLost,
     PointerButton {
         button: PointerButton,
         state: PointerButtonState,
@@ -251,6 +252,12 @@ pub enum PixelWindowError {
 }
 
 impl PixelWindowError {
+    pub fn unsupported(reason: impl Into<Cow<'static, str>>) -> Self {
+        Self::Unsupported {
+            reason: reason.into(),
+        }
+    }
+
     pub fn failed(code: &'static str, message: impl ToString) -> Self {
         Self::Failed {
             code: Cow::Borrowed(code),
@@ -280,6 +287,7 @@ pub(crate) trait PixelWindowBackend {
     fn focus(&self);
     fn set_title(&self, title: &str);
     fn request_logical_inner_size(&self, size: LogicalSize) -> Result<(), PixelWindowError>;
+    fn set_pointer_capture(&self, captured: bool) -> Result<(), PixelWindowError>;
     fn set_ime_allowed(&self, allowed: bool);
     fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError>;
 }
@@ -352,6 +360,10 @@ impl PixelWindow {
 
     pub fn request_logical_inner_size(&self, size: LogicalSize) -> Result<(), PixelWindowError> {
         self.backend.request_logical_inner_size(size)
+    }
+
+    pub fn set_pointer_capture(&self, captured: bool) -> Result<(), PixelWindowError> {
+        self.backend.set_pointer_capture(captured)
     }
 
     pub fn set_ime_allowed(&self, allowed: bool) {
