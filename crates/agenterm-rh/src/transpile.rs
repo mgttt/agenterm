@@ -3317,7 +3317,7 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
         ValueKind::Set => Some("std::collections::HashSet::<String>::new()"),
         // Typed placeholders after rh_fail so throw keeps the function return kind.
         ValueKind::Output => Some(
-            "RhOutput { success: 0, exit_code: -1, stdout: String::new(), stderr: String::new() }",
+            "RhOutput { success: 0, exit_code: -1, stdout: String::new(), stderr: String::new(), truncated: 0, complete: 0 }",
         ),
         ValueKind::Child => Some("RhChild::exited(0, 64 * 1024)"),
         ValueKind::WindowControl => {
