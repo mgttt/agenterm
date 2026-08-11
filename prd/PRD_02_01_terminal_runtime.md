@@ -390,6 +390,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `.pdata` grows 24 bytes, and `.rsrc` is unchanged. Evidence remains 81 unit
   tests, 18 public-control GUI black-box journeys, one isolated multitab
   control journey, Windows x64 Clippy, and Linux x64 compilation.
+  Mouse action and button wire tags now have one non-generic enum-owned mapping
+  shared by `ATC1` encode and decode. Opcode 10, all numeric tags, unknown-tag
+  failures, and the move/none pairing rule remain byte compatible. The official
+  PE remains 620,032 bytes due to file alignment while `.text` falls from
+  404,604 to 404,572 bytes; this is retained as protocol-drift prevention and
+  reported as artifact-size-neutral. The same control and cross-platform
+  evidence remains green.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

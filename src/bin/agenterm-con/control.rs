@@ -131,6 +131,48 @@ pub enum MouseButton {
     Right,
 }
 
+impl MouseAction {
+    fn wire_tag(&self) -> u8 {
+        match self {
+            Self::Press => 0,
+            Self::Release => 1,
+            Self::Move => 2,
+            Self::Click => 3,
+        }
+    }
+
+    fn from_wire_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0 => Some(Self::Press),
+            1 => Some(Self::Release),
+            2 => Some(Self::Move),
+            3 => Some(Self::Click),
+            _ => None,
+        }
+    }
+}
+
+impl MouseButton {
+    fn wire_tag(&self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Left => 1,
+            Self::Middle => 2,
+            Self::Right => 3,
+        }
+    }
+
+    fn from_wire_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0 => Some(Self::None),
+            1 => Some(Self::Left),
+            2 => Some(Self::Middle),
+            3 => Some(Self::Right),
+            _ => None,
+        }
+    }
+}
+
 const DEFAULT_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 
@@ -755,18 +797,8 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
         } => {
             wire.byte(10);
             wire.optional_tab(target);
-            wire.byte(match action {
-                MouseAction::Press => 0,
-                MouseAction::Release => 1,
-                MouseAction::Move => 2,
-                MouseAction::Click => 3,
-            });
-            wire.byte(match button {
-                MouseButton::None => 0,
-                MouseButton::Left => 1,
-                MouseButton::Middle => 2,
-                MouseButton::Right => 3,
-            });
+            wire.byte(action.wire_tag());
+            wire.byte(button.wire_tag());
             wire.u16(column);
             wire.u16(row);
         }
@@ -850,19 +882,13 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
         }
         10 => {
             let target = wire.optional_tab()?;
-            let action = match wire.byte()? {
-                0 => MouseAction::Press,
-                1 => MouseAction::Release,
-                2 => MouseAction::Move,
-                3 => MouseAction::Click,
-                _ => return Err("invalid control mouse action".to_owned()),
+            let action = match MouseAction::from_wire_tag(wire.byte()?) {
+                Some(action) => action,
+                None => return Err("invalid control mouse action".to_owned()),
             };
-            let button = match wire.byte()? {
-                0 => MouseButton::None,
-                1 => MouseButton::Left,
-                2 => MouseButton::Middle,
-                3 => MouseButton::Right,
-                _ => return Err("invalid control mouse button".to_owned()),
+            let button = match MouseButton::from_wire_tag(wire.byte()?) {
+                Some(button) => button,
+                None => return Err("invalid control mouse button".to_owned()),
             };
             if (action == MouseAction::Move) != (button == MouseButton::None) {
                 return Err("invalid control mouse action/button pair".to_owned());

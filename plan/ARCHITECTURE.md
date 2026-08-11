@@ -314,6 +314,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   public-control black-box、1 multitab control journey、Windows x64 Clippy 和 Linux x64
   check 通过。该边界是产品内部去重，不下沉到 platform，也不用 generic closure 重新
   制造按命令单态化的 helper。
+- compact `ATC1` 的 mouse action/button tag 由各 enum 的普通非泛型方法单点拥有，
+  encode/decode 不再维护两份数值表；opcode、tag、未知值错误和 move/none 组合校验不变。
+  官方 release-fast PE 因文件对齐保持 620,032 B，`.text` 从 404,604 B 降至
+  404,572 B（-32 B），其他 section 不变。该项按协议漂移预防保留，并明确记为 artifact
+  size-neutral；81 unit、18 public-control black-box、1 multitab control journey、
+  Windows x64 Clippy 和 Linux x64 check 通过。
   filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
   每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制

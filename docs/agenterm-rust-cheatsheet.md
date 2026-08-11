@@ -221,6 +221,12 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   error-propagation contract. The measured con control refactor used ordinary
   session/cell helpers, retained per-command `map`/`and_then` boundaries, and
   reduced the final PE by 512 B with `.text` down 720 B.
+- Protocol enum tags need one encode/decode authority. Plain non-generic
+  enum-owned conversion methods can remove parallel match tables without a
+  trait or allocation. Measure sections as well as final bytes: con's compact
+  mouse tag unification removed 32 B of `.text`, but PE file alignment kept the
+  artifact byte count unchanged, so it is a consistency win rather than a PE
+  size claim.
 - Do not change an unwind-enabled native host to `panic = "abort"` merely to
   remove runtime bytes. `agenterm-con` catches panics at WNDPROC, deferred-work,
   and native-thread FFI boundaries; abort changes that containment contract
