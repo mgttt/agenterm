@@ -54,8 +54,8 @@ use agenterm_platform::window_host::{
     run_pixel_window,
 };
 use agenterm_ui_core::{
-    DirtyRegion, DirtyRows, PixelRect, ScrollbarHit, ScrollbarThumbDrag, scrollback_for_thumb_top,
-    scrollbar_hit_test,
+    DirtyRegion, DirtyRows, PixelRect, RetainedXrgbFrame, ScrollbarHit, ScrollbarThumbDrag,
+    scrollback_for_thumb_top, scrollbar_hit_test,
 };
 
 use palette::Rgb;
@@ -764,6 +764,7 @@ struct ConApp {
     control_waits: Vec<PendingControlWait>,
     perf_stats: PerfStats,
     chrome_dirty: DirtyRegion,
+    retained: RetainedXrgbFrame,
     frame_width: u32,
     frame_height: u32,
     frame_scale: f64,
@@ -910,6 +911,7 @@ impl ConApp {
             control_waits: Vec::new(),
             perf_stats: PerfStats::default(),
             chrome_dirty: DirtyRegion::full(),
+            retained: RetainedXrgbFrame::new(),
             frame_width: 0,
             frame_height: 0,
             frame_scale: 1.0,
@@ -1733,15 +1735,16 @@ impl ConApp {
         }
     }
 
-    fn paint_chrome(&self, frame: &mut XrgbPixelFrame<'_>) -> Result<(), PixelWindowError> {
+    fn paint_chrome(
+        &self,
+        frame: &mut RetainedXrgbFrame,
+        candidate: DirtyRegion,
+    ) -> Result<(), PixelWindowError> {
         let session = self.active_session()?;
         let width = frame.width();
         let height = frame.height();
-        let mut surface = Surface {
-            pixels: frame.pixels_mut(),
-            width,
-            height,
-        };
+        let clip = candidate_bounds(candidate, width, height);
+        let mut surface = Surface::with_clip(frame.pixels_mut(), width, height, clip);
         let scale = session.scale.max(1.0);
         let layout = self.layout(width, height, scale);
         let tree_width = layout.sidebar.width;
@@ -2508,6 +2511,10 @@ impl ConTerminal {
                 break;
             }
             let span = self.cell_w * cells;
+            if !surface.intersects_rect(x0, y0, span, self.cell_h) {
+                advance += cells;
+                continue;
+            }
             surface.fill_rect(x0, y0, span, self.cell_h, bg.to_xrgb());
             if let Some(glyph) = font::raster(character, self.font_size_px) {
                 surface.blit_glyph(
@@ -3671,13 +3678,9 @@ impl ConTerminal {
     fn render(
         &mut self,
         window: &PixelWindow,
-        frame: &mut XrgbPixelFrame<'_>,
+        frame: &mut RetainedXrgbFrame,
+        candidate: DirtyRegion,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
-        let drain = self.drain_pty();
-        if drain.backlog {
-            window.request_redraw();
-        }
-
         // Apply OSC title changes (shell emits \e]0;title\a).
         if let Some(title) = self.parser.callbacks_mut().title.take() {
             self.current_title = title;
@@ -3686,13 +3689,27 @@ impl ConTerminal {
 
         let fw = frame.width();
         let fh = frame.height();
+        if candidate.is_empty() {
+            self.write_snapshot_if_requested();
+            return Ok(PixelWindowDirective::Continue);
+        }
         let bg_word = self.default_bg.to_xrgb();
-        let mut surface = Surface {
-            pixels: frame.pixels_mut(),
-            width: fw,
-            height: fh,
-        };
-        surface.fill_rect(0, 0, fw, fh, bg_word);
+        let clip = candidate_bounds(candidate, fw, fh);
+        let mut surface = Surface::with_clip(frame.pixels_mut(), fw, fh, clip);
+        if candidate.is_full() {
+            surface.fill_rect(0, 0, fw, fh, bg_word);
+        } else {
+            let terminal_height = fh
+                .saturating_sub(self.content_top_px)
+                .saturating_sub(self.content_bottom_px);
+            surface.fill_rect(
+                self.content_left_px,
+                self.content_top_px,
+                fw.saturating_sub(self.content_left_px),
+                terminal_height,
+                bg_word,
+            );
+        }
 
         let (scrollbar, _, _) = self.scrollbar_geometry(fw, fh);
         let scrollbar_active = self.scrollbar_drag.is_some();
@@ -4063,15 +4080,71 @@ impl PixelWindowApplication for ConApp {
         self.note_frame_dimensions(width, height, scale);
         self.active_session_mut()?
             .note_frame_dimensions(width, height);
-        // Consume the candidate before raster begins. Any state discovered
-        // while draining PTY output during render is treated as late/unknown
-        // and upgrades this frame to full before statistics are committed.
-        let mut candidate = self.take_dirty_candidate(width, height);
+        let retained_requires_full = match self.retained.prepare(width, height) {
+            Ok(requires_full) => requires_full,
+            Err(error) => {
+                self.retained.invalidate();
+                return Err(PixelWindowError::failed(
+                    "con_retained_frame",
+                    error.to_string(),
+                ));
+            }
+        };
+        if retained_requires_full {
+            self.chrome_dirty.mark_full();
+            self.active_session_mut()?.dirty.mark_full();
+        }
+
+        // Drain before consuming the candidate. PTY output can alter arbitrary
+        // cells, cursor state, modes, scrollback, and selection, so it always
+        // upgrades the candidate to full before raster starts.
+        let drain = self.active_session_mut()?.drain_pty();
+        self.perf_stats.pty_drained_bytes = self
+            .perf_stats
+            .pty_drained_bytes
+            .saturating_add(drain.bytes as u64);
+        self.perf_stats.pty_budget_yields = self
+            .perf_stats
+            .pty_budget_yields
+            .saturating_add(u64::from(drain.backlog));
+        if drain.backlog {
+            window.request_redraw();
+        }
+
+        // The candidate is complete before either product surface starts
+        // rasterizing. A late dirty state is therefore a programming error,
+        // not an excuse to label a partial frame after the fact.
+        let candidate = self.take_dirty_candidate(width, height);
         let render_started = Instant::now();
-        let directive = self.active_session_mut()?.render(window, frame)?;
-        self.paint_chrome(frame)?;
+        let active_id = self.workspace.active().ok_or_else(|| {
+            PixelWindowError::failed("con_session_missing", "no active terminal session")
+        })?;
+        let directive = {
+            let session = self.sessions.get_mut(&active_id).ok_or_else(|| {
+                PixelWindowError::failed("con_session_missing", "active terminal session missing")
+            })?;
+            match session.render(window, &mut self.retained, candidate) {
+                Ok(directive) => directive,
+                Err(error) => {
+                    self.retained.invalidate();
+                    return Err(error);
+                }
+            }
+        };
+        if !candidate.is_empty() {
+            let mut retained = std::mem::take(&mut self.retained);
+            let paint_result = self.paint_chrome(&mut retained, candidate);
+            self.retained = retained;
+            if let Err(error) = paint_result {
+                self.retained.invalidate();
+                return Err(error);
+            }
+        }
+        self.retained.mark_valid();
         let (pending_screenshot, pending_control_screenshot) = {
-            let session = self.active_session_mut()?;
+            let session = self.sessions.get_mut(&active_id).ok_or_else(|| {
+                PixelWindowError::failed("con_session_missing", "active terminal session missing")
+            })?;
             (
                 session.pending_screenshot.take(),
                 session.pending_control_screenshot.take(),
@@ -4080,7 +4153,7 @@ impl PixelWindowApplication for ConApp {
         if let Some(path) = pending_screenshot {
             let _ = agent_interface::write_png_atomic(
                 path.as_path(),
-                frame.pixels_mut(),
+                self.retained.pixels(),
                 width,
                 height,
             );
@@ -4088,7 +4161,7 @@ impl PixelWindowApplication for ConApp {
         if let Some((path, reply)) = pending_control_screenshot {
             let result = agent_interface::write_png_atomic(
                 path.as_path(),
-                frame.pixels_mut(),
+                self.retained.pixels(),
                 width,
                 height,
             )
@@ -4102,9 +4175,12 @@ impl PixelWindowApplication for ConApp {
             .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
         }
-        let late_dirty = self.active_session_mut()?.take_dirty();
-        if !late_dirty.is_empty() {
-            candidate.mark_full();
+        if let Err(error) = self.retained.copy_to(frame.pixels_mut(), width, height) {
+            self.retained.invalidate();
+            return Err(PixelWindowError::failed(
+                "con_retained_copy",
+                error.to_string(),
+            ));
         }
         self.perf_stats.record_frame(render_started.elapsed());
         self.perf_stats
@@ -4223,6 +4299,13 @@ struct CellRect {
     h: u32,
 }
 
+fn candidate_bounds(candidate: DirtyRegion, width: u32, height: u32) -> PixelRect {
+    candidate
+        .clip(width, height)
+        .bounds()
+        .unwrap_or_else(PixelRect::empty)
+}
+
 /// The pixel target for one frame: the buffer and its dimensions, which always
 /// travel together. Bundling them keeps the drawing calls readable — the free
 /// functions this replaced took nine positional arguments, most of them the
@@ -4231,17 +4314,54 @@ struct Surface<'a> {
     pixels: &'a mut [u32],
     width: u32,
     height: u32,
+    clip: PixelRect,
 }
 
-impl Surface<'_> {
+impl<'a> Surface<'a> {
+    #[cfg(test)]
+    fn new(pixels: &'a mut [u32], width: u32, height: u32) -> Surface<'a> {
+        Self::with_clip(pixels, width, height, PixelRect::full_frame(width, height))
+    }
+
+    fn with_clip(pixels: &'a mut [u32], width: u32, height: u32, clip: PixelRect) -> Surface<'a> {
+        Self {
+            pixels,
+            width,
+            height,
+            clip: clip.clip(width, height),
+        }
+    }
+
+    fn clipped_rect(&self, x: u32, y: u32, w: u32, h: u32) -> PixelRect {
+        let rect = PixelRect::from_xywh(x, y, w, h).clip(self.width, self.height);
+        let left = rect.left.max(self.clip.left);
+        let top = rect.top.max(self.clip.top);
+        let right = rect.right.min(self.clip.right).max(left);
+        let bottom = rect.bottom.min(self.clip.bottom).max(top);
+        PixelRect {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    fn intersects_rect(&self, x: u32, y: u32, w: u32, h: u32) -> bool {
+        !self.clipped_rect(x, y, w, h).is_empty()
+    }
+
     fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
+        let rect = self.clipped_rect(x, y, w, h);
+        if rect.is_empty() {
+            return;
+        }
         agenterm_ui_core::pixel::fill_xrgb_rect(
             self.pixels,
             self.width,
-            x,
-            y,
-            w,
-            h.min(self.height.saturating_sub(y)),
+            rect.left,
+            rect.top,
+            rect.width(),
+            rect.height(),
             color,
         );
     }
@@ -4253,16 +4373,20 @@ impl Surface<'_> {
     /// loading a real italic face, which would have a different advance width
     /// and break the fixed cell grid.
     fn blit_glyph(&mut self, glyph: &font::RasterGlyph, cell: CellRect, fg: Rgb, shear: f32) {
-        let start_x = cell.x as i32 + glyph.offset_x;
-        let start_y = cell.y as i32 + glyph.offset_y;
-        let clip_x0 = cell.x as i32;
-        let clip_y0 = cell.y as i32;
-        let clip_x1 = cell.x as i32 + cell.w as i32;
-        let clip_y1 = cell.y as i32 + cell.h as i32;
+        let clip = self.clipped_rect(cell.x, cell.y, cell.w, cell.h);
+        if clip.is_empty() {
+            return;
+        }
+        let start_x = i64::from(cell.x) + i64::from(glyph.offset_x);
+        let start_y = i64::from(cell.y) + i64::from(glyph.offset_y);
+        let clip_x0 = i64::from(clip.left);
+        let clip_y0 = i64::from(clip.top);
+        let clip_x1 = i64::from(clip.right);
+        let clip_y1 = i64::from(clip.bottom);
 
         for gy in 0..glyph.height {
-            let py = start_y + gy as i32;
-            if py < clip_y0 || py >= clip_y1 || py < 0 || py as u32 >= self.height {
+            let py = start_y + i64::from(gy);
+            if py < clip_y0 || py >= clip_y1 || py < 0 || py >= i64::from(self.height) {
                 continue;
             }
             // Rows nearer the top lean further right, pivoting on the bottom
@@ -4270,25 +4394,50 @@ impl Surface<'_> {
             let slant = if shear == 0.0 {
                 0
             } else {
-                ((clip_y1 - py) as f32 * shear).round() as i32
+                ((clip_y1 - py) as f32 * shear).round() as i64
             };
             let row_start_x = start_x + slant;
-            let source_x_start = (clip_x0.max(0) - row_start_x).max(0) as u32;
-            let source_x_end = glyph.width.min(
-                (clip_x1.min(self.width.min(i32::MAX as u32) as i32) - row_start_x).max(0) as u32,
-            );
+            let source_x_start = (clip_x0 - row_start_x).max(0).min(i64::from(u32::MAX)) as u32;
+            let source_x_end = glyph
+                .width
+                .min((clip_x1 - row_start_x).max(0).min(i64::from(u32::MAX)) as u32);
             if source_x_start >= source_x_end {
                 continue;
             }
-            let destination_x = row_start_x + source_x_start as i32;
-            let destination_start = (py as u32 * self.width + destination_x as u32) as usize;
-            let source_start = (gy * glyph.width + source_x_start) as usize;
-            let count = (source_x_end - source_x_start) as usize;
-            agenterm_ui_core::pixel::blend_mask_xrgb(
-                &mut self.pixels[destination_start..destination_start + count],
-                &glyph.alpha[source_start..source_start + count],
-                fg.to_xrgb(),
-            );
+            let destination_x = row_start_x + i64::from(source_x_start);
+            if destination_x < 0 || destination_x >= i64::from(self.width) {
+                continue;
+            }
+            let count = usize::try_from(source_x_end - source_x_start).unwrap_or(0);
+            let Some(row_start) = usize::try_from(py)
+                .ok()
+                .and_then(|row| row.checked_mul(self.width as usize))
+            else {
+                continue;
+            };
+            let Some(destination_start) = row_start.checked_add(destination_x as usize) else {
+                continue;
+            };
+            let Some(destination_end) = destination_start.checked_add(count) else {
+                continue;
+            };
+            let Some(source_start) = usize::try_from(gy)
+                .ok()
+                .and_then(|row| row.checked_mul(glyph.width as usize))
+                .and_then(|row| row.checked_add(source_x_start as usize))
+            else {
+                continue;
+            };
+            let Some(source_end) = source_start.checked_add(count) else {
+                continue;
+            };
+            let Some(destination) = self.pixels.get_mut(destination_start..destination_end) else {
+                continue;
+            };
+            let Some(source) = glyph.alpha.get(source_start..source_end) else {
+                continue;
+            };
+            agenterm_ui_core::pixel::blend_mask_xrgb(destination, source, fg.to_xrgb());
         }
     }
 }
@@ -4341,12 +4490,15 @@ fn paint_cells_at(
 ) {
     let (rows, cols) = screen.size();
     for row in 0..rows {
-        let y0 = top + u32::from(row) * cell_h;
+        let y0 = top.saturating_add(u32::from(row).saturating_mul(cell_h));
         if y0 >= surface.height {
             break;
         }
+        if !surface.intersects_rect(left, y0, surface.width.saturating_sub(left), cell_h) {
+            continue;
+        }
         for col in 0..cols {
-            let x0 = left + u32::from(col) * cell_w;
+            let x0 = left.saturating_add(u32::from(col).saturating_mul(cell_w));
             if x0 >= surface.width {
                 break;
             }
@@ -4354,6 +4506,10 @@ fn paint_cells_at(
                 continue;
             };
             if cell.is_wide_continuation() {
+                continue;
+            }
+            let span_w = if cell.is_wide() { cell_w * 2 } else { cell_w };
+            if !surface.intersects_rect(x0, y0, span_w, cell_h) {
                 continue;
             }
 
@@ -4382,9 +4538,6 @@ fn paint_cells_at(
             if cell.dim() {
                 fg = palette::blend(fg, bg, 0.55);
             }
-
-            // Wide (CJK/emoji) cells span 2 columns for background + glyph clip.
-            let span_w = if cell.is_wide() { cell_w * 2 } else { cell_w };
 
             // Only repaint backgrounds that differ from the frame clear.
             if bg != default_bg {
@@ -4440,7 +4593,9 @@ fn paint_chrome_text(
         if cursor.saturating_add(cell_w) > limit {
             break;
         }
-        if let Some(glyph) = font::raster(character, font_size_px) {
+        if surface.intersects_rect(cursor, y, cell_w, cell_h)
+            && let Some(glyph) = font::raster(character, font_size_px)
+        {
             surface.blit_glyph(
                 &glyph,
                 CellRect {
@@ -4498,11 +4653,7 @@ mod tests {
         let height = 32;
         let untouched = 0x0012_3456;
         let mut pixels = vec![untouched; (width * height) as usize];
-        let mut surface = Surface {
-            pixels: &mut pixels,
-            width,
-            height,
-        };
+        let mut surface = Surface::new(&mut pixels, width, height);
         paint_cells_at(
             &mut surface,
             parser.screen(),
@@ -4962,11 +5113,7 @@ mod tests {
         let fw = u32::from(cols) * cell_w;
         let fh = u32::from(rows) * cell_h;
         let mut pixels = vec![Rgb(0, 0, 0).to_xrgb(); (fw * fh) as usize];
-        let mut surface = Surface {
-            pixels: &mut pixels,
-            width: fw,
-            height: fh,
-        };
+        let mut surface = Surface::new(&mut pixels, fw, fh);
         paint_cells(
             &mut surface,
             screen_parser.screen(),
@@ -4978,6 +5125,30 @@ mod tests {
             10,
         );
         (pixels, cell_w, cell_h)
+    }
+
+    #[test]
+    fn clipped_surface_matches_full_terminal_rect_operations() {
+        let width = 16u32;
+        let height = 8u32;
+        let candidate = PixelRect::from_xywh(2, 1, 12, 6);
+        let mut full_pixels = vec![0u32; (width * height) as usize];
+        let mut full = Surface::new(&mut full_pixels, width, height);
+        full.fill_rect(0, 0, width, height, 0);
+        full.fill_rect(2, 1, 4, 3, 0x0011_2233);
+        full.fill_rect(8, 4, 5, 2, 0x0044_5566);
+        full.fill_rect(3, 6, 8, 1, 0x0077_8899);
+
+        let mut partial_pixels = vec![0u32; (width * height) as usize];
+        let mut partial = Surface::with_clip(&mut partial_pixels, width, height, candidate);
+        partial.fill_rect(0, 0, width, height, 0);
+        partial.fill_rect(2, 1, 4, 3, 0x0011_2233);
+        partial.fill_rect(8, 4, 5, 2, 0x0044_5566);
+        partial.fill_rect(3, 6, 8, 1, 0x0077_8899);
+
+        assert_eq!(partial_pixels, full_pixels);
+        assert_eq!(partial_pixels[0], 0);
+        assert_eq!(partial_pixels[(7 * width + 15) as usize], 0);
     }
 
     #[test]
@@ -5112,11 +5283,7 @@ mod tests {
             let fw = u32::from(cols) * cell_w;
             let fh = u32::from(rows) * cell_h;
             let mut pixels = vec![0u32; (fw * fh) as usize];
-            let mut surface = Surface {
-                pixels: &mut pixels,
-                width: fw,
-                height: fh,
-            };
+            let mut surface = Surface::new(&mut pixels, fw, fh);
             paint_cells(
                 &mut surface,
                 parser.screen(),

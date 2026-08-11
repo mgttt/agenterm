@@ -220,7 +220,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   unrelated active-tab paints, and remaining backlog yields to input before
   self-scheduling another turn. `perf-stats` and
   `reset-perf-stats` expose frame latency plus PTY drain/yield counters through
-  the same public CLI for repeatable interactive profiling. The same counters now expose conservative full/partial raster-candidate frames and dirty/frame pixel totals; they do not claim retained rendering or native partial present. One public CLI probe observed 2/5 partial candidates at about 60.0% dirty pixels for blink/idle, falling to 2/13 and about 84.6% after mixed PTY output. Its local chrome
+  the same public CLI for repeatable interactive profiling. The same counters now expose conservative full/partial raster-candidate frames and dirty/frame pixel totals; the product now owns a bounded retained XRGB frame and clips raster work to conservative candidates, while every host frame is still fully copied and natively presented; the counters do not claim native partial present. One public CLI probe observed 2/5 partial candidates at about 60.0% dirty pixels for blink/idle, falling to 2/13 and about 84.6% after mixed PTY output. A same-scenario single-run directional probe reduced average render time by about 6.7%/12.1%; this is not release qualification evidence. Its local chrome
   now owns a vertically scrollable left tree with row-level close targets and
   top `z`/`Z` font controls, plus a distinct bottom composer input and send
   action. The default 15 logical-pixel terminal font corresponds to roughly
@@ -236,7 +236,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its x86_64 release PE is currently 558,080 bytes versus 1,046,528 bytes
+  host; its x86_64 release PE is currently 561,664 bytes versus 1,046,528 bytes
   for the original portable host. Its cross-platform screenshot writer uses a
   bounded streaming stored-DEFLATE encoder with batched Adler-32 and a shared
   platform IEEE CRC-32 state rather than linking the general PNG compression

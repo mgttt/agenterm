@@ -3,10 +3,12 @@
 pub mod damage;
 pub mod glyph_cache;
 pub mod pixel;
+pub mod retained_frame;
 pub mod tree;
 
 pub use damage::{DirtyRegion, DirtyRows, PixelRect};
 pub use glyph_cache::{GlyphCache, GlyphCacheKey, GlyphCacheStats};
+pub use retained_frame::{RetainedFrameError, RetainedXrgbFrame};
 pub use tree::{TreeDepthError, TreeDepthNode, compute_tree_depths, compute_tree_depths_by};
 
 const MIN_THUMB_HEIGHT: i32 = 24;

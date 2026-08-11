@@ -211,11 +211,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 558,080 B；当前比 512 KiB x86_64 目标高 33,792 B，主要增量是
+  1,046,528 B 降到 561,664 B；当前比 512 KiB x86_64 目标高 37,376 B，主要增量是
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
 - tree depth 已下沉为 UI-core 的迭代 O(n) typed kernel，替代 con 每节点重复扫描 parent；20,000 深链、缺父、重复 ID、自环和多节点环均有单测；
-- UI-core dirty region/row kernel 只描述保守 raster candidate；con 的公开 perf stats 记录 full/partial candidate frame 与 dirty/frame pixels，当前 host 仍完整 raster/present，retained buffer 与 Windows partial GDI present 必须由后续证据驱动；首个公开 CLI 真机样本显示 blink/idle 2/5 帧可 partial（dirty/frame 约 60.0%），混合 PTY 输出后仅 2/13（约 84.6%）；
+- UI-core dirty region/row kernel 只描述保守 raster candidate；con 的公开 perf stats 记录 full/partial candidate frame 与 dirty/frame pixels，当前 host 仍完整 raster/present，产品侧 retained XRGB frame 已落地，partial candidate 只 raster clip 内 rows/cells/glyph pixels，host buffer 仍每帧完整 copy/present；Windows partial GDI present 必须由后续证据驱动；首个公开 CLI 真机样本显示 blink/idle 2/5 帧可 partial（dirty/frame 约 60.0%），混合 PTY 输出后仅 2/13（约 84.6%）；同场景单次方向性复测平均 render 约下降 6.7%/12.1%，不作为发布资格基准；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
