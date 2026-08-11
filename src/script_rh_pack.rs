@@ -38,8 +38,20 @@ pub fn load_rh_pack(path: &Path) -> Result<LoadedRhPack, agenterm_rh::RhError> {
 /// Run a pack's entry with the host callbacks registered. Only the explicit
 /// pack probes need this; task and run flows go through
 /// `script_rh_host::call_pack_entry_with_host_result`.
+///
+/// Accepts either a pack directory or a native library path, because both probe
+/// call sites take whatever the operator typed.
 pub fn run_rh_pack_entry(path: &Path) -> Result<i64, agenterm_rh::RhError> {
-    crate::script_rh_host::call_pack_entry_with_host_registration(path)
+    let native = resolve_native_path(path)?;
+    crate::script_rh_host::call_pack_entry_with_host_registration(&native)
+}
+
+fn resolve_native_path(path: &Path) -> Result<PathBuf, agenterm_rh::RhError> {
+    if !path.is_dir() {
+        return Ok(path.to_path_buf());
+    }
+    let manifest = agenterm_rh::RhPackManifest::read(&path.join("manifest.json"))?;
+    Ok(path.join(manifest.native_file))
 }
 
 pub fn try_load_rh_pack_from_env() -> Option<LoadedRhPack> {
