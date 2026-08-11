@@ -283,8 +283,6 @@ impl PtyMaster {
 #[derive(Debug)]
 pub struct PtyChild {
     process: OwnedHandle,
-    #[allow(dead_code)]
-    thread: Option<OwnedHandle>,
     job: Option<JobObjectGuard>,
     session: Arc<ConptySession>,
     pid: ProcessId,
@@ -320,7 +318,6 @@ impl PtyChild {
             .map_err(|error| pty_error("clone wait handle", "pty_wait_clone_failed", error))?;
         Ok(Self {
             process,
-            thread: None,
             job: None,
             session: Arc::clone(&self.session),
             pid: self.pid,
@@ -1494,17 +1491,18 @@ fn resume_as_child(
         .process
         .take()
         .expect("process handle transfers exactly once");
-    let thread_handle = process
-        .thread
-        .take()
-        .expect("thread handle transfers exactly once");
+    drop(
+        process
+            .thread
+            .take()
+            .expect("primary thread handle transfers exactly once"),
+    );
     Ok(SpawnedPty {
         master: PtyMaster {
             session: Arc::clone(&session),
         },
         child: PtyChild {
             process: process_handle,
-            thread: Some(thread_handle),
             job: Some(job),
             session,
             pid,

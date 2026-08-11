@@ -362,6 +362,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   moved to process creation while the isolated PE stayed 609.0 KiB, `.text`
   stayed 398.5 KiB, and the official PE stayed 623,616 bytes. This is recorded
   as robustness evidence, not a size reduction.
+  The primary thread handle returned by suspended `CreateProcessW` now remains
+  owned only until `ResumeThread` and PID validation succeed, then closes
+  immediately through `OwnedHandle` Drop. Runtime `PtyChild` and process-only
+  wait clones no longer retain a thread field. Failure before successful resume
+  remains armed to terminate the partial child; Job assignment-before-resume
+  and independent process, Job and HPCON ownership remain unchanged. The
+  filtered create path and official PE remain 609.0 KiB and 623,616 bytes, so
+  this is a per-session kernel-resource reduction rather than a size claim.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

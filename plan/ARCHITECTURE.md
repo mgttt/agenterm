@@ -290,6 +290,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `create_suspended_process`，总 PE 仍为 609.0 KiB、`.text` 仍为 398.5 KiB，官方
   PE 仍为 623,616 B。该项是稳健性与边界改进，不是尺寸收益；单符号区间不得替代
   final PE/section 作为汇编或 FFI 下沉依据。
+- `CreateProcessW(CREATE_SUSPENDED)` 的 primary thread handle 只由
+  `SuspendedProcess` 持有到 `ResumeThread` 与 PID 校验成功；随后立即通过
+  `OwnedHandle` Drop 关闭，不再转移进运行期 `PtyChild`。wait clone 只 duplicate
+  process handle，也不再携带空 thread slot。suspended 失败仍由 armed owner 终止半成品
+  process，Job assignment-before-resume 与独立 process/Job/HPCON authority 不变。
+  filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
+  每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

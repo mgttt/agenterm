@@ -107,6 +107,12 @@ Windows checklist:
   call; another FFI or allocation can overwrite thread-local error state.
 - Use RAII for GDI objects, handles, clipboard allocations, capture ownership,
   and process resources. Transfer ownership only after native success.
+- A Windows `PROCESS_INFORMATION.hThread` is required through suspended setup
+  and `ResumeThread`, but not for ordinary process wait/termination afterward.
+  Once resume and PID validation succeed, close that `OwnedHandle` immediately;
+  keep only `hProcess` unless a typed runtime contract actually operates on the
+  primary thread. Never close it earlier than the armed partial-process owner
+  can still terminate a failed suspended launch.
 - Distinguish GUI-thread-only APIs from worker-safe I/O. Do not block the event
   thread on clipboard reads, PTY waits, filesystem retries, or IPC round trips.
 - Retry only documented transient errors, with a strict attempt/deadline bound.
