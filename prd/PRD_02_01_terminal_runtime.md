@@ -322,6 +322,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   back the OS thread description and prove panic-driven task destruction, while
   the full con suite proves the real PTY/control/child paths. The official
   release-fast PE falls from 698,880 to 688,128 bytes without a new dependency.
+  The child waiter now publishes its one completion bit directly instead of
+  instantiating a final production `mpsc` channel for one `()` value. Release
+  stores the state before the existing window wake; the GUI consumes it once
+  with an acquire-release swap. This keeps process-exit authority independent
+  from ConPTY pipe EOF while removing channel allocation and disconnect states.
+  Normal, failed and fast command exits plus multitab control remain covered by
+  90 unit, 18 black-box and one isolated control test. The official release-fast
+  PE falls from 688,128 to 667,648 bytes.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

@@ -36,8 +36,8 @@ mod workspace;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButton};
@@ -648,11 +648,11 @@ struct ConTerminal {
     /// the event thread has consumed its bounded share.
     pty_wake_pending: Arc<AtomicBool>,
 
-    /// Signaled once by the waiter thread when the child process actually
-    /// exits (via Windows' process-exit notification, not PTY EOF — see
-    /// `spawn_pty`). A placeholder with its sender already dropped until
-    /// `spawn_pty` installs the real one.
-    child_exit_rx: mpsc::Receiver<()>,
+    /// Set once by the waiter thread when the child process actually exits
+    /// (via Windows' process-exit notification, not PTY EOF — see `spawn_pty`).
+    /// The existing window wake transports notification; this atomic owns only
+    /// the completion state, so no general-purpose channel is required.
+    child_exit_pending: Arc<AtomicBool>,
 
     /// Set before the waiter reports that an explicit `-e` command failed, so
     /// `main` can return the CLI runtime-error code after the window loop exits.
@@ -2178,8 +2178,6 @@ impl ConTerminal {
     fn new(working_dir: Option<String>) -> Self {
         let pty_output = Arc::new(BoundedOutputPipe::new(PTY_QUEUE_BYTES));
         pty_output.close();
-        let (exit_tx, exit_rx) = mpsc::channel();
-        drop(exit_tx);
         Self {
             working_dir,
             command: None,
@@ -2195,7 +2193,7 @@ impl ConTerminal {
             child: None,
             pty_output,
             pty_wake_pending: Arc::new(AtomicBool::new(false)),
-            child_exit_rx: exit_rx,
+            child_exit_pending: Arc::new(AtomicBool::new(false)),
             command_failed: Arc::new(AtomicBool::new(false)),
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
@@ -2562,7 +2560,8 @@ impl ConTerminal {
         let mut waiter = child.try_clone_for_wait().map_err(|error| {
             PixelWindowError::failed("cmd_wait_clone_failed", format!("{error}"))
         })?;
-        let (exit_tx, exit_rx) = mpsc::channel();
+        let child_exit_pending = Arc::new(AtomicBool::new(false));
+        let waiter_exit_pending = Arc::clone(&child_exit_pending);
         let exit_waker = window.waker();
         let explicit_command = self.command.is_some();
         let command_failed = Arc::clone(&self.command_failed);
@@ -2577,7 +2576,7 @@ impl ConTerminal {
                 {
                     command_failed.store(true, Ordering::Release);
                 }
-                let _ = exit_tx.send(());
+                waiter_exit_pending.store(true, Ordering::Release);
                 let _ = exit_waker.wake();
             }),
         )
@@ -2587,7 +2586,7 @@ impl ConTerminal {
         self.child = Some(child);
         self.pty_output = output;
         self.pty_wake_pending = wake_pending;
-        self.child_exit_rx = exit_rx;
+        self.child_exit_pending = child_exit_pending;
 
         Ok(())
     }
@@ -2595,11 +2594,7 @@ impl ConTerminal {
     fn drain_pty(&mut self) -> DrainOutcome {
         self.pty_wake_pending.store(false, Ordering::Release);
         let mut outcome = DrainOutcome::default();
-        // Only `Ok(())` (an actual signal from the waiter thread) means
-        // anything here — both the placeholder channel `new()` installs
-        // before a child exists and a waiter thread that hasn't finished yet
-        // report as empty/disconnected, which must not be mistaken for exit.
-        if let Ok(()) = self.child_exit_rx.try_recv() {
+        if self.child_exit_pending.swap(false, Ordering::AcqRel) {
             self.child_gone = true;
             outcome.redraw = true;
         }

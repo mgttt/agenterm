@@ -258,6 +258,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   con 的真实 PTY/control/child 路径继续通过。隔离 PE 从 682.5 KiB 降至
   672.0 KiB、`.text` 从 447.5 KiB 降至 441.5 KiB；官方 release-fast PE 从
   698,880 B 降至 688,128 B（-10,752 B），未增加 crate 或 platform feature。
+  child waiter 的完成通知不再为单个 `()` 实例化最后一套生产 `mpsc`。每个 session
+  持有一个共享 `AtomicBool`：waiter 在写入退出状态后以 Release 发布并沿用既有
+  window wake，GUI 以 AcqRel `swap(false)` 恰好消费一次；原子位只拥有状态，wake
+  仍拥有调度，因此 ConPTY child 退出与 output pipe EOF 的独立语义不变。隔离 PE
+  从 672 KiB 降至 652 KiB、`.text` 从 441.5 KiB 降至 429.0 KiB；官方
+  release-fast PE 从 688,128 B 降至 667,648 B（-20,480 B）。正常/失败/快速命令
+  退出和多标签控制仍由 90 unit、18 black-box 与 1 control journey 覆盖。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
