@@ -151,6 +151,8 @@ shared-memory = [
     "windows-sys/Win32_System_Memory",
 ]
 process = [
+    "parent-console",
+    "runtime",
     "process-observation",
     "process-reference",
     "process-containment",
@@ -165,6 +167,15 @@ process = [
     "windows-sys/Win32_System_JobObjects",
     "windows-sys/Win32_System_Pipes",
 ]
+parent-console = [
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_Security",
+    "windows-sys/Win32_Storage_FileSystem",
+    "windows-sys/Win32_System_Console",
+    "windows-sys/Win32_System_Threading",
+]
+runtime = []
 filesystem-conventions = []
 filesystem-entry = []
 directory-access = [
@@ -225,7 +236,6 @@ ipc = [
     "windows-sys/Win32_System_Pipes",
 ]
 pty = [
-    "process",
     "windows-sys/Win32_Storage_FileSystem",
     "windows-sys/Win32_System_Console",
     "windows-sys/Win32_System_IO",
@@ -254,7 +264,6 @@ ime = [
 ]
 activation = ["portable-pixel-window"]
 clipboard = [
-    "process",
     "windows-sys/Win32_System_DataExchange",
     "windows-sys/Win32_System_Memory",
 ]

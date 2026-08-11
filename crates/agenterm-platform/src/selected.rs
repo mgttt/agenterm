@@ -503,7 +503,19 @@ pub mod ipc;
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;
 
-#[cfg(all(windows, any(feature = "pty", feature = "process")))]
+#[cfg(all(feature = "parent-console", windows))]
+#[path = "adapters/windows/parent_console.rs"]
+pub(crate) mod parent_console;
+
+#[cfg(all(feature = "parent-console", target_os = "linux"))]
+#[path = "adapters/linux/parent_console.rs"]
+pub(crate) mod parent_console;
+
+#[cfg(all(feature = "parent-console", target_os = "macos"))]
+#[path = "adapters/macos/parent_console.rs"]
+pub(crate) mod parent_console;
+
+#[cfg(all(windows, any(feature = "pty", feature = "parent-console")))]
 #[path = "adapters/windows/console.rs"]
 pub(crate) mod console;
 
@@ -511,7 +523,7 @@ pub(crate) mod console;
 #[path = "adapters/windows/process_control.rs"]
 pub(crate) mod process_control;
 
-#[cfg(all(feature = "process", windows))]
+#[cfg(all(feature = "runtime", windows))]
 #[path = "adapters/windows/runtime.rs"]
 pub(crate) mod runtime;
 
@@ -543,11 +555,11 @@ pub(crate) mod ui_screenshot;
 #[path = "adapters/macos/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
-#[cfg(all(feature = "process", target_os = "linux"))]
+#[cfg(all(feature = "runtime", target_os = "linux"))]
 #[path = "adapters/linux/runtime.rs"]
 pub(crate) mod runtime;
 
-#[cfg(all(feature = "process", target_os = "macos"))]
+#[cfg(all(feature = "runtime", target_os = "macos"))]
 #[path = "adapters/macos/runtime.rs"]
 pub(crate) mod runtime;
 

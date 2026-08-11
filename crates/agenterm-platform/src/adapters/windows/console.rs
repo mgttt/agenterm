@@ -9,9 +9,9 @@ use std::io;
 use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
 use std::sync::Mutex;
 
-use windows_sys::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
-};
+#[cfg(feature = "pty")]
+use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
@@ -48,6 +48,7 @@ impl ConsoleGuard {
     /// Like `attach_parent`, but leaves the default console control
     /// behavior in place so `Ctrl+C` terminates this process — the contract
     /// a CLI worker must honor for parity with a console-subsystem binary.
+    #[cfg(feature = "process")]
     pub(crate) fn attach_parent_with_default_interrupts() -> io::Result<Self> {
         Self::attach_parent_impl(false)
     }
@@ -94,6 +95,7 @@ impl ConsoleGuard {
     /// Unlike `attach_parent`, this does *not* redirect the host process's
     /// stdio handles — the host is intended to inspect the child console,
     /// not take it over for its own I/O.
+    #[cfg(feature = "pty")]
     pub(crate) fn attach_process(process_id: u32) -> io::Result<Self> {
         let lock = LOCK
             .lock()
@@ -255,6 +257,7 @@ fn rollback_std_handles(applied: &[(STD_HANDLE, HANDLE)]) {
 /// into `std::process::Stdio` so a GUI-subsystem child receives real
 /// handles at startup regardless of what this process's cached Rust stdio
 /// saw, and independent of when the console guard is dropped.
+#[cfg(feature = "process")]
 pub(crate) fn duplicate_std_handles() -> [Option<OwnedHandle>; 3] {
     [
         duplicate_std_handle(STD_INPUT_HANDLE),
@@ -263,6 +266,7 @@ pub(crate) fn duplicate_std_handles() -> [Option<OwnedHandle>; 3] {
     ]
 }
 
+#[cfg(feature = "process")]
 fn duplicate_std_handle(which: STD_HANDLE) -> Option<OwnedHandle> {
     use windows_sys::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle};
     use windows_sys::Win32::System::Threading::GetCurrentProcess;

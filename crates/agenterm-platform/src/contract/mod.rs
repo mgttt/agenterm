@@ -46,7 +46,7 @@ pub mod processor_affinity;
 pub mod processor_topology;
 #[cfg(feature = "pty")]
 pub mod pty;
-#[cfg(feature = "process")]
+#[cfg(feature = "runtime")]
 pub mod runtime;
 #[cfg(feature = "shared-memory")]
 pub mod shared_memory;

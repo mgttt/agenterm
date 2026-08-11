@@ -67,7 +67,9 @@ clipboard, IPC, or screenshot modules.
 | `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |
 | `process-spawn` | detached child launch with retained `Child`, explicit Windows job fallback, ambient-stdio protection and transactional explicit-handle inheritance | target `libc` / minimal `windows-sys` |
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
-| `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
+| `parent-console` | best-effort stdout/stderr lines for GUI-subsystem launchers without process authority | minimal `windows-sys`; none on Unix |
+| `runtime` | target terminal-shell and locale defaults without process authority | none |
+| `process` | observation/tree control, child-pipe probes and compatibility access to `parent-console` / `runtime` | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
 | `filesystem-entry` | classify path metadata or already-open objects, treating Unix symbolic links and every Windows reparse point as link-like | none |
 | `directory-access` | merge bounded read/execute or content-modify access for a native principal across a quiescent directory tree without following links | `filesystem-entry` + minimal Windows security APIs |
@@ -79,12 +81,12 @@ clipboard, IPC, or screenshot modules.
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and product-neutral local byte streams; target-selected extension traits own borrowed/owned handle or fd transfer | `locking`, target native APIs |
-| `pty` | PTY command/master/child lifecycle | `process`, direct Win32 ConPTY / POSIX PTY adapters |
+| `pty` | PTY command/master/child lifecycle | direct Win32 ConPTY / POSIX PTY adapters |
 | `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Linux `x11rb` / Unix `winit` + `softbuffer` / macOS system frameworks |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and the neutral pixel-window runner when `window` + `input` are enabled | `input` |
 | `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
-| `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | `process`, target native APIs |
+| `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | target native APIs |
 | `screenshot` | bounded XRGB encoding and typed native-window capture | `filesystem`, `png`, target Win32 APIs |
 | `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |
 | `webview` | passive system-runtime discovery | none |

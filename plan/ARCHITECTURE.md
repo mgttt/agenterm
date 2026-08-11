@@ -213,6 +213,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   alternate-screen `less`、输入、缩放、截图和异常进程的 18 项黑盒及 1 项多标签控制门
   通过；Windows 正常生产图不再含 `rmux-pty` / `rmux-types` / `tracing`。同一
   unwind/trace-only release-fast PE 从 791,552 B 降至 761,856 B，净减 29,696 B。
+- Platform feature 边界按机制而非历史聚合划分：`pty` 和 `clipboard` 不再隐式启用
+  完整 `process`；GUI launcher 的父控制台输出与目标 shell/locale 默认值分别由
+  `parent-console`、`runtime` 拥有。完整 `process` 仅为兼容聚合窄机制，con 必须显式
+  声明所需 feature，不得因此获得进程枚举、控制、指标、安全或 spawn 面。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

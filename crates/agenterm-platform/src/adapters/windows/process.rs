@@ -5,57 +5,6 @@ use std::process::{Child, ChildStderr, ChildStdout, Command};
 use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo};
 
-pub(crate) fn write_parent_console_stderr(message: &str) -> bool {
-    write_parent_console(message, true)
-}
-
-pub(crate) fn write_parent_console_stdout(message: &str) -> bool {
-    write_parent_console(message, false)
-}
-
-fn write_parent_console(message: &str, to_stderr: bool) -> bool {
-    use std::{
-        fs::{File, OpenOptions},
-        io::Write as _,
-        mem::ManuallyDrop,
-        os::windows::{fs::OpenOptionsExt, io::FromRawHandle as _},
-    };
-    use windows_sys::Win32::{
-        Foundation::INVALID_HANDLE_VALUE,
-        System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
-    };
-
-    let payload = format!("{message}\n");
-    let std_handle = if to_stderr {
-        STD_ERROR_HANDLE
-    } else {
-        STD_OUTPUT_HANDLE
-    };
-    let handle = unsafe { GetStdHandle(std_handle) };
-    if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
-        // A windows-subsystem process can have a valid inherited pipe/file
-        // handle while Rust's stdout/stderr singleton was initialized as a
-        // sink. Write through the real Win32 handle and deliberately avoid
-        // taking ownership of the caller's std slot.
-        let mut stream = ManuallyDrop::new(unsafe { File::from_raw_handle(handle) });
-        if stream.write_all(payload.as_bytes()).is_ok() && stream.flush().is_ok() {
-            return true;
-        }
-    }
-    let Ok(_guard) = super::console::ConsoleGuard::attach_parent() else {
-        return false;
-    };
-    let mut opts = OpenOptions::new();
-    opts.read(true).write(true);
-    opts.share_mode(
-        windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ
-            | windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE,
-    );
-    opts.open("CONOUT$").is_ok_and(|mut console| {
-        console.write_all(payload.as_bytes()).is_ok() && console.flush().is_ok()
-    })
-}
-
 pub(crate) fn stdout_probe_token(reader: &ChildStdout) -> Option<PipeProbeToken> {
     use std::os::windows::io::AsRawHandle as _;
     Some(PipeProbeToken(reader.as_raw_handle() as usize))

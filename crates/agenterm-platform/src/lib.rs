@@ -258,6 +258,9 @@ pub mod checksum;
 #[cfg(feature = "process")]
 pub mod process;
 
+#[cfg(feature = "parent-console")]
+pub mod parent_console;
+
 #[cfg(feature = "process-control")]
 pub mod process_control;
 
@@ -298,7 +301,7 @@ pub mod shared_memory;
 #[cfg(feature = "window")]
 pub mod process_window;
 
-#[cfg(feature = "process")]
+#[cfg(feature = "runtime")]
 pub mod runtime;
 
 #[cfg(feature = "screenshot")]

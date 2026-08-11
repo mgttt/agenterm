@@ -405,7 +405,7 @@ fn main() {
     let parsed = match parse_args(&args) {
         Ok(parsed) => parsed,
         Err(message) => {
-            let _ = agenterm_platform::process::write_parent_console_stderr(&message);
+            let _ = agenterm_platform::parent_console::write_stderr(&message);
             std::process::exit(2);
         }
     };
@@ -440,7 +440,7 @@ fn main() {
     let script = match script {
         Ok(script) => script,
         Err(message) => {
-            let _ = agenterm_platform::process::write_parent_console_stderr(&message);
+            let _ = agenterm_platform::parent_console::write_stderr(&message);
             std::process::exit(2);
         }
     };
@@ -484,9 +484,7 @@ fn main() {
         .with_ime_allowed(true);
 
     if let Err(error) = run_pixel_window(options, Box::new(app)) {
-        let _ = agenterm_platform::process::write_parent_console_stderr(&format!(
-            "agenterm-con: {error}"
-        ));
+        let _ = agenterm_platform::parent_console::write_stderr(&format!("agenterm-con: {error}"));
         std::process::exit(1);
     }
     if command_failed.load(Ordering::Acquire) {
@@ -559,11 +557,11 @@ Ctrl+wheel adjusts font size at runtime.";
 
 /// Flags that must not open a window. Returns `Some(exit_code)` when handled.
 fn write_offline_stdout(text: &str) {
-    let _ = agenterm_platform::process::write_parent_console_stdout(text);
+    let _ = agenterm_platform::parent_console::write_stdout(text);
 }
 
 fn write_offline_stderr(text: &str) {
-    let _ = agenterm_platform::process::write_parent_console_stderr(text);
+    let _ = agenterm_platform::parent_console::write_stderr(text);
 }
 
 fn offline_cli_exit(args: &[String]) -> Option<i32> {
@@ -584,18 +582,18 @@ fn offline_cli_exit(args: &[String]) -> Option<i32> {
     let alone = args.len() == 1;
     match args.first().map(String::as_str) {
         Some("--version" | "-V") if alone => {
-            let _ = agenterm_platform::process::write_parent_console_stdout(&format!(
+            let _ = agenterm_platform::parent_console::write_stdout(&format!(
                 "agenterm-con {}",
                 env!("CARGO_PKG_VERSION")
             ));
             Some(0)
         }
         Some("--help" | "-h") if alone => {
-            let _ = agenterm_platform::process::write_parent_console_stdout(USAGE);
+            let _ = agenterm_platform::parent_console::write_stdout(USAGE);
             Some(0)
         }
         Some("--version" | "-V" | "--help" | "-h") => {
-            let _ = agenterm_platform::process::write_parent_console_stderr(
+            let _ = agenterm_platform::parent_console::write_stderr(
                 "error: --version/--help must be used alone",
             );
             Some(2)

@@ -542,6 +542,12 @@ integrated validation recorded below):
   union. Default and each individual capability compile independently; on
   Windows the minimal process/filesystem dependency trees contain only
   `windows-sys -> windows-link` and do not activate UI/GDI/clipboard modules.
+- [x] PTY and clipboard no longer imply the aggregate process capability.
+  Product-neutral `parent-console` and `runtime` features independently own
+  launcher output and terminal defaults; `process` retains compatibility
+  wrappers by aggregating those narrow mechanisms. Lightweight hosts therefore
+  declare actual needs without compiling process inventory, control, metrics,
+  security, observation, containment, image, or spawn surfaces.
 - [x] The optional Windows `app-container-profile` feature owns profile/SID
   mechanics needed by external platform-crate callers without making them
   reconstruct native capability identities or pass potentially unaligned SID
