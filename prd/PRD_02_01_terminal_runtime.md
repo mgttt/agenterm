@@ -229,14 +229,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   keys into the PTY; `Ctrl+A/C/V/X` provide select-all, copy, bounded single-line
   paste and cut semantics. The host chrome defaults to high-contrast
   black/white/gray and the terminal default foreground is near-white on black;
-  explicit ANSI application colors remain intact. Geometry, tree viewport
+  explicit ANSI application colors remain intact. Geometry, iterative typed tree-depth resolution, tree viewport
   bounds and hit results are pure deterministic contracts covered independently
   of Win32/PTY state; an out-of-range hit or scroll safely becomes background or
   a bounded no-op. A feature-gated native Win32 pixel host now proves the
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its x86_64 release PE is currently 549,888 bytes versus 1,046,528 bytes
+  host; its x86_64 release PE is currently 554,496 bytes versus 1,046,528 bytes
   for the original portable host. Its cross-platform screenshot writer uses a
   bounded streaming stored-DEFLATE encoder with batched Adler-32 and a shared
   platform IEEE CRC-32 state rather than linking the general PNG compression

@@ -1656,20 +1656,20 @@ impl ConApp {
         );
 
         let nodes = self.workspace.nodes();
-        for (visible_index, node) in nodes.iter().skip(self.tree_scroll_offset).enumerate() {
+        let depths =
+            agenterm_ui_core::compute_tree_depths_by(nodes, |node| node.id, |node| node.parent)
+                .unwrap_or_else(|_| vec![0; nodes.len()]);
+        for (visible_index, (node_index, node)) in nodes
+            .iter()
+            .enumerate()
+            .skip(self.tree_scroll_offset)
+            .enumerate()
+        {
             let y = header_height + visible_index as u32 * row_height;
             if y >= height {
                 break;
             }
-            let mut depth = 0u32;
-            let mut parent = node.parent;
-            while let Some(parent_id) = parent {
-                depth = depth.saturating_add(1).min(8);
-                parent = nodes
-                    .iter()
-                    .find(|candidate| candidate.id == parent_id)
-                    .and_then(|candidate| candidate.parent);
-            }
+            let depth = depths.get(node_index).copied().unwrap_or(0).min(8);
             let indent = 14 + depth * 18;
             if self.workspace.active() == Some(node.id) {
                 surface.fill_rect(0, y, tree_width, row_height, active_bg.to_xrgb());

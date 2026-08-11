@@ -310,3 +310,6 @@ If a recurring answer was hard to discover, add the proven rule here.
 - Trace the full call path before caching an expensive FFI or parser call. A product facade may already own a bounded cache even when the render caller looks uncached.
 - Never layer a second cache around an already cached facade without measured evidence for a distinct lifetime or key domain. It duplicates memory, code, invalidation rules, and statistics while hiding the real owner.
 - When cache policy is reusable, move the existing single cache implementation into a host-neutral crate and keep platform rasterization or other native FFI behind the miss path. Preserve capacity, negative caching, fallback behavior, and key semantics during the move.
+
+- `bool::then_some(value)` evaluates `value` eagerly. Do not use it to guard subtraction, indexing, parsing, allocation, FFI, or any other operation that must not happen on the false path; use `if` or lazy `then(|| value)` instead.
+- Compare data-structure choices in the final optimized artifact. In this repository, a generic sorted index for tree depths added 2 KiB more release code than the measured `HashMap` implementation even though it looked simpler; source-level intuition is not PE-size evidence.
