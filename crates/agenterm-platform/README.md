@@ -79,7 +79,7 @@ clipboard, IPC, or screenshot modules.
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and product-neutral local byte streams; target-selected extension traits own borrowed/owned handle or fd transfer | `locking`, target native APIs |
-| `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
+| `pty` | PTY command/master/child lifecycle | `process`, direct Win32 ConPTY / POSIX PTY adapters |
 | `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Linux `x11rb` / Unix `winit` + `softbuffer` / macOS system frameworks |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and the neutral pixel-window runner when `window` + `input` are enabled | `input` |

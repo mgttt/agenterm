@@ -61,9 +61,9 @@ PRD + Cargo deps (primary)
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。
 - 不变量：`ChildCommand` / `PtyMaster` / `PtyChild` / `TerminalSize` 对外签名稳定。
-- 证据：Windows 仍走 `rmux-pty`；Linux `openpty`+fork/exec 能 spawn `/bin/sh` 读写。
+- 证据：Windows 走 platform-owned direct ConPTY；Linux `openpty`+fork/exec 能 spawn `/bin/sh` 读写。
 - 安全失败：spawn 失败返回 typed error，不挂 GUI。
-- 非目标：不替换 Windows ConPTY；不做多 pane。
+- 非目标：不把任一 host 的 PTY 机制泄漏进共享 runtime；不做多 pane。
 
 ### B — `terminal_runtime` 跨平台
 - 用户问题：标签生命周期、vt100、scrollback、composer submit 必须共用。
@@ -101,7 +101,7 @@ PRD + Cargo deps (primary)
 | 窗口/事件 | `winit` | 跨 Linux/macOS，无 GPU 绑定 |
 | 像素缓冲 | `softbuffer` | 对齐 Win32/GDI「软件栅格」 |
 | Unix PTY | `libc` openpty/fork（必要时 `nix`） | 已有 libc；避免第二套 Windows PTY |
-| Windows PTY | 继续 `rmux-pty` | 不扰动已交付路径 |
+| Windows PTY | platform direct ConPTY/Job Object adapter | 与 Unix 共享 facade，不共享 OS 机制 |
 
 ## 版本选择
 

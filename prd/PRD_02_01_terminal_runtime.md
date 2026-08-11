@@ -11,9 +11,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   composer, settings, wheel/scrollbar, paste, and word/row/drag selection
   with edge autoscroll; status-bar CWD editor, window-close confirm, and tabs
   resize grip on Unix; proxy editor and professional selection remain later
-- [x] one ConPTY-backed process per tab on Windows; adapter-private `rmux-pty`
-  currently owns lifecycle and byte-stream mechanics while platform-owned native
-  console input owns attachment serialization and key injection
+- [x] one ConPTY-backed process per tab on Windows; the platform adapter directly
+  owns ConPTY pipes, process/job lifecycle, resize, wait and native console input
 - [x] shared PTY backend facade: Windows keeps those implementation details behind
   one adapter; Unix uses POSIX `openpty` + fork/exec; `terminal_runtime` consumes
   one API
@@ -259,8 +258,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   block, with `.rdata`, `.pdata`, and `.rsrc` unchanged. The product accepts that
   measured 0.06% cost for one shared contract and system-compressed PNG rather
   than claiming native FFI is automatically smaller.
-  Windows native key delivery no longer delegates a second console-attachment
-  authority to `rmux-pty`: one platform `ConsoleGuard` serializes `FreeConsole` /
+  Windows native key delivery uses one platform `ConsoleGuard` to serialize `FreeConsole` /
   `AttachConsole`, retries the documented already-attached case, opens `CONIN$`,
   and writes an exact key-down/key-up `INPUT_RECORD` pair with
   `WriteConsoleInputW`. The real `cmd.exe` cursor journey and alternate-screen
@@ -270,6 +268,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   unwind/trace-only release-fast PE from 790,528 to 791,552 bytes; the measured
   1,024-byte cost is retained for behavior and single native ownership, not
   presented as a size optimization.
+  The next structural step removes `rmux-pty` from the Windows production graph
+  entirely. The direct adapter owns synchronous ConPTY endpoints, a cancellable
+  overlapped writer, a drain-safe output pump, build-gated passthrough fallback,
+  PowerShell DSR fragments, suspended process creation, exact wait/exit status,
+  and a `KILL_ON_JOB_CLOSE` Job Object. It never resumes an unassigned child and
+  never reuses a ConPTY whose failed first child may have closed its output pump.
+  A platform real-child `COMSPEC /D /C echo` regression and all 18 con black-box
+  journeys plus the isolated multitab control journey pass. The same
+  unwind/trace-only release-fast artifact falls from 791,552 to 761,856 bytes,
+  a measured 29,696-byte reduction while retaining unwind containment.
   Windows glyph selection and gray8 coverage now execute behind the platform
   `RasterGlyph` contract through bounded GDI calls with deterministic DC/font
   cleanup; con no longer opens or parses font files, and ab_glyph/ttf_parser

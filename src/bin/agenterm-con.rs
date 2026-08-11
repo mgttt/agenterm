@@ -639,8 +639,8 @@ struct ConTerminal {
     master: Option<PtyMaster>,
 
     /// PTY child handle. MUST stay alive for the session lifetime: dropping it
-    /// closes the rmux_pty Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE),
-    /// which kills the shell process immediately.
+    /// closes the platform-owned Job Object
+    /// (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), which kills the shell tree.
     child: Option<PtyChild>,
 
     /// Preallocated bounded handoff from the PTY reader thread.

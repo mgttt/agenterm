@@ -97,7 +97,6 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation 0.2.2",
  "png",
- "rmux-pty",
  "serde",
  "softbuffer",
  "windows-sys 0.61.2",
@@ -2672,38 +2671,6 @@ dependencies = [
  "untrusted",
  "windows-sys 0.52.0",
 ]
-
-[[package]]
-name = "rmux-os"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ac92a8a5bb5618ffc0ffaef843b8ce3c98c57ec57233db8f3b3a762970afed3"
-dependencies = [
- "libc",
- "rmux-types",
- "rustix 1.1.4",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rmux-pty"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ed81da89c738a0bca198b65f6b379b947e9f81a465a5135355bc3d5584a5b62"
-dependencies = [
- "libc",
- "rmux-os",
- "rmux-types",
- "rustix 1.1.4",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rmux-types"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13257d66b340e82a395620778b30e50d1b4ed9d8885868af60a7b1394e599da1"
 
 [[package]]
 name = "rquickjs"

@@ -722,8 +722,9 @@ integrated validation recorded below):
 - [x] POSIX PTY allocation, fork/session/exec, resize, polling, and child
   lifecycle code now physically resides in `adapters/linux/pty.rs`; macOS has
   an explicit adapter entry over that private POSIX mechanism. The Windows
-  adapter wraps `rmux-pty` and converts the neutral terminal size and process
-  identity at its boundary. `src/pty` is now an OS-neutral compatibility
+  adapter directly owns ConPTY, cancellable input, output draining, process wait
+  and Job Object cleanup behind neutral terminal size/process identities.
+  `src/pty` is now an OS-neutral compatibility
   projection over `services::pty → selected → adapter`; reader/wait concurrency,
   exit-triggered pseudoconsole close, and force-terminate ordering remain in
   the existing runtime path. Spawn, resize, reader/wait handle cloning, wait,
