@@ -313,23 +313,38 @@ fn wait_locale(context, cli, locale_id) {
     throw "remote_ui_locale_timeout:" + locale_id;
 }
 
+// The `0..1200` attempt bound is ~156s of wall clock here, because every attempt
+// spawns a `ui-snapshot` child (~105ms measured). These two run four times each
+// on the font-zoom path, so a condition that stops holding silently consumes
+// remote-ui-smoke's whole 600s budget and reports only `host_hard_timeout`.
+// Both now give up after 20s and report what they last saw.
 fn wait_effective_font_size(context, cli, size, overridden) {
+    let font_deadline = std::time::SystemTime::now().unix_millis + 20000;
+    let last_effective = -1;
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         if snapshot.settings != json_null() && snapshot.settings.effective != json_null() {
             let terminal_override = snapshot.settings.current_terminal_override;
+            last_effective = 0 + snapshot.settings.effective.terminal_font_size;
             if snapshot.settings.effective.terminal_font_size == size
                 && ((overridden && terminal_override != json_null())
                     || (!overridden && terminal_override == json_null())) {
                 return snapshot;
             }
         }
+        if std::time::SystemTime::now().unix_millis > font_deadline {
+            throw "remote_ui_effective_font_timeout:want=" + size
+                + ":last=" + last_effective;
+        }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw "remote_ui_effective_font_timeout:" + size;
+    throw "remote_ui_effective_font_timeout:want=" + size
+        + ":last=" + last_effective;
 }
 
 fn wait_terminal_resize_settled(context, cli) {
+    let settle_deadline = std::time::SystemTime::now().unix_millis + 20000;
+    let last_detail = "";
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let terminal = snapshot.layout.terminal;
@@ -338,9 +353,15 @@ fn wait_terminal_resize_settled(context, cli) {
                 && terminal.cols == terminal.desired_cols {
             return snapshot;
         }
+        last_detail = "pending=" + terminal.resize_pending
+            + ":rows=" + terminal.rows + "/" + terminal.desired_rows
+            + ":cols=" + terminal.cols + "/" + terminal.desired_cols;
+        if std::time::SystemTime::now().unix_millis > settle_deadline {
+            throw "remote_ui_terminal_resize_settle_timeout:" + last_detail;
+        }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw "remote_ui_terminal_resize_settle_timeout";
+    throw "remote_ui_terminal_resize_settle_timeout:" + last_detail;
 }
 
 fn wait_terminal_selection(
