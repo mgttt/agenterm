@@ -229,6 +229,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   取代异常膨胀的泛型 `collect<Result<...>>`。`cargo-bloat` 等会改变 rustc flags 的分析
   构建必须使用隔离 `--target-dir`；与 build-std 官方图共用 target 会留下不匹配的
   core/compiler_builtins fingerprint，profile clean 不能可靠回收，禁止再次污染交付图。
+  后续隔离 bloat 证明 size profile 仍把 config、参数、脚本和 CLI codec 过度内联进
+  `main` / offline 入口；这些既有可测边界显式禁止内联，并以固定 8-byte 数组装配
+  `ATC1` header，避免通用可变尾切片。官方同 profile PE 从 737,280 B 降至
+  733,184 B（-4,096 B），其中 `.text -2,896 B`、`.rdata -536 B`，`.rsrc` 不变。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

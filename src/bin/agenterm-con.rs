@@ -257,6 +257,7 @@ fn config_path() -> Option<std::path::PathBuf> {
     None
 }
 
+#[inline(never)]
 fn load_config() -> ConConfig {
     let Some(path) = config_path() else {
         return ConConfig::default();
@@ -305,6 +306,7 @@ struct ConArgs {
 }
 
 /// Parses arguments, returning the message to print on failure.
+#[inline(never)]
 fn parse_args(args: &[String]) -> Result<ConArgs, String> {
     let mut parsed = ConArgs::default();
     let mut rest = args.iter();

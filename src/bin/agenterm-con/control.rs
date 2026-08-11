@@ -100,6 +100,7 @@ pub enum MouseButton {
 const DEFAULT_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 
+#[inline(never)]
 pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
     let mut cursor = Cursor::new(args);
     cursor.require("cli")?;
@@ -456,6 +457,7 @@ impl Drop for ControlServer {
     }
 }
 
+#[inline(never)]
 pub fn run_cli(args: &[String]) -> Result<String, String> {
     let request = parse_cli(args)?;
     let endpoint = parse_native_endpoint(&request.control)?;
@@ -515,9 +517,9 @@ fn write_frame(stream: &mut NativeStream, payload: &[u8], max_bytes: usize) -> R
     }
     let length =
         u32::try_from(payload.len()).map_err(|_| "control frame payload exceeds u32".to_owned())?;
-    let mut header = [0u8; 8];
-    header[..4].copy_from_slice(&WIRE_MAGIC);
-    header[4..].copy_from_slice(&length.to_le_bytes());
+    let [m0, m1, m2, m3] = WIRE_MAGIC;
+    let [l0, l1, l2, l3] = length.to_le_bytes();
+    let header = [m0, m1, m2, m3, l0, l1, l2, l3];
     stream
         .write_all(&header)
         .map_err(|error| error.to_string())?;
@@ -532,10 +534,10 @@ fn read_frame(stream: &mut NativeStream, max_bytes: usize) -> Result<Vec<u8>, St
     stream
         .read_exact(&mut header)
         .map_err(|error| error.to_string())?;
-    if header[..4] != WIRE_MAGIC {
+    if [header[0], header[1], header[2], header[3]] != WIRE_MAGIC {
         return Err("unsupported control frame version".to_owned());
     }
-    let length = u32::from_le_bytes(header[4..].try_into().expect("four-byte length")) as usize;
+    let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
     if length == 0 || length > max_bytes {
         return Err("control frame payload is empty or oversized".to_owned());
     }
@@ -861,7 +863,10 @@ impl<'a> WireReader<'a> {
             .checked_add(length)
             .filter(|end| *end <= self.bytes.len())
             .ok_or_else(|| "truncated control request".to_owned())?;
-        let value = &self.bytes[self.position..end];
+        let value = self
+            .bytes
+            .get(self.position..end)
+            .ok_or_else(|| "truncated control request".to_owned())?;
         self.position = end;
         Ok(value)
     }

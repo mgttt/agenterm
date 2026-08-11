@@ -545,6 +545,7 @@ fn parse_key_name(name: &str) -> Option<ScriptKey> {
 /// Fails loudly and specifically (which command, what was wrong) rather than
 /// skipping bad entries — a script silently missing half its steps is a
 /// worse debugging experience than the process refusing to start.
+#[inline(never)]
 pub fn parse_script(bytes: &[u8]) -> Result<Vec<ScriptCommand>, String> {
     let values = super::json::parse(bytes)
         .map_err(|error| format!("script is not a JSON array of command objects: {error}"))?
