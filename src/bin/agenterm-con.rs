@@ -2520,7 +2520,7 @@ impl ConTerminal {
         let waker = window.waker();
         let wake_pending = Arc::new(AtomicBool::new(false));
         let reader_wake_pending = Arc::clone(&wake_pending);
-        agenterm_platform::threading::spawn_named(
+        agenterm_platform::threading::spawn_named_detached(
             "agenterm-con-reader",
             Box::new(move || {
                 let mut buf = [0u8; READ_BUF];
@@ -2566,7 +2566,7 @@ impl ConTerminal {
         let exit_waker = window.waker();
         let explicit_command = self.command.is_some();
         let command_failed = Arc::clone(&self.command_failed);
-        agenterm_platform::threading::spawn_named(
+        agenterm_platform::threading::spawn_named_detached(
             "agenterm-con-waiter",
             Box::new(move || {
                 let wait_result = waiter.wait();

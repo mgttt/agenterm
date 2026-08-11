@@ -1055,11 +1055,10 @@ fn spawn_output_pump(
     input: Arc<InputWriter>,
     dsr: Option<DsrBootstrap>,
 ) -> io::Result<()> {
-    crate::threading::spawn_named(
+    crate::threading::spawn_named_detached(
         "agenterm-conpty-output",
         Box::new(move || output_pump(output_read, output, input, dsr)),
     )
-    .map(|_| ())
 }
 
 #[derive(Debug)]

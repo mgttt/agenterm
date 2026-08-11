@@ -155,7 +155,7 @@ pub fn spawn_breakaway_visible_child(
 /// zombie while the parent remains alive.
 pub fn spawn_detached_command(command: &mut Command) -> std::io::Result<DetachedSpawnMode> {
     let (mut child, mode) = spawn_detached_child(command)?;
-    crate::threading::spawn_named(
+    crate::threading::spawn_named_detached(
         "agenterm-platform-child-reaper",
         Box::new(move || {
             let _ = child.wait();
@@ -169,7 +169,7 @@ pub fn spawn_breakaway_visible_command(
     command: &mut Command,
 ) -> std::io::Result<DetachedSpawnMode> {
     let (mut child, mode) = spawn_breakaway_visible_child(command)?;
-    crate::threading::spawn_named(
+    crate::threading::spawn_named_detached(
         "agenterm-platform-visible-child-reaper",
         Box::new(move || {
             let _ = child.wait();

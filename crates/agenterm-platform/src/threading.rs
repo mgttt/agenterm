@@ -1,50 +1,60 @@
-//! Host-neutral thread launch boundary.
-//!
-//! Callers box product-specific work so `std` generates its thread startup and
-//! panic-unwind trampoline once instead of once for every closure type.
+//! Host-neutral detached-thread launch contract.
 
-use std::{io, thread};
+use std::io;
 
 pub type ThreadTask = Box<dyn FnOnce() + Send + 'static>;
 
 #[inline(never)]
-pub fn spawn_named(name: &'static str, task: ThreadTask) -> io::Result<thread::JoinHandle<()>> {
-    thread::Builder::new()
-        .name(name.to_owned())
-        .spawn(move || run_task(task))
-}
-
-#[inline(never)]
-fn run_task(task: ThreadTask) {
-    task();
+pub fn spawn_named_detached(name: &'static str, task: ThreadTask) -> io::Result<()> {
+    crate::selected::threading::spawn_named_detached(name, task)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
 
     #[test]
-    fn preserves_the_requested_thread_name() {
-        let handle = spawn_named(
+    fn detached_task_runs_with_the_requested_os_name() {
+        let (send, receive) = mpsc::channel();
+        spawn_named_detached(
             "platform-thread-name-probe",
-            Box::new(|| {
-                assert_eq!(
-                    std::thread::current().name(),
-                    Some("platform-thread-name-probe")
-                );
+            Box::new(move || {
+                let _ = send.send(crate::selected::threading::current_name());
             }),
         )
         .expect("spawn named thread");
-        handle.join().expect("named thread succeeds");
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Some("platform-thread-name-probe".to_owned())
+        );
     }
 
     #[test]
-    fn panic_remains_contained_by_the_join_handle() {
-        let handle = spawn_named(
+    fn panic_is_contained_and_unwinds_the_detached_task() {
+        struct Completion(mpsc::Sender<()>);
+        impl Drop for Completion {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+
+        let (send, receive) = mpsc::channel();
+        let started = Instant::now();
+        spawn_named_detached(
             "platform-thread-panic-probe",
-            Box::new(|| panic!("thread panic probe")),
+            Box::new(move || {
+                let _completion = Completion(send);
+                panic!("thread panic probe");
+            }),
         )
         .expect("spawn panic probe");
-        assert!(handle.join().is_err());
+        receive
+            .recv_timeout(Duration::from_secs(2))
+            .expect("panic unwound the task");
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

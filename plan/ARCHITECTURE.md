@@ -249,6 +249,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `catch_unwind` 胶水。隔离 PE 从 698 KiB 降至 682.5 KiB、`.text` 从 459.0 KiB
   降至 447.5 KiB；官方 release-fast PE 从 714,752 B 降至 698,880 B
   （-15,872 B）。该边界是跨平台机制复用，不包含终端、进程或产品调度策略。
+  Windows adapter 随后将这个真实 detached 语义下沉到 raw system FFI：一个
+  `CreateThread` 入口接收 boxed 上下文，成功后立即 `CloseHandle`，线程内先用
+  `SetThreadDescription` 发布 OS 可见名称，再以显式 `catch_unwind` 执行任务；
+  创建失败在调用线程回收上下文，panic 绝不越过 `extern "system"` ABI。Linux/
+  macOS 保持同一 `spawn_named_detached` contract 上的 std adapter，直到 pthread
+  方案具备同等可移植性证据。Windows 单测从系统读取线程描述并证明 panic 析构，
+  con 的真实 PTY/control/child 路径继续通过。隔离 PE 从 682.5 KiB 降至
+  672.0 KiB、`.text` 从 447.5 KiB 降至 441.5 KiB；官方 release-fast PE 从
+  698,880 B 降至 688,128 B（-10,752 B），未增加 crate 或 platform feature。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

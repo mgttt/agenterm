@@ -560,7 +560,7 @@ impl ControlServer {
         let request_tx = Arc::clone(&requests);
         let worker_alive = Arc::clone(&alive);
         let wake = Arc::new(wake);
-        agenterm_platform::threading::spawn_named(
+        agenterm_platform::threading::spawn_named_detached(
             "agenterm-con-control",
             Box::new(move || {
                 while worker_alive.load(Ordering::Acquire) {
@@ -573,7 +573,7 @@ impl ControlServer {
                     };
                     let request_tx = request_tx.clone();
                     let wake = Arc::clone(&wake);
-                    let _ = agenterm_platform::threading::spawn_named(
+                    let _ = agenterm_platform::threading::spawn_named_detached(
                         "agenterm-con-control-request",
                         Box::new(move || serve_one(stream, request_tx, wake)),
                     );

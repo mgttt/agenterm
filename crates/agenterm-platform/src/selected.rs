@@ -37,6 +37,14 @@ pub(crate) const fn app_container_profile_supported() -> bool {
     }
 }
 
+#[cfg(windows)]
+#[path = "adapters/windows/threading.rs"]
+pub(crate) mod threading;
+
+#[cfg(not(windows))]
+#[path = "adapters/unix/threading.rs"]
+pub(crate) mod threading;
+
 #[cfg(all(feature = "console-interrupt", windows))]
 #[path = "adapters/windows/console_interrupt.rs"]
 pub(crate) mod console_interrupt;

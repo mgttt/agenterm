@@ -313,6 +313,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   both name preservation and panic containment, while all 90 con unit tests,
   18 Windows black-box tests and the isolated multitab control journey pass.
   The official release-fast PE falls again from 714,752 to 698,880 bytes.
+  On Windows that detached contract now calls `CreateThread` directly through
+  one raw platform FFI entry, closes the creator's handle immediately, and sets
+  the debugger-visible name with `SetThreadDescription`. Creation failure drops
+  the boxed context on the caller; the native entry catches every unwind before
+  it can cross the system ABI. Linux and macOS retain the same public contract
+  over their std adapter pending equivalent pthread evidence. Native tests read
+  back the OS thread description and prove panic-driven task destruction, while
+  the full con suite proves the real PTY/control/child paths. The official
+  release-fast PE falls from 698,880 to 688,128 bytes without a new dependency.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
