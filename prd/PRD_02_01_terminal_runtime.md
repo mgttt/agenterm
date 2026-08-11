@@ -206,11 +206,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `screenshot-pane`, `send-text`, `send-keys`, cell-addressed mouse
   press/release/move/click, `send-wheel`, and bounded `wait-text`. The CLI
   connects only to an explicitly configured local pipe or Unix-socket endpoint;
-  requests and responses are size/time bounded, screenshot success is returned
+  its private transport uses a versioned, length-prefixed typed frame rather
+  than a nullable JSON envelope. Opcodes and field order are fixed; invalid
+  UTF-8, values, lengths, trailing bytes, or versions fail only that request.
+  Requests and responses are size/time bounded, screenshot success is returned
   only after atomic PNG output has crossed the platform durability barrier, and
   a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 76 binary unit tests plus a Windows
+  window. The owning suite now includes 88 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.

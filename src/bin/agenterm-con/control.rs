@@ -3,7 +3,7 @@
 //! This deliberately models only direct terminal interaction.  It is not a
 //! scripting language, mux protocol, workspace store, or background service.
 
-use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::io::{Read as _, Write as _};
 use std::str::FromStr as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -17,8 +17,9 @@ use super::{
     workspace::TabId,
 };
 
-const REQUEST_MAX_BYTES: u64 = 1024 * 1024;
-const RESPONSE_MAX_BYTES: u64 = 2 * 1024 * 1024;
+const REQUEST_MAX_BYTES: usize = 1024 * 1024;
+const RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
+const WIRE_MAGIC: [u8; 4] = *b"ATC1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const GUI_RESPONSE_TIMEOUT: Duration = Duration::from_secs(125);
 const ACCEPT_POLL: Duration = Duration::from_millis(200);
@@ -458,43 +459,14 @@ impl Drop for ControlServer {
 pub fn run_cli(args: &[String]) -> Result<String, String> {
     let request = parse_cli(args)?;
     let endpoint = parse_native_endpoint(&request.control)?;
-    let wire = WireRequest::from(request.command);
     let mut stream = NativeStream::connect(&endpoint, CONNECT_TIMEOUT)
         .map_err(|error| format!("connect {}: {error}", endpoint))?;
     stream
         .set_io_timeout(GUI_RESPONSE_TIMEOUT)
         .map_err(|error| error.to_string())?;
-    let mut bytes = json::to_vec(&wire.into_json());
-    bytes.push(b'\n');
-    stream
-        .write_all(&bytes)
-        .map_err(|error| error.to_string())?;
-    stream.flush().map_err(|error| error.to_string())?;
-
-    let mut reader = BufReader::new(stream);
-    let mut response = Vec::new();
-    let read = (&mut reader)
-        .take(RESPONSE_MAX_BYTES + 1)
-        .read_until(b'\n', &mut response)
-        .map_err(|error| error.to_string())?;
-    if read == 0 || read as u64 > RESPONSE_MAX_BYTES || !response.ends_with(b"\n") {
-        return Err("invalid or oversized control response".to_owned());
-    }
-    let response = WireResponse::from_json(
-        json::parse(&response).map_err(|error| format!("control response: {error}"))?,
-    )?;
-    if response.ok {
-        Ok(match response.result {
-            Some(JsonValue::String(text)) => text,
-            Some(value) => String::from_utf8(json::to_vec_pretty(&value))
-                .map_err(|_| "JSON writer emitted invalid UTF-8".to_owned())?,
-            None => String::new(),
-        })
-    } else {
-        Err(response
-            .error
-            .unwrap_or_else(|| "control request failed".to_owned()))
-    }
+    let payload = encode_request(request.command)?;
+    write_frame(&mut stream, &payload, REQUEST_MAX_BYTES)?;
+    decode_response(&read_frame(&mut stream, RESPONSE_MAX_BYTES)?)
 }
 
 fn serve_one(
@@ -513,38 +485,12 @@ fn serve_one(
             .recv_timeout(GUI_RESPONSE_TIMEOUT)
             .map_err(|_| "terminal GUI did not respond before timeout".to_owned())?
     });
-    let wire = match response {
-        Ok(result) => WireResponse {
-            ok: true,
-            result: Some(result),
-            error: None,
-        },
-        Err(error) => WireResponse {
-            ok: false,
-            result: None,
-            error: Some(error),
-        },
-    };
-    let mut bytes = json::to_vec(&wire.into_json());
-    bytes.push(b'\n');
-    let _ = stream.write_all(&bytes);
-    let _ = stream.flush();
+    let payload = encode_response(response);
+    let _ = write_frame(&mut stream, &payload, RESPONSE_MAX_BYTES);
 }
 
 fn read_wire_request(stream: &mut NativeStream) -> Result<CliCommand, String> {
-    let mut reader = BufReader::new(stream);
-    let mut bytes = Vec::new();
-    let read = (&mut reader)
-        .take(REQUEST_MAX_BYTES + 1)
-        .read_until(b'\n', &mut bytes)
-        .map_err(|error| error.to_string())?;
-    if read == 0 || read as u64 > REQUEST_MAX_BYTES || !bytes.ends_with(b"\n") {
-        return Err("invalid or oversized control request".to_owned());
-    }
-    let request = WireRequest::from_json(
-        json::parse(&bytes).map_err(|error| format!("control request: {error}"))?,
-    )?;
-    request.try_into()
+    decode_request(&read_frame(stream, REQUEST_MAX_BYTES)?)
 }
 
 fn parse_native_endpoint(value: &str) -> Result<IpcEndpoint, String> {
@@ -561,254 +507,433 @@ fn parse_native_endpoint(value: &str) -> Result<IpcEndpoint, String> {
     Ok(endpoint)
 }
 
-struct WireRequest {
-    command: String,
-    target: Option<u64>,
-    parent: Option<u64>,
-    text: Option<String>,
-    keys: Option<Vec<String>>,
-    output: Option<String>,
-    max_bytes: Option<usize>,
-    action: Option<String>,
-    button: Option<String>,
-    column: Option<u16>,
-    row: Option<u16>,
-    timeout_ms: Option<u64>,
-    notches: Option<i16>,
-    ctrl: Option<bool>,
+const MAX_WIRE_KEYS: usize = 16_384;
+
+fn write_frame(stream: &mut NativeStream, payload: &[u8], max_bytes: usize) -> Result<(), String> {
+    if payload.is_empty() || payload.len() > max_bytes {
+        return Err("control frame payload is empty or oversized".to_owned());
+    }
+    let length =
+        u32::try_from(payload.len()).map_err(|_| "control frame payload exceeds u32".to_owned())?;
+    let mut header = [0u8; 8];
+    header[..4].copy_from_slice(&WIRE_MAGIC);
+    header[4..].copy_from_slice(&length.to_le_bytes());
+    stream
+        .write_all(&header)
+        .map_err(|error| error.to_string())?;
+    stream
+        .write_all(payload)
+        .map_err(|error| error.to_string())?;
+    stream.flush().map_err(|error| error.to_string())
 }
 
-struct WireResponse {
-    ok: bool,
-    result: Option<JsonValue>,
-    error: Option<String>,
+fn read_frame(stream: &mut NativeStream, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let mut header = [0u8; 8];
+    stream
+        .read_exact(&mut header)
+        .map_err(|error| error.to_string())?;
+    if header[..4] != WIRE_MAGIC {
+        return Err("unsupported control frame version".to_owned());
+    }
+    let length = u32::from_le_bytes(header[4..].try_into().expect("four-byte length")) as usize;
+    if length == 0 || length > max_bytes {
+        return Err("control frame payload is empty or oversized".to_owned());
+    }
+    let mut payload = vec![0u8; length];
+    stream
+        .read_exact(&mut payload)
+        .map_err(|error| error.to_string())?;
+    Ok(payload)
 }
 
-impl WireRequest {
-    fn into_json(self) -> JsonValue {
-        json::object([
-            ("command", self.command.into()),
-            ("target", json::nullable(self.target)),
-            ("parent", json::nullable(self.parent)),
-            ("text", json::nullable(self.text)),
-            (
-                "keys",
-                json::nullable(
-                    self.keys
-                        .map(|keys| JsonValue::Array(keys.into_iter().map(Into::into).collect())),
-                ),
-            ),
-            ("output", json::nullable(self.output)),
-            ("max_bytes", json::nullable(self.max_bytes)),
-            ("action", json::nullable(self.action)),
-            ("button", json::nullable(self.button)),
-            ("column", json::nullable(self.column)),
-            ("row", json::nullable(self.row)),
-            ("timeout_ms", json::nullable(self.timeout_ms)),
-            ("notches", json::nullable(self.notches)),
-            ("ctrl", json::nullable(self.ctrl)),
-        ])
+fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
+    let mut wire = WireWriter::new();
+    match command {
+        CliCommand::ListTabs => wire.byte(0),
+        CliCommand::PerfStats => wire.byte(1),
+        CliCommand::ResetPerfStats => wire.byte(2),
+        CliCommand::NewTab { parent } => {
+            wire.byte(3);
+            wire.optional_tab(parent);
+        }
+        CliCommand::SelectTab { target } => {
+            wire.byte(4);
+            wire.tab(target);
+        }
+        CliCommand::CloseTab { target } => {
+            wire.byte(5);
+            wire.tab(target);
+        }
+        CliCommand::CapturePane { target, max_bytes } => {
+            wire.byte(6);
+            wire.optional_tab(target);
+            wire.u64(max_bytes as u64);
+        }
+        CliCommand::ScreenshotPane { target, output } => {
+            wire.byte(7);
+            wire.optional_tab(target);
+            wire.string(&output)?;
+        }
+        CliCommand::SendText { target, text } => {
+            wire.byte(8);
+            wire.optional_tab(target);
+            wire.string(&text)?;
+        }
+        CliCommand::SendKeys { target, keys } => {
+            wire.byte(9);
+            wire.optional_tab(target);
+            let count =
+                u32::try_from(keys.len()).map_err(|_| "too many control keys".to_owned())?;
+            wire.u32(count);
+            for key in keys {
+                wire.string(&key)?;
+            }
+        }
+        CliCommand::SendMouse {
+            target,
+            action,
+            button,
+            column,
+            row,
+        } => {
+            wire.byte(10);
+            wire.optional_tab(target);
+            wire.byte(match action {
+                MouseAction::Press => 0,
+                MouseAction::Release => 1,
+                MouseAction::Move => 2,
+                MouseAction::Click => 3,
+            });
+            wire.byte(match button {
+                MouseButton::None => 0,
+                MouseButton::Left => 1,
+                MouseButton::Middle => 2,
+                MouseButton::Right => 3,
+            });
+            wire.u16(column);
+            wire.u16(row);
+        }
+        CliCommand::SendWheel {
+            target,
+            column,
+            row,
+            notches,
+            ctrl,
+        } => {
+            wire.byte(11);
+            wire.optional_tab(target);
+            wire.u16(column);
+            wire.u16(row);
+            wire.i16(notches);
+            wire.boolean(ctrl);
+        }
+        CliCommand::WaitText {
+            target,
+            text,
+            timeout_ms,
+        } => {
+            wire.byte(12);
+            wire.optional_tab(target);
+            wire.string(&text)?;
+            wire.u64(timeout_ms);
+        }
     }
-
-    fn from_json(value: JsonValue) -> Result<Self, String> {
-        let mut fields = value.into_object("control request")?;
-        let request = Self {
-            command: json::take_string(&mut fields, "command")?
-                .ok_or_else(|| "missing command".to_owned())?,
-            target: json::take_u64(&mut fields, "target")?,
-            parent: json::take_u64(&mut fields, "parent")?,
-            text: json::take_string(&mut fields, "text")?,
-            keys: json::take_string_array(&mut fields, "keys")?,
-            output: json::take_string(&mut fields, "output")?,
-            max_bytes: json::take_usize(&mut fields, "max_bytes")?,
-            action: json::take_string(&mut fields, "action")?,
-            button: json::take_string(&mut fields, "button")?,
-            column: json::take_u16(&mut fields, "column")?,
-            row: json::take_u16(&mut fields, "row")?,
-            timeout_ms: json::take_u64(&mut fields, "timeout_ms")?,
-            notches: json::take_i16(&mut fields, "notches")?,
-            ctrl: json::take_bool(&mut fields, "ctrl")?,
-        };
-        json::reject_unknown(fields, "control request")?;
-        Ok(request)
+    if wire.bytes.len() > REQUEST_MAX_BYTES {
+        return Err("control request is oversized".to_owned());
     }
+    Ok(wire.bytes)
 }
 
-impl WireResponse {
-    fn into_json(self) -> JsonValue {
-        json::object([
-            ("ok", self.ok.into()),
-            ("result", self.result.unwrap_or(JsonValue::Null)),
-            ("error", json::nullable(self.error)),
-        ])
+fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
+    if bytes.is_empty() || bytes.len() > REQUEST_MAX_BYTES {
+        return Err("control request is empty or oversized".to_owned());
     }
-
-    fn from_json(value: JsonValue) -> Result<Self, String> {
-        let mut fields = value.into_object("control response")?;
-        let ok = json::take_bool(&mut fields, "ok")?
-            .ok_or_else(|| "control response missing ok".to_owned())?;
-        let result = json::take(&mut fields, "result").filter(|value| !value.is_null());
-        let error = json::take_string(&mut fields, "error")?;
-        json::reject_unknown(fields, "control response")?;
-        Ok(Self { ok, result, error })
-    }
-}
-
-impl From<CliCommand> for WireRequest {
-    fn from(command: CliCommand) -> Self {
-        let mut wire = Self {
-            command: String::new(),
-            target: None,
-            parent: None,
-            text: None,
-            keys: None,
-            output: None,
-            max_bytes: None,
-            action: None,
-            button: None,
-            column: None,
-            row: None,
-            timeout_ms: None,
-            notches: None,
-            ctrl: None,
-        };
-        match command {
-            CliCommand::ListTabs => wire.command = "list-tabs".to_owned(),
-            CliCommand::PerfStats => wire.command = "perf-stats".to_owned(),
-            CliCommand::ResetPerfStats => wire.command = "reset-perf-stats".to_owned(),
-            CliCommand::NewTab { parent } => {
-                wire.command = "new-tab".to_owned();
-                wire.parent = parent.map(TabId::get);
+    let mut wire = WireReader::new(bytes);
+    let command = match wire.byte()? {
+        0 => CliCommand::ListTabs,
+        1 => CliCommand::PerfStats,
+        2 => CliCommand::ResetPerfStats,
+        3 => CliCommand::NewTab {
+            parent: wire.optional_tab()?,
+        },
+        4 => CliCommand::SelectTab {
+            target: wire.tab()?,
+        },
+        5 => CliCommand::CloseTab {
+            target: wire.tab()?,
+        },
+        6 => {
+            let target = wire.optional_tab()?;
+            let max_bytes = usize::try_from(wire.u64()?)
+                .map_err(|_| "capture size is outside usize".to_owned())?;
+            if max_bytes == 0 || max_bytes > MAX_CAPTURE_BYTES {
+                return Err("capture size is outside its allowed range".to_owned());
             }
-            CliCommand::SelectTab { target } => {
-                wire.command = "select-tab".to_owned();
-                wire.target = Some(target.get());
+            CliCommand::CapturePane { target, max_bytes }
+        }
+        7 => CliCommand::ScreenshotPane {
+            target: wire.optional_tab()?,
+            output: wire.string()?,
+        },
+        8 => CliCommand::SendText {
+            target: wire.optional_tab()?,
+            text: wire.string()?,
+        },
+        9 => {
+            let target = wire.optional_tab()?;
+            let count = wire.u32()? as usize;
+            if count == 0 || count > MAX_WIRE_KEYS || count > wire.remaining() / 4 {
+                return Err("control key count is invalid".to_owned());
             }
-            CliCommand::CloseTab { target } => {
-                wire.command = "close-tab".to_owned();
-                wire.target = Some(target.get());
+            let mut keys = Vec::with_capacity(count);
+            for _ in 0..count {
+                keys.push(wire.string()?);
             }
-            CliCommand::CapturePane { target, max_bytes } => {
-                wire.command = "capture-pane".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.max_bytes = Some(max_bytes);
-            }
-            CliCommand::ScreenshotPane { target, output } => {
-                wire.command = "screenshot-pane".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.output = Some(output);
-            }
-            CliCommand::SendText { target, text } => {
-                wire.command = "send-text".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.text = Some(text);
-            }
-            CliCommand::SendKeys { target, keys } => {
-                wire.command = "send-keys".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.keys = Some(keys);
+            CliCommand::SendKeys { target, keys }
+        }
+        10 => {
+            let target = wire.optional_tab()?;
+            let action = match wire.byte()? {
+                0 => MouseAction::Press,
+                1 => MouseAction::Release,
+                2 => MouseAction::Move,
+                3 => MouseAction::Click,
+                _ => return Err("invalid control mouse action".to_owned()),
+            };
+            let button = match wire.byte()? {
+                0 => MouseButton::None,
+                1 => MouseButton::Left,
+                2 => MouseButton::Middle,
+                3 => MouseButton::Right,
+                _ => return Err("invalid control mouse button".to_owned()),
+            };
+            if (action == MouseAction::Move) != (button == MouseButton::None) {
+                return Err("invalid control mouse action/button pair".to_owned());
             }
             CliCommand::SendMouse {
                 target,
                 action,
                 button,
-                column,
-                row,
-            } => {
-                wire.command = "send-mouse".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.action = Some(format!("{action:?}").to_ascii_lowercase());
-                wire.button = Some(format!("{button:?}").to_ascii_lowercase());
-                wire.column = Some(column);
-                wire.row = Some(row);
+                column: wire.u16()?,
+                row: wire.u16()?,
+            }
+        }
+        11 => {
+            let target = wire.optional_tab()?;
+            let column = wire.u16()?;
+            let row = wire.u16()?;
+            let notches = wire.i16()?;
+            if notches == 0 {
+                return Err("control wheel notches must not be zero".to_owned());
             }
             CliCommand::SendWheel {
                 target,
                 column,
                 row,
                 notches,
-                ctrl,
-            } => {
-                wire.command = "send-wheel".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.column = Some(column);
-                wire.row = Some(row);
-                wire.notches = Some(notches);
-                wire.ctrl = Some(ctrl);
+                ctrl: wire.boolean()?,
+            }
+        }
+        12 => {
+            let target = wire.optional_tab()?;
+            let text = wire.string()?;
+            let timeout_ms = wire.u64()?;
+            if timeout_ms == 0 || timeout_ms > 120_000 {
+                return Err("control wait timeout is outside its allowed range".to_owned());
             }
             CliCommand::WaitText {
                 target,
                 text,
                 timeout_ms,
-            } => {
-                wire.command = "wait-text".to_owned();
-                wire.target = target.map(TabId::get);
-                wire.text = Some(text);
-                wire.timeout_ms = Some(timeout_ms);
             }
         }
-        wire
+        _ => return Err("unknown control command opcode".to_owned()),
+    };
+    wire.finish()?;
+    Ok(command)
+}
+
+fn encode_response(response: Reply) -> Vec<u8> {
+    let mut payload = Vec::new();
+    match response {
+        Err(error) => {
+            payload.push(0);
+            payload.extend_from_slice(error.as_bytes());
+        }
+        Ok(JsonValue::Null) => payload.push(1),
+        Ok(JsonValue::String(text)) => {
+            payload.push(2);
+            payload.extend_from_slice(text.as_bytes());
+        }
+        Ok(value) => {
+            payload.push(3);
+            payload.extend_from_slice(&json::to_vec_pretty(&value));
+        }
+    }
+    payload
+}
+
+fn decode_response(bytes: &[u8]) -> Result<String, String> {
+    let (&tag, payload) = bytes
+        .split_first()
+        .ok_or_else(|| "empty control response".to_owned())?;
+    let text = std::str::from_utf8(payload)
+        .map_err(|_| "control response is not valid UTF-8".to_owned())?;
+    match tag {
+        0 => Err(text.to_owned()),
+        1 if payload.is_empty() => Ok(String::new()),
+        2 | 3 => Ok(text.to_owned()),
+        1 => Err("null control response has trailing bytes".to_owned()),
+        _ => Err("unknown control response tag".to_owned()),
     }
 }
 
-impl TryFrom<WireRequest> for CliCommand {
-    type Error = String;
+struct WireWriter {
+    bytes: Vec<u8>,
+}
 
-    fn try_from(wire: WireRequest) -> Result<Self, Self::Error> {
-        let target = wire.target.map(TabId::new);
-        match wire.command.as_str() {
-            "list-tabs" => Ok(Self::ListTabs),
-            "perf-stats" => Ok(Self::PerfStats),
-            "reset-perf-stats" => Ok(Self::ResetPerfStats),
-            "new-tab" => Ok(Self::NewTab {
-                parent: wire.parent.map(TabId::new),
-            }),
-            "select-tab" => Ok(Self::SelectTab {
-                target: wire.target.map(TabId::new).ok_or("missing target")?,
-            }),
-            "close-tab" => Ok(Self::CloseTab {
-                target: wire.target.map(TabId::new).ok_or("missing target")?,
-            }),
-            "capture-pane" => Ok(Self::CapturePane {
-                target,
-                max_bytes: wire.max_bytes.unwrap_or(DEFAULT_CAPTURE_BYTES),
-            }),
-            "screenshot-pane" => Ok(Self::ScreenshotPane {
-                target,
-                output: wire.output.ok_or("missing output")?,
-            }),
-            "send-text" => Ok(Self::SendText {
-                target,
-                text: wire.text.ok_or("missing text")?,
-            }),
-            "send-keys" => Ok(Self::SendKeys {
-                target,
-                keys: wire.keys.ok_or("missing keys")?,
-            }),
-            "send-mouse" => Ok(Self::SendMouse {
-                target,
-                action: parse_mouse_action(wire.action.as_deref().ok_or("missing action")?)?,
-                button: parse_mouse_button(wire.button.as_deref().ok_or("missing button")?)?,
-                column: wire.column.ok_or("missing column")?,
-                row: wire.row.ok_or("missing row")?,
-            }),
-            "send-wheel" => Ok(Self::SendWheel {
-                target,
-                column: wire.column.ok_or("missing column")?,
-                row: wire.row.ok_or("missing row")?,
-                notches: wire.notches.ok_or("missing notches")?,
-                ctrl: wire.ctrl.unwrap_or(false),
-            }),
-            "wait-text" => Ok(Self::WaitText {
-                target,
-                text: wire.text.ok_or("missing text")?,
-                timeout_ms: wire.timeout_ms.unwrap_or(10_000),
-            }),
-            _ => Err("unknown control command".to_owned()),
+impl WireWriter {
+    fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+
+    fn byte(&mut self, value: u8) {
+        self.bytes.push(value);
+    }
+
+    fn boolean(&mut self, value: bool) {
+        self.byte(u8::from(value));
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn i16(&mut self, value: i16) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn tab(&mut self, value: TabId) {
+        self.u64(value.get());
+    }
+
+    fn optional_tab(&mut self, value: Option<TabId>) {
+        self.boolean(value.is_some());
+        if let Some(value) = value {
+            self.tab(value);
+        }
+    }
+
+    fn string(&mut self, value: &str) -> Result<(), String> {
+        let length =
+            u32::try_from(value.len()).map_err(|_| "control string exceeds u32".to_owned())?;
+        self.u32(length);
+        self.bytes.extend_from_slice(value.as_bytes());
+        Ok(())
+    }
+}
+
+struct WireReader<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl<'a> WireReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, position: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len() - self.position
+    }
+
+    fn take(&mut self, length: usize) -> Result<&'a [u8], String> {
+        let end = self
+            .position
+            .checked_add(length)
+            .filter(|end| *end <= self.bytes.len())
+            .ok_or_else(|| "truncated control request".to_owned())?;
+        let value = &self.bytes[self.position..end];
+        self.position = end;
+        Ok(value)
+    }
+
+    fn byte(&mut self) -> Result<u8, String> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn boolean(&mut self) -> Result<bool, String> {
+        match self.byte()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err("invalid control boolean tag".to_owned()),
+        }
+    }
+
+    fn u16(&mut self) -> Result<u16, String> {
+        Ok(u16::from_le_bytes(
+            self.take(2)?.try_into().expect("two-byte integer"),
+        ))
+    }
+
+    fn i16(&mut self) -> Result<i16, String> {
+        Ok(i16::from_le_bytes(
+            self.take(2)?.try_into().expect("two-byte integer"),
+        ))
+    }
+
+    fn u32(&mut self) -> Result<u32, String> {
+        Ok(u32::from_le_bytes(
+            self.take(4)?.try_into().expect("four-byte integer"),
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64, String> {
+        Ok(u64::from_le_bytes(
+            self.take(8)?.try_into().expect("eight-byte integer"),
+        ))
+    }
+
+    fn tab(&mut self) -> Result<TabId, String> {
+        let value = self.u64()?;
+        if value == 0 {
+            return Err("control tab id must not be zero".to_owned());
+        }
+        Ok(TabId::new(value))
+    }
+
+    fn optional_tab(&mut self) -> Result<Option<TabId>, String> {
+        if self.boolean()? {
+            self.tab().map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn string(&mut self) -> Result<String, String> {
+        let length = self.u32()? as usize;
+        let bytes = self.take(length)?;
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| "control string is not valid UTF-8".to_owned())
+    }
+
+    fn finish(self) -> Result<(), String> {
+        if self.position == self.bytes.len() {
+            Ok(())
+        } else {
+            Err("trailing bytes in control request".to_owned())
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -965,13 +1090,19 @@ mod tests {
             },
         ];
         for command in commands {
-            let bytes = json::to_vec(&WireRequest::from(command.clone()).into_json());
-            let decoded = CliCommand::try_from(
-                WireRequest::from_json(json::parse(&bytes).expect("wire JSON parses"))
-                    .expect("wire schema decodes"),
-            )
-            .unwrap();
+            let bytes = encode_request(command.clone()).expect("wire command encodes");
+            let decoded = decode_request(&bytes).expect("wire command decodes");
             assert_eq!(decoded, command);
         }
+    }
+
+    #[test]
+    fn typed_wire_rejects_trailing_and_invalid_fields() {
+        let mut trailing = encode_request(CliCommand::ListTabs).unwrap();
+        trailing.push(0);
+        assert!(decode_request(&trailing).is_err());
+
+        assert!(decode_request(&[10, 0, 3, 0, 0, 0, 0, 0]).is_err());
+        assert!(decode_response(&[9]).is_err());
     }
 }

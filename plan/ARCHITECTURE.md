@@ -220,6 +220,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 同一规则适用于正交文件机制：`screenshot`、`font` 不携带完整 `filesystem`，`ipc`
   不携带未使用的 `locking`。截图落盘由产品显式选择 `filesystem-publish`；IPC adapter
   只拥有 endpoint、transport 与调用者 identity，不能借 feature 依赖隐式扩大文件面。
+- con 的公开自动化面是 `agenterm-con cli`，不是其进程内 wire。CLI 与 JSON 输出保持
+  稳定；GUI-lifetime client/server 之间使用 `ATC1` 长度前缀 typed frame，只编码命令
+  实际字段并拒绝未知 opcode、非法 tag/范围/UTF-8、超限长度和尾随字节。该层不得演化
+  为 mux/server 协议，也不得重新引入通用 DOM envelope。同一 unwind/trace-only
+  release-fast PE 从 760,832 B 降至 737,280 B（-23,552 B）：`.text -17,664 B`、
+  `.rdata -4,808 B`、`.pdata -1,572 B`，`.rsrc` 不变；脚本 decode 同时用显式循环
+  取代异常膨胀的泛型 `collect<Result<...>>`。`cargo-bloat` 等会改变 rustc flags 的分析
+  构建必须使用隔离 `--target-dir`；与 build-std 官方图共用 target 会留下不匹配的
+  core/compiler_builtins fingerprint，profile clean 不能可靠回收，禁止再次污染交付图。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

@@ -549,11 +549,11 @@ pub fn parse_script(bytes: &[u8]) -> Result<Vec<ScriptCommand>, String> {
     let values = super::json::parse(bytes)
         .map_err(|error| format!("script is not a JSON array of command objects: {error}"))?
         .into_array("script")?;
-    values
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| decode_raw_command(value, index)?.validate(index))
-        .collect()
+    let mut commands = Vec::with_capacity(values.len());
+    for (index, value) in values.into_iter().enumerate() {
+        commands.push(decode_raw_command(value, index)?.validate(index)?);
+    }
+    Ok(commands)
 }
 
 fn decode_raw_command(value: super::json::JsonValue, index: usize) -> Result<RawCommand, String> {

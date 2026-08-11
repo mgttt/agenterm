@@ -371,6 +371,7 @@ fn hex(byte: u8) -> Option<u16> {
     }
 }
 
+#[cfg(test)]
 pub fn to_vec(value: &JsonValue) -> Vec<u8> {
     let mut output = Vec::new();
     write_value(value, &mut output, None, 0);
@@ -516,8 +517,6 @@ macro_rules! number_take {
 
 number_take!(take_u16, u16);
 number_take!(take_u64, u64);
-number_take!(take_usize, usize);
-number_take!(take_i16, i16);
 
 pub fn take_f64(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<f64>, String> {
     let value = take_number(fields, key)?
@@ -531,27 +530,6 @@ pub fn take_f64(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Opti
         return Err(format!("{key} is not a finite number"));
     }
     Ok(value)
-}
-
-pub fn take_string_array(
-    fields: &mut Vec<(String, JsonValue)>,
-    key: &str,
-) -> Result<Option<Vec<String>>, String> {
-    let Some(value) = take(fields, key) else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    value
-        .into_array(key)?
-        .into_iter()
-        .map(|value| match value {
-            JsonValue::String(value) => Ok(value),
-            _ => Err(format!("{key} entries must be strings")),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
 }
 
 #[cfg(test)]
