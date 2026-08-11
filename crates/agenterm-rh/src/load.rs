@@ -26,6 +26,18 @@ impl RhNativeModule {
         self.register_host_v11(fleet_call, None, None, None, None, None, None)
     }
 
+    /// Register the stub callbacks for a pack that is run WITHOUT a host --
+    /// qualification does this, since this crate has no host implementation.
+    ///
+    /// The stubs answer -4 / empty, which is defined and inspectable. What the
+    /// prelude must never do is answer a MISSING callback with a value: an
+    /// unregistered pack that fabricates `args.len == -4` silently misses every
+    /// branch comparing it, so the prelude aborts instead. A hostless run is a
+    /// legitimate niche and must opt in here rather than trip that guard.
+    pub fn register_stub_host(&self) -> Result<(), RhError> {
+        self.register_host_v11(dummy_fleet_call, None, None, None, None, None, None)
+    }
+
     pub fn register_host_v2(&self, fleet_call: RhHostFleetCall) -> Result<(), RhError> {
         self.register_host_v11(fleet_call, None, None, None, None, None, None)
     }
@@ -285,6 +297,17 @@ impl RhNativeModule {
             lines
         }
     }
+}
+
+extern "C" fn dummy_fleet_call(
+    _operation_id: *const u8,
+    _operation_id_len: u32,
+    _params_json: *const u8,
+    _params_json_len: u32,
+    _out_buf: *mut u8,
+    _out_cap: u32,
+) -> i32 {
+    -4
 }
 
 extern "C" fn dummy_std_fs_exists_call(_path: *const u8, _path_len: u32) -> i32 {

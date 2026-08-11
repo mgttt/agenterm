@@ -26,6 +26,11 @@ pub struct RhQualificationReceipt {
 pub fn qualify_pack_dir(source: &str, dir: &Path) -> Result<RhQualificationReceipt, RhError> {
     let build = build_pack_dir(source, dir)?;
     let pack = RhPack::load(dir)?;
+    // Qualification runs the entry, and this crate has no host implementation,
+    // so opt into the stub callbacks. Without this the prelude aborts on the
+    // first `args.len`/`print` rather than fabricating a value for a callback
+    // that was never registered -- see `register_stub_host`.
+    pack.register_stub_host()?;
     let cc_lines = pack.cc_lines();
     Ok(RhQualificationReceipt {
         schema: QUALIFICATION_SCHEMA.to_owned(),

@@ -36,6 +36,12 @@ impl RhPack {
         self.module.cc_lines()
     }
 
+    /// See `RhNativeModule::register_stub_host`. Qualification runs a pack with
+    /// no host, so it opts into the stub callbacks explicitly.
+    pub fn register_stub_host(&self) -> Result<(), RhError> {
+        self.module.register_stub_host()
+    }
+
     pub fn api_version(&self) -> u32 {
         self.module.api_version()
     }
