@@ -282,6 +282,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   black-box 与 1 isolated multitab control journey 通过；Win x64 Clippy、Win ARM64
   和 Linux x64 编译门保持绿色。这是产品边界与尺寸优化同向的案例：删除平行机制
   优先于把它改写成汇编。
+- Windows PTY 的进程终止探测以 500 ms `WaitForSingleObject` raw FFI 为唯一原生
+  叶子，并立即把返回值与 `GetLastError` 收敛为无分配 `ProcessWaitState`；显式
+  terminate 调用者才构造 typed error，Drop 对失败保持既有 best-effort 语义。过滤
+  bloat 证明该叶子两个代码区合计仅 105 B。此前 top list 将相邻/折叠代码归给
+  `process_is_still_running` 而显示 7.0 KiB；重构后标签转移到
+  `create_suspended_process`，总 PE 仍为 609.0 KiB、`.text` 仍为 398.5 KiB，官方
+  PE 仍为 623,616 B。该项是稳健性与边界改进，不是尺寸收益；单符号区间不得替代
+  final PE/section 作为汇编或 FFI 下沉依据。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

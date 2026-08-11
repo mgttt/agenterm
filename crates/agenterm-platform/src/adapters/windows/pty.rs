@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
     DuplicateHandle, E_HANDLE, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF,
-    ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER, ERROR_IO_PENDING, ERROR_NOT_FOUND,
-    ERROR_OPERATION_ABORTED, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE,
+    ERROR_INVALID_DATA, ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER, ERROR_IO_PENDING,
+    ERROR_NOT_FOUND, ERROR_OPERATION_ABORTED, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE,
     INVALID_HANDLE_VALUE, S_OK, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
@@ -341,11 +341,19 @@ impl PtyChild {
         };
         job.terminate(1)
             .map_err(|error| pty_error("terminate", "pty_terminate_failed", error))?;
-        if process_is_still_running(&self.process)
-            .map_err(|error| pty_error("terminate", "pty_terminate_failed", error))?
-        {
-            terminate_process(&self.process, 1)
-                .map_err(|error| pty_error("terminate", "pty_terminate_failed", error))?;
+        match wait_process_state(&self.process) {
+            ProcessWaitState::Exited => {}
+            ProcessWaitState::Running => {
+                terminate_process(&self.process, 1)
+                    .map_err(|error| pty_error("terminate", "pty_terminate_failed", error))?;
+            }
+            ProcessWaitState::Failed(code) => {
+                return Err(pty_error(
+                    "terminate",
+                    "pty_terminate_failed",
+                    io::Error::from_raw_os_error(code as i32),
+                ));
+            }
         }
         self.session.close();
         Ok(())
@@ -416,7 +424,7 @@ impl Drop for PtyChild {
         // the final safety net: terminate the tree first, then close HPCON
         // while the independent output pump is still draining it.
         let _ = job.terminate(1);
-        if process_is_still_running(&self.process).unwrap_or(false) {
+        if wait_process_state(&self.process) == ProcessWaitState::Running {
             let _ = terminate_process(&self.process, 1);
         }
         self.session.close();
@@ -1702,18 +1710,58 @@ fn exit_status(process: &OwnedHandle) -> io::Result<ExitStatus> {
     Ok(ExitStatus::from_raw(code))
 }
 
-fn process_is_still_running(process: &OwnedHandle) -> io::Result<bool> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessWaitState {
+    Exited,
+    Running,
+    Failed(u32),
+}
+
+const fn classify_process_wait(status: u32, error: u32) -> ProcessWaitState {
+    match status {
+        WAIT_OBJECT_0 => ProcessWaitState::Exited,
+        WAIT_TIMEOUT => ProcessWaitState::Running,
+        WAIT_FAILED => ProcessWaitState::Failed(error),
+        _ => ProcessWaitState::Failed(ERROR_INVALID_DATA),
+    }
+}
+
+#[inline(never)]
+fn wait_process_state(process: &OwnedHandle) -> ProcessWaitState {
     let wait = unsafe {
         // SAFETY: process is live; this bounded wait only observes state.
         WaitForSingleObject(process.as_raw_handle() as HANDLE, 500)
     };
-    match wait {
-        WAIT_OBJECT_0 => Ok(false),
-        WAIT_TIMEOUT => Ok(true),
-        WAIT_FAILED => Err(last_os_error()),
-        status => Err(io::Error::other(format!(
-            "unexpected process wait status {status}"
-        ))),
+    let error = if wait == WAIT_FAILED {
+        last_error_code()
+    } else {
+        0
+    };
+    classify_process_wait(wait, error)
+}
+
+#[cfg(test)]
+mod process_wait_tests {
+    use super::*;
+
+    #[test]
+    fn native_wait_statuses_are_classified_without_allocating_errors() {
+        assert_eq!(
+            classify_process_wait(WAIT_OBJECT_0, 0),
+            ProcessWaitState::Exited
+        );
+        assert_eq!(
+            classify_process_wait(WAIT_TIMEOUT, 0),
+            ProcessWaitState::Running
+        );
+        assert_eq!(
+            classify_process_wait(WAIT_FAILED, ERROR_INVALID_HANDLE),
+            ProcessWaitState::Failed(ERROR_INVALID_HANDLE)
+        );
+        assert_eq!(
+            classify_process_wait(7, 0),
+            ProcessWaitState::Failed(ERROR_INVALID_DATA)
+        );
     }
 }
 

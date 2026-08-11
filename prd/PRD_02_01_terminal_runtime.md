@@ -352,6 +352,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   653,824 to 623,616 bytes. Evidence is 81 unit tests, 18 GUI black-box journeys
   driven through the public control CLI, one isolated multitab control journey,
   Win x64 Clippy, Win ARM64 check and Linux x64 check.
+  Windows process termination now keeps its native wait leaf allocation-free:
+  the 500 ms `WaitForSingleObject` result and immediately captured
+  `GetLastError` become `Exited`, `Running`, or `Failed(code)`, and only the
+  explicit terminate caller constructs a typed error. Drop preserves its
+  best-effort cleanup policy. A filtered bloat probe measures the two emitted
+  wait leaf regions at 105 bytes total. The earlier top-symbol report of 7.0
+  KiB was attribution from adjacent/folded code: after the refactor that label
+  moved to process creation while the isolated PE stayed 609.0 KiB, `.text`
+  stayed 398.5 KiB, and the official PE stayed 623,616 bytes. This is recorded
+  as robustness evidence, not a size reduction.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

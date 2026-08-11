@@ -194,6 +194,13 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   block; keep it when the measured trade buys shared semantics, less protocol
   code, or stronger output, and record the honest delta instead of claiming a
   size win.
+- Do not select an assembly/FFI target from one `cargo bloat` top-symbol row.
+  ICF, cold blocks, unwind ranges, and adjacent symbol intervals can charge
+  unrelated code to a small leaf. Filter the exact symbol, inspect emitted code
+  when needed, and compare total `.text` plus final artifact bytes. A measured
+  Windows PTY case showed 7.0 KiB in the top list, while the filtered native
+  wait leaf was only 105 B; changing its typed boundary moved the 7.0 KiB label
+  to process creation and changed neither `.text` nor PE size.
 
 Always inspect emitted release code:
 
