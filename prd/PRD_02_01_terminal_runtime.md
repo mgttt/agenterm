@@ -451,6 +451,16 @@ con and the main Unix renderer while relying on compiler-vectorized
 `slice::fill`; reducing dirty rows/frames remains the next rendering optimization
 rather than maintaining an unmeasured fill-specific ISA fork.
 
+On Windows aarch64, emitted assembly is part of the pixel-kernel evidence.
+Rust 1.97 did not inline the small NEON divide-by-255 helper under ordinary
+`inline`: each four-pixel iteration made two calls and spilled vector state.
+The narrow `inline(always)` exception removes both calls, the helper symbol, and
+the stack round-trips while preserving all 33 scalar/ISA parity tests. The
+matching optimized `agenterm-ui-core` archive falls from 199,038 to 198,054
+bytes. Both Windows aarch64 and Linux aarch64 `agenterm-con` consumer graphs
+compile; the Windows x64 executable is intentionally not credited with this
+architecture-specific reduction.
+
 Completing a non-empty local terminal selection copies its normalized text to
 the system clipboard. A click without a range, application-owned mouse gesture,
 scrollbar drag, or tab-divider resize must not mutate clipboard contents.

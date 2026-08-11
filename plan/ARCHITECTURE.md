@@ -518,3 +518,11 @@ scalar references for other architectures and parity tests. Rectangle fill
 shares safe clipping/stride/full-frame collapse but deliberately retains
 `slice::fill`; emitted-code inspection found no reason to own another ISA fork.
 Architecture kernels never own terminal cells, fonts, layout, or frame lifecycle.
+
+The aarch64 mask compositor keeps its exact divide-by-255 helper force-inlined.
+This is an emitted-code requirement rather than a general annotation policy:
+ordinary `inline` left two calls and vector stack round-trips in each four-pixel
+NEON iteration, while `inline(always)` produced one register-only
+`umull`/`uzp2`/`uqxtn` pipeline and removed the separate helper symbol. Scalar
+parity remains the semantic authority; future compiler upgrades must recheck the
+assembly before retaining or extending this exception.

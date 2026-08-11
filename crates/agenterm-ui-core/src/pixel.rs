@@ -176,7 +176,7 @@ unsafe fn avx2_kernel(destination: *mut u32, alpha: *const u8, length: usize, fo
 unsafe fn neon_kernel(destination: *mut u32, alpha: *const u8, length: usize, foreground: u32) {
     use core::arch::aarch64::*;
 
-    #[inline]
+    #[inline(always)]
     unsafe fn divide_255(value: uint16x8_t) -> uint16x8_t {
         unsafe {
             let adjusted = vaddq_u16(value, vdupq_n_u16(1));
