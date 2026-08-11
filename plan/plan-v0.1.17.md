@@ -71,7 +71,7 @@ CLI 请求与输出都有尺寸、数量、时限边界；解析错误、无效�
 | C-con-cli | [x] | 固定 GUI-lifetime `cli --control ENDPOINT` 已实现 `list-tabs`、new/select/close、capture、screenshot、send-text、send-keys、send-mouse、send-wheel、wait-text、perf-stats/reset-perf-stats；Windows 命名管道黑盒覆盖多 PTY 隔离、后台 2000 行压力、截图、异常请求、父节点提升和清理。PTY 队列有界、wake 合并且每 GUI turn 有解析预算，GUI 子系统的 pipe stdout 也已修复 | 不复用主程序 mux/control plane |
 | C-con-font | [ ] | 采用主程序同一原生字体/格宽度量路径，默认优先新宋体并验证 ASCII 1 格、CJK/Unicode 宽字符 2 格 | 不在 custom rasterizer 中混拼字体 face |
 | C-con-harness | [ ] | Windows 黑盒覆盖高输出、异常 ANSI/Unicode、重入输入、并发 CLI、建关标签、resize/DPI 风暴、IME/鼠标异常；进程与非目标会话持续可用 | 不承诺不可证明的“绝对不崩” |
-| C-con-native-host | [~] | `crates/agenterm-con` 为独立 package，Windows 默认 User32/GDI，Linux/macOS 默认 portable；resolved normal graph 无 winit/softbuffer/Rhai/HTTP/TLS/script engine。Native 已接 IMM32 preedit/commit、候选框 client-anchor、pointer capture/loss、mouse-leave、checked DPI suggested-rect，并修复 GCS_CURSORPOS UTF-16→char。截图使用流式 stored-DEFLATE PNG，生产图移除 png/miniz/fdeflate/crc32fast。字体新增 neutral `RasterGlyph` contract：Windows 用 bounded GDI glyph index/gray8 outline，Linux/macOS 的 ab_glyph file-font 路径收进 platform portable adapter；Windows 生产图移除 ab_glyph/ttf_parser。配置/script/snapshot/control 共用 bounded strict JSON codec，serde_json 只作 dev oracle。compact 16/32/64 icon 把 `.rsrc` 从 90,112 B 降到 8,704 B，并有 16 KiB source budget。73 con 单测、185 platform lib tests、control GUI 黑盒、terminal 黑盒 16 pass/2 known-gap ignored/0 fail、Linux portable check 通过。x86_64 release PE 515,584 B，低于 512 KiB budget 8,704 B；release-fast 543,744 B。真实中文输入法和最终字体观感仍需人工验收；ARM64 release size 因本机误命中 Unix `link.exe` 尚无证据 | 不把 Win32 泄漏进产品层；GDI 本轮不拆 surrogate，补充平面返回缺字；接受截图文件较大；不把无 LTO 快版冒充 release |
+| C-con-native-host | [~] | `crates/agenterm-con` 为独立 package，Windows 默认 User32/GDI，Linux/macOS 默认 portable；resolved normal graph 无 winit/softbuffer/Rhai/HTTP/TLS/script engine。Native 已接 IMM32 preedit/commit、候选框 client-anchor、pointer capture/loss、mouse-leave、checked DPI suggested-rect，并修复 GCS_CURSORPOS UTF-16→char。截图使用流式 stored-DEFLATE PNG，生产图移除 png/miniz/fdeflate/crc32fast。字体新增 neutral `RasterGlyph` contract：Windows 用 bounded GDI glyph index/gray8 outline，Linux/macOS 的 ab_glyph file-font 路径收进 platform portable adapter；Windows 生产图移除 ab_glyph/ttf_parser。配置/script/snapshot/control 共用 bounded strict JSON codec，serde_json 只作 dev oracle。compact 16/32/64 icon 把 `.rsrc` 从 90,112 B 降到 8,704 B，并有 16 KiB source budget。PTY reader 使用 platform-owned 固定容量字节环，消除逐 read `Vec` 分配并保留有界背压、关闭唤醒和尾部排空。77 con 单测、86 项启用 PTY 的 platform lib tests、control GUI 黑盒、terminal 黑盒定点压力与 Linux portable/aarch64 Windows 编译边界通过。x86_64 release PE 515,584 B，低于 512 KiB budget 8,704 B；release-fast 543,744 B。真实中文输入法和最终字体观感仍需人工验收；ARM64 release size 因本机误命中 Unix `link.exe` 尚无证据 | 不把 Win32 泄漏进产品层；GDI 本轮不拆 surrogate，补充平面返回缺字；接受截图文件较大；不把无 LTO 快版冒充 release |
 - rh `shipped_surfaces.rs` 声明的 76 条 fleet.* 中有 32 条在 host `OPERATION_CATALOG` 不存在（stale 声明）
 - `agenterm cli script` 已弃用并在 v0.1.17 待删除；公开引擎入口统一为
   `agenterm rh|lua|qjs|sql`，现存调用者、help 与 catalog 仍待迁移
@@ -451,9 +451,11 @@ Low-level follow-up order after review:
    scalar parity plus x86_64 SSE2/AVX2 and aarch64 NEON implementations selected
    once outside the pixel loop. Inline assembly is justified only where emitted
    code proves intrinsics cannot preserve the required compact loop.
-2. Replace per-read PTY `Vec` allocation with a bounded reusable SPSC byte-ring
-   owned by `agenterm-platform`; preserve backpressure, edge-triggered wakeup,
-   EOF, cancellation, and one-session isolation on Windows, Linux, and macOS.
+2. [x] Replace per-read PTY `Vec` allocation with a bounded reusable byte-ring
+   owned by `agenterm-platform`. Whole-read commits preserve byte order and
+   bounded backpressure; close wakes blocked readers while committed tail bytes
+   remain drainable. Con keeps wake coalescing, a 128 KiB GUI-turn budget, and
+   one-session isolation on Windows, Linux, and macOS.
 3. Optimize screenshot RGB packing and IEEE PNG CRC only after measured capture
    evidence. Do not use x86 SSE4.2 `crc32` for PNG: that instruction computes
    CRC32C, not PNG's IEEE polynomial.

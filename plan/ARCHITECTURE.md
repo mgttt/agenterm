@@ -187,6 +187,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 底层机制应汇合：PTY 生命周期、VT/宽字符、字体与渲染缓存、选择/剪贴板、
   IME/focus、鼠标/滚轮、DPI geometry、背压/调度及黑盒观测接口优先形成纯函数或
   typed platform/frontend contract；host adapter 只 present/wake/接 OS 事件。
+- PTY 输出传输由 `agenterm-platform::pty::BoundedOutputPipe` 提供跨平台固定容量
+  字节环：一次原生 read 要么整体提交、要么等待容量，关闭会唤醒生产者且已提交
+  字节仍可排空。消费者按字节预算直接读取环内连续切片，不为每次 read 分配
+  `Vec`；产品层只决定容量、每轮预算、解析和重调度策略。
 - 提升顺序固定为：先在 owning 产品以单测和公开黑盒证据证明规则，再抽取无产品
   authority 的最小契约，再让两个产品消费；不得为了“复用”把 server、脚本、Fleet
   或 con 的 GUI-lifetime local-control 策略下沉到 platform。

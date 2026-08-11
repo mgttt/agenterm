@@ -6,6 +6,9 @@ pub use crate::contract::pty::{
 };
 pub use crate::selected::pty::{ChildCommand, PtyChild, PtyMaster, login_shell_argument};
 
+mod output;
+pub use output::{BoundedOutputPipe, OutputDrain, OutputPushError};
+
 #[cfg(test)]
 mod tests {
     use super::*;

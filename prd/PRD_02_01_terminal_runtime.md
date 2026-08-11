@@ -207,14 +207,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   requests and responses are size/time bounded, screenshot success is returned
   only after atomic PNG output, and a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 73 binary unit tests plus a Windows
+  window. The owning suite now includes 77 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
-  PTY delivery is bounded per session to 128 queued chunks and 128 KiB of
-  parsing per GUI turn; reader wakes are coalesced, inactive tabs are drained
-  without forcing unrelated active-tab paints, and remaining backlog yields to
-  input before self-scheduling another turn. `perf-stats` and
+  PTY delivery uses a platform-owned fixed 1 MiB byte ring per session instead
+  of allocating a `Vec` for every native read. Each read commits atomically or
+  waits for capacity; close wakes blocked producers while preserving committed
+  tail bytes for draining. Parsing remains bounded to 128 KiB per GUI turn;
+  reader wakes are coalesced, inactive tabs are drained without forcing
+  unrelated active-tab paints, and remaining backlog yields to input before
+  self-scheduling another turn. `perf-stats` and
   `reset-perf-stats` expose frame latency plus PTY drain/yield counters through
   the same public CLI for repeatable interactive profiling. Its local chrome
   now owns a vertically scrollable left tree with row-level close targets and

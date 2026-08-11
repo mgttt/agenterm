@@ -45,7 +45,7 @@ use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButto
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
-use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
+use agenterm_platform::pty::{BoundedOutputPipe, ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::window_host::{
     GeometryChange, LogicalPoint, LogicalSize, PixelPointerCursor, PixelWindow,
@@ -221,7 +221,7 @@ const ITALIC_SHEAR: f32 = 0.21;
 
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
-const PTY_QUEUE_CHUNKS: usize = 128;
+const PTY_QUEUE_BYTES: usize = READ_BUF * 128;
 const PTY_DRAIN_BUDGET_BYTES: usize = 128 * 1024;
 
 /// Logical (DIP) font size. 15 px is approximately 11.25 pt at 96 DPI and
@@ -641,8 +641,8 @@ struct ConTerminal {
     /// which kills the shell process immediately.
     child: Option<PtyChild>,
 
-    /// Receives PTY output chunks from the reader thread.
-    pty_rx: mpsc::Receiver<Vec<u8>>,
+    /// Preallocated bounded handoff from the PTY reader thread.
+    pty_output: Arc<BoundedOutputPipe>,
     /// Coalesces reader notifications so a burst produces one GUI wake until
     /// the event thread has consumed its bounded share.
     pty_wake_pending: Arc<AtomicBool>,
@@ -650,7 +650,7 @@ struct ConTerminal {
     /// Signaled once by the waiter thread when the child process actually
     /// exits (via Windows' process-exit notification, not PTY EOF — see
     /// `spawn_pty`). A placeholder with its sender already dropped until
-    /// `spawn_pty` installs the real one, matching `pty_rx`'s own pattern.
+    /// `spawn_pty` installs the real one.
     child_exit_rx: mpsc::Receiver<()>,
 
     /// Set before the waiter reports that an explicit `-e` command failed, so
@@ -724,6 +724,15 @@ struct ConTerminal {
     content_left_px: u32,
     content_top_px: u32,
     content_bottom_px: u32,
+}
+
+impl Drop for ConTerminal {
+    fn drop(&mut self) {
+        // The reader may be blocked on a full bounded ring. Closing before the
+        // rest of the session drops preserves sync_channel's old guarantee
+        // that closing a tab cannot strand its reader thread forever.
+        self.pty_output.close();
+    }
 }
 
 /// One lightweight GUI process containing several isolated terminal sessions.
@@ -1768,10 +1777,8 @@ impl ConApp {
 
 impl ConTerminal {
     fn new(working_dir: Option<String>) -> Self {
-        let (tx, rx) = mpsc::sync_channel(PTY_QUEUE_CHUNKS);
-        // Drop the sender on the main side; the reader thread owns the only
-        // surviving copy, so Disconnected reliably signals PTY EOF.
-        drop(tx);
+        let pty_output = Arc::new(BoundedOutputPipe::new(PTY_QUEUE_BYTES));
+        pty_output.close();
         let (exit_tx, exit_rx) = mpsc::channel();
         drop(exit_tx);
         Self {
@@ -1787,7 +1794,7 @@ impl ConTerminal {
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
-            pty_rx: rx,
+            pty_output,
             pty_wake_pending: Arc::new(AtomicBool::new(false)),
             child_exit_rx: exit_rx,
             command_failed: Arc::new(AtomicBool::new(false)),
@@ -1896,7 +1903,8 @@ impl ConTerminal {
         let reader = master.try_clone_for_startup_reader().map_err(|error| {
             PixelWindowError::failed("cmd_reader_clone_failed", format!("{error}"))
         })?;
-        let (tx, rx) = mpsc::sync_channel(PTY_QUEUE_CHUNKS);
+        let output = Arc::new(BoundedOutputPipe::new(PTY_QUEUE_BYTES));
+        let reader_output = Arc::clone(&output);
         let waker = window.waker();
         let wake_pending = Arc::new(AtomicBool::new(false));
         let reader_wake_pending = Arc::clone(&wake_pending);
@@ -1908,7 +1916,7 @@ impl ConTerminal {
                     match reader.io().read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
-                            if tx.send(buf[..n].to_vec()).is_err() {
+                            if reader_output.push_blocking(&buf[..n]).is_err() {
                                 break;
                             }
                             if !reader_wake_pending.swap(true, Ordering::AcqRel) {
@@ -1919,6 +1927,7 @@ impl ConTerminal {
                         Err(_) => break,
                     }
                 }
+                reader_output.close();
                 if !reader_wake_pending.swap(true, Ordering::AcqRel) {
                     let _ = waker.wake();
                 }
@@ -1966,7 +1975,7 @@ impl ConTerminal {
 
         self.master = Some(master);
         self.child = Some(child);
-        self.pty_rx = rx;
+        self.pty_output = output;
         self.pty_wake_pending = wake_pending;
         self.child_exit_rx = exit_rx;
 
@@ -1984,31 +1993,20 @@ impl ConTerminal {
         }
 
         let mut outcome = DrainOutcome::default();
-        while outcome.bytes < PTY_DRAIN_BUDGET_BYTES {
-            match self.pty_rx.try_recv() {
-                Ok(bytes) => {
-                    outcome.bytes = outcome.bytes.saturating_add(bytes.len());
-                    self.parser.process(&bytes);
-                    outcome.changed = true;
-                    // Flush any terminal-query reply (DA1/CPR/DSR) right
-                    // after the input that triggered it, not batched until
-                    // this whole read loop empties out — a program that
-                    // blocks on the reply before sending anything else
-                    // should see it as promptly as a real terminal would.
-                    let replies = std::mem::take(&mut self.parser.callbacks_mut().pending_replies);
-                    if !replies.is_empty() {
-                        self.write_pty(&replies);
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                // PTY EOF can race ahead of the process waiter. The waiter is
-                // authoritative because it records an explicit command's exit
-                // status before telling the window loop to terminate.
-                Err(mpsc::TryRecvError::Disconnected) => break,
+        let output = Arc::clone(&self.pty_output);
+        let report = output.drain(PTY_DRAIN_BUDGET_BYTES, |bytes| {
+            self.parser.process(bytes);
+            outcome.changed = true;
+            // Flush terminal-query replies immediately after the contiguous
+            // input span that completed them.
+            let replies = std::mem::take(&mut self.parser.callbacks_mut().pending_replies);
+            if !replies.is_empty() {
+                self.write_pty(&replies);
             }
-        }
-        if outcome.bytes >= PTY_DRAIN_BUDGET_BYTES {
-            outcome.backlog = true;
+        });
+        outcome.bytes = report.bytes;
+        outcome.backlog = report.backlog;
+        if outcome.backlog {
             self.pty_wake_pending.store(true, Ordering::Release);
         }
         // New output snaps scrollback to bottom.
