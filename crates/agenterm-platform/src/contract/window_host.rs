@@ -2,7 +2,11 @@
 
 use std::{borrow::Cow, fmt, rc::Rc, sync::Arc, time::Instant};
 
-use super::{ime::ImeEvent, input::NormalizedKeyEvent};
+use super::{
+    ime::ImeEvent,
+    input::NormalizedKeyEvent,
+    pixel_present::{PixelPresentReceipt, PixelPresentStats},
+};
 use crate::window::WindowSemanticState;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -333,6 +337,14 @@ impl std::error::Error for PixelWindowError {}
 pub(crate) trait PixelWindowBackend {
     fn request_redraw(&self);
 
+    fn present_stats(&self) -> PixelPresentStats {
+        PixelPresentStats::default()
+    }
+
+    fn last_present(&self) -> Option<PixelPresentReceipt> {
+        None
+    }
+
     /// Requests a redraw for a physical-pixel region. Backends without a
     /// partial-present contract conservatively fall back to a full redraw.
     fn request_redraw_rect(&self, rect: PixelRect) {
@@ -386,6 +398,14 @@ impl PixelWindow {
 
     pub fn request_redraw_rect(&self, rect: PixelRect) {
         self.backend.request_redraw_rect(rect);
+    }
+
+    pub fn present_stats(&self) -> PixelPresentStats {
+        self.backend.present_stats()
+    }
+
+    pub fn last_present(&self) -> Option<PixelPresentReceipt> {
+        self.backend.last_present()
     }
 
     pub fn metrics(&self) -> Result<PixelWindowMetrics, PixelWindowError> {

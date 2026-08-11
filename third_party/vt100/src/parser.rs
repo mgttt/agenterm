@@ -49,6 +49,14 @@ impl<CB: crate::callbacks::Callbacks> Parser<CB> {
         self.parser.advance(&mut self.screen, bytes);
     }
 
+    /// Takes conservative damage accumulated by the terminal model.
+    ///
+    /// The value is reset by this call. A caller should take it after one
+    /// parser batch and before starting the next batch.
+    pub fn take_damage(&mut self) -> crate::ScreenDamage {
+        self.screen.screen.take_damage()
+    }
+
     /// Returns a reference to a [`Screen`](crate::Screen) object containing
     /// the terminal state.
     #[must_use]

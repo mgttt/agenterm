@@ -42,6 +42,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButton};
+use agenterm_platform::contract::pixel_present::PixelPresentStats;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
@@ -726,8 +727,8 @@ struct ConTerminal {
     content_top_px: u32,
     content_bottom_px: u32,
 
-    /// Conservative raster-candidate evidence. The actual frame remains a
-    /// complete raster and the host still performs its existing full present.
+    /// Conservative raster-candidate evidence for retained pixels and native
+    /// redraw requests. Unknown damage remains full rather than guessed.
     dirty: DirtyRegion,
     last_cursor: Option<TerminalPoint>,
     frame_width: u32,
@@ -790,6 +791,11 @@ struct PerfStats {
     partial_candidate_frames: u64,
     dirty_pixels: u64,
     frame_pixels: u64,
+    platform_present: PixelPresentStats,
+    present_baseline: PixelPresentStats,
+    present_sequence_seen: u64,
+    present_last_ns: u64,
+    present_max_ns: u64,
 }
 
 impl PerfStats {
@@ -820,8 +826,54 @@ impl PerfStats {
         }
     }
 
-    fn reset(&mut self) {
+    /// Samples the platform's cumulative ledger without adding a second
+    /// synchronization primitive. `PixelWindow::present_stats` is a GUI-thread
+    /// value copy; native adapters own any internal synchronization.
+    fn sync_present_stats(&mut self, current: PixelPresentStats) {
+        if current.sequence > self.present_sequence_seen {
+            self.present_sequence_seen = current.sequence;
+            self.present_last_ns = current.last_ns;
+            self.present_max_ns = self.present_max_ns.max(current.last_ns);
+        }
+        self.platform_present = current;
+    }
+
+    fn present_delta(&self) -> PixelPresentStats {
+        let current = self.platform_present;
+        let baseline = self.present_baseline;
+        PixelPresentStats {
+            sequence: current.sequence.saturating_sub(baseline.sequence),
+            count: current.count.saturating_sub(baseline.count),
+            success_count: current
+                .success_count
+                .saturating_sub(baseline.success_count),
+            failure_count: current
+                .failure_count
+                .saturating_sub(baseline.failure_count),
+            last_ns: self.present_last_ns,
+            total_ns: current.total_ns.saturating_sub(baseline.total_ns),
+            // A cumulative max is not subtractable. This is the maximum
+            // latest-present sample observed after reset, and is zero until a
+            // post-reset present sequence is observed.
+            max_ns: self.present_max_ns,
+            full_pixels: current.full_pixels.saturating_sub(baseline.full_pixels),
+            partial_pixels: current
+                .partial_pixels
+                .saturating_sub(baseline.partial_pixels),
+            requested_full_pixels: current
+                .requested_full_pixels
+                .saturating_sub(baseline.requested_full_pixels),
+            requested_partial_pixels: current
+                .requested_partial_pixels
+                .saturating_sub(baseline.requested_partial_pixels),
+        }
+    }
+
+    fn reset(&mut self, present: PixelPresentStats) {
         *self = Self::default();
+        self.platform_present = present;
+        self.present_baseline = present;
+        self.present_sequence_seen = present.sequence;
     }
 
     fn json(&self) -> json::JsonValue {
@@ -830,6 +882,7 @@ impl PerfStats {
         } else {
             (self.render_total_us / u128::from(self.frames)).min(u128::from(u64::MAX)) as u64
         };
+        let present = self.present_delta();
         json::object([
             ("frames", self.frames.into()),
             ("observed_frames", self.observed_frames.into()),
@@ -845,6 +898,31 @@ impl PerfStats {
             ),
             ("dirty_pixels", self.dirty_pixels.into()),
             ("frame_pixels", self.frame_pixels.into()),
+            (
+                "present_count",
+                present.count.into(),
+            ),
+            (
+                "present_success",
+                present.success_count.into(),
+            ),
+            (
+                "present_failure",
+                present.failure_count.into(),
+            ),
+            ("last_ns", present.last_ns.into()),
+            ("total_ns", present.total_ns.into()),
+            ("max_ns", present.max_ns.into()),
+            ("full_pixels", present.full_pixels.into()),
+            ("partial_pixels", present.partial_pixels.into()),
+            (
+                "requested_full_pixels",
+                present.requested_full_pixels.into(),
+            ),
+            (
+                "requested_partial_pixels",
+                present.requested_partial_pixels.into(),
+            ),
         ])
     }
 }
@@ -873,12 +951,83 @@ mod perf_stats_tests {
             assert!(serialized.contains(field), "missing {field}: {serialized}");
         }
         assert_eq!(stats.observed_frames, 2);
-        stats.reset();
+        stats.reset(PixelPresentStats::default());
         assert_eq!(stats.observed_frames, 0);
         assert_eq!(stats.full_candidate_frames, 0);
         assert_eq!(stats.partial_candidate_frames, 0);
         assert_eq!(stats.dirty_pixels, 0);
         assert_eq!(stats.frame_pixels, 0);
+    }
+
+    #[test]
+    fn platform_present_baseline_delta_json_and_reset_semantics() {
+        let baseline = PixelPresentStats {
+            sequence: 4,
+            count: 4,
+            success_count: 3,
+            failure_count: 1,
+            last_ns: 8,
+            total_ns: 30,
+            max_ns: 8,
+            full_pixels: 100,
+            partial_pixels: 50,
+            requested_full_pixels: 120,
+            requested_partial_pixels: 60,
+        };
+        let current = PixelPresentStats {
+            sequence: 6,
+            count: 6,
+            success_count: 4,
+            failure_count: 2,
+            last_ns: 5,
+            total_ns: 43,
+            max_ns: 8,
+            full_pixels: 140,
+            partial_pixels: 65,
+            requested_full_pixels: 170,
+            requested_partial_pixels: 80,
+        };
+
+        let mut stats = PerfStats::default();
+        stats.reset(baseline);
+        assert_eq!(stats.present_delta(), PixelPresentStats::default());
+
+        stats.sync_present_stats(current);
+        let delta = stats.present_delta();
+        assert_eq!(delta.count, 2);
+        assert_eq!(delta.success_count, 1);
+        assert_eq!(delta.failure_count, 1);
+        assert_eq!(delta.last_ns, 5);
+        assert_eq!(delta.total_ns, 13);
+        // The cumulative platform max (8ns) is not subtracted. After reset,
+        // max is the maximum post-reset sample observed by the GUI (5ns).
+        assert_eq!(delta.max_ns, 5);
+        assert_eq!(delta.full_pixels, 40);
+        assert_eq!(delta.partial_pixels, 15);
+        assert_eq!(delta.requested_full_pixels, 50);
+        assert_eq!(delta.requested_partial_pixels, 20);
+
+        let serialized = String::from_utf8(json::to_vec(&stats.json())).expect("JSON is UTF-8");
+        for field in [
+            "present_count",
+            "present_success",
+            "present_failure",
+            "last_ns",
+            "total_ns",
+            "max_ns",
+            "full_pixels",
+            "partial_pixels",
+            "requested_full_pixels",
+            "requested_partial_pixels",
+        ] {
+            assert!(serialized.contains(field), "missing {field}: {serialized}");
+        }
+
+        stats.reset(current);
+        let after_reset = stats.present_delta();
+        assert_eq!(after_reset.count, 0);
+        assert_eq!(after_reset.last_ns, 0);
+        assert_eq!(after_reset.max_ns, 0);
     }
 
     #[test]
@@ -903,6 +1052,7 @@ mod perf_stats_tests {
 #[derive(Clone, Copy, Default)]
 struct DrainOutcome {
     changed: bool,
+    redraw: bool,
     backlog: bool,
     bytes: usize,
 }
@@ -1437,6 +1587,7 @@ impl ConApp {
 
     fn dispatch_control(&mut self, window: &PixelWindow, request: control::IncomingRequest) {
         use control::CliCommand;
+        self.perf_stats.sync_present_stats(window.present_stats());
         let mut reply = Some(request.reply);
         let result = match request.command {
             CliCommand::ListTabs => {
@@ -1473,7 +1624,7 @@ impl ConApp {
             }
             CliCommand::PerfStats => Ok(self.perf_stats.json()),
             CliCommand::ResetPerfStats => {
-                self.perf_stats.reset();
+                self.perf_stats.reset(window.present_stats());
                 Ok(json::object([("reset", true.into())]))
             }
             CliCommand::NewTab { parent } => (|| {
@@ -2048,18 +2199,105 @@ impl ConTerminal {
     }
 
     fn mark_cell(&mut self, point: TerminalPoint) {
+        if !self.mark_cursor_position((point.row, point.col)) {
+            self.dirty.mark_full();
+        }
+    }
+
+    fn mark_cursor_position(&mut self, position: (u16, u16)) -> bool {
+        if self.frame_width == 0
+            || self.frame_height == 0
+            || self.cols == 0
+            || self.rows == 0
+            || self.cell_w == 0
+            || self.cell_h == 0
+        {
+            return false;
+        }
+        let viewport_right = self
+            .frame_width
+            .saturating_sub(ui::terminal_scrollbar_width(self.scale));
+        let viewport_bottom = self.frame_height.saturating_sub(self.content_bottom_px);
+        let row = position.0.min(self.rows.saturating_sub(1));
+        let col = position.1.min(self.cols.saturating_sub(1));
         let x = self
             .content_left_px
-            .saturating_add(u32::from(point.col).saturating_mul(self.cell_w));
+            .saturating_add(u32::from(col).saturating_mul(self.cell_w));
         let y = self
             .content_top_px
-            .saturating_add(u32::from(point.row).saturating_mul(self.cell_h));
-        self.dirty.mark_rect(PixelRect::from_xywh(
-            x,
-            y,
-            self.cell_w.saturating_mul(2),
+            .saturating_add(u32::from(row).saturating_mul(self.cell_h));
+        let left = x.min(viewport_right);
+        let top = y.min(viewport_bottom);
+        let right = x
+            .saturating_add(self.cell_w.saturating_mul(2))
+            .min(viewport_right);
+        let bottom = y.saturating_add(self.cell_h).min(viewport_bottom);
+        let rect = PixelRect {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        if rect.is_empty() {
+            false
+        } else {
+            self.dirty.mark_rect(rect);
+            true
+        }
+    }
+
+    fn mark_terminal_rows(&mut self, rows: vt100::RowRange) -> bool {
+        let rows = rows.clip(self.rows);
+        if rows.is_empty() {
+            return false;
+        }
+        let viewport_right = self
+            .frame_width
+            .saturating_sub(ui::terminal_scrollbar_width(self.scale));
+        let viewport_bottom = self.frame_height.saturating_sub(self.content_bottom_px);
+        let terminal_right = self
+            .content_left_px
+            .saturating_add(u32::from(self.cols).saturating_mul(self.cell_w))
+            .min(viewport_right);
+        let mut dirty_rows = DirtyRows::empty();
+        dirty_rows.mark_range(rows.first(), u64::from(rows.end()));
+        let Some(rect) = dirty_rows.to_pixel_bounds(
+            self.content_left_px,
+            self.content_top_px,
+            self.cell_w,
             self.cell_h,
-        ));
+            terminal_right,
+            viewport_bottom,
+        ) else {
+            return false;
+        };
+        self.dirty.mark_rect(rect);
+        true
+    }
+
+    fn mark_vt_damage(&mut self, damage: vt100::ScreenDamage) {
+        if damage.needs_full_raster() {
+            self.dirty.mark_full();
+            return;
+        }
+
+        let mut needs_full = false;
+        if !damage.rows().is_empty() && !self.mark_terminal_rows(damage.rows()) {
+            needs_full = true;
+        }
+        if damage.cursor_changed() {
+            match (damage.cursor_before(), damage.cursor_after()) {
+                (Some(before), Some(after)) => {
+                    if !self.mark_cursor_position(before) || !self.mark_cursor_position(after) {
+                        needs_full = true;
+                    }
+                }
+                _ => needs_full = true,
+            }
+        }
+        if needs_full {
+            self.dirty.mark_full();
+        }
     }
 
     fn mark_cursor_change(&mut self) {
@@ -2295,19 +2533,21 @@ impl ConTerminal {
 
     fn drain_pty(&mut self) -> DrainOutcome {
         self.pty_wake_pending.store(false, Ordering::Release);
+        let mut outcome = DrainOutcome::default();
         // Only `Ok(())` (an actual signal from the waiter thread) means
         // anything here — both the placeholder channel `new()` installs
         // before a child exists and a waiter thread that hasn't finished yet
         // report as empty/disconnected, which must not be mistaken for exit.
         if let Ok(()) = self.child_exit_rx.try_recv() {
             self.child_gone = true;
+            outcome.redraw = true;
         }
 
-        let mut outcome = DrainOutcome::default();
         let output = Arc::clone(&self.pty_output);
         let report = output.drain(PTY_DRAIN_BUDGET_BYTES, |bytes| {
             self.parser.process(bytes);
             outcome.changed = true;
+            outcome.redraw = true;
             // Flush terminal-query replies immediately after the contiguous
             // input span that completed them.
             let replies = std::mem::take(&mut self.parser.callbacks_mut().pending_replies);
@@ -2330,11 +2570,11 @@ impl ConTerminal {
             self.mark_selection(self.selection);
             self.selection = None;
         }
-        if outcome.changed {
-            // PTY output can alter arbitrary cells, cursor state, modes, and
-            // scrollback. It is not safe to infer a smaller bound here.
-            self.dirty.mark_full();
+        let damage = self.parser.take_damage();
+        if !damage.is_empty() {
+            outcome.redraw = true;
         }
+        self.mark_vt_damage(damage);
         outcome
     }
 
@@ -2674,22 +2914,9 @@ impl ConTerminal {
 
     /// Scrolls the viewport by `lines` (positive = toward older output).
     ///
-    /// Delegates the upper clamp to `Screen::set_scrollback` itself rather
-    /// than re-deriving "how much scrollback is available" here: vendored
-    /// `vt100`'s `Screen::scrollback()` returns the *current* offset (its
-    /// own doc comment says so — "0 when the normal screen is in view"),
-    /// not the available range, and there is no public accessor for the
-    /// latter. A prior version of this function added that current offset
-    /// to itself as a stand-in for the bound (`scrollback() +
-    /// self.scroll_offset`), which is always exactly `2 * scroll_offset` —
-    /// zero from a fresh view — so scrolling never moved past the very
-    /// first notch. `scroll_by(10)` on a fresh terminal still correctly
-    /// stays at `0`, which is why the existing unit test covering that case
-    /// could not tell the two behaviors apart; only a live session with
-    /// real scrolled-off content (a black-box `--script` `wheel` test)
-    /// caught it. `set_scrollback` internally clamps to the real buffered
-    /// row count (`rows.min(self.scrollback.len())`), so reading the offset
-    /// back after calling it is the correct value, not a guess.
+    /// Uses vt100's read-only scrollback length instead of temporarily moving
+    /// the viewport to `usize::MAX` and restoring it. Bounds queries must not
+    /// create their own viewport damage or perturb parser state.
     fn scroll_by(&mut self, lines: isize) {
         if self.parser.screen().alternate_screen() {
             return;
@@ -2710,12 +2937,10 @@ impl ConTerminal {
         if self.parser.screen().alternate_screen() {
             return (0, 0);
         }
-        let current = self.parser.screen().scrollback();
-        self.parser.screen_mut().set_scrollback(usize::MAX);
-        let maximum = self.parser.screen().scrollback();
-        self.parser.screen_mut().set_scrollback(current);
-        self.scroll_offset = self.parser.screen().scrollback();
-        (self.scroll_offset, maximum)
+        let offset = self.parser.screen().scrollback();
+        let maximum = self.parser.screen().scrollback_len();
+        self.scroll_offset = offset;
+        (offset, maximum)
     }
 
     fn set_scrollback(&mut self, requested: usize) {
@@ -3610,7 +3835,6 @@ impl ConTerminal {
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::Wake => {
-                self.dirty.mark_full();
                 // Fired by the PTY reader thread's `waker.wake()` whenever
                 // new output actually arrived (see `spawn_pty`) — this is
                 // the *only* signal that a shell just echoed a keystroke or
@@ -3624,7 +3848,11 @@ impl ConTerminal {
                 // a second before it responds" symptom this fixes. Typing
                 // was never actually slow — the PTY round-trip is fast —
                 // painting the result just wasn't wired to happen promptly.
-                window.request_redraw();
+                if self.dirty.is_empty() {
+                    window.request_redraw();
+                } else {
+                    self.request_dirty_redraw(window);
+                }
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::Keyboard(key) => {
@@ -3975,7 +4203,7 @@ impl PixelWindowApplication for ConApp {
         }
         if matches!(event, PixelWindowEvent::Wake) {
             let active = self.workspace.active();
-            let mut active_changed = false;
+            let mut active_redraw = false;
             let mut backlog = false;
             for (id, session) in &mut self.sessions {
                 let outcome = session.drain_pty();
@@ -3987,11 +4215,17 @@ impl PixelWindowApplication for ConApp {
                     .perf_stats
                     .pty_budget_yields
                     .saturating_add(u64::from(outcome.backlog));
-                active_changed |= active == Some(*id) && outcome.changed;
+                active_redraw |= active == Some(*id) && outcome.redraw;
                 backlog |= outcome.backlog;
             }
-            if active_changed {
-                window.request_redraw();
+            if active_redraw {
+                if self.active_session()?.dirty.is_empty() {
+                    // Title-only output and child exit still need one render,
+                    // but there is no pixel rectangle to invalidate.
+                    window.request_redraw();
+                } else {
+                    self.active_session()?.request_dirty_redraw(window);
+                }
             }
             if backlog {
                 let _ = window.waker().wake();
@@ -4111,6 +4345,7 @@ impl PixelWindowApplication for ConApp {
         window: &PixelWindow,
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        self.perf_stats.sync_present_stats(window.present_stats());
         let width = frame.width();
         let height = frame.height();
         let scale = self.active_session()?.scale.max(1.0);
@@ -4136,7 +4371,12 @@ impl PixelWindowApplication for ConApp {
         // Drain before consuming the candidate. PTY output can alter arbitrary
         // cells, cursor state, modes, scrollback, and selection, so it always
         // upgrades the candidate to full before raster starts.
-        let drain = self.active_session_mut()?.drain_pty();
+        let (drain, wake_pending) = {
+            let session = self.active_session_mut()?;
+            let drain = session.drain_pty();
+            let wake_pending = session.pty_wake_pending.load(Ordering::Acquire);
+            (drain, wake_pending)
+        };
         self.perf_stats.pty_drained_bytes = self
             .perf_stats
             .pty_drained_bytes
@@ -4145,11 +4385,12 @@ impl PixelWindowApplication for ConApp {
             .perf_stats
             .pty_budget_yields
             .saturating_add(u64::from(drain.backlog));
-        if drain.changed {
-            window.request_redraw();
-        }
-        if drain.backlog {
-            window.request_redraw();
+        if drain.backlog || wake_pending {
+            // Output arrived while this render was being prepared, or the
+            // bounded drain still has a tail. The current retained frame is
+            // made safe with a full raster; the reader/waker will schedule the
+            // next bounded drain without forcing an unconditional Wake full.
+            self.active_session_mut()?.dirty.mark_full();
         }
 
         // The candidate is complete before either product surface starts
@@ -4717,6 +4958,99 @@ mod tests {
 
     fn parser() -> vt100::Parser<ConCallbacks> {
         vt100::Parser::<ConCallbacks>::new_with_callbacks(24, 80, 0, ConCallbacks::default())
+    }
+
+    #[test]
+    fn vt_damage_rows_map_to_clamped_content_and_cursor_endpoints() {
+        let mut app = ConTerminal::new(None);
+        app.dirty = DirtyRegion::empty();
+        app.frame_width = 100;
+        app.frame_height = 60;
+        app.content_left_px = 10;
+        app.content_top_px = 8;
+        app.content_bottom_px = 12;
+        app.cell_w = 8;
+        app.cell_h = 10;
+        app.cols = 8;
+        app.rows = 4;
+        app.parser.screen_mut().set_size(4, 8);
+        let _ = app.parser.take_damage();
+
+        app.parser.process(b"\x1b[2J");
+        let damage = app.parser.take_damage();
+        assert!(!damage.needs_full_raster());
+        app.mark_vt_damage(damage);
+        let rows = app.dirty.bounds().expect("row damage has a pixel bound");
+        assert_eq!(rows.left, 10);
+        assert_eq!(rows.top, 8);
+        assert_eq!(rows.right, 74);
+        assert_eq!(rows.bottom, 48);
+        assert!(!app.dirty.is_full());
+
+        app.dirty = DirtyRegion::empty();
+        app.parser.process(b"A");
+        let _ = app.parser.take_damage();
+        app.parser.process(b"\x1b[1;1H");
+        let damage = app.parser.take_damage();
+        assert_eq!(damage.cursor_before(), Some((0, 1)));
+        assert_eq!(damage.cursor_after(), Some((0, 0)));
+        app.mark_vt_damage(damage);
+        let cursor = app.dirty.bounds().expect("cursor endpoints are dirty");
+        assert_eq!(cursor.left, 10);
+        assert_eq!(cursor.right, 34);
+        assert_eq!(cursor.top, 8);
+        assert_eq!(cursor.bottom, 18);
+        assert!(!app.dirty.is_full());
+    }
+
+    #[test]
+    fn pty_drain_consumes_vt_damage_without_unconditional_full() {
+        let mut app = ConTerminal::new(None);
+        app.pty_output = Arc::new(BoundedOutputPipe::new(1024));
+        app.dirty = DirtyRegion::empty();
+        app.frame_width = 640;
+        app.frame_height = 400;
+        app.content_left_px = 10;
+        app.content_top_px = 8;
+        app.content_bottom_px = 12;
+        app.cell_w = 8;
+        app.cell_h = 16;
+        app.pty_output.push_blocking(b"ASCII").expect("pipe open");
+
+        let outcome = app.drain_pty();
+        assert!(outcome.changed);
+        assert!(outcome.redraw);
+        assert!(!app.dirty.is_full());
+        assert!(app.dirty.bounds().is_some());
+    }
+
+    #[test]
+    fn full_vt_damage_is_the_explicit_safe_fallback() {
+        let mut app = ConTerminal::new(None);
+        app.dirty = DirtyRegion::empty();
+        app.frame_width = 640;
+        app.frame_height = 400;
+        app.parser.screen_mut().mark_full_damage();
+
+        let outcome = app.drain_pty();
+        assert!(outcome.redraw);
+        assert!(app.dirty.is_full());
+    }
+
+    #[test]
+    fn scrollback_bounds_uses_read_only_vt_length() {
+        let mut app = ConTerminal::new(None);
+        app.parser.screen_mut().set_size(3, 10);
+        let _ = app.parser.take_damage();
+        app.parser.process(b"a\r\nb\r\nc\r\nd");
+        let _ = app.parser.take_damage();
+
+        let before = app.parser.screen().scrollback();
+        let expected = app.parser.screen().scrollback_len();
+        let (offset, maximum) = app.scrollback_bounds();
+        assert_eq!(offset, before);
+        assert_eq!(maximum, expected);
+        assert_eq!(app.parser.screen().scrollback(), before);
     }
 
     /// Regression coverage for a real, confirmed hang: `claude` (a real

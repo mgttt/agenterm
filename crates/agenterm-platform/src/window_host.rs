@@ -2,6 +2,9 @@
 //!
 //! Native event-loop and surface types remain owned by the selected adapter.
 
+pub use crate::contract::pixel_present::{
+    PixelPresentOutcome, PixelPresentReceipt, PixelPresentRegion, PixelPresentStats,
+};
 pub use crate::contract::window_host::{
     GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
     PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,

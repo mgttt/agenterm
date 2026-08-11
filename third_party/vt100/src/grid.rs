@@ -13,6 +13,9 @@ pub struct Grid {
     scrollback: std::collections::VecDeque<crate::row::Row>,
     scrollback_len: usize,
     scrollback_offset: usize,
+    dirty_rows: crate::damage::RowRange,
+    full_damage: bool,
+    viewport_changed: bool,
 }
 
 impl Grid {
@@ -29,6 +32,36 @@ impl Grid {
             scrollback: std::collections::VecDeque::new(),
             scrollback_len,
             scrollback_offset: 0,
+            dirty_rows: crate::damage::RowRange::empty(),
+            full_damage: false,
+            viewport_changed: false,
+        }
+    }
+
+    fn mark_row(&mut self, row: u16) {
+        self.dirty_rows.mark_row(row);
+    }
+
+    fn mark_rows(&mut self, first: u16, end: u32) {
+        self.dirty_rows.mark_range(first, end);
+    }
+
+    fn mark_full(&mut self) {
+        self.full_damage = true;
+    }
+
+    fn mark_viewport(&mut self) {
+        self.viewport_changed = true;
+    }
+
+    pub(crate) fn take_damage(&mut self) -> crate::damage::GridDamage {
+        let rows = std::mem::take(&mut self.dirty_rows);
+        let full = std::mem::replace(&mut self.full_damage, false);
+        let viewport_changed = std::mem::replace(&mut self.viewport_changed, false);
+        crate::damage::GridDamage {
+            rows,
+            full,
+            viewport_changed,
         }
     }
 
@@ -48,6 +81,7 @@ impl Grid {
     }
 
     pub fn clear(&mut self) {
+        self.mark_full();
         self.pos = Pos::default();
         self.saved_pos = Pos::default();
         for row in self.drawing_rows_mut() {
@@ -64,6 +98,9 @@ impl Grid {
     }
 
     pub fn set_size(&mut self, size: Size) {
+        if size != self.size {
+            self.mark_full();
+        }
         if size.cols != self.size.cols {
             for row in &mut self.rows {
                 row.wrap(false);
@@ -196,7 +233,11 @@ impl Grid {
     }
 
     pub fn set_scrollback(&mut self, rows: usize) {
-        self.scrollback_offset = rows.min(self.scrollback.len());
+        let offset = rows.min(self.scrollback.len());
+        if offset != self.scrollback_offset {
+            self.mark_viewport();
+            self.scrollback_offset = offset;
+        }
     }
 
     pub fn write_contents(&self, contents: &mut String) {
@@ -453,6 +494,7 @@ impl Grid {
     }
 
     pub fn erase_all(&mut self, attrs: crate::attrs::Attrs) {
+        self.mark_rows(0, u32::from(self.size.rows));
         for row in self.drawing_rows_mut() {
             row.clear(attrs);
         }
@@ -460,6 +502,7 @@ impl Grid {
 
     pub fn erase_all_forward(&mut self, attrs: crate::attrs::Attrs) {
         let pos = self.pos;
+        self.mark_rows(pos.row, u32::from(self.size.rows));
         for row in self.drawing_rows_mut().skip(usize::from(pos.row) + 1) {
             row.clear(attrs);
         }
@@ -469,6 +512,7 @@ impl Grid {
 
     pub fn erase_all_backward(&mut self, attrs: crate::attrs::Attrs) {
         let pos = self.pos;
+        self.mark_rows(0, u32::from(pos.row) + 1);
         for row in self.drawing_rows_mut().take(usize::from(pos.row)) {
             row.clear(attrs);
         }
@@ -477,12 +521,14 @@ impl Grid {
     }
 
     pub fn erase_row(&mut self, attrs: crate::attrs::Attrs) {
+        self.mark_row(self.pos.row);
         self.current_row_mut().clear(attrs);
     }
 
     pub fn erase_row_forward(&mut self, attrs: crate::attrs::Attrs) {
         let size = self.size;
         let pos = self.pos;
+        self.mark_row(pos.row);
         let row = self.current_row_mut();
         for col in pos.col..size.cols {
             row.erase(col, attrs);
@@ -492,6 +538,7 @@ impl Grid {
     pub fn erase_row_backward(&mut self, attrs: crate::attrs::Attrs) {
         let size = self.size;
         let pos = self.pos;
+        self.mark_row(pos.row);
         let row = self.current_row_mut();
         for col in 0..=pos.col.min(size.cols - 1) {
             row.erase(col, attrs);
@@ -499,6 +546,10 @@ impl Grid {
     }
 
     pub fn insert_cells(&mut self, count: u16) {
+        if count == 0 {
+            return;
+        }
+        self.mark_row(self.pos.row);
         let size = self.size;
         let pos = self.pos;
         let wide = pos.col < size.cols
@@ -523,6 +574,10 @@ impl Grid {
     }
 
     pub fn delete_cells(&mut self, count: u16) {
+        if count == 0 {
+            return;
+        }
+        self.mark_row(self.pos.row);
         let size = self.size;
         let pos = self.pos;
         let row = self.current_row_mut();
@@ -533,6 +588,10 @@ impl Grid {
     }
 
     pub fn erase_cells(&mut self, count: u16, attrs: crate::attrs::Attrs) {
+        if count == 0 {
+            return;
+        }
+        self.mark_row(self.pos.row);
         let size = self.size;
         let pos = self.pos;
         let row = self.current_row_mut();
@@ -542,6 +601,10 @@ impl Grid {
     }
 
     pub fn insert_lines(&mut self, count: u16) {
+        if count == 0 || self.pos.row < self.scroll_top || self.pos.row > self.scroll_bottom {
+            return;
+        }
+        self.mark_rows(self.pos.row, u32::from(self.scroll_bottom) + 1);
         for _ in 0..count {
             self.rows.remove(usize::from(self.scroll_bottom));
             self.rows.insert(usize::from(self.pos.row), self.new_row());
@@ -551,6 +614,10 @@ impl Grid {
     }
 
     pub fn delete_lines(&mut self, count: u16) {
+        if count == 0 || self.pos.row < self.scroll_top || self.pos.row > self.scroll_bottom {
+            return;
+        }
+        self.mark_rows(self.pos.row, u32::from(self.scroll_bottom) + 1);
         for _ in 0..(count.min(self.size.rows - self.pos.row)) {
             self.rows
                 .insert(usize::from(self.scroll_bottom) + 1, self.new_row());
@@ -559,6 +626,13 @@ impl Grid {
     }
 
     pub fn scroll_up(&mut self, count: u16) {
+        if count == 0 {
+            return;
+        }
+        self.mark_full();
+        if self.scrollback_offset > 0 {
+            self.mark_viewport();
+        }
         for _ in 0..(count.min(self.size.rows - self.scroll_top)) {
             self.rows
                 .insert(usize::from(self.scroll_bottom) + 1, self.new_row());
@@ -577,6 +651,10 @@ impl Grid {
     }
 
     pub fn scroll_down(&mut self, count: u16) {
+        if count == 0 {
+            return;
+        }
+        self.mark_full();
         for _ in 0..count {
             self.rows.remove(usize::from(self.scroll_bottom));
             self.rows
@@ -676,7 +754,15 @@ impl Grid {
     }
 
     pub fn col_wrap(&mut self, width: u16, wrap: bool) {
+        // A cell wider than the grid has no valid placement.  Ignore it
+        // rather than evaluating `cols - width` or creating a continuation
+        // outside the row.
+        if self.size.cols == 0 || width > self.size.cols {
+            return;
+        }
         if self.pos.col > self.size.cols - width {
+            self.mark_row(self.pos.row);
+            self.mark_rows(self.scroll_top, u32::from(self.scroll_bottom) + 1);
             let mut prev_pos = self.pos;
             self.pos.col = 0;
             let scrolled = self.row_inc_scroll(1);

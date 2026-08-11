@@ -503,7 +503,7 @@ pub(crate) fn resolved_ipc_endpoint() -> Result<ResolvedIpcEndpoint> {
 /// `--instance NAME` is deliberately *not* pinning: selecting a logical instance
 /// is exactly the case where resolving to whatever endpoint currently serves that
 /// name is correct.
-fn transport_was_pinned_explicitly() -> bool {
+pub(crate) fn transport_was_pinned_explicitly() -> bool {
     IPC_SELECTOR_OVERRIDE.with(|value| {
         let selectors = value.borrow();
         selectors.address.is_some() || selectors.endpoint.is_some()

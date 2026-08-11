@@ -206,12 +206,23 @@ pub(crate) fn start_frontend_server_process() -> Result<(), String> {
     // Never mint a second Fleet authority while one already answers protocol
     // for this logical instance — that path is what wipes agent tabs via
     // workspace re-spawn of empty shells.
-    if let Some(endpoint) = crate::instances::find_live_endpoint_for_logical_instance(
-        &resolved.logical_instance,
-        Some(&resolved.endpoint),
-        Duration::from_millis(250),
-    )
-    .map_err(|error| error.to_string())?
+    //
+    // The guard is about the *implicit* endpoint. `--address HOST:PORT` and
+    // `--endpoint` name a concrete transport, and autostarting the server the
+    // operator asked for is that flag's documented behaviour. Applying the
+    // logical-instance guard there did two wrong things at once: it refused to
+    // start the requested server, and `pin_client_endpoint` re-pointed this
+    // client at the *other* live server — so the caller's command then ran
+    // against a server it never named and exited 0, with the refusal only on
+    // stderr. `cli --address 127.0.0.1:43004 new-window -n X` created X on
+    // 127.0.0.1:43001 exactly this way.
+    if !crate::client::transport_was_pinned_explicitly()
+        && let Some(endpoint) = crate::instances::find_live_endpoint_for_logical_instance(
+            &resolved.logical_instance,
+            Some(&resolved.endpoint),
+            Duration::from_millis(250),
+        )
+        .map_err(|error| error.to_string())?
     {
         pin_client_endpoint(&endpoint);
         return Err(format!(

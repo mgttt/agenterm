@@ -25,6 +25,7 @@ pub mod input;
 pub mod ipc_transport;
 pub mod local_clock;
 pub mod native_virtualization;
+pub mod pixel_present;
 #[cfg(feature = "process")]
 pub mod process;
 #[cfg(feature = "process-control")]

@@ -21,8 +21,8 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, DIB_RGB_COLORS, EndPaint, InvalidateRect,
-        PAINTSTRUCT, SRCCOPY, StretchDIBits,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, DIB_RGB_COLORS, EndPaint, HDC,
+        InvalidateRect, PAINTSTRUCT, SRCCOPY, StretchDIBits,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
@@ -58,6 +58,10 @@ use crate::contract::{
     input::{
         KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
         Utf16TextDecoder,
+    },
+    pixel_present::{
+        PixelPresentLedger, PixelPresentOutcome, PixelPresentReceipt, PixelPresentRegion,
+        PixelPresentStats, elapsed_ns_since,
     },
     window_host::{
         GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
@@ -129,6 +133,61 @@ struct StretchDibGeometry {
     destination: Win32Rect,
 }
 
+struct PaintSession {
+    hwnd: HWND,
+    paint: PAINTSTRUCT,
+    dc: HDC,
+    ended: bool,
+}
+
+impl PaintSession {
+    fn begin(hwnd: HWND) -> Result<Self, PixelWindowError> {
+        let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
+        let dc = unsafe { BeginPaint(hwnd, &mut paint) };
+        if dc.is_null() {
+            return Err(last_error("pixel_window_begin_paint_failed"));
+        }
+        Ok(Self {
+            hwnd,
+            paint,
+            dc,
+            ended: false,
+        })
+    }
+
+    fn dc(&self) -> HDC {
+        self.dc
+    }
+
+    fn paint_rect(&self) -> Win32Rect {
+        Win32Rect {
+            left: self.paint.rcPaint.left,
+            top: self.paint.rcPaint.top,
+            right: self.paint.rcPaint.right,
+            bottom: self.paint.rcPaint.bottom,
+        }
+    }
+
+    fn finish(mut self) -> Result<(), PixelWindowError> {
+        let ended = unsafe { EndPaint(self.hwnd, &self.paint) };
+        self.ended = true;
+        if ended == 0 {
+            Err(last_error("pixel_window_end_paint_failed"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for PaintSession {
+    fn drop(&mut self) {
+        if !self.ended {
+            unsafe { EndPaint(self.hwnd, &self.paint) };
+            self.ended = true;
+        }
+    }
+}
+
 /// `BITMAPINFOHEADER.biHeight` is negative below, so the XRGB buffer is a
 /// top-down DIB. The source and destination rectangles therefore share the
 /// client-coordinate Y axis without a bottom-up inversion.
@@ -163,6 +222,7 @@ struct Backend {
     hwnd: Cell<HWND>,
     wake_hwnd: Arc<AtomicIsize>,
     metrics: RefCell<PixelWindowMetrics>,
+    present: RefCell<PixelPresentLedger>,
     alive: Arc<AtomicBool>,
     capture_active: Cell<bool>,
     ime_allowed: Cell<bool>,
@@ -174,6 +234,14 @@ impl PixelWindowBackend for Backend {
         if !hwnd.is_null() {
             unsafe { InvalidateRect(hwnd, ptr::null(), 0) };
         }
+    }
+
+    fn present_stats(&self) -> PixelPresentStats {
+        self.present.borrow().snapshot()
+    }
+
+    fn last_present(&self) -> Option<PixelPresentReceipt> {
+        self.present.borrow().last()
     }
 
     fn request_redraw_rect(&self, damage: PixelRect) {
@@ -393,6 +461,7 @@ pub(crate) fn run_pixel_window(
         hwnd: Cell::new(ptr::null_mut()),
         wake_hwnd: Arc::new(AtomicIsize::new(0)),
         metrics: RefCell::new(initial_metrics),
+        present: RefCell::new(PixelPresentLedger::new()),
         alive: Arc::clone(&alive),
         capture_active: Cell::new(false),
         ime_allowed: Cell::new(options.ime_allowed),
@@ -447,7 +516,7 @@ pub(crate) fn run_pixel_window(
     backend.wake_hwnd.store(hwnd as isize, Ordering::Release);
     apply_ime_allowed(hwnd, options.ime_allowed);
     update_metrics(&mut state, GeometryChange::Resized, false);
-    let opened = state.application.opened(&state.window);
+    let opened = catch_application("opened", || state.application.opened(&state.window));
     apply_directive(&mut state, opened);
     state.opened = true;
     unsafe {
@@ -491,9 +560,11 @@ pub(crate) fn run_pixel_window(
         if state.exit {
             break;
         }
-        let directive = state
-            .application
-            .about_to_wait(&state.window, Instant::now());
+        let directive = catch_application("about_to_wait", || {
+            state
+                .application
+                .about_to_wait(&state.window, Instant::now())
+        });
         apply_directive(&mut state, directive);
     }
 
@@ -529,7 +600,14 @@ unsafe extern "system" fn window_proc(
     match result {
         Ok(value) => value,
         Err(_) => {
-            unsafe { (*state).exit = true };
+            let state = unsafe { &mut *state };
+            if state.deferred_error.is_none() {
+                state.deferred_error = Some(PixelWindowError::failed(
+                    "pixel_window_host_panic",
+                    "native pixel-window callback panicked",
+                ));
+            }
+            state.exit = true;
             0
         }
     }
@@ -757,11 +835,8 @@ unsafe fn dispatch_message(
 }
 
 fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
-    let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
-    let dc = unsafe { BeginPaint(hwnd, &mut paint) };
-    if dc.is_null() {
-        return Err(last_error("pixel_window_begin_paint_failed"));
-    }
+    let session = PaintSession::begin(hwnd)?;
+    let dc = session.dc();
 
     let result = (|| {
         let metrics = *state.backend.metrics.borrow();
@@ -778,21 +853,27 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
                 )
             })?;
         state.pixels.resize(count, 0);
-        let mut frame = XrgbPixelFrame::new(
-            &mut state.pixels,
-            metrics.physical_width,
-            metrics.physical_height,
-            metrics.scale_factor,
-        );
-        let render_result = state.application.render(&state.window, &mut frame);
-        apply_directive(state, render_result);
-
-        let paint_rect = Win32Rect {
-            left: paint.rcPaint.left,
-            top: paint.rcPaint.top,
-            right: paint.rcPaint.right,
-            bottom: paint.rcPaint.bottom,
+        let render_result = {
+            let mut frame = XrgbPixelFrame::new(
+                &mut state.pixels,
+                metrics.physical_width,
+                metrics.physical_height,
+                metrics.scale_factor,
+            );
+            catch_application("render", || {
+                state.application.render(&state.window, &mut frame)
+            })
         };
+        let directive = match render_result {
+            Ok(directive) => directive,
+            Err(error) => {
+                apply_directive(state, Err(error));
+                return Ok(());
+            }
+        };
+        apply_directive(state, Ok(directive));
+
+        let paint_rect = session.paint_rect();
         let Some(geometry) =
             stretch_geometry_for_paint(paint_rect, metrics.physical_width, metrics.physical_height)
         else {
@@ -813,6 +894,13 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
         };
         let source = geometry.source;
         let destination = geometry.destination;
+        let (region, requested_pixels, _) = present_pixels_for_geometry(
+            geometry,
+            metrics.physical_width,
+            metrics.physical_height,
+            0,
+        );
+        let started = Instant::now();
         let copied = unsafe {
             StretchDIBits(
                 dc,
@@ -830,17 +918,72 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
                 SRCCOPY,
             )
         };
-        if copied <= 0 {
-            return Err(last_error("pixel_window_surface_present_failed"));
-        }
+        let (outcome, completed_scanlines, present_error) =
+            match validate_stretch_copy(copied, source.bottom - source.top) {
+                Ok(copied) => (PixelPresentOutcome::Succeeded, copied, None),
+                Err(error) => (PixelPresentOutcome::Failed, 0, Some(error)),
+            };
+        let elapsed_ns = elapsed_ns_since(started);
+        let (_, _, completed_pixels) = present_pixels_for_geometry(
+            geometry,
+            metrics.physical_width,
+            metrics.physical_height,
+            completed_scanlines,
+        );
+        state.backend.present.borrow_mut().record(
+            elapsed_ns,
+            requested_pixels,
+            completed_pixels,
+            region,
+            outcome,
+        );
+        if let Some(error) = present_error {
+            return Err(error);
+        };
         Ok(())
     })();
-    let ended = unsafe { EndPaint(hwnd, &paint) };
+    let end_result = session.finish();
     match result {
         Err(error) => Err(error),
-        Ok(()) if ended == 0 => Err(last_error("pixel_window_end_paint_failed")),
-        Ok(()) => Ok(()),
+        Ok(()) => end_result,
     }
+}
+
+fn validate_stretch_copy(
+    copied_scanlines: i32,
+    requested_scanlines: i32,
+) -> Result<i32, PixelWindowError> {
+    if copied_scanlines <= 0 {
+        return Err(last_error("pixel_window_surface_present_failed"));
+    }
+    if copied_scanlines < requested_scanlines {
+        return Err(PixelWindowError::failed(
+            "pixel_window_surface_present_short",
+            format!("StretchDIBits copied {copied_scanlines} of {requested_scanlines} scanlines"),
+        ));
+    }
+    Ok(copied_scanlines)
+}
+
+fn present_pixels_for_geometry(
+    geometry: StretchDibGeometry,
+    frame_width: u32,
+    frame_height: u32,
+    copied_scanlines: i32,
+) -> (PixelPresentRegion, u64, u64) {
+    let width = u64::try_from(geometry.source.right - geometry.source.left).unwrap_or(0);
+    let height = u64::try_from(geometry.source.bottom - geometry.source.top).unwrap_or(0);
+    let requested_pixels = width.saturating_mul(height);
+    let copied_scanlines = u64::try_from(copied_scanlines.max(0))
+        .unwrap_or(0)
+        .min(height);
+    let completed_pixels = width.saturating_mul(copied_scanlines);
+    let region = if width == u64::from(frame_width) && height == u64::from(frame_height) {
+        PixelPresentRegion::Full
+    } else {
+        PixelPresentRegion::Partial
+    };
+    (region, requested_pixels, completed_pixels)
 }
 
 fn update_metrics(state: &mut HostState, change: GeometryChange, notify: bool) {
@@ -905,8 +1048,21 @@ fn dispatch_event(state: &mut HostState, event: PixelWindowEvent) {
     if !state.opened || state.exit {
         return;
     }
-    let result = state.application.event(&state.window, event);
+    let result = catch_application("event", || state.application.event(&state.window, event));
     apply_directive(state, result);
+}
+
+fn catch_application<T>(
+    callback_name: &'static str,
+    callback: impl FnOnce() -> Result<T, PixelWindowError>,
+) -> Result<T, PixelWindowError> {
+    match catch_unwind(AssertUnwindSafe(callback)) {
+        Ok(result) => result,
+        Err(_) => Err(PixelWindowError::failed(
+            "pixel_window_application_panic",
+            format!("application callback `{callback_name}` panicked"),
+        )),
+    }
 }
 
 fn apply_directive(state: &mut HostState, result: Result<PixelWindowDirective, PixelWindowError>) {
@@ -1156,5 +1312,62 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn present_pixels_distinguish_full_partial_and_short_native_copy() {
+        let full = StretchDibGeometry {
+            source: Win32Rect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 50,
+            },
+            destination: Win32Rect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 50,
+            },
+        };
+        assert_eq!(
+            present_pixels_for_geometry(full, 100, 50, 50),
+            (PixelPresentRegion::Full, 5_000, 5_000)
+        );
+        assert_eq!(
+            present_pixels_for_geometry(full, 100, 50, 7),
+            (PixelPresentRegion::Full, 5_000, 700)
+        );
+
+        let partial = StretchDibGeometry {
+            source: Win32Rect {
+                left: 10,
+                top: 20,
+                right: 30,
+                bottom: 30,
+            },
+            destination: Win32Rect {
+                left: 10,
+                top: 20,
+                right: 30,
+                bottom: 30,
+            },
+        };
+        assert_eq!(
+            present_pixels_for_geometry(partial, 100, 50, -1),
+            (PixelPresentRegion::Partial, 200, 0)
+        );
+    }
+
+    #[test]
+    fn short_stretch_copy_is_a_typed_failure() {
+        let error = validate_stretch_copy(7, 50).expect_err("short copy must fail");
+        match error {
+            PixelWindowError::Failed { code, .. } => {
+                assert_eq!(code, "pixel_window_surface_present_short");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_eq!(validate_stretch_copy(50, 50).expect("complete copy"), 50);
     }
 }

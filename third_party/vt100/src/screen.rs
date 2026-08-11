@@ -91,6 +91,7 @@ pub struct Screen {
     cursor_shape: CursorShape,
     // xterm/conhost default to a blinking cursor absent any DECSCUSR.
     cursor_blinking: bool,
+    damage: crate::damage::ScreenDamage,
 }
 
 impl Screen {
@@ -112,7 +113,12 @@ impl Screen {
             mouse_protocol_encoding: MouseProtocolEncoding::default(),
             cursor_shape: CursorShape::default(),
             cursor_blinking: true,
+            damage: crate::damage::ScreenDamage::empty(),
         }
+    }
+
+    fn mark_cursor(&mut self) {
+        self.damage.mark_cursor(self.cursor_position());
     }
 
     /// Handles DECSCUSR (`CSI Ps SP q`): sets the cursor shape and blink.
@@ -123,6 +129,7 @@ impl Screen {
     /// than leaving stale state, matching how xterm treats out-of-range
     /// DECSCUSR parameters.
     pub(crate) fn decscusr(&mut self, param: u16) {
+        self.mark_cursor();
         let (shape, blinking) = match param {
             0 | 1 => (CursorShape::Block, true),
             2 => (CursorShape::Block, false),
@@ -151,6 +158,7 @@ impl Screen {
 
     /// Resizes the terminal.
     pub fn set_size(&mut self, rows: u16, cols: u16) {
+        self.damage.mark_full();
         self.grid.set_size(crate::grid::Size { rows, cols });
         self.alternate_grid
             .set_size(crate::grid::Size { rows, cols });
@@ -177,6 +185,44 @@ impl Screen {
     /// The value given will be clamped to the actual size of the scrollback.
     pub fn set_scrollback(&mut self, rows: usize) {
         self.grid_mut().set_scrollback(rows);
+    }
+
+    /// Returns the number of rows currently retained for the active screen.
+    ///
+    /// This read-only query exists so callers do not need to temporarily
+    /// mutate the scrollback viewport just to discover its upper bound.
+    #[must_use]
+    pub fn scrollback_len(&self) -> usize {
+        self.grid().scrollback_len()
+    }
+
+    /// Takes and clears conservative damage accumulated by this screen.
+    ///
+    /// The returned row range covers visible cell mutations. Full and
+    /// viewport flags are stronger than the row range and require a full
+    /// terminal raster. Cursor and model flags cover overlay and non-pixel
+    /// state changes respectively.
+    pub fn take_damage(&mut self) -> crate::ScreenDamage {
+        let mut damage = std::mem::take(&mut self.damage);
+        let primary = self.grid.take_damage();
+        let alternate = self.alternate_grid.take_damage();
+        if self.mode(MODE_ALTERNATE_SCREEN) {
+            damage.merge_grid(alternate);
+        } else {
+            damage.merge_grid(primary);
+        }
+        if damage.cursor_changed() {
+            damage.set_cursor_after(self.cursor_position());
+        }
+        damage
+    }
+
+    /// Escalates pending damage to a full terminal raster.
+    ///
+    /// Embedding callbacks should call this when handling an extension whose
+    /// visual effect cannot be proven to fit a finite row range.
+    pub fn mark_full_damage(&mut self) {
+        self.damage.mark_full();
     }
 
     /// Returns the current position in the scrollback.
@@ -714,31 +760,53 @@ impl Screen {
     }
 
     fn enter_alternate_grid(&mut self) {
+        self.mark_cursor();
+        self.damage.mark_full();
         self.grid_mut().set_scrollback(0);
         self.set_mode(MODE_ALTERNATE_SCREEN);
         self.alternate_grid.allocate_rows();
     }
 
     fn exit_alternate_grid(&mut self) {
+        self.mark_cursor();
+        self.damage.mark_full();
         self.clear_mode(MODE_ALTERNATE_SCREEN);
     }
 
     fn save_cursor(&mut self) {
+        self.damage.mark_model();
         self.grid_mut().save_cursor();
         self.saved_attrs = self.attrs;
     }
 
     fn restore_cursor(&mut self) {
+        self.mark_cursor();
         self.grid_mut().restore_cursor();
         self.attrs = self.saved_attrs;
     }
 
     fn set_mode(&mut self, mode: u8) {
+        let previous = self.modes;
         self.modes |= mode;
+        if self.modes != previous {
+            if mode == MODE_HIDE_CURSOR {
+                self.mark_cursor();
+            } else {
+                self.damage.mark_model();
+            }
+        }
     }
 
     fn clear_mode(&mut self, mode: u8) {
+        let previous = self.modes;
         self.modes &= !mode;
+        if self.modes != previous {
+            if mode == MODE_HIDE_CURSOR {
+                self.mark_cursor();
+            } else {
+                self.damage.mark_model();
+            }
+        }
     }
 
     fn mode(&self, mode: u8) -> bool {
@@ -751,7 +819,10 @@ impl Screen {
         // 1000h refresh after 1002h). Replacing blindly would downgrade
         // button-motion to press-release and break TUI click/drag pass-through.
         if mouse_mode_rank(mode) >= mouse_mode_rank(self.mouse_protocol_mode) {
-            self.mouse_protocol_mode = mode;
+            if self.mouse_protocol_mode != mode {
+                self.mouse_protocol_mode = mode;
+                self.damage.mark_model();
+            }
         }
     }
 
@@ -760,16 +831,21 @@ impl Screen {
         // lower DECRST arrives first (e.g. 1000l while 1002 is still active).
         if self.mouse_protocol_mode == mode {
             self.mouse_protocol_mode = MouseProtocolMode::default();
+            self.damage.mark_model();
         }
     }
 
     fn set_mouse_encoding(&mut self, encoding: MouseProtocolEncoding) {
-        self.mouse_protocol_encoding = encoding;
+        if self.mouse_protocol_encoding != encoding {
+            self.mouse_protocol_encoding = encoding;
+            self.damage.mark_model();
+        }
     }
 
     fn clear_mouse_encoding(&mut self, encoding: MouseProtocolEncoding) {
         if self.mouse_protocol_encoding == encoding {
             self.mouse_protocol_encoding = MouseProtocolEncoding::default();
+            self.damage.mark_model();
         }
     }
 }
@@ -790,6 +866,22 @@ impl Screen {
             .try_into()
             // width() can only return 0, 1, or 2
             .unwrap();
+
+        // A zero-column grid has no cell to inspect.  A wide glyph that
+        // cannot fit in the grid is not representable, so discard it without
+        // moving the cursor or manufacturing an invalid continuation cell.
+        if size.rows == 0 || size.cols == 0 || width > size.cols {
+            return;
+        }
+
+        // Mark before any wrapping, scrolling, combining, or wide-cell
+        // neighbour is touched. A previous wrapped row is conservatively
+        // included because a zero-width character may append there.
+        self.mark_cursor();
+        self.damage.mark_row(pos.row);
+        if pos.row > 0 {
+            self.damage.mark_row(pos.row - 1);
+        }
 
         // it doesn't make any sense to wrap if the last column in a row
         // didn't already have contents. don't try to handle the case where a
@@ -817,6 +909,7 @@ impl Screen {
         }
         self.grid_mut().col_wrap(width, wrap);
         let pos = self.grid().pos();
+        self.damage.mark_row(pos.row);
 
         if width == 0 {
             if pos.col > 0 {
@@ -1017,14 +1110,17 @@ impl Screen {
     // control codes
 
     pub(crate) fn bs(&mut self) {
+        self.mark_cursor();
         self.grid_mut().col_dec(1);
     }
 
     pub(crate) fn tab(&mut self) {
+        self.mark_cursor();
         self.grid_mut().col_tab();
     }
 
     pub(crate) fn lf(&mut self) {
+        self.mark_cursor();
         self.grid_mut().row_inc_scroll(1);
     }
 
@@ -1037,6 +1133,7 @@ impl Screen {
     }
 
     pub(crate) fn cr(&mut self) {
+        self.mark_cursor();
         self.grid_mut().col_set(0);
     }
 
@@ -1064,12 +1161,16 @@ impl Screen {
 
     // ESC M
     pub(crate) fn ri(&mut self) {
+        self.mark_cursor();
         self.grid_mut().row_dec_scroll(1);
     }
 
     // ESC c
     pub(crate) fn ris(&mut self) {
-        *self = Self::new(self.grid.size(), self.grid.scrollback_len());
+        let size = self.grid.size();
+        let scrollback_len = self.grid.scrollback_len();
+        *self = Self::new(size, scrollback_len);
+        self.damage.mark_full();
     }
 
     // csi codes
@@ -1081,43 +1182,51 @@ impl Screen {
 
     // CSI A
     pub(crate) fn cuu(&mut self, offset: u16) {
+        self.mark_cursor();
         self.grid_mut().row_dec_clamp(offset);
     }
 
     // CSI B
     pub(crate) fn cud(&mut self, offset: u16) {
+        self.mark_cursor();
         self.grid_mut().row_inc_clamp(offset);
     }
 
     // CSI C
     pub(crate) fn cuf(&mut self, offset: u16) {
+        self.mark_cursor();
         self.grid_mut().col_inc_clamp(offset);
     }
 
     // CSI D
     pub(crate) fn cub(&mut self, offset: u16) {
+        self.mark_cursor();
         self.grid_mut().col_dec(offset);
     }
 
     // CSI E
     pub(crate) fn cnl(&mut self, offset: u16) {
+        self.mark_cursor();
         self.grid_mut().col_set(0);
         self.grid_mut().row_inc_clamp(offset);
     }
 
     // CSI F
     pub(crate) fn cpl(&mut self, offset: u16) {
+        self.mark_cursor();
         self.grid_mut().col_set(0);
         self.grid_mut().row_dec_clamp(offset);
     }
 
     // CSI G
     pub(crate) fn cha(&mut self, col: u16) {
+        self.mark_cursor();
         self.grid_mut().col_set(col - 1);
     }
 
     // CSI H
     pub(crate) fn cup(&mut self, (row, col): (u16, u16)) {
+        self.mark_cursor();
         self.grid_mut().set_pos(crate::grid::Pos {
             row: row - 1,
             col: col - 1,
@@ -1135,7 +1244,10 @@ impl Screen {
             0 => self.grid_mut().erase_all_forward(attrs),
             1 => self.grid_mut().erase_all_backward(attrs),
             2 => self.grid_mut().erase_all(attrs),
-            _ => unhandled(self),
+            _ => {
+                self.damage.mark_full();
+                unhandled(self);
+            }
         }
     }
 
@@ -1159,7 +1271,10 @@ impl Screen {
             0 => self.grid_mut().erase_row_forward(attrs),
             1 => self.grid_mut().erase_row_backward(attrs),
             2 => self.grid_mut().erase_row(attrs),
-            _ => unhandled(self),
+            _ => {
+                self.damage.mark_full();
+                unhandled(self);
+            }
         }
     }
 
@@ -1205,6 +1320,7 @@ impl Screen {
 
     // CSI d
     pub(crate) fn vpa(&mut self, row: u16) {
+        self.mark_cursor();
         self.grid_mut().row_set(row - 1);
     }
 
@@ -1217,7 +1333,10 @@ impl Screen {
         for param in params {
             match param {
                 [1] => self.set_mode(MODE_APPLICATION_CURSOR),
-                [6] => self.grid_mut().set_origin_mode(true),
+                [6] => {
+                    self.mark_cursor();
+                    self.grid_mut().set_origin_mode(true);
+                }
                 [9] => self.set_mouse_mode(MouseProtocolMode::Press),
                 [25] => self.clear_mode(MODE_HIDE_CURSOR),
                 [47] => self.enter_alternate_grid(),
@@ -1240,7 +1359,10 @@ impl Screen {
                     self.enter_alternate_grid();
                 }
                 [2004] => self.set_mode(MODE_BRACKETED_PASTE),
-                _ => unhandled(self),
+                _ => {
+                    self.damage.mark_full();
+                    unhandled(self);
+                }
             }
         }
     }
@@ -1254,7 +1376,10 @@ impl Screen {
         for param in params {
             match param {
                 [1] => self.clear_mode(MODE_APPLICATION_CURSOR),
-                [6] => self.grid_mut().set_origin_mode(false),
+                [6] => {
+                    self.mark_cursor();
+                    self.grid_mut().set_origin_mode(false);
+                }
                 [9] => self.clear_mouse_mode(MouseProtocolMode::Press),
                 [25] => self.set_mode(MODE_HIDE_CURSOR),
                 [47] => {
@@ -1280,7 +1405,10 @@ impl Screen {
                     self.decrc();
                 }
                 [2004] => self.clear_mode(MODE_BRACKETED_PASTE),
-                _ => unhandled(self),
+                _ => {
+                    self.damage.mark_full();
+                    unhandled(self);
+                }
             }
         }
     }
@@ -1291,6 +1419,7 @@ impl Screen {
         params: &vte::Params,
         mut unhandled: impl FnMut(&mut Self),
     ) {
+        self.damage.mark_model();
         // XXX really i want to just be able to pass in a default Params
         // instance with a 0 in it, but vte doesn't allow creating new Params
         // instances
@@ -1364,6 +1493,7 @@ impl Screen {
                             crate::Color::Idx(next_param_u8!());
                     }
                     _ => {
+                        self.damage.mark_full();
                         unhandled(self);
                         return;
                     }
@@ -1393,6 +1523,7 @@ impl Screen {
                             crate::Color::Idx(next_param_u8!());
                     }
                     _ => {
+                        self.damage.mark_full();
                         unhandled(self);
                         return;
                     }
@@ -1406,13 +1537,17 @@ impl Screen {
                 [n] if (100..=107).contains(n) => {
                     self.attrs.bgcolor = crate::Color::Idx(to_u8!(*n) - 92);
                 }
-                _ => unhandled(self),
+                _ => {
+                    self.damage.mark_full();
+                    unhandled(self);
+                }
             }
         }
     }
 
     // CSI r
     pub(crate) fn decstbm(&mut self, (top, bottom): (u16, u16)) {
+        self.mark_cursor();
         self.grid_mut().set_scroll_region(top - 1, bottom - 1);
     }
 }

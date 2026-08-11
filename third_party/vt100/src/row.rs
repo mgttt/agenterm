@@ -122,13 +122,7 @@ impl Row {
         other.clear(*other.attrs());
     }
 
-    pub fn write_contents(
-        &self,
-        contents: &mut String,
-        start: u16,
-        width: u16,
-        wrapping: bool,
-    ) {
+    pub fn write_contents(&self, contents: &mut String, start: u16, width: u16, wrapping: bool) {
         let mut prev_was_wide = false;
 
         let mut prev_col = start;
@@ -219,30 +213,22 @@ impl Row {
             if let Some((prev_col, attrs)) = erase {
                 if cell.has_contents() || cell.attrs() != attrs {
                     let new_pos = crate::grid::Pos { row, col: prev_col };
-                    if wrapping
-                        && prev_pos.row + 1 == new_pos.row
-                        && prev_pos.col >= self.cols()
-                    {
+                    if wrapping && prev_pos.row + 1 == new_pos.row && prev_pos.col >= self.cols() {
                         if new_pos.col > 0 {
-                            contents.extend(
-                                " ".repeat(usize::from(new_pos.col))
-                                    .as_bytes(),
-                            );
+                            contents.extend(" ".repeat(usize::from(new_pos.col)).as_bytes());
                         } else {
                             contents.extend(b" ");
                             crate::term::Backspace.write_buf(contents);
                         }
                     } else {
-                        crate::term::MoveFromTo::new(prev_pos, new_pos)
-                            .write_buf(contents);
+                        crate::term::MoveFromTo::new(prev_pos, new_pos).write_buf(contents);
                     }
                     prev_pos = new_pos;
                     if &prev_attrs != attrs {
                         attrs.write_escape_code_diff(contents, &prev_attrs);
                         prev_attrs = *attrs;
                     }
-                    crate::term::EraseChar::new(pos.col - prev_col)
-                        .write_buf(contents);
+                    crate::term::EraseChar::new(pos.col - prev_col).write_buf(contents);
                     erase = None;
                 }
             }
@@ -253,12 +239,10 @@ impl Row {
                     if pos != prev_pos {
                         if !wrapping
                             || prev_pos.row + 1 != pos.row
-                            || prev_pos.col
-                                < self.cols() - u16::from(cell.is_wide())
+                            || prev_pos.col < self.cols() - u16::from(cell.is_wide())
                             || pos.col != 0
                         {
-                            crate::term::MoveFromTo::new(prev_pos, pos)
-                                .write_buf(contents);
+                            crate::term::MoveFromTo::new(prev_pos, pos).write_buf(contents);
                         }
                         prev_pos = pos;
                     }
@@ -278,21 +262,15 @@ impl Row {
         }
         if let Some((prev_col, attrs)) = erase {
             let new_pos = crate::grid::Pos { row, col: prev_col };
-            if wrapping
-                && prev_pos.row + 1 == new_pos.row
-                && prev_pos.col >= self.cols()
-            {
+            if wrapping && prev_pos.row + 1 == new_pos.row && prev_pos.col >= self.cols() {
                 if new_pos.col > 0 {
-                    contents.extend(
-                        " ".repeat(usize::from(new_pos.col)).as_bytes(),
-                    );
+                    contents.extend(" ".repeat(usize::from(new_pos.col)).as_bytes());
                 } else {
                     contents.extend(b" ");
                     crate::term::Backspace.write_buf(contents);
                 }
             } else {
-                crate::term::MoveFromTo::new(prev_pos, new_pos)
-                    .write_buf(contents);
+                crate::term::MoveFromTo::new(prev_pos, new_pos).write_buf(contents);
             }
             prev_pos = new_pos;
             if &prev_attrs != attrs {
@@ -328,13 +306,11 @@ impl Row {
             && !prev_wrapping
             && first_cell == prev_first_cell
             && prev_pos.row + 1 == row
-            && prev_pos.col
-                >= self.cols() - u16::from(prev_first_cell.is_wide())
+            && prev_pos.col >= self.cols() - u16::from(prev_first_cell.is_wide())
         {
             let first_cell_attrs = first_cell.attrs();
             if &prev_attrs != first_cell_attrs {
-                first_cell_attrs
-                    .write_escape_code_diff(contents, &prev_attrs);
+                first_cell_attrs.write_escape_code_diff(contents, &prev_attrs);
                 prev_attrs = *first_cell_attrs;
             }
             let mut cell_contents = prev_first_cell.contents();
@@ -376,30 +352,22 @@ impl Row {
             if let Some((prev_col, attrs)) = erase {
                 if cell.has_contents() || cell.attrs() != attrs {
                     let new_pos = crate::grid::Pos { row, col: prev_col };
-                    if wrapping
-                        && prev_pos.row + 1 == new_pos.row
-                        && prev_pos.col >= self.cols()
-                    {
+                    if wrapping && prev_pos.row + 1 == new_pos.row && prev_pos.col >= self.cols() {
                         if new_pos.col > 0 {
-                            contents.extend(
-                                " ".repeat(usize::from(new_pos.col))
-                                    .as_bytes(),
-                            );
+                            contents.extend(" ".repeat(usize::from(new_pos.col)).as_bytes());
                         } else {
                             contents.extend(b" ");
                             crate::term::Backspace.write_buf(contents);
                         }
                     } else {
-                        crate::term::MoveFromTo::new(prev_pos, new_pos)
-                            .write_buf(contents);
+                        crate::term::MoveFromTo::new(prev_pos, new_pos).write_buf(contents);
                     }
                     prev_pos = new_pos;
                     if &prev_attrs != attrs {
                         attrs.write_escape_code_diff(contents, &prev_attrs);
                         prev_attrs = *attrs;
                     }
-                    crate::term::EraseChar::new(pos.col - prev_col)
-                        .write_buf(contents);
+                    crate::term::EraseChar::new(pos.col - prev_col).write_buf(contents);
                     erase = None;
                 }
             }
@@ -410,12 +378,10 @@ impl Row {
                     if pos != prev_pos {
                         if !wrapping
                             || prev_pos.row + 1 != pos.row
-                            || prev_pos.col
-                                < self.cols() - u16::from(cell.is_wide())
+                            || prev_pos.col < self.cols() - u16::from(cell.is_wide())
                             || pos.col != 0
                         {
-                            crate::term::MoveFromTo::new(prev_pos, pos)
-                                .write_buf(contents);
+                            crate::term::MoveFromTo::new(prev_pos, pos).write_buf(contents);
                         }
                         prev_pos = pos;
                     }
@@ -434,21 +400,15 @@ impl Row {
         }
         if let Some((prev_col, attrs)) = erase {
             let new_pos = crate::grid::Pos { row, col: prev_col };
-            if wrapping
-                && prev_pos.row + 1 == new_pos.row
-                && prev_pos.col >= self.cols()
-            {
+            if wrapping && prev_pos.row + 1 == new_pos.row && prev_pos.col >= self.cols() {
                 if new_pos.col > 0 {
-                    contents.extend(
-                        " ".repeat(usize::from(new_pos.col)).as_bytes(),
-                    );
+                    contents.extend(" ".repeat(usize::from(new_pos.col)).as_bytes());
                 } else {
                     contents.extend(b" ");
                     crate::term::Backspace.write_buf(contents);
                 }
             } else {
-                crate::term::MoveFromTo::new(prev_pos, new_pos)
-                    .write_buf(contents);
+                crate::term::MoveFromTo::new(prev_pos, new_pos).write_buf(contents);
             }
             prev_pos = new_pos;
             if &prev_attrs != attrs {
@@ -463,11 +423,8 @@ impl Row {
         // wrapped, we need to redraw the last character without erasing it to
         // position the cursor after the end of the line correctly so that
         // drawing the next line can just start writing and be wrapped.
-        if (!self.wrapped && prev.wrapped) || (!prev.wrapped && self.wrapped)
-        {
-            let end_pos = if self.cells[usize::from(self.cols() - 1)]
-                .is_wide_continuation()
-            {
+        if (!self.wrapped && prev.wrapped) || (!prev.wrapped && self.wrapped) {
+            let end_pos = if self.cells[usize::from(self.cols() - 1)].is_wide_continuation() {
                 crate::grid::Pos {
                     row,
                     col: self.cols() - 2,
@@ -478,8 +435,7 @@ impl Row {
                     col: self.cols() - 1,
                 }
             };
-            crate::term::MoveFromTo::new(prev_pos, end_pos)
-                .write_buf(contents);
+            crate::term::MoveFromTo::new(prev_pos, end_pos).write_buf(contents);
             prev_pos = end_pos;
             if !self.wrapped {
                 crate::term::EraseChar::new(1).write_buf(contents);

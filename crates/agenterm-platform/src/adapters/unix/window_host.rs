@@ -1,7 +1,9 @@
 //! Unix winit/softbuffer pixel-window host.
 
 use std::{
+    cell::RefCell,
     num::NonZeroU32,
+    panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
     sync::{
         Arc,
@@ -26,6 +28,10 @@ use crate::{
     contract::{
         ime::ImeEvent,
         input::ModifierState,
+        pixel_present::{
+            PixelPresentLedger, PixelPresentOutcome, PixelPresentReceipt, PixelPresentRegion,
+            PixelPresentStats, elapsed_ns_since,
+        },
         window_host::{
             GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelRect,
             PixelWindow, PixelWindowApplication, PixelWindowBackend, PixelWindowDirective,
@@ -77,13 +83,22 @@ pub(crate) fn run_pixel_window(
         modifiers: ModifierState::empty(),
         last_pointer: None,
         failure: None,
+        present: Rc::new(RefCell::new(PixelPresentLedger::new())),
         #[cfg(target_os = "macos")]
         detached_for_reopen: Rc::new(Cell::new(false)),
     };
-    let run_result = event_loop.run_app(&mut runner);
+    let run_result = catch_unwind(AssertUnwindSafe(|| event_loop.run_app(&mut runner)));
     alive.store(false, Ordering::Release);
-    run_result
-        .map_err(|error| PixelWindowError::failed("pixel_window_event_loop_failed", error))?;
+    match run_result {
+        Ok(run_result) => run_result
+            .map_err(|error| PixelWindowError::failed("pixel_window_event_loop_failed", error))?,
+        Err(_) => {
+            return Err(PixelWindowError::failed(
+                "pixel_window_event_loop_panic",
+                "native pixel-window event loop panicked",
+            ));
+        }
+    }
     runner.failure.take().map_or(Ok(()), Err)
 }
 
@@ -109,6 +124,7 @@ fn event_loop_closed() -> PixelWindowError {
 
 struct NativeWindowBackend {
     window: Rc<Window>,
+    present: Rc<RefCell<PixelPresentLedger>>,
     #[cfg(target_os = "macos")]
     detached_for_reopen: Rc<Cell<bool>>,
 }
@@ -116,6 +132,14 @@ struct NativeWindowBackend {
 impl PixelWindowBackend for NativeWindowBackend {
     fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    fn present_stats(&self) -> PixelPresentStats {
+        self.present.borrow().snapshot()
+    }
+
+    fn last_present(&self) -> Option<PixelPresentReceipt> {
+        self.present.borrow().last()
     }
 
     fn request_redraw_rect(&self, rect: PixelRect) {
@@ -233,6 +257,7 @@ struct PixelWindowRunner {
     modifiers: ModifierState,
     last_pointer: Option<LogicalPoint>,
     failure: Option<PixelWindowError>,
+    present: Rc<RefCell<PixelPresentLedger>>,
     #[cfg(target_os = "macos")]
     detached_for_reopen: Rc<Cell<bool>>,
 }
@@ -262,7 +287,7 @@ impl PixelWindowRunner {
         let Some(window) = self.window.clone() else {
             return;
         };
-        match self.application.event(&window, event) {
+        match catch_application("event", || self.application.event(&window, event)) {
             Ok(directive) => self.apply_directive(event_loop, directive),
             Err(error) => self.fail(event_loop, error),
         }
@@ -319,6 +344,7 @@ impl PixelWindowRunner {
         width: NonZeroU32,
         height: NonZeroU32,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        let present = Rc::clone(&self.present);
         let surface = self.surface.as_mut().ok_or_else(|| {
             PixelWindowError::failed(
                 "pixel_window_surface_unavailable",
@@ -339,12 +365,44 @@ impl PixelWindowRunner {
         let directive = {
             let mut frame =
                 XrgbPixelFrame::new(&mut buffer, frame_width, frame_height, metrics.scale_factor);
-            self.application.render(window, &mut frame)?
+            catch_application("render", || self.application.render(window, &mut frame))?
         };
-        buffer.present().map_err(|error| {
+        let requested_pixels = u64::from(frame_width).saturating_mul(u64::from(frame_height));
+        let started = Instant::now();
+        let present_result = buffer.present();
+        let elapsed_ns = elapsed_ns_since(started);
+        present.borrow_mut().record(
+            elapsed_ns,
+            requested_pixels,
+            if present_result.is_ok() {
+                requested_pixels
+            } else {
+                0
+            },
+            PixelPresentRegion::Full,
+            if present_result.is_ok() {
+                PixelPresentOutcome::Succeeded
+            } else {
+                PixelPresentOutcome::Failed
+            },
+        );
+        present_result.map_err(|error| {
             PixelWindowError::failed("pixel_window_surface_present_failed", error)
         })?;
         Ok(directive)
+    }
+}
+
+fn catch_application<T>(
+    callback_name: &'static str,
+    callback: impl FnOnce() -> Result<T, PixelWindowError>,
+) -> Result<T, PixelWindowError> {
+    match catch_unwind(AssertUnwindSafe(callback)) {
+        Ok(result) => result,
+        Err(_) => Err(PixelWindowError::failed(
+            "pixel_window_application_panic",
+            format!("application callback `{callback_name}` panicked"),
+        )),
     }
 }
 
@@ -406,13 +464,14 @@ impl ApplicationHandler<()> for PixelWindowRunner {
         };
         let backend: Rc<dyn PixelWindowBackend> = Rc::new(NativeWindowBackend {
             window: native_window,
+            present: Rc::clone(&self.present),
             #[cfg(target_os = "macos")]
             detached_for_reopen: Rc::clone(&self.detached_for_reopen),
         });
         let window = PixelWindow::new(backend, self.waker.clone());
         self.surface = Some(surface);
         self.window = Some(window.clone());
-        match self.application.opened(&window) {
+        match catch_application("opened", || self.application.opened(&window)) {
             Ok(directive) => {
                 window.request_redraw();
                 self.apply_directive(event_loop, directive);
@@ -540,7 +599,9 @@ impl ApplicationHandler<()> for PixelWindowRunner {
             return;
         };
         let now = Instant::now();
-        match self.application.about_to_wait(&window, now) {
+        match catch_application("about_to_wait", || {
+            self.application.about_to_wait(&window, now)
+        }) {
             Ok(directive) => {
                 #[cfg(target_os = "macos")]
                 let directive = macos_reactivation_poll_directive(window.visible(), now, directive);
@@ -602,6 +663,25 @@ mod tests {
         assert!(!macos_should_reopen(false, true, true));
         assert!(!macos_should_reopen(false, false, false));
         assert!(!macos_should_reopen(true, true, false));
+    }
+}
+
+#[cfg(test)]
+mod panic_tests {
+    use super::*;
+
+    #[test]
+    fn application_panic_becomes_typed_failure() {
+        let error = catch_application("render", || -> Result<(), PixelWindowError> {
+            panic!("test callback panic");
+        })
+        .expect_err("panic must become an error");
+        match error {
+            PixelWindowError::Failed { code, .. } => {
+                assert_eq!(code, "pixel_window_application_panic");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
 
@@ -680,5 +760,30 @@ mod damage_tests {
     fn typed_damage_explicitly_degrades_to_full_present() {
         assert!(unix_rect_requires_full_redraw(PixelRect::new(1, 2, 3, 4)));
         assert!(!unix_rect_requires_full_redraw(PixelRect::empty()));
+    }
+
+    #[test]
+    fn full_present_reports_requested_pixels_only_after_success() {
+        let requested = u64::from(320_u32) * u64::from(240_u32);
+        let mut ledger = PixelPresentLedger::new();
+        ledger.record(
+            13,
+            requested,
+            requested,
+            PixelPresentRegion::Full,
+            PixelPresentOutcome::Succeeded,
+        );
+        ledger.record(
+            17,
+            requested,
+            0,
+            PixelPresentRegion::Full,
+            PixelPresentOutcome::Failed,
+        );
+        let stats = ledger.snapshot();
+        assert_eq!(stats.full_pixels, requested);
+        assert_eq!(stats.requested_full_pixels, requested * 2);
+        assert_eq!(stats.success_count, 1);
+        assert_eq!(stats.failure_count, 1);
     }
 }

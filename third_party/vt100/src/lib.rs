@@ -50,6 +50,7 @@
 mod attrs;
 mod callbacks;
 mod cell;
+mod damage;
 mod grid;
 mod parser;
 mod perform;
@@ -60,5 +61,6 @@ mod term;
 pub use attrs::Color;
 pub use callbacks::Callbacks;
 pub use cell::Cell;
+pub use damage::{RowRange, ScreenDamage};
 pub use parser::Parser;
 pub use screen::{CursorShape, MouseProtocolEncoding, MouseProtocolMode, Screen};
