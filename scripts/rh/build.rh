@@ -478,6 +478,16 @@ fn entry() {
     let executable_entries = [];
     if cross_client != 0 || unix_bootstrap != 0 {
         executable_entries = platform_executables(repo, os_name, arch);
+        // `agenterm-con` became its own workspace package, so a bare `--bin
+        // agenterm-con` no longer resolves: cargo looks only in the default-run
+        // packages and fails with "no bin target named `agenterm-con` ... a
+        // target with a similar name exists: `agenterm-com`". That took every CI
+        // lane red at the "manifest client set" step. Name the owning packages
+        // here exactly like the non-cross branch below already does.
+        cargo_args.push("--package");
+        cargo_args.push("agenterm");
+        cargo_args.push("--package");
+        cargo_args.push("agenterm-con");
         for executable in executable_entries {
             cargo_args.push("--bin");
             cargo_args.push(cargo_binary(executable.name));
