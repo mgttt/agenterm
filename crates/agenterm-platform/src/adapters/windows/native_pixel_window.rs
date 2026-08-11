@@ -38,17 +38,18 @@ use windows_sys::Win32::{
         WindowsAndMessaging::{
             CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
             DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
-            GetWindowLongPtrW, GetWindowRect, IDC_ARROW, IsIconic, IsWindowVisible, IsZoomed,
-            KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW, RegisterClassW,
-            SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-            SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CANCELMODE,
-            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
-            WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT,
-            WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
-            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-            WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE,
-            WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            GetWindowLongPtrW, GetWindowRect, IDC_ARROW, IDC_SIZEWE, IsIconic, IsWindowVisible,
+            IsZoomed, KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW,
+            RegisterClassW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+            SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
+            SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+            TranslateMessage, WM_APP, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
+            WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_IME_CHAR, WM_IME_COMPOSITION,
+            WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+            WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
+            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP,
+            WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     },
 };
@@ -59,7 +60,7 @@ use crate::contract::{
         Utf16TextDecoder,
     },
     window_host::{
-        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelWindow,
+        GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelWindow,
         PixelWindowApplication, PixelWindowBackend, PixelWindowDirective, PixelWindowError,
         PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
         PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
@@ -140,6 +141,19 @@ impl PixelWindowBackend for Backend {
             let title = wide_null(title);
             unsafe { SetWindowTextW(hwnd, title.as_ptr()) };
         }
+    }
+
+    fn set_pointer_cursor(&self, cursor: PixelPointerCursor) -> Result<(), PixelWindowError> {
+        let id = match cursor {
+            PixelPointerCursor::Arrow => IDC_ARROW,
+            PixelPointerCursor::ResizeHorizontal => IDC_SIZEWE,
+        };
+        let handle = unsafe { LoadCursorW(ptr::null_mut(), id) };
+        if handle.is_null() {
+            return Err(last_error("pixel_window_cursor_load_failed"));
+        }
+        unsafe { SetCursor(handle) };
+        Ok(())
     }
 
     fn request_logical_inner_size(&self, size: LogicalSize) -> Result<(), PixelWindowError> {

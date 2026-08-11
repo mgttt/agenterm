@@ -3,10 +3,10 @@
 //! Native event-loop and surface types remain owned by the selected adapter.
 
 pub use crate::contract::window_host::{
-    GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelWindow, PixelWindowApplication,
-    PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowMetrics,
-    PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, WindowSemanticFlags,
-    WindowWaker, XrgbPixelFrame,
+    GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor, PixelWindow,
+    PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
+    PixelWindowMetrics, PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta,
+    WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
 };
 
 /// Run one native pixel window until the application requests exit or the

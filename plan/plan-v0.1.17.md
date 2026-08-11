@@ -437,3 +437,27 @@ R′. Evidence closeout
 ---
 
 *执行投影，非产品宪法。能力状态以 PRD 为准。*
+
+- `agenterm-con` terminal viewport: add an always-visible right scrollbar with
+  reserved grid width, page-click and capture-safe thumb drag. Add a hoverable,
+  capture-safe horizontal resize grip for the left tab tree.
+  Sidebar drag updates chrome immediately but coalesces PTY and VT grid resize
+  through the same trailing-edge path as native window resize and font zoom;
+  pointer-move frequency must never become PTY resize frequency.
+
+Low-level follow-up order after review:
+
+1. Move glyph alpha-mask compositing behind a shared row-kernel contract, with
+   scalar parity plus x86_64 SSE2/AVX2 and aarch64 NEON implementations selected
+   once outside the pixel loop. Inline assembly is justified only where emitted
+   code proves intrinsics cannot preserve the required compact loop.
+2. Replace per-read PTY `Vec` allocation with a bounded reusable SPSC byte-ring
+   owned by `agenterm-platform`; preserve backpressure, edge-triggered wakeup,
+   EOF, cancellation, and one-session isolation on Windows, Linux, and macOS.
+3. Optimize screenshot RGB packing and IEEE PNG CRC only after measured capture
+   evidence. Do not use x86 SSE4.2 `crc32` for PNG: that instruction computes
+   CRC32C, not PNG's IEEE polynomial.
+
+Do not hand-write assembly for VT parsing, JSON, Unicode width, tree/workspace
+state, or rectangle fills. Those are branch-heavy policy or already lower to
+optimized runtime primitives and would gain risk rather than a stable kernel.

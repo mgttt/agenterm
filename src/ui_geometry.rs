@@ -31,7 +31,6 @@ const TREE_COMPACT_SAVE_ACTION_WIDTH: i32 = 34;
 const TREE_COMPACT_CANCEL_ACTION_WIDTH: i32 = 40;
 const TREE_COMPACT_ACTION_THRESHOLD: i32 = 300;
 const NODE_Y_OFFSET: i32 = 11;
-const MIN_SCROLLBAR_THUMB_HEIGHT: i32 = 24;
 const WORKSPACE_TOOLBAR_DIVIDER_HEIGHT: i32 = 1;
 const WORKSPACE_TOOLBAR_HORIZONTAL_PADDING: i32 = 4;
 const WORKSPACE_TOOLBAR_BUTTON_GAP: i32 = 4;
@@ -467,38 +466,30 @@ pub(crate) fn terminal_scrollbar_geometry(
     scrollback_offset: usize,
     max_scrollback: usize,
 ) -> TerminalScrollbarGeometry {
-    let track = PixelRect {
-        left: (terminal.right - TERMINAL_SCROLLBAR_WIDTH).max(terminal.left),
-        top: terminal.top,
-        right: terminal.right,
-        bottom: terminal.bottom,
-    };
-    let track_height = track.height().max(0);
-    let total_rows = visible_rows.saturating_add(max_scrollback).max(1);
-    let proportional_height =
-        (i64::from(track_height) * visible_rows.max(1) as i64 / total_rows as i64) as i32;
-    let thumb_height = if max_scrollback == 0 {
-        track_height
-    } else {
-        proportional_height
-            .max(MIN_SCROLLBAR_THUMB_HEIGHT)
-            .min(track_height)
-    };
-    let travel = (track_height - thumb_height).max(0);
-    let offset = scrollback_offset.min(max_scrollback);
-    let distance_from_bottom = if max_scrollback == 0 {
-        0
-    } else {
-        (offset as i64 * i64::from(travel) / max_scrollback as i64) as i32
-    };
-    let thumb_top = track.bottom - thumb_height - distance_from_bottom;
+    let geometry = agenterm_ui_core::terminal_scrollbar_geometry(
+        agenterm_ui_core::Rect {
+            left: terminal.left,
+            top: terminal.top,
+            right: terminal.right,
+            bottom: terminal.bottom,
+        },
+        TERMINAL_SCROLLBAR_WIDTH,
+        visible_rows,
+        scrollback_offset,
+        max_scrollback,
+    );
     TerminalScrollbarGeometry {
-        track,
+        track: PixelRect {
+            left: geometry.track.left,
+            top: geometry.track.top,
+            right: geometry.track.right,
+            bottom: geometry.track.bottom,
+        },
         thumb: PixelRect {
-            left: track.left + 2,
-            top: thumb_top,
-            right: (track.right - 2).max(track.left + 2),
-            bottom: thumb_top + thumb_height,
+            left: geometry.thumb.left,
+            top: geometry.thumb.top,
+            right: geometry.thumb.right,
+            bottom: geometry.thumb.bottom,
         },
     }
 }
@@ -508,17 +499,24 @@ pub(crate) fn scrollback_for_thumb_top(
     thumb_top: i32,
     max_scrollback: usize,
 ) -> usize {
-    let travel = geometry.track.height() - geometry.thumb.height();
-    if max_scrollback == 0 || travel <= 0 {
-        return 0;
-    }
-    let clamped_top = thumb_top.clamp(
-        geometry.track.top,
-        geometry.track.bottom - geometry.thumb.height(),
-    );
-    let distance_from_bottom = geometry.track.bottom - geometry.thumb.height() - clamped_top;
-    ((i64::from(distance_from_bottom) * max_scrollback as i64 + i64::from(travel) / 2)
-        / i64::from(travel)) as usize
+    agenterm_ui_core::scrollback_for_thumb_top(
+        agenterm_ui_core::ScrollbarGeometry {
+            track: agenterm_ui_core::Rect {
+                left: geometry.track.left,
+                top: geometry.track.top,
+                right: geometry.track.right,
+                bottom: geometry.track.bottom,
+            },
+            thumb: agenterm_ui_core::Rect {
+                left: geometry.thumb.left,
+                top: geometry.thumb.top,
+                right: geometry.thumb.right,
+                bottom: geometry.thumb.bottom,
+            },
+        },
+        thumb_top,
+        max_scrollback,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -536,17 +534,29 @@ pub(crate) fn scrollbar_hit_test(
     x: i32,
     y: i32,
 ) -> Option<ScrollbarHit> {
-    if !geometry.track.contains(x, y) {
-        return None;
-    }
-    if geometry.thumb.contains(x, y) {
-        return Some(ScrollbarHit::Thumb);
-    }
-    if y < geometry.thumb.top {
-        Some(ScrollbarHit::TrackAbove)
-    } else {
-        Some(ScrollbarHit::TrackBelow)
-    }
+    let hit = agenterm_ui_core::scrollbar_hit_test(
+        &agenterm_ui_core::ScrollbarGeometry {
+            track: agenterm_ui_core::Rect {
+                left: geometry.track.left,
+                top: geometry.track.top,
+                right: geometry.track.right,
+                bottom: geometry.track.bottom,
+            },
+            thumb: agenterm_ui_core::Rect {
+                left: geometry.thumb.left,
+                top: geometry.thumb.top,
+                right: geometry.thumb.right,
+                bottom: geometry.thumb.bottom,
+            },
+        },
+        x,
+        y,
+    )?;
+    Some(match hit {
+        agenterm_ui_core::ScrollbarHit::Thumb => ScrollbarHit::Thumb,
+        agenterm_ui_core::ScrollbarHit::TrackAbove => ScrollbarHit::TrackAbove,
+        agenterm_ui_core::ScrollbarHit::TrackBelow => ScrollbarHit::TrackBelow,
+    })
 }
 
 /// Map a client pixel inside the terminal content (excluding scrollbar) to a cell.

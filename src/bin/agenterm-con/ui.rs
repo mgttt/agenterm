@@ -8,6 +8,11 @@ pub const SIDEBAR_WIDTH_DIP: f64 = 224.0;
 pub const TREE_HEADER_HEIGHT_DIP: f64 = 32.0;
 pub const TREE_ROW_HEIGHT_DIP: f64 = 30.0;
 pub const COMPOSER_HEIGHT_DIP: f64 = 96.0;
+pub const SIDEBAR_MIN_WIDTH_DIP: f64 = 180.0;
+pub const SIDEBAR_MAX_WIDTH_DIP: f64 = 480.0;
+pub const TERMINAL_MIN_WIDTH_DIP: f64 = 320.0;
+pub const SIDEBAR_RESIZE_GRIP_DIP: f64 = 6.0;
+pub const TERMINAL_SCROLLBAR_WIDTH_DIP: f64 = 12.0;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Rect {
@@ -39,9 +44,17 @@ pub struct Layout {
 }
 
 impl Layout {
+    #[cfg(test)]
     pub fn new(width: u32, height: u32, scale: f64) -> Self {
+        Self::with_sidebar_width(width, height, scale, SIDEBAR_WIDTH_DIP)
+    }
+
+    pub fn with_sidebar_width(width: u32, height: u32, scale: f64, sidebar_dip: f64) -> Self {
         let scale = scale.max(1.0);
-        let sidebar_width = dip(SIDEBAR_WIDTH_DIP, scale).min(width);
+        let maximum = (f64::from(width) / scale - TERMINAL_MIN_WIDTH_DIP)
+            .clamp(SIDEBAR_MIN_WIDTH_DIP, SIDEBAR_MAX_WIDTH_DIP);
+        let sidebar_width =
+            dip(sidebar_dip.clamp(SIDEBAR_MIN_WIDTH_DIP, maximum), scale).min(width);
         let composer_height = dip(COMPOSER_HEIGHT_DIP, scale).min(height);
         let composer = Rect {
             x: sidebar_width,
@@ -112,6 +125,16 @@ impl Layout {
             .saturating_sub(self.tree_header_height)
             .checked_div(self.tree_row_height)
             .unwrap_or(0) as usize
+    }
+
+    pub fn sidebar_resize_grip(self, scale: f64) -> Rect {
+        let width = dip(SIDEBAR_RESIZE_GRIP_DIP, scale).min(self.sidebar.width);
+        Rect {
+            x: self.sidebar.width.saturating_sub(width),
+            y: 0,
+            width,
+            height: self.sidebar.height,
+        }
     }
 
     pub fn tree_close_rect(self, visible_row: usize, scale: f64) -> Rect {
@@ -220,6 +243,49 @@ fn dip(value: f64, scale: f64) -> u32 {
     (value * scale.max(1.0)).round().max(0.0) as u32
 }
 
+pub fn terminal_scrollbar_width(scale: f64) -> u32 {
+    dip(TERMINAL_SCROLLBAR_WIDTH_DIP, scale).max(1)
+}
+
+pub fn sidebar_width_from_pointer(pointer_x: f64, client_width: f64) -> f64 {
+    let maximum =
+        (client_width - TERMINAL_MIN_WIDTH_DIP).clamp(SIDEBAR_MIN_WIDTH_DIP, SIDEBAR_MAX_WIDTH_DIP);
+    pointer_x.clamp(SIDEBAR_MIN_WIDTH_DIP, maximum)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalViewport {
+    pub width: u32,
+    pub height: u32,
+    pub left: u32,
+    pub top: u32,
+    pub bottom_inset: u32,
+    pub scale: f64,
+    pub rows: usize,
+}
+
+pub fn terminal_scrollbar_geometry(
+    viewport: TerminalViewport,
+    offset: usize,
+    maximum: usize,
+) -> agenterm_ui_core::ScrollbarGeometry {
+    agenterm_ui_core::terminal_scrollbar_geometry(
+        agenterm_ui_core::Rect {
+            left: viewport.left.min(i32::MAX as u32) as i32,
+            top: viewport.top.min(i32::MAX as u32) as i32,
+            right: viewport.width.min(i32::MAX as u32) as i32,
+            bottom: viewport
+                .height
+                .saturating_sub(viewport.bottom_inset)
+                .min(i32::MAX as u32) as i32,
+        },
+        terminal_scrollbar_width(viewport.scale).min(i32::MAX as u32) as i32,
+        viewport.rows,
+        offset,
+        maximum,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +365,34 @@ mod tests {
             ComposerHit::Send
         );
         assert_eq!(composer_hit(layout, 500, 100), ComposerHit::Outside);
+    }
+
+    #[test]
+    fn sidebar_drag_is_bounded_and_preserves_terminal_floor() {
+        assert_eq!(sidebar_width_from_pointer(90.0, 1000.0), 180.0);
+        assert_eq!(sidebar_width_from_pointer(330.0, 1000.0), 330.0);
+        assert_eq!(sidebar_width_from_pointer(900.0, 1000.0), 480.0);
+        assert_eq!(sidebar_width_from_pointer(300.0, 450.0), 180.0);
+    }
+
+    #[test]
+    fn scrollbar_owns_terminal_right_edge() {
+        let g = terminal_scrollbar_geometry(
+            TerminalViewport {
+                width: 1200,
+                height: 800,
+                left: 224,
+                top: 0,
+                bottom_inset: 96,
+                scale: 1.0,
+                rows: 24,
+            },
+            0,
+            100,
+        );
+        assert_eq!(
+            (g.track.left, g.track.right, g.track.bottom),
+            (1188, 1200, 704)
+        );
     }
 }

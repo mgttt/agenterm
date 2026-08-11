@@ -19,7 +19,7 @@ use winit::{
     dpi::{LogicalPosition, LogicalSize as NativeLogicalSize},
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowAttributes, WindowId},
+    window::{CursorIcon, Window, WindowAttributes, WindowId},
 };
 
 use crate::{
@@ -27,10 +27,11 @@ use crate::{
         ime::ImeEvent,
         input::ModifierState,
         window_host::{
-            GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelWindow,
-            PixelWindowApplication, PixelWindowBackend, PixelWindowDirective, PixelWindowError,
-            PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
-            PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
+            GeometryChange, LogicalPoint, LogicalRect, LogicalSize, PixelPointerCursor,
+            PixelWindow, PixelWindowApplication, PixelWindowBackend, PixelWindowDirective,
+            PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions,
+            PointerButton, PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker,
+            XrgbPixelFrame,
         },
     },
     input::{NativeKeyEventExt as _, NativeModifierStateExt as _},
@@ -159,6 +160,14 @@ impl PixelWindowBackend for NativeWindowBackend {
 
     fn set_title(&self, title: &str) {
         self.window.set_title(title);
+    }
+
+    fn set_pointer_cursor(&self, cursor: PixelPointerCursor) -> Result<(), PixelWindowError> {
+        self.window.set_cursor(match cursor {
+            PixelPointerCursor::Arrow => CursorIcon::Default,
+            PixelPointerCursor::ResizeHorizontal => CursorIcon::EwResize,
+        });
+        Ok(())
     }
 
     fn request_logical_inner_size(&self, size: LogicalSize) -> Result<(), PixelWindowError> {

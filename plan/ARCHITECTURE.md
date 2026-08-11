@@ -324,3 +324,17 @@ C manifest 真源（推荐长期）         architecture.manifest.{toml,json}
 债务钩子：**L2**（双主机/巨石）、**L3**（policy/facade）、**L4**（SSOT 机读）。  
 执行叶：当前版本 plan（如 `plan-v0.1.15` **S 组** + **§九 预备树**）；落地后 **同批** 更新本文 §1/§3/§4。  
 **HOLD**：多 agent 并行时 S 泳道不写主树；用户通知复审后再按 §九 刀序开工。不必等 S3 全文双向才微重构。
+
+### Shared terminal interaction geometry
+
+`crates/agenterm-ui-core` is the allocation-free, host-neutral boundary for
+scrollbar geometry, hit testing, and drag mapping. Product hosts retain layout,
+palette, viewport state, capture, rendering, and OS event adaptation. The pixel
+window contract exposes typed pointer cursors; Windows implements them through
+Win32 cursor FFI and Unix/macOS through the native winit adapter.
+
+The crate also owns bit-exact XRGB alpha-mask row composition. It selects AVX2
+or baseline SSE2 once on x86_64, uses NEON on aarch64, and retains a scalar
+reference for other architectures and parity tests. Hosts own clipping and
+submit only contiguous destination/mask spans; architecture kernels never own
+terminal cells, fonts, layout, or frame lifecycle.

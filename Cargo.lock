@@ -43,6 +43,7 @@ dependencies = [
  "agenterm-qjs",
  "agenterm-rh",
  "agenterm-sql",
+ "agenterm-ui-core",
  "agenterm-wasmcore",
  "anyhow",
  "libc",
@@ -64,6 +65,7 @@ name = "agenterm-con"
 version = "0.1.16"
 dependencies = [
  "agenterm-platform",
+ "agenterm-ui-core",
  "png",
  "serde_json",
  "unicode-width",
@@ -149,6 +151,10 @@ dependencies = [
  "sqlparser",
  "tempfile",
 ]
+
+[[package]]
+name = "agenterm-ui-core"
+version = "0.1.16"
 
 [[package]]
 name = "agenterm-wasmcore"

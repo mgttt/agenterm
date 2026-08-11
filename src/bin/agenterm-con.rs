@@ -48,9 +48,13 @@ use agenterm_platform::input::{
 use agenterm_platform::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 use agenterm_platform::terminal_input::{self, TerminalKeyMode};
 use agenterm_platform::window_host::{
-    GeometryChange, LogicalPoint, LogicalSize, PixelWindow, PixelWindowApplication,
-    PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowOptions, PointerButton,
-    PointerButtonState, WheelDelta, XrgbPixelFrame, run_pixel_window,
+    GeometryChange, LogicalPoint, LogicalSize, PixelPointerCursor, PixelWindow,
+    PixelWindowApplication, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
+    PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
+    run_pixel_window,
+};
+use agenterm_ui_core::{
+    ScrollbarHit, ScrollbarThumbDrag, scrollback_for_thumb_top, scrollbar_hit_test,
 };
 
 use palette::Rgb;
@@ -140,6 +144,10 @@ impl vt100::Callbacks for ConCallbacks {
 struct TerminalPoint {
     row: u16,
     col: u16,
+}
+
+fn selection_should_auto_copy(selection: Option<(TerminalPoint, TerminalPoint)>) -> bool {
+    selection.is_some_and(|(anchor, focus)| anchor != focus)
 }
 
 impl TerminalPoint {
@@ -675,6 +683,7 @@ struct ConTerminal {
     scroll_offset: usize,
     /// Accumulated wheel delta (fractional lines pending application).
     wheel_accumulator: f32,
+    scrollbar_drag: Option<ScrollbarThumbDrag>,
 
     /// Text selection: anchor + focus in terminal cell coordinates.
     /// None = no selection; Some = active or completed selection.
@@ -730,6 +739,8 @@ struct ConApp {
     composer_focused: bool,
     composer_select_all: bool,
     tree_scroll_offset: usize,
+    sidebar_width_logical: f64,
+    sidebar_resizing: bool,
     exit: bool,
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
@@ -801,6 +812,8 @@ impl ConApp {
             composer_focused: false,
             composer_select_all: false,
             tree_scroll_offset: 0,
+            sidebar_width_logical: ui::SIDEBAR_WIDTH_DIP,
+            sidebar_resizing: false,
             exit: false,
             control_endpoint,
             control_server: None,
@@ -862,8 +875,9 @@ impl ConApp {
             return Ok(());
         }
         let metrics = window.metrics()?;
+        let sidebar_width = self.sidebar_width_logical;
         let session = self.active_session_mut()?;
-        Self::configure_chrome(session, metrics.scale_factor);
+        Self::configure_chrome(session, metrics.scale_factor, sidebar_width);
         session.apply_resize(
             metrics.physical_width,
             metrics.physical_height,
@@ -875,13 +889,17 @@ impl ConApp {
         Ok(())
     }
 
-    fn configure_chrome(session: &mut ConTerminal, scale: f64) {
+    fn configure_chrome(session: &mut ConTerminal, scale: f64, sidebar_width_logical: f64) {
         let scale = scale.max(1.0);
         session.set_content_insets(
-            (ui::SIDEBAR_WIDTH_DIP * scale).round() as u32,
+            (sidebar_width_logical * scale).round() as u32,
             0,
             (ui::COMPOSER_HEIGHT_DIP * scale).round() as u32,
         );
+    }
+
+    fn layout(&self, width: u32, height: u32, scale: f64) -> ui::Layout {
+        ui::Layout::with_sidebar_width(width, height, scale, self.sidebar_width_logical)
     }
 
     fn reveal_active_tree_row(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
@@ -897,7 +915,7 @@ impl ConApp {
             return Ok(());
         };
         let metrics = window.metrics()?;
-        let layout = ui::Layout::new(
+        let layout = self.layout(
             metrics.physical_width,
             metrics.physical_height,
             metrics.scale_factor,
@@ -936,7 +954,11 @@ impl ConApp {
         session.font_size_logical = font_size_logical;
         session.cols = cols;
         session.rows = rows;
-        Self::configure_chrome(&mut session, window.metrics()?.scale_factor);
+        Self::configure_chrome(
+            &mut session,
+            window.metrics()?.scale_factor,
+            self.sidebar_width_logical,
+        );
         if let Err(error) = session.opened(window) {
             self.workspace.close(id);
             return Err(error);
@@ -965,8 +987,9 @@ impl ConApp {
         self.workspace.set_active(ids[next]);
         self.reveal_active_tree_row(window)?;
         let metrics = window.metrics()?;
+        let sidebar_width = self.sidebar_width_logical;
         let session = self.active_session_mut()?;
-        Self::configure_chrome(session, metrics.scale_factor);
+        Self::configure_chrome(session, metrics.scale_factor, sidebar_width);
         session.apply_resize(
             metrics.physical_width,
             metrics.physical_height,
@@ -1025,7 +1048,7 @@ impl ConApp {
     ) -> Result<bool, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
-        let layout = ui::Layout::new(
+        let layout = self.layout(
             metrics.physical_width,
             metrics.physical_height,
             metrics.scale_factor,
@@ -1066,8 +1089,9 @@ impl ConApp {
                 self.reveal_active_tree_row(window)?;
             }
         }
+        let sidebar_width = self.sidebar_width_logical;
         let session = self.active_session_mut()?;
-        Self::configure_chrome(session, metrics.scale_factor);
+        Self::configure_chrome(session, metrics.scale_factor, sidebar_width);
         session.apply_resize(
             metrics.physical_width,
             metrics.physical_height,
@@ -1087,7 +1111,7 @@ impl ConApp {
     ) -> Result<ui::ComposerHit, PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
-        let layout = ui::Layout::new(
+        let layout = self.layout(
             metrics.physical_width,
             metrics.physical_height,
             metrics.scale_factor,
@@ -1102,7 +1126,7 @@ impl ConApp {
     fn update_composer_ime_anchor(&self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         let metrics = window.metrics()?;
         let scale = metrics.scale_factor.max(1.0);
-        let layout = ui::Layout::new(
+        let layout = self.layout(
             metrics.physical_width,
             metrics.physical_height,
             metrics.scale_factor,
@@ -1472,6 +1496,80 @@ impl ConApp {
         next
     }
 
+    fn handle_sidebar_resize(
+        &mut self,
+        window: &PixelWindow,
+        event: &PixelWindowEvent,
+    ) -> Result<bool, PixelWindowError> {
+        let metrics = window.metrics()?;
+        let scale = metrics.scale_factor.max(1.0);
+        let layout = self.layout(
+            metrics.physical_width,
+            metrics.physical_height,
+            metrics.scale_factor,
+        );
+        let physical = |position: &LogicalPoint| {
+            (
+                (position.x * scale).max(0.0) as u32,
+                (position.y * scale).max(0.0) as u32,
+            )
+        };
+        match event {
+            PixelWindowEvent::PointerMoved { position, .. } if self.sidebar_resizing => {
+                self.sidebar_width_logical =
+                    ui::sidebar_width_from_pointer(position.x, metrics.logical_size.width);
+                let sidebar_width = self.sidebar_width_logical;
+                let session = self.active_session_mut()?;
+                Self::configure_chrome(session, metrics.scale_factor, sidebar_width);
+                session.queue_resize(
+                    metrics.physical_width,
+                    metrics.physical_height,
+                    metrics.scale_factor,
+                );
+                let _ = window.set_pointer_cursor(PixelPointerCursor::ResizeHorizontal);
+                window.request_redraw();
+                Ok(true)
+            }
+            PixelWindowEvent::PointerMoved { position, .. } => {
+                let (x, y) = physical(position);
+                let over_grip = layout.sidebar_resize_grip(scale).contains(x, y);
+                let _ = window.set_pointer_cursor(if over_grip {
+                    PixelPointerCursor::ResizeHorizontal
+                } else {
+                    PixelPointerCursor::Arrow
+                });
+                Ok(over_grip)
+            }
+            PixelWindowEvent::PointerButton {
+                button: PointerButton::Left,
+                state: PointerButtonState::Pressed,
+                position: Some(position),
+                ..
+            } => {
+                let (x, y) = physical(position);
+                if !layout.sidebar_resize_grip(scale).contains(x, y) {
+                    return Ok(false);
+                }
+                self.sidebar_resizing = true;
+                let _ = window.set_pointer_capture(true);
+                let _ = window.set_pointer_cursor(PixelPointerCursor::ResizeHorizontal);
+                Ok(true)
+            }
+            PixelWindowEvent::PointerButton {
+                button: PointerButton::Left,
+                state: PointerButtonState::Released,
+                ..
+            } if std::mem::take(&mut self.sidebar_resizing) => {
+                let _ = window.set_pointer_capture(false);
+                Ok(true)
+            }
+            PixelWindowEvent::PointerCaptureLost if std::mem::take(&mut self.sidebar_resizing) => {
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     fn paint_chrome(&self, frame: &mut XrgbPixelFrame<'_>) -> Result<(), PixelWindowError> {
         let session = self.active_session()?;
         let width = frame.width();
@@ -1482,7 +1580,7 @@ impl ConApp {
             height,
         };
         let scale = session.scale.max(1.0);
-        let layout = ui::Layout::new(width, height, scale);
+        let layout = self.layout(width, height, scale);
         let tree_width = layout.sidebar.width;
         let header_height = layout.tree_header_height;
         let row_height = layout.tree_row_height;
@@ -1642,11 +1740,7 @@ impl ConApp {
             layout.composer_send.height,
             active_bg.to_xrgb(),
         );
-        let mut composer = if self.composer.is_empty() && self.composer_preedit.is_empty() {
-            "Type here, then press Enter".to_owned()
-        } else {
-            format!("{}{}", self.composer, self.composer_preedit)
-        };
+        let mut composer = format!("{}{}", self.composer, self.composer_preedit);
         if self.composer_focused && !self.composer_select_all {
             composer.push('|');
         }
@@ -1711,6 +1805,7 @@ impl ConTerminal {
             exit: false,
             scroll_offset: 0,
             wheel_accumulator: 0.0,
+            scrollbar_drag: None,
             selection: None,
             selecting: false,
             mouse_dragging: false,
@@ -1934,7 +2029,9 @@ impl ConTerminal {
     fn apply_resize(&mut self, phys_w: u32, phys_h: u32, scale: f64) {
         self.scale = scale;
         self.recompute_metrics(scale);
-        let usable_w = phys_w.saturating_sub(self.content_left_px);
+        let usable_w = phys_w
+            .saturating_sub(self.content_left_px)
+            .saturating_sub(ui::terminal_scrollbar_width(scale));
         let usable_h = phys_h
             .saturating_sub(self.content_top_px)
             .saturating_sub(self.content_bottom_px);
@@ -1948,6 +2045,11 @@ impl ConTerminal {
             let _ = master.resize(TerminalSize { rows, cols });
         }
         self.parser.screen_mut().set_size(rows, cols);
+    }
+
+    fn queue_resize(&mut self, phys_w: u32, phys_h: u32, scale: f64) {
+        self.pending_geometry = Some((phys_w, phys_h, scale));
+        self.last_geometry_at = Instant::now();
     }
 
     /// Handles one IME composition event.
@@ -2269,6 +2371,124 @@ impl ConTerminal {
         if self.scroll_offset != 0 {
             self.scroll_offset = 0;
             self.parser.screen_mut().set_scrollback(0);
+        }
+    }
+
+    fn scrollback_bounds(&mut self) -> (usize, usize) {
+        if self.parser.screen().alternate_screen() {
+            return (0, 0);
+        }
+        let current = self.parser.screen().scrollback();
+        self.parser.screen_mut().set_scrollback(usize::MAX);
+        let maximum = self.parser.screen().scrollback();
+        self.parser.screen_mut().set_scrollback(current);
+        self.scroll_offset = self.parser.screen().scrollback();
+        (self.scroll_offset, maximum)
+    }
+
+    fn set_scrollback(&mut self, requested: usize) {
+        if !self.parser.screen().alternate_screen() {
+            self.parser.screen_mut().set_scrollback(requested);
+            self.scroll_offset = self.parser.screen().scrollback();
+        }
+    }
+
+    fn scrollbar_geometry(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> (agenterm_ui_core::ScrollbarGeometry, usize, usize) {
+        let (offset, maximum) = self.scrollback_bounds();
+        (
+            ui::terminal_scrollbar_geometry(
+                ui::TerminalViewport {
+                    width,
+                    height,
+                    left: self.content_left_px,
+                    top: self.content_top_px,
+                    bottom_inset: self.content_bottom_px,
+                    scale: self.scale,
+                    rows: usize::from(self.rows),
+                },
+                offset,
+                maximum,
+            ),
+            offset,
+            maximum,
+        )
+    }
+
+    fn handle_scrollbar_event(
+        &mut self,
+        window: &PixelWindow,
+        event: &PixelWindowEvent,
+    ) -> Result<bool, PixelWindowError> {
+        let metrics = window.metrics()?;
+        let scale = self.scale;
+        let physical = |position: &LogicalPoint| {
+            (
+                (position.x * scale).round() as i32,
+                (position.y * scale).round() as i32,
+            )
+        };
+        match event {
+            PixelWindowEvent::PointerButton {
+                button: PointerButton::Left,
+                state: PointerButtonState::Pressed,
+                position: Some(position),
+                ..
+            } => {
+                let (geometry, current, _) =
+                    self.scrollbar_geometry(metrics.physical_width, metrics.physical_height);
+                let (x, y) = physical(position);
+                let Some(hit) = scrollbar_hit_test(&geometry, x, y) else {
+                    return Ok(false);
+                };
+                match hit {
+                    ScrollbarHit::Thumb => {
+                        self.scrollbar_drag =
+                            Some(ScrollbarThumbDrag::begin(y, geometry.thumb.top));
+                        let _ = window.set_pointer_capture(true);
+                    }
+                    ScrollbarHit::TrackAbove => {
+                        self.set_scrollback(current.saturating_add(usize::from(self.rows).max(1)))
+                    }
+                    ScrollbarHit::TrackBelow => {
+                        self.set_scrollback(current.saturating_sub(usize::from(self.rows).max(1)))
+                    }
+                }
+                window.request_redraw();
+                Ok(true)
+            }
+            PixelWindowEvent::PointerMoved { position, .. } => {
+                let Some(drag) = self.scrollbar_drag else {
+                    return Ok(false);
+                };
+                let (geometry, _, maximum) =
+                    self.scrollbar_geometry(metrics.physical_width, metrics.physical_height);
+                let (_, y) = physical(position);
+                self.set_scrollback(scrollback_for_thumb_top(
+                    geometry,
+                    drag.thumb_top(y),
+                    maximum,
+                ));
+                window.request_redraw();
+                Ok(true)
+            }
+            PixelWindowEvent::PointerButton {
+                button: PointerButton::Left,
+                state: PointerButtonState::Released,
+                ..
+            } if self.scrollbar_drag.take().is_some() => {
+                let _ = window.set_pointer_capture(false);
+                window.request_redraw();
+                Ok(true)
+            }
+            PixelWindowEvent::PointerCaptureLost if self.scrollbar_drag.take().is_some() => {
+                window.request_redraw();
+                Ok(true)
+            }
+            _ => Ok(false),
         }
     }
 
@@ -2622,7 +2842,8 @@ impl ConTerminal {
     }
 
     /// Builds the current [`ScreenSnapshot`] for `--emit-snapshot`.
-    fn build_snapshot(&self) -> ScreenSnapshot {
+    fn build_snapshot(&mut self) -> ScreenSnapshot {
+        let (_, max_scrollback) = self.scrollback_bounds();
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
         let cursor = screen.cursor_position();
@@ -2647,6 +2868,7 @@ impl ConTerminal {
                 visible_now,
             },
             scroll_offset: self.scroll_offset,
+            max_scrollback,
             selection: self.selection.map(|(a, b)| {
                 (
                     agent_interface::PointSnapshot {
@@ -2669,9 +2891,9 @@ impl ConTerminal {
     /// Errors are deliberately swallowed: a full disk or a test harness that
     /// deleted the target directory mid-run must not crash the session it is
     /// trying to observe.
-    fn write_snapshot_if_requested(&self) {
-        if let Some(path) = &self.snapshot_path {
-            let _ = agent_interface::write_snapshot_atomic(path, &self.build_snapshot());
+    fn write_snapshot_if_requested(&mut self) {
+        if let Some(path) = self.snapshot_path.clone() {
+            let _ = agent_interface::write_snapshot_atomic(&path, &self.build_snapshot());
         }
     }
 
@@ -2897,6 +3119,9 @@ impl ConTerminal {
             }
             (PointerButton::Left, false) => {
                 self.selecting = false;
+                if selection_should_auto_copy(self.selection) {
+                    self.copy_selection();
+                }
             }
             (PointerButton::Right, true) => {
                 // Right-click: copy if a selection exists, else paste.
@@ -2982,7 +3207,10 @@ impl ConTerminal {
         // Request keyboard focus so winit delivers KeyboardInput events on Windows.
         window.focus();
         let (cols, rows) = Self::compute_grid(
-            metrics.physical_width.saturating_sub(self.content_left_px),
+            metrics
+                .physical_width
+                .saturating_sub(self.content_left_px)
+                .saturating_sub(ui::terminal_scrollbar_width(scale)),
             metrics
                 .physical_height
                 .saturating_sub(self.content_top_px)
@@ -3003,6 +3231,9 @@ impl ConTerminal {
         window: &PixelWindow,
         event: PixelWindowEvent,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        if self.handle_scrollbar_event(window, &event)? {
+            return Ok(PixelWindowDirective::Continue);
+        }
         match event {
             PixelWindowEvent::CloseRequested => {
                 self.exit = true;
@@ -3140,6 +3371,8 @@ impl ConTerminal {
         };
         surface.pixels.fill(bg_word);
 
+        let (scrollbar, _, _) = self.scrollbar_geometry(fw, fh);
+        let scrollbar_active = self.scrollbar_drag.is_some();
         let screen = self.parser.screen();
         let cursor = screen.cursor_position();
         let cursor_hidden = screen.hide_cursor();
@@ -3234,6 +3467,26 @@ impl ConTerminal {
             }
         }
 
+        surface.fill_rect(
+            scrollbar.track.left.max(0) as u32,
+            scrollbar.track.top.max(0) as u32,
+            scrollbar.track.width().max(0) as u32,
+            scrollbar.track.height().max(0) as u32,
+            Rgb(0x18, 0x18, 0x18).to_xrgb(),
+        );
+        surface.fill_rect(
+            scrollbar.thumb.left.max(0) as u32,
+            scrollbar.thumb.top.max(0) as u32,
+            scrollbar.thumb.width().max(0) as u32,
+            scrollbar.thumb.height().max(0) as u32,
+            if scrollbar_active {
+                Rgb(0xF0, 0xF0, 0xF0)
+            } else {
+                Rgb(0xA8, 0xA8, 0xA8)
+            }
+            .to_xrgb(),
+        );
+
         self.write_snapshot_if_requested();
 
         Ok(PixelWindowDirective::Continue)
@@ -3313,7 +3566,12 @@ impl ConTerminal {
 impl PixelWindowApplication for ConApp {
     fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
         let metrics = window.metrics()?;
-        Self::configure_chrome(self.active_session_mut()?, metrics.scale_factor);
+        let sidebar_width = self.sidebar_width_logical;
+        Self::configure_chrome(
+            self.active_session_mut()?,
+            metrics.scale_factor,
+            sidebar_width,
+        );
         let directive = self.active_session_mut()?.opened(window)?;
         if let Some(endpoint) = self.control_endpoint.clone() {
             let waker = window.waker();
@@ -3361,8 +3619,16 @@ impl PixelWindowApplication for ConApp {
             }
             return Ok(PixelWindowDirective::Continue);
         }
+        if self.handle_sidebar_resize(window, &event)? {
+            return Ok(PixelWindowDirective::Continue);
+        }
         if let PixelWindowEvent::GeometryChanged { metrics, .. } = &event {
-            Self::configure_chrome(self.active_session_mut()?, metrics.scale_factor);
+            let sidebar_width = self.sidebar_width_logical;
+            Self::configure_chrome(
+                self.active_session_mut()?,
+                metrics.scale_factor,
+                sidebar_width,
+            );
         }
         if let PixelWindowEvent::Keyboard(key) = &event
             && self.handle_workspace_shortcut(window, key)?
@@ -3377,7 +3643,7 @@ impl PixelWindowApplication for ConApp {
         {
             let metrics = window.metrics()?;
             let scale = metrics.scale_factor.max(1.0);
-            let layout = ui::Layout::new(
+            let layout = self.layout(
                 metrics.physical_width,
                 metrics.physical_height,
                 metrics.scale_factor,
@@ -3667,22 +3933,23 @@ impl Surface<'_> {
             } else {
                 ((clip_y1 - py) as f32 * shear).round() as i32
             };
-            let row_base = (py as u32 * self.width) as usize;
-            for gx in 0..glyph.width {
-                let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
-                if alpha == 0 {
-                    continue;
-                }
-                let px = start_x + gx as i32 + slant;
-                if px < clip_x0 || px >= clip_x1 || px < 0 || px as u32 >= self.width {
-                    continue;
-                }
-                let idx = row_base + px as usize;
-                if idx >= self.pixels.len() {
-                    continue;
-                }
-                self.pixels[idx] = blend_xrgb(self.pixels[idx], fg, alpha);
+            let row_start_x = start_x + slant;
+            let source_x_start = (clip_x0.max(0) - row_start_x).max(0) as u32;
+            let source_x_end = glyph.width.min(
+                (clip_x1.min(self.width.min(i32::MAX as u32) as i32) - row_start_x).max(0) as u32,
+            );
+            if source_x_start >= source_x_end {
+                continue;
             }
+            let destination_x = row_start_x + source_x_start as i32;
+            let destination_start = (py as u32 * self.width + destination_x as u32) as usize;
+            let source_start = (gy * glyph.width + source_x_start) as usize;
+            let count = (source_x_end - source_x_start) as usize;
+            agenterm_ui_core::pixel::blend_mask_xrgb(
+                &mut self.pixels[destination_start..destination_start + count],
+                &glyph.alpha[source_start..source_start + count],
+                fg.to_xrgb(),
+            );
         }
     }
 }
@@ -3849,19 +4116,6 @@ fn paint_chrome_text(
         }
         cursor = cursor.saturating_add(cell_w);
     }
-}
-
-#[inline]
-fn blend_xrgb(existing: u32, fg: Rgb, alpha: u8) -> u32 {
-    let a = u32::from(alpha);
-    let inv = 255 - a;
-    let er = (existing >> 16) & 0xFF;
-    let eg = (existing >> 8) & 0xFF;
-    let eb = existing & 0xFF;
-    let r = (er * inv + u32::from(fg.0) * a) / 255;
-    let g = (eg * inv + u32::from(fg.1) * a) / 255;
-    let b = (eb * inv + u32::from(fg.2) * a) / 255;
-    r << 16 | g << 8 | b
 }
 
 /// Returns the first non-combining character so combining marks do not each
@@ -4069,6 +4323,27 @@ mod tests {
         // ...and scrolling down from the bottom must not underflow.
         app.scroll_by(-10);
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn auto_copy_requires_a_non_empty_local_selection() {
+        let point = TerminalPoint { row: 2, col: 4 };
+        assert!(!selection_should_auto_copy(None));
+        assert!(!selection_should_auto_copy(Some((point, point))));
+        assert!(selection_should_auto_copy(Some((
+            point,
+            TerminalPoint { row: 2, col: 7 },
+        ))));
+    }
+
+    #[test]
+    fn queued_resize_coalesces_without_synchronously_mutating_the_grid() {
+        let mut terminal = ConTerminal::new(None);
+        let original_grid = (terminal.cols, terminal.rows);
+        terminal.queue_resize(900, 600, 1.0);
+        terminal.queue_resize(1200, 800, 1.25);
+        assert_eq!((terminal.cols, terminal.rows), original_grid);
+        assert_eq!(terminal.pending_geometry, Some((1200, 800, 1.25)));
     }
 
     #[test]

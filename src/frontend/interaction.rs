@@ -532,22 +532,7 @@ pub(crate) fn route_wheel(sidebar_hit: bool, terminal_hit: bool) -> WheelTarget 
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ScrollbarThumbDrag {
-    thumb_grab_offset: i32,
-}
-
-impl ScrollbarThumbDrag {
-    pub(crate) fn begin(pointer_y: i32, thumb_top: i32) -> Self {
-        Self {
-            thumb_grab_offset: pointer_y - thumb_top,
-        }
-    }
-
-    pub(crate) fn thumb_top(self, pointer_y: i32) -> i32 {
-        pointer_y - self.thumb_grab_offset
-    }
-}
+pub(crate) type ScrollbarThumbDrag = agenterm_ui_core::ScrollbarThumbDrag;
 
 pub(crate) fn sidebar_scroll_offset_for_thumb_top(
     geometry: TerminalScrollbarGeometry,

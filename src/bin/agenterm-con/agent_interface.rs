@@ -78,6 +78,7 @@ pub struct ScreenSnapshot {
     pub rows_text: Vec<String>,
     pub cursor: CursorSnapshot,
     pub scroll_offset: usize,
+    pub max_scrollback: usize,
     pub selection: Option<(PointSnapshot, PointSnapshot)>,
     /// Non-empty while an IME composition is in progress. A headless/scripted
     /// session never populates this (there is no real IME to drive it), but
@@ -135,6 +136,7 @@ fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
             ]),
         ),
         ("scroll_offset", snapshot.scroll_offset.into()),
+        ("max_scrollback", snapshot.max_scrollback.into()),
         (
             "selection",
             nullable(
@@ -1078,6 +1080,7 @@ mod tests {
                 visible_now: true,
             },
             scroll_offset: 0,
+            max_scrollback: 120,
             selection: Some((
                 PointSnapshot { row: 0, col: 0 },
                 PointSnapshot { row: 0, col: 4 },
@@ -1092,6 +1095,7 @@ mod tests {
         assert_eq!(value["rows_text"][0], "hello");
         assert_eq!(value["cursor"]["shape"], "block");
         assert_eq!(value["cursor"]["visible_now"], true);
+        assert_eq!(value["max_scrollback"], 120);
         assert_eq!(value["selection"][0]["col"], 0);
         assert_eq!(value["selection"][1]["col"], 4);
         assert_eq!(value["child_alive"], true);

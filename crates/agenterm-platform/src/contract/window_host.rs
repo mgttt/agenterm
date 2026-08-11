@@ -288,8 +288,16 @@ pub(crate) trait PixelWindowBackend {
     fn set_title(&self, title: &str);
     fn request_logical_inner_size(&self, size: LogicalSize) -> Result<(), PixelWindowError>;
     fn set_pointer_capture(&self, captured: bool) -> Result<(), PixelWindowError>;
+    fn set_pointer_cursor(&self, cursor: PixelPointerCursor) -> Result<(), PixelWindowError>;
     fn set_ime_allowed(&self, allowed: bool);
     fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError>;
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PixelPointerCursor {
+    #[default]
+    Arrow,
+    ResizeHorizontal,
 }
 
 #[derive(Clone)]
@@ -316,6 +324,10 @@ impl PixelWindow {
 
     pub fn metrics(&self) -> Result<PixelWindowMetrics, PixelWindowError> {
         self.backend.metrics()
+    }
+
+    pub fn set_pointer_cursor(&self, cursor: PixelPointerCursor) -> Result<(), PixelWindowError> {
+        self.backend.set_pointer_cursor(cursor)
     }
 
     pub fn scale_factor(&self) -> Result<f64, PixelWindowError> {

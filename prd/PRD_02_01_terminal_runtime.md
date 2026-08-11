@@ -278,3 +278,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   returns a typed error instead of pretending the terminal was closed
 - [~] robust CJK double-cell layout; broader visual regression is needed
 - [ ] sustained high-throughput and long-output performance qualification
+
+`agenterm-con` keeps a high-contrast vertical scrollbar visible at the right
+edge of every terminal viewport. Its column is excluded from PTY grid sizing;
+the thumb maps bottom to the live view and upward to older history. Track clicks
+move one visible page, thumb drags retain their grab offset, and capture loss
+cancels the drag without emitting terminal mouse input. Structured snapshots
+expose both current and maximum scrollback. The tab-tree divider exposes a
+horizontal-resize cursor on hover and a bounded capture-safe drag that retains
+the terminal's minimum usable width.
+
+Tab-divider drag must remain visually responsive without synchronously resizing
+the PTY for every pointer event. Chrome follows the pointer immediately while
+the latest PTY/VT grid geometry is applied through the shared trailing-edge
+resize path. Glyph rows use the shared bit-exact architecture pixel kernel;
+unsupported architectures retain identical scalar output.
+
+Completing a non-empty local terminal selection copies its normalized text to
+the system clipboard. A click without a range, application-owned mouse gesture,
+scrollbar drag, or tab-divider resize must not mutate clipboard contents.
