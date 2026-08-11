@@ -7,11 +7,19 @@ fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let script = repo.join("scripts/rh/fresh-clone-rehearsal.rh");
     let manifest = repo.join("agenterm.tasks.json");
+    // `--timeout-ms` is mandatory here: `output()` waits without a deadline, and
+    // this task's declared budget is 3600s. When the self-test branch was missed
+    // (a fabricated `args.len` selected the FULL rehearsal instead) this test
+    // sat through a clone-and-build of the whole repository and took the windows
+    // unit-tests gate down with it -- 900s+ with no output. A child that
+    // misbehaves must now die in 120s and report `host_hard_timeout`, which is a
+    // failure this test can print rather than a hang the gate absorbs.
     let output = Command::new(env!("CARGO_BIN_EXE_agenterm"))
         .args(["__agenterm-internal-engine", "rh"])
         .current_dir(repo)
         .args(["task", "run", "fresh-clone-rehearsal", "--manifest"])
         .arg(&manifest)
+        .args(["--timeout-ms", "120000"])
         .args(["--json", "--", "--self-test"])
         .output()
         .expect("run fresh-clone rehearsal policy self-test");

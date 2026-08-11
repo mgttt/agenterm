@@ -52,6 +52,18 @@ pub fn clear_fleet_bridge() {
     });
 }
 
+/// Run a pack's entry with the host callbacks registered and no fleet bridge.
+/// The pack probes use this; loading a pack must never execute it.
+pub fn call_pack_entry_with_host_registration(native_path: &Path) -> Result<i64, RhError> {
+    crate::script_rh_run::with_run_context(crate::script_rh_run::RhRunContext::default(), || {
+        let module = RhNativeModule::load(native_path)?;
+        register_native_module(&module)?;
+        clear_host_error();
+        let entry_value = module.call_entry();
+        take_host_error().map_or(Ok(entry_value), Err)
+    })
+}
+
 pub fn call_cached_pack_entry_with_fleet(bridge: FleetBridgeFn) -> Result<i64, RhError> {
     let native_path = crate::script_rh_pack::cached_native_path()
         .ok_or_else(|| RhError::Compile("AGENTERM_RH_PACK native path is unavailable".into()))?;
@@ -111,6 +123,21 @@ pub(crate) fn call_pack_entry_with_host_result(
 
 pub fn register_native_module(module: &RhNativeModule) -> Result<(), RhError> {
     let api = module.host_api_version();
+    // A pack below the host's api gets `None` for some callbacks, and
+    // `RhNativeModule::register_host_*` substitutes DUMMIES for those: the
+    // dummy `args_len` returns -4 and the dummy utility call swallows `print`
+    // and `rh_fail`. A script then sees `args.len == -4`, silently misses every
+    // branch that compares it, and runs a completely different path with no
+    // error anywhere -- which is exactly how `fresh-clone-rehearsal --self-test`
+    // came to run a full clone-and-build inside a unit test. The pack cache key
+    // already pins the api version, so a mismatch here is a stale artifact or a
+    // bug, never a normal condition: say so instead of degrading in silence.
+    if api < RH_HOST_API_VERSION {
+        eprintln!(
+            "rh pack host api {api} is older than this host's {RH_HOST_API_VERSION}; \
+             callbacks above that version are stubs (args.len reads -4, print is dropped)"
+        );
+    }
     if api >= RH_HOST_API_VERSION {
         module.register_host_v10(
             host_fleet_call,

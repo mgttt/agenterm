@@ -1504,15 +1504,22 @@ fn run_entry(command: EntryCommand) -> Result<()> {
         EntryCommand::RhPack { json, path } => {
             let pack = crate::script_rh_pack::load_rh_pack(&path)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
+            // Running is explicit and registers the host callbacks first; it is
+            // never a side effect of loading (see `load_rh_pack`).
+            let entry_value = crate::script_rh_pack::run_rh_pack_entry(&path)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&crate::script_rh_pack::rh_pack_document(&pack))?
+                    serde_json::to_string_pretty(&crate::script_rh_pack::rh_pack_document(
+                        &pack,
+                        Some(entry_value)
+                    ))?
                 );
             } else {
                 println!("rh pack loaded: {}", path.display());
                 println!("native_hash={}", pack.native_hash);
-                println!("entry={}", pack.entry_value);
+                println!("entry={entry_value}");
                 for line in &pack.cc_lines {
                     println!("cc: {line}");
                 }

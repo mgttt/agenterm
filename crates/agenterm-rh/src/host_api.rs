@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 95;
+pub const RH_CODEGEN_REVISION: u32 = 96;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -184,9 +184,26 @@ pub fn emit_host_runtime(out: &mut String) {
              };\n\
              call(path.as_ptr(), path.len() as u32) as INT\n\
          }\n\n\
+         // A missing host callback must never be answered with a VALUE. -4 was\n\
+         // comparable: `args.len == 1` and `== 2` both went false, every branch\n\
+         // that selects on argument count silently missed, and the script ran a\n\
+         // different path with no error anywhere. That is how\n\
+         // `fresh-clone-rehearsal --self-test` came to run a full clone-and-build\n\
+         // inside a unit test and hang the windows gate. An unregistered\n\
+         // callback is a broken host contract -- usually a stale staged worker --\n\
+         // so say so on stderr and stop, because `rh_fail` itself needs the\n\
+         // utility callback that is equally missing.\n\
+         fn rh_host_contract_violation(what: &str) -> ! {\n\
+             eprintln!(\n\
+                 \"rh pack: host {what} callback is not registered; the loading \\\n\
+                  host is older than this pack. Refusing to continue with a \\\n\
+                  fabricated value.\"\n\
+             );\n\
+             std::process::abort();\n\
+         }\n\n\
          fn rh_args_len() -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_ARGS_LEN_CALL }) else {\n\
-                 return -4;\n\
+                 rh_host_contract_violation(\"args_len\");\n\
              };\n\
              call() as INT\n\
          }\n\n\
@@ -195,7 +212,7 @@ pub fn emit_host_runtime(out: &mut String) {
                  return String::new();\n\
              }\n\
              let Some(call) = (unsafe { RH_HOST_ARG_CALL }) else {\n\
-                 return String::new();\n\
+                 rh_host_contract_violation(\"arg\");\n\
              };\n\
              let mut scratch = vec![0u8; ",
     );
@@ -1563,7 +1580,9 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_utility(operation: u32, input: &str) -> INT {\n\
              let Some(call) = (unsafe { RH_HOST_UTILITY_CALL }) else {\n\
-                 return -4;\n\
+                 // Without this callback `print` is dropped and `rh_fail` cannot\n\
+                 // report anything, so a failing task looks like a silent hang.\n\
+                 rh_host_contract_violation(\"utility\");\n\
              };\n\
              call(operation, input.as_ptr(), input.len() as u32) as INT\n\
          }\n\n\

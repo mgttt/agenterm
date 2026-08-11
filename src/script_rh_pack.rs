@@ -7,20 +7,39 @@ use std::sync::OnceLock;
 #[derive(Clone, Debug)]
 pub struct LoadedRhPack {
     pub native_hash: String,
-    pub entry_value: i64,
     pub cc_lines: Vec<String>,
 }
 
 static RH_PACK: OnceLock<Option<LoadedRhPack>> = OnceLock::new();
 static NATIVE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+/// Loading a pack must NOT run it.
+///
+/// This used to call `pack.entry_value()` here, which executed the script's
+/// `entry()` with NO host callbacks registered -- `register_native_module` runs
+/// later, on the run path. An unregistered pack reads `args.len` as -4 and drops
+/// every `print` and `rh_fail`, so that first execution silently missed every
+/// argument branch and then ran whatever the script does when no branch matches.
+/// For most entries that is a swallowed argument check, which is why it went
+/// unnoticed; for `fresh-clone-rehearsal` it is a full clone-and-build of the
+/// repository, which is what hung the windows unit-tests gate for 900s+ and left
+/// a 4.5 GB `target/qualification/fresh-clone-workspace` behind.
+///
+/// `entry_value` is now produced only by `run_rh_pack_entry`, which registers
+/// the host first.
 pub fn load_rh_pack(path: &Path) -> Result<LoadedRhPack, agenterm_rh::RhError> {
     let pack = agenterm_rh::RhPack::load(path)?;
     Ok(LoadedRhPack {
         native_hash: pack.manifest.native_hash.clone(),
-        entry_value: pack.entry_value(),
         cc_lines: pack.cc_lines(),
     })
+}
+
+/// Run a pack's entry with the host callbacks registered. Only the explicit
+/// pack probes need this; task and run flows go through
+/// `script_rh_host::call_pack_entry_with_host_result`.
+pub fn run_rh_pack_entry(path: &Path) -> Result<i64, agenterm_rh::RhError> {
+    crate::script_rh_host::call_pack_entry_with_host_registration(path)
 }
 
 pub fn try_load_rh_pack_from_env() -> Option<LoadedRhPack> {
@@ -62,7 +81,7 @@ pub fn rh_pack_observability() -> serde_json::Value {
     match cached_rh_pack() {
         Some(pack) => serde_json::json!({
             "script_backend": crate::script_backend::ScriptBackend::from_env().as_str(),
-            "rh_pack": rh_pack_document(pack),
+            "rh_pack": rh_pack_document(pack, None),
         }),
         None => serde_json::json!({
             "script_backend": crate::script_backend::ScriptBackend::from_env().as_str(),
@@ -80,27 +99,31 @@ pub fn append_cc_lines(mut lines: Vec<String>, pack: &LoadedRhPack) -> Vec<Strin
     lines
 }
 
-pub fn rh_pack_document(pack: &LoadedRhPack) -> serde_json::Value {
+/// `entry_value` is `None` for callers that only inspect a pack. Producing it
+/// requires RUNNING the entry, which must never be a side effect of looking.
+pub fn rh_pack_document(pack: &LoadedRhPack, entry_value: Option<i64>) -> serde_json::Value {
     serde_json::json!({
         "backend": "rh",
         "native_hash": pack.native_hash,
-        "entry_value": pack.entry_value,
+        "entry_value": entry_value,
         "cc_lines": pack.cc_lines,
     })
 }
 
 pub fn print_rh_pack(path: &Path, json: bool) -> Result<(), agenterm_rh::RhError> {
     let pack = load_rh_pack(path)?;
+    // Explicit, registered execution -- see `load_rh_pack`.
+    let entry_value = run_rh_pack_entry(path)?;
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&rh_pack_document(&pack))
+            serde_json::to_string_pretty(&rh_pack_document(&pack, Some(entry_value)))
                 .map_err(|err| { agenterm_rh::RhError::Compile(err.to_string()) })?
         );
     } else {
         println!("rh pack loaded: {}", path.display());
         println!("native_hash={}", pack.native_hash);
-        println!("entry={}", pack.entry_value);
+        println!("entry={entry_value}");
         for line in &pack.cc_lines {
             println!("cc: {line}");
         }
@@ -161,7 +184,6 @@ mod tests {
             vec!["cockpit".to_owned()],
             &LoadedRhPack {
                 native_hash: "abc".to_owned(),
-                entry_value: 1,
                 cc_lines: vec!["pack line".to_owned()],
             },
         );
@@ -180,8 +202,10 @@ mod tests {
         )
         .expect("build");
         let loaded = load_rh_pack(&dir).expect("load");
-        assert_eq!(loaded.entry_value, 7);
         assert_eq!(loaded.cc_lines.len(), 2);
+        // Loading exposes metadata only; running is explicit and registers the
+        // host first, which is the whole point of splitting the two.
+        assert_eq!(super::run_rh_pack_entry(&dir).expect("run"), 7);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

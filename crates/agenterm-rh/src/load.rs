@@ -200,6 +200,15 @@ impl RhNativeModule {
                 );
                 return Ok(());
             }
+            // Fleet-only registration leaves args, fs-read, utility and json
+            // unregistered. Packs built by this crate always export the v11
+            // entry, so a missing symbol means a foreign or stale artifact --
+            // and the consequences are severe enough (the pack aborts on the
+            // first `args.len` or `print`) that it must not be silent.
+            eprintln!(
+                "rh pack does not export rh_register_host_v11; registering the \
+                 fleet callback only. args, print and rh_fail will be unavailable."
+            );
             let register = self
                 .library
                 .get::<Symbol<extern "C" fn(RhHostFleetCall)>>(b"rh_register_host")
