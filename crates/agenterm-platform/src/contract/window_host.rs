@@ -243,7 +243,11 @@ impl PixelFrameState {
         self.content_valid = false;
     }
 
-    #[cfg(unix)]
+    // Not `#[cfg(unix)]`: `adapters/unix/window_host.rs` is included by the
+    // *windows* adapter too (`adapters/windows/window.rs` has the same
+    // `#[path = "../unix/window_host.rs"]` as the linux and macos ones), and it
+    // calls this. Gating the method on unix while its only caller compiles
+    // everywhere broke the windows build outright.
     pub(crate) fn begin_transient_frame(&mut self) {
         self.advance_generation();
     }
