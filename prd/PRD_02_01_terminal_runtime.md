@@ -382,6 +382,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   capability reduction. The native audit also confirms that Windows font,
   PNG, pixel-window, and ConPTY paths already terminate in system FFI and that
   unwind remains required to contain panics at native callback boundaries.
+  Six synchronous control commands now share non-generic session lookup and
+  terminal-cell validation helpers while preserving each command's local
+  `Result` propagation. Screenshot and wait reply ownership and active-tab
+  ordering are unchanged. The official matching-profile PE falls again from
+  620,544 to 620,032 bytes; `.text` falls 720 bytes, `.rdata` falls 32 bytes,
+  `.pdata` grows 24 bytes, and `.rsrc` is unchanged. Evidence remains 81 unit
+  tests, 18 public-control GUI black-box journeys, one isolated multitab
+  control journey, Windows x64 Clippy, and Linux x64 compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

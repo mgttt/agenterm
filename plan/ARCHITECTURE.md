@@ -305,6 +305,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   和 ConPTY 已分别使用 GDI/系统字体、GDI+、User32/GDI 与原生 ConPTY FFI；完整 unwind
   仍负责 WNDPROC、deferred callback 和 native-thread panic containment，不能以重复包装
   系统 API 或改用 panic-abort 冒充进一步下沉。
+- `ConApp::dispatch_control` 的六个同步终端命令现共用两个普通非泛型产品 helper：
+  `control_session_mut` 单点收敛 stable target 到 session 的失败语义，
+  `validate_control_cell` 单点收敛 mouse/wheel 的 cell bounds。需要解析 key/button 的命令
+  仍在各自非泛型 `Result` 闭包内传播错误，screenshot/wait 的 pending reply ownership 与
+  active-tab 顺序不变。官方同 profile PE 从 620,544 B 降至 620,032 B（-512 B）；
+  `.text -720 B`、`.rdata -32 B`、`.pdata +24 B`、`.rsrc` 不变。81 unit、18
+  public-control black-box、1 multitab control journey、Windows x64 Clippy 和 Linux x64
+  check 通过。该边界是产品内部去重，不下沉到 platform，也不用 generic closure 重新
+  制造按命令单态化的 helper。
   filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
   每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制

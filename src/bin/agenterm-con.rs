@@ -1650,6 +1650,26 @@ impl ConApp {
             .ok_or_else(|| format!("terminal @{} does not exist", id.get()))
     }
 
+    fn control_session_mut(
+        &mut self,
+        target: Option<workspace::TabId>,
+    ) -> Result<&mut ConTerminal, String> {
+        let id = self.control_target(target)?;
+        self.sessions
+            .get_mut(&id)
+            .ok_or_else(|| "terminal disappeared".to_owned())
+    }
+
+    fn validate_control_cell(session: &ConTerminal, row: u16, column: u16) -> Result<(), String> {
+        if row >= session.rows || column >= session.cols {
+            return Err(format!(
+                "mouse cell {row},{column} is outside {}x{}",
+                session.rows, session.cols
+            ));
+        }
+        Ok(())
+    }
+
     fn dispatch_control(&mut self, window: &PixelWindow, request: control::IncomingRequest) {
         use control::CliCommand;
         self.perf_stats.sync_present_stats(window.present_stats());
@@ -1727,11 +1747,7 @@ impl ConApp {
                 )]))
             }),
             CliCommand::CapturePane { target, max_bytes } => {
-                self.control_target(target).and_then(|id| {
-                    let session = self
-                        .sessions
-                        .get_mut(&id)
-                        .ok_or_else(|| "terminal disappeared".to_owned())?;
+                self.control_session_mut(target).map(|session| {
                     session.drain_pty();
                     let mut text = session.build_snapshot().rows_text.join("\n");
                     if text.len() > max_bytes {
@@ -1741,54 +1757,39 @@ impl ConApp {
                         }
                         text.truncate(end);
                     }
-                    Ok(json::JsonValue::String(text))
+                    json::JsonValue::String(text)
                 })
             }
-            CliCommand::SendText { target, text } => self.control_target(target).and_then(|id| {
-                let session = self
-                    .sessions
-                    .get_mut(&id)
-                    .ok_or_else(|| "terminal disappeared".to_owned())?;
-                session.scroll_to_bottom();
-                session.write_pty(text.as_bytes());
-                Ok(json::object(vec![("sent_bytes", text.len().into())]))
-            }),
-            CliCommand::SendPaste { target, text } => self.control_target(target).and_then(|id| {
-                let session = self
-                    .sessions
-                    .get_mut(&id)
-                    .ok_or_else(|| "terminal disappeared".to_owned())?;
-                session.paste_text(&text);
-                Ok(json::object(vec![("sent_bytes", text.len().into())]))
-            }),
-            CliCommand::SendKeys { target, keys } => self.control_target(target).and_then(|id| {
-                let session = self
-                    .sessions
-                    .get_mut(&id)
-                    .ok_or_else(|| "terminal disappeared".to_owned())?;
-                for key in &keys {
-                    let (key, ctrl, alt, shift) = parse_control_key(key)?;
-                    session.inject_key(key, ctrl, alt, shift);
-                }
-                Ok(json::object(vec![("sent_keys", keys.len().into())]))
-            }),
+            CliCommand::SendText { target, text } => {
+                self.control_session_mut(target).map(|session| {
+                    session.scroll_to_bottom();
+                    session.write_pty(text.as_bytes());
+                    json::object(vec![("sent_bytes", text.len().into())])
+                })
+            }
+            CliCommand::SendPaste { target, text } => {
+                self.control_session_mut(target).map(|session| {
+                    session.paste_text(&text);
+                    json::object(vec![("sent_bytes", text.len().into())])
+                })
+            }
+            CliCommand::SendKeys { target, keys } => {
+                self.control_session_mut(target).and_then(|session| {
+                    for key in &keys {
+                        let (key, ctrl, alt, shift) = parse_control_key(key)?;
+                        session.inject_key(key, ctrl, alt, shift);
+                    }
+                    Ok(json::object(vec![("sent_keys", keys.len().into())]))
+                })
+            }
             CliCommand::SendMouse {
                 target,
                 action,
                 button,
                 column,
                 row,
-            } => self.control_target(target).and_then(|id| {
-                let session = self
-                    .sessions
-                    .get_mut(&id)
-                    .ok_or_else(|| "terminal disappeared".to_owned())?;
-                if row >= session.rows || column >= session.cols {
-                    return Err(format!(
-                        "mouse cell {row},{column} is outside {}x{}",
-                        session.rows, session.cols
-                    ));
-                }
+            } => self.control_session_mut(target).and_then(|session| {
+                Self::validate_control_cell(session, row, column)?;
                 match action {
                     control::MouseAction::Move => session.inject_mouse_move(window, row, column),
                     control::MouseAction::Click => {
@@ -1813,17 +1814,8 @@ impl ConApp {
                 row,
                 notches,
                 ctrl,
-            } => self.control_target(target).and_then(|id| {
-                let session = self
-                    .sessions
-                    .get_mut(&id)
-                    .ok_or_else(|| "terminal disappeared".to_owned())?;
-                if row >= session.rows || column >= session.cols {
-                    return Err(format!(
-                        "mouse cell {row},{column} is outside {}x{}",
-                        session.rows, session.cols
-                    ));
-                }
+            } => self.control_session_mut(target).and_then(|session| {
+                Self::validate_control_cell(session, row, column)?;
                 session.inject_wheel(window, row, column, f32::from(notches), ctrl);
                 Ok(json::object(vec![("delivered_notches", notches.into())]))
             }),

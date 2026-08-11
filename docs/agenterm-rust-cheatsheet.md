@@ -214,6 +214,13 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   collapsed about 2,445 B of measured specializations to 727 B and reduced the
   same-profile PE by 3,072 B. Apply this only where the saved code outweighs
   allocation/runtime cost; it is not a blanket rule against generics.
+- For branch-heavy dispatch, share repeated lookup and validation through plain
+  non-generic helpers, but keep fallible command work inside its existing local
+  `Result` boundary. A helper taking a closure recreates one monomorph per call;
+  flattening `?` into a surrounding function that returns `()` changes the
+  error-propagation contract. The measured con control refactor used ordinary
+  session/cell helpers, retained per-command `map`/`and_then` boundaries, and
+  reduced the final PE by 512 B with `.text` down 720 B.
 - Do not change an unwind-enabled native host to `panic = "abort"` merely to
   remove runtime bytes. `agenterm-con` catches panics at WNDPROC, deferred-work,
   and native-thread FFI boundaries; abort changes that containment contract
