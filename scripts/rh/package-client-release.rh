@@ -8,7 +8,15 @@
 // here and are driven only by scripts/artifacts.json.
 
 fn copy_required(source, destination, code) {
-    require(std::fs::exists(source), "" + code);
+    // Name the file. Every one of these tags is reused across the whole
+    // executable set, so a bare `package_client_binary_missing` says only "one of
+    // four is absent" -- which is exactly how the windows-aarch64 Candidate leg
+    // failed (run 31540288943) with no way to tell which binary the cross build
+    // had not produced.
+    require(
+        std::fs::exists(source),
+        "" + code + ":" + source
+    );
     std::fs::copy(source, destination);
     0
 }
