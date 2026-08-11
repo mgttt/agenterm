@@ -145,7 +145,7 @@ inference corrupts a serialized field.
 | `return rh::fail("msg")` | fail-return | same recording, explicit |
 | `throw msg` | catchable | unwinds to the nearest `try { } catch { }` |
 
-Two consequences that cost real debugging time:
+Three consequences that cost real debugging time:
 
 1. **`rh_fail` records and continues.** Only the *first* recorded failure is
    reported. A task can print `PASS: ...` and still fail, because the recording
@@ -155,6 +155,19 @@ Two consequences that cost real debugging time:
    keeps running with that default. If a leg must abort the whole task, put the
    `require` in `entry()`, or run the thing you are asserting about as a **child
    process** and assert on its exit code.
+3. **A module-qualified `require` is always case 2.** `test_harness::require(...)`
+   is a helper call, so it cannot stop *your* function. This is not theoretical:
+   `script-smoke.rh` asserted `holders.len > 0` that way and then indexed
+   `holders[0]` regardless.
+
+   When the guarded value is about to be indexed or unwrapped, write a real
+   early return instead:
+
+   ```rust
+   if holders.len == 0 {
+       return rh::fail("script_supervisor_no_holder_acquired");
+   }
+   ```
 
 ## 6. Modules
 
@@ -197,6 +210,28 @@ These are places where the same `.rh` behaves differently once `mode=native`.
 6. **Arithmetic over host reads is INT, but a bare host read may infer Bool.**
    `let pid = 0 + row.pid;` exists in real scripts specifically to force INT —
    without it a later `#{ pid: pid }` serialized `"pid": true`.
+7. **Not every list is the same kind, and only some index safely.** A plain
+   `[]` that you push strings into is JSON-backed, so `items[9]` on a short list
+   is a clean `rh_fail: json_array_index: 9`. A list of Children
+   (`ValueKind::ChildList`) is a real Rust `Vec`, so the same index is a **panic**.
+
+## 7a. When a script panics
+
+`rh_entry` is `extern "C"` and cannot unwind, so a panic in generated code used
+to abort the whole script worker: exit `0xC0000409` / `-1073740791`, no message,
+and the task runner then waited on a worker that was already dead. The generated
+prelude now catches it and reports
+
+```
+rh pack panicked: src\lib.rs:2321:55: index out of bounds: the len is 0 but the index is 0
+```
+
+The `file:line:column` is a position in the **generated** crate, not in your
+`.rh`. To map it back, find the operation named in the message (here an index)
+and look for the corresponding construct in the step that was last printed. The
+generated source lives in a `tempfile::tempdir()` that is deleted after the
+build, so you cannot open it after the fact — the last `STEP` line plus the
+operation name is what you have. That is also why every step should print one.
 
 ## 8. Shipped surface index
 
