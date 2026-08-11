@@ -180,10 +180,10 @@ const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
     let mut cursor = Cursor::new(args);
     cursor.require("cli")?;
-    let control = cursor.required_value("--control")?;
+    let control = cursor.required_value("--control")?.to_owned();
     let verb = cursor.next().ok_or_else(usage)?;
 
-    let command = match verb.as_str() {
+    let command = match verb {
         "list-tabs" => {
             cursor.finish()?;
             CliCommand::ListTabs
@@ -226,7 +226,7 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
         }
         "screenshot-pane" => {
             let target = cursor.optional_target()?;
-            let output = cursor.required_value("--output")?;
+            let output = cursor.required_value("--output")?.to_owned();
             cursor.finish()?;
             CliCommand::ScreenshotPane { target, output }
         }
@@ -234,7 +234,8 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             let target = cursor.optional_target()?;
             let text = cursor
                 .next()
-                .ok_or_else(|| "send-text requires TEXT".to_owned())?;
+                .ok_or_else(|| "send-text requires TEXT".to_owned())?
+                .to_owned();
             cursor.finish()?;
             CliCommand::SendText { target, text }
         }
@@ -242,7 +243,8 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             let target = cursor.optional_target()?;
             let text = cursor
                 .next()
-                .ok_or_else(|| "send-paste requires TEXT".to_owned())?;
+                .ok_or_else(|| "send-paste requires TEXT".to_owned())?
+                .to_owned();
             cursor.finish()?;
             CliCommand::SendPaste { target, text }
         }
@@ -250,7 +252,7 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             let target = cursor.optional_target()?;
             let mut keys = Vec::new();
             while let Some(key) = cursor.next() {
-                keys.push(key);
+                keys.push(key.to_owned());
             }
             if keys.is_empty() {
                 return Err("send-keys requires at least one KEY".to_owned());
@@ -259,8 +261,8 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
         }
         "send-mouse" => {
             let target = cursor.optional_target()?;
-            let action = parse_mouse_action(&cursor.required_value("--action")?)?;
-            let button = parse_mouse_button(&cursor.required_value("--button")?)?;
+            let action = parse_mouse_action(cursor.required_value("--action")?)?;
+            let button = parse_mouse_button(cursor.required_value("--button")?)?;
             let column = cursor.required_u16("--column")?;
             let row = cursor.required_u16("--row")?;
             cursor.finish()?;
@@ -304,7 +306,8 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             }
             let text = cursor
                 .next()
-                .ok_or_else(|| "wait-text requires TEXT".to_owned())?;
+                .ok_or_else(|| "wait-text requires TEXT".to_owned())?
+                .to_owned();
             cursor.finish()?;
             CliCommand::WaitText {
                 target,
@@ -361,21 +364,21 @@ impl<'a> Cursor<'a> {
         Self { args, position: 0 }
     }
 
-    fn next(&mut self) -> Option<String> {
-        let value = self.args.get(self.position)?.clone();
+    fn next(&mut self) -> Option<&'a str> {
+        let value = self.args.get(self.position)?.as_str();
         self.position += 1;
         Some(value)
     }
 
     fn require(&mut self, expected: &str) -> Result<(), String> {
-        match self.next().as_deref() {
+        match self.next() {
             Some(value) if value == expected => Ok(()),
             _ => Err(usage()),
         }
     }
 
-    fn required_value(&mut self, flag: &str) -> Result<String, String> {
-        match self.next().as_deref() {
+    fn required_value(&mut self, flag: &str) -> Result<&'a str, String> {
+        match self.next() {
             Some(value) if value == flag => self
                 .next()
                 .filter(|value| !value.starts_with("--"))
@@ -429,7 +432,7 @@ impl<'a> Cursor<'a> {
         let value = self
             .next()
             .ok_or_else(|| format!("{flag} requires a value"))?;
-        let value = match parse_u64_decimal(&value) {
+        let value = match parse_u64_decimal(value) {
             Some(value) => value,
             None => return Err(format!("{flag} must be an unsigned integer")),
         };
@@ -451,7 +454,7 @@ impl<'a> Cursor<'a> {
         let value = self
             .next()
             .ok_or_else(|| format!("{flag} requires a value"))?;
-        match parse_u64_decimal(&value) {
+        match parse_u64_decimal(value) {
             Some(value) => Ok(Some(value)),
             None => Err(format!("{flag} must be an unsigned integer")),
         }
@@ -459,7 +462,7 @@ impl<'a> Cursor<'a> {
 
     fn required_u16(&mut self, flag: &str) -> Result<u16, String> {
         let value = self.required_value(flag)?;
-        let value = match parse_u64_decimal(&value) {
+        let value = match parse_u64_decimal(value) {
             Some(value) => value,
             None => return Err(format!("{flag} must be an unsigned 16-bit integer")),
         };

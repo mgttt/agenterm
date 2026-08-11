@@ -406,6 +406,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `.rdata` up 16 bytes. Evidence is 83 unit tests, 18 public-control GUI
   black-box journeys, one multitab control journey, Windows x64 Clippy, and
   Linux x64 compilation.
+  The control CLI cursor now borrows argument text from the process-owned
+  `String` slice and allocates only when a value enters an owned command field.
+  Verbs, flags, numeric values, tab ids, and mouse tags no longer clone on every
+  cursor advance; syntax, error text, stable tab ids, and wire bytes are
+  unchanged. The official release-fast PE falls from 619,520 to 616,448 bytes:
+  `.text` falls from 404,348 to 402,924 bytes, `.rdata` from 172,122 to 171,362
+  bytes, and `.pdata` from 29,220 to 29,076 bytes. Evidence is 83 unit tests,
+  18 public-control GUI black-box journeys, one multitab control journey, and
+  Windows x64 Clippy.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
