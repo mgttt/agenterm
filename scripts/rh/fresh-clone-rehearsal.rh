@@ -295,6 +295,59 @@ fn remove_owned_clone(qualification_root, clone) {
     assert_ok(!std::fs::exists(target), "fresh_clone_cleanup_failed:" + target);
 }
 
+// A run killed by the host deadline never reaches `remove_owned_clone`, so its
+// clone directory leaks. Nine had piled up at ~740 MB each -- 6.7 GB of dead
+// weight on a host that then failed builds with "no space left on device".
+// Sweep siblings whose owning process is gone before creating a new one.
+//
+// Best effort by design: pid liveness (not an age heuristic) so a concurrent
+// rehearsal's clone is never touched, and a directory we cannot delete is simply
+// left for the next sweep rather than failing the rehearsal.
+// Compared as text on purpose: `parse_int` answers a non-numeric string by
+// calling `rh_fail` (which RECORDS a failure and returns 0), so one oddly named
+// directory in here would turn a best-effort sweep into a red rehearsal.
+fn owned_clone_owner_text(name) {
+    // "fresh-clone-owned-<pid>-<millis>"; the prefix is 18 characters.
+    let rest = name.sub_string(18, name.len);
+    let parts = rest.split("-");
+    parts[0]
+}
+
+fn process_text_is_live(owner_text, live_ids) {
+    for candidate in live_ids {
+        if candidate == owner_text {
+            return 1;
+        }
+    }
+    0
+}
+
+fn sweep_stale_owned_clones(clone_owner) {
+    let live_ids = [];
+    let processes = std::process::list();
+    for process_index in 0..processes.len {
+        let process = processes[process_index];
+        live_ids.push("" + process.id);
+    }
+    let swept = 0;
+    for entry in std::fs::read_dir(clone_owner) {
+        let name = "" + entry.file_name;
+        if !name.starts_with("fresh-clone-owned-") {
+            continue;
+        }
+        if !entry.is_dir {
+            continue;
+        }
+        let owner_text = owned_clone_owner_text(name);
+        if owner_text != "" && process_text_is_live(owner_text, live_ids) != 0 {
+            continue;
+        }
+        std::fs::try_remove_dir_all(entry.path.display);
+        swept += 1;
+    }
+    swept
+}
+
 fn child_is_running(child) {
     let state = "" + child.state;
     state == "running"
@@ -478,6 +531,10 @@ std::fs::create_dir_all(qualification_root);
 let clone_owner =
     std::path::join(qualification_root, "fresh-clone-workspace").display;
 std::fs::create_dir_all(clone_owner);
+let swept_clones = sweep_stale_owned_clones(clone_owner);
+if swept_clones > 0 {
+    print("fresh-clone rehearsal: reclaimed abandoned clone directories");
+}
 let nonce =
     std::process::id() + "-" +
     std::time::SystemTime::now().unix_millis;
