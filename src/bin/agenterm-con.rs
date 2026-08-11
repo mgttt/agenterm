@@ -19,6 +19,8 @@
 
 #[path = "agenterm-con/agent_interface.rs"]
 mod agent_interface;
+#[path = "agenterm-con/composer.rs"]
+mod composer;
 #[path = "agenterm-con/control.rs"]
 mod control;
 #[path = "agenterm-con/font.rs"]
@@ -720,6 +722,7 @@ struct ConApp {
     composer: String,
     composer_preedit: String,
     composer_focused: bool,
+    composer_select_all: bool,
     tree_scroll_offset: usize,
     exit: bool,
     control_endpoint: Option<String>,
@@ -790,6 +793,7 @@ impl ConApp {
             composer: String::new(),
             composer_preedit: String::new(),
             composer_focused: false,
+            composer_select_all: false,
             tree_scroll_offset: 0,
             exit: false,
             control_endpoint,
@@ -1111,23 +1115,54 @@ impl ConApp {
         if key.state != KeyPressState::Pressed {
             return true;
         }
+        if key.modifiers.control
+            && !key.modifiers.alt
+            && let LogicalKey::Character(text) = &key.logical
+        {
+            if text.eq_ignore_ascii_case("a") {
+                composer::select_all(&self.composer, &mut self.composer_select_all);
+            } else if text.eq_ignore_ascii_case("c") {
+                if let Some(text) =
+                    composer::selected_text(&self.composer, &self.composer_select_all)
+                {
+                    let _ = agenterm_platform::clipboard::set_text(text);
+                }
+            } else if text.eq_ignore_ascii_case("x") {
+                if let Some(text) = composer::cut(&mut self.composer, &mut self.composer_select_all)
+                {
+                    let _ = agenterm_platform::clipboard::set_text(&text);
+                }
+            } else if text.eq_ignore_ascii_case("v")
+                && let Ok(text) =
+                    agenterm_platform::clipboard::get_text(composer::PASTE_LIMIT_BYTES)
+            {
+                composer::paste(&mut self.composer, &mut self.composer_select_all, &text);
+            }
+            let _ = self.update_composer_ime_anchor(window);
+            window.request_redraw();
+            return true;
+        }
         match &key.logical {
             LogicalKey::Named(NamedKey::Enter) => {
                 self.submit_composer();
             }
             LogicalKey::Named(NamedKey::Backspace) => {
-                self.composer.pop();
+                composer::backspace(&mut self.composer, &mut self.composer_select_all);
             }
             LogicalKey::Named(NamedKey::Escape) => {
                 self.composer_focused = false;
                 self.composer_preedit.clear();
+                self.composer_select_all = false;
+            }
+            LogicalKey::Named(NamedKey::Space) if !key.modifiers.control && !key.modifiers.alt => {
+                composer::insert(&mut self.composer, &mut self.composer_select_all, " ");
             }
             LogicalKey::Character(text)
                 if !key.modifiers.control && !key.modifiers.alt && !text.is_empty() =>
             {
-                self.composer.push_str(text);
+                composer::insert(&mut self.composer, &mut self.composer_select_all, text);
             }
-            _ => return false,
+            _ => {}
         }
         let _ = self.update_composer_ime_anchor(window);
         window.request_redraw();
@@ -1145,6 +1180,7 @@ impl ConApp {
         }
         self.composer.clear();
         self.composer_preedit.clear();
+        self.composer_select_all = false;
     }
 
     fn handle_composer_ime(
@@ -1158,7 +1194,7 @@ impl ConApp {
             ImeAction::ClearPreedit => self.composer_preedit.clear(),
             ImeAction::CommitText(text) => {
                 self.composer_preedit.clear();
-                self.composer.push_str(&text);
+                composer::insert(&mut self.composer, &mut self.composer_select_all, &text);
             }
             ImeAction::None => {}
             _ => self.composer_preedit.clear(),
@@ -1426,14 +1462,17 @@ impl ConApp {
         let tree_width = layout.sidebar.width;
         let header_height = layout.tree_header_height;
         let row_height = layout.tree_row_height;
-        let tree_bg = Rgb(0x18, 0x1C, 0x1F);
-        let tree_rule = Rgb(0x36, 0x3E, 0x42);
-        let branch = Rgb(0x58, 0x65, 0x69);
-        let active_bg = Rgb(0x24, 0x3B, 0x43);
-        let accent = Rgb(0x58, 0xC7, 0xB0);
-        let composer_bg = Rgb(0x10, 0x14, 0x17);
-        let text = Rgb(0xE7, 0xE4, 0xDA);
-        let muted = Rgb(0x91, 0x9A, 0x9C);
+        // High-contrast monochrome chrome. Applications still retain their
+        // explicit ANSI colors inside the terminal; only the host UI uses
+        // black/white/gray so controls remain legible without color cues.
+        let tree_bg = Rgb(0x08, 0x08, 0x08);
+        let tree_rule = Rgb(0x70, 0x70, 0x70);
+        let branch = Rgb(0x98, 0x98, 0x98);
+        let active_bg = Rgb(0x32, 0x32, 0x32);
+        let accent = Rgb(0xFF, 0xFF, 0xFF);
+        let composer_bg = Rgb(0x00, 0x00, 0x00);
+        let text = Rgb(0xF5, 0xF5, 0xF5);
+        let muted = Rgb(0xC0, 0xC0, 0xC0);
         surface.fill_rect(0, 0, tree_width, height, tree_bg.to_xrgb());
         surface.fill_rect(
             tree_width.saturating_sub(1),
@@ -1565,7 +1604,12 @@ impl ConApp {
             layout.composer_input.y + 1,
             layout.composer_input.width.saturating_sub(2),
             layout.composer_input.height.saturating_sub(2),
-            composer_bg.to_xrgb(),
+            if self.composer_select_all {
+                active_bg
+            } else {
+                composer_bg
+            }
+            .to_xrgb(),
         );
         surface.fill_rect(
             layout.composer_send.x,
@@ -1579,7 +1623,7 @@ impl ConApp {
         } else {
             format!("{}{}", self.composer, self.composer_preedit)
         };
-        if self.composer_focused {
+        if self.composer_focused && !self.composer_select_all {
             composer.push('|');
         }
         paint_chrome_text(
@@ -1637,7 +1681,7 @@ impl ConTerminal {
             rows: 24,
             pending_geometry: None,
             last_geometry_at: Instant::now(),
-            default_fg: Rgb(0xCC, 0xCC, 0xCC),
+            default_fg: Rgb(0xF0, 0xF0, 0xF0),
             default_bg: Rgb(0x00, 0x00, 0x00),
             child_gone: false,
             exit: false,
@@ -3317,6 +3361,7 @@ impl PixelWindowApplication for ConApp {
             match self.composer_hit(window, position)? {
                 ui::ComposerHit::Input => {
                     self.composer_focused = true;
+                    self.composer_select_all = false;
                     self.update_composer_ime_anchor(window)?;
                     window.focus();
                     window.request_redraw();

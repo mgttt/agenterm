@@ -207,7 +207,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   requests and responses are size/time bounded, screenshot success is returned
   only after atomic PNG output, and a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 66 binary unit tests plus a Windows
+  window. The owning suite now includes 70 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
@@ -220,7 +220,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   now owns a vertically scrollable left tree with row-level close targets and
   top `z`/`Z` font controls, plus a distinct bottom composer input and send
   action. The default 15 logical-pixel terminal font corresponds to roughly
-  11.25 pt at 96 DPI and is no smaller than the tree labels. Geometry, tree viewport
+  11.25 pt at 96 DPI and is no smaller than the tree labels. While focused,
+  the composer owns Space and all keyboard events instead of leaking ignored
+  keys into the PTY; `Ctrl+A/C/V/X` provide select-all, copy, bounded single-line
+  paste and cut semantics. The host chrome defaults to high-contrast
+  black/white/gray and the terminal default foreground is near-white on black;
+  explicit ANSI application colors remain intact. Geometry, tree viewport
   bounds and hit results are pure deterministic contracts covered independently
   of Win32/PTY state; an out-of-range hit or scroll safely becomes background or
   clamps rather than selecting/closing an unrelated terminal. Visual styling
