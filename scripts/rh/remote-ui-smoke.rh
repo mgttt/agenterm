@@ -2188,6 +2188,14 @@ try {
     // it with one read.
     let hierarchy = json_null();
     let hierarchy_confirmed = 0;
+    // Wall-clock bound, not just the attempt count: 600 attempts at ~130ms per
+    // `ui-snapshot` child is ~78s, and this step has two such loops -- together
+    // they were the 177s that per-step stamps exposed between "reject a
+    // hierarchy cycle" and the next step. Stop after 15s and carry the observed
+    // shape into the failure so it is diagnosable without another run.
+    let hierarchy_deadline =
+        std::time::SystemTime::now().unix_millis + 15000;
+    let hierarchy_detail = "no snapshot read";
     for attempt in 0..600 {
         hierarchy = json_cli(context, cli, ["ui-snapshot"]);
         let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
@@ -2202,9 +2210,18 @@ try {
             hierarchy_confirmed = 1;
             break;
         }
+        hierarchy_detail =
+            "child=" + rh::json::stringify(hierarchy_child)
+                + ":grandchild=" + rh::json::stringify(hierarchy_grandchild);
+        if std::time::SystemTime::now().unix_millis > hierarchy_deadline {
+            break;
+        }
         rh::task::sleep(std::time::Duration::from_millis(50));
     }
-    test_harness::require(hierarchy_confirmed, "remote_ui_hierarchy_shape_invalid");
+    test_harness::require(
+        hierarchy_confirmed,
+        "remote_ui_hierarchy_shape_invalid:" + hierarchy_detail
+    );
     if requested_screenshot != "" {
         screenshot(context, cli, requested_screenshot);
     }
@@ -2239,6 +2256,10 @@ try {
     );
     let promoted = json_null();
     let promotion_confirmed = 0;
+    // Second wall-clock-bounded loop in this step; see the note above the first.
+    let promotion_deadline =
+        std::time::SystemTime::now().unix_millis + 15000;
+    let promotion_detail = "no bootstrap read";
     for attempt in 0..600 {
         promoted = json_cli(context, cli, ["ui-bootstrap"]);
         let promoted_grandchild =
@@ -2248,9 +2269,18 @@ try {
             promotion_confirmed = 1;
             break;
         }
+        promotion_detail =
+            "want_parent=" + tab_id
+                + ":grandchild=" + rh::json::stringify(promoted_grandchild);
+        if std::time::SystemTime::now().unix_millis > promotion_deadline {
+            break;
+        }
         rh::task::sleep(std::time::Duration::from_millis(50));
     }
-    test_harness::require(promotion_confirmed, "remote_ui_hierarchy_child_not_promoted");
+    test_harness::require(
+        promotion_confirmed,
+        "remote_ui_hierarchy_child_not_promoted:" + promotion_detail
+    );
     wait_observed(
         context,
         cli,
