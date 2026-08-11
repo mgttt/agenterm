@@ -1052,9 +1052,16 @@ try {
 
     print("STEP close only the GUI and retain server, PTY, and workspace");
     let composer_editor = assert_window_control(gui, 2101, "composer_editor");
-    let close_keep = assert_window_control(gui, 2109, "close_keep");
-    let close_stop = assert_window_control(gui, 2110, "close_stop");
-    let close_cancel = assert_window_control(gui, 2111, "close_cancel");
+    // Acquired WITHOUT `assert_window_control`: that helper reports "missing"
+    // when `visible == 0`, and these three are created hidden and only shown
+    // once the three-choice close dialog opens -- which is the `WM_CLOSE` below.
+    // Asserting visibility here is asserting the dialog is already open, so it
+    // threw `remote_ui_control_missing:close_keep` every time the smoke got this
+    // far. The real assertion is the `require` after `WM_CLOSE`, which checks
+    // exactly that they became visible; it is unchanged.
+    let close_keep = gui.window_control(2109);
+    let close_stop = gui.window_control(2110);
+    let close_cancel = gui.window_control(2111);
     let draft_marker = "draft-" + context.run_id;
     composer_editor.set_text(draft_marker);
     gui.window_message(0x0010, 0, 0);
