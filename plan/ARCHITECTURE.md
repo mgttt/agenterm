@@ -211,7 +211,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 549,376 B；当前比 512 KiB x86_64 目标高 25,088 B，主要增量是
+  1,046,528 B 降到 549,888 B；当前比 512 KiB x86_64 目标高 25,088 B，主要增量是
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或

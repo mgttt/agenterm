@@ -1,6 +1,9 @@
-//! Allocation-free, host-neutral interaction geometry shared by AgenTerm UIs.
+//! Host-neutral interaction and rendering primitives shared by AgenTerm UIs.
 
+pub mod glyph_cache;
 pub mod pixel;
+
+pub use glyph_cache::{GlyphCache, GlyphCacheKey, GlyphCacheStats};
 
 const MIN_THUMB_HEIGHT: i32 = 24;
 

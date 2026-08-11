@@ -304,3 +304,9 @@ the behavior. Add or identify the owner.
 - Were changed docs checked with `scripts/doc-redact-check.sh`?
 
 If a recurring answer was hard to discover, add the proven rule here.
+
+### Audit an API boundary before adding a cache
+
+- Trace the full call path before caching an expensive FFI or parser call. A product facade may already own a bounded cache even when the render caller looks uncached.
+- Never layer a second cache around an already cached facade without measured evidence for a distinct lifetime or key domain. It duplicates memory, code, invalidation rules, and statistics while hiding the real owner.
+- When cache policy is reusable, move the existing single cache implementation into a host-neutral crate and keep platform rasterization or other native FFI behind the miss path. Preserve capacity, negative caching, fallback behavior, and key semantics during the move.

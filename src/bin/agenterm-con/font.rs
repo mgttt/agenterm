@@ -4,10 +4,9 @@
 //! terminal cache policy and the embedded ASCII disaster fallback, keeping the
 //! product state machine independent of GDI, CoreText, fontconfig, and parsers.
 
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
+
+use agenterm_ui_core::{GlyphCache, GlyphCacheKey};
 
 pub use agenterm_platform::font::RasterGlyph;
 
@@ -21,52 +20,19 @@ pub struct CellMetrics {
     pub height: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct GlyphKey {
-    ch: char,
-    size: u16,
-}
-
-#[derive(Default)]
-struct GlyphCache {
-    values: HashMap<GlyphKey, Option<Arc<RasterGlyph>>>,
-    order: VecDeque<GlyphKey>,
-}
-
-impl GlyphCache {
-    fn get(&self, key: &GlyphKey) -> Option<Option<Arc<RasterGlyph>>> {
-        self.values.get(key).cloned()
-    }
-
-    fn insert(&mut self, key: GlyphKey, value: Option<Arc<RasterGlyph>>) {
-        if let Some(slot) = self.values.get_mut(&key) {
-            *slot = value;
-            return;
-        }
-        while self.values.len() >= MAX_CACHED_GLYPHS {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            self.values.remove(&evicted);
-        }
-        self.order.push_back(key);
-        self.values.insert(key, value);
-    }
-}
-
 struct Renderer {
-    cache: std::sync::Mutex<GlyphCache>,
+    cache: std::sync::Mutex<GlyphCache<GlyphCacheKey, Option<Arc<RasterGlyph>>>>,
 }
 
 impl Renderer {
     fn raster(&self, ch: char, size_px: u16) -> Option<Arc<RasterGlyph>> {
         let size = size_px.clamp(8, 72);
-        let key = GlyphKey { ch, size };
+        let key = GlyphCacheKey::new(ch, size, 0);
         let mut cache = self
             .cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(cached) = cache.get(&key) {
+        if let Some(cached) = cache.get_cloned(&key) {
             return cached;
         }
         let produced = agenterm_platform::font::rasterize(ch, size)
@@ -82,7 +48,7 @@ impl Renderer {
 fn renderer() -> &'static Renderer {
     static RENDERER: OnceLock<Renderer> = OnceLock::new();
     RENDERER.get_or_init(|| Renderer {
-        cache: std::sync::Mutex::new(GlyphCache::default()),
+        cache: std::sync::Mutex::new(GlyphCache::with_capacity(MAX_CACHED_GLYPHS)),
     })
 }
 
@@ -171,20 +137,13 @@ mod tests {
 
     #[test]
     fn cache_evicts_at_capacity() {
-        let mut cache = GlyphCache::default();
+        let mut cache = GlyphCache::with_capacity(MAX_CACHED_GLYPHS);
         for offset in 0..=MAX_CACHED_GLYPHS {
             let ch = char::from_u32(0x1000 + offset as u32).expect("valid char");
-            cache.insert(GlyphKey { ch, size: 14 }, None);
+            cache.insert(GlyphCacheKey::new(ch, 14, 0), None::<Arc<RasterGlyph>>);
         }
-        assert_eq!(cache.values.len(), MAX_CACHED_GLYPHS);
-        assert!(
-            cache
-                .get(&GlyphKey {
-                    ch: '\u{1000}',
-                    size: 14,
-                })
-                .is_none()
-        );
+        assert_eq!(cache.len(), MAX_CACHED_GLYPHS);
+        assert!(cache.get(&GlyphCacheKey::new('\u{1000}', 14, 0)).is_none());
     }
 
     #[test]
