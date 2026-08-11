@@ -376,15 +376,33 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
         gui.window_message(0x8004, 0, 0) == 1,
         "remote_ui_render_activity_sample_rejected"
     );
+    // Bounded by wall clock, not attempt count. Each attempt spawns a
+    // `ui-snapshot` child (~105ms measured) plus the sleep, so 1200 attempts is
+    // ~156s -- and the theme step calls this helper up to eight times. A
+    // sequence that stops advancing therefore ate remote-ui-smoke's entire 600s
+    // budget and reported `host_hard_timeout` with no indication of which wait
+    // was stuck: that is exactly how this became the windows lane's blocker with
+    // zero diagnostics. Fail in seconds and report what was actually observed.
+    let sample_deadline =
+        std::time::SystemTime::now().unix_millis + 20000;
+    let last_sequence = -1;
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let activity = snapshot.render_activity;
-        if activity != json_null() && (0 + activity.sequence) > required_sequence {
-            return activity;
+        if activity != json_null() {
+            last_sequence = 0 + activity.sequence;
+            if last_sequence > required_sequence {
+                return activity;
+            }
+        }
+        if std::time::SystemTime::now().unix_millis > sample_deadline {
+            throw "remote_ui_render_activity_sample_timeout:required="
+                + required_sequence + ":last=" + last_sequence;
         }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw "remote_ui_render_activity_sample_timeout";
+    throw "remote_ui_render_activity_sample_timeout:required="
+        + required_sequence + ":last=" + last_sequence;
 }
 
 fn text_starts_with(text, prefix) {
