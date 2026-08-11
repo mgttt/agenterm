@@ -833,7 +833,7 @@
         "png-evidence"
       ],
       "budget": {
-        "timeout_ms": 600000,
+        "timeout_ms": 1200000,
         "max_operations": 100000000,
         "max_output_bytes": 1048576
       },
