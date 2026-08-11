@@ -101,8 +101,8 @@ pub fn write_snapshot_atomic(path: &Path, snapshot: &ScreenSnapshot) -> std::io:
 fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
     use super::json::{JsonValue, nullable, object};
     let point =
-        |point: PointSnapshot| object([("row", point.row.into()), ("col", point.col.into())]);
-    object([
+        |point: PointSnapshot| object(vec![("row", point.row.into()), ("col", point.col.into())]);
+    object(vec![
         ("cols", snapshot.cols.into()),
         ("rows", snapshot.rows.into()),
         ("title", snapshot.title.as_str().into()),
@@ -118,7 +118,7 @@ fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
         ),
         (
             "cursor",
-            object([
+            object(vec![
                 ("row", snapshot.cursor.row.into()),
                 ("col", snapshot.cursor.col.into()),
                 ("shape", snapshot.cursor.shape.into()),

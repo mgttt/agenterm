@@ -66,7 +66,7 @@ pub fn nullable<T: Into<JsonValue>>(value: Option<T>) -> JsonValue {
     value.map(Into::into).unwrap_or(JsonValue::Null)
 }
 
-pub fn object<const N: usize>(fields: [(&str, JsonValue); N]) -> JsonValue {
+pub fn object(fields: Vec<(&str, JsonValue)>) -> JsonValue {
     JsonValue::Object(
         fields
             .into_iter()

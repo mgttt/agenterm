@@ -295,6 +295,16 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `OwnedHandle` Drop 关闭，不再转移进运行期 `PtyChild`。wait clone 只 duplicate
   process handle，也不再携带空 thread slot。suspended 失败仍由 armed owner 终止半成品
   process，Job assignment-before-resume 与独立 process/Job/HPCON authority 不变。
+- con 的 bounded JSON object constructor 不再以数组长度 `N` 形成 const-generic
+  单态化；18 个冷路径调用点把字段 `Vec` 的所有权交给一个非泛型边界。隔离的同 profile
+  构建中，原 `object<1>` / `object<2>` / `object<5>` 等约 2,445 B 的多份代码收敛为
+  727 B 单份实现，最终 PE 从 623,616 B 降至 620,544 B（-3,072 B）。81 unit、18
+  public-control black-box、1 multitab control journey、Windows x64 Clippy 和 Linux x64
+  check 通过。该证据把“泛型便利 API 的容器形状”加入尺寸审计清单；热路径仍须同时
+  衡量分配成本，不能把 `Vec` 所有权边界机械推广。Windows 字体、PNG、pixel window
+  和 ConPTY 已分别使用 GDI/系统字体、GDI+、User32/GDI 与原生 ConPTY FFI；完整 unwind
+  仍负责 WNDPROC、deferred callback 和 native-thread panic containment，不能以重复包装
+  系统 API 或改用 panic-abort 冒充进一步下沉。
   filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
   每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制

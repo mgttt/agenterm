@@ -893,7 +893,7 @@ impl PerfStats {
             (self.render_total_us / u128::from(self.frames)).min(u128::from(u64::MAX)) as u64
         };
         let present = self.present_delta();
-        json::object([
+        json::object(vec![
             ("frames", self.frames.into()),
             ("observed_frames", self.observed_frames.into()),
             ("render_last_us", self.render_last_us.into()),
@@ -1663,7 +1663,7 @@ impl ConApp {
                     .iter()
                     .map(|node| {
                         let session = self.sessions.get(&node.id);
-                        json::object([
+                        json::object(vec![
                             ("id", format!("@{}", node.id.get()).into()),
                             (
                                 "parent",
@@ -1685,12 +1685,12 @@ impl ConApp {
                         ])
                     })
                     .collect();
-                Ok(json::object([("tabs", json::JsonValue::Array(tabs))]))
+                Ok(json::object(vec![("tabs", json::JsonValue::Array(tabs))]))
             }
             CliCommand::PerfStats => Ok(self.perf_stats.json()),
             CliCommand::ResetPerfStats => {
                 self.perf_stats.reset(window.present_stats());
-                Ok(json::object([("reset", true.into())]))
+                Ok(json::object(vec![("reset", true.into())]))
             }
             CliCommand::NewTab { parent } => (|| {
                 if let Some(parent) = parent {
@@ -1703,7 +1703,7 @@ impl ConApp {
                     .workspace
                     .active()
                     .ok_or_else(|| "new terminal was not activated".to_owned())?;
-                Ok(json::object([
+                Ok(json::object(vec![
                     ("id", format!("@{}", id.get()).into()),
                     (
                         "parent",
@@ -1715,13 +1715,16 @@ impl ConApp {
                 self.mark_chrome_full();
                 self.workspace.set_active(id);
                 window.request_redraw();
-                json::object([("active", format!("@{}", id.get()).into())])
+                json::object(vec![("active", format!("@{}", id.get()).into())])
             }),
             CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
                 self.workspace.set_active(id);
                 self.close_active_session(window)
                     .map_err(|error| error.to_string())?;
-                Ok(json::object([("closed", format!("@{}", id.get()).into())]))
+                Ok(json::object(vec![(
+                    "closed",
+                    format!("@{}", id.get()).into(),
+                )]))
             }),
             CliCommand::CapturePane { target, max_bytes } => {
                 self.control_target(target).and_then(|id| {
@@ -1748,7 +1751,7 @@ impl ConApp {
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
                 session.scroll_to_bottom();
                 session.write_pty(text.as_bytes());
-                Ok(json::object([("sent_bytes", text.len().into())]))
+                Ok(json::object(vec![("sent_bytes", text.len().into())]))
             }),
             CliCommand::SendPaste { target, text } => self.control_target(target).and_then(|id| {
                 let session = self
@@ -1756,7 +1759,7 @@ impl ConApp {
                     .get_mut(&id)
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
                 session.paste_text(&text);
-                Ok(json::object([("sent_bytes", text.len().into())]))
+                Ok(json::object(vec![("sent_bytes", text.len().into())]))
             }),
             CliCommand::SendKeys { target, keys } => self.control_target(target).and_then(|id| {
                 let session = self
@@ -1767,7 +1770,7 @@ impl ConApp {
                     let (key, ctrl, alt, shift) = parse_control_key(key)?;
                     session.inject_key(key, ctrl, alt, shift);
                 }
-                Ok(json::object([("sent_keys", keys.len().into())]))
+                Ok(json::object(vec![("sent_keys", keys.len().into())]))
             }),
             CliCommand::SendMouse {
                 target,
@@ -1802,7 +1805,7 @@ impl ConApp {
                         session.inject_pointer_button(window, row, column, button, state);
                     }
                 }
-                Ok(json::object([("delivered", true.into())]))
+                Ok(json::object(vec![("delivered", true.into())]))
             }),
             CliCommand::SendWheel {
                 target,
@@ -1822,7 +1825,7 @@ impl ConApp {
                     ));
                 }
                 session.inject_wheel(window, row, column, f32::from(notches), ctrl);
-                Ok(json::object([("delivered_notches", notches.into())]))
+                Ok(json::object(vec![("delivered_notches", notches.into())]))
             }),
             CliCommand::ScreenshotPane { target, output } => {
                 self.control_target(target).and_then(|id| {
@@ -1857,7 +1860,7 @@ impl ConApp {
                     .get(&id)
                     .is_some_and(|session| session.screen_contains(&text))
                 {
-                    return Ok(json::object([("matched", true.into())]));
+                    return Ok(json::object(vec![("matched", true.into())]));
                 }
                 self.control_waits.push(PendingControlWait {
                     target: id,
@@ -1892,7 +1895,7 @@ impl ConApp {
             if matched {
                 let _ = wait
                     .reply
-                    .send(Ok(json::object([("matched", true.into())])));
+                    .send(Ok(json::object(vec![("matched", true.into())])));
             } else if now >= wait.deadline {
                 let _ = wait.reply.send(Err(format!(
                     "wait-text timed out waiting for {:?}",
@@ -4404,7 +4407,7 @@ impl PixelWindowApplication for ConApp {
                 .min(u128::from(u64::MAX)) as u64;
             let result = write_result
                 .map(|()| {
-                    json::object([
+                    json::object(vec![
                         ("path", path.to_string_lossy().into_owned().into()),
                         ("width", width.into()),
                         ("height", height.into()),

@@ -207,6 +207,18 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   Windows PTY case showed 7.0 KiB in the top list, while the filtered native
   wait leaf was only 105 B; changing its typed boundary moved the 7.0 KiB label
   to process creation and changed neither `.text` nor PE size.
+- Audit const generics and iterator adapters whose type records a container's
+  shape. A fixed-schema helper taking `[T; N]` can emit its collection path once
+  per used `N` even when the operation is cold and identical. In `agenterm-con`,
+  replacing the JSON `object<const N>` helper with one owning `Vec` boundary
+  collapsed about 2,445 B of measured specializations to 727 B and reduced the
+  same-profile PE by 3,072 B. Apply this only where the saved code outweighs
+  allocation/runtime cost; it is not a blanket rule against generics.
+- Do not change an unwind-enabled native host to `panic = "abort"` merely to
+  remove runtime bytes. `agenterm-con` catches panics at WNDPROC, deferred-work,
+  and native-thread FFI boundaries; abort changes that containment contract
+  rather than optimizing its implementation. First prove no public robustness
+  invariant depends on unwind, or retain the exact-profile unwind graph.
 
 Always inspect emitted release code:
 

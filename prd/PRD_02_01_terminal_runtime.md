@@ -370,6 +370,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and independent process, Job and HPCON ownership remain unchanged. The
   filtered create path and official PE remain 609.0 KiB and 623,616 bytes, so
   this is a per-session kernel-resource reduction rather than a size claim.
+  The bounded JSON object constructor now owns a field `Vec` at one non-generic
+  boundary instead of monomorphizing its complete iterator/collection path for
+  every array length. All 18 snapshot and control-result construction sites
+  retain the same JSON schema and ordering. In the isolated matching profile,
+  the former `object<1>` / `object<2>` / `object<5>` families (about 2,445 bytes)
+  become one 727-byte implementation and the PE falls from 623,616 to 620,544
+  bytes. Evidence is 81 unit tests, 18 public-control GUI black-box journeys,
+  one isolated multitab control journey, Windows x64 Clippy, and Linux x64
+  compilation. This is a measured code-generation optimization, not a product
+  capability reduction. The native audit also confirms that Windows font,
+  PNG, pixel-window, and ConPTY paths already terminate in system FFI and that
+  unwind remains required to contain panics at native callback boundaries.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
