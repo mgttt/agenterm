@@ -1460,22 +1460,25 @@ try {
         [
             "new-agent", "-d", "-n", delimiter_name,
             "--program", "cmd.exe", "--yolo", "--",
-            "/d", "/c", "echo %cmdcmdline%",
+            "/d", "/c", "echo %cmdcmdline%&ping -n 4 127.0.0.1 >nul",
             "--parent", "@999999",
             "--program", "missing-agent.exe",
             "--proxy", "http://should-not-be-an-environment"
         ]
+    );
+    // Read while alive, then wait for death -- same pane-reclamation race as the
+    // tab-environment and codex-proxy steps. The echoed command line is what
+    // this step asserts on, so losing the pane loses the evidence.
+    let delimiter_capture = text(
+        harness,
+        cli,
+        ["capture-pane", "-p", "-t", delimiter_name]
     );
     text(
         harness,
         cli,
         ["wait-pane", "-t", delimiter_name, "--dead",
          "--timeout-ms", "30000"]
-    );
-    let delimiter_capture = text(
-        harness,
-        cli,
-        ["capture-pane", "-p", "-t", delimiter_name]
     );
     let delimiter_inspect = json(
         harness,
