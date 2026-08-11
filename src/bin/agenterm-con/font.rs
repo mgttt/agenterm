@@ -204,7 +204,13 @@ fn load_faces() -> Vec<Face> {
     // face Windows exposes as "新宋体"; it has measured 1:2 Latin/CJK advances,
     // so it must be the primary face rather than a fallback squeezed into a
     // grid measured from Consolas or Cascadia.
-    #[cfg(windows)]
+    // No `#[cfg(windows)]` here: the platform difference already lives in
+    // `agenterm_platform::font::fallback_candidates()`, which only offers the
+    // SimSun collection on hosts that ship it. Off Windows the lookup below
+    // simply finds nothing and this falls through. Branching on the target in a
+    // main-crate module is what `production_sources_use_platform_crate_as_the_only_native_boundary`
+    // rejects -- the exemption covers the three subsystem entrypoints, not their
+    // modules.
     if let Some(face) = load_new_simsun_face() {
         faces.push(face);
         for candidate in agenterm_platform::font::fallback_candidates() {
@@ -243,7 +249,6 @@ fn load_faces() -> Vec<Face> {
 /// index here is deliberate: `ab_glyph` exposes glyph outlines but not a
 /// family-name selector, and accepting the first face would silently select
 /// SimSun instead of the requested terminal face.
-#[cfg(windows)]
 fn load_new_simsun_face() -> Option<Face> {
     const NEW_SIMSUN_INDEX: u32 = 1;
     let candidate = agenterm_platform::font::fallback_candidates()
