@@ -242,9 +242,9 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
         "qualify" => {
             let path = require_path(&mut args, "qualify")?;
             let mut subargs = args;
-            let dir = pack_dir_flag(&mut subargs)?;
-            let output =
-                parse_output_flag(&mut subargs)?.unwrap_or_else(|| dir.join("qualification.json"));
+            let (dir, rest) = pack_dir_flag(&mut subargs, "qualify")?;
+            let output = parse_output_flag(&mut rest.into_iter())?
+                .unwrap_or_else(|| dir.join("qualification.json"));
             let source = read_source(&path)?;
             let receipt = qualify_pack_dir(&source, &dir)?;
             write_receipt(&output, &receipt)?;
@@ -270,7 +270,8 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
                 )));
             }
             let path = require_path(&mut subargs, "pack build")?;
-            let dir = pack_dir_flag(&mut subargs)?;
+            let (dir, rest) = pack_dir_flag(&mut subargs, "pack build")?;
+            reject_leftover_args(rest)?;
             let source = read_source(&path)?;
             let output = build_pack_dir(&source, &dir)?;
             println!(
@@ -660,8 +661,16 @@ fn native_output_path(
         .unwrap_or_else(|| input.with_extension(agenterm_rh::compile::native_extension())))
 }
 
-fn pack_dir_flag(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, RhError> {
+/// Consumes `--dir PATH` and returns it together with the arguments that were
+/// not part of that flag, so a command accepting further flags (`qualify` also
+/// takes `-o`) can keep parsing. A command that accepts nothing else has to
+/// reject the leftovers itself -- see `reject_leftover_args`.
+fn pack_dir_flag(
+    args: &mut impl Iterator<Item = String>,
+    command: &str,
+) -> Result<(PathBuf, Vec<String>), RhError> {
     let mut dir = None;
+    let mut rest = Vec::new();
     while let Some(arg) = args.next() {
         if arg == "--dir" {
             dir = Some(
@@ -670,10 +679,18 @@ fn pack_dir_flag(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, RhE
                     .ok_or_else(|| RhError::Parse("missing path after --dir".into()))?,
             );
         } else {
-            return Err(RhError::Parse(format!("unexpected argument `{arg}`")));
+            rest.push(arg);
         }
     }
-    dir.ok_or_else(|| RhError::Parse("pack build requires --dir PATH".into()))
+    let dir = dir.ok_or_else(|| RhError::Parse(format!("{command} requires --dir PATH")))?;
+    Ok((dir, rest))
+}
+
+fn reject_leftover_args(rest: Vec<String>) -> Result<(), RhError> {
+    match rest.first() {
+        Some(arg) => Err(RhError::Parse(format!("unexpected argument `{arg}`"))),
+        None => Ok(()),
+    }
 }
 
 fn print_usage() {
