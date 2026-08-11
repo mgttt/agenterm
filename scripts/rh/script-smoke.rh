@@ -433,7 +433,11 @@ fn failure_text(
         script_smoke_empty_env(),
         []
     );
-    result.stdout + result.stderr
+    // Lead with `""`. Two JSON fields added together have no int-or-string
+    // context to disambiguate them, and the arithmetic lane wins -- these reads
+    // came back as `json_integer_path: stdout`. fleet-smoke already writes it
+    // this way.
+    "" + result.stdout + result.stderr
 }
 
 fn process_ids(executable_name) {
@@ -1603,7 +1607,7 @@ fn assert_tasks_and_http(
         []
     );
     let missing_env_text =
-        missing_environment.stdout + missing_environment.stderr;
+        "" + missing_environment.stdout + missing_environment.stderr;
     script_smoke_require_contains(
         missing_env_text,
         "task_environment_missing",
@@ -3254,7 +3258,7 @@ fn assert_audit(
         []
     );
     script_smoke_require_contains(
-        audit_failure.stdout + audit_failure.stderr,
+        "" + audit_failure.stdout + audit_failure.stderr,
         "\"code\":\"host_audit_write\"",
         "script_audit_write_failure_not_fail_closed"
     );
