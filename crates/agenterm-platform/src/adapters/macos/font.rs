@@ -2,6 +2,7 @@ use ab_glyph::{Font, FontRef, ScaleFont};
 
 use crate::contract::font::{
     FontDiscovery, FontError, FontFileCandidate, FontMetrics, FontRequest, OpaqueWindowHandle,
+    RasterGlyph,
 };
 
 pub(crate) fn candidates() -> Vec<FontFileCandidate> {
@@ -86,6 +87,14 @@ pub(crate) fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
 
 pub(crate) fn probe_capability() -> Result<(), FontError> {
     primary_metrics(14).map(|_| ())
+}
+
+pub(crate) fn rasterizer_name() -> Result<String, FontError> {
+    crate::selected::portable_font_raster::rasterizer_name(candidates, fallback_candidates)
+}
+
+pub(crate) fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, FontError> {
+    crate::selected::portable_font_raster::rasterize(candidates, fallback_candidates, ch, size_px)
 }
 
 pub(crate) fn create_terminal_font(

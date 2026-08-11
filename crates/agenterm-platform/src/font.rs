@@ -3,6 +3,7 @@
 use crate::CapabilityStatus;
 pub use crate::contract::font::{
     FontDiscovery, FontError, FontFileCandidate, FontMetrics, FontRequest, OpaqueWindowHandle,
+    RasterGlyph,
 };
 use crate::selected;
 
@@ -15,6 +16,8 @@ impl FontError {
             Self::DeviceContextUnavailable => "the native font device context is unavailable",
             Self::CreateFailed => "native font creation failed",
             Self::MetricsFailed => "native font metrics could not be measured",
+            Self::RasterFailed => "native font glyph rasterization failed",
+            Self::GlyphTooLarge => "native font glyph exceeds the allocation bound",
         };
         match self {
             Self::Unsupported => CapabilityStatus::Unsupported {
@@ -52,6 +55,16 @@ pub fn primary_family_name() -> Result<&'static str, FontError> {
 
 pub fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
     selected::font::primary_metrics(size_px)
+}
+
+/// Name of the face actually selected by the platform rasterizer.
+pub fn rasterizer_name() -> Result<String, FontError> {
+    selected::font::rasterizer_name()
+}
+
+/// Rasterizes one Unicode scalar without exposing font files or native handles.
+pub fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, FontError> {
+    selected::font::rasterize(ch, size_px)
 }
 
 pub fn capability_status() -> CapabilityStatus {

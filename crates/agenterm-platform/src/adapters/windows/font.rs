@@ -1,14 +1,119 @@
-use std::mem;
+use std::{mem, ptr};
 
 use windows_sys::Win32::Graphics::Gdi::{
-    CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, DEFAULT_CHARSET, DeleteObject, FF_MODERN,
-    FIXED_PITCH, FW_NORMAL, GetDC, GetDeviceCaps, GetTextMetricsW, HGDIOBJ, LOGPIXELSY,
-    OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, TEXTMETRICW,
+    ANTIALIASED_QUALITY, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleDC, CreateFontW,
+    DEFAULT_CHARSET, DeleteDC, DeleteObject, FF_MODERN, FIXED, FIXED_PITCH, FW_NORMAL, GDI_ERROR,
+    GGI_MARK_NONEXISTING_GLYPHS, GGO_GLYPH_INDEX, GGO_GRAY8_BITMAP, GLYPHMETRICS, GetDC,
+    GetDeviceCaps, GetGlyphIndicesW, GetGlyphOutlineW, GetTextFaceW, GetTextMetricsW, HGDIOBJ,
+    LOGPIXELSY, MAT2, OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, TEXTMETRICW,
 };
 
 use crate::contract::font::{
     FontDiscovery, FontError, FontFileCandidate, FontMetrics, FontRequest, OpaqueWindowHandle,
+    RasterGlyph,
 };
+
+const MAX_GLYPH_DIM: u32 = 4096;
+const MAX_GLYPH_BYTES: u32 = MAX_GLYPH_DIM * MAX_GLYPH_DIM;
+const RASTER_FAMILIES: &[&str] = &[
+    "NSimSun",
+    "Sarasa Fixed SC",
+    "Cascadia Mono",
+    "Consolas",
+    "Microsoft YaHei",
+    "MS Gothic",
+    "Malgun Gothic",
+    "Segoe UI Symbol",
+    "Segoe UI Emoji",
+];
+
+struct PixelFace {
+    dc: *mut core::ffi::c_void,
+    font: HGDIOBJ,
+    previous: HGDIOBJ,
+    metrics: TEXTMETRICW,
+}
+
+impl Drop for PixelFace {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.previous);
+            DeleteObject(self.font);
+            DeleteDC(self.dc);
+        }
+    }
+}
+
+impl PixelFace {
+    fn create(family: &str, size_px: u16) -> Result<Self, FontError> {
+        if family.is_empty() || size_px == 0 {
+            return Err(FontError::InvalidRequest);
+        }
+        let dc = unsafe { CreateCompatibleDC(ptr::null_mut()) };
+        if dc.is_null() {
+            return Err(FontError::DeviceContextUnavailable);
+        }
+        let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
+        let font = unsafe {
+            CreateFontW(
+                -i32::from(size_px),
+                0,
+                0,
+                0,
+                FW_NORMAL as i32,
+                0,
+                0,
+                0,
+                u32::from(DEFAULT_CHARSET),
+                u32::from(OUT_DEFAULT_PRECIS),
+                u32::from(CLIP_DEFAULT_PRECIS),
+                u32::from(ANTIALIASED_QUALITY),
+                u32::from(FIXED_PITCH | FF_MODERN),
+                family.as_ptr(),
+            )
+        } as HGDIOBJ;
+        if font.is_null() {
+            unsafe { DeleteDC(dc) };
+            return Err(FontError::CreateFailed);
+        }
+        let previous = unsafe { SelectObject(dc, font) };
+        if previous.is_null() {
+            unsafe {
+                DeleteObject(font);
+                DeleteDC(dc);
+            }
+            return Err(FontError::CreateFailed);
+        }
+        let mut metrics = TEXTMETRICW::default();
+        if unsafe { GetTextMetricsW(dc, &mut metrics) } == 0 {
+            unsafe {
+                SelectObject(dc, previous);
+                DeleteObject(font);
+                DeleteDC(dc);
+            }
+            return Err(FontError::MetricsFailed);
+        }
+        Ok(Self {
+            dc,
+            font,
+            previous,
+            metrics,
+        })
+    }
+
+    fn actual_name(&self) -> Result<String, FontError> {
+        let mut name = [0u16; 64];
+        let copied = unsafe { GetTextFaceW(self.dc, name.len() as i32, name.as_mut_ptr()) };
+        if copied <= 0 {
+            return Err(FontError::MetricsFailed);
+        }
+        let len = name
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(name.len());
+        Ok(String::from_utf16_lossy(&name[..len]))
+    }
+}
 
 pub(crate) fn candidates() -> Vec<FontFileCandidate> {
     // Windows monospace font files. Ordered by preference; the first readable
@@ -94,21 +199,131 @@ pub(crate) fn primary_family_name() -> Result<&'static str, FontError> {
 }
 
 pub(crate) fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
-    // Approximate metrics for the primary system monospace font at the given
-    // pixel size. Used when a native HFONT is not available (e.g. pixel-buffer
-    // renderers). Cell width ≈ 0.55×height for typical monospace fonts.
-    let h = f32::from(size_px);
+    let size_px = size_px.clamp(8, 72);
+    let face = PixelFace::create(RASTER_FAMILIES[0], size_px)?;
     Ok(FontMetrics {
-        family: Some("Sarasa Fixed SC"),
+        family: None,
         size_px,
-        cell_width: (h * 0.55).round().max(1.0),
-        cell_height: h,
-        ascent: (h * 0.8).round().max(1.0),
+        cell_width: face.metrics.tmAveCharWidth.max(1) as f32,
+        cell_height: face.metrics.tmHeight.max(1) as f32,
+        ascent: face.metrics.tmAscent.max(1) as f32,
     })
 }
 
 pub(crate) fn probe_capability() -> Result<(), FontError> {
     Ok(())
+}
+
+pub(crate) fn rasterizer_name() -> Result<String, FontError> {
+    PixelFace::create(RASTER_FAMILIES[0], 16)?.actual_name()
+}
+
+pub(crate) fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, FontError> {
+    let mut utf16 = [0u16; 2];
+    let units = ch.encode_utf16(&mut utf16);
+    if units.len() != 1 {
+        return Ok(None);
+    }
+    let size_px = size_px.clamp(8, 72);
+    for family in RASTER_FAMILIES {
+        let face = PixelFace::create(family, size_px)?;
+        let mut glyph_index = 0u16;
+        let mapped = unsafe {
+            GetGlyphIndicesW(
+                face.dc,
+                units.as_ptr(),
+                1,
+                &mut glyph_index,
+                GGI_MARK_NONEXISTING_GLYPHS,
+            )
+        };
+        if mapped == GDI_ERROR as u32 || glyph_index == u16::MAX {
+            continue;
+        }
+        if let Some(glyph) = raster_face(&face, glyph_index)? {
+            return Ok(Some(glyph));
+        }
+    }
+    Ok(None)
+}
+
+fn raster_face(face: &PixelFace, glyph_index: u16) -> Result<Option<RasterGlyph>, FontError> {
+    let identity = MAT2 {
+        eM11: FIXED { fract: 0, value: 1 },
+        eM12: FIXED::default(),
+        eM21: FIXED::default(),
+        eM22: FIXED { fract: 0, value: 1 },
+    };
+    let mut metrics = GLYPHMETRICS::default();
+    let format = GGO_GRAY8_BITMAP | GGO_GLYPH_INDEX;
+    let required = unsafe {
+        GetGlyphOutlineW(
+            face.dc,
+            u32::from(glyph_index),
+            format,
+            &mut metrics,
+            0,
+            ptr::null_mut(),
+            &identity,
+        )
+    };
+    if required == GDI_ERROR as u32 {
+        return Ok(None);
+    }
+    if metrics.gmBlackBoxX > MAX_GLYPH_DIM
+        || metrics.gmBlackBoxY > MAX_GLYPH_DIM
+        || required > MAX_GLYPH_BYTES
+    {
+        return Err(FontError::GlyphTooLarge);
+    }
+    if required == 0 {
+        return Ok(Some(RasterGlyph {
+            alpha: Vec::new(),
+            width: 0,
+            height: 0,
+            offset_x: metrics.gmptGlyphOrigin.x,
+            offset_y: face.metrics.tmAscent - metrics.gmptGlyphOrigin.y,
+        }));
+    }
+    let mut native = vec![0u8; required as usize];
+    let written = unsafe {
+        GetGlyphOutlineW(
+            face.dc,
+            u32::from(glyph_index),
+            format,
+            &mut metrics,
+            required,
+            native.as_mut_ptr().cast(),
+            &identity,
+        )
+    };
+    if written == GDI_ERROR as u32 || written > required {
+        return Err(FontError::RasterFailed);
+    }
+    let width = metrics.gmBlackBoxX;
+    let height = metrics.gmBlackBoxY;
+    let stride = width.checked_add(3).ok_or(FontError::GlyphTooLarge)? & !3;
+    let alpha_len = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or(FontError::GlyphTooLarge)?;
+    let mut alpha = vec![0u8; alpha_len];
+    for y in 0..height {
+        for x in 0..width {
+            let source = (y as usize)
+                .checked_mul(stride as usize)
+                .and_then(|row| row.checked_add(x as usize))
+                .filter(|index| *index < native.len())
+                .ok_or(FontError::RasterFailed)?;
+            alpha[(y * width + x) as usize] = ((u16::from(native[source]) * 255 + 32) / 64) as u8;
+        }
+    }
+    Ok(Some(RasterGlyph {
+        alpha,
+        width,
+        height,
+        offset_x: metrics.gmptGlyphOrigin.x,
+        offset_y: face.metrics.tmAscent - metrics.gmptGlyphOrigin.y,
+    }))
 }
 
 pub(crate) fn create_terminal_font(
@@ -200,5 +415,23 @@ mod tests {
             ),
             Err(FontError::InvalidRequest)
         );
+    }
+
+    #[test]
+    fn native_rasterizer_produces_bounded_ascii_and_cjk_coverage() {
+        for ch in ['A', '中'] {
+            let glyph = rasterize(ch, 16)
+                .expect("GDI raster call")
+                .expect("installed Windows font covers glyph");
+            assert!(glyph.width <= MAX_GLYPH_DIM);
+            assert!(glyph.height <= MAX_GLYPH_DIM);
+            assert_eq!(glyph.alpha.len(), (glyph.width * glyph.height) as usize);
+            assert!(glyph.alpha.iter().any(|alpha| *alpha != 0));
+        }
+    }
+
+    #[test]
+    fn supplementary_scalar_fails_safely_without_splitting_surrogates() {
+        assert_eq!(rasterize('😀', 16), Ok(None));
     }
 }

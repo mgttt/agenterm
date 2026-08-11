@@ -54,6 +54,18 @@ pub struct FontMetrics {
     pub ascent: f32,
 }
 
+/// One grayscale glyph bitmap with placement already resolved relative to the
+/// top-left of a terminal cell. Adapters own font parsing/native APIs; product
+/// renderers only blend this bounded, OS-neutral result.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RasterGlyph {
+    pub alpha: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FontRequest<'a> {
     pub family: &'a str,
@@ -94,6 +106,8 @@ pub enum FontError {
     DeviceContextUnavailable,
     CreateFailed,
     MetricsFailed,
+    RasterFailed,
+    GlyphTooLarge,
 }
 
 impl FontError {
@@ -105,6 +119,8 @@ impl FontError {
             Self::DeviceContextUnavailable => "font_device_context_unavailable",
             Self::CreateFailed => "font_create_failed",
             Self::MetricsFailed => "font_metrics_failed",
+            Self::RasterFailed => "font_raster_failed",
+            Self::GlyphTooLarge => "font_glyph_too_large",
         }
     }
 }

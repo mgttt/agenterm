@@ -194,14 +194,19 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
   `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
-  `crates/agenterm-con` package 及受约束的流式 PNG encoder 已把 release PE 从
-  1,046,528 B 降到 763,904 B；
+  `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
+  native font rasterizer 已把 release PE 从 1,046,528 B 降到 665,600 B；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
   依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。截图路径使用
   stored-DEFLATE、手写 Adler-32/CRC-32 和约 64 KiB block buffer，避免生产链接通用
   PNG/压缩栈；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
+  Windows 字形路径通过 neutral `RasterGlyph` contract 调用 GDI
+  `GetGlyphIndicesW`/`GetGlyphOutlineW`，con 不再读/解析字体文件，Windows 生产图也
+  不含 ab_glyph/ttf_parser；Linux/macOS 的现有 file-font 实现下沉到 platform 的共享
+  portable adapter。GDI 当前只接受单 UTF-16 unit，补充平面安全返回缺字而不拆
+  surrogate；完整 emoji fallback 是否值得引入 DirectWrite 必须由后续体积/体验证据决定。
   后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充 512 KiB 达标。
 
 ### 6.1 跨平台任务固定执行句式

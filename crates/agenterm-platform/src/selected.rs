@@ -370,6 +370,10 @@ pub(crate) mod font;
 #[path = "adapters/macos/font.rs"]
 pub(crate) mod font;
 
+#[cfg(all(feature = "font", any(target_os = "linux", target_os = "macos")))]
+#[path = "adapters/unix/font_raster.rs"]
+pub(crate) mod portable_font_raster;
+
 #[cfg(all(
     any(feature = "filesystem-conventions", feature = "filesystem"),
     target_os = "linux"

@@ -22,9 +22,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named pipes and Unix sockets are public together with typed transport failures,
   bounded I/O and endpoint ownership checks. Only AgenTerm endpoint/workspace
   naming remains in the root package, and IPC capability status is available.
-- [x] Clipboard, bounded XRGB screenshot encoding and font-file candidates are
-  reusable crate capabilities. Terminal paste limits, HWND/GDI capture and font
-  handles remain explicit root product extensions rather than leaking native
+- [x] Clipboard, bounded XRGB screenshot encoding, font-file candidates and
+  neutral glyph raster results are reusable crate capabilities. Terminal paste
+  limits and HWND/GDI capture remain explicit product extensions; font files,
+  DCs and font handles stop inside platform adapters rather than leaking native
   types through the public crate API. Linux/macOS clipboard helpers now consume
   the caller deadline with a 1500 ms adapter ceiling (including one shared Linux
   fallback budget); zero deadlines and helper timeout/size/backend failures stay
@@ -248,10 +249,13 @@ Available, Unsupported, and Failed without reading source or assuming parity.
     physical extent conversion, window metrics, geometry-event classification,
     and stable scale error codes; Windows adopts the revision without routing
     its native DPI messages through a Unix abstraction
-  - [x] GDI terminal-font creation and metric measurement now execute through
+  - [x] GDI terminal-font creation, metric measurement, glyph-index lookup and
+    bounded gray8 rasterization now execute through
     `platform::windows::font`; device-context, font-creation, and metric
-    failures have stable typed diagnostics, while the application retains
-    ownership of the live font handle and rendering lifecycle
+    failures have stable typed diagnostics, every temporary DC/font is RAII
+    reclaimed, and product renderers receive only neutral alpha coverage and
+    placement. The con Windows graph no longer links ab_glyph/ttf_parser;
+    Linux/macOS retain file-font parsing in one shared platform adapter.
   - [x] Windows capability reporting no longer claims full IME support:
     committed UTF-16 text is shipped, while unadapted IME preedit reports
     explicit `ime-preedit-not-yet-adapted`
