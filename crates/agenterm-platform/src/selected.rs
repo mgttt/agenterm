@@ -519,6 +519,10 @@ pub(crate) mod runtime;
 #[path = "adapters/windows/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
+#[cfg(all(feature = "screenshot", unix))]
+#[path = "adapters/unix/png.rs"]
+pub(crate) mod portable_png;
+
 #[cfg(all(feature = "webview", windows))]
 #[path = "adapters/windows/webview.rs"]
 pub(crate) mod webview;

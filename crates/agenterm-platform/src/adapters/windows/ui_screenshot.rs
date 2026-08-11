@@ -1,15 +1,25 @@
 //! Windows screenshot encoding and bounded native GDI capture.
 
-use std::{fs::File, mem, path::Path};
+use std::{mem, os::windows::ffi::OsStrExt, path::Path, ptr};
 
-use windows_sys::Win32::{
-    Foundation::{HWND, RECT},
-    Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
-        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, GetWindowDC, HBITMAP, HDC,
-        HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject,
+use windows_sys::{
+    Win32::{
+        Foundation::{HWND, RECT},
+        Graphics::{
+            Gdi::{
+                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap,
+                CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits,
+                GetWindowDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject,
+            },
+            GdiPlus::{
+                GdipCreateBitmapFromScan0, GdipDisposeImage, GdipSaveImageToFile, GdiplusShutdown,
+                GdiplusStartup, GdiplusStartupInput, GpBitmap, GpImage, Ok as GDIP_OK,
+                PixelFormatGDI,
+            },
+        },
+        UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
     },
-    UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
+    core::GUID,
 };
 
 use crate::contract::ui_screenshot::{
@@ -18,11 +28,108 @@ use crate::contract::ui_screenshot::{
 };
 
 const MAX_CAPTURE_PIXELS: usize = 33_554_432;
+const PIXEL_FORMAT_32BPP_RGB: i32 = (9 | (32 << 8) | PixelFormatGDI) as i32;
+const PNG_ENCODER: GUID = GUID::from_u128(0x557cf406_1a04_11d3_9a73_0000f81ef32e);
 
 pub(crate) fn write_xrgb_png(
     frame: XrgbFrame<'_>,
 ) -> Result<ScreenshotWriteResult, UiScreenshotError> {
-    crate::screenshot::write_xrgb_png_impl(frame)
+    let (x, y, width, height, output_pixels) = crate::screenshot::checked_frame(&frame)?;
+    let stride = frame
+        .width()
+        .checked_mul(4)
+        .and_then(|stride| i32::try_from(stride).ok())
+        .ok_or_else(allocation_failed)?;
+    let start = (y as usize)
+        .checked_mul(frame.width() as usize)
+        .and_then(|row| row.checked_add(x as usize))
+        .ok_or_else(allocation_failed)?;
+    save_bgrx_png(
+        frame.path(),
+        width,
+        height,
+        stride,
+        frame.pixels()[start..].as_ptr().cast(),
+    )?;
+    Ok(ScreenshotWriteResult {
+        frame_width: frame.width(),
+        frame_height: frame.height(),
+        output_width: width,
+        output_height: height,
+        output_pixels,
+    })
+}
+
+struct GdiImage(*mut GpImage);
+
+impl Drop for GdiImage {
+    fn drop(&mut self) {
+        unsafe { GdipDisposeImage(self.0) };
+    }
+}
+
+struct GdiPlus(usize);
+
+impl GdiPlus {
+    fn start() -> Result<Self, UiScreenshotError> {
+        let input = GdiplusStartupInput {
+            GdiplusVersion: 1,
+            ..GdiplusStartupInput::default()
+        };
+        let mut token = 0usize;
+        let status = unsafe { GdiplusStartup(&mut token, &input, ptr::null_mut()) };
+        if status == GDIP_OK {
+            Ok(Self(token))
+        } else {
+            Err(gdip_error("screenshot_gdiplus_startup", status))
+        }
+    }
+}
+
+impl Drop for GdiPlus {
+    fn drop(&mut self) {
+        unsafe { GdiplusShutdown(self.0) };
+    }
+}
+
+fn save_bgrx_png(
+    path: &Path,
+    width: u32,
+    height: u32,
+    stride: i32,
+    pixels: *const u8,
+) -> Result<(), UiScreenshotError> {
+    let _gdiplus = GdiPlus::start()?;
+    let width = i32::try_from(width).map_err(|_| allocation_failed())?;
+    let height = i32::try_from(height).map_err(|_| allocation_failed())?;
+    let mut bitmap: *mut GpBitmap = ptr::null_mut();
+    let status = unsafe {
+        GdipCreateBitmapFromScan0(
+            width,
+            height,
+            stride,
+            PIXEL_FORMAT_32BPP_RGB,
+            pixels,
+            &mut bitmap,
+        )
+    };
+    if status != GDIP_OK || bitmap.is_null() {
+        return Err(gdip_error("screenshot_bitmap_create", status));
+    }
+    let image = GdiImage(bitmap.cast());
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let status = unsafe { GdipSaveImageToFile(image.0, wide.as_ptr(), &PNG_ENCODER, ptr::null()) };
+    if status != GDIP_OK {
+        return Err(gdip_error("screenshot_encode_error", status));
+    }
+    Ok(())
+}
+
+fn gdip_error(code: &'static str, status: i32) -> UiScreenshotError {
+    UiScreenshotError::failed(
+        code,
+        format!("GDI+ PNG operation failed with status {status}"),
+    )
 }
 
 struct SourceDc {
@@ -88,13 +195,6 @@ fn invalid_clip() -> UiScreenshotError {
         "screenshot_invalid_clip",
         "screenshot clip is outside the client framebuffer",
     )
-}
-
-fn bgra_to_rgba(bytes: &mut [u8]) {
-    for pixel in bytes.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-        pixel[3] = 255;
-    }
 }
 
 fn validate_client_area(
@@ -216,7 +316,7 @@ pub(crate) fn capture_native_window_png(
         biCompression: BI_RGB,
         ..unsafe { mem::zeroed() }
     };
-    let mut rgba = vec![0_u8; rgba_buffer_len(width, height)?];
+    let mut bgrx = vec![0_u8; rgba_buffer_len(width, height)?];
     let scanlines = if copied != 0 {
         unsafe {
             GetDIBits(
@@ -224,7 +324,7 @@ pub(crate) fn capture_native_window_png(
                 bitmap.0,
                 0,
                 height as u32,
-                rgba.as_mut_ptr().cast(),
+                bgrx.as_mut_ptr().cast(),
                 &mut info,
                 DIB_RGB_COLORS,
             )
@@ -239,8 +339,6 @@ pub(crate) fn capture_native_window_png(
             "BitBlt/GetDIBits screenshot capture failed",
         ));
     }
-    bgra_to_rgba(&mut rgba);
-
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -248,17 +346,7 @@ pub(crate) fn capture_native_window_png(
             UiScreenshotError::failed("screenshot_file_error", error.to_string())
         })?;
     }
-    let file = File::create(path)
-        .map_err(|error| UiScreenshotError::failed("screenshot_file_error", error.to_string()))?;
-    let mut encoder = png::Encoder::new(file, width as u32, height as u32);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder
-        .write_header()
-        .map_err(|error| UiScreenshotError::failed("screenshot_encode_error", error.to_string()))?;
-    writer
-        .write_image_data(&rgba)
-        .map_err(|error| UiScreenshotError::failed("screenshot_encode_error", error.to_string()))?;
+    save_bgrx_png(path, width as u32, height as u32, width * 4, bgrx.as_ptr())?;
     Ok(ScreenshotWriteResult {
         frame_width: width as u32,
         frame_height: height as u32,
@@ -290,13 +378,6 @@ mod tests {
             rgba_buffer_len(0, 20).expect_err("zero width").code(),
             "screenshot_invalid_bounds"
         );
-    }
-
-    #[test]
-    fn color_conversion_is_in_place_and_forces_opaque_alpha() {
-        let mut pixels = [3, 2, 1, 0, 30, 20, 10, 7];
-        bgra_to_rgba(&mut pixels);
-        assert_eq!(pixels, [1, 2, 3, 255, 10, 20, 30, 255]);
     }
 
     #[test]

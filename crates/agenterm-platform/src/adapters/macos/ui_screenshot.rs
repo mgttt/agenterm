@@ -9,7 +9,7 @@ use crate::contract::ui_screenshot::{
 pub(crate) fn write_xrgb_png(
     frame: XrgbFrame<'_>,
 ) -> Result<ScreenshotWriteResult, UiScreenshotError> {
-    crate::screenshot::write_xrgb_png_impl(frame)
+    crate::selected::portable_png::write_xrgb_png(frame)
 }
 
 pub(crate) fn capture_native_window_png(

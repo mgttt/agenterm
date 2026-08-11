@@ -31,11 +31,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use agenterm_platform::{
-    checksum::{Adler32, IeeeCrc32},
-    filesystem_publish::write_file_atomic,
+    filesystem_publish::{write_file_atomic, write_path_atomic},
     input::NamedKey,
+    screenshot::{XrgbFrame, write_xrgb_png},
 };
-use agenterm_ui_core::pixel::pack_xrgb_to_rgb8;
 
 // ---------------------------------------------------------------------------
 // Snapshot: introspection
@@ -186,146 +185,21 @@ pub fn write_png_atomic(
             "PNG pixel count does not match dimensions",
         ));
     }
-    write_file_atomic(path, |file| {
-        let mut file = std::io::BufWriter::new(file);
-        encode_png(&mut file, pixels, width, height)?;
-        file.flush()
+    write_path_atomic(path, |temporary| {
+        write_xrgb_png(XrgbFrame::new(temporary, width, height, pixels))
+            .map(|_| ())
+            .map_err(|error| {
+                let kind = match error.code() {
+                    "screenshot_invalid_dimensions"
+                    | "screenshot_buffer_too_small"
+                    | "screenshot_invalid_clip"
+                    | "screenshot_too_large" => std::io::ErrorKind::InvalidInput,
+                    _ => std::io::ErrorKind::Other,
+                };
+                std::io::Error::new(kind, error)
+            })
     })
     .map_err(std::io::Error::from)
-}
-
-const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
-const DEFLATE_BLOCK_MAX: usize = u16::MAX as usize;
-
-/// Minimal PNG encoder for RGB8 screenshots. The zlib stream uses stored
-/// DEFLATE blocks: screenshots are larger than compressed PNGs, but the
-/// executable does not carry a general-purpose compressor and its failure
-/// surface. Encoding remains streaming and bounded to one 64 KiB block.
-fn encode_png(
-    output: &mut impl Write,
-    pixels: &[u32],
-    width: u32,
-    height: u32,
-) -> std::io::Result<()> {
-    let row_bytes = u64::from(width)
-        .checked_mul(3)
-        .and_then(|bytes| bytes.checked_add(1))
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "PNG row overflow"))?;
-    let raw_len = row_bytes.checked_mul(u64::from(height)).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "PNG data overflow")
-    })?;
-    let blocks = raw_len.div_ceil(DEFLATE_BLOCK_MAX as u64);
-    let idat_len = raw_len
-        .checked_add(blocks.checked_mul(5).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "PNG block count overflow")
-        })?)
-        .and_then(|len| len.checked_add(6))
-        .and_then(|len| u32::try_from(len).ok())
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "PNG IDAT exceeds 4 GiB")
-        })?;
-
-    output.write_all(PNG_SIGNATURE)?;
-    let mut ihdr = [0u8; 13];
-    ihdr[..4].copy_from_slice(&width.to_be_bytes());
-    ihdr[4..8].copy_from_slice(&height.to_be_bytes());
-    ihdr[8] = 8; // bit depth
-    ihdr[9] = 2; // truecolor RGB
-    write_png_chunk(output, *b"IHDR", &ihdr)?;
-
-    output.write_all(&idat_len.to_be_bytes())?;
-    output.write_all(b"IDAT")?;
-    let mut crc = IeeeCrc32::new();
-    crc.update(b"IDAT");
-    write_idat(output, &mut crc, &[0x78, 0x01])?; // zlib, fastest/no compression
-
-    let mut adler = Adler32::new();
-    let mut block = Vec::with_capacity(DEFLATE_BLOCK_MAX);
-    let rgb_row_len = usize::try_from(row_bytes - 1).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "PNG row exceeds address space",
-        )
-    })?;
-    let mut rgb_row = vec![0; rgb_row_len];
-    let mut remaining = raw_len;
-    for row in pixels.chunks_exact(width as usize) {
-        push_deflate_bytes(
-            output,
-            &mut crc,
-            &mut block,
-            &mut remaining,
-            &[0],
-            &mut adler,
-        )?;
-        let packed = pack_xrgb_to_rgb8(row, &mut rgb_row);
-        debug_assert_eq!(packed, row.len());
-        push_deflate_bytes(
-            output,
-            &mut crc,
-            &mut block,
-            &mut remaining,
-            &rgb_row,
-            &mut adler,
-        )?;
-    }
-    debug_assert!(block.is_empty());
-    debug_assert_eq!(remaining, 0);
-    write_idat(output, &mut crc, &adler.finish().to_be_bytes())?;
-    output.write_all(&crc.finish().to_be_bytes())?;
-    write_png_chunk(output, *b"IEND", &[])
-}
-
-#[allow(clippy::too_many_arguments)]
-fn push_deflate_bytes(
-    output: &mut impl Write,
-    crc: &mut IeeeCrc32,
-    block: &mut Vec<u8>,
-    remaining: &mut u64,
-    mut bytes: &[u8],
-    adler: &mut Adler32,
-) -> std::io::Result<()> {
-    while !bytes.is_empty() {
-        let take = bytes.len().min(DEFLATE_BLOCK_MAX - block.len());
-        let input = &bytes[..take];
-        block.extend_from_slice(input);
-        adler.update(input);
-        *remaining -= take as u64;
-        bytes = &bytes[take..];
-        if block.len() == DEFLATE_BLOCK_MAX || *remaining == 0 {
-            let len = block.len() as u16;
-            let header = [
-                u8::from(*remaining == 0),
-                len as u8,
-                (len >> 8) as u8,
-                !len as u8,
-                (!len >> 8) as u8,
-            ];
-            write_idat(output, crc, &header)?;
-            write_idat(output, crc, block)?;
-            block.clear();
-        }
-    }
-    Ok(())
-}
-
-fn write_idat(output: &mut impl Write, crc: &mut IeeeCrc32, bytes: &[u8]) -> std::io::Result<()> {
-    output.write_all(bytes)?;
-    crc.update(bytes);
-    Ok(())
-}
-
-fn write_png_chunk(output: &mut impl Write, kind: [u8; 4], data: &[u8]) -> std::io::Result<()> {
-    let len = u32::try_from(data.len()).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "PNG chunk exceeds 4 GiB")
-    })?;
-    output.write_all(&len.to_be_bytes())?;
-    output.write_all(&kind)?;
-    output.write_all(data)?;
-    let mut crc = IeeeCrc32::new();
-    crc.update(&kind);
-    crc.update(data);
-    output.write_all(&crc.finish().to_be_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -834,19 +708,24 @@ mod tests {
     }
 
     #[test]
-    fn png_stream_crosses_stored_deflate_block_boundaries() {
+    fn native_png_encoder_handles_a_large_frame() {
         let width = 256;
         let height = 100;
         let pixels = vec![0x0012_3456; width * height];
-        let mut bytes = Vec::new();
-        encode_png(&mut bytes, &pixels, width as u32, height as u32).expect("encode PNG");
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-con-large-png-test-{}",
+            std::process::id()
+        ));
+        write_png_atomic(&path, &pixels, width as u32, height as u32).expect("encode PNG");
+        let bytes = std::fs::read(&path).expect("read PNG");
 
         let decoder = png::Decoder::new(bytes.as_slice());
         let mut reader = decoder.read_info().expect("valid multi-block PNG");
         let mut decoded = vec![0u8; reader.output_buffer_size()];
         let info = reader.next_frame(&mut decoded).expect("decode frame");
         assert_eq!((info.width, info.height), (width as u32, height as u32));
-        assert_eq!(&decoded[decoded.len() - 3..], &[0x12, 0x34, 0x56]);
+        assert_eq!(&decoded[..3], &[0x12, 0x34, 0x56]);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

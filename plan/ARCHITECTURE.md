@@ -201,15 +201,19 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   字节环：一次原生 read 要么整体提交、要么等待容量，关闭会唤醒生产者且已提交
   字节仍可排空。消费者按字节预算直接读取环内连续切片，不为每次 read 分配
   `Vec`；产品层只决定容量、每轮预算、解析和重调度策略。
-- 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch。XRGB→RGB8
-  截图打包在 x86_64 选择 SSSE3 `pshufb`、在 aarch64 选择 NEON table shuffle，
-  其他架构走逐字节相同的标量结果；产品编码器不得复制 CPU 探测。PNG 的 IEEE
-  CRC-32 状态机属于 `agenterm-platform::checksum`，不得误用 x86 SSE4.2/Arm CRC32C。
-  同 crate 还统一 XRGB rectangle 的裁剪、stride 与连续整帧规则，con 和主程序 Unix
-  frontend 复用 `slice::fill` 生成代码；无测量证据时不得为该成熟原语维护 ISA 分叉。
-- 原子文件发布由 `agenterm-platform::filesystem_publish::write_file_atomic` 统一
-  持有：同目录独占临时文件、文件 sync、原生替换、父目录 durability barrier 和
-  失败清理。Windows adapter 使用 `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`
+- 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
+  CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
+  将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
+  `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter
+  生成 RGBA 并调用 Rust PNG encoder。`agenterm-platform::checksum` 的 IEEE CRC-32 与
+  Adler-32 仍是通用校验合同，但不再进入 Windows con 截图生产图；不得误用 x86
+  SSE4.2/Arm CRC32C 冒充 PNG polynomial。无测量证据时不得为 `slice::fill` 等成熟原语
+  维护 ISA 分叉。
+- 原子文件发布由 `agenterm-platform::filesystem_publish` 的 `write_file_atomic` 与
+  `write_path_atomic` 统一持有：前者供 Rust writer，后者供只能接收路径的系统 codec；
+  两者均使用同目录独占临时文件、文件 sync、原生替换、父目录 durability barrier 和
+  失败清理，path callback 返回后还会重验 regular/non-link entry。Windows adapter 使用
+  `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`
   并有界重试共享冲突；Linux/macOS 使用同目录 `rename` 后 fsync 父目录。错误必须
   区分未发布与“完整文件已发布但 durability 未确认”，产品不得复制 `.tmp` 规则。
 - 提升顺序固定为：先在 owning 产品以单测和公开黑盒证据证明规则，再抽取无产品
@@ -219,28 +223,33 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
   `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
-  `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
+  `crates/agenterm-con` package、platform-owned native PNG/font adapter 及
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
   1,046,528 B 降到 585,216 B；当前比 512 KiB x86_64 目标高 60,928 B，主要增量是
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
 - tree depth 已下沉为 UI-core 的迭代 O(n) typed kernel，替代 con 每节点重复扫描 parent；20,000 深链、缺父、重复 ID、自环和多节点环均有单测；
-- UI-core dirty region/row kernel 描述保守 raster candidate；vendored `vt100` 在 mutation 层输出无分配 row/cursor/model/viewport damage，以逐 Cell 精确比较作为无碰撞测试 oracle，未知 callback、resize、alternate screen 与 viewport 变化保守升级 full；con 在 PTY Wake 阶段先 drain 再按 changed rows 与旧/新 cursor 请求 redraw，公开 perf stats 同时记录 candidate、host direct/copy 和 platform-owned native present 证据；pixel-window frame 合同声明 backing 为 retained 或 transient，并要求提交 `None`/`Full`/bounded partial。Windows con 直接 raster 到 native retained XRGB buffer，allocation/resize/DPI 失效后强制 full；Unix/macOS 继续由产品 retained frame 向 transient softbuffer 完整复制。Windows adapter 将 typed physical rect 映射为 `InvalidateRect`，以 `PAINTSTRUCT.rcPaint` 驱动 top-down `StretchDIBits` partial present，并以 RAII 保证 `BeginPaint`/`EndPaint` exactly once、拒绝短 scanline 和 renderer error；Unix/macOS 当前 full present fallback，并在 event-loop 边界将 application panic 收敛为 typed failure；配对 Windows release 探针中 idle 平均 render 895 us -> 360 us（-59.8%），50-step send/wait 为 1,310 us -> 992 us（-24.3%），新版 250/250 direct、0 copy frame/pixel；post-row-damage Windows release 探针为 33/33 partial raster candidate、dirty/frame 约 0.40%、33/33 native present 成功，平台 ledger 仍诚实区分一次 529,584-pixel OS full expose 与 70,560 partial pixels；旧版 2/5、2/13 candidate 与约 6.7%/12.1% render 降幅仅为方向性历史证据，不作为发布资格基准；Win32 host 的 userdata owner、dispatch phase 和 bounded deferred queue 阻止同步 User32/IMM FFI 在 application/frame borrow 内重建 `&mut HostState`，复制 DPI/IME 等消息数据后再重放，nested paint validate 后重新 invalidate，overflow/nonconvergence typed-fail；随后将窗口回调和 deferred item 各收敛为一个 panic boundary，并以单一 typed message class 替代重复的 stateless/stateful matcher；原 abort 配置下同 profile release-fast PE 从 622,080 B 降至 621,568 B，512 B 收益全部落在 `.text` raw，`.rsrc` 不变；但该 profile 使 `catch_unwind` 在交付版直接 abort，测试默认 unwind 曾掩盖这一合同破坏。现由 `con-dev` / `con-release-fast` / `con-release` 独立构建完整 unwind 依赖图，Rh build 将其 `agenterm-con` 精确覆盖进原 staging 目录而不改变主程序 abort profile；三处 staged bytes SHA-256 相同，release-fast unwind PE 当前为 849,920 B，87 个单测、16 个黑盒（2 个既有 ignore）、1 个多标签控制面测试及专门的 release-profile panic containment test 通过。官方 con 构建现以显式 target、固定 `rust-src` 和局部 `RUSTC_BOOTSTRAP` 使用 Rust 1.97 `backtrace-trace-only + panic-unwind` 自建 std，将 PE 降至 790,016 B（回收 59,904 B）；三处 staged bytes 一致，精确 profile 的 87 个单测、16 个黑盒（2 个既有 ignore）、1 个控制面测试、x64 Clippy 与 Windows aarch64 编译通过；六平台 Candidate 与 sealed-byte 可复现性仍由发布门最终证明，512 KiB 仍是目标，不以恢复 abort 换体积；100-title OSC 公共压力为 883/883 direct、0 copy、0 present failure；
+- UI-core dirty region/row kernel 描述保守 raster candidate；vendored `vt100` 在 mutation 层输出无分配 row/cursor/model/viewport damage，以逐 Cell 精确比较作为无碰撞测试 oracle，未知 callback、resize、alternate screen 与 viewport 变化保守升级 full；con 在 PTY Wake 阶段先 drain 再按 changed rows 与旧/新 cursor 请求 redraw，公开 perf stats 同时记录 candidate、host direct/copy 和 platform-owned native present 证据；pixel-window frame 合同声明 backing 为 retained 或 transient，并要求提交 `None`/`Full`/bounded partial。Windows con 直接 raster 到 native retained XRGB buffer，allocation/resize/DPI 失效后强制 full；Unix/macOS 继续由产品 retained frame 向 transient softbuffer 完整复制。Windows adapter 将 typed physical rect 映射为 `InvalidateRect`，以 `PAINTSTRUCT.rcPaint` 驱动 top-down `StretchDIBits` partial present，并以 RAII 保证 `BeginPaint`/`EndPaint` exactly once、拒绝短 scanline 和 renderer error；Unix/macOS 当前 full present fallback，并在 event-loop 边界将 application panic 收敛为 typed failure；配对 Windows release 探针中 idle 平均 render 895 us -> 360 us（-59.8%），50-step send/wait 为 1,310 us -> 992 us（-24.3%），新版 250/250 direct、0 copy frame/pixel；post-row-damage Windows release 探针为 33/33 partial raster candidate、dirty/frame 约 0.40%、33/33 native present 成功，平台 ledger 仍诚实区分一次 529,584-pixel OS full expose 与 70,560 partial pixels；旧版 2/5、2/13 candidate 与约 6.7%/12.1% render 降幅仅为方向性历史证据，不作为发布资格基准；Win32 host 的 userdata owner、dispatch phase 和 bounded deferred queue 阻止同步 User32/IMM FFI 在 application/frame borrow 内重建 `&mut HostState`，复制 DPI/IME 等消息数据后再重放，nested paint validate 后重新 invalidate，overflow/nonconvergence typed-fail；随后将窗口回调和 deferred item 各收敛为一个 panic boundary，并以单一 typed message class 替代重复的 stateless/stateful matcher；原 abort 配置下同 profile release-fast PE 从 622,080 B 降至 621,568 B，512 B 收益全部落在 `.text` raw，`.rsrc` 不变；但该 profile 使 `catch_unwind` 在交付版直接 abort，测试默认 unwind 曾掩盖这一合同破坏。现由 `con-dev` / `con-release-fast` / `con-release` 独立构建完整 unwind 依赖图，Rh build 将其 `agenterm-con` 精确覆盖进原 staging 目录而不改变主程序 abort profile；三处 staged bytes SHA-256 相同，release-fast unwind PE 当前为 849,920 B，87 个单测、16 个黑盒（2 个既有 ignore）、1 个多标签控制面测试及专门的 release-profile panic containment test 通过。官方 con 构建现以显式 target、固定 `rust-src` 和局部 `RUSTC_BOOTSTRAP` 使用 Rust 1.97 `backtrace-trace-only + panic-unwind` 自建 std；自建 std 基线为 790,016 B，GDI+ 共享截图后当前为 790,528 B；精确 profile 的 87 个单测、16 个黑盒（2 个既有 ignore）、1 个控制面测试、x64 Clippy 与 Windows aarch64 编译通过；六平台 Candidate 与 sealed-byte 可复现性仍由发布门最终证明，512 KiB 仍是目标，不以恢复 abort 换体积；100-title OSC 公共压力为 883/883 direct、0 copy、0 present failure；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
-  依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。截图路径使用
-  stored-DEFLATE、批量 Adler-32、platform IEEE CRC-32 和约 64 KiB block buffer，
-  避免生产链接通用 PNG/压缩栈；XRGB 每行经共享 SSSE3/NEON/标量内核打包，不产生
-  全帧 RGB 副本。快照和截图通过 platform 原子文件发布覆盖已有目标，不再共享固定
-  `.tmp` 名；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
+  依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。Windows 截图现由
+  platform GDI+ adapter 直接编码 caller-owned XRGB/stride，不再维护 con 私有
+  stored-DEFLATE、Adler-32、IEEE CRC-32、64 KiB block buffer 或全帧 RGB 副本；主程序
+  和 con 复用同一 `write_xrgb_png` 合同。快照和截图分别通过 writer/path 两种 platform
+  原子发布覆盖已有目标，不共享固定 `.tmp` 名；第三方 PNG decoder、原子覆盖和 GUI
+  black-box 测试拥有格式/发布互操作证据。替换后 unwind+trace-only release-fast PE
+  由 790,016 B 变为 790,528 B，净增的 512 B 全在 `.text` raw 对齐块，`.rdata`、
+  `.pdata`、`.rsrc` 不变；接受这 0.06% 交换以删除双写并获得系统压缩，不伪称 FFI
+  必然缩小二进制。
   570,368 B 基线 PE 的 section 证据为 `.text` 420,864 B、`.rdata` 119,296 B、
   `.pdata` 16,896 B、`.rsrc` 8,704 B；full-copy 已落到 CRT memcpy/memmove/memset，
   字体与 PTY 已落到 GDI/ConPTY FFI，pixel packing/blend 已有 SSSE3/AVX2/NEON，
-  不再为这些路径新增手写汇编。PNG checksum 实验拒绝了未独立证明 reflected IEEE
+  不再为这些路径新增手写汇编。已退役的 con PNG checksum 实验拒绝了未独立证明 reflected IEEE
   reduction constants/chunk combination 的 PCLMULQDQ/PMULL folding，也禁止用 CRC32C
   指令冒充 PNG polynomial；最终采用 1 KiB IEEE byte table 和共享 Adler-32 state，
-  x86_64 SSSE3、aarch64 NEON、其余 scalar fallback。101 对公开 `screenshot-pane`
+  x86_64 SSSE3、aarch64 NEON、其余 scalar fallback；以下数字仅保留为被替换方案的
+  历史证据。101 对公开 `screenshot-pane`
   交替样本中，scalar+nibble p95 31.215 ms、byte-table+SSSE3 p95 24.887 ms，改善
   20.27%，平均改善 23.94%，相同 PNG 字节数，release PE 只增加 2,048 B；同 byte
   table 下 SSSE3 相对 scalar Adler 两次正反序样本均改善约 5% average / 8-10% p95。

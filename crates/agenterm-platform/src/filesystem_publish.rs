@@ -191,6 +191,56 @@ pub fn write_file_atomic<T>(
     Ok(value)
 }
 
+/// Lets a path-oriented encoder fill a reserved sibling temporary, then
+/// synchronizes and atomically publishes that complete file.
+///
+/// The callback may replace or truncate the reserved regular file, but the
+/// resulting entry is revalidated before publication. This is the path-based
+/// counterpart to [`write_file_atomic`] for native codecs that cannot consume
+/// a Rust [`fs::File`].
+pub fn write_path_atomic<T>(
+    destination: &Path,
+    write: impl FnOnce(&Path) -> io::Result<T>,
+) -> Result<T, FilePublishError> {
+    let destination = normalized_destination(destination)?;
+    let parent = destination.parent().expect("normalized parent");
+    let name = destination.file_name().expect("normalized file name");
+    let (temporary, file) = create_temporary(parent, name)?;
+    let mut cleanup = TemporaryFile::new(temporary.clone());
+    drop(file);
+    let value = write(&temporary).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Write,
+            format!("write prepared path failed: {error}"),
+        )
+    })?;
+    let metadata = fs::symlink_metadata(&temporary).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Inspect,
+            format!("inspect prepared path failed: {error}"),
+        )
+    })?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err(FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "prepared path must remain a real regular file entry",
+        ));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&temporary)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| {
+            FilePublishError::new(
+                FilePublishErrorKind::SyncFile,
+                format!("sync prepared path failed: {error}"),
+            )
+        })?;
+    publish_file(&temporary, &destination)?;
+    cleanup.disarm();
+    Ok(value)
+}
+
 fn normalized_destination(destination: &Path) -> Result<PathBuf, FilePublishError> {
     let name = destination.file_name().ok_or_else(|| {
         FilePublishError::new(

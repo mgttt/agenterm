@@ -1,15 +1,11 @@
 //! XRGB screenshot facade.
 
-use std::{fs::File, io::BufWriter};
-
-use png::{BitDepth, ColorType, Encoder};
-
 use crate::{
-    contract::ui_screenshot::{ScreenshotWriteResult, UiScreenshotError, XrgbClip, XrgbFrame},
+    contract::ui_screenshot::{ScreenshotWriteResult, UiScreenshotError, XrgbClip},
     selected,
 };
 
-pub use crate::contract::ui_screenshot::{NativeCaptureArea, ScreenshotWindowHandle};
+pub use crate::contract::ui_screenshot::{NativeCaptureArea, ScreenshotWindowHandle, XrgbFrame};
 
 /// Maximum accepted framebuffer side length in pixels.
 pub const MAX_FRAME_SIDE: u32 = 16_384;
@@ -31,9 +27,9 @@ pub fn capture_native_window_png(
     selected::ui_screenshot::capture_native_window_png(window, path, area)
 }
 
-pub(crate) fn write_xrgb_png_impl(
-    frame: XrgbFrame<'_>,
-) -> Result<ScreenshotWriteResult, UiScreenshotError> {
+pub(crate) fn checked_frame(
+    frame: &XrgbFrame<'_>,
+) -> Result<(u32, u32, u32, u32, usize), UiScreenshotError> {
     if frame.path().as_os_str().is_empty() {
         return Err(UiScreenshotError::failed(
             "screenshot_empty_path",
@@ -53,41 +49,7 @@ pub(crate) fn write_xrgb_png_impl(
     let (x, y, output_width, output_height) =
         checked_clip(frame.width(), frame.height(), frame.clip())?;
     let output_pixels = checked_pixel_count(output_width, output_height)?;
-    let rgba_capacity = output_pixels.checked_mul(4).ok_or_else(|| {
-        UiScreenshotError::failed(
-            "screenshot_too_large",
-            format!("screenshot exceeds the {MAX_FRAME_PIXELS}-pixel limit"),
-        )
-    })?;
-    let mut rgba = Vec::with_capacity(rgba_capacity);
-    for row in y..y + output_height {
-        let row_start = row as usize * frame.width() as usize;
-        for column in x..x + output_width {
-            let pixel = frame.pixels()[row_start + column as usize] & 0x00FF_FFFF;
-            rgba.extend_from_slice(&[
-                ((pixel >> 16) & 0xFF) as u8,
-                ((pixel >> 8) & 0xFF) as u8,
-                (pixel & 0xFF) as u8,
-                255,
-            ]);
-        }
-    }
-
-    let file = File::create(frame.path())
-        .map_err(|error| UiScreenshotError::failed("screenshot_io_error", error.to_string()))?;
-    let mut encoder = Encoder::new(BufWriter::new(file), output_width, output_height);
-    encoder.set_color(ColorType::Rgba);
-    encoder.set_depth(BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(encode_error)?;
-    writer.write_image_data(&rgba).map_err(encode_error)?;
-
-    Ok(ScreenshotWriteResult {
-        frame_width: frame.width(),
-        frame_height: frame.height(),
-        output_width,
-        output_height,
-        output_pixels,
-    })
+    Ok((x, y, output_width, output_height, output_pixels))
 }
 
 fn checked_pixel_count(width: u32, height: u32) -> Result<usize, UiScreenshotError> {
@@ -146,10 +108,6 @@ pub(crate) fn checked_clip(
     Ok((clip.x, clip.y, clip.width, clip.height))
 }
 
-fn encode_error(error: impl std::fmt::Display) -> UiScreenshotError {
-    UiScreenshotError::failed("screenshot_encode_error", error.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,19 +116,19 @@ mod tests {
     #[test]
     fn dimensions_buffers_and_clip_fail_before_encoding() {
         assert_eq!(
-            write_xrgb_png_impl(XrgbFrame::new(Path::new("unused.png"), 0, 2, &[]))
+            write_xrgb_png(XrgbFrame::new(Path::new("unused.png"), 0, 2, &[]))
                 .expect_err("zero width")
                 .code(),
             "screenshot_invalid_dimensions"
         );
         assert_eq!(
-            write_xrgb_png_impl(XrgbFrame::new(Path::new("unused.png"), 2, 2, &[0; 3]))
+            write_xrgb_png(XrgbFrame::new(Path::new("unused.png"), 2, 2, &[0; 3]))
                 .expect_err("short buffer")
                 .code(),
             "screenshot_buffer_too_small"
         );
         assert_eq!(
-            write_xrgb_png_impl(
+            write_xrgb_png(
                 XrgbFrame::new(Path::new("unused.png"), 2, 2, &[0; 4])
                     .with_clip(XrgbClip::new(1, 1, 2, 2))
             )
@@ -187,7 +145,7 @@ mod tests {
             std::process::id()
         ));
         let pixels = [0x00FF00u32, 0x0000FFu32, 0xFF0000u32, 0xFFFFFFu32];
-        let result = write_xrgb_png_impl(
+        let result = write_xrgb_png(
             XrgbFrame::new(&path, 2, 2, &pixels).with_clip(XrgbClip::new(0, 0, 2, 1)),
         )
         .expect("PNG");
