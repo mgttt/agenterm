@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 99;
+pub const RH_CODEGEN_REVISION: u32 = 100;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -872,6 +872,13 @@ pub fn emit_host_runtime(out: &mut String) {
              exit_code: INT,\n\
              stdout: String,\n\
              stderr: String,\n\
+             // Truncation facts used to be dropped on the floor: the pack type\n\
+             // had nowhere to keep them even though `rh_finish_pipe_reader`\n\
+             // already returns the flag. `output.truncated` / `output.complete`\n\
+             // are documented on `std.process.Output` and read by script-smoke,\n\
+             // so natively they were simply unavailable.\n\
+             truncated: INT,\n\
+             complete: INT,\n\
          }\n\n\
          struct RhChild {\n\
              inner: std::rc::Rc<std::cell::RefCell<RhChildInner>>,\n\
@@ -1188,6 +1195,8 @@ pub fn emit_host_runtime(out: &mut String) {
                                  exit_code: -1,\n\
                                  stdout: String::new(),\n\
                                  stderr: String::new(),\n\
+                                 truncated: 0,\n\
+                                 complete: 0,\n\
                              };\n\
                          }\n\
                          std::thread::sleep(std::time::Duration::from_millis(10));\n\
@@ -1201,17 +1210,26 @@ pub fn emit_host_runtime(out: &mut String) {
                              exit_code: -1,\n\
                              stdout: String::new(),\n\
                              stderr: String::new(),\n\
+                             truncated: 0,\n\
+                             complete: 0,\n\
                          };\n\
                      }\n\
                  }\n\
              };\n\
-             let (stdout, _) = rh_finish_pipe_reader(stdout_reader.take());\n\
-             let (stderr, _) = rh_finish_pipe_reader(stderr_reader.take());\n\
+             let (stdout, stdout_truncated) =\n\
+                 rh_finish_pipe_reader(stdout_reader.take());\n\
+             let (stderr, stderr_truncated) =\n\
+                 rh_finish_pipe_reader(stderr_reader.take());\n\
+             // Same definition the interpreter publishes: `complete` means\n\
+             // NEITHER stream hit the capture bound.\n\
+             let truncated = stdout_truncated || stderr_truncated;\n\
              RhOutput {\n\
                  success: i64::from(status.success()),\n\
                  exit_code: status.code().unwrap_or(-1) as INT,\n\
                  stdout,\n\
                  stderr,\n\
+                 truncated: INT::from(truncated),\n\
+                 complete: INT::from(!truncated),\n\
              }\n\
          }\n\n\
          fn rh_command_output(command: &mut RhCommand) -> RhOutput {\n\
@@ -1245,6 +1263,8 @@ pub fn emit_host_runtime(out: &mut String) {
                          exit_code: -1,\n\
                          stdout: String::new(),\n\
                          stderr: String::new(),\n\
+                         truncated: 0,\n\
+                         complete: 0,\n\
                      }\n\
                  }\n\
              }\n\
@@ -1585,6 +1605,8 @@ pub fn emit_host_runtime(out: &mut String) {
                      exit_code: -1,\n\
                      stdout: String::new(),\n\
                      stderr: String::new(),\n\
+                     truncated: 0,\n\
+                     complete: 0,\n\
                  };\n\
              };\n\
              rh_finish_process_output(process, timeout, capture_limit, \"child\", \"\")\n\

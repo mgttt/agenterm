@@ -795,7 +795,15 @@ fn script_eval(context, cli, source, audit_path) {
     cli_text(
         context,
         cli,
-        ["script", "eval", source, "--profile", "local"],
+        [
+            "script", "eval", source, "--profile", "local",
+            // Under the rh backend each distinct eval source is a separate
+            // cdylib pack that cargo has to build, so the script budget has to
+            // cover a compile, not just an evaluation. The default deadline
+            // turned every eval step into `host_hard_timeout` with cargo's
+            // index update as the only visible clue.
+            "--timeout-ms", "180000"
+        ],
         audit_path
     )
 }
@@ -806,7 +814,8 @@ fn script_eval_json(context, cli, source, audit_path) {
         cli,
         [
             "script", "eval", source,
-            "--profile", "local", "--json"
+            "--profile", "local", "--json",
+            "--timeout-ms", "180000"
         ],
         audit_path
     )
@@ -866,7 +875,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     let bytes_entries = matching(
         catalog.entries,
         "stable_id",
-        "rhai.bytes.from-array"
+        "rh.bytes.from-array"
     );
     let command_builder_entries = matching(
         catalog.entries,
@@ -919,16 +928,27 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
             "script_api_comparison_unreviewed"
         );
     }
+    // Bijectivity is the property: one distinct operation id per entry that has
+    // one. The literal `== 24` pinned the *size* of the operation surface, which
+    // has since grown to 77 -- so this could not pass and told nobody why. Entry
+    // counts are already gated by the PRD-alignment step; assert the invariant
+    // here and report both numbers when it breaks.
     test_harness::require(
-        operation_entries == 24 && operation_id_list.len == 24,
-        "script_api_operation_mapping_not_bijective"
+        operation_entries > 0
+            && operation_id_list.len == operation_entries,
+        "script_api_operation_mapping_not_bijective:entries=" + operation_entries
+            + ":distinct_ids=" + operation_id_list.len
     );
 
     // A downstream consumer closing stdout early must remain a normal exit.
+    // `agenterm rh api` does not exist -- the API surface is reachable only
+    // through `cli script api` since the binary entry was standardised, and
+    // `rh` answers `unknown command 'api'`. Both this pipe probe and the tree
+    // check below were still asking the retired way.
     let pipe_command = configured_program(
         context,
         script,
-        ["rh", "api", "--json"],
+        ["cli", "script", "api", "--json"],
         "",
         script_smoke_empty_env()
     );
@@ -944,10 +964,10 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     );
 
     print("STEP filtered scripting API object tree");
-    let tree = direct_text(
+    let tree = cli_text(
         context,
-        script,
-        ["api", "std::fs", "--status", "shipped", "--tree"],
+        cli,
+        ["script", "api", "std::fs", "--status", "shipped", "--tree"],
         audit_path
     );
     let tree_has_title = tree.contains("AgenTerm Script API v2");
@@ -1024,7 +1044,11 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
                 repo,
                 "scripts/rh/verify-script-contract.rh"
             ).display,
-            "--profile", "local", "--",
+            // The verifier is not in the ready task catalog, so `script run`
+            // has to transpile and cargo-build its pack first. That does not
+            // fit the default host deadline -- the step failed with exit 3 and
+            // `host_hard_timeout`, with cargo's index update as the only clue.
+            "--profile", "local", "--timeout-ms", "180000", "--",
             std::path::join(
                 repo,
                 "docs/agenterm-rh-runtime.md"
@@ -1059,7 +1083,9 @@ fn assert_process_and_streams(
         [
             "script", "run", process_file,
             "--profile", "local",
-            "--timeout-ms", "10000",
+            // Compile budget, not just run budget: every distinct source is a
+            // cdylib pack cargo must build first.
+            "--timeout-ms", "180000",
             "--max-operations", "1000000",
             "--", runtime_dir
         ],
@@ -1086,7 +1112,7 @@ fn assert_process_and_streams(
         [
             "script", "eval",
             "let c=std::process::command(\"cmd.exe\");\n             c.args([\"/d\",\"/s\",\"/c\",\"ping -n 6 127.0.0.1 >nul\"]);\n             c.timeout(std::time::Duration::from_millis(10));\n             try { c.output(); \"missing\" } catch(e) { print(e); }",
-            "--profile", "local", "--timeout-ms", "10000"
+            "--profile", "local", "--timeout-ms", "180000"
         ],
         audit_path
     );
@@ -1100,8 +1126,12 @@ fn assert_process_and_streams(
         cli,
         [
             "script", "eval",
-            "std::process::command(\"agenterm-definitely-missing.exe\").output()",
-            "--profile", "local"
+            // Bind the command before calling it: a method chained straight
+            // onto `std::process::command(...)` has no native lowering, so this
+            // expression failed to transpile and the step measured that instead
+            // of the typed spawn failure it exists to prove.
+            "let c = std::process::command(\"agenterm-definitely-missing.exe\");\n             c.output()",
+            "--profile", "local", "--timeout-ms", "180000"
         ],
         4,
         audit_path
@@ -1114,7 +1144,7 @@ fn assert_process_and_streams(
         cli,
         [
             "script", "eval", nonzero_source,
-            "--profile", "local"
+            "--profile", "local", "--timeout-ms", "180000"
         ],
         4,
         audit_path
@@ -1245,7 +1275,7 @@ fn assert_tasks_and_http(
         [
             "script", "eval",
             "let task=rh::task::after(std::time::Duration::from_secs(1));\n             try { task.wait(std::time::Duration::from_millis(1)); }\n             catch(error) { print(error); } task.cancel();",
-            "--profile", "local", "--timeout-ms", "10000"
+            "--profile", "local", "--timeout-ms", "180000"
         ],
         audit_path
     );
@@ -1298,7 +1328,7 @@ fn assert_tasks_and_http(
             [
                 "script", "run", http_file,
                 "--profile", "local",
-                "--timeout-ms", "10000",
+                "--timeout-ms", "180000",
                 "--max-operations", "1000000",
                 "--", ready.url, ready.tls_url
             ],

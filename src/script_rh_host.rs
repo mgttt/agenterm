@@ -791,19 +791,43 @@ extern "C" fn host_json_call(
                 Err(code) => Err(code),
             }
         }
+        // Record the typed clipboard code before collapsing to -5. Discarding it
+        // left scripts with a bare `host_json_call_failed: clipboard.get_text: -5`
+        // that cannot distinguish "another process holds the clipboard" from
+        // "the clipboard holds no Unicode text" from "unsupported platform" --
+        // three different remedies behind one number.
         "clipboard.get_text" => crate::platform::services::script_clipboard::get_text()
             .map(|text| serde_json::json!({ "text": text }))
-            .map_err(|_| -5),
+            .map_err(|error| {
+                record_host_error("rh_clipboard_get_text", &clipboard_error_detail(&error));
+                -5
+            }),
         "clipboard.set_text" => match input.get("text").and_then(serde_json::Value::as_str) {
             Some(text) => crate::platform::services::script_clipboard::set_text(text)
                 .map(|()| serde_json::json!({ "ok": true }))
-                .map_err(|_| -5),
-            None => Err(-5),
+                .map_err(|error| {
+                    record_host_error("rh_clipboard_set_text", &clipboard_error_detail(&error));
+                    -5
+                }),
+            None => {
+                record_host_error("rh_clipboard_set_text", "missing text field");
+                Err(-5)
+            }
         },
         _ => Err(-4),
     }
     .and_then(|value| serde_json::to_string(&value).map_err(|_| -5));
     write_response(response, out_buf, out_cap)
+}
+
+/// `code(cause): message` for a clipboard failure.
+fn clipboard_error_detail(
+    error: &crate::platform::contract::script_clipboard::ScriptClipboardError,
+) -> String {
+    match error.cause {
+        Some(cause) => format!("{}({cause}): {}", error.code, error.message),
+        None => format!("{}: {}", error.code, error.message),
+    }
 }
 
 fn clear_host_error() {

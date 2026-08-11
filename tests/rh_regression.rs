@@ -594,3 +594,54 @@ fn string_fn_bundle_fixture_executes_natively_without_interpreter() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(receipt.entry_value, 1);
 }
+
+/// `output.truncated` / `output.complete` are documented on `std.process.Output`
+/// and read by script-smoke, but the generated pack's `RhOutput` had no such
+/// fields, so they could not be expressed natively at all -- and a bare
+/// `#{ complete: output.complete }` additionally had no json-value lane.
+#[test]
+fn process_output_truncation_facts_are_native_and_json_valued() {
+    let source = r#"
+fn entry() {
+    let command = std::process::command("cmd.exe");
+    command.args(["/d", "/c", "echo probe"]);
+    command.capture_limit(4096);
+    let output = command.output();
+    let report = #{
+        complete: output.complete,
+        truncated: output.truncated
+    };
+    if output.complete == 1 && output.truncated == 0 {
+        return 7;
+    }
+    rh::fail("output_truncation_facts_unexpected:" + rh::json::stringify(report))
+}
+"#;
+    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile output facts");
+    assert_eq!(
+        output.execution_mode,
+        agenterm_rh::CdylibExecutionMode::Native,
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("truncated: INT::from(truncated)"),
+        "the prelude must carry the real flag: {}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("serde_json::json!(output.complete)"),
+        "a native int expression must be usable as a json value: {}",
+        output.rust
+    );
+    assert_eq!(output.rust.matches("rh_host_eval_int(").count(), 0);
+
+    let dir = std::env::temp_dir().join(format!(
+        "agenterm-rh-output-facts-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let receipt = agenterm_rh::qualify_pack_dir(source, &dir).expect("qualify output facts pack");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(receipt.entry_value, 7);
+}

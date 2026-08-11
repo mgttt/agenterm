@@ -5133,8 +5133,11 @@ fn output_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str
         return None;
     }
     let property = dot_property_name(&boxed.rhs)?;
-    matches!(property, "success" | "exit_code" | "stdout" | "stderr")
-        .then_some((ident.1.as_str(), property))
+    matches!(
+        property,
+        "success" | "exit_code" | "stdout" | "stderr" | "truncated" | "complete"
+    )
+    .then_some((ident.1.as_str(), property))
 }
 
 fn child_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
@@ -9422,7 +9425,30 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
                 }
             }
         }
+        // Any expression that already lowers natively to an INT is a valid json
+        // number. Without this, `#{ complete: output.complete }` -- the obvious
+        // way to report an Output fact -- failed to transpile even though the
+        // same `output.complete` works in every comparison and arithmetic
+        // position.
+        _ if is_native_json_int_expr(expr, ctx) => {
+            out.push_str("serde_json::json!(");
+            emit_expr(out, expr, ctx)?;
+            out.push(')');
+        }
         _ => {
+            // Last resort: anything the string lane can already emit is a valid
+            // json string. `#{ cwd: std::env::current_dir().display }` had a
+            // string lowering but no json-value lane, so the obvious way to put
+            // a path or a formatted fact into a map did not transpile. Only
+            // reached after every typed arm above, so this cannot capture an
+            // expression that had a better representation.
+            let mut rendered = String::new();
+            if emit_stringish(&mut rendered, expr, ctx).is_ok() {
+                out.push_str("serde_json::Value::String(");
+                out.push_str(&rendered);
+                out.push(')');
+                return Ok(());
+            }
             return Err(RhError::Transpile(format!(
                 "unsupported json value expression: {expr:?}"
             )));

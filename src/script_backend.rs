@@ -158,7 +158,21 @@ pub fn try_execute_rh_invocation(
             }))
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
-            let (pack, native_path) = resolve_rh_pack(source, options.project_root.as_deref())?;
+            // `script eval` takes an *expression*, but the rh backend compiles a
+            // cdylib pack and `transpile_cdylib_with_mode` requires `fn entry()`.
+            // Production handed the expression through unwrapped, so
+            // `script eval '1 + 1'` answered `cdylib pack requires fn entry()`
+            // -- the worker's own test helper had always wrapped it, which is why
+            // no unit test noticed. `Run` is deliberately left alone: a file with
+            // no `entry` should still say so.
+            let eval_source = match operation {
+                ScriptOperation::Eval if eval_source_needs_entry(source) => {
+                    std::borrow::Cow::Owned(format!("fn entry() {{ {source} }}"))
+                }
+                _ => std::borrow::Cow::Borrowed(source),
+            };
+            let (pack, native_path) =
+                resolve_rh_pack(eval_source.as_ref(), options.project_root.as_deref())?;
             let entry_result = crate::script_rh_host::call_pack_entry_with_host_result(
                 &native_path,
                 fleet_bridge,
@@ -185,6 +199,21 @@ pub fn try_execute_rh_invocation(
             }))
         }
     }
+}
+
+/// Whether an `eval` expression should be wrapped in `fn entry() { .. }`.
+///
+/// `entry()` returns `INT`, so only a source whose value is an integer can be
+/// its body. A map or array literal has to keep failing the way it always did
+/// until the typed entry-value channel (`RhHostEntryValue`) is wired to the AOT
+/// pack -- wrapping it produces `expected i64, found Value` from rustc, which is
+/// strictly worse than the existing message.
+fn eval_source_needs_entry(source: &str) -> bool {
+    if source.contains("fn entry") {
+        return false;
+    }
+    let trimmed = source.trim_start();
+    !trimmed.starts_with("#{") && !trimmed.starts_with('[')
 }
 
 fn json_value_from_entry(entry_value: i64) -> Option<serde_json::Value> {

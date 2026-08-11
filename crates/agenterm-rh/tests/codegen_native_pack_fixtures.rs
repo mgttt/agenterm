@@ -232,7 +232,7 @@ fn assert_native_only(name: &str, needles: &[&str], anti_needles: &[&str]) {
 
 #[test]
 fn codegen_revision_is_pinned() {
-    assert_eq!(RH_CODEGEN_REVISION, 99);
+    assert_eq!(RH_CODEGEN_REVISION, 100);
 }
 
 /// Every child the generated prelude spawns itself must have all three streams
