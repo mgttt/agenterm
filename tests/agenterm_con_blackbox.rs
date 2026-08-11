@@ -550,38 +550,13 @@ fn typed_input_echoes_back_well_under_one_blink_cycle() {
 }
 
 #[test]
-#[ignore = "known gap, not yet root-caused: see comment below — tracked in plan/plan-v0.1.16.md"]
 fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
-    // Intended to prove the *wiring*: a scripted key event reaches
+    // Proves the complete wiring: a scripted key event reaches
     // ConTerminal::forward_key (the same path a real OS keyboard event
-    // takes), which writes to the PTY, which cmd.exe's line editor responds
-    // to by moving the cursor left.
-    //
-    // It does not pass, and the cause is not agenterm-con's own logic:
-    //   1. The encoder is proven correct in isolation — a dedicated unit
-    //      test confirms ArrowLeft produces exactly `\x1b[D`
-    //      (arrow_left_key_command_produces_the_expected_csi_bytes in
-    //      agenterm-con.rs).
-    //   2. forward_key's code path to write_pty was read line by line; there
-    //      is no early return or guard that would swallow this event.
-    //   3. Reproduced identically with REAL OS keyboard input via
-    //      keybd_event(VK_LEFT) against a live window, not just through
-    //      --script — so this is not specific to the script mechanism this
-    //      session added.
-    //   4. Also reproduced against PowerShell's line editor (PSReadLine),
-    //      not just cmd.exe's, though that run was inconclusive on its own
-    //      (the screen changed in an unexpected way, possibly a PSReadLine
-    //      redraw quirk) — not strong enough evidence to call it confirmed
-    //      "every shell, every editor," just evidence it isn't cmd.exe-only.
-    //
-    // Leading hypothesis, unconfirmed: Windows ConPTY on this environment
-    // does not reliably translate a VT cursor-key escape sequence into the
-    // classic console KEY_EVENT_RECORD a cooked-mode reader (cmd.exe's/
-    // PSReadLine's line editor) expects — which would make this an
-    // environment/dependency limitation outside agenterm-con's own code, not
-    // a bug this file can fix. Left `#[ignore]` rather than deleted or
-    // silently red: the encoder-level proof stays real value, and this stays
-    // visible as a real open question instead of being swept under the rug.
+    // takes), then the platform adapter attaches to the child console and
+    // writes native KEY_EVENT_RECORD press/release pairs. cmd.exe's cooked
+    // line editor must move exactly two cells; falling back to byte-only VT
+    // injection or splitting console-attachment authority regresses this.
     let dir = scratch_dir("key-wiring");
     let script = write_script(
         &dir,
@@ -918,25 +893,13 @@ fn real_tui_less_scrolls_via_character_and_space_keys() {
 }
 
 #[test]
-#[ignore = "known gap (same root cause as key_command_moves_the_cursor_through_the_real_forward_key_path, see plan/plan-v0.1.16.md): \
-            arrow keys and alternate-screen wheel-as-cursor-keys don't reach less either"]
-fn real_tui_less_arrow_keys_and_alt_screen_wheel_do_not_scroll_known_gap() {
+fn real_tui_less_arrow_keys_and_alt_screen_wheel_scroll() {
     let _guard = gui_test_guard();
     // Companion to `real_tui_less_scrolls_via_character_and_space_keys`:
-    // that test proves plain character/space keys reach a real raw-mode
-    // TUI correctly. This one is the arrow-key half, and it fails —
-    // confirming the standing gap (`key_command_moves_the_cursor_...`,
-    // never root-caused) is not specific to cooked-mode line editors like
-    // cmd.exe: it also blocks a curses-style TUI reading raw escape
-    // sequences directly. It additionally surfaces a related consequence
-    // that wasn't previously known: `less` enters the alternate screen, so
-    // `handle_wheel` translates wheel notches into the *same* cursor-key
-    // escape sequences (`\x1b[A`/`\x1b[B`) real ArrowUp/ArrowDown produce —
-    // meaning wheel scrolling inside any alternate-screen TUI is silently
-    // broken by the same root cause, not just literal arrow keypresses.
-    // Left `#[ignore]`, not deleted or silently green, for the same reason
-    // the original does: this is real, open, and not this binary's own
-    // logic to fix blind.
+    // that test proves plain character/space keys reach a real raw-mode TUI.
+    // This owns the native-arrow half plus the alternate-screen wheel path,
+    // which deliberately translates wheel notches through the same native
+    // cursor-key injection contract. Both must advance a real `less` session.
     let Some(less) = find_less_exe() else {
         eprintln!("skipping: no less.exe found (Git for Windows not detected on this machine)");
         return;
@@ -970,10 +933,6 @@ fn real_tui_less_arrow_keys_and_alt_screen_wheel_do_not_scroll_known_gap() {
     let after = session.wait_for(Duration::from_secs(5), |snapshot| {
         snapshot["rows_text"][0].as_str() != Some("LESS_LINE_1")
     });
-    // This assert is expected to fail on the currently-affected
-    // environment — that's the point of `#[ignore]`ing the test rather
-    // than asserting the (currently true) opposite, which would silently
-    // start lying the moment this ever gets root-caused and fixed.
     assert_ne!(after["rows_text"][0], "LESS_LINE_1");
     let _ = session.child.kill();
 }

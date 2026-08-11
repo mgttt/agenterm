@@ -188,12 +188,12 @@ C. Console host (agenterm-con.exe)
 明确列为**非本版目标**。
 
 **仍未解决 / 仍未验证的缺口（如实列出，不装作齐了）**：
-1. **方向键在真实 shell 里不生效**（`key_command_moves_the_cursor_through_the_real_forward_key_path`，
-   `#[ignore]`）——编码器单测证明字节是对的（`\x1b[D`），`forward_key`
-   代码逐行读过没有吞掉分支，**但真实光标就是不动**，用真实键盘输入
-   （`keybd_event`，非脚本）复现过，不是本轮新引入。头号疑点：这台
-   Windows Server 2022 的 ConPTY 没把 VT 方向键序列正确译回经典控制台
-   按键事件给 cooked-mode 行编辑器——但没有工具确证，只是最可能的解释。
+1. ~~**方向键在真实 shell 里不生效**~~ ——**2026-08-11 已根治**：根因不是
+   VT encoder，而是 native console input 的 attach/锁/RAII authority 分散在
+   rmux 与 platform 两层。Windows PTY adapter 现直接在共享 `ConsoleGuard` 下构造
+   `KEY_EVENT_RECORD` press/release pair 并调用 `WriteConsoleInputW`；attach 已存在时
+   对 `ERROR_ACCESS_DENIED` 执行受锁的 detach/retry。原 ignored cooked-shell 测试、
+   real `less` ArrowDown 与 alternate-screen wheel 测试均提升为默认门并通过。
 2. **IME 端到端从未自动化验证过**——一直标注"待人工验证"，这轮也没有变，
    因为没有可编程的方式驱动真实输入法。
 3. ~~**鼠标事件没有进 `--script`**~~ ——**2026-08-08 已补**：新增
@@ -366,17 +366,10 @@ panic 位置同上。
    真正驱动一个 raw/cbreak 模式的 curses 风格 TUI（不是 cmd.exe 那种
    cooked-mode 行编辑器），证明字符键（`j`）和空格键的转发链路
    （`forward_key` → `write_pty`）在真会话里对真程序确实生效——这是此前
-   完全没有的证据类别，不只是编码器层 + 单进程覆盖。**但 DECCKM/方向键这半
-   仍未补上，而且证据比之前想的更糟**：新增（`#[ignore]`，同旧那条方向键
-   缺口一样如实标记、不装作过了）`real_tui_less_arrow_keys_and_alt_screen_wheel_do_not_scroll_known_gap`
-   证明真实 ArrowDown 在 `less` 里同样不生效——说明缺口 1 的根因不是
-   cmd.exe/cooked-mode 特有的，curses 风格程序读原始转义序列一样受影响；
-   而且顺手挖出一个之前不知道的连带后果：`less` 会进入备用屏（alternate
-   screen），此时 `handle_wheel` 把滚轮转成的是**跟 ArrowUp/ArrowDown 完全
-   相同**的光标键转义序列（`\x1b[A`/`\x1b[B`），于是**备用屏 TUI 里滚轮
-   滚动也被同一个根因坑了**，不只是字面上的方向键按键。仍未做：更复杂的
-   TUI（vim 的普通/插入模式切换、鼠标点击上报）没测，因为这些都要先绕开
-   同一个方向键/转义序列根因才有意义去测。
+   完全没有的证据类别，不只是编码器层 + 单进程覆盖。**2026-08-11 已补齐
+   DECCKM/方向键半面**：`real_tui_less_arrow_keys_and_alt_screen_wheel_scroll`
+   已从 ignored 缺口提升为默认门，真实 ArrowDown 和 alternate-screen wheel 均能
+   推进 `less`。仍未做：更复杂的 TUI（vim 普通/插入模式切换、鼠标点击上报）。
 
 **2026-08-08 用户反馈两条，均已处理**：
 

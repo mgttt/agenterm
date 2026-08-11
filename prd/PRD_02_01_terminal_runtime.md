@@ -11,9 +11,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   composer, settings, wheel/scrollbar, paste, and word/row/drag selection
   with edge autoscroll; status-bar CWD editor, window-close confirm, and tabs
   resize grip on Unix; proxy editor and professional selection remain later
-- [x] one ConPTY-backed process per tab through `rmux-pty` on Windows
-- [x] shared PTY backend facade: Windows keeps adapter-private `rmux-pty`; Unix uses
-  POSIX `openpty` + fork/exec; `terminal_runtime` consumes one API
+- [x] one ConPTY-backed process per tab on Windows; adapter-private `rmux-pty`
+  currently owns lifecycle and byte-stream mechanics while platform-owned native
+  console input owns attachment serialization and key injection
+- [x] shared PTY backend facade: Windows keeps those implementation details behind
+  one adapter; Unix uses POSIX `openpty` + fork/exec; `terminal_runtime` consumes
+  one API
 - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
 - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
   character in the default `cmd.exe` line editor
@@ -256,6 +259,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   block, with `.rdata`, `.pdata`, and `.rsrc` unchanged. The product accepts that
   measured 0.06% cost for one shared contract and system-compressed PNG rather
   than claiming native FFI is automatically smaller.
+  Windows native key delivery no longer delegates a second console-attachment
+  authority to `rmux-pty`: one platform `ConsoleGuard` serializes `FreeConsole` /
+  `AttachConsole`, retries the documented already-attached case, opens `CONIN$`,
+  and writes an exact key-down/key-up `INPUT_RECORD` pair with
+  `WriteConsoleInputW`. The real `cmd.exe` cursor journey and alternate-screen
+  `less` arrow/wheel journey are now default black-box tests instead of ignored
+  known gaps. Exact-profile evidence is 87 unit, 18 black-box and one isolated
+  control test with zero ignored or failed tests. This repair changes the
+  unwind/trace-only release-fast PE from 790,528 to 791,552 bytes; the measured
+  1,024-byte cost is retained for behavior and single native ownership, not
+  presented as a size optimization.
   Windows glyph selection and gray8 coverage now execute behind the platform
   `RasterGlyph` contract through bounded GDI calls with deterministic DC/font
   cleanup; con no longer opens or parses font files, and ab_glyph/ttf_parser

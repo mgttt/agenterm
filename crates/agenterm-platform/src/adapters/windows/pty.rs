@@ -6,12 +6,13 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 
-use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    ENABLE_LINE_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT, GetConsoleMode,
+    ENABLE_LINE_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT, GetConsoleMode, INPUT_RECORD, INPUT_RECORD_0,
+    KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, WriteConsoleInputW,
 };
 
 use crate::contract::pty::{
@@ -27,6 +28,15 @@ pub fn login_shell_argument(
 }
 
 const ENHANCED_KEY: u32 = 0x0100;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WindowsConsoleKeyEvent {
+    virtual_key_code: u16,
+    virtual_scan_code: u16,
+    unicode_char: u16,
+    control_key_state: u32,
+    repeat_count: u16,
+}
 
 #[derive(Clone, Debug)]
 pub struct ChildCommand(rmux_pty::ChildCommand);
@@ -164,9 +174,15 @@ impl PtyChild {
                 "repeat count must be greater than zero",
             ));
         }
-        let _guard = super::console::lock();
-        rmux_pty::write_windows_console_key(
-            self.0.pid(),
+        let _attachment = super::console::ConsoleGuard::attach_process(self.0.pid().as_u32())
+            .map_err(|error| {
+                PtyError::failed("send native key", "pty_console_attach_failed", error)
+            })?;
+        let input = open_console_input().map_err(|error| {
+            PtyError::failed("send native key", "pty_console_input_open_failed", error)
+        })?;
+        write_console_key(
+            input.as_raw_handle() as HANDLE,
             native_console_key_event(key, repeat_count),
         )
         .map_err(|error| PtyError::failed("send native key", "pty_native_key_failed", error))
@@ -226,7 +242,7 @@ fn open_console_input() -> io::Result<OwnedHandle> {
         // the console attached for the duration of this query.
         CreateFileW(
             CONIN.as_ptr(),
-            GENERIC_READ,
+            GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             std::ptr::null(),
             OPEN_EXISTING,
@@ -258,18 +274,56 @@ fn console_input_mode(input: &OwnedHandle) -> io::Result<u32> {
 const fn native_console_key_event(
     key: NativeTerminalKey,
     repeat_count: u16,
-) -> rmux_pty::WindowsConsoleKeyEvent {
+) -> WindowsConsoleKeyEvent {
     let (virtual_key_code, virtual_scan_code) = match key {
         NativeTerminalKey::Up => (0x26, 0x48),
         NativeTerminalKey::Down => (0x28, 0x50),
     };
-    rmux_pty::WindowsConsoleKeyEvent::new(
+    WindowsConsoleKeyEvent {
         virtual_key_code,
         virtual_scan_code,
-        0,
-        ENHANCED_KEY,
+        unicode_char: 0,
+        control_key_state: ENHANCED_KEY,
         repeat_count,
-    )
+    }
+}
+
+fn write_console_key(handle: HANDLE, key: WindowsConsoleKeyEvent) -> io::Result<()> {
+    let records = [key_input_record(key, true), key_input_record(key, false)];
+    let mut written = 0u32;
+    let succeeded =
+        unsafe { WriteConsoleInputW(handle, records.as_ptr(), records.len() as u32, &mut written) };
+    if succeeded == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if written != records.len() as u32 {
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            format!(
+                "WriteConsoleInputW wrote {written} of {} records",
+                records.len()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn key_input_record(key: WindowsConsoleKeyEvent, key_down: bool) -> INPUT_RECORD {
+    INPUT_RECORD {
+        EventType: KEY_EVENT as u16,
+        Event: INPUT_RECORD_0 {
+            KeyEvent: KEY_EVENT_RECORD {
+                bKeyDown: i32::from(key_down),
+                wRepeatCount: if key_down { key.repeat_count.max(1) } else { 1 },
+                wVirtualKeyCode: key.virtual_key_code,
+                wVirtualScanCode: key.virtual_scan_code,
+                uChar: KEY_EVENT_RECORD_0 {
+                    UnicodeChar: key.unicode_char,
+                },
+                dwControlKeyState: key.control_key_state,
+            },
+        },
+    }
 }
 
 const fn native_size(size: TerminalSize) -> rmux_pty::TerminalSize {
@@ -310,18 +364,18 @@ mod tests {
     #[test]
     fn native_cursor_keys_preserve_win32_identity_and_repeat() {
         let up = native_console_key_event(NativeTerminalKey::Up, 3);
-        assert_eq!(up.virtual_key_code(), 0x26);
-        assert_eq!(up.virtual_scan_code(), 0x48);
-        assert_eq!(up.unicode_char(), 0);
-        assert_eq!(up.control_key_state(), super::ENHANCED_KEY);
-        assert_eq!(up.repeat_count(), 3);
+        assert_eq!(up.virtual_key_code, 0x26);
+        assert_eq!(up.virtual_scan_code, 0x48);
+        assert_eq!(up.unicode_char, 0);
+        assert_eq!(up.control_key_state, super::ENHANCED_KEY);
+        assert_eq!(up.repeat_count, 3);
 
         let down = native_console_key_event(NativeTerminalKey::Down, 7);
-        assert_eq!(down.virtual_key_code(), 0x28);
-        assert_eq!(down.virtual_scan_code(), 0x50);
-        assert_eq!(down.unicode_char(), 0);
-        assert_eq!(down.control_key_state(), super::ENHANCED_KEY);
-        assert_eq!(down.repeat_count(), 7);
+        assert_eq!(down.virtual_key_code, 0x28);
+        assert_eq!(down.virtual_scan_code, 0x50);
+        assert_eq!(down.unicode_char, 0);
+        assert_eq!(down.control_key_state, super::ENHANCED_KEY);
+        assert_eq!(down.repeat_count, 7);
     }
 
     #[test]

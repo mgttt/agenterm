@@ -9,7 +9,9 @@ use std::io;
 use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
 use std::sync::Mutex;
 
-use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
@@ -19,15 +21,6 @@ use windows_sys::Win32::System::Console::{
 };
 
 static LOCK: Mutex<()> = Mutex::new(());
-
-/// Acquire the console serialization lock without attaching.
-///
-/// Use this when the caller (or a library it delegates to) manages its own
-/// `AttachConsole` / `FreeConsole` calls but must still be serialized with
-/// other console users in this process.
-pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
-    LOCK.lock().expect("console attach lock poisoned")
-}
 
 /// RAII guard that attaches to a process's console and releases on drop.
 ///
@@ -106,9 +99,18 @@ impl ConsoleGuard {
             .lock()
             .map_err(|_| io::Error::other("console attach lock poisoned"))?;
         // SAFETY: `AttachConsole` validates the non-zero process id.
-        let attached = unsafe { AttachConsole(process_id) };
-        if attached == 0 {
-            return Err(io::Error::last_os_error());
+        if unsafe { AttachConsole(process_id) } == 0 {
+            let first_error = io::Error::last_os_error();
+            if first_error.raw_os_error() != Some(ERROR_ACCESS_DENIED as i32) {
+                return Err(first_error);
+            }
+            // ERROR_ACCESS_DENIED means this process is already attached to a
+            // console. Detach under the process-wide lock and retry the target
+            // attachment, matching native ConPTY input-injection semantics.
+            let _ = unsafe { FreeConsole() };
+            if unsafe { AttachConsole(process_id) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         match ConsoleControlIgnoreGuard::install() {
             Ok(control_ignore) => Ok(Self {

@@ -201,6 +201,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   字节环：一次原生 read 要么整体提交、要么等待容量，关闭会唤醒生产者且已提交
   字节仍可排空。消费者按字节预算直接读取环内连续切片，不为每次 read 分配
   `Vec`；产品层只决定容量、每轮预算、解析和重调度策略。
+- Windows PTY 的生命周期、字节流、resize 和 wait 暂由 adapter-private
+  `rmux-pty` 承担；控制台附着、分离、进程级串行化和按键 `INPUT_RECORD`
+  写入由 platform 自己的 `ConsoleGuard` 单独持有。`send_native_key` 在同一锁内
+  处理已有控制台的 `ERROR_ACCESS_DENIED`，必要时先 `FreeConsole` 再附着目标
+  ConPTY client，并通过 `WriteConsoleInputW` 精确提交 press/release 对。产品层和
+  `rmux-pty` 不得另建第二套 attach lock/RAII authority。真实 `cmd.exe` 行编辑器和
+  alternate-screen `less` 的方向键/滚轮黑盒由原先两个 ignore 转为默认门；该叶子
+  使 unwind/trace-only release-fast PE 从 790,528 B 增至 791,552 B，接受实测
+  1,024 B 行为成本，不宣称 FFI 自动缩小产物。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

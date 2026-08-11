@@ -48,6 +48,19 @@ jobs:
           type "%LOG%"
           exit /b %CHECK_EXIT%
 
+      - name: Prove the Script Runtime public surface
+        # script-smoke's home while it is red on the pack entry-value gap (see
+        # the note in ci.yml's release-lane step). This is the deep gate, so it
+        # runs here in full rather than being trimmed or skipped -- and it has to
+        # be green before ci.yml takes it back onto the blocking path.
+        shell: bash
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+          AGENTERM_SCRIPT_WORKER_STDERR: inherit
+        run: |
+          set -euo pipefail
+          dist/agenterm.exe rh task run script-smoke --manifest agenterm.tasks.json
+
       - name: Upload failed gate diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
