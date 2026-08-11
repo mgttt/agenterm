@@ -211,7 +211,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 570,368 B；当前比 512 KiB x86_64 目标高 46,080 B，主要增量是
+  1,046,528 B 降到 572,416 B；当前比 512 KiB x86_64 目标高 48,128 B，主要增量是
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
 - tree depth 已下沉为 UI-core 的迭代 O(n) typed kernel，替代 con 每节点重复扫描 parent；20,000 深链、缺父、重复 ID、自环和多节点环均有单测；
@@ -224,12 +224,16 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   避免生产链接通用 PNG/压缩栈；XRGB 每行经共享 SSSE3/NEON/标量内核打包，不产生
   全帧 RGB 副本。快照和截图通过 platform 原子文件发布覆盖已有目标，不再共享固定
   `.tmp` 名；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
-  当前 570,368 B PE 的 section 证据为 `.text` 420,864 B、`.rdata` 119,296 B、
+  570,368 B 基线 PE 的 section 证据为 `.text` 420,864 B、`.rdata` 119,296 B、
   `.pdata` 16,896 B、`.rsrc` 8,704 B；full-copy 已落到 CRT memcpy/memmove/memset，
   字体与 PTY 已落到 GDI/ConPTY FFI，pixel packing/blend 已有 SSSE3/AVX2/NEON，
-  不再为这些路径新增手写汇编。下一项仅实验 PNG IEEE CRC/Adler 的 PCLMULQDQ/PMULL
-  kernel；保留门槛是公开大图截图 p95 至少改善 20%、字节完全一致、PE 增量不超过
-  4 KiB，并始终保留 scalar fallback。
+  不再为这些路径新增手写汇编。PNG checksum 实验拒绝了未独立证明 reflected IEEE
+  reduction constants/chunk combination 的 PCLMULQDQ/PMULL folding，也禁止用 CRC32C
+  指令冒充 PNG polynomial；最终采用 1 KiB IEEE byte table 和共享 Adler-32 state，
+  x86_64 SSSE3、aarch64 NEON、其余 scalar fallback。101 对公开 `screenshot-pane`
+  交替样本中，scalar+nibble p95 31.215 ms、byte-table+SSSE3 p95 24.887 ms，改善
+  20.27%，平均改善 23.94%，相同 PNG 字节数，release PE 只增加 2,048 B；同 byte
+  table 下 SSSE3 相对 scalar Adler 两次正反序样本均改善约 5% average / 8-10% p95。
   Windows 字形路径通过 neutral `RasterGlyph` contract 调用 GDI
   `GetGlyphIndicesW`/`GetGlyphOutlineW`，con 不再读/解析字体文件，Windows 生产图也
   不含 ab_glyph/ttf_parser；Linux/macOS 的现有 file-font 实现下沉到 platform 的共享

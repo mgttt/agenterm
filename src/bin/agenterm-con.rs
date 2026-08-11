@@ -4433,20 +4433,27 @@ impl PixelWindowApplication for ConApp {
             );
         }
         if let Some((path, reply)) = pending_control_screenshot {
-            let result = agent_interface::write_png_atomic(
+            let encode_started = Instant::now();
+            let write_result = agent_interface::write_png_atomic(
                 path.as_path(),
                 self.retained.pixels(),
                 width,
                 height,
-            )
-            .map(|()| {
-                json::object([
-                    ("path", path.to_string_lossy().into_owned().into()),
-                    ("width", width.into()),
-                    ("height", height.into()),
-                ])
-            })
-            .map_err(|error| format!("write screenshot: {error}"));
+            );
+            let encode_ns = encode_started
+                .elapsed()
+                .as_nanos()
+                .min(u128::from(u64::MAX)) as u64;
+            let result = write_result
+                .map(|()| {
+                    json::object([
+                        ("path", path.to_string_lossy().into_owned().into()),
+                        ("width", width.into()),
+                        ("height", height.into()),
+                        ("encode_ns", encode_ns.into()),
+                    ])
+                })
+                .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
         }
         if let Err(error) = self.retained.copy_to(frame.pixels_mut(), width, height) {

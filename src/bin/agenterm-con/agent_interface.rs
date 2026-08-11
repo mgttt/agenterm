@@ -31,7 +31,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use agenterm_platform::{
-    checksum::IeeeCrc32, filesystem_publish::write_file_atomic, input::NamedKey,
+    checksum::{Adler32, IeeeCrc32},
+    filesystem_publish::write_file_atomic,
+    input::NamedKey,
 };
 use agenterm_ui_core::pixel::pack_xrgb_to_rgb8;
 
@@ -237,8 +239,7 @@ fn encode_png(
     crc.update(b"IDAT");
     write_idat(output, &mut crc, &[0x78, 0x01])?; // zlib, fastest/no compression
 
-    let mut adler_a = 1u32;
-    let mut adler_b = 0u32;
+    let mut adler = Adler32::new();
     let mut block = Vec::with_capacity(DEFLATE_BLOCK_MAX);
     let rgb_row_len = usize::try_from(row_bytes - 1).map_err(|_| {
         std::io::Error::new(
@@ -255,8 +256,7 @@ fn encode_png(
             &mut block,
             &mut remaining,
             &[0],
-            &mut adler_a,
-            &mut adler_b,
+            &mut adler,
         )?;
         let packed = pack_xrgb_to_rgb8(row, &mut rgb_row);
         debug_assert_eq!(packed, row.len());
@@ -266,14 +266,12 @@ fn encode_png(
             &mut block,
             &mut remaining,
             &rgb_row,
-            &mut adler_a,
-            &mut adler_b,
+            &mut adler,
         )?;
     }
     debug_assert!(block.is_empty());
     debug_assert_eq!(remaining, 0);
-    let adler = (adler_b << 16) | adler_a;
-    write_idat(output, &mut crc, &adler.to_be_bytes())?;
+    write_idat(output, &mut crc, &adler.finish().to_be_bytes())?;
     output.write_all(&crc.finish().to_be_bytes())?;
     write_png_chunk(output, *b"IEND", &[])
 }
@@ -285,14 +283,13 @@ fn push_deflate_bytes(
     block: &mut Vec<u8>,
     remaining: &mut u64,
     mut bytes: &[u8],
-    adler_a: &mut u32,
-    adler_b: &mut u32,
+    adler: &mut Adler32,
 ) -> std::io::Result<()> {
     while !bytes.is_empty() {
         let take = bytes.len().min(DEFLATE_BLOCK_MAX - block.len());
         let input = &bytes[..take];
         block.extend_from_slice(input);
-        update_adler32(adler_a, adler_b, input);
+        adler.update(input);
         *remaining -= take as u64;
         bytes = &bytes[take..];
         if block.len() == DEFLATE_BLOCK_MAX || *remaining == 0 {
@@ -310,19 +307,6 @@ fn push_deflate_bytes(
         }
     }
     Ok(())
-}
-
-fn update_adler32(a: &mut u32, b: &mut u32, bytes: &[u8]) {
-    const MODULUS: u32 = 65_521;
-    const REDUCTION_CHUNK: usize = 5_552;
-    for chunk in bytes.chunks(REDUCTION_CHUNK) {
-        for &byte in chunk {
-            *a += u32::from(byte);
-            *b += *a;
-        }
-        *a %= MODULUS;
-        *b %= MODULUS;
-    }
 }
 
 fn write_idat(output: &mut impl Write, crc: &mut IeeeCrc32, bytes: &[u8]) -> std::io::Result<()> {

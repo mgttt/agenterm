@@ -282,7 +282,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
     );
 
     let screenshot_text = gui.screenshot.to_string_lossy().into_owned();
-    cli_json(
+    let screenshot_receipt = cli_json(
         exe,
         &endpoint,
         &[
@@ -292,6 +292,12 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "--output",
             &screenshot_text,
         ],
+    );
+    assert!(
+        screenshot_receipt["encode_ns"]
+            .as_u64()
+            .is_some_and(|elapsed| elapsed > 0),
+        "screenshot receipt must expose positive encoding time: {screenshot_receipt}"
     );
     let png = fs::read(&gui.screenshot).expect("screenshot must exist after successful reply");
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
