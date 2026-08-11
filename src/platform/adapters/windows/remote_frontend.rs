@@ -21,7 +21,7 @@ use crate::ui_snapshot::{
     PROJECTION_REPLACEABLE_UI_CLIENT, SYSTEM_MENU_COPY_ID as SHARED_SYSTEM_MENU_COPY_ID,
     SYSTEM_MENU_OPEN_INSTANCE_ID as SHARED_SYSTEM_MENU_OPEN_INSTANCE_ID,
     SYSTEM_MENU_PASTE_ID as SHARED_SYSTEM_MENU_PASTE_ID,
-    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID, settings_json,
+    SYSTEM_MENU_TOGGLE_TABS_ID as SHARED_SYSTEM_MENU_TOGGLE_TABS_ID, locale_json, settings_json,
 };
 use crate::{
     client::{ipc_address, resolved_ipc_endpoint},
@@ -2999,16 +2999,14 @@ impl RemoteWindowState {
             "tab_editor": tab_editor,
             "modal": modal,
             "settings": self.settings_snapshot_value(source.active_tab_id.as_deref(), true),
-            "locale": {
-                "id": self.config.locale.as_str(),
-                "controls": {
-                    "send": self.config.locale.text(UiText::Send),
-                    "settings": self.config.locale.text(UiText::Settings),
-                    "new": self.config.locale.text(UiText::New),
-                    "apply": self.config.locale.text(UiText::Apply),
-                    "save": self.config.locale.text(UiText::Save),
-                },
-            },
+            // Shared helper, not a hand-rolled copy: this branch used to inline
+            // `id` + `controls` and had drifted from `ui_snapshot::locale_json`,
+            // which also carries `toolbar_label`. The unix frontend already
+            // calls the helper, so the two platforms disagreed about the shape
+            // of the same documented object, and remote-ui-smoke (Windows-only)
+            // read `locale.toolbar_label` and died with
+            // `rh_fail: json_path: toolbar_label`.
+            "locale": locale_json(self.config.locale),
             "feedback": {
                 "message": self.last_message,
                 "error": self.last_error,
