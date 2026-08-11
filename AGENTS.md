@@ -7,6 +7,9 @@ repository orientation at `PRD.md`, then follow its links to the owning
 `plan/`. Current source layout SSOT is [`plan/ARCHITECTURE.md`](plan/ARCHITECTURE.md);
 do not invent a second living file map in prompts or version plans.
 
+Writing or editing a script? Start at
+[Script engines](#script-engines--read-the-condensed-manual-before-writing-a-script).
+
 ## Document redaction (hard rule · never re-offend)
 
 **Incident (2026-08-08):** a handoff goal under `plan/` shipped host home absolute
@@ -154,6 +157,33 @@ prerequisite on the primary path. After parallel work returns, integrate and
 review it before validation. Run the final formatting, Clippy, unit-test,
 artifact, and full public-interface gates serially on the integrated tree so the
 result represents one reproducible source state.
+
+## Script engines — read the condensed manual before writing a script
+
+Scripts are written in **rh** (`scripts/rh/**.rh`, the AOT-transpiled Rust
+subset that all gates and tasks run on) or **qjs** (`scripts/qjs/**.js`,
+QuickJS-ng). Neither behaves the way general knowledge of Rust, Rhai, or Node
+would suggest, and the two fail in opposite ways: rh rejects constructs it
+cannot lower, while qjs accepts all of modern JavaScript and then has almost no
+capabilities. Read the relevant manual first — the failure modes below are
+recurring, not hypothetical.
+
+| Manual | Use for |
+|--------|---------|
+| [`docs/agenterm-rh-cheatsheet.md`](docs/agenterm-rh-cheatsheet.md) | rh syntax subset, native-pack vs interpreter semantics, error model, shipped surface index, debug checklist |
+| [`docs/agenterm-qjs-cheatsheet.md`](docs/agenterm-qjs-cheatsheet.md) | the four-primitive qjs host surface, module vs classical mode, import resolution, pack format |
+| [`docs/agenterm-rh-runtime.md`](docs/agenterm-rh-runtime.md) | the full interface *specification* (reference, not a how-to) |
+
+The two highest-yield rules, stated here so they are unmissable:
+
+- **After editing any `.rh`, run
+  `cargo run -p agenterm-rh --example mode_probe -- --root . <entry>` and require
+  `mode=native host_eval_int=0`.** A silent fallback to host evaluation changes
+  semantics — a missing JSON field becomes a hard failure rather than `()`, and
+  objects stop stringifying by concatenation.
+- **`rh_fail` records and continues, and `require` inside a helper only returns
+  from that helper.** A task can print `PASS: ...` and still fail. Always read
+  the *first* recorded failure.
 
 ## Development loop
 
