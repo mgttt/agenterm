@@ -240,6 +240,125 @@ unsafe fn neon_kernel(destination: *mut u32, alpha: *const u8, length: usize, fo
     }
 }
 
+/// Packs little-endian `0x00RRGGBB` pixels into tightly packed RGB8 bytes.
+/// Returns the number of pixels written; a short destination safely truncates
+/// at a complete pixel rather than writing a partial RGB triplet.
+pub fn pack_xrgb_to_rgb8(source: &[u32], destination: &mut [u8]) -> usize {
+    let length = source.len().min(destination.len() / 3);
+    if length != 0 {
+        unsafe {
+            selected_pack_kernel()(source.as_ptr(), destination.as_mut_ptr(), length);
+        }
+    }
+    length
+}
+
+type PackKernel = unsafe fn(*const u32, *mut u8, usize);
+
+#[cfg(target_arch = "x86_64")]
+fn selected_pack_kernel() -> PackKernel {
+    use std::sync::OnceLock;
+    static KERNEL: OnceLock<PackKernel> = OnceLock::new();
+    *KERNEL.get_or_init(|| {
+        if std::is_x86_feature_detected!("ssse3") {
+            ssse3_pack_kernel
+        } else {
+            scalar_pack_kernel
+        }
+    })
+}
+
+#[cfg(target_arch = "aarch64")]
+fn selected_pack_kernel() -> PackKernel {
+    neon_pack_kernel
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn selected_pack_kernel() -> PackKernel {
+    scalar_pack_kernel
+}
+
+unsafe fn scalar_pack_kernel(source: *const u32, destination: *mut u8, length: usize) {
+    for index in 0..length {
+        unsafe {
+            let pixel = *source.add(index);
+            let output = destination.add(index * 3);
+            *output = (pixel >> 16) as u8;
+            *output.add(1) = (pixel >> 8) as u8;
+            *output.add(2) = pixel as u8;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn ssse3_pack_kernel(source: *const u32, destination: *mut u8, length: usize) {
+    use core::arch::x86_64::*;
+
+    let shuffle = _mm_setr_epi8(2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, -1, -1, -1, -1);
+    let mut index = 0;
+    while index + 4 <= length {
+        unsafe {
+            let pixels = _mm_loadu_si128(source.add(index).cast());
+            let packed = _mm_shuffle_epi8(pixels, shuffle);
+            let output = destination.add(index * 3);
+            _mm_storel_epi64(output.cast(), packed);
+            output
+                .add(8)
+                .cast::<u32>()
+                .write_unaligned(_mm_cvtsi128_si32(_mm_srli_si128::<8>(packed)) as u32);
+        }
+        index += 4;
+    }
+    if index < length {
+        unsafe {
+            scalar_pack_kernel(
+                source.add(index),
+                destination.add(index * 3),
+                length - index,
+            );
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn neon_pack_kernel(source: *const u32, destination: *mut u8, length: usize) {
+    use core::arch::aarch64::*;
+
+    let shuffle = unsafe {
+        vld1q_u8(
+            [
+                2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, 0xff, 0xff, 0xff, 0xff,
+            ]
+            .as_ptr(),
+        )
+    };
+    let mut index = 0;
+    while index + 4 <= length {
+        unsafe {
+            let pixels = vld1q_u8(source.add(index).cast());
+            let packed = vqtbl1q_u8(pixels, shuffle);
+            let output = destination.add(index * 3);
+            vst1_u8(output, vget_low_u8(packed));
+            vst1_lane_u32::<0>(
+                output.add(8).cast(),
+                vreinterpret_u32_u8(vget_high_u8(packed)),
+            );
+        }
+        index += 4;
+    }
+    if index < length {
+        unsafe {
+            scalar_pack_kernel(
+                source.add(index),
+                destination.add(index * 3),
+                length - index,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +394,23 @@ mod tests {
         }
     }
 
+    fn exercise_pack(kernel: PackKernel) {
+        for length in 0..35 {
+            let source: Vec<u32> = (0..length)
+                .map(|index| 0xa500_0000 | ((index as u32 * 0x0007_1329) & 0x00ff_ffff))
+                .collect();
+            let expected: Vec<u8> = source
+                .iter()
+                .flat_map(|pixel| [(*pixel >> 16) as u8, (*pixel >> 8) as u8, *pixel as u8])
+                .collect();
+            let mut actual = vec![0xcc; length * 3];
+            unsafe {
+                kernel(source.as_ptr(), actual.as_mut_ptr(), length);
+            }
+            assert_eq!(actual, expected, "length={length}");
+        }
+    }
+
     #[test]
     fn scalar_is_the_bit_exact_reference() {
         exercise(scalar_kernel);
@@ -285,6 +421,19 @@ mod tests {
         let mut pixels = [0x0010_2030, 0x0040_5060, 0x0070_8090];
         blend_mask_xrgb(&mut pixels, &[255, 0], 0x00ab_cdef);
         assert_eq!(pixels, [0x00ab_cdef, 0x0040_5060, 0x0070_8090]);
+    }
+
+    #[test]
+    fn public_pack_api_writes_only_complete_pixels() {
+        let source = [0xaa12_3456, 0xbbab_cdef];
+        let mut output = [0xcc; 5];
+        assert_eq!(pack_xrgb_to_rgb8(&source, &mut output), 1);
+        assert_eq!(output, [0x12, 0x34, 0x56, 0xcc, 0xcc]);
+    }
+
+    #[test]
+    fn scalar_pack_is_the_byte_exact_reference() {
+        exercise_pack(scalar_pack_kernel);
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -301,9 +450,23 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn ssse3_pack_is_byte_exact_when_available() {
+        if std::is_x86_feature_detected!("ssse3") {
+            exercise_pack(ssse3_pack_kernel);
+        }
+    }
+
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn neon_is_bit_exact() {
         exercise(neon_kernel);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn neon_pack_is_byte_exact() {
+        exercise_pack(neon_pack_kernel);
     }
 }

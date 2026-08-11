@@ -253,6 +253,8 @@ pub mod webview;
 #[cfg(feature = "pty")]
 pub mod pty;
 
+pub mod checksum;
+
 #[cfg(feature = "process")]
 pub mod process;
 

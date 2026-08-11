@@ -30,7 +30,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use agenterm_platform::input::NamedKey;
+use agenterm_platform::{checksum::IeeeCrc32, input::NamedKey};
+use agenterm_ui_core::pixel::pack_xrgb_to_rgb8;
 
 // ---------------------------------------------------------------------------
 // Snapshot: introspection
@@ -261,88 +262,101 @@ fn encode_png(
 
     output.write_all(&idat_len.to_be_bytes())?;
     output.write_all(b"IDAT")?;
-    let mut crc = crc32_update(!0, b"IDAT");
+    let mut crc = IeeeCrc32::new();
+    crc.update(b"IDAT");
     write_idat(output, &mut crc, &[0x78, 0x01])?; // zlib, fastest/no compression
 
     let mut adler_a = 1u32;
     let mut adler_b = 0u32;
     let mut block = Vec::with_capacity(DEFLATE_BLOCK_MAX);
+    let rgb_row_len = usize::try_from(row_bytes - 1).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "PNG row exceeds address space",
+        )
+    })?;
+    let mut rgb_row = vec![0; rgb_row_len];
     let mut remaining = raw_len;
     for row in pixels.chunks_exact(width as usize) {
-        push_deflate_byte(
+        push_deflate_bytes(
             output,
             &mut crc,
             &mut block,
             &mut remaining,
-            0,
+            &[0],
             &mut adler_a,
             &mut adler_b,
         )?;
-        for &pixel in row {
-            for byte in [
-                ((pixel >> 16) & 0xff) as u8,
-                ((pixel >> 8) & 0xff) as u8,
-                (pixel & 0xff) as u8,
-            ] {
-                push_deflate_byte(
-                    output,
-                    &mut crc,
-                    &mut block,
-                    &mut remaining,
-                    byte,
-                    &mut adler_a,
-                    &mut adler_b,
-                )?;
-            }
-        }
+        let packed = pack_xrgb_to_rgb8(row, &mut rgb_row);
+        debug_assert_eq!(packed, row.len());
+        push_deflate_bytes(
+            output,
+            &mut crc,
+            &mut block,
+            &mut remaining,
+            &rgb_row,
+            &mut adler_a,
+            &mut adler_b,
+        )?;
     }
     debug_assert!(block.is_empty());
     debug_assert_eq!(remaining, 0);
     let adler = (adler_b << 16) | adler_a;
     write_idat(output, &mut crc, &adler.to_be_bytes())?;
-    output.write_all(&(!crc).to_be_bytes())?;
+    output.write_all(&crc.finish().to_be_bytes())?;
     write_png_chunk(output, *b"IEND", &[])
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push_deflate_byte(
+fn push_deflate_bytes(
     output: &mut impl Write,
-    crc: &mut u32,
+    crc: &mut IeeeCrc32,
     block: &mut Vec<u8>,
     remaining: &mut u64,
-    byte: u8,
+    mut bytes: &[u8],
     adler_a: &mut u32,
     adler_b: &mut u32,
 ) -> std::io::Result<()> {
-    block.push(byte);
-    *remaining -= 1;
-    *adler_a += u32::from(byte);
-    if *adler_a >= 65_521 {
-        *adler_a -= 65_521;
-    }
-    *adler_b += *adler_a;
-    if *adler_b >= 65_521 {
-        *adler_b -= 65_521;
-    }
-    if block.len() == DEFLATE_BLOCK_MAX || *remaining == 0 {
-        let len = block.len() as u16;
-        let header = [
-            u8::from(*remaining == 0),
-            len as u8,
-            (len >> 8) as u8,
-            !len as u8,
-            (!len >> 8) as u8,
-        ];
-        write_idat(output, crc, &header)?;
-        write_idat(output, crc, block)?;
-        block.clear();
+    while !bytes.is_empty() {
+        let take = bytes.len().min(DEFLATE_BLOCK_MAX - block.len());
+        let input = &bytes[..take];
+        block.extend_from_slice(input);
+        update_adler32(adler_a, adler_b, input);
+        *remaining -= take as u64;
+        bytes = &bytes[take..];
+        if block.len() == DEFLATE_BLOCK_MAX || *remaining == 0 {
+            let len = block.len() as u16;
+            let header = [
+                u8::from(*remaining == 0),
+                len as u8,
+                (len >> 8) as u8,
+                !len as u8,
+                (!len >> 8) as u8,
+            ];
+            write_idat(output, crc, &header)?;
+            write_idat(output, crc, block)?;
+            block.clear();
+        }
     }
     Ok(())
 }
 
-fn write_idat(output: &mut impl Write, crc: &mut u32, bytes: &[u8]) -> std::io::Result<()> {
+fn update_adler32(a: &mut u32, b: &mut u32, bytes: &[u8]) {
+    const MODULUS: u32 = 65_521;
+    const REDUCTION_CHUNK: usize = 5_552;
+    for chunk in bytes.chunks(REDUCTION_CHUNK) {
+        for &byte in chunk {
+            *a += u32::from(byte);
+            *b += *a;
+        }
+        *a %= MODULUS;
+        *b %= MODULUS;
+    }
+}
+
+fn write_idat(output: &mut impl Write, crc: &mut IeeeCrc32, bytes: &[u8]) -> std::io::Result<()> {
     output.write_all(bytes)?;
-    *crc = crc32_update(*crc, bytes);
+    crc.update(bytes);
     Ok(())
 }
 
@@ -353,18 +367,10 @@ fn write_png_chunk(output: &mut impl Write, kind: [u8; 4], data: &[u8]) -> std::
     output.write_all(&len.to_be_bytes())?;
     output.write_all(&kind)?;
     output.write_all(data)?;
-    let crc = crc32_update(crc32_update(!0, &kind), data);
-    output.write_all(&(!crc).to_be_bytes())
-}
-
-fn crc32_update(mut crc: u32, bytes: &[u8]) -> u32 {
-    for &byte in bytes {
-        crc ^= u32::from(byte);
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(crc & 1));
-        }
-    }
-    crc
+    let mut crc = IeeeCrc32::new();
+    crc.update(&kind);
+    crc.update(data);
+    output.write_all(&crc.finish().to_be_bytes())
 }
 
 // ---------------------------------------------------------------------------

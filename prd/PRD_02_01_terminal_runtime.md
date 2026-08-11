@@ -235,12 +235,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its x86_64 release PE is 515,584 bytes versus 1,046,528 bytes
+  host; its x86_64 release PE is currently 539,648 bytes versus 1,046,528 bytes
   for the original portable host. Its cross-platform screenshot writer uses a
-  bounded streaming stored-DEFLATE encoder with local Adler-32/CRC-32 rather
-  than linking the general PNG compression stack; screenshots trade larger
-  files for an 87,552-byte PE reduction and avoid a full-frame RGB copy, while
-  the independent `png` dev decoder owns single/multi-block interoperability.
+  bounded streaming stored-DEFLATE encoder with batched Adler-32 and a shared
+  platform IEEE CRC-32 state rather than linking the general PNG compression
+  stack. XRGB rows are packed without a full-frame RGB copy by a shared
+  byte-exact scalar kernel, x86_64 SSSE3 `pshufb`, or aarch64 NEON table
+  shuffle; CRC32C hardware instructions are not substituted for PNG's distinct
+  polynomial. The independent `png` dev decoder owns single/multi-block
+  interoperability and the GUI black box owns rendered screenshot evidence.
   Windows glyph selection and gray8 coverage now execute behind the platform
   `RasterGlyph` contract through bounded GDI calls with deterministic DC/font
   cleanup; con no longer opens or parses font files, and ab_glyph/ttf_parser
@@ -294,8 +297,9 @@ the terminal's minimum usable width.
 Tab-divider drag must remain visually responsive without synchronously resizing
 the PTY for every pointer event. Chrome follows the pointer immediately while
 the latest PTY/VT grid geometry is applied through the shared trailing-edge
-resize path. Glyph rows use the shared bit-exact architecture pixel kernel;
-unsupported architectures retain identical scalar output.
+resize path. Glyph rows and screenshot channel packing use shared bit-exact
+architecture pixel kernels; unsupported architectures retain identical scalar
+output.
 
 Completing a non-empty local terminal selection copies its normalized text to
 the system clipboard. A click without a range, application-owned mouse gesture,

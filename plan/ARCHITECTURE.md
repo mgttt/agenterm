@@ -191,6 +191,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   字节环：一次原生 read 要么整体提交、要么等待容量，关闭会唤醒生产者且已提交
   字节仍可排空。消费者按字节预算直接读取环内连续切片，不为每次 read 分配
   `Vec`；产品层只决定容量、每轮预算、解析和重调度策略。
+- 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch。XRGB→RGB8
+  截图打包在 x86_64 选择 SSSE3 `pshufb`、在 aarch64 选择 NEON table shuffle，
+  其他架构走逐字节相同的标量结果；产品编码器不得复制 CPU 探测。PNG 的 IEEE
+  CRC-32 状态机属于 `agenterm-platform::checksum`，不得误用 x86 SSE4.2/Arm CRC32C。
 - 提升顺序固定为：先在 owning 产品以单测和公开黑盒证据证明规则，再抽取无产品
   authority 的最小契约，再让两个产品消费；不得为了“复用”把 server、脚本、Fleet
   或 con 的 GUI-lifetime local-control 策略下沉到 platform。
@@ -200,13 +204,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 515,584 B，低于 512 KiB x86_64 release budget 8,704 B；
+  1,046,528 B 降到 539,648 B；当前比 512 KiB x86_64 目标高 15,360 B，主要增量是
+  后续加入的可靠 PTY 固定环与同步语义，不以回退关闭/背压正确性换体积；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
   依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。截图路径使用
-  stored-DEFLATE、手写 Adler-32/CRC-32 和约 64 KiB block buffer，避免生产链接通用
-  PNG/压缩栈；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
+  stored-DEFLATE、批量 Adler-32、platform IEEE CRC-32 和约 64 KiB block buffer，
+  避免生产链接通用 PNG/压缩栈；XRGB 每行经共享 SSSE3/NEON/标量内核打包，不产生
+  全帧 RGB 副本。接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
   Windows 字形路径通过 neutral `RasterGlyph` contract 调用 GDI
   `GetGlyphIndicesW`/`GetGlyphOutlineW`，con 不再读/解析字体文件，Windows 生产图也
   不含 ab_glyph/ttf_parser；Linux/macOS 的现有 file-font 实现下沉到 platform 的共享
@@ -220,7 +226,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   Windows resource 复用现有图标的 16/32/64 PNG frames，compact ICO 为 7,658 B，
   `.rsrc` 从 90,112 B 降到 8,704 B；build script 强制 16 KiB source-icon budget，
   Windows shell 已成功提取 32×32 associated icon。release-fast 的 con-only one-CGU
-  override把默认 staged PE 降到 543,744 B；其无 LTO 快版不得冒充 515,584 B 发布证据。
+  override把默认 staged PE 保持接近 release；无 LTO 快版不得冒充 release 发布证据。
   后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充进展。
 
 ### 6.1 跨平台任务固定执行句式
