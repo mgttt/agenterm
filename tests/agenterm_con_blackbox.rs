@@ -764,8 +764,9 @@ fn repeated_ctrl_wheel_zoom_cycles_survive_without_crashing() {
     let _guard = gui_test_guard();
     // Reproduction attempt for a user-reported bug: "Ctrl+wheel zoom past a
     // certain size and the process exits" (self-terminates, no error
-    // dialog — consistent with a panic under this binary's release profile,
-    // which sets `panic = "abort"`, not a graceful error path). An earlier
+    // dialog). The con delivery profiles now use unwind so native callback
+    // boundaries can convert a panic to typed fail-closed state; this journey
+    // still guards cumulative resize/raster state that need not panic. An earlier
     // investigation (`3d23dfde`) swept `apply_resize`/`font::raster` as
     // *independent, single-shot* unit-test calls at every font size and
     // found nothing — which cannot rule out a bug that only manifests

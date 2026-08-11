@@ -318,6 +318,9 @@ fn entry() {
     }
     let profile_directory =
         std::path::join(cargo_profile_root, profile_name).display;
+    let con_profile_name = "con-" + profile;
+    let con_profile_directory =
+        std::path::join(cargo_profile_root, con_profile_name).display;
 
     let identity = build_identity::facts(repo, profile);
     let environment = build_identity::environment(identity);
@@ -421,11 +424,15 @@ fn entry() {
     if action == "build" && cross_client == 0 && unix_bootstrap == 0 {
         let unlock_manifest_path =
             std::path::join(repo, "scripts/artifacts.json").display;
-        let deps_directory =
-            std::path::join(profile_directory, "deps").display;
-        if std::fs::exists(profile_directory) {
+        let output_directories = [profile_directory, con_profile_directory];
+        for output_directory in output_directories {
+            let deps_directory =
+                std::path::join(output_directory, "deps").display;
+            if !std::fs::exists(output_directory) {
+                continue;
+            }
             let _reaped = artifact_files::clean_locked(
-                profile_directory,
+                output_directory,
                 unlock_manifest_path
             );
             if std::fs::exists(deps_directory) {
@@ -434,14 +441,14 @@ fn entry() {
                     unlock_manifest_path
                 );
             }
-            for entry in std::fs::read_dir(profile_directory) {
+            for entry in std::fs::read_dir(output_directory) {
                 let name = "" + entry.file_name;
                 if entry.is_file
                     && name.starts_with("agenterm")
                     && name.ends_with(".exe")
                     && !name.contains(".locked-") {
                     let _parked = artifact_files::unlock_output(
-                        profile_directory,
+                        output_directory,
                         name
                     );
                     let twin = name;
@@ -478,25 +485,19 @@ fn entry() {
     let executable_entries = [];
     if cross_client != 0 || unix_bootstrap != 0 {
         executable_entries = platform_executables(repo, os_name, arch);
-        // `agenterm-con` became its own workspace package, so a bare `--bin
-        // agenterm-con` no longer resolves: cargo looks only in the default-run
-        // packages and fails with "no bin target named `agenterm-con` ... a
-        // target with a similar name exists: `agenterm-com`". That took every CI
-        // lane red at the "manifest client set" step. Name the owning packages
-        // here exactly like the non-cross branch below already does.
         cargo_args.push("--package");
         cargo_args.push("agenterm");
-        cargo_args.push("--package");
-        cargo_args.push("agenterm-con");
         for executable in executable_entries {
-            cargo_args.push("--bin");
-            cargo_args.push(cargo_binary(executable.name));
+            let executable_name = "" + executable.name;
+            if executable_name != "agenterm-con"
+                    && executable_name != "agenterm-con.exe" {
+                cargo_args.push("--bin");
+                cargo_args.push(cargo_binary(executable_name));
+            }
         }
     } else {
         cargo_args.push("--package");
         cargo_args.push("agenterm");
-        cargo_args.push("--package");
-        cargo_args.push("agenterm-con");
     }
     if action == "clippy" {
         cargo_args.push("--");
@@ -577,6 +578,117 @@ fn entry() {
     }
     std::fs::try_remove_file(stdout_path);
     std::fs::try_remove_file(stderr_path);
+
+    // `agenterm-con` promises callback panic containment, while the workbench
+    // binaries intentionally keep the workspace aborting profiles. Build the
+    // complete con dependency graph under its matching unwind profile, then
+    // merge only that executable into the ordinary staging directory.
+    let con_cargo_args = [];
+    if driver == "cargo-xwin" {
+        con_cargo_args.push("xwin");
+    }
+    con_cargo_args.push(action);
+    con_cargo_args.push("--locked");
+    con_cargo_args.push("--profile");
+    con_cargo_args.push(con_profile_name);
+    if target != "" {
+        con_cargo_args.push("--target");
+        con_cargo_args.push(target);
+    }
+    con_cargo_args.push("--package");
+    con_cargo_args.push("agenterm-con");
+    if action == "clippy" {
+        con_cargo_args.push("--");
+        con_cargo_args.push("-D");
+        con_cargo_args.push("warnings");
+    }
+
+    let con_cargo_command = std::process::command("cargo");
+    con_cargo_command.args(con_cargo_args);
+    con_cargo_command.current_dir(repo);
+    con_cargo_command.timeout(std::time::Duration::from_millis(3600000));
+    con_cargo_command.stdout_file(stdout_path);
+    if stream_stderr != 0 {
+        con_cargo_command.stderr_inherit();
+    } else {
+        con_cargo_command.stderr_file(stderr_path);
+    }
+    if environment_text.contains("\"AGENTERM_BUILD_IDENTITY_VERSION\":") != 0 {
+        con_cargo_command.env("AGENTERM_BUILD_IDENTITY_VERSION", "" + environment.AGENTERM_BUILD_IDENTITY_VERSION);
+        con_cargo_command.env("AGENTERM_BUILD_GIT_COMMIT", "" + environment.AGENTERM_BUILD_GIT_COMMIT);
+        con_cargo_command.env("AGENTERM_BUILD_GIT_DIRTY", "" + environment.AGENTERM_BUILD_GIT_DIRTY);
+        con_cargo_command.env("AGENTERM_BUILD_CARGO_LOCK_SHA256", "" + environment.AGENTERM_BUILD_CARGO_LOCK_SHA256);
+        con_cargo_command.env("AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256", "" + environment.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256);
+        con_cargo_command.env("AGENTERM_BUILD_PROFILE", "" + environment.AGENTERM_BUILD_PROFILE);
+    }
+    if environment_text.contains("\"CARGO_TARGET_DIR\":") != 0 {
+        con_cargo_command.env("CARGO_TARGET_DIR", "" + environment.CARGO_TARGET_DIR);
+    }
+    if environment_text.contains("\"RUSTC_WRAPPER\":") != 0 {
+        con_cargo_command.env("RUSTC_WRAPPER", "" + environment.RUSTC_WRAPPER);
+        con_cargo_command.env("AGENTERM_INTERNAL_RUSTC_WRAPPER", "" + environment.AGENTERM_INTERNAL_RUSTC_WRAPPER);
+        con_cargo_command.env("AGENTERM_INCREMENTAL_INVOCATION_ID", "" + environment.AGENTERM_INCREMENTAL_INVOCATION_ID);
+        con_cargo_command.env("AGENTERM_INCREMENTAL_TARGET", "" + environment.AGENTERM_INCREMENTAL_TARGET);
+        con_cargo_command.env("AGENTERM_INCREMENTAL_ROOT", "" + environment.AGENTERM_INCREMENTAL_ROOT);
+        con_cargo_command.env("AGENTERM_INCREMENTAL_STATE", "" + environment.AGENTERM_INCREMENTAL_STATE);
+    }
+    let con_cargo_result = con_cargo_command.output();
+    let con_cargo_code = con_cargo_result.exit_code;
+    if con_cargo_code != 0 {
+        if incremental_producer != 0 {
+            cleanup_incremental_state(incremental_state);
+        }
+        let con_failure_stdout = std::fs::read_to_string(stdout_path);
+        con_failure_stdout.trim();
+        if con_failure_stdout != "" {
+            print(con_failure_stdout);
+        }
+        std::fs::try_remove_file(stdout_path);
+        let con_failure_detail = "stderr_streamed_above";
+        if stream_stderr == 0 {
+            let con_failure_stderr = std::fs::read_to_string(stderr_path);
+            con_failure_stderr.trim();
+            con_failure_detail = con_failure_stderr;
+            std::fs::try_remove_file(stderr_path);
+        }
+        require(
+            con_cargo_code == 0,
+            "build_con_cargo:exit=" + con_cargo_code + ":" + con_failure_detail
+        );
+    }
+    let con_cargo_stdout = std::fs::read_to_string(stdout_path);
+    con_cargo_stdout.trim();
+    if con_cargo_stdout != "" {
+        print(con_cargo_stdout);
+    }
+    std::fs::try_remove_file(stdout_path);
+    std::fs::try_remove_file(stderr_path);
+
+    if action == "build" {
+        let con_binary_name = "agenterm-con";
+        let windows_con_source =
+            std::path::join(con_profile_directory, "agenterm-con.exe").display;
+        if direct_file(windows_con_source) != 0 {
+            con_binary_name = "agenterm-con.exe";
+        }
+        let con_source =
+            std::path::join(con_profile_directory, con_binary_name).display;
+        let con_destination =
+            std::path::join(profile_directory, con_binary_name).display;
+        require(
+            direct_file(con_source) != 0,
+            "build_con_artifact_source:" + con_source
+        );
+        std::fs::try_remove_file(con_destination);
+        require(
+            std::fs::try_copy(con_source, con_destination) == 1,
+            "build_con_artifact_copy:" + con_source
+        );
+        require(
+            direct_file(con_destination) != 0,
+            "build_con_artifact_destination:" + con_destination
+        );
+    }
 
     if action == "build" && external_target == 0 && cross_client == 0 {
         let bootstrap_name = "agenterm";

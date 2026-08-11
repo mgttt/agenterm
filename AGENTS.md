@@ -364,6 +364,13 @@ output for incremental feedback. Release-only LTO belongs in `[profile.release]`
 do not remove the con-only codegen-unit override without replacing its measured
 staged-size benefit. The staging path is one named Rhai task; do not split it
 back into one interpreter startup per artifact.
+`agenterm-con` is the deliberate panic-strategy exception: official build tasks
+compile its complete dependency graph with `con-dev`, `con-release-fast`, or
+`con-release` (`panic = "unwind"`) and merge that executable into the ordinary
+profile directory before the single staging task. Never qualify or distribute a
+direct `dev` / `release-fast` / `release` con artifact; those workspace profiles
+abort and cannot satisfy the native callback containment contract. Panic tests
+must run under the matching `con-*` profile, not only Cargo's test profile.
 Build-identity freezing first reuses an existing compatible Script worker and
 falls back to bootstrapping one only when it is absent or incompatible. Do not
 restore an unconditional pre-identity worker build: compile-time

@@ -2212,6 +2212,18 @@ mod tests {
     }
 
     #[test]
+    fn application_panic_becomes_a_typed_failure() {
+        let error = catch_application::<()>("test", || panic!("synthetic callback panic"))
+            .expect_err("callback panic must not escape the host boundary");
+        match error {
+            PixelWindowError::Failed { code, .. } => {
+                assert_eq!(code, "pixel_window_application_panic");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn default_window_messages_are_classified_before_state_borrow() {
         assert_eq!(
             classify_native_message(WM_SETTEXT),
