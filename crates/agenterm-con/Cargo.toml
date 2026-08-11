@@ -24,11 +24,13 @@ path = "../../tests/agenterm_con_control.rs"
 [dependencies]
 ab_glyph = "0.2.32"
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "font", "ime", "ipc", "pty", "serde", "window"] }
-png = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 unicode-width = "0.2"
 vt100 = "0.16"
+
+[dev-dependencies]
+png = "0.17"
 
 [target.'cfg(windows)'.dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["native-pixel-window"] }

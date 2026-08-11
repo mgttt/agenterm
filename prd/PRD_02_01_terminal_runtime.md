@@ -207,7 +207,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   requests and responses are size/time bounded, screenshot success is returned
   only after atomic PNG output, and a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 71 binary unit tests plus a Windows
+  window. The owning suite now includes 73 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
@@ -232,8 +232,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its release PE is 851,456 bytes versus 1,046,528 bytes
-  for the original portable host. Evidence is 71 binary unit tests, the isolated
+  host; its release PE is 763,904 bytes versus 1,046,528 bytes
+  for the original portable host. Its cross-platform screenshot writer uses a
+  bounded streaming stored-DEFLATE encoder with local Adler-32/CRC-32 rather
+  than linking the general PNG compression stack; screenshots trade larger
+  files for an 87,552-byte PE reduction and avoid a full-frame RGB copy, while
+  the independent `png` dev decoder owns single/multi-block interoperability.
+  Evidence is 73 binary unit tests, the isolated
   public-control GUI journey, and the Windows terminal black box at 16 passed,
   2 pre-existing ignored gaps, 0 failed. It remains non-default until native IME
   preedit/commit from IMM32, candidate anchoring in documented client

@@ -193,12 +193,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - `src/bin/agenterm-con/ui.rs` 当前是局部孵化层，只容纳无窗口后端/PTY 依赖的
   geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
   `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
-- 体积与构建隔离是两个问题：Windows 原生 pixel host 与独立
-  `crates/agenterm-con` package 已把 release PE 从 1,046,528 B 降到 851,456 B；
+- 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
+  `crates/agenterm-con` package 及受约束的流式 PNG encoder 已把 release PE 从
+  1,046,528 B 降到 763,904 B；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
-  依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。
+  依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。截图路径使用
+  stored-DEFLATE、手写 Adler-32/CRC-32 和约 64 KiB block buffer，避免生产链接通用
+  PNG/压缩栈；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
   后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充 512 KiB 达标。
 
 ### 6.1 跨平台任务固定执行句式
