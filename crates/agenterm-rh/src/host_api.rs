@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 96;
+pub const RH_CODEGEN_REVISION: u32 = 97;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -1591,6 +1591,53 @@ pub fn emit_host_runtime(out: &mut String) {
          }\n\n\
          fn rh_print(message: &str) -> INT {\n\
              rh_utility(4, message)\n\
+         }\n\n\
+         static RH_PANIC_DETAIL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);\n\n\
+         // A panic in generated code (an out-of-bounds index, a bad slice range)\n\
+         // used to escape `rh_entry`, which is `extern \"C\"` and cannot unwind, so\n\
+         // the whole script worker died with `0xC0000409` and no attribution --\n\
+         // and the default hook's `file:line` went to a stderr the gates set to\n\
+         // null. Record it here so `rh_entry` can report it as an ordinary\n\
+         // failure, and keep chaining to the previous hook so an inherited\n\
+         // stderr still shows the backtrace.\n\
+         fn rh_install_panic_reporter() {\n\
+             static ONCE: std::sync::Once = std::sync::Once::new();\n\
+             ONCE.call_once(|| {\n\
+                 let previous = std::panic::take_hook();\n\
+                 std::panic::set_hook(Box::new(move |info| {\n\
+                     let location = info\n\
+                         .location()\n\
+                         .map(|at| format!(\"{}:{}:{}\", at.file(), at.line(), at.column()))\n\
+                         .unwrap_or_else(|| String::from(\"unknown location\"));\n\
+                     if let Ok(mut slot) = RH_PANIC_DETAIL.lock() {\n\
+                         *slot = Some(format!(\"{location}: {}\", rh_panic_message(info.payload())));\n\
+                     }\n\
+                     previous(info);\n\
+                 }));\n\
+             });\n\
+         }\n\n\
+         fn rh_panic_message(payload: &(dyn std::any::Any + Send)) -> String {\n\
+             if let Some(text) = payload.downcast_ref::<&str>() {\n\
+                 return (*text).to_owned();\n\
+             }\n\
+             if let Some(text) = payload.downcast_ref::<String>() {\n\
+                 return text.clone();\n\
+             }\n\
+             String::from(\"unknown panic payload\")\n\
+         }\n\n\
+         fn rh_run_entry_reporting_panics(body: fn() -> INT) -> INT {\n\
+             rh_install_panic_reporter();\n\
+             match std::panic::catch_unwind(body) {\n\
+                 Ok(value) => value,\n\
+                 Err(payload) => {\n\
+                     let detail = RH_PANIC_DETAIL\n\
+                         .lock()\n\
+                         .ok()\n\
+                         .and_then(|mut slot| slot.take())\n\
+                         .unwrap_or_else(|| rh_panic_message(payload.as_ref()));\n\
+                     rh_fail(&format!(\"rh pack panicked: {detail}\"))\n\
+                 }\n\
+             }\n\
          }\n\n\
          fn rh_std_fs_exists_case_exact(path: &str) -> INT {\n\
              rh_utility(2, path)\n\

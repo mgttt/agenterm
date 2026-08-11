@@ -465,8 +465,10 @@ fn emit(ast: &AST, ctx: EmitCtx) -> Result<String, RhError> {
         out.push_str(
             "#[no_mangle]\npub extern \"C\" fn rh_pack_api_version() -> u32 {\n    1\n}\n\n",
         );
+        // `extern "C"` is `nounwind`: a panic escaping here aborts the process.
+        // Report it as a failure instead -- see `rh_run_entry_reporting_panics`.
         out.push_str("#[no_mangle]\npub extern \"C\" fn rh_entry() -> i64 {\n");
-        out.push_str("    rh_entry_internal() as i64\n");
+        out.push_str("    rh_run_entry_reporting_panics(rh_entry_internal) as i64\n");
         out.push_str("}\n");
     } else if !wrote_fn {
         out.push_str("pub fn rh_entry() -> Dynamic {\n    Dynamic::UNIT\n}\n");
