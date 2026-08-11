@@ -248,12 +248,14 @@ impl PixelFrameState {
     // `#[path = "../unix/window_host.rs"]` as the linux and macos ones), and it
     // calls this. Gating the method on unix while its only caller compiles
     // everywhere broke the windows build outright.
-    // The allow has to cover *all* of windows, not just the
-    // `native-pixel-window` build: the windows-aarch64 cross lane compiles this
-    // crate without that feature, so the caller is absent and `dead_code` is
-    // denied (`method begin_transient_frame is never used`). On unix it is
-    // always used, so the lint stays meaningful there.
-    #[cfg_attr(windows, allow(dead_code))]
+    // Plain `allow`, with no platform cfg: whether this has a caller depends on
+    // the target and on `native-pixel-window`, but `boundary_tests` forbids any
+    // platform cfg in `contract/` -- both `#[cfg(unix)]` and
+    // `#[cfg_attr(windows, ..)]` were rejected there ("platform cfg target must
+    // stay in selected.rs or adapters"), while dropping the attribute entirely
+    // fails the windows-aarch64 cross lane, which compiles this crate without
+    // the caller and denies `dead_code`.
+    #[allow(dead_code, reason = "caller presence is target- and feature-dependent")]
     pub(crate) fn begin_transient_frame(&mut self) {
         self.advance_generation();
     }
