@@ -114,6 +114,17 @@ pub(crate) mod filesystem_cleanup;
 #[path = "adapters/macos/filesystem_cleanup.rs"]
 pub(crate) mod filesystem_cleanup;
 
+#[cfg(all(feature = "filesystem-publish", windows))]
+#[path = "adapters/windows/filesystem_publish.rs"]
+pub(crate) mod filesystem_publish;
+
+#[cfg(all(
+    feature = "filesystem-publish",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/filesystem_publish.rs"]
+pub(crate) mod filesystem_publish;
+
 #[cfg(all(
     windows,
     any(feature = "cache-hierarchy", feature = "processor-topology")

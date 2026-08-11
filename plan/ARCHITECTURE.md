@@ -195,6 +195,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   截图打包在 x86_64 选择 SSSE3 `pshufb`、在 aarch64 选择 NEON table shuffle，
   其他架构走逐字节相同的标量结果；产品编码器不得复制 CPU 探测。PNG 的 IEEE
   CRC-32 状态机属于 `agenterm-platform::checksum`，不得误用 x86 SSE4.2/Arm CRC32C。
+- 原子文件发布由 `agenterm-platform::filesystem_publish::write_file_atomic` 统一
+  持有：同目录独占临时文件、文件 sync、原生替换、父目录 durability barrier 和
+  失败清理。Windows adapter 使用 `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`
+  并有界重试共享冲突；Linux/macOS 使用同目录 `rename` 后 fsync 父目录。错误必须
+  区分未发布与“完整文件已发布但 durability 未确认”，产品不得复制 `.tmp` 规则。
 - 提升顺序固定为：先在 owning 产品以单测和公开黑盒证据证明规则，再抽取无产品
   authority 的最小契约，再让两个产品消费；不得为了“复用”把 server、脚本、Fleet
   或 con 的 GUI-lifetime local-control 策略下沉到 platform。
@@ -204,15 +209,17 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 539,648 B；当前比 512 KiB x86_64 目标高 15,360 B，主要增量是
-  后续加入的可靠 PTY 固定环与同步语义，不以回退关闭/背压正确性换体积；
+  1,046,528 B 降到 548,864 B；当前比 512 KiB x86_64 目标高 24,576 B，主要增量是
+  后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
+  背压或覆盖/durability 正确性换体积；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
   依赖原本已被 linker 裁掉，也证明关键系统交互无需引入大型框架。截图路径使用
   stored-DEFLATE、批量 Adler-32、platform IEEE CRC-32 和约 64 KiB block buffer，
   避免生产链接通用 PNG/压缩栈；XRGB 每行经共享 SSSE3/NEON/标量内核打包，不产生
-  全帧 RGB 副本。接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
+  全帧 RGB 副本。快照和截图通过 platform 原子文件发布覆盖已有目标，不再共享固定
+  `.tmp` 名；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
   Windows 字形路径通过 neutral `RasterGlyph` contract 调用 GDI
   `GetGlyphIndicesW`/`GetGlyphOutlineW`，con 不再读/解析字体文件，Windows 生产图也
   不含 ab_glyph/ttf_parser；Linux/macOS 的现有 file-font 实现下沉到 platform 的共享

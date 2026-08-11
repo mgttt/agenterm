@@ -1,12 +1,297 @@
 //! Recoverable publication of caller-prepared filesystem directories.
 
 use std::{
+    ffi::OsString,
     fmt, fs, io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
 static BACKUP_SERIAL: AtomicU64 = AtomicU64::new(0);
+static FILE_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum FilePublishErrorKind {
+    InvalidInput,
+    Inspect,
+    Create,
+    Write,
+    SyncFile,
+    Install,
+    Durability,
+}
+
+#[derive(Debug)]
+pub struct FilePublishError {
+    kind: FilePublishErrorKind,
+    detail: String,
+    published: bool,
+}
+
+impl FilePublishError {
+    pub const fn kind(&self) -> FilePublishErrorKind {
+        self.kind
+    }
+
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+
+    /// True only when replacement succeeded but the parent durability barrier
+    /// failed. The destination then contains the complete new file even though
+    /// crash durability could not be confirmed.
+    pub const fn published(&self) -> bool {
+        self.published
+    }
+
+    fn new(kind: FilePublishErrorKind, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+            published: false,
+        }
+    }
+
+    fn after_publish(mut self) -> Self {
+        self.published = true;
+        self
+    }
+}
+
+impl fmt::Display for FilePublishError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for FilePublishError {}
+
+impl From<FilePublishError> for io::Error {
+    fn from(error: FilePublishError) -> Self {
+        let kind = if error.kind == FilePublishErrorKind::InvalidInput {
+            io::ErrorKind::InvalidInput
+        } else {
+            io::ErrorKind::Other
+        };
+        Self::new(kind, error)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FilePublishOutcome {
+    replaced_existing: bool,
+}
+
+impl FilePublishOutcome {
+    pub const fn replaced_existing(self) -> bool {
+        self.replaced_existing
+    }
+}
+
+/// Atomically installs a caller-prepared regular file over `destination`.
+///
+/// Both entries must have one physical parent. Success consumes `staging` and
+/// guarantees that observers see either the complete old file or the complete
+/// new file. A `Durability` error reports `published() == true`: replacement
+/// completed, but the Unix parent-directory sync failed. Windows replacement
+/// uses the adapter's write-through barrier.
+pub fn publish_file(
+    staging: &Path,
+    destination: &Path,
+) -> Result<FilePublishOutcome, FilePublishError> {
+    let destination = normalized_destination(destination)?;
+    let destination_parent = destination.parent().expect("normalized parent");
+    let staging_metadata = fs::symlink_metadata(staging).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Inspect,
+            format!("inspect prepared file failed: {error}"),
+        )
+    })?;
+    if !staging_metadata.file_type().is_file() || staging_metadata.file_type().is_symlink() {
+        return Err(FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "staging must be a real regular file entry",
+        ));
+    }
+    let staging_parent = staging.parent().filter(|path| !path.as_os_str().is_empty());
+    let staging_parent = fs::canonicalize(staging_parent.unwrap_or_else(|| Path::new(".")))
+        .map_err(|error| {
+            FilePublishError::new(
+                FilePublishErrorKind::Inspect,
+                format!("inspect staging parent failed: {error}"),
+            )
+        })?;
+    if staging_parent != destination_parent {
+        return Err(FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "staging and destination must share one physical parent directory",
+        ));
+    }
+    if fs::canonicalize(staging).ok().as_deref() == Some(destination.as_path()) {
+        return Err(FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "staging and destination must be distinct file entries",
+        ));
+    }
+    let replaced_existing = match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            true
+        }
+        Ok(_) => {
+            return Err(FilePublishError::new(
+                FilePublishErrorKind::InvalidInput,
+                "an existing destination must be a real regular file entry",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(FilePublishError::new(
+                FilePublishErrorKind::Inspect,
+                format!("inspect destination file failed: {error}"),
+            ));
+        }
+    };
+    publish_file_with(
+        staging,
+        &destination,
+        destination_parent,
+        replaced_existing,
+        crate::selected::filesystem_publish::replace_file,
+        crate::selected::filesystem_publish::sync_parent,
+    )
+}
+
+/// Creates, writes, synchronizes and atomically publishes a unique sibling
+/// temporary file. The temporary is removed on every pre-publication failure.
+pub fn write_file_atomic<T>(
+    destination: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<T>,
+) -> Result<T, FilePublishError> {
+    let destination = normalized_destination(destination)?;
+    let parent = destination.parent().expect("normalized parent");
+    let name = destination.file_name().expect("normalized file name");
+    let (temporary, mut file) = create_temporary(parent, name)?;
+    let mut cleanup = TemporaryFile::new(temporary.clone());
+    let value = write(&mut file).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Write,
+            format!("write prepared file failed: {error}"),
+        )
+    })?;
+    file.sync_all().map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::SyncFile,
+            format!("sync prepared file failed: {error}"),
+        )
+    })?;
+    drop(file);
+    publish_file(&temporary, &destination)?;
+    cleanup.disarm();
+    Ok(value)
+}
+
+fn normalized_destination(destination: &Path) -> Result<PathBuf, FilePublishError> {
+    let name = destination.file_name().ok_or_else(|| {
+        FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "destination requires a final file name",
+        )
+    })?;
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = fs::canonicalize(parent).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Inspect,
+            format!("inspect destination parent failed: {error}"),
+        )
+    })?;
+    Ok(parent.join(name))
+}
+
+fn create_temporary(
+    parent: &Path,
+    name: &std::ffi::OsStr,
+) -> Result<(PathBuf, fs::File), FilePublishError> {
+    for _ in 0..64 {
+        let serial = FILE_SERIAL.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = OsString::from(".");
+        temporary_name.push(name);
+        temporary_name.push(format!(".platform-write-{}-{serial}", std::process::id()));
+        let temporary = parent.join(temporary_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(FilePublishError::new(
+                    FilePublishErrorKind::Create,
+                    format!("create prepared file failed: {error}"),
+                ));
+            }
+        }
+    }
+    Err(FilePublishError::new(
+        FilePublishErrorKind::Create,
+        "unique temporary file attempts exhausted",
+    ))
+}
+
+fn publish_file_with<R, S>(
+    staging: &Path,
+    destination: &Path,
+    parent: &Path,
+    replaced_existing: bool,
+    replace: R,
+    sync_parent: S,
+) -> Result<FilePublishOutcome, FilePublishError>
+where
+    R: FnOnce(&Path, &Path) -> io::Result<()>,
+    S: FnOnce(&Path) -> io::Result<()>,
+{
+    replace(staging, destination).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Install,
+            format!("install prepared file failed: {error}"),
+        )
+    })?;
+    sync_parent(parent).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Durability,
+            format!("sync published file parent failed: {error}"),
+        )
+        .after_publish()
+    })?;
+    Ok(FilePublishOutcome { replaced_existing })
+}
+
+struct TemporaryFile {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TemporaryFile {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -319,6 +604,94 @@ mod tests {
         fs::create_dir(&staging).expect("create staging");
         fs::write(staging.join("value"), value).expect("write staging value");
         staging
+    }
+
+    #[test]
+    fn atomic_file_writer_replaces_and_leaves_no_temporary() {
+        let root = fixture("file-replace");
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("snapshot.json");
+        let first = write_file_atomic(&destination, |file| {
+            io::Write::write_all(file, b"first")?;
+            Ok(5)
+        })
+        .expect("first publish");
+        assert_eq!(first, 5);
+        write_file_atomic(&destination, |file| io::Write::write_all(file, b"second"))
+            .expect("replacement publish");
+        assert_eq!(fs::read(&destination).unwrap(), b"second");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        crate::filesystem_cleanup::remove_tree(&root).unwrap();
+    }
+
+    #[test]
+    fn failed_file_writer_preserves_destination_and_cleans_temporary() {
+        let root = fixture("file-write-failure");
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("snapshot.json");
+        fs::write(&destination, b"old").unwrap();
+        let error = write_file_atomic(&destination, |file| -> io::Result<()> {
+            io::Write::write_all(file, b"partial")?;
+            Err(io::Error::other("injected"))
+        })
+        .expect_err("writer failure");
+        assert_eq!(error.kind(), FilePublishErrorKind::Write);
+        assert!(!error.published());
+        assert_eq!(fs::read(&destination).unwrap(), b"old");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        crate::filesystem_cleanup::remove_tree(&root).unwrap();
+    }
+
+    #[test]
+    fn durability_failure_reports_that_complete_file_was_published() {
+        let root = fixture("file-durability");
+        fs::create_dir_all(&root).unwrap();
+        let staging = root.join("staging");
+        let destination = root.join("live");
+        fs::write(&staging, b"new").unwrap();
+        fs::write(&destination, b"old").unwrap();
+        let error = publish_file_with(
+            &staging,
+            &destination,
+            &root,
+            true,
+            |from, to| fs::rename(from, to),
+            |_parent| Err(io::Error::other("injected")),
+        )
+        .expect_err("durability failure");
+        assert_eq!(error.kind(), FilePublishErrorKind::Durability);
+        assert!(error.published());
+        assert_eq!(fs::read(&destination).unwrap(), b"new");
+        assert!(!staging.exists());
+        crate::filesystem_cleanup::remove_tree(&root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_readers_observe_only_complete_atomic_values() {
+        let root = fixture("file-reader");
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("live");
+        write_file_atomic(&destination, |file| io::Write::write_all(file, b"left"))
+            .expect("initial publish");
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let writer_barrier = &barrier;
+            let writer_path = &destination;
+            scope.spawn(move || {
+                writer_barrier.wait();
+                for index in 0..64 {
+                    let value: &[u8] = if index % 2 == 0 { b"right" } else { b"left" };
+                    write_file_atomic(writer_path, |file| io::Write::write_all(file, value))
+                        .expect("concurrent publish");
+                }
+            });
+            barrier.wait();
+            for _ in 0..256 {
+                let value = fs::read(&destination).expect("read atomic value");
+                assert!(value == b"left" || value == b"right");
+            }
+        });
+        crate::filesystem_cleanup::remove_tree(&root).unwrap();
     }
 
     #[cfg(unix)]

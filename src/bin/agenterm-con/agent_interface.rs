@@ -30,7 +30,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use agenterm_platform::{checksum::IeeeCrc32, input::NamedKey};
+use agenterm_platform::{
+    checksum::IeeeCrc32, filesystem_publish::write_file_atomic, input::NamedKey,
+};
 use agenterm_ui_core::pixel::pack_xrgb_to_rgb8;
 
 // ---------------------------------------------------------------------------
@@ -99,13 +101,7 @@ pub struct ScreenSnapshot {
 /// for anything polling a file that's rewritten many times a second.
 pub fn write_snapshot_atomic(path: &Path, snapshot: &ScreenSnapshot) -> std::io::Result<()> {
     let json = super::json::to_vec_pretty(&snapshot_json(snapshot));
-    let tmp_path = tmp_sibling(path);
-    {
-        let mut file = std::fs::File::create(&tmp_path)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
-    }
-    std::fs::rename(&tmp_path, path)
+    write_file_atomic(path, |file| file.write_all(&json)).map_err(std::io::Error::from)
 }
 
 fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
@@ -152,24 +148,6 @@ fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
     ])
 }
 
-/// A temp path in the same directory as `path`, so the later rename is
-/// guaranteed atomic (same filesystem/volume) rather than an OS-dependent
-/// maybe-atomic cross-directory move.
-fn tmp_sibling(path: &Path) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .map(|name| {
-            let mut owned = name.to_os_string();
-            owned.push(".tmp");
-            owned
-        })
-        .unwrap_or_else(|| "snapshot.tmp".into());
-    match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.join(file_name),
-        _ => PathBuf::from(file_name),
-    }
-}
-
 /// Encodes an XRGB (`0x00RRGGBB`) pixel buffer as PNG and writes it
 /// atomically (temp file + rename), the same guarantee `write_snapshot_atomic`
 /// gives text state: a poller must never observe a truncated image.
@@ -206,19 +184,12 @@ pub fn write_png_atomic(
             "PNG pixel count does not match dimensions",
         ));
     }
-    let tmp_path = tmp_sibling(path);
-    let result = (|| {
-        let file = std::fs::File::create(&tmp_path)?;
+    write_file_atomic(path, |file| {
         let mut file = std::io::BufWriter::new(file);
         encode_png(&mut file, pixels, width, height)?;
-        file.flush()?;
-        file.get_ref().sync_all()
-    })();
-    if let Err(error) = result {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(error);
-    }
-    std::fs::rename(&tmp_path, path)
+        file.flush()
+    })
+    .map_err(std::io::Error::from)
 }
 
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
@@ -863,6 +834,7 @@ mod tests {
         let path = dir.join("shot.png");
         // 2x2, XRGB: red, green, blue, white.
         let pixels = [0x00FF_0000u32, 0x0000_FF00, 0x0000_00FF, 0x00FF_FFFF];
+        write_png_atomic(&path, &[0; 4], 2, 2).expect("write initial png");
         write_png_atomic(&path, &pixels, 2, 2).expect("write png");
 
         let bytes = std::fs::read(&path).expect("read png back");
@@ -1105,13 +1077,5 @@ mod tests {
         assert_eq!(value["selection"][0]["col"], 0);
         assert_eq!(value["selection"][1]["col"], 4);
         assert_eq!(value["child_alive"], true);
-    }
-
-    #[test]
-    fn tmp_sibling_stays_in_the_same_directory_for_an_atomic_rename() {
-        let path = Path::new("/some/dir/snapshot.json");
-        let tmp = tmp_sibling(path);
-        assert_eq!(tmp.parent(), Some(Path::new("/some/dir")));
-        assert_eq!(tmp.file_name().unwrap(), "snapshot.json.tmp");
     }
 }

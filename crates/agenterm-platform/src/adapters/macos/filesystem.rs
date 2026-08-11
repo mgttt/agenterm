@@ -8,19 +8,6 @@ pub fn user_home_directory() -> Result<PathBuf, FilesystemError> {
     crate::filesystem::home_directory_from_env(std::env::var_os("HOME"))
 }
 
-#[cfg(feature = "filesystem")]
-pub fn replace_file(
-    source: &std::path::Path,
-    destination: &std::path::Path,
-) -> std::io::Result<()> {
-    std::fs::rename(source, destination)
-}
-
-#[cfg(feature = "filesystem")]
-pub fn sync_parent(parent: &std::path::Path) -> std::io::Result<()> {
-    std::fs::File::open(parent)?.sync_all()
-}
-
 pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
     let home = user_home_directory()?;
     let application_support = home.join("Library").join("Application Support");

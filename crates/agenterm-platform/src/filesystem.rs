@@ -110,12 +110,12 @@ pub fn lexical_normalize(path: &Path) -> PathBuf {
 
 #[cfg(feature = "filesystem")]
 pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    selected::filesystem::replace_file(source, destination)
+    selected::filesystem_publish::replace_file(source, destination)
 }
 
 #[cfg(feature = "filesystem")]
 pub fn sync_parent(parent: &Path) -> io::Result<()> {
-    selected::filesystem::sync_parent(parent)
+    selected::filesystem_publish::sync_parent(parent)
 }
 
 /// Restrict an existing directory to the current user.

@@ -205,9 +205,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   press/release/move/click, `send-wheel`, and bounded `wait-text`. The CLI
   connects only to an explicitly configured local pipe or Unix-socket endpoint;
   requests and responses are size/time bounded, screenshot success is returned
-  only after atomic PNG output, and a malformed request or failed child may
+  only after atomic PNG output has crossed the platform durability barrier, and
+  a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 77 binary unit tests plus a Windows
+  window. The owning suite now includes 76 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
@@ -235,7 +236,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its x86_64 release PE is currently 539,648 bytes versus 1,046,528 bytes
+  host; its x86_64 release PE is currently 548,864 bytes versus 1,046,528 bytes
   for the original portable host. Its cross-platform screenshot writer uses a
   bounded streaming stored-DEFLATE encoder with batched Adler-32 and a shared
   platform IEEE CRC-32 state rather than linking the general PNG compression
@@ -244,6 +245,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   shuffle; CRC32C hardware instructions are not substituted for PNG's distinct
   polynomial. The independent `png` dev decoder owns single/multi-block
   interoperability and the GUI black box owns rendered screenshot evidence.
+  Snapshot and screenshot publication use one platform-owned atomic-file
+  contract: an exclusively created sibling is synchronized then replaced with
+  Windows `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)` or Unix rename plus
+  parent-directory fsync. Concurrent readers observe only a complete old or new
+  value; pre-publication failures remove the sibling, while a post-replacement
+  durability failure explicitly reports that publication already occurred.
   Windows glyph selection and gray8 coverage now execute behind the platform
   `RasterGlyph` contract through bounded GDI calls with deterministic DC/font
   cleanup; con no longer opens or parses font files, and ab_glyph/ttf_parser
