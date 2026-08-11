@@ -89,7 +89,7 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；`server` = 无窗权威；`cli` = 共享控制平面入口 |
 | `agenterm-com` | `src/bin/agenterm-com.rs` | 极简 Windows Console-subsystem 转发器；交付名 `agenterm.com`，同步等待 `agenterm.exe` |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
-| `agenterm-con` | `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 最小控制台宿主（conhost 等价物；单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；局部纯 UI 规则与适配状态机分离） |
+| `agenterm-con` | `crates/agenterm-con/Cargo.toml` + `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 独立最小依赖 package；conhost 等价物（单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；局部纯 UI 规则与适配状态机分离） |
 
 `agenterm-con` 的窗口机制仍只能从 `agenterm-platform` 选择。Windows 已有
 `native-pixel-window` 实验 host：直接使用 User32 消息泵、GDI XRGB buffer 与
@@ -191,10 +191,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - `src/bin/agenterm-con/ui.rs` 当前是局部孵化层，只容纳无窗口后端/PTY 依赖的
   geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
   `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
-- 体积与构建隔离是两个问题：Windows 原生 pixel host 已把 release PE 从
-  1,046,528 B 降到 848,896 B，但根 package 的 con 构建仍会编译脚本/HTTP/TLS 等
-  无关依赖。下一边界是独立 package 复用 platform/core crate，不以 strip 掩盖依赖
-  污染，也不把 server/script 能力链接进 con。
+- 体积与构建隔离是两个问题：Windows 原生 pixel host 与独立
+  `crates/agenterm-con` package 已把 release PE 从 1,046,528 B 降到 848,384 B；
+  con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
+  任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
+  PE 只比拆包前 native 实验再少 512 B，证明未使用根依赖原本已被 linker 裁掉。
+  后续体积工作必须继续归因实际链接段，不以 strip 或 package 拆分冒充 512 KiB 达标。
 
 ### 6.1 跨平台任务固定执行句式
 

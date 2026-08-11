@@ -50,6 +50,7 @@ mod native_pixel_window;
 #[cfg(all(
     feature = "input",
     feature = "ime",
+    feature = "portable-pixel-window",
     not(feature = "native-pixel-window")
 ))]
 #[path = "../unix/window_host.rs"]

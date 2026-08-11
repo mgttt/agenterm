@@ -15,7 +15,7 @@ use windows_sys::Win32::{
         CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
         DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, GetStockObject, InvalidateRect,
         LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY, ScreenToClient, SelectObject,
-        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, UpdateWindow, WHITE_BRUSH,
+        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, WHITE_BRUSH,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
@@ -48,6 +48,9 @@ use windows_sys::Win32::{
         },
     },
 };
+
+#[cfg(feature = "screenshot")]
+use windows_sys::Win32::Graphics::Gdi::UpdateWindow;
 
 use crate::{
     contract::input::{

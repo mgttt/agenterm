@@ -612,6 +612,13 @@ integrated validation recorded below):
   black box, and 16 active terminal black-box cases with zero failures. This is
   not yet the selected production host: IME preedit/candidate, pointer capture
   loss, DPI suggested-rect and human input acceptance remain explicit gaps.
+- [x] Pixel-window host selection is now a real Cargo boundary rather than a
+  source-only cfg. `window` owns the typed contract and OS API surface,
+  `portable-pixel-window` owns winit/softbuffer, and `native-pixel-window` owns
+  the Windows User32/GDI implementation. The root workbench explicitly selects
+  portable behavior; the independent con package selects native on Windows and
+  portable on Linux/macOS. Cargo's resolved normal graph proves the Windows con
+  path contains neither portable GUI dependency.
 - [x] The Windows remote GUI now consumes the frozen typed `control_window`
   boundary. The dedicated neutral host owns Win32 class/window/child
   controls, pre-translation key preview, WndProc/message loop, focus/capture,

@@ -2,6 +2,7 @@ use crate::contract::input::ModifierState;
 
 // Shared winit key-event normalization (winit types → platform NormalizedKeyEvent).
 // Included here so the pixel-window host can run on Windows too.
+#[cfg(feature = "portable-pixel-window")]
 #[path = "../unix/input.rs"]
 mod unix;
 

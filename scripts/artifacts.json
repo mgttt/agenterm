@@ -32,6 +32,16 @@
         "--version"
       ],
       "release_budget_bytes": 4194304
+    },
+    {
+      "name": "agenterm-con.exe",
+      "role": "lightweight-terminal-host",
+      "pe_subsystem": 2,
+      "documentation_role": "standalone multi-terminal tree without server or script runtime",
+      "offline_probe": [
+        "--version"
+      ],
+      "release_budget_bytes": 1048576
     }
   ],
   "platforms": [
@@ -71,6 +81,16 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-con.exe",
+          "role": "lightweight-terminal-host",
+          "pe_subsystem": 2,
+          "documentation_role": "standalone multi-terminal tree without server or script runtime",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1048576
         }
       ]
     },
@@ -110,6 +130,16 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-con.exe",
+          "role": "lightweight-terminal-host",
+          "pe_subsystem": 2,
+          "documentation_role": "standalone multi-terminal tree without server or script runtime",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1048576
         }
       ]
     },
@@ -136,6 +166,15 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-con",
+          "role": "lightweight-terminal-host",
+          "documentation_role": "standalone multi-terminal tree without server or script runtime",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1572864
         }
       ]
     },
@@ -162,6 +201,15 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-con",
+          "role": "lightweight-terminal-host",
+          "documentation_role": "standalone multi-terminal tree without server or script runtime",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1572864
         }
       ]
     },
@@ -188,6 +236,15 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-con",
+          "role": "lightweight-terminal-host",
+          "documentation_role": "standalone multi-terminal tree without server or script runtime",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1572864
         }
       ]
     },
@@ -214,6 +271,15 @@
             "--version"
           ],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-con",
+          "role": "lightweight-terminal-host",
+          "documentation_role": "standalone multi-terminal tree without server or script runtime",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1572864
         }
       ]
     }

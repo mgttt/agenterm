@@ -60,6 +60,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "agenterm-con"
+version = "0.1.16"
+dependencies = [
+ "ab_glyph",
+ "agenterm-platform",
+ "png",
+ "serde",
+ "serde_json",
+ "unicode-width",
+ "vt100",
+ "winresource",
+]
+
+[[package]]
 name = "agenterm-lua"
 version = "0.1.0"
 dependencies = [

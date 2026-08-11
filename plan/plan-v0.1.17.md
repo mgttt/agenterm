@@ -71,7 +71,7 @@ CLI 请求与输出都有尺寸、数量、时限边界；解析错误、无效�
 | C-con-cli | [x] | 固定 GUI-lifetime `cli --control ENDPOINT` 已实现 `list-tabs`、new/select/close、capture、screenshot、send-text、send-keys、send-mouse、send-wheel、wait-text、perf-stats/reset-perf-stats；Windows 命名管道黑盒覆盖多 PTY 隔离、后台 2000 行压力、截图、异常请求、父节点提升和清理。PTY 队列有界、wake 合并且每 GUI turn 有解析预算，GUI 子系统的 pipe stdout 也已修复 | 不复用主程序 mux/control plane |
 | C-con-font | [ ] | 采用主程序同一原生字体/格宽度量路径，默认优先新宋体并验证 ASCII 1 格、CJK/Unicode 宽字符 2 格 | 不在 custom rasterizer 中混拼字体 face |
 | C-con-harness | [ ] | Windows 黑盒覆盖高输出、异常 ANSI/Unicode、重入输入、并发 CLI、建关标签、resize/DPI 风暴、IME/鼠标异常；进程与非目标会话持续可用 | 不承诺不可证明的“绝对不崩” |
-| C-con-native-host | [~] | `native-pixel-window` 实验路径以 User32/GDI 实现同一 platform contract；70 单测、control GUI 黑盒、terminal 黑盒 16 pass/2 known-gap ignored/0 fail，release PE 由 1,046,528 B 降至 848,896 B。待补 IME preedit/candidate、capture-loss、DPI suggested-rect 与人工输入验收后才可切默认 | 不把 Win32 泄漏进产品层；不宣称已达 512 KiB |
+| C-con-native-host | [~] | `crates/agenterm-con` 已成为独立 package，Windows 默认以 User32/GDI 实现同一 platform contract，Linux/macOS 默认 portable；resolved normal graph 59 行且无 winit/softbuffer/Rhai/HTTP/TLS/script engine。70 单测、control GUI 黑盒、terminal 黑盒 16 pass/2 known-gap ignored/0 fail；release PE 由 1,046,528 B 降至 848,384 B。待补 IME preedit/candidate、capture-loss、DPI suggested-rect 与人工输入验收 | 不把 Win32 泄漏进产品层；不宣称已达 512 KiB |
 - rh `shipped_surfaces.rs` 声明的 76 条 fleet.* 中有 32 条在 host `OPERATION_CATALOG` 不存在（stale 声明）
 - `agenterm cli script` 已弃用并在 v0.1.17 待删除；公开引擎入口统一为
   `agenterm rh|lua|qjs|sql`，现存调用者、help 与 catalog 仍待迁移

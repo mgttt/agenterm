@@ -482,6 +482,11 @@ fn entry() {
             cargo_args.push("--bin");
             cargo_args.push(cargo_binary(executable.name));
         }
+    } else {
+        cargo_args.push("--package");
+        cargo_args.push("agenterm");
+        cargo_args.push("--package");
+        cargo_args.push("agenterm-con");
     }
     if action == "clippy" {
         cargo_args.push("--");

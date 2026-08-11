@@ -53,7 +53,7 @@ fn main() {
     // it costs the icon, nothing else).
     #[cfg(windows)]
     {
-        const ICON_BINS: &[&str] = &["agenterm", "agenterm-cc", "agenterm-con"];
+        const ICON_BINS: &[&str] = &["agenterm", "agenterm-cc"];
         let me = std::env::current_exe().expect("build script path");
         let output = std::process::Command::new(me)
             .env("AGENTERM_BUILDRS_RESOURCE_CHILD", "1")
