@@ -211,6 +211,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
+  PTY delivery is bounded per session to 128 queued chunks and 128 KiB of
+  parsing per GUI turn; reader wakes are coalesced, inactive tabs are drained
+  without forcing unrelated active-tab paints, and remaining backlog yields to
+  input before self-scheduling another turn. `perf-stats` and
+  `reset-perf-stats` expose frame latency plus PTY drain/yield counters through
+  the same public CLI for repeatable interactive profiling.
 - [x] explicit tab/server close cancels I/O, closes ConPTY ownership, and
   waits within a 750 ms bound for the process-wait and reader workers; success
   is reported only after both workers finish, while an incomplete shutdown

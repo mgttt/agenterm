@@ -207,6 +207,8 @@ const ITALIC_SHEAR: f32 = 0.21;
 
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
+const PTY_QUEUE_CHUNKS: usize = 128;
+const PTY_DRAIN_BUDGET_BYTES: usize = 128 * 1024;
 
 /// Logical (DIP) font size. conhost defaults to ~12px at 96 DPI, but
 /// ab_glyph outline metrics tend to produce taller cells than GDI, so we
@@ -488,6 +490,7 @@ A standalone console host (conhost equivalent). No server, mux, or Fleet.
 Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   agenterm-con --control pipe:\\\\.\\pipe\\agenterm-con-test
   agenterm-con cli --control pipe:\\\\.\\pipe\\agenterm-con-test list-tabs
+  ... perf-stats | reset-perf-stats
   ... new-tab [--parent TAB]
   ... select-tab --target TAB | close-tab --target TAB
   ... capture-pane [--target TAB] [--max-bytes N]
@@ -629,6 +632,9 @@ struct ConTerminal {
 
     /// Receives PTY output chunks from the reader thread.
     pty_rx: mpsc::Receiver<Vec<u8>>,
+    /// Coalesces reader notifications so a burst produces one GUI wake until
+    /// the event thread has consumed its bounded share.
+    pty_wake_pending: Arc<AtomicBool>,
 
     /// Signaled once by the waiter thread when the child process actually
     /// exits (via Windows' process-exit notification, not PTY EOF — see
@@ -723,6 +729,7 @@ struct ConApp {
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
     control_waits: Vec<PendingControlWait>,
+    perf_stats: PerfStats,
 }
 
 struct PendingControlWait {
@@ -730,6 +737,49 @@ struct PendingControlWait {
     text: String,
     deadline: Instant,
     reply: control::ReplySender,
+}
+
+#[derive(Default)]
+struct PerfStats {
+    frames: u64,
+    render_total_us: u128,
+    render_last_us: u64,
+    render_max_us: u64,
+    pty_drained_bytes: u64,
+    pty_budget_yields: u64,
+}
+
+impl PerfStats {
+    fn record_frame(&mut self, elapsed: Duration) {
+        let micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+        self.frames = self.frames.saturating_add(1);
+        self.render_total_us = self.render_total_us.saturating_add(u128::from(micros));
+        self.render_last_us = micros;
+        self.render_max_us = self.render_max_us.max(micros);
+    }
+
+    fn json(&self) -> serde_json::Value {
+        let average = if self.frames == 0 {
+            0
+        } else {
+            (self.render_total_us / u128::from(self.frames)).min(u128::from(u64::MAX)) as u64
+        };
+        serde_json::json!({
+            "frames": self.frames,
+            "render_last_us": self.render_last_us,
+            "render_average_us": average,
+            "render_max_us": self.render_max_us,
+            "pty_drained_bytes": self.pty_drained_bytes,
+            "pty_budget_yields": self.pty_budget_yields,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct DrainOutcome {
+    changed: bool,
+    backlog: bool,
+    bytes: usize,
 }
 
 impl ConApp {
@@ -748,6 +798,7 @@ impl ConApp {
             control_endpoint,
             control_server: None,
             control_waits: Vec::new(),
+            perf_stats: PerfStats::default(),
         }
     }
 
@@ -1086,6 +1137,11 @@ impl ConApp {
                     .collect();
                 Ok(serde_json::json!({ "tabs": tabs }))
             }
+            CliCommand::PerfStats => Ok(self.perf_stats.json()),
+            CliCommand::ResetPerfStats => {
+                self.perf_stats = PerfStats::default();
+                Ok(serde_json::json!({ "reset": true }))
+            }
             CliCommand::NewTab { parent } => (|| {
                 if let Some(parent) = parent {
                     self.control_target(Some(parent))?;
@@ -1423,7 +1479,7 @@ impl ConApp {
 
 impl ConTerminal {
     fn new(working_dir: Option<String>) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(PTY_QUEUE_CHUNKS);
         // Drop the sender on the main side; the reader thread owns the only
         // surviving copy, so Disconnected reliably signals PTY EOF.
         drop(tx);
@@ -1443,6 +1499,7 @@ impl ConTerminal {
             master: None,
             child: None,
             pty_rx: rx,
+            pty_wake_pending: Arc::new(AtomicBool::new(false)),
             child_exit_rx: exit_rx,
             command_failed: Arc::new(AtomicBool::new(false)),
             font_size_logical: DEFAULT_FONT_PX,
@@ -1549,8 +1606,10 @@ impl ConTerminal {
         let reader = master.try_clone_for_startup_reader().map_err(|error| {
             PixelWindowError::failed("cmd_reader_clone_failed", format!("{error}"))
         })?;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(PTY_QUEUE_CHUNKS);
         let waker = window.waker();
+        let wake_pending = Arc::new(AtomicBool::new(false));
+        let reader_wake_pending = Arc::clone(&wake_pending);
         thread::Builder::new()
             .name("agenterm-con-reader".into())
             .spawn(move || {
@@ -1562,13 +1621,17 @@ impl ConTerminal {
                             if tx.send(buf[..n].to_vec()).is_err() {
                                 break;
                             }
-                            let _ = waker.wake();
+                            if !reader_wake_pending.swap(true, Ordering::AcqRel) {
+                                let _ = waker.wake();
+                            }
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(_) => break,
                     }
                 }
-                let _ = waker.wake();
+                if !reader_wake_pending.swap(true, Ordering::AcqRel) {
+                    let _ = waker.wake();
+                }
             })
             .map_err(|error| {
                 PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}"))
@@ -1614,12 +1677,14 @@ impl ConTerminal {
         self.master = Some(master);
         self.child = Some(child);
         self.pty_rx = rx;
+        self.pty_wake_pending = wake_pending;
         self.child_exit_rx = exit_rx;
 
         Ok(())
     }
 
-    fn drain_pty(&mut self) {
+    fn drain_pty(&mut self) -> DrainOutcome {
+        self.pty_wake_pending.store(false, Ordering::Release);
         // Only `Ok(())` (an actual signal from the waiter thread) means
         // anything here — both the placeholder channel `new()` installs
         // before a child exists and a waiter thread that hasn't finished yet
@@ -1628,12 +1693,13 @@ impl ConTerminal {
             self.child_gone = true;
         }
 
-        let mut got_output = false;
-        loop {
+        let mut outcome = DrainOutcome::default();
+        while outcome.bytes < PTY_DRAIN_BUDGET_BYTES {
             match self.pty_rx.try_recv() {
                 Ok(bytes) => {
+                    outcome.bytes = outcome.bytes.saturating_add(bytes.len());
                     self.parser.process(&bytes);
-                    got_output = true;
+                    outcome.changed = true;
                     // Flush any terminal-query reply (DA1/CPR/DSR) right
                     // after the input that triggered it, not batched until
                     // this whole read loop empties out — a program that
@@ -1651,15 +1717,20 @@ impl ConTerminal {
                 Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
+        if outcome.bytes >= PTY_DRAIN_BUDGET_BYTES {
+            outcome.backlog = true;
+            self.pty_wake_pending.store(true, Ordering::Release);
+        }
         // New output snaps scrollback to bottom.
-        if got_output && self.scroll_offset > 0 {
+        if outcome.changed && self.scroll_offset > 0 {
             self.scroll_offset = 0;
             self.parser.screen_mut().set_scrollback(0);
         }
         // New output clears stale selection.
-        if got_output && !self.selecting {
+        if outcome.changed && !self.selecting {
             self.selection = None;
         }
+        outcome
     }
 
     /// Applies a settled geometry: resize PTY first, then the VT model. The PTY
@@ -2820,7 +2891,10 @@ impl ConTerminal {
         window: &PixelWindow,
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
-        self.drain_pty();
+        let drain = self.drain_pty();
+        if drain.backlog {
+            window.request_redraw();
+        }
 
         // Apply OSC title changes (shell emits \e]0;title\a).
         if let Some(title) = self.parser.callbacks_mut().title.take() {
@@ -3034,6 +3108,31 @@ impl PixelWindowApplication for ConApp {
         if self.exit {
             return Ok(PixelWindowDirective::Exit);
         }
+        if matches!(event, PixelWindowEvent::Wake) {
+            let active = self.workspace.active();
+            let mut active_changed = false;
+            let mut backlog = false;
+            for (id, session) in &mut self.sessions {
+                let outcome = session.drain_pty();
+                self.perf_stats.pty_drained_bytes = self
+                    .perf_stats
+                    .pty_drained_bytes
+                    .saturating_add(outcome.bytes as u64);
+                self.perf_stats.pty_budget_yields = self
+                    .perf_stats
+                    .pty_budget_yields
+                    .saturating_add(u64::from(outcome.backlog));
+                active_changed |= active == Some(*id) && outcome.changed;
+                backlog |= outcome.backlog;
+            }
+            if active_changed {
+                window.request_redraw();
+            }
+            if backlog {
+                let _ = window.waker().wake();
+            }
+            return Ok(PixelWindowDirective::Continue);
+        }
         if let PixelWindowEvent::GeometryChanged { metrics, .. } = &event {
             Self::configure_chrome(self.active_session_mut()?, metrics.scale_factor);
         }
@@ -3079,6 +3178,7 @@ impl PixelWindowApplication for ConApp {
         window: &PixelWindow,
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        let render_started = Instant::now();
         let directive = self.active_session_mut()?.render(window, frame)?;
         self.paint_chrome(frame)?;
         let (pending_screenshot, pending_control_screenshot) = {
@@ -3115,6 +3215,7 @@ impl PixelWindowApplication for ConApp {
             .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
         }
+        self.perf_stats.record_frame(render_started.elapsed());
         Ok(directive)
     }
 
@@ -3312,10 +3413,6 @@ impl Surface<'_> {
 /// Paints every cell of one screen into `surface`. Pure with respect to
 /// window/frame types so it is directly unit-testable — see the `tests`
 /// module, which renders into a plain `Vec<u32>` and asserts on pixel colors.
-// Retained as the directly-unit-testable shape described above: production
-// painting now goes through `paint_cells_at`, so the only callers are in the
-// tests module and `-D warnings` would otherwise reject it as dead code.
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 fn paint_cells(
     surface: &mut Surface<'_>,

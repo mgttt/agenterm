@@ -120,6 +120,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
     let listed = wait_until_ready(exe, &endpoint, Duration::from_secs(15));
     let root = tab_id(&listed["tabs"][0]["id"]).to_owned();
     assert_eq!(listed["tabs"][0]["active"], true);
+    cli_json(exe, &endpoint, &["reset-perf-stats"]);
 
     cli_json(
         exe,
@@ -169,12 +170,40 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "KEY_EVENT",
         ],
     );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-text",
+            "--target",
+            &child_id,
+            "for /L %i in (1,1,2000) do @echo LOAD_%i & echo LOAD_DONE\r",
+        ],
+    );
+    cli_json(exe, &endpoint, &["select-tab", "--target", &root]);
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &child_id,
+            "--timeout-ms",
+            "15000",
+            "LOAD_DONE",
+        ],
+    );
+    let perf = cli_json(exe, &endpoint, &["perf-stats"]);
+    assert!(perf["frames"].as_u64().is_some_and(|frames| frames > 0));
+    assert!(perf["pty_drained_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
 
     let root_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &root]);
     let child_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &child_id]);
     assert!(root_text.contains("ROOT_ONLY"));
-    assert!(!root_text.contains("KEY_EVENT"));
-    assert!(child_text.contains("KEY_EVENT"));
+    assert!(!root_text.contains("LOAD_DONE"));
+    assert!(child_text.contains("LOAD_DONE"));
 
     cli_json(
         exe,

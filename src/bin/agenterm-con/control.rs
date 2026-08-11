@@ -29,6 +29,8 @@ pub struct CliRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliCommand {
     ListTabs,
+    PerfStats,
+    ResetPerfStats,
     NewTab {
         parent: Option<TabId>,
     },
@@ -104,6 +106,14 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
         "list-tabs" => {
             cursor.finish()?;
             CliCommand::ListTabs
+        }
+        "perf-stats" => {
+            cursor.finish()?;
+            CliCommand::PerfStats
+        }
+        "reset-perf-stats" => {
+            cursor.finish()?;
+            CliCommand::ResetPerfStats
         }
         "new-tab" => {
             let parent = cursor.optional_tab("--parent")?;
@@ -225,7 +235,7 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
 }
 
 pub fn usage() -> String {
-    "usage: agenterm-con cli --control ENDPOINT <list-tabs|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
+    "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
 }
 
 struct Cursor<'a> {
@@ -593,6 +603,8 @@ impl From<CliCommand> for WireRequest {
         };
         match command {
             CliCommand::ListTabs => wire.command = "list-tabs".to_owned(),
+            CliCommand::PerfStats => wire.command = "perf-stats".to_owned(),
+            CliCommand::ResetPerfStats => wire.command = "reset-perf-stats".to_owned(),
             CliCommand::NewTab { parent } => {
                 wire.command = "new-tab".to_owned();
                 wire.parent = parent.map(TabId::get);
@@ -675,6 +687,8 @@ impl TryFrom<WireRequest> for CliCommand {
         let target = wire.target.map(TabId::new);
         match wire.command.as_str() {
             "list-tabs" => Ok(Self::ListTabs),
+            "perf-stats" => Ok(Self::PerfStats),
+            "reset-perf-stats" => Ok(Self::ResetPerfStats),
             "new-tab" => Ok(Self::NewTab {
                 parent: wire.parent.map(TabId::new),
             }),
@@ -832,6 +846,8 @@ mod tests {
     fn every_control_command_survives_wire_round_trip() {
         let commands = [
             CliCommand::ListTabs,
+            CliCommand::PerfStats,
+            CliCommand::ResetPerfStats,
             CliCommand::NewTab {
                 parent: Some(TabId::new(1)),
             },
