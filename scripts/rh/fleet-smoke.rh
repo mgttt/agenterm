@@ -823,8 +823,19 @@ try {
             "new-window", "-d", "-n", environment_name,
             "-e", "FLEET_ROLE=" + role,
             "--", "cmd.exe", "/d", "/c",
-            "set FLEET_ROLE&set AGENTERM_TAB_ID&set AGENTERM_SESSION"
+            "set FLEET_ROLE&set AGENTERM_TAB_ID&set AGENTERM_SESSION&ping -n 4 127.0.0.1 >nul"
         ]
+    );
+    // Read the evidence while the child is still alive, then let it die. The
+    // three `set` lines are printed immediately; the trailing ping keeps the
+    // pane from being reclaimed before this step has looked at it. Capturing
+    // after `--dead` -- and worse, seven steps later, as this used to -- read a
+    // pane whose content was already gone, which is why the failure looked like
+    // missing environment injection for several rounds of diagnosis.
+    let capture = text(
+        harness,
+        cli,
+        ["capture-pane", "-p", "-t", environment_name]
     );
     text(
         harness,
@@ -1042,11 +1053,8 @@ try {
         "fleet.instance-discovery"
     );
 
-    let capture = text(
-        harness,
-        cli,
-        ["capture-pane", "-p", "-t", environment_name]
-    );
+    // `capture` was read in the tab-environment step while that child was still
+    // alive; re-reading here would race the pane's reclamation.
     let snapshot = json(harness, cli, ["ui-snapshot"]);
     let environment_tab_id = tab_id_by_name(snapshot, environment_name);
     let tab_inspect = json(
@@ -1369,7 +1377,11 @@ try {
     // whatever proxy variables the caller already exported. Assert the paused
     // contract directly against the tab environment below instead of probing
     // an inherited variable, which passed only on proxied developer machines.
-    let agent_command = "set NO_PROXY&set AGENTERM_TAB_ID";
+    // Trailing ping for the same reason as the tab-environment step: both `set`
+    // lines print immediately, and the pane must still exist when this step
+    // reads it.
+    let agent_command =
+        "set NO_PROXY&set AGENTERM_TAB_ID&ping -n 4 127.0.0.1 >nul";
     text(
         harness,
         cli,
@@ -1381,16 +1393,17 @@ try {
             "--", "/d", "/c", agent_command
         ]
     );
+    // Read while alive, then wait for death -- see the tab-environment step.
+    let agent_capture = text(
+        harness,
+        cli,
+        ["capture-pane", "-p", "-t", agent_name]
+    );
     text(
         harness,
         cli,
         ["wait-pane", "-t", agent_name, "--dead",
          "--timeout-ms", "30000"]
-    );
-    let agent_capture = text(
-        harness,
-        cli,
-        ["capture-pane", "-p", "-t", agent_name]
     );
     let agent_snapshot = json(harness, cli, ["ui-snapshot"]);
     let agent_tab_id = tab_id_by_name(agent_snapshot, agent_name);
