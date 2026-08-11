@@ -65,7 +65,6 @@ version = "0.1.16"
 dependencies = [
  "agenterm-platform",
  "png",
- "serde",
  "serde_json",
  "unicode-width",
  "vt100",

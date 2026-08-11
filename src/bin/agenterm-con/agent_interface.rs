@@ -38,7 +38,7 @@ use agenterm_platform::input::NamedKey;
 
 /// One cell's worth of cursor state, flattened for JSON rather than nested,
 /// so a consumer can `snapshot.cursor.row` instead of matching an enum.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone)]
 pub struct CursorSnapshot {
     pub row: u16,
     pub col: u16,
@@ -52,7 +52,7 @@ pub struct CursorSnapshot {
 }
 
 /// A point in terminal cell coordinates, used for selection endpoints.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct PointSnapshot {
     pub row: u16,
     pub col: u16,
@@ -67,7 +67,7 @@ pub struct PointSnapshot {
 /// color/attribute correctness already has dedicated pixel-level unit tests
 /// (`paint_cells`'s own test module) — duplicating that here would test the
 /// same fact twice through a slower, flakier path.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone)]
 pub struct ScreenSnapshot {
     pub cols: u16,
     pub rows: u16,
@@ -96,8 +96,7 @@ pub struct ScreenSnapshot {
 /// JSON parse error instead of stale-but-valid data — a real flake source
 /// for anything polling a file that's rewritten many times a second.
 pub fn write_snapshot_atomic(path: &Path, snapshot: &ScreenSnapshot) -> std::io::Result<()> {
-    let json = serde_json::to_vec_pretty(snapshot)
-        .map_err(|error| std::io::Error::other(format!("snapshot serialization: {error}")))?;
+    let json = super::json::to_vec_pretty(&snapshot_json(snapshot));
     let tmp_path = tmp_sibling(path);
     {
         let mut file = std::fs::File::create(&tmp_path)?;
@@ -105,6 +104,49 @@ pub fn write_snapshot_atomic(path: &Path, snapshot: &ScreenSnapshot) -> std::io:
         file.sync_all()?;
     }
     std::fs::rename(&tmp_path, path)
+}
+
+fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
+    use super::json::{JsonValue, nullable, object};
+    let point =
+        |point: PointSnapshot| object([("row", point.row.into()), ("col", point.col.into())]);
+    object([
+        ("cols", snapshot.cols.into()),
+        ("rows", snapshot.rows.into()),
+        ("title", snapshot.title.as_str().into()),
+        (
+            "rows_text",
+            JsonValue::Array(
+                snapshot
+                    .rows_text
+                    .iter()
+                    .map(|row| row.as_str().into())
+                    .collect(),
+            ),
+        ),
+        (
+            "cursor",
+            object([
+                ("row", snapshot.cursor.row.into()),
+                ("col", snapshot.cursor.col.into()),
+                ("shape", snapshot.cursor.shape.into()),
+                ("blinking", snapshot.cursor.blinking.into()),
+                ("visible_now", snapshot.cursor.visible_now.into()),
+            ]),
+        ),
+        ("scroll_offset", snapshot.scroll_offset.into()),
+        (
+            "selection",
+            nullable(
+                snapshot
+                    .selection
+                    .map(|(start, end)| JsonValue::Array(vec![point(start), point(end)])),
+            ),
+        ),
+        ("ime_preedit", snapshot.ime_preedit.as_str().into()),
+        ("child_alive", snapshot.child_alive.into()),
+        ("font_size_px", snapshot.font_size_px.into()),
+    ])
 }
 
 /// A temp path in the same directory as `path`, so the later rename is
@@ -340,8 +382,7 @@ pub enum ScriptKey {
 /// Which physical button a scripted [`ScriptCommand::Click`] presses. A
 /// closed set (not a raw code) so a script author gets a loud parse error on
 /// a typo instead of an ambiguous number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScriptMouseButton {
     #[default]
     Left,
@@ -474,45 +515,36 @@ pub enum ScriptCommand {
 /// by mistake.
 /// A cell coordinate as it appears in script JSON — shared shape for
 /// `mouse_move` and (nested in [`RawClick`]/[`RawWheel`]) `click`/`wheel`.
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 struct RawPoint {
     row: u16,
     col: u16,
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 struct RawClick {
     row: u16,
     col: u16,
-    #[serde(default)]
     button: ScriptMouseButton,
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 struct RawWheel {
     row: u16,
     col: u16,
     notches: f32,
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 struct RawCommand {
     text: Option<String>,
     paste: Option<String>,
     key: Option<String>,
-    #[serde(default)]
     ctrl: bool,
-    #[serde(default)]
     alt: bool,
-    #[serde(default)]
     shift: bool,
     wait_ms: Option<u64>,
     wait_text: Option<String>,
-    #[serde(default)]
     timeout_ms: Option<u64>,
     screenshot: Option<PathBuf>,
     click: Option<RawClick>,
@@ -677,12 +709,98 @@ fn parse_key_name(name: &str) -> Option<ScriptKey> {
 /// skipping bad entries — a script silently missing half its steps is a
 /// worse debugging experience than the process refusing to start.
 pub fn parse_script(bytes: &[u8]) -> Result<Vec<ScriptCommand>, String> {
-    let raw: Vec<RawCommand> = serde_json::from_slice(bytes)
-        .map_err(|error| format!("script is not a JSON array of command objects: {error}"))?;
-    raw.into_iter()
+    let values = super::json::parse(bytes)
+        .map_err(|error| format!("script is not a JSON array of command objects: {error}"))?
+        .into_array("script")?;
+    values
+        .into_iter()
         .enumerate()
-        .map(|(index, command)| command.validate(index))
+        .map(|(index, value)| decode_raw_command(value, index)?.validate(index))
         .collect()
+}
+
+fn decode_raw_command(value: super::json::JsonValue, index: usize) -> Result<RawCommand, String> {
+    let mut fields = value.into_object("script command")?;
+    let command = RawCommand {
+        text: super::json::take_string(&mut fields, "text")?,
+        paste: super::json::take_string(&mut fields, "paste")?,
+        key: super::json::take_string(&mut fields, "key")?,
+        ctrl: super::json::take_bool(&mut fields, "ctrl")?.unwrap_or(false),
+        alt: super::json::take_bool(&mut fields, "alt")?.unwrap_or(false),
+        shift: super::json::take_bool(&mut fields, "shift")?.unwrap_or(false),
+        wait_ms: super::json::take_u64(&mut fields, "wait_ms")?,
+        wait_text: super::json::take_string(&mut fields, "wait_text")?,
+        timeout_ms: super::json::take_u64(&mut fields, "timeout_ms")?,
+        screenshot: super::json::take_string(&mut fields, "screenshot")?.map(PathBuf::from),
+        click: take_click(&mut fields, "click")?,
+        mouse_down: take_click(&mut fields, "mouse_down")?,
+        mouse_up: take_click(&mut fields, "mouse_up")?,
+        mouse_move: take_point(&mut fields, "mouse_move")?,
+        wheel: take_wheel(&mut fields, "wheel")?,
+    };
+    super::json::reject_unknown(fields, &format!("script command {index}"))?;
+    Ok(command)
+}
+
+fn take_point(
+    fields: &mut Vec<(String, super::json::JsonValue)>,
+    key: &str,
+) -> Result<Option<RawPoint>, String> {
+    let Some(value) = super::json::take(fields, key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let mut point = value.into_object(key)?;
+    let row = super::json::take_u16(&mut point, "row")?.ok_or("missing row")?;
+    let col = super::json::take_u16(&mut point, "col")?.ok_or("missing col")?;
+    super::json::reject_unknown(point, key)?;
+    Ok(Some(RawPoint { row, col }))
+}
+
+fn take_click(
+    fields: &mut Vec<(String, super::json::JsonValue)>,
+    key: &str,
+) -> Result<Option<RawClick>, String> {
+    let Some(value) = super::json::take(fields, key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let mut click = value.into_object(key)?;
+    let row = super::json::take_u16(&mut click, "row")?.ok_or("missing row")?;
+    let col = super::json::take_u16(&mut click, "col")?.ok_or("missing col")?;
+    let button = match super::json::take_string(&mut click, "button")?.as_deref() {
+        None | Some("left") => ScriptMouseButton::Left,
+        Some("middle") => ScriptMouseButton::Middle,
+        Some("right") => ScriptMouseButton::Right,
+        Some(_) => return Err("unknown mouse button".to_owned()),
+    };
+    super::json::reject_unknown(click, key)?;
+    Ok(Some(RawClick { row, col, button }))
+}
+
+fn take_wheel(
+    fields: &mut Vec<(String, super::json::JsonValue)>,
+    key: &str,
+) -> Result<Option<RawWheel>, String> {
+    let Some(value) = super::json::take(fields, key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let mut wheel = value.into_object(key)?;
+    let row = super::json::take_u16(&mut wheel, "row")?.ok_or("missing row")?;
+    let col = super::json::take_u16(&mut wheel, "col")?.ok_or("missing col")?;
+    let notches = super::json::take_f64(&mut wheel, "notches")?.ok_or("missing notches")? as f32;
+    if !notches.is_finite() {
+        return Err("wheel notches must be finite".to_owned());
+    }
+    super::json::reject_unknown(wheel, key)?;
+    Ok(Some(RawWheel { row, col, notches }))
 }
 
 #[cfg(test)]
@@ -969,7 +1087,7 @@ mod tests {
             font_size_px: 16,
         };
         let value: serde_json::Value =
-            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+            serde_json::from_slice(&crate::json::to_vec(&snapshot_json(&snapshot))).unwrap();
         assert_eq!(value["cols"], 80);
         assert_eq!(value["rows_text"][0], "hello");
         assert_eq!(value["cursor"]["shape"], "block");

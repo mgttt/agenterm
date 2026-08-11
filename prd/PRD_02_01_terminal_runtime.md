@@ -207,7 +207,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   requests and responses are size/time bounded, screenshot success is returned
   only after atomic PNG output, and a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 70 binary unit tests plus a Windows
+  window. The owning suite now includes 73 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
@@ -232,7 +232,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its release PE is 665,600 bytes versus 1,046,528 bytes
+  host; its release PE is 596,992 bytes versus 1,046,528 bytes
   for the original portable host. Its cross-platform screenshot writer uses a
   bounded streaming stored-DEFLATE encoder with local Adler-32/CRC-32 rather
   than linking the general PNG compression stack; screenshots trade larger
@@ -246,7 +246,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   GDI leaf accepts one UTF-16 unit and returns a missing glyph for supplementary
   scalars rather than splitting a surrogate pair; broader emoji fallback is an
   explicit later DirectWrite tradeoff, not a false shipped claim.
-  Evidence is 70 binary unit tests, 185 platform library tests, the isolated
+  Configuration, scripted interaction, atomic snapshots and the local control
+  protocol now share one strict bounded JSON codec instead of four serde/ad-hoc
+  paths. It accepts UTF-8, JSON escapes and valid surrogate pairs while bounding
+  input bytes, nesting, nodes, object fields and strings; duplicate keys,
+  isolated surrogates, malformed/non-finite numbers and trailing data fail
+  locally. `serde_json` remains a dev-only interoperability oracle and is absent
+  from the production graph.
+  Evidence is 73 binary unit tests, 185 platform library tests, the isolated
   public-control GUI journey, and the Windows terminal black box at 16 passed,
   2 pre-existing ignored gaps, 0 failed. It remains non-default until native IME
   preedit/commit from IMM32, candidate anchoring in documented client

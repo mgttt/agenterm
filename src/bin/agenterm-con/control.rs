@@ -12,7 +12,10 @@ use std::time::Duration;
 
 use agenterm_platform::ipc::{IpcEndpoint, IpcTransportErrorCode, NativeListener, NativeStream};
 
-use super::workspace::TabId;
+use super::{
+    json::{self, JsonValue},
+    workspace::TabId,
+};
 
 const REQUEST_MAX_BYTES: u64 = 1024 * 1024;
 const RESPONSE_MAX_BYTES: u64 = 2 * 1024 * 1024;
@@ -398,7 +401,7 @@ fn parse_mouse_button(value: &str) -> Result<MouseButton, String> {
     }
 }
 
-pub type Reply = Result<serde_json::Value, String>;
+pub type Reply = Result<JsonValue, String>;
 pub type ReplySender = mpsc::Sender<Reply>;
 
 pub struct IncomingRequest {
@@ -461,7 +464,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     stream
         .set_io_timeout(GUI_RESPONSE_TIMEOUT)
         .map_err(|error| error.to_string())?;
-    let mut bytes = serde_json::to_vec(&wire).map_err(|error| error.to_string())?;
+    let mut bytes = json::to_vec(&wire.into_json());
     bytes.push(b'\n');
     stream
         .write_all(&bytes)
@@ -477,14 +480,14 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     if read == 0 || read as u64 > RESPONSE_MAX_BYTES || !response.ends_with(b"\n") {
         return Err("invalid or oversized control response".to_owned());
     }
-    let response: WireResponse =
-        serde_json::from_slice(&response).map_err(|error| format!("control response: {error}"))?;
+    let response = WireResponse::from_json(
+        json::parse(&response).map_err(|error| format!("control response: {error}"))?,
+    )?;
     if response.ok {
         Ok(match response.result {
-            Some(serde_json::Value::String(text)) => text,
-            Some(value) => {
-                serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
-            }
+            Some(JsonValue::String(text)) => text,
+            Some(value) => String::from_utf8(json::to_vec_pretty(&value))
+                .map_err(|_| "JSON writer emitted invalid UTF-8".to_owned())?,
             None => String::new(),
         })
     } else {
@@ -522,11 +525,10 @@ fn serve_one(
             error: Some(error),
         },
     };
-    if let Ok(mut bytes) = serde_json::to_vec(&wire) {
-        bytes.push(b'\n');
-        let _ = stream.write_all(&bytes);
-        let _ = stream.flush();
-    }
+    let mut bytes = json::to_vec(&wire.into_json());
+    bytes.push(b'\n');
+    let _ = stream.write_all(&bytes);
+    let _ = stream.flush();
 }
 
 fn read_wire_request(stream: &mut NativeStream) -> Result<CliCommand, String> {
@@ -539,8 +541,9 @@ fn read_wire_request(stream: &mut NativeStream) -> Result<CliCommand, String> {
     if read == 0 || read as u64 > REQUEST_MAX_BYTES || !bytes.ends_with(b"\n") {
         return Err("invalid or oversized control request".to_owned());
     }
-    let request: WireRequest =
-        serde_json::from_slice(&bytes).map_err(|error| format!("control request: {error}"))?;
+    let request = WireRequest::from_json(
+        json::parse(&bytes).map_err(|error| format!("control request: {error}"))?,
+    )?;
     request.try_into()
 }
 
@@ -558,7 +561,6 @@ fn parse_native_endpoint(value: &str) -> Result<IpcEndpoint, String> {
     Ok(endpoint)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
 struct WireRequest {
     command: String,
     target: Option<u64>,
@@ -576,11 +578,80 @@ struct WireRequest {
     ctrl: Option<bool>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
 struct WireResponse {
     ok: bool,
-    result: Option<serde_json::Value>,
+    result: Option<JsonValue>,
     error: Option<String>,
+}
+
+impl WireRequest {
+    fn into_json(self) -> JsonValue {
+        json::object([
+            ("command", self.command.into()),
+            ("target", json::nullable(self.target)),
+            ("parent", json::nullable(self.parent)),
+            ("text", json::nullable(self.text)),
+            (
+                "keys",
+                json::nullable(
+                    self.keys
+                        .map(|keys| JsonValue::Array(keys.into_iter().map(Into::into).collect())),
+                ),
+            ),
+            ("output", json::nullable(self.output)),
+            ("max_bytes", json::nullable(self.max_bytes)),
+            ("action", json::nullable(self.action)),
+            ("button", json::nullable(self.button)),
+            ("column", json::nullable(self.column)),
+            ("row", json::nullable(self.row)),
+            ("timeout_ms", json::nullable(self.timeout_ms)),
+            ("notches", json::nullable(self.notches)),
+            ("ctrl", json::nullable(self.ctrl)),
+        ])
+    }
+
+    fn from_json(value: JsonValue) -> Result<Self, String> {
+        let mut fields = value.into_object("control request")?;
+        let request = Self {
+            command: json::take_string(&mut fields, "command")?
+                .ok_or_else(|| "missing command".to_owned())?,
+            target: json::take_u64(&mut fields, "target")?,
+            parent: json::take_u64(&mut fields, "parent")?,
+            text: json::take_string(&mut fields, "text")?,
+            keys: json::take_string_array(&mut fields, "keys")?,
+            output: json::take_string(&mut fields, "output")?,
+            max_bytes: json::take_usize(&mut fields, "max_bytes")?,
+            action: json::take_string(&mut fields, "action")?,
+            button: json::take_string(&mut fields, "button")?,
+            column: json::take_u16(&mut fields, "column")?,
+            row: json::take_u16(&mut fields, "row")?,
+            timeout_ms: json::take_u64(&mut fields, "timeout_ms")?,
+            notches: json::take_i16(&mut fields, "notches")?,
+            ctrl: json::take_bool(&mut fields, "ctrl")?,
+        };
+        json::reject_unknown(fields, "control request")?;
+        Ok(request)
+    }
+}
+
+impl WireResponse {
+    fn into_json(self) -> JsonValue {
+        json::object([
+            ("ok", self.ok.into()),
+            ("result", self.result.unwrap_or(JsonValue::Null)),
+            ("error", json::nullable(self.error)),
+        ])
+    }
+
+    fn from_json(value: JsonValue) -> Result<Self, String> {
+        let mut fields = value.into_object("control response")?;
+        let ok = json::take_bool(&mut fields, "ok")?
+            .ok_or_else(|| "control response missing ok".to_owned())?;
+        let result = json::take(&mut fields, "result").filter(|value| !value.is_null());
+        let error = json::take_string(&mut fields, "error")?;
+        json::reject_unknown(fields, "control response")?;
+        Ok(Self { ok, result, error })
+    }
 }
 
 impl From<CliCommand> for WireRequest {
@@ -894,7 +965,12 @@ mod tests {
             },
         ];
         for command in commands {
-            let decoded = CliCommand::try_from(WireRequest::from(command.clone())).unwrap();
+            let bytes = json::to_vec(&WireRequest::from(command.clone()).into_json());
+            let decoded = CliCommand::try_from(
+                WireRequest::from_json(json::parse(&bytes).expect("wire JSON parses"))
+                    .expect("wire schema decodes"),
+            )
+            .unwrap();
             assert_eq!(decoded, command);
         }
     }

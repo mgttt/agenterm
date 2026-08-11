@@ -25,6 +25,8 @@ mod composer;
 mod control;
 #[path = "agenterm-con/font.rs"]
 mod font;
+#[path = "agenterm-con/json.rs"]
+mod json;
 #[path = "agenterm-con/palette.rs"]
 mod palette;
 #[path = "agenterm-con/ui.rs"]
@@ -249,25 +251,29 @@ fn load_config() -> ConConfig {
     let Some(path) = config_path() else {
         return ConConfig::default();
     };
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(bytes) = std::fs::read(&path) else {
         return ConConfig::default();
     };
-    // Minimal JSON parsing without a serde dependency: look for known keys.
-    let mut config = ConConfig::default();
-    for line in text.lines() {
-        let trimmed = line.trim().trim_end_matches(',');
-        let Some((key, value)) = trimmed.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        match key.trim() {
-            "\"font_size\"" => config.font_size = value.parse().ok(),
-            "\"cols\"" => config.cols = value.parse().ok(),
-            "\"rows\"" => config.rows = value.parse().ok(),
-            _ => {}
-        }
+    let Ok(value) = json::parse(&bytes) else {
+        return ConConfig::default();
+    };
+    let Ok(mut fields) = value.into_object("configuration") else {
+        return ConConfig::default();
+    };
+    let Ok(font_size) = json::take_f64(&mut fields, "font_size") else {
+        return ConConfig::default();
+    };
+    let Ok(cols) = json::take_u16(&mut fields, "cols") else {
+        return ConConfig::default();
+    };
+    let Ok(rows) = json::take_u16(&mut fields, "rows") else {
+        return ConConfig::default();
+    };
+    ConConfig {
+        font_size,
+        cols,
+        rows,
     }
-    config
 }
 
 /// Command-line options, parsed out of `main` so the precedence and
@@ -757,20 +763,20 @@ impl PerfStats {
         self.render_max_us = self.render_max_us.max(micros);
     }
 
-    fn json(&self) -> serde_json::Value {
+    fn json(&self) -> json::JsonValue {
         let average = if self.frames == 0 {
             0
         } else {
             (self.render_total_us / u128::from(self.frames)).min(u128::from(u64::MAX)) as u64
         };
-        serde_json::json!({
-            "frames": self.frames,
-            "render_last_us": self.render_last_us,
-            "render_average_us": average,
-            "render_max_us": self.render_max_us,
-            "pty_drained_bytes": self.pty_drained_bytes,
-            "pty_budget_yields": self.pty_budget_yields,
-        })
+        json::object([
+            ("frames", self.frames.into()),
+            ("render_last_us", self.render_last_us.into()),
+            ("render_average_us", average.into()),
+            ("render_max_us", self.render_max_us.into()),
+            ("pty_drained_bytes", self.pty_drained_bytes.into()),
+            ("pty_budget_yields", self.pty_budget_yields.into()),
+        ])
     }
 }
 
@@ -1225,21 +1231,34 @@ impl ConApp {
                     .iter()
                     .map(|node| {
                         let session = self.sessions.get(&node.id);
-                        serde_json::json!({
-                            "id": format!("@{}", node.id.get()),
-                            "parent": node.parent.map(|id| format!("@{}", id.get())),
-                            "title": session.map_or(node.title.as_str(), |session| session.current_title.as_str()),
-                            "active": active == Some(node.id),
-                            "child_alive": session.is_some_and(|session| !session.child_gone),
-                        })
+                        json::object([
+                            ("id", format!("@{}", node.id.get()).into()),
+                            (
+                                "parent",
+                                json::nullable(node.parent.map(|id| format!("@{}", id.get()))),
+                            ),
+                            (
+                                "title",
+                                session
+                                    .map_or(node.title.as_str(), |session| {
+                                        session.current_title.as_str()
+                                    })
+                                    .into(),
+                            ),
+                            ("active", (active == Some(node.id)).into()),
+                            (
+                                "child_alive",
+                                session.is_some_and(|session| !session.child_gone).into(),
+                            ),
+                        ])
                     })
                     .collect();
-                Ok(serde_json::json!({ "tabs": tabs }))
+                Ok(json::object([("tabs", json::JsonValue::Array(tabs))]))
             }
             CliCommand::PerfStats => Ok(self.perf_stats.json()),
             CliCommand::ResetPerfStats => {
                 self.perf_stats = PerfStats::default();
-                Ok(serde_json::json!({ "reset": true }))
+                Ok(json::object([("reset", true.into())]))
             }
             CliCommand::NewTab { parent } => (|| {
                 if let Some(parent) = parent {
@@ -1252,21 +1271,24 @@ impl ConApp {
                     .workspace
                     .active()
                     .ok_or_else(|| "new terminal was not activated".to_owned())?;
-                Ok(serde_json::json!({
-                    "id": format!("@{}", id.get()),
-                    "parent": parent.map(|id| format!("@{}", id.get())),
-                }))
+                Ok(json::object([
+                    ("id", format!("@{}", id.get()).into()),
+                    (
+                        "parent",
+                        json::nullable(parent.map(|id| format!("@{}", id.get()))),
+                    ),
+                ]))
             })(),
             CliCommand::SelectTab { target } => self.control_target(Some(target)).map(|id| {
                 self.workspace.set_active(id);
                 window.request_redraw();
-                serde_json::json!({ "active": format!("@{}", id.get()) })
+                json::object([("active", format!("@{}", id.get()).into())])
             }),
             CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
                 self.workspace.set_active(id);
                 self.close_active_session(window)
                     .map_err(|error| error.to_string())?;
-                Ok(serde_json::json!({ "closed": format!("@{}", id.get()) }))
+                Ok(json::object([("closed", format!("@{}", id.get()).into())]))
             }),
             CliCommand::CapturePane { target, max_bytes } => {
                 self.control_target(target).and_then(|id| {
@@ -1283,7 +1305,7 @@ impl ConApp {
                         }
                         text.truncate(end);
                     }
-                    Ok(serde_json::Value::String(text))
+                    Ok(json::JsonValue::String(text))
                 })
             }
             CliCommand::SendText { target, text } => self.control_target(target).and_then(|id| {
@@ -1293,7 +1315,7 @@ impl ConApp {
                     .ok_or_else(|| "terminal disappeared".to_owned())?;
                 session.scroll_to_bottom();
                 session.write_pty(text.as_bytes());
-                Ok(serde_json::json!({ "sent_bytes": text.len() }))
+                Ok(json::object([("sent_bytes", text.len().into())]))
             }),
             CliCommand::SendKeys { target, keys } => self.control_target(target).and_then(|id| {
                 let session = self
@@ -1304,7 +1326,7 @@ impl ConApp {
                     let (key, ctrl, alt, shift) = parse_control_key(key)?;
                     session.execute_script_key(key, ctrl, alt, shift);
                 }
-                Ok(serde_json::json!({ "sent_keys": keys.len() }))
+                Ok(json::object([("sent_keys", keys.len().into())]))
             }),
             CliCommand::SendMouse {
                 target,
@@ -1344,7 +1366,7 @@ impl ConApp {
                         );
                     }
                 }
-                Ok(serde_json::json!({ "delivered": true }))
+                Ok(json::object([("delivered", true.into())]))
             }),
             CliCommand::SendWheel {
                 target,
@@ -1364,7 +1386,7 @@ impl ConApp {
                     ));
                 }
                 session.execute_script_wheel(window, row, column, f32::from(notches), ctrl);
-                Ok(serde_json::json!({ "delivered_notches": notches }))
+                Ok(json::object([("delivered_notches", notches.into())]))
             }),
             CliCommand::ScreenshotPane { target, output } => {
                 self.control_target(target).and_then(|id| {
@@ -1383,7 +1405,7 @@ impl ConApp {
                         reply.take().expect("control reply available"),
                     ));
                     window.request_redraw();
-                    Ok(serde_json::Value::Null)
+                    Ok(json::JsonValue::Null)
                 })
             }
             CliCommand::WaitText {
@@ -1399,7 +1421,7 @@ impl ConApp {
                     .get(&id)
                     .is_some_and(|session| session.screen_contains(&text))
                 {
-                    return Ok(serde_json::json!({ "matched": true }));
+                    return Ok(json::object([("matched", true.into())]));
                 }
                 self.control_waits.push(PendingControlWait {
                     target: id,
@@ -1407,7 +1429,7 @@ impl ConApp {
                     deadline: Instant::now() + Duration::from_millis(timeout_ms),
                     reply: reply.take().expect("control reply available"),
                 });
-                Ok(serde_json::Value::Null)
+                Ok(json::JsonValue::Null)
             }),
         };
         if let Some(reply) = reply {
@@ -1432,7 +1454,9 @@ impl ConApp {
                 .get(&wait.target)
                 .is_some_and(|session| session.screen_contains(&wait.text));
             if matched {
-                let _ = wait.reply.send(Ok(serde_json::json!({ "matched": true })));
+                let _ = wait
+                    .reply
+                    .send(Ok(json::object([("matched", true.into())])));
             } else if now >= wait.deadline {
                 let _ = wait.reply.send(Err(format!(
                     "wait-text timed out waiting for {:?}",
@@ -3459,11 +3483,11 @@ impl PixelWindowApplication for ConApp {
                 height,
             )
             .map(|()| {
-                serde_json::json!({
-                    "path": path.to_string_lossy(),
-                    "width": width,
-                    "height": height,
-                })
+                json::object([
+                    ("path", path.to_string_lossy().into_owned().into()),
+                    ("width", width.into()),
+                    ("height", height.into()),
+                ])
             })
             .map_err(|error| format!("write screenshot: {error}"));
             let _ = reply.send(result);
