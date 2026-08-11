@@ -42,12 +42,27 @@ fn step(label) {
     );
 }
 
+// Existence only -- visibility is NOT existence.
+//
+// `Child.window_control(id)` already calls `script_window::control_exists(pid,
+// id)` and fails if the control is absent, so resolving the handle *is* the
+// existence check. The extra `visible == 0` throw this helper used to carry was
+// both redundant and wrong: every dialog control in the Windows frontend is
+// created with `visible = false` and shown only when its dialog opens, so
+// acquiring one before opening the dialog -- which the smoke has to do, because
+// it needs the handle to click with -- reported it as MISSING.
+//
+// That produced `remote_ui_control_missing:close_keep` and then
+// :initial_command, and it is the likely reason the dialog-heavy steps were the
+// slow ones (new terminal 75s, title/note 250s, hierarchy cycle 176s of a 922s
+// run): the recorded failure did not stop the step, so it continued against a
+// premise that had already failed and let its waits run to exhaustion.
+//
+// Call sites that genuinely require visibility assert it themselves right after
+// opening the dialog (`require(close_keep.visible, ...)`,
+// `require(initial_command.visible, ...)`, ...), so nothing is lost here.
 fn assert_window_control(gui, control_id, name) {
-    let control = gui.window_control(control_id);
-    if control.visible == 0 {
-        throw "remote_ui_control_missing:" + name;
-    }
-    control
+    gui.window_control(control_id)
 }
 
 fn output_stderr_text(output) {
@@ -1069,16 +1084,11 @@ try {
 
     step("close only the GUI and retain server, PTY, and workspace");
     let composer_editor = assert_window_control(gui, 2101, "composer_editor");
-    // Acquired WITHOUT `assert_window_control`: that helper reports "missing"
-    // when `visible == 0`, and these three are created hidden and only shown
-    // once the three-choice close dialog opens -- which is the `WM_CLOSE` below.
-    // Asserting visibility here is asserting the dialog is already open, so it
-    // threw `remote_ui_control_missing:close_keep` every time the smoke got this
-    // far. The real assertion is the `require` after `WM_CLOSE`, which checks
-    // exactly that they became visible; it is unchanged.
-    let close_keep = gui.window_control(2109);
-    let close_stop = gui.window_control(2110);
-    let close_cancel = gui.window_control(2111);
+    // Hidden until the `WM_CLOSE` below opens the dialog; the `require` after it
+    // is what asserts they became visible. See `assert_window_control`.
+    let close_keep = assert_window_control(gui, 2109, "close_keep");
+    let close_stop = assert_window_control(gui, 2110, "close_stop");
+    let close_cancel = assert_window_control(gui, 2111, "close_cancel");
     let draft_marker = "draft-" + context.run_id;
     composer_editor.set_text(draft_marker);
     gui.window_message(0x0010, 0, 0);
