@@ -548,6 +548,11 @@ integrated validation recorded below):
   wrappers by aggregating those narrow mechanisms. Lightweight hosts therefore
   declare actual needs without compiling process inventory, control, metrics,
   security, observation, containment, image, or spawn surfaces.
+- [x] Screenshot and font capabilities no longer imply aggregate filesystem
+  access, and IPC no longer implies path locking. Their adapters have no such
+  calls: screenshot owns encoding/capture, font owns discovery/rasterization,
+  and IPC owns native endpoint binding plus caller identity. Embedders that
+  need publication or locking declare those orthogonal mechanisms explicitly.
 - [x] The optional Windows `app-container-profile` feature owns profile/SID
   mechanics needed by external platform-crate callers without making them
   reconstruct native capability identities or pass potentially unaligned SID

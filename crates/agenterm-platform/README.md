@@ -80,15 +80,15 @@ clipboard, IPC, or screenshot modules.
 | `file-identity` | opened/path host object identity across rename and hard-link aliases | target minimal `windows-sys`; none on Unix |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
-| `ipc` | typed endpoints and product-neutral local byte streams; target-selected extension traits own borrowed/owned handle or fd transfer | `locking`, target native APIs |
+| `ipc` | typed endpoints and product-neutral local byte streams; target-selected extension traits own borrowed/owned handle or fd transfer | `user-identity`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | direct Win32 ConPTY / POSIX PTY adapters |
 | `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Linux `x11rb` / Unix `winit` + `softbuffer` / macOS system frameworks |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and the neutral pixel-window runner when `window` + `input` are enabled | `input` |
 | `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
 | `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | target native APIs |
-| `screenshot` | bounded XRGB encoding and typed native-window capture | `filesystem`, `png`, target Win32 APIs |
-| `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |
+| `screenshot` | bounded XRGB encoding and typed native-window capture | `png`, target Win32 APIs |
+| `font` | discovery, metrics and RAII native font resource | target `ab_glyph` / GDI |
 | `webview` | passive system-runtime discovery | none |
 | `full` | every declared feature | union of the above |
 

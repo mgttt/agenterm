@@ -217,6 +217,9 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   完整 `process`；GUI launcher 的父控制台输出与目标 shell/locale 默认值分别由
   `parent-console`、`runtime` 拥有。完整 `process` 仅为兼容聚合窄机制，con 必须显式
   声明所需 feature，不得因此获得进程枚举、控制、指标、安全或 spawn 面。
+- 同一规则适用于正交文件机制：`screenshot`、`font` 不携带完整 `filesystem`，`ipc`
+  不携带未使用的 `locking`。截图落盘由产品显式选择 `filesystem-publish`；IPC adapter
+  只拥有 endpoint、transport 与调用者 identity，不能借 feature 依赖隐式扩大文件面。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
