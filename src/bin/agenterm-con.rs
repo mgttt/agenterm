@@ -3128,6 +3128,25 @@ impl PixelWindowApplication for ConApp {
         }
         let control_deadline = self.drain_control(window, now);
         let directive = self.active_session_mut()?.about_to_wait(window, now)?;
+        // `ConTerminal::about_to_wait` returns `Wait` for a session whose child
+        // exited so one dead tab cannot discard live siblings. With NO live
+        // session left there is nothing to host, and `agenterm-con -e CMD` must
+        // exit when its child does: `--emit-snapshot` automation and
+        // tests/agenterm_con_blackbox.rs wait for this process to exit. Without
+        // it, `-e cmd.exe /c echo X` writes its snapshot and then hangs, which
+        // stalled the first GUI test in that suite and took the windows
+        // unit-tests gate past its budget with no test completing.
+        //
+        // Checked AFTER the session runs: `child_gone` is set by `drain_pty`
+        // inside that call, so testing first sees the pre-drain value on the one
+        // wake that reports the exit. A bound control endpoint means a client is
+        // driving this GUI and may still open tabs, so that case keeps waiting.
+        if self.control_server.is_none()
+            && !self.sessions.is_empty()
+            && self.sessions.values().all(|session| session.child_gone)
+        {
+            return Ok(PixelWindowDirective::Exit);
+        }
         Ok(match (directive, control_deadline) {
             (PixelWindowDirective::Wait, Some(deadline)) => {
                 PixelWindowDirective::WaitUntil(deadline)
