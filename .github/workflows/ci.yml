@@ -128,7 +128,15 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 30 minutes could not fit a COLD run, and this lane was stuck cold: the
+    # gate alone took 21m37s from an empty target cache (eb3ecb8d), the pack
+    # pipeline another 6m46s, so the release-lane smokes were killed 52s after
+    # they started. The save steps below are gated on the job not being
+    # cancelled, and a timeout counts as cancelled -- so the timeout skipped
+    # the save, the next run started cold again, and timed out again. Nothing
+    # about the product was wrong; the lane could never bootstrap its own
+    # cache. Give a cold run room to finish and save; warm runs are far shorter.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -162,8 +170,13 @@ jobs:
             target/debug/incremental/
             target/.rustc_info.json
           key: cargo-target-v3-windows-x86_64-native-slim-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          # The fallback must be a strict PREFIX of the key. It used to be the
+          # whole key plus a trailing `-`, which no saved entry can ever start
+          # with -- so there was no fallback at all and any dependency change
+          # meant a fully cold build. Dropping the hash makes the previous
+          # commit's units reusable; cargo revalidates fingerprints anyway.
           restore-keys: |
-            cargo-target-v3-windows-x86_64-native-slim-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v3-windows-x86_64-native-slim-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-
       - name: Install lint components
         id: install-lint
         shell: bash
@@ -328,7 +341,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Save Windows x86_64 build target
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        # `always()`, not `!cancelled()`: a job that ran out of budget is exactly
+        # the job whose compile units are most worth keeping, and skipping the
+        # save there is what kept this lane permanently cold. Cargo fingerprints
+        # are self-validating, so a partially built target directory is safe to
+        # reuse -- unfinished units simply rebuild.
+        if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         continue-on-error: true
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -381,7 +399,7 @@ jobs:
             target/.rustc_info.json
           key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
-            cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-
       - name: Install host dependencies
         id: install-deps
         run: |
@@ -628,7 +646,7 @@ jobs:
             target/.rustc_info.json
           key: cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
-            cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-
       - name: Install target dependencies
         id: install-deps
         run: |
@@ -750,7 +768,7 @@ jobs:
             target/.rustc_info.json
           key: cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
-            cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-
       - name: Install target
         id: install-target
         run: |
@@ -987,7 +1005,7 @@ jobs:
             ~/.cache/cargo-xwin/
           key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
-            cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-
       - name: Install cross tooling
         id: install-cross-tooling
         run: |
