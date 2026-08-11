@@ -403,23 +403,40 @@ fn wait_terminal_resize_settled(context, cli) {
 
 fn wait_terminal_selection(
         context, cli, phase, capture_owned, copyable, code) {
+    // Bounded by wall clock, and `contains` before every read: `terminal_interaction`
+    // and `selection.highlight` are absent until a selection exists, and *reading*
+    // an absent key records a failure. This loop polled up to 1200 times, so a
+    // single missing key produced thousands of recorded failures -- and because
+    // only the first is returned, a run that passed every assertion still exited
+    // non-zero reporting `json_path: terminal_interaction` (windows CI on
+    // 47dc36e0, right after `PASS:` was printed).
+    let selection_deadline = std::time::SystemTime::now().unix_millis + 20000;
+    let observed = "no snapshot read";
     for attempt in 0..1200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        let interaction = snapshot.terminal_interaction;
-        if interaction != json_null() {
-            let selection = interaction.selection;
-            if selection != json_null()
-                && selection.phase == phase
-                && selection.capture_owned == capture_owned
-                && selection.copyable == copyable
-                && selection.highlight.rendered
-                && selection.highlight.bounds.len > 0 {
-                return snapshot;
+        if snapshot.contains("terminal_interaction") {
+            let interaction = snapshot.terminal_interaction;
+            if interaction != json_null() && interaction.contains("selection") {
+                let selection = interaction.selection;
+                if selection != json_null()
+                    && selection.contains("highlight")
+                    && selection.phase == phase
+                    && selection.capture_owned == capture_owned
+                    && selection.copyable == copyable
+                    && selection.highlight.rendered
+                    && selection.highlight.bounds.len > 0 {
+                    return snapshot;
+                }
+                observed = rh::json::stringify(interaction);
             }
+        }
+        if std::time::SystemTime::now().unix_millis > selection_deadline {
+            break;
         }
         rh::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code;
+    throw code + ":want_phase=" + phase + ":capture_owned=" + capture_owned
+        + ":copyable=" + copyable + ":saw=" + observed;
 }
 
 fn sample_render_activity(context, cli, gui, after_sequence) {

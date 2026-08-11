@@ -1313,10 +1313,17 @@ try {
     // so a red here forced a re-run with extra instrumentation every time.
     // Report both expectations and the observed listing instead.
     let second_window_name = "second-" + std::process::id();
+    // Which server answered matters as much as what it listed: `saw=cmd.exe`
+    // alone cannot distinguish "main lost the tab" from "a different server
+    // replied". Carry the answering server's identity and the instance table.
+    let priority_who = text(harness, cli, ["protocol-info", "--running"]);
+    let priority_instances = text(harness, cli, ["list-instances", "--json"]);
     let priority_detail =
         ":want=" + environment_name
             + ":reject=" + second_window_name
-            + ":saw=" + explicit_windows.sub_string(0, 512);
+            + ":saw=" + explicit_windows.sub_string(0, 512)
+            + ":answered_by=" + priority_who.sub_string(0, 384)
+            + ":instances=" + priority_instances.sub_string(0, 768);
     test_harness::require(
         explicit_windows.contains(environment_name)
             && !explicit_windows.contains(second_window_name),

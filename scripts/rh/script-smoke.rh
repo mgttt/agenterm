@@ -65,6 +65,15 @@ fn script_smoke_pad(text, target_len, ch) {
     padded
 }
 
+/// Returns `target` with `arguments` appended.
+///
+/// The result MUST be used. A JSON parameter is passed by value, so pushing
+/// onto `target` mutates a copy and the caller's array is untouched -- every
+/// call site here used to discard the return, so `run_cli` invoked
+/// `agenterm.com --address HOST:PORT` with no subcommand at all. That is the
+/// GUI launcher, which prints its banner and stays alive, so the very first
+/// step of this smoke sat through a 60s process timeout and the remaining
+/// three thousand failures were its cascade.
 fn append_arguments(target, arguments) {
     let index = 0;
     while index < arguments.len {
@@ -138,7 +147,12 @@ fn configured_program(
         arguments
     );
     command.timeout(std::time::Duration::from_secs(60));
-    command.capture_limit(262144);
+    // `script api --json` alone is ~384 KiB today, so the old 256 KiB ceiling
+    // silently cut the envelope mid-string and every assertion about it saw
+    // `json_parse: EOF while parsing a string`. Keep a real bound -- a runaway
+    // child still has to be capped -- but one with headroom above the largest
+    // legitimate payload this smoke reads.
+    command.capture_limit(2097152);
     if audit_path == "" {
         command.env_remove("AGENTERM_SCRIPT_AUDIT_PATH");
         command.env_remove("AGENTERM_AUDIT_ENV_SECRET");
@@ -160,8 +174,7 @@ fn configured_program(
 }
 
 fn safe_command_arguments(program, arguments) {
-    let safe = [program];
-    append_arguments(safe, arguments);
+    let safe = append_arguments([program], arguments);
     let script_index = -1;
     let index = 0;
     while index < safe.len {
@@ -304,8 +317,8 @@ fn run_cli(
     environment,
     redactions
 ) {
-    let command_arguments = ["--address", context.address];
-    append_arguments(command_arguments, arguments);
+    let command_arguments =
+        append_arguments(["cli", "--address", context.address], arguments);
     run_program(
         context,
         cli,
@@ -345,9 +358,37 @@ fn cli_json(context, cli, arguments, audit_path) {
     rh::json::parse(result.stdout)
 }
 
+/// Same as [`cli_json`] for a payload larger than the runtime's in-memory
+/// child-capture bound.
+///
+/// `MAX_CAPTURE_BYTES` is 262144 and is *published in the API catalog*, so it is
+/// a contract, not a knob to raise. `script api --json` is ~384 KiB today, which
+/// means the catalog cannot be read through `output()` at all: the envelope came
+/// back cut mid-string and every assertion about it reported
+/// `json_parse: EOF while parsing a string`. Spool it to a file instead -- the
+/// same affordance the runtime offers for exactly this case -- so memory stays
+/// bounded while the payload does not have to be.
+fn cli_json_spooled(context, cli, arguments, audit_path, spool_path) {
+    let command_arguments =
+        append_arguments(["cli", "--address", context.address], arguments);
+    let command = configured_program(
+        context,
+        cli,
+        command_arguments,
+        audit_path,
+        script_smoke_empty_env()
+    );
+    command.stdout_file(spool_path);
+    let output = command.output();
+    test_harness::require(
+        output.success,
+        "script_smoke_spooled_cli_failed:" + output.stderr_text()
+    );
+    rh::json::parse(std::fs::read_to_string(spool_path))
+}
+
 fn direct_text(context, script, arguments, audit_path) {
-    let rh_arguments = ["rh"];
-    append_arguments(rh_arguments, arguments);
+    let rh_arguments = append_arguments(["rh"], arguments);
     let result = run_program(
         context,
         script,
@@ -363,8 +404,7 @@ fn direct_text(context, script, arguments, audit_path) {
 }
 
 fn direct_json(context, script, arguments, audit_path) {
-    let rh_arguments = ["rh"];
-    append_arguments(rh_arguments, arguments);
+    let rh_arguments = append_arguments(["rh"], arguments);
     let result = run_program(
         context,
         script,
@@ -453,8 +493,8 @@ fn start_script_client(
     arguments,
     audit_path
 ) {
-    let command_arguments = ["--address", context.address];
-    append_arguments(command_arguments, arguments);
+    let command_arguments =
+        append_arguments(["cli", "--address", context.address], arguments);
     configured_program(
         context,
         cli,
@@ -779,11 +819,12 @@ fn script_eval_parse(context, cli, source, audit_path) {
 
 fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     print("STEP offline scripting API discovery");
-    let api = cli_json(
+    let api = cli_json_spooled(
         context,
         cli,
         ["script", "api", "--json"],
-        audit_path
+        audit_path,
+        std::path::join(runtime_dir, "script-api.json").display
     );
     test_harness::require(api.ok, "script_api_envelope_failed");
     let catalog = api.value;
@@ -2116,9 +2157,8 @@ fn assert_supervisor(
     let denied_exit_code = 0;
     let denied_stderr = "";
     for index in 0..8 {
-        let holder_arguments = ["--address", context.address];
-        append_arguments(
-            holder_arguments,
+        let holder_arguments = append_arguments(
+            ["cli", "--address", context.address],
             [
                 "script", "eval", blocking_source,
                 "--timeout-ms", "10000",

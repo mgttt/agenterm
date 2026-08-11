@@ -497,6 +497,19 @@ pub(crate) fn resolved_ipc_endpoint() -> Result<ResolvedIpcEndpoint> {
     resolve_ipc_endpoint(&selectors).map_err(anyhow::Error::new)
 }
 
+/// True when the caller pinned a concrete transport with `--address` or
+/// `--endpoint`.
+///
+/// `--instance NAME` is deliberately *not* pinning: selecting a logical instance
+/// is exactly the case where resolving to whatever endpoint currently serves that
+/// name is correct.
+fn transport_was_pinned_explicitly() -> bool {
+    IPC_SELECTOR_OVERRIDE.with(|value| {
+        let selectors = value.borrow();
+        selectors.address.is_some() || selectors.endpoint.is_some()
+    })
+}
+
 pub(crate) fn ipc_endpoint() -> Result<IpcEndpoint> {
     let resolved = resolved_ipc_endpoint()?;
     apply_resolved_environment(&resolved);
@@ -1263,7 +1276,16 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         }
     };
     let mut response = send_control_request(arguments.clone(), control.clone());
-    if response.is_err() && may_start_server {
+    // Only when the caller did NOT pin a transport. `--address HOST:PORT` with
+    // nothing listening there used to fall through to this branch, find the live
+    // peer for the same logical instance, and run the command against *that*
+    // server -- exiting 0 while stderr carried "failed to launch independent
+    // AgenTerm server". So `cli --address 127.0.0.1:43004 new-window -n X`
+    // printed a window id and created X on 127.0.0.1:43001. An explicit address
+    // that cannot be served has to be an error, not a redirect: silently
+    // retargeting a destructive or stateful command at a different server is the
+    // worst possible reading of "explicit".
+    if response.is_err() && may_start_server && !transport_was_pinned_explicitly() {
         // Prefer attaching a live peer for this logical instance over minting a
         // second server (workspace re-spawn would look like a session reset).
         if let Ok(resolved) = resolved_ipc_endpoint()
