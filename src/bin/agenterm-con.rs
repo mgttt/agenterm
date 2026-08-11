@@ -3633,6 +3633,11 @@ impl Surface<'_> {
 /// Paints every cell of one screen into `surface`. Pure with respect to
 /// window/frame types so it is directly unit-testable — see the `tests`
 /// module, which renders into a plain `Vec<u32>` and asserts on pixel colors.
+// Only the `tests` module calls this wrapper, and this file is a `[[bin]]`:
+// its non-test compilation cfg's the tests away, so `-D warnings` sees an
+// unused function and fails the lint gate. Same shape as
+// `NativeToolbarHit::ORDER` in `src/frontend/toolbar.rs`.
+#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 fn paint_cells(
     surface: &mut Surface<'_>,
