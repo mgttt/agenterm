@@ -238,7 +238,9 @@ pub fn rh_compile(
 }
 
 pub fn rh_run_smoke(native: &Path) -> Result<i64, agenterm_rh::RhError> {
-    agenterm_rh::load_and_call_entry(native)
+    // Host callbacks registered: see the note on the `eval` arm in
+    // `script_rh_cli_main.rs`. A hostless run now aborts by design.
+    crate::script_rh_host::call_pack_entry_with_host_registration(native)
 }
 
 pub fn rh_load_pack(

@@ -493,6 +493,7 @@ App lane 不是“零 CI 成本”，而是“零 Base 重编译”。签名、�
 | 后续 | 建议范围 | 本版必须留下的稳定接口 |
 |------|----------|--------------------------|
 | **v0.1.19** | Phase 1：一条真实 CC 静态语义竖线 | typed callback、等价 fallback、interrupt、event、persisted disabled 熔断和 doctor 恢复 |
+| **v0.1.19+（独立授权）** | ape + thin shells 架构重构 | Phase A：拆分 `crates/agenterm-ape/`，将根 crate 的 ~110 个产品逻辑文件搬入独立 crate，~55 个平台薄壳文件留在根 crate。详见 [`plan-ape-thin-shell-dynamic-packages.md`](plan-ape-thin-shell-dynamic-packages.md)。 |
 | **v0.1.20+** | Phase 2：CC 静态语义扩面 | nav→empty/settings→layout 顺序、IPC cache/invalidation、fallback 切最小安全态、Win/Unix parity 与 i18n |
 | **v0.1.20+（独立授权）** | Phase 3：签名更新 | channel、离线公钥、显式 apply、rollback、audit、prev 一代、staging 上限与密钥轮换/吊销 |
 | **v0.2.x** | Phase 4：主 GUI chrome | toolbar/shortcut/context-menu/welcome/tab-editor 声明语义；native 仍渲染 |

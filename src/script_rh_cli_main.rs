@@ -28,9 +28,9 @@ use std::{
 
 use agenterm_rh::{
     CallerInventoryOptions, CorpusScanOptions, RH_VERSION, RhError, build_pack_dir, check,
-    check_with_project_validation, compile_native, hash_file, load_and_call_entry,
-    parse_check_many_cli, qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory,
-    scan_rh_directory, static_evidence_declarations, transpile, write_receipt,
+    check_with_project_validation, compile_native, hash_file, parse_check_many_cli,
+    qualify_pack_dir, read_manifest, run_check_many, scan_caller_inventory, scan_rh_directory,
+    static_evidence_declarations, transpile, write_receipt,
 };
 
 /// Entry point for the `agenterm-rh` CLI, callable from the thin
@@ -213,7 +213,12 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
             let native = scratch
                 .path()
                 .join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-            let value = load_and_call_entry(&native)?;
+            // Registers the host callbacks first: this runs a real script, so
+            // `print` has to reach stdout and `rh::fail` has to be reported.
+            // `agenterm_rh::load_and_call_entry` runs hostless, which the pack
+            // prelude now refuses outright rather than fabricating values.
+            let (value, output) = crate::script_rh_host::call_pack_entry_capturing_output(&native)?;
+            print!("{output}");
             println!(
                 "rh eval ok: {} -> {}\n  source_hash={}\n  native_hash={}\n  cc_lines={}",
                 path.display(),
@@ -228,7 +233,8 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
         }
         "run-smoke" => {
             let path = require_path(&mut args, "run-smoke")?;
-            let value = load_and_call_entry(&path)?;
+            let (value, output) = crate::script_rh_host::call_pack_entry_capturing_output(&path)?;
+            print!("{output}");
             println!(
                 "rh run-smoke ok: {} -> rh_entry() = {value}",
                 path.display()

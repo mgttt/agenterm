@@ -64,6 +64,32 @@ pub fn call_pack_entry_with_host_registration(native_path: &Path) -> Result<i64,
     })
 }
 
+/// Same as [`call_pack_entry_with_host_registration`], but also returns whatever
+/// the script `print`ed.
+///
+/// `print` is deliberately not written straight to stdout by the host utility:
+/// in the worker protocol stdout carries the JSON result, so a script's output
+/// would corrupt it. That is why the utility only writes to the run context's
+/// capture (or to stderr under `AGENTERM_SCRIPT_WORKER_STDERR=inherit`). The
+/// dev-loop commands (`rh eval`, `rh run-smoke`) have no such constraint and
+/// *should* show the output -- without this they silently swallowed every
+/// `print`, which is the opposite of what a debugging command is for.
+pub fn call_pack_entry_capturing_output(native_path: &Path) -> Result<(i64, String), RhError> {
+    let capture = std::sync::Arc::new(crate::script_rh_run::RhOutputCapture::new(1 << 20));
+    let context = crate::script_rh_run::RhRunContext {
+        output_capture: Some(std::sync::Arc::clone(&capture)),
+        ..Default::default()
+    };
+    let entry_value = crate::script_rh_run::with_run_context(context, || {
+        let module = RhNativeModule::load(native_path)?;
+        register_native_module(&module)?;
+        clear_host_error();
+        let entry_value = module.call_entry();
+        take_host_error().map_or(Ok(entry_value), Err)
+    })?;
+    Ok((entry_value, capture.finish()?))
+}
+
 pub fn call_cached_pack_entry_with_fleet(bridge: FleetBridgeFn) -> Result<i64, RhError> {
     let native_path = crate::script_rh_pack::cached_native_path()
         .ok_or_else(|| RhError::Compile("AGENTERM_RH_PACK native path is unavailable".into()))?;

@@ -1309,12 +1309,18 @@ try {
         cli,
         ["list-windows", "-F", "#{window_name}"]
     );
+    // The tag alone said nothing about WHICH half of the conjunction failed,
+    // so a red here forced a re-run with extra instrumentation every time.
+    // Report both expectations and the observed listing instead.
+    let second_window_name = "second-" + std::process::id();
+    let priority_detail =
+        ":want=" + environment_name
+            + ":reject=" + second_window_name
+            + ":saw=" + explicit_windows.sub_string(0, 512);
     test_harness::require(
         explicit_windows.contains(environment_name)
-            && !explicit_windows.contains(
-                "second-" + std::process::id()
-            ),
-        "fleet_environment_address_priority"
+            && !explicit_windows.contains(second_window_name),
+        "fleet_environment_address_priority" + priority_detail
     );
     run_program(
         harness,

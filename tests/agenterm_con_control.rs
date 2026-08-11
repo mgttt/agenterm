@@ -195,9 +195,11 @@ fn gui_control_surface_isolated_multitab_black_box() {
     );
     let perf = cli_json(exe, &endpoint, &["perf-stats"]);
     assert!(perf["frames"].as_u64().is_some_and(|frames| frames > 0));
-    assert!(perf["pty_drained_bytes"]
-        .as_u64()
-        .is_some_and(|bytes| bytes > 0));
+    assert!(
+        perf["pty_drained_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0)
+    );
 
     let root_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &root]);
     let child_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &child_id]);

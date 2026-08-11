@@ -1,8 +1,59 @@
 # ape + thin shells + dynamic packages: 架构与落地计划
 
-状态：draft（2026-08-10）
+状态：draft（2026-08-10，2026-08-10 全量 src/ 文件审计后更新）
+版本：计划期 v0.1.18，执行期 v0.1.19+（不在 v0.1.18 内施工）
 目标：根治构建时间问题——将频繁变更的产品逻辑与极少变更的平台薄壳分离，
 使一次典型改动只重编译目标 crate 而非整个 workspace。
+
+## 0. 核心发现（2026-08-10 全量 165 文件审计）
+
+### F1: 真正的靶心是 agenterm.exe 链接的大 library（165 文件）
+
+`agenterm-con.exe` 是 conhost 对标物，故意保持极简独立——不在本次重构靶心内。
+`agenterm-com.exe` 是 255 行 `#![no_std]` 零壳，`agenterm-cc.exe` 是 7 行入口——
+提取 ape 对它们完全不影响。
+
+本次重构的靶心是拆分 **agenterm.exe 依赖的那个 165 文件的 monolithic library**：
+
+```
+当前:
+  agenterm.exe ──→ agenterm 库 (165 .rs, 单 crate, 内部互相 crate:: 引用)
+                       改一行 terminal parser → 整个 crate 重编译
+
+目标:
+  agenterm.exe ──→ agenterm 根 crate (薄壳, ~55 .rs)
+                       │
+                       └──→ agenterm-ape (产品逻辑, ~110 .rs)
+                               改一行 terminal parser → 只重编 ape
+```
+
+### F2: 165 文件精确分类
+
+| 类别 | 文件数 | 去向 |
+|------|--------|------|
+| BIN（4 个 binary + agenterm-con 子模块） | 8 | 留在根 crate |
+| BUILD（build_identity.rs） | 1 | 留在根 crate |
+| TERMINAL（parser/screen/selection/lifecycle） | 4 | → ape |
+| PROTOCOL（wire types/IPC/control contract） | 4 | → ape |
+| SCRIPT（engine host/fleet/task/stdlib/worker） | 31 | → ape |
+| SERVER（authority/dispatch/workspace/client） | 8 | → ape |
+| FRONTEND（dialog states/actions/geometry） | 21 | → ape |
+| PLATFORM_ADAPTER_WINDOWS | 4 | 留在根 crate（薄壳） |
+| PLATFORM_ADAPTER_UNIX | 10 | 留在根 crate（薄壳） |
+| PLATFORM_GLUE（contracts/policy/services） | 46 | 分裂：产品策略 → ape，平台胶水 → 根 |
+| OTHER（product logic） | 28 | 大部分 → ape |
+
+### F3: 已有 crate 边界是三层架构
+
+```
+Tier 0: agenterm-platform        (OS contracts, 零 workspace 内依赖)
+Tier 1: agenterm-script-common   (共享脚手架, 零 workspace 内依赖)
+Tier 2: agenterm-rh/lua/qjs/sql/wasmcore  (引擎, 仅依赖 script-common)
+Tier 3: agenterm (根)            (产品, 依赖 platform + 所有引擎)
+```
+
+`agenterm-ape` 放在 Tier 1.5：依赖 `agenterm-platform` + `agenterm-script-common`，
+不依赖根 crate。根 crate 反过来依赖它。
 
 ## 1. 问题量化
 
@@ -111,297 +162,115 @@ CI 冷编译通过 crate 级并行 + 缓存降低到 3-5 分钟。
 | `src/ui_*.rs` | ✅ 共享语义 | 直接进 ape |
 | `src/platform/adapters/{windows,unix}` | ✅ 已按 host 分目录 | 薄壳的原材料 |
 
-## 4. 分阶段落地
+## 4. Phase A 精确搬移序列（8 step，按依赖从少到多）
 
-### Phase A: 拆 ape crate（1-2 天）
+**策略**：每个 step 搬文件 + 修 import + `cargo check`，不在一大坨里找 bug。
+每一步搬完立即验证，出问题范围小。全程不改逻辑，只搬文件。
 
-**目标**：把根 crate 的 `src/` 产品逻辑搬进 `crates/agenterm-ape/`，
-保持 rlib，不引入 C ABI。
+### Step 0: 前置准备
 
+1. 创建 `crates/agenterm-ape/` 目录和 `Cargo.toml`
+2. 在根 `Cargo.toml` 的 workspace members 添加 `"crates/agenterm-ape"`
+3. 在 `[dependencies]` 添加 `agenterm-ape = { path = "crates/agenterm-ape" }`
+4. 创建空的 `crates/agenterm-ape/src/lib.rs`
+
+**验收**：`cargo check --workspace` 通过。
+
+### Step 1: terminal 模块（最独立，依赖最少）
+
+先搬三个零内部依赖的"叶子"文件：
+- `src/terminal_cursor.rs` → `crates/agenterm-ape/src/terminal/cursor.rs`
+- `src/terminal_lifecycle.rs` → `crates/agenterm-ape/src/terminal/lifecycle.rs`
+- `src/terminal_observation.rs` → `crates/agenterm-ape/src/terminal/observation.rs`
+
+`terminal_runtime.rs` 有跨模块依赖（`crate::pty`、`crate::SCROLLBACK_LINES`、
+`crate::frontend`、`crate::wake_signal`、`crate::working_context`、`crate::workspace`），
+等依赖到位后再搬。
+
+**验收**：`cargo check` 通过，terminal cursor/lifecycle/observation 从 ape 提供。
+
+### Step 2: protocol 模块
+
+- `src/protocol.rs` → `crates/agenterm-ape/src/protocol/types.rs`
+- `src/ipc_endpoint.rs` → `crates/agenterm-ape/src/protocol/ipc_endpoint.rs`
+- `src/ipc_transport.rs` → `crates/agenterm-ape/src/protocol/ipc_transport.rs`
+- `src/ui_bridge.rs` → `crates/agenterm-ape/src/protocol/ui_bridge.rs`
+
+### Step 3: frontend 模块（21 文件，ARCHITECTURE.md 标注为"产品语义"）
+
+全部 `src/frontend/*.rs` 直接搬入 `crates/agenterm-ape/src/frontend/`。
+大多数只依赖 `agenterm_platform` 或纯 std，搬移风险最低。
+
+### Step 4: ui 共享模块
+
+`src/ui_*.rs`（geometry, snapshot, clipboard model, bridge, client, command, lease, interaction）。
+
+### Step 5: product 模块
+
+`src/settings.rs`, `theme.rs`, `locale.rs`, `tab_tree.rs`, `instances.rs`,
+`working_context.rs`, `wake_signal.rs`, `operations.rs`, `commands.rs`,
+`agent_tools.rs`, `event_journal.rs`, `frontend_server.rs`, `upgrade_identity.rs`,
+`webview_host.rs`, `control_center.rs` —— 逐个分析依赖，有循环依赖的留到后续 step。
+
+### Step 6: script 模块（31 文件，最重一批）
+
+先搬"叶子"（被依赖但不依赖别人的）：
+- `script_error.rs`, `script_protocol.rs` → 先搬（纯类型，零内部依赖）
+- 再逐步搬 host/run/cli 等
+
+### Step 7: server 模块（8 文件）
+
+最后一批，因为 server 依赖几乎所有其他模块：
+`server_app.rs`, `control_authority.rs`, `control_dispatch.rs`,
+`control_contract.rs`, `workspace.rs`, `named_buffer.rs`, `client/mod.rs`。
+
+### Step 8: 精简薄壳
+
+搬完后根 crate 的 `src/lib.rs` 只剩：
+- 薄壳模块的 `mod` 声明（platform/adapters/*, build_identity, tui, incremental_wrapper）
+- 对 `agenterm_ape` 的 `pub use` 重导出（保持对外 API 兼容）
+
+### 搬移期间 API 兼容策略
+
+根 crate 当前对外暴露了大量 `pub` 类型。搬移期间在根 crate 保留
+`pub use agenterm_ape::xxx` 重导出，binary 和 test 的 `use agenterm::...`
+不需要立即改动。全部搬完后逐步迁移 import。
+
+### 搬移期间测试策略
+
+每个 step 后立即：
+```powershell
+cargo check --workspace          # 编译通过
+cargo test --lib                 # 根 crate lib 测试
 ```
-crates/agenterm-ape/
-  Cargo.toml         # [lib] crate-type = ["rlib"]（Phase A 只用 rlib）
-  src/
-    lib.rs           # re-export 所有子模块
-    terminal/        # 从 src/ 搬入
-      mod.rs
-      parser.rs      # vt100 wrapper
-      screen.rs      # terminal state
-      selection.rs   # 选区逻辑
-    protocol/        # 从 src/ 搬入
-      mod.rs
-      types.rs       # wire types
-      contracts.rs   # capability/error contracts
-      ipc_wire.rs    # IPC message format
-    script_host/     # 从 src/ 搬入
-      mod.rs
-      engine_registry.rs  # ScriptEngine enum + dispatch
-      fleet_bridge.rs     # FleetCallFn passthrough
-      task_dispatch.rs    # Rhai task runner
-    server/          # 从 src/ 搬入
-      mod.rs
-      authority.rs   # workspace/tab authority
-      workspace.rs   # workspace lifecycle
-      pty_orch.rs    # PTY management
-    frontend/        # 直接搬 src/frontend/*
-      mod.rs
-      action.rs
-      ui_action_catalog.rs
-      toolbar.rs
-      window.rs
-      interaction.rs
-      composer.rs
-      cwd_editor.rs
-      input.rs
-      new_terminal.rs
-      settings.rs
-      close_confirmation.rs
-      tab_editor.rs
-      window_close.rs
-      selection.rs
-      control_center.rs
-    ui_shared/       # 直接搬 src/ui_*.rs
-      mod.rs
-      geometry.rs
-      snapshot.rs
-      clipboard.rs
-      dispatch.rs
-```
+全量门禁（`check.cmd --quick`）只在 Step 8 后跑一次。
 
-**这一步不做任何逻辑改动，只搬文件 + 修 import 路径。**
+## 5. 构建时间预期（基于 2026-08-10 文件审计）
 
-搬运后，根 crate 的 4 个 `[[bin]]` 改为依赖 `agenterm-ape`（rlib）：
-
-```toml
-# 根 Cargo.toml
-[dependencies]
-agenterm-ape = { path = "crates/agenterm-ape" }
-```
-
-4 个 binary 的 `src/bin/agenterm.rs` 等只保留平台窗口创建、输入事件循环、
-渲染 surface 代码，其余全 delegate 给 ape。
-
-**验收**：
-- `cargo build --workspace` 成功，所有 4 个 binary 功能不变
-- `cargo test --workspace` 全绿
-- `check.cmd --quick` 通过
-- 改 `crates/agenterm-ape/src/terminal/parser.rs` 一行 →
-  只重编译 agenterm-ape + 4 binary 链接（不再编译整个 src/ 单体）
-
-**预期收益**：
-- 增量构建：改动在 ape 内 → 只重编译 ape crate，4 binary 只重链接
-  （链接 4 个 thin binary 比链接整个 monolithic library 快得多，因为 thin binary 自身代码极少）
-- 冷构建：Cargo 可并行编译 ape、platform、rh 等独立 crate
-- CI：crate 级缓存粒度更细
-
-### Phase B: C ABI 薄壳化（2-3 天）
-
-**目标**：给 ape 加 cdylib 输出，给 4 个 binary 加动态加载路径。
-
-```
-crates/agenterm-ape/
-  Cargo.toml         # crate-type = ["rlib", "cdylib"]
-  src/
-    lib.rs           # 已有 rlib re-export
-    ffi.rs           # [NEW] C ABI exports（feature-gated: "cdylib"）
-    ffi_types.rs     # [NEW] JSON schema for FFI boundary
-```
-
-**C ABI 面设计**（最小化！只暴露薄壳真正需要的）：
-
-```rust
-// crates/agenterm-ape/src/ffi.rs
-
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
-
-/// Opaque handle to an initialized APE instance.
-pub struct ApeHandle(/* internal */);
-
-/// Opaque handle to a window managed by the APE.
-pub struct ApeWindow(/* internal */);
-
-/// Initialize the APE engine. Returns null on failure (error written to stderr).
-#[no_mangle]
-pub extern "C" fn ape_init(config_json: *const c_char) -> *mut ApeHandle;
-
-/// Create a terminal window. The shell owns the native window handle
-/// and passes input events through ape_process_input().
-#[no_mangle]
-pub extern "C" fn ape_create_window(
-    handle: *mut ApeHandle,
-    window_config_json: *const c_char,
-) -> *mut ApeWindow;
-
-/// Process user input for a window. Returns JSON describing state changes
-/// (cursor update, selection change, bell, title change, etc.).
-/// Caller must free the returned string with ape_free_string().
-#[no_mangle]
-pub extern "C" fn ape_process_input(
-    window: *mut ApeWindow,
-    input_json: *const c_char,
-) -> *mut c_char;
-
-/// Get a full snapshot of window state (for rendering, IPC, etc.).
-/// Caller must free with ape_free_string().
-#[no_mangle]
-pub extern "C" fn ape_get_snapshot(
-    window: *mut ApeWindow,
-) -> *mut c_char;
-
-/// Free a string returned by any ape_* function.
-#[no_mangle]
-pub extern "C" fn ape_free_string(s: *mut c_char);
-
-/// Destroy a window.
-#[no_mangle]
-pub extern "C" fn ape_destroy_window(window: *mut ApeWindow);
-
-/// Shut down the APE engine.
-#[no_mangle]
-pub extern "C" fn ape_shutdown(handle: *mut ApeHandle);
-```
-
-**总共 7 个函数**。这不是一个"把整个 Rust API 翻译成 C"的工程——这是
-一个"薄壳只需要知道这些"的极窄接口。薄壳的职责：
-
-1. 创建原生窗口（Win32 `CreateWindowEx` / winit `Window`）
-2. 收到输入事件 → 序列化为 JSON → `ape_process_input()`
-3. 收到状态变更 → 驱动渲染
-4. 窗口关闭 → `ape_destroy_window()`
-
-**薄壳代码量估算**（以 Windows 为例）：
-
-```
-src/bin/agenterm.rs  (当前) → ~2000 行 Win32 + 产品逻辑混合
-                          → 目标 ~300 行纯 Win32 胶水
-```
-
-**验收**：
-- `cargo build --features cdylib` 产出 `agenterm-ape.dll` (~3MB)
-- 4 个 binary 仍可 static-link（rlib 路径），`cargo test` 全绿
-- 有 `AGENTERM_USE_CDYLIB=1` 环境变量时，thin shell 走 LoadLibrary 路径
-- CDYLIB 路径下的 startup smoke 通过
-
-### Phase C: 动态包插件化（2-3 天）
-
-**目标**：script engines + 可选组件变成 `.dll`/`.so`，ape 启动时扫描并加载。
-
-#### Plugin VTable 设计
-
-```rust
-// crates/agenterm-script-common/src/plugin.rs (新增)
-
-/// Every dynamic package exports exactly one function:
-///   extern "C" fn agenterm_plugin_get_vtable() -> *const PluginVTable;
-#[repr(C)]
-pub struct PluginVTable {
-    pub version: u32,              // API version (1)
-    pub plugin_id: *const c_char,  // e.g. "agenterm-rh"
-    pub plugin_kind: *const c_char, // "script-engine" | "platform-backend" | ...
-    
-    /// Initialize the plugin. Returns null on success, error message on failure.
-    pub init: extern "C" fn(ape_bridge: *const ApeBridge) -> *const c_char,
-    
-    /// Shut down the plugin.
-    pub shutdown: extern "C" fn(),
-}
-
-/// Bridge from plugin back to the APE.
-#[repr(C)]
-pub struct ApeBridge {
-    /// Call a fleet operation. plugin_data is an opaque pointer the plugin
-    /// passed to init(); it's passed back here for context.
-    pub fleet_call: extern "C" fn(
-        plugin_data: *mut c_void,
-        operation_id: *const c_char,
-        params_json: *const c_char,
-    ) -> FleetCallResult,
-}
-```
-
-#### 已有的 script engine 改造成 plugin
-
-当前 `ScriptEngineBackend` trait 已定义 `check()` 和 `execute()`。
-每个 engine（rh/qjs/lua/sql/wasmcore）只需要加一个 `agenterm_plugin_get_vtable()`
-导出函数：
-
-```rust
-// crates/agenterm-rh/src/plugin.rs (新增，feature-gated)
-
-#[no_mangle]
-pub extern "C" fn agenterm_plugin_get_vtable() -> *const PluginVTable {
-    &PluginVTable {
-        version: 1,
-        plugin_id: c"agenterm-rh".as_ptr(),
-        plugin_kind: c"script-engine".as_ptr(),
-        init: rh_plugin_init,
-        shutdown: rh_plugin_shutdown,
-    }
-}
-```
-
-#### ape 的插件加载器
-
-```rust
-// crates/agenterm-ape/src/plugin_loader.rs (新增)
-
-impl ApeEngine {
-    fn load_plugins(&mut self, plugin_dir: &Path) {
-        for entry in std::fs::read_dir(plugin_dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension() != Some("dll") && path.extension() != Some("so") {
-                continue;
-            }
-            // SAFETY: we verify the vtable version before calling anything
-            unsafe {
-                let lib = libloading::Library::new(&path)?;
-                let get_vtable: libloading::Symbol<
-                    unsafe extern "C" fn() -> *const PluginVTable
-                > = lib.get(b"agenterm_plugin_get_vtable")?;
-                let vtable = get_vtable();
-                if (*vtable).version != 1 {
-                    continue; // skip incompatible plugins
-                }
-                let plugin_id = CStr::from_ptr((*vtable).plugin_id).to_str()?;
-                self.plugins.insert(plugin_id, (lib, vtable));
-            }
-        }
-    }
-}
-```
-
-**验收**：
-- `cargo build -p agenterm-rh --features cdylib` 产出 `agenterm-rh.dll`
-- ape 启动时扫描 `plugins/` 目录，自动发现并加载
-- `agenterm cli script run --engine rh` 仍正常工作
-- 新增一个 script engine（如 wasmcore）不需要重编译 ape 或 shell
-
-### Phase D: platform backend 动态化（1-2 天）
-
-**目标**：将 `agenterm-platform` 的 PTY/process 后端变成可选动态包。
-
-Windows 薄壳自带 ConPTY backend 编译进 shell（它不是可选功能）。
-但 Unix PTY、ConPTY 诊断工具、特定平台的 process containment 等可以作为动态包。
-
-这一步较小——主要是把 platform 的 feature flags 映射到 plugin kind，
-让 ape 在启动时根据当前 OS 选择加载哪个 platform backend plugin。
-
-## 5. 构建时间预期
-
-| 场景 | 当前 (monolith) | Phase A 后 (rlib 拆分) | Phase B 后 (+cdylib) | Phase C 后 (+plugins) |
-|------|---------------|----------------------|---------------------|----------------------|
-| 改动 terminal parser 一行 | ~14s（增量 hot） | ~3s（只重编 ape crate） | ~3s | ~3s |
-| 改动 UI geometry 一行 | ~14s | ~3s | ~3s | ~3s |
-| 改动 Win32 shell 一行 | ~14s | ~2s（只重编 thin shell） | ~1s | ~1s |
-| 改动 Rhai stdlib | ~14s | ~5s（ape + rh crate） | ~5s | ~2s（只重编 rh.dll） |
-| CI 冷编译（全 workspace） | ~20min | ~8min（crate 并行） | ~8min | ~5min（插件并行编译） |
-| CI 热编译（缓存命中） | ~5min | ~2min | ~2min | ~1min |
+| 场景 | 当前 | Phase A 后 | 原理 |
+|------|------|-----------|------|
+| 改 terminal cursor 一行 | ~14s | ~4s | 只重编 ape crate（~4 文件）+ 2 binary 重链接 |
+| 改 frontend dialog 一行 | ~14s | ~3s | 只重编 ape crate + binary 重链接 |
+| 改 Win32 window 一行 | ~14s | ~2s | 只重编根 crate 薄壳模块 |
+| 改 Rhai stdlib | ~14s | ~5s | 重编 ape（含 script 模块）+ agenterm-rh crate |
+| CI 冷编译 | ~20min | ~10min | ape 与其他 crate 并行编译 |
+| CI 热编译（缓存全命中） | ~5min | ~2min | 增量粒度为 crate 级 |
 
 **核心收益不在绝对数值，而在改动影响面**：
 - 当前：改任何 `src/*.rs` → 整个 workspace 重编译
 - Phase A 后：改动局限在单一 crate
 - Phase B/C 后：改动脚本引擎完全不影响 shell 和 ape
+
+## 6. 版本定位
+
+| 版本 | ape 相关工作 |
+|------|-------------|
+| **v0.1.18** | 计划期——本文件完善、依赖分析、CI 缓存止血（`success()` → `!cancelled()`）等可并行前置 |
+| **v0.1.19+** | 执行期——Phase A 搬文件（需 v0.1.17 收口 + v0.1.18 QJS App Pack 完成后授权开工） |
+| **v0.2.x** | Phase B/C/D（C ABI 薄壳化 + 动态包插件化） |
+
+v0.1.18 的主题是 Portable App Substrate（QJS App Pack），参见 `plan/plan-v0.1.18.md`。
+本文件中的 Phase A 不在 v0.1.18 执行范围内。
 
 ## 6. 风险与缓解
 
