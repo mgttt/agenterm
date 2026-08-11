@@ -195,6 +195,8 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   截图打包在 x86_64 选择 SSSE3 `pshufb`、在 aarch64 选择 NEON table shuffle，
   其他架构走逐字节相同的标量结果；产品编码器不得复制 CPU 探测。PNG 的 IEEE
   CRC-32 状态机属于 `agenterm-platform::checksum`，不得误用 x86 SSE4.2/Arm CRC32C。
+  同 crate 还统一 XRGB rectangle 的裁剪、stride 与连续整帧规则，con 和主程序 Unix
+  frontend 复用 `slice::fill` 生成代码；无测量证据时不得为该成熟原语维护 ISA 分叉。
 - 原子文件发布由 `agenterm-platform::filesystem_publish::write_file_atomic` 统一
   持有：同目录独占临时文件、文件 sync、原生替换、父目录 durability barrier 和
   失败清理。Windows adapter 使用 `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`
@@ -209,7 +211,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 548,864 B；当前比 512 KiB x86_64 目标高 24,576 B，主要增量是
+  1,046,528 B 降到 549,376 B；当前比 512 KiB x86_64 目标高 25,088 B，主要增量是
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
@@ -350,8 +352,9 @@ palette, viewport state, capture, rendering, and OS event adaptation. The pixel
 window contract exposes typed pointer cursors; Windows implements them through
 Win32 cursor FFI and Unix/macOS through the native winit adapter.
 
-The crate also owns bit-exact XRGB alpha-mask row composition. It selects AVX2
-or baseline SSE2 once on x86_64, uses NEON on aarch64, and retains a scalar
-reference for other architectures and parity tests. Hosts own clipping and
-submit only contiguous destination/mask spans; architecture kernels never own
-terminal cells, fonts, layout, or frame lifecycle.
+The crate also owns bit-exact XRGB alpha-mask row composition and RGB8 packing.
+It selects AVX2/SSE2 or SSSE3 once on x86_64, uses NEON on aarch64, and retains
+scalar references for other architectures and parity tests. Rectangle fill
+shares safe clipping/stride/full-frame collapse but deliberately retains
+`slice::fill`; emitted-code inspection found no reason to own another ISA fork.
+Architecture kernels never own terminal cells, fonts, layout, or frame lifecycle.

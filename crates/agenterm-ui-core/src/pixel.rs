@@ -359,6 +359,46 @@ unsafe fn neon_pack_kernel(source: *const u32, destination: *mut u8, length: usi
     }
 }
 
+/// Fills a clipped rectangle in a row-major XRGB framebuffer.
+///
+/// `stride` is the physical pixel width of a row. A partial trailing row is
+/// ignored, zero geometry is a no-op, and overflowing rectangles clamp to the
+/// complete framebuffer. Full-width rectangles collapse to one contiguous ISA
+/// call instead of dispatching once per row.
+pub fn fill_xrgb_rect(
+    destination: &mut [u32],
+    stride: u32,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: u32,
+) {
+    let stride = stride as usize;
+    if stride == 0 || width == 0 || height == 0 {
+        return;
+    }
+    let rows = destination.len() / stride;
+    let x = (x as usize).min(stride);
+    let y = (y as usize).min(rows);
+    let right = x.saturating_add(width as usize).min(stride);
+    let bottom = y.saturating_add(height as usize).min(rows);
+    let span = right - x;
+    let row_count = bottom - y;
+    if span == 0 || row_count == 0 {
+        return;
+    }
+
+    if x == 0 && span == stride {
+        destination[y * stride..bottom * stride].fill(color);
+    } else {
+        for row in y..bottom {
+            let start = row * stride + x;
+            destination[start..start + span].fill(color);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +474,23 @@ mod tests {
     #[test]
     fn scalar_pack_is_the_byte_exact_reference() {
         exercise_pack(scalar_pack_kernel);
+    }
+
+    #[test]
+    fn clipped_fill_preserves_offsets_and_partial_trailing_row() {
+        let mut pixels = vec![0xaaaa_aaaa; 22];
+        fill_xrgb_rect(&mut pixels, 5, 3, 1, u32::MAX, u32::MAX, 0x0012_3456);
+        for row in 0..4 {
+            for column in 0..5 {
+                let expected = if row >= 1 && column >= 3 {
+                    0x0012_3456
+                } else {
+                    0xaaaa_aaaa
+                };
+                assert_eq!(pixels[row * 5 + column], expected, "row={row} col={column}");
+            }
+        }
+        assert_eq!(&pixels[20..], &[0xaaaa_aaaa; 2]);
     }
 
     #[cfg(target_arch = "x86_64")]

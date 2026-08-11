@@ -3442,6 +3442,21 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         }
         _ if json_parse_arg(expr).is_some() => ValueKind::Json,
         _ if json_string_field_path(expr, ctx).is_some() => ValueKind::String,
+        // `doc.items.len` is an INT surface, but it also parses as a json path
+        // whose last segment happens to be `len` -- and the json arm below is
+        // greedier. Comparisons and arithmetic already route it to
+        // `rh_json_array_len` (both lanes consult `is_native_json_int_expr`),
+        // so only the bare `let n = doc.items.len;` form fell through to
+        // `rh_json_get_path(&doc, &["items", "len"])`, which fails closed at
+        // runtime with `json_path: items.len`. That silently made the binding
+        // null, so every later count assertion ran on a poisoned premise
+        // instead of naming the real problem.
+        _ if json_array_len_path(expr, ctx).is_some()
+            || json_object_keys_len_path(expr, ctx).is_some()
+            || set_keys_len_path(expr, ctx).is_some() =>
+        {
+            ValueKind::Int
+        }
         _ if json_value_path(expr, ctx).is_some_and(|(_, path)| !path.is_empty()) => {
             ValueKind::Json
         }

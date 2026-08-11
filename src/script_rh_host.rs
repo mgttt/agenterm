@@ -266,16 +266,7 @@ extern "C" fn host_utility_call(operation: u32, input: *const u8, input_len: u32
             }
         }
         agenterm_rh::RH_HOST_UTILITY_PRINT => {
-            if std::env::var_os("AGENTERM_SCRIPT_WORKER_STDERR")
-                .is_some_and(|value| value == "inherit")
-            {
-                eprintln!("{input}");
-            }
-            if let Some(capture) = crate::script_rh_run::current_run_context()
-                .and_then(|context| context.output_capture)
-            {
-                capture.push_line(&input);
-            }
+            emit_host_trace(&input);
             0
         }
         _ => {
@@ -819,15 +810,40 @@ fn clear_host_error() {
     HOST_ERROR.with(|slot| {
         slot.borrow_mut().take();
     });
+    HOST_ERROR_COUNT.with(|slot| slot.set(0));
 }
 
 fn record_host_error(code: &'static str, detail: &str) {
+    let ordinal = HOST_ERROR_COUNT.with(|slot| {
+        let next = slot.get().saturating_add(1);
+        slot.set(next);
+        next
+    });
+    // Only the first failure survives to the caller, because `require` records
+    // and continues -- so a long script reports failure #1 and hides every one
+    // after it. Trace each of them where `print` already goes, so one run
+    // yields the whole ordered list next to the STEP stamps instead of costing
+    // a fresh run per failure.
+    emit_host_trace(&format!("RH_FAIL[{ordinal}] {code}: {detail}"));
     HOST_ERROR.with(|slot| {
         let mut error = slot.borrow_mut();
         if error.is_none() {
             *error = Some(RhError::Compile(format!("{code}: {detail}")));
         }
     });
+}
+
+/// Send one diagnostic line down the same two channels as script `print`:
+/// an inherited worker stderr and the run's output capture.
+fn emit_host_trace(line: &str) {
+    if std::env::var_os("AGENTERM_SCRIPT_WORKER_STDERR").is_some_and(|value| value == "inherit") {
+        eprintln!("{line}");
+    }
+    if let Some(capture) =
+        crate::script_rh_run::current_run_context().and_then(|context| context.output_capture)
+    {
+        capture.push_line(line);
+    }
 }
 
 fn take_host_error() -> Option<RhError> {
@@ -863,6 +879,7 @@ std::thread_local! {
         const { std::cell::RefCell::new(None) };
     static HOST_ERROR: std::cell::RefCell<Option<RhError>> =
         const { std::cell::RefCell::new(None) };
+    static HOST_ERROR_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -1022,6 +1039,40 @@ mod tests {
                 .expect("typed failure")
                 .to_string()
                 .contains(message)
+        );
+    }
+
+    #[test]
+    fn every_recorded_failure_is_traced_even_though_only_the_first_is_returned() {
+        let capture = std::sync::Arc::new(crate::script_rh_run::RhOutputCapture::new(4096));
+        let context = crate::script_rh_run::RhRunContext {
+            output_capture: Some(capture.clone()),
+            ..Default::default()
+        };
+        crate::script_rh_run::with_run_context(context, || {
+            super::clear_host_error();
+            for message in ["first failure", "second failure"] {
+                assert_eq!(
+                    super::host_utility_call(
+                        agenterm_rh::RH_HOST_UTILITY_FAIL,
+                        message.as_ptr(),
+                        message.len() as u32,
+                    ),
+                    -5
+                );
+            }
+            let returned = super::take_host_error().expect("typed failure");
+            assert!(returned.to_string().contains("first failure"));
+            assert!(!returned.to_string().contains("second failure"));
+        });
+        let traced = capture.finish().expect("captured trace");
+        assert!(
+            traced.contains("RH_FAIL[1] rh_fail: first failure"),
+            "trace missing the first failure: {traced}"
+        );
+        assert!(
+            traced.contains("RH_FAIL[2] rh_fail: second failure"),
+            "the failure the returned error hides must still be traced: {traced}"
         );
     }
 

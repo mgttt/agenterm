@@ -9,6 +9,8 @@ do not invent a second living file map in prompts or version plans.
 
 Writing or editing a script? Start at
 [Script engines](#script-engines--read-the-condensed-manual-before-writing-a-script).
+Writing or editing Rust? Start at
+[Rust engineering](#rust-engineering--read-the-condensed-manual-before-editing-rust).
 
 ## Document redaction (hard rule · never re-offend)
 
@@ -157,6 +159,35 @@ prerequisite on the primary path. After parallel work returns, integrate and
 review it before validation. Run the final formatting, Clippy, unit-test,
 artifact, and full public-interface gates serially on the integrated tree so the
 result represents one reproducible source state.
+
+## Rust engineering — read the condensed manual before editing Rust
+
+Repository Rust work repeatedly crosses feature graphs, six target cells,
+native handle ownership, GUI thread affinity, bounded concurrency, and ISA
+dispatch. General Rust knowledge is not enough to recover those local
+contracts. Read [`docs/agenterm-rust-cheatsheet.md`](docs/agenterm-rust-cheatsheet.md)
+before changing `.rs`, `Cargo.toml`, build profiles, FFI, `unsafe`, SIMD, PTY,
+IPC, filesystem publication, or rendering hot paths. Add newly proven recurring
+lessons there; do not let them survive only in a conversation or version plan.
+Before closing every Rust task, explicitly audit whether the work produced a
+reusable rule, failure mode, target caveat, evidence technique, or rejected
+optimization. If it did, update the condensed manual in the same coherent
+increment. If it did not, do not add speculative filler. Review and handoff are
+not substitutes for this repository write-back.
+
+The highest-yield rules are:
+
+- Product code does not import raw OS APIs. Put neutral types/contracts in
+  `agenterm-platform`, native calls in selected adapters, and product meaning in
+  shared frontend/product modules.
+- Every `unsafe` or ISA kernel needs a safe bounded caller, a scalar truth
+  implementation, exact parity tests, target compile evidence, and emitted-code
+  inspection. Do not specialize branch-heavy policy or compiler/runtime
+  primitives without measured evidence.
+- Validate the feature in isolation with `--no-default-features --features ...`;
+  a full build can hide undeclared dependencies through feature unification.
+- Use a dedicated `CARGO_TARGET_DIR` for isolated work and clean it after the
+  owning evidence. Never run competing Cargo builds in one target directory.
 
 ## Script engines — read the condensed manual before writing a script
 

@@ -205,6 +205,23 @@ fn json_array_fixture_executes_natively_without_interpreter() {
             .rust
             .contains("rh_json_array_len(&document, &[\"executables\"])")
     );
+    // A bare `let count = document.executables.len;` must take the INT lane too.
+    // It used to emit `rh_json_get_path(&document, &["executables", "len"])`,
+    // which resolves to null and fails closed at runtime.
+    assert!(
+        output
+            .rust
+            .contains("let mut count = rh_json_array_len(&document, &[\"executables\"])"),
+        "{}",
+        output.rust
+    );
+    assert!(
+        !output
+            .rust
+            .contains("rh_json_get_path(&document, &[\"executables\", \"len\"])"),
+        "{}",
+        output.rust
+    );
     assert!(
         output
             .rust

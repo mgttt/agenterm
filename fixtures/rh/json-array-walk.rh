@@ -5,6 +5,14 @@ fn entry() {
     if document.executables.len != 2 {
         return rh::fail("json_executables_length_invalid");
     }
+    // The bare `let` form is a separate lowering lane from the comparison
+    // above: `len` also parses as the last segment of a json path, and the
+    // json arm used to win here, emitting `rh_json_get_path(.., ["executables",
+    // "len"])` -- null at runtime, so the binding was silently unusable.
+    let count = document.executables.len;
+    if count != 2 {
+        return rh::fail("json_executables_bound_length_invalid");
+    }
     let total = 0;
     for executable in document.executables {
         total += executable.release_budget_bytes;

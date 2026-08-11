@@ -3367,7 +3367,7 @@ impl ConTerminal {
             width: fw,
             height: fh,
         };
-        surface.pixels.fill(bg_word);
+        surface.fill_rect(0, 0, fw, fh, bg_word);
 
         let (scrollbar, _, _) = self.scrollbar_geometry(fw, fh);
         let scrollbar_active = self.scrollbar_drag.is_some();
@@ -3883,26 +3883,15 @@ struct Surface<'a> {
 
 impl Surface<'_> {
     fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
-        if x >= self.width || y >= self.height {
-            return;
-        }
-        let max_x = x.saturating_add(w).min(self.width);
-        let max_y = y.saturating_add(h).min(self.height);
-        for py in y..max_y {
-            let base = (py * self.width) as usize;
-            // The slice must start at column `x` within the row, not at the
-            // row's own start — `base` alone is column 0. Omitting `+ x` here
-            // was a real, shipped bug: every non-default background color,
-            // the underline, text selection, the block cursor, and the IME
-            // preedit background all rendered flush against the left edge of
-            // their row instead of at their actual column. Glyphs were
-            // unaffected (blit_glyph already offsets correctly), which is why
-            // text always looked right and this went unnoticed until a
-            // pixel-level test checked fills specifically.
-            let start = base + x as usize;
-            let row = &mut self.pixels[start..(start + (max_x - x) as usize)];
-            row.fill(color);
-        }
+        agenterm_ui_core::pixel::fill_xrgb_rect(
+            self.pixels,
+            self.width,
+            x,
+            y,
+            w,
+            h.min(self.height.saturating_sub(y)),
+            color,
+        );
     }
 
     /// Blits a rasterized glyph into a cell, clipped to that cell.
