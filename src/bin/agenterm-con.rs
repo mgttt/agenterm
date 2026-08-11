@@ -844,12 +844,8 @@ impl PerfStats {
         PixelPresentStats {
             sequence: current.sequence.saturating_sub(baseline.sequence),
             count: current.count.saturating_sub(baseline.count),
-            success_count: current
-                .success_count
-                .saturating_sub(baseline.success_count),
-            failure_count: current
-                .failure_count
-                .saturating_sub(baseline.failure_count),
+            success_count: current.success_count.saturating_sub(baseline.success_count),
+            failure_count: current.failure_count.saturating_sub(baseline.failure_count),
             last_ns: self.present_last_ns,
             total_ns: current.total_ns.saturating_sub(baseline.total_ns),
             // A cumulative max is not subtractable. This is the maximum
@@ -898,18 +894,9 @@ impl PerfStats {
             ),
             ("dirty_pixels", self.dirty_pixels.into()),
             ("frame_pixels", self.frame_pixels.into()),
-            (
-                "present_count",
-                present.count.into(),
-            ),
-            (
-                "present_success",
-                present.success_count.into(),
-            ),
-            (
-                "present_failure",
-                present.failure_count.into(),
-            ),
+            ("present_count", present.count.into()),
+            ("present_success", present.success_count.into()),
+            ("present_failure", present.failure_count.into()),
             ("last_ns", present.last_ns.into()),
             ("total_ns", present.total_ns.into()),
             ("max_ns", present.max_ns.into()),

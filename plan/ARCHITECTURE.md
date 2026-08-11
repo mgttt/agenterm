@@ -211,11 +211,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立
   `crates/agenterm-con` package、受约束的流式 PNG encoder 及 platform-owned
   native font rasterizer 及 bounded schema-specific JSON codec 已把 release PE 从
-  1,046,528 B 降到 563,200 B；当前比 512 KiB x86_64 目标高 38,912 B，主要增量是
+  1,046,528 B 降到 570,368 B；当前比 512 KiB x86_64 目标高 46,080 B，主要增量是
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
 - tree depth 已下沉为 UI-core 的迭代 O(n) typed kernel，替代 con 每节点重复扫描 parent；20,000 深链、缺父、重复 ID、自环和多节点环均有单测；
-- UI-core dirty region/row kernel 只描述保守 raster candidate；con 的公开 perf stats 记录 full/partial candidate frame 与 dirty/frame pixels，当前 host 仍完整 raster/present，产品侧 retained XRGB frame 已落地，partial candidate 只 raster clip 内 rows/cells/glyph pixels，host buffer 仍每帧完整 copy/present；Windows adapter 已把 typed physical rect 映射为 `InvalidateRect`，并以 `PAINTSTRUCT.rcPaint` 驱动 top-down `StretchDIBits` partial present；Unix/macOS adapter 明确降级 full redraw/present；首个公开 CLI 真机样本显示 blink/idle 2/5 帧可 partial（dirty/frame 约 60.0%），混合 PTY 输出后仅 2/13（约 84.6%）；同场景单次方向性复测平均 render 约下降 6.7%/12.1%，不作为发布资格基准；Windows release 探针 9 帧中 6 帧为 partial candidate 且截图有效，但 render 计时不包含 GDI present；
+- UI-core dirty region/row kernel 描述保守 raster candidate；vendored `vt100` 在 mutation 层输出无分配 row/cursor/model/viewport damage，以逐 Cell 精确比较作为无碰撞测试 oracle，未知 callback、resize、alternate screen 与 viewport 变化保守升级 full；con 在 PTY Wake 阶段先 drain 再按 changed rows 与旧/新 cursor 请求 redraw，公开 perf stats 同时记录 candidate 与 platform-owned native present 次数、耗时和 requested/completed pixels；产品 retained XRGB frame 只 raster clip 内 rows/cells/glyph pixels，host buffer 仍每帧完整 copy；Windows adapter 将 typed physical rect 映射为 `InvalidateRect`，以 `PAINTSTRUCT.rcPaint` 驱动 top-down `StretchDIBits` partial present，并以 RAII 保证 `BeginPaint`/`EndPaint` exactly once、拒绝短 scanline 和 renderer error；Unix/macOS 当前 full present fallback，并在 event-loop 边界将 application panic 收敛为 typed failure；post-row-damage Windows release 探针为 33/33 partial raster candidate、dirty/frame 约 0.40%、33/33 native present 成功，平台 ledger 仍诚实区分一次 529,584-pixel OS full expose 与 70,560 partial pixels；旧版 2/5、2/13 candidate 与约 6.7%/12.1% render 降幅仅为方向性历史证据，不作为发布资格基准；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
   完整 native IME/capture/DPI 机制相对首个独立包基线增加 3,072 B；证明未使用根
@@ -224,6 +224,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   避免生产链接通用 PNG/压缩栈；XRGB 每行经共享 SSSE3/NEON/标量内核打包，不产生
   全帧 RGB 副本。快照和截图通过 platform 原子文件发布覆盖已有目标，不再共享固定
   `.tmp` 名；接受截图文件较大，第三方 PNG decoder 测试拥有格式互操作证据。
+  当前 570,368 B PE 的 section 证据为 `.text` 420,864 B、`.rdata` 119,296 B、
+  `.pdata` 16,896 B、`.rsrc` 8,704 B；full-copy 已落到 CRT memcpy/memmove/memset，
+  字体与 PTY 已落到 GDI/ConPTY FFI，pixel packing/blend 已有 SSSE3/AVX2/NEON，
+  不再为这些路径新增手写汇编。下一项仅实验 PNG IEEE CRC/Adler 的 PCLMULQDQ/PMULL
+  kernel；保留门槛是公开大图截图 p95 至少改善 20%、字节完全一致、PE 增量不超过
+  4 KiB，并始终保留 scalar fallback。
   Windows 字形路径通过 neutral `RasterGlyph` contract 调用 GDI
   `GetGlyphIndicesW`/`GetGlyphOutlineW`，con 不再读/解析字体文件，Windows 生产图也
   不含 ab_glyph/ttf_parser；Linux/macOS 的现有 file-font 实现下沉到 platform 的共享
