@@ -13,7 +13,6 @@ use std::process::ExitStatus;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
@@ -1056,10 +1055,11 @@ fn spawn_output_pump(
     input: Arc<InputWriter>,
     dsr: Option<DsrBootstrap>,
 ) -> io::Result<()> {
-    thread::Builder::new()
-        .name("agenterm-conpty-output".to_owned())
-        .spawn(move || output_pump(output_read, output, input, dsr))
-        .map(|_| ())
+    crate::threading::spawn_named(
+        "agenterm-conpty-output",
+        Box::new(move || output_pump(output_read, output, input, dsr)),
+    )
+    .map(|_| ())
 }
 
 #[derive(Debug)]

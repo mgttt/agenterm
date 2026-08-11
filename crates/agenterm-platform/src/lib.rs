@@ -199,6 +199,9 @@ pub mod entropy;
 // Host-neutral today (std only), so it needs no feature gate or adapter split.
 pub mod local_clock;
 
+// Host-neutral and deliberately non-generic at the std thread boundary.
+pub mod threading;
+
 #[cfg(feature = "user-identity")]
 pub mod user_identity;
 

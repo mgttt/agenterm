@@ -7,7 +7,6 @@ use std::io::{Read as _, Write as _};
 use std::str::FromStr as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::time::Duration;
 
 use agenterm_platform::ipc::{IpcEndpoint, IpcTransportErrorCode, NativeListener, NativeStream};
@@ -561,9 +560,9 @@ impl ControlServer {
         let request_tx = Arc::clone(&requests);
         let worker_alive = Arc::clone(&alive);
         let wake = Arc::new(wake);
-        thread::Builder::new()
-            .name("agenterm-con-control".to_owned())
-            .spawn(move || {
+        agenterm_platform::threading::spawn_named(
+            "agenterm-con-control",
+            Box::new(move || {
                 while worker_alive.load(Ordering::Acquire) {
                     let stream = match listener.accept(ACCEPT_POLL) {
                         Ok(stream) => stream,
@@ -574,12 +573,14 @@ impl ControlServer {
                     };
                     let request_tx = request_tx.clone();
                     let wake = Arc::clone(&wake);
-                    let _ = thread::Builder::new()
-                        .name("agenterm-con-control-request".to_owned())
-                        .spawn(move || serve_one(stream, request_tx, wake));
+                    let _ = agenterm_platform::threading::spawn_named(
+                        "agenterm-con-control-request",
+                        Box::new(move || serve_one(stream, request_tx, wake)),
+                    );
                 }
-            })
-            .map_err(|error| format!("control listener thread: {error}"))?;
+            }),
+        )
+        .map_err(|error| format!("control listener thread: {error}"))?;
         Ok(Self { requests })
     }
 

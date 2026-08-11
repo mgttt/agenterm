@@ -38,7 +38,6 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use agent_interface::{ScreenSnapshot, ScriptCommand, ScriptKey, ScriptMouseButton};
@@ -2521,9 +2520,9 @@ impl ConTerminal {
         let waker = window.waker();
         let wake_pending = Arc::new(AtomicBool::new(false));
         let reader_wake_pending = Arc::clone(&wake_pending);
-        thread::Builder::new()
-            .name("agenterm-con-reader".into())
-            .spawn(move || {
+        agenterm_platform::threading::spawn_named(
+            "agenterm-con-reader",
+            Box::new(move || {
                 let mut buf = [0u8; READ_BUF];
                 loop {
                     match reader.io().read(&mut buf) {
@@ -2544,10 +2543,9 @@ impl ConTerminal {
                 if !reader_wake_pending.swap(true, Ordering::AcqRel) {
                     let _ = waker.wake();
                 }
-            })
-            .map_err(|error| {
-                PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}"))
-            })?;
+            }),
+        )
+        .map_err(|error| PixelWindowError::failed("cmd_reader_spawn_failed", format!("{error}")))?;
 
         // Waiter thread: on Windows, ConPTY's output pipe does not reliably
         // EOF just because the immediate child process exited — the pipe
@@ -2568,9 +2566,9 @@ impl ConTerminal {
         let exit_waker = window.waker();
         let explicit_command = self.command.is_some();
         let command_failed = Arc::clone(&self.command_failed);
-        thread::Builder::new()
-            .name("agenterm-con-waiter".into())
-            .spawn(move || {
+        agenterm_platform::threading::spawn_named(
+            "agenterm-con-waiter",
+            Box::new(move || {
                 let wait_result = waiter.wait();
                 if explicit_command
                     && !wait_result
@@ -2581,10 +2579,9 @@ impl ConTerminal {
                 }
                 let _ = exit_tx.send(());
                 let _ = exit_waker.wake();
-            })
-            .map_err(|error| {
-                PixelWindowError::failed("cmd_waiter_spawn_failed", format!("{error}"))
-            })?;
+            }),
+        )
+        .map_err(|error| PixelWindowError::failed("cmd_waiter_spawn_failed", format!("{error}")))?;
 
         self.master = Some(master);
         self.child = Some(child);

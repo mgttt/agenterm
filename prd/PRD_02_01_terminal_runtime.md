@@ -304,6 +304,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   timeout. The official release-fast PE falls from 733,184 to 714,752 bytes;
   90 binary unit tests, 18 Windows black-box tests and the isolated multitab
   control journey pass, including explicit sender-drop and closed-queue tests.
+  Thread creation is likewise a shared platform mechanism rather than repeated
+  product glue. Con reader/waiter, control listener/request and the Windows
+  ConPTY output pump submit boxed tasks through one non-generic named-thread
+  trampoline; the same API owns general detached-child reapers on every host.
+  Thread names and spawn failures remain observable, and a task panic remains
+  contained by Rust's unwind-enabled JoinHandle boundary. Dedicated tests prove
+  both name preservation and panic containment, while all 90 con unit tests,
+  18 Windows black-box tests and the isolated multitab control journey pass.
+  The official release-fast PE falls again from 714,752 to 698,880 bytes.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

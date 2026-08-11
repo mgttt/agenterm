@@ -241,6 +241,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   733,184 B 降至 714,752 B（-18,432 B）。普通 profile 与 build-std con profile
   也不得共用默认 target：即使包/profile 名相同，不同 rustc flags 仍会污染
   core/compiler_builtins fingerprint；诊断构建同样必须使用隔离 `--target-dir`。
+  生产线程入口统一经过无 feature 的 `agenterm-platform::threading::spawn_named`：
+  产品和 adapter 先将任务收敛为 `Box<dyn FnOnce() + Send>`，platform 内一个禁止
+  内联的 trampoline 才调用 `std::thread::Builder`。线程名、spawn 错误和 Rust
+  unwind/JoinHandle containment 不变，con reader/waiter、控制 listener/request、
+  ConPTY output pump 以及通用 child reaper 不再按闭包类型重复生成 std 线程启动和
+  `catch_unwind` 胶水。隔离 PE 从 698 KiB 降至 682.5 KiB、`.text` 从 459.0 KiB
+  降至 447.5 KiB；官方 release-fast PE 从 714,752 B 降至 698,880 B
+  （-15,872 B）。该边界是跨平台机制复用，不包含终端、进程或产品调度策略。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
