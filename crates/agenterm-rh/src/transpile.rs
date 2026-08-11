@@ -8095,6 +8095,15 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             emit_expr(out, expr, ctx)?;
             out.push_str(").to_string()");
         }
+        // Bools had no string lane at all, so `"visible=" + control.visible`
+        // failed to transpile -- which is precisely the shape an assertion needs
+        // to report what it observed. Ints already stringify above; booleans get
+        // the same treatment.
+        _ if infer_binding_kind(expr, ctx) == ValueKind::Bool => {
+            out.push('(');
+            emit_expr(out, expr, ctx)?;
+            out.push_str(").to_string()");
+        }
         Expr::FnCall(call, ..)
             if call.op_token.is_none()
                 && call.namespace.is_empty()
@@ -8974,7 +8983,8 @@ fn emit_json_stringify_pretty(
             out.push(')');
             Ok(true)
         }
-        _ => Ok(false),
+        // See the note in `emit_json_stringify`: json paths belong here too.
+        _ => emit_json_value_operand_call(out, "rh_json_stringify_pretty", value, ctx),
     }
 }
 
@@ -9005,8 +9015,31 @@ fn emit_json_stringify(out: &mut String, value: &Expr, ctx: &mut EmitCtx) -> Res
             out.push(')');
             Ok(true)
         }
-        _ => Ok(false),
+        // Any other json value expression -- notably a path like `doc.tabs` or
+        // `tab["actions"]`. Only a bare Json *variable* used to be accepted, so
+        // the natural way to say "report what I actually saw" did not transpile
+        // and assertions ended up carrying no evidence at all.
+        _ => emit_json_value_operand_call(out, "rh_json_stringify", value, ctx),
     }
+}
+
+/// Emit `name(&<json value expr>)`, or report that the expression is not a json
+/// value so the caller can raise its own typed error.
+fn emit_json_value_operand_call(
+    out: &mut String,
+    name: &str,
+    value: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let mut rendered = String::new();
+    if emit_json_value_expr(&mut rendered, value, ctx).is_err() {
+        return Ok(false);
+    }
+    out.push_str(name);
+    out.push_str("(&");
+    out.push_str(&rendered);
+    out.push(')');
+    Ok(true)
 }
 
 fn emit_json_array_push_stmt(

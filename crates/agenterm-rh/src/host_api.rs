@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 98;
+pub const RH_CODEGEN_REVISION: u32 = 99;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -302,8 +302,19 @@ pub fn emit_host_runtime(out: &mut String) {
              }\n\
              #[cfg(windows)]\n\
              {\n\
+                 // Silence all three streams. `status()` inherits stdout, and\n\
+                 // inside the framed script worker stdout IS the protocol\n\
+                 // stream -- taskkill's success line went straight into it and\n\
+                 // the supervisor then read the message text as a frame length\n\
+                 // (`worker frame length 3016341926`, which is \"\\u{6210}\\u{529f}\"\n\
+                 // in GBK on a Chinese Windows; an English runner would inject\n\
+                 // \"SUCCESS\" and fail just the same). A script that kills a\n\
+                 // process could therefore never return a result.\n\
                  match std::process::Command::new(\"taskkill\")\n\
                      .args([\"/PID\", &pid.to_string(), \"/F\"])\n\
+                     .stdin(std::process::Stdio::null())\n\
+                     .stdout(std::process::Stdio::null())\n\
+                     .stderr(std::process::Stdio::null())\n\
                      .status()\n\
                  {\n\
                      Ok(status) if status.success() => 0,\n\

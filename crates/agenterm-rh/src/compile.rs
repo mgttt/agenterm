@@ -183,6 +183,11 @@ fn cargo_command() -> Command {
     });
     let mut command = Command::new(cargo);
     command.stdin(Stdio::null());
+    // Cargo puts every human-facing line on stderr; its stdout carries nothing
+    // we read. Leaving stdout inherited let a pack build write into whatever
+    // stdout the caller owns -- and in the framed script worker that is the
+    // protocol stream itself.
+    command.stdout(Stdio::null());
     command
 }
 

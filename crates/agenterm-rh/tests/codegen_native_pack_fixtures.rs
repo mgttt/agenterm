@@ -231,8 +231,32 @@ fn assert_native_only(name: &str, needles: &[&str], anti_needles: &[&str]) {
 }
 
 #[test]
-fn codegen_revision_is_eighty_nine() {
-    assert_eq!(RH_CODEGEN_REVISION, 98);
+fn codegen_revision_is_pinned() {
+    assert_eq!(RH_CODEGEN_REVISION, 99);
+}
+
+/// Every child the generated prelude spawns itself must have all three streams
+/// redirected. In the framed script worker stdout *is* the protocol stream, so
+/// an inherited stdout lets the child's chatter be read as a frame length.
+#[test]
+fn prelude_taskkill_never_inherits_the_protocol_stream() {
+    let source = "fn entry() { std::process::kill(1); 0 }";
+    let output = agenterm_rh::transpile_cdylib_with_mode(source).expect("transpile kill");
+    let prelude = output.rust;
+    let taskkill = prelude
+        .find("Command::new(\"taskkill\")")
+        .expect("prelude spawns taskkill on windows");
+    let call = &prelude[taskkill..];
+    let end = call
+        .find(".status()")
+        .expect("taskkill is run via status()");
+    let configured = &call[..end];
+    for stream in ["stdin", "stdout", "stderr"] {
+        assert!(
+            configured.contains(&format!(".{stream}(std::process::Stdio::null())")),
+            "taskkill must redirect {stream}: {configured}"
+        );
+    }
 }
 
 #[test]
