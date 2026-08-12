@@ -323,6 +323,18 @@ fall back to host evaluation for that call. Prefer them for best-effort cleanup
 5. Ask when this gate last actually ran green. A gate that never ran is more
    likely to contain an assertion that was **never** satisfiable than a
    regression.
+
+### Cross-build fixtures must live outside Cargo target trees
+
+Formal release builds reclaim the complete `target/` and release scratch trees.
+A fixture needed both before and after such a build must therefore be parked in
+the host temporary directory, use a process-qualified filename for parallel-run
+isolation, and be removed on both success and terminal failure. Windows-only
+qualification can require and read `TEMP`; although `rh::runtime::temp_dir()`
+is catalogued, the native pack transpiler does not currently lower that call.
+Copying a file from `target/release-fast/` into `target/qualification/` does not
+preserve it: both source and destination belong to the later Cargo cleanup.
+
 ## Byte-exact raw protocol fixtures
 
 When a temporary Windows fixture must shell out for a raw TCP request because

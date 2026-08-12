@@ -1803,8 +1803,20 @@ context = map_context(unit_gate);
 timing = map_timing(unit_gate);
 sequence = map_sequence(unit_gate);
 
-let upgrade_fixture =
-    std::path::join(scratch, "prior-agenterm.exe").display;
+require(
+    std::env::has("TEMP"),
+    "qualification_temp_directory_missing"
+);
+let qualification_temp_dir = std::env::get("TEMP");
+let upgrade_fixture = std::path::join(
+    qualification_temp_dir,
+    "agenterm-qualification-" + std::process::id() +
+        "-prior-agenterm.exe"
+).display;
+// The release build owns and reclaims the complete Cargo target tree. Park
+// this cross-build fixture in the OS temporary directory instead, with a
+// process-qualified name so parallel qualifications cannot share bytes.
+std::fs::try_remove_file(upgrade_fixture);
 // The release-fast fixture must be captured before the release build runs:
 // a staged release reclaims the development target with `cargo clean`, which
 // would otherwise remove target/release-fast/agenterm.exe before the copy.
@@ -2137,19 +2149,29 @@ if skip_smoke == 0 {
                 "RETRY " + id + " after transient failure: " +
                     "" + first_failure
             );
-            let completed = run_gate(
-                context,
-                timing,
-                id,
-                id + " (retry)",
-                smoke_spec,
-                repo,
-                scratch,
-                sequence + 1000
-            );
-            smoke_context = map_context(completed);
-            smoke_timing = map_timing(completed);
-            smoke_sequence = map_sequence(completed);
+            try {
+                let completed = run_gate(
+                    context,
+                    timing,
+                    id,
+                    id + " (retry)",
+                    smoke_spec,
+                    repo,
+                    scratch,
+                    sequence + 1000
+                );
+                smoke_context = map_context(completed);
+                smoke_timing = map_timing(completed);
+                smoke_sequence = map_sequence(completed);
+            } catch (retry_failure) {
+                if id == "remote-ui-upgrade-smoke" {
+                    std::fs::try_remove_file(upgrade_fixture);
+                }
+                throw retry_failure;
+            }
+        }
+        if id == "remote-ui-upgrade-smoke" {
+            std::fs::try_remove_file(upgrade_fixture);
         }
         context = smoke_context;
         timing = smoke_timing;
