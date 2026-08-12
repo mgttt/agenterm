@@ -558,15 +558,8 @@ mod tests {
     }
 
     #[test]
-    fn span_fill_matches_scalar_around_dispatch_boundary_and_preserves_guards() {
-        let lengths = [
-            0,
-            NATIVE_FILL_MIN_PIXELS - 1,
-            NATIVE_FILL_MIN_PIXELS,
-            NATIVE_FILL_MIN_PIXELS + 1,
-            NATIVE_FILL_MIN_PIXELS + 7,
-            NATIVE_FILL_MIN_PIXELS * 8 + 3,
-        ];
+    fn span_fill_matches_scalar_for_varied_lengths_and_preserves_guards() {
+        let lengths = [0, 1, 15, 16, 17, 127, 259];
         for length in lengths {
             let mut expected = vec![0xa5a5_a5a5; length + 4];
             let mut actual = expected.clone();
