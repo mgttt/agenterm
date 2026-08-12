@@ -365,3 +365,21 @@ minimal-feature tests, 85 con tests, 18 GUI black-box tests, one multitab
 journey, Windows Clippy and Linux x86-64 compilation pass. The result reinforces
 that a native leaf saves meaningful space only when its entire generic producer
 pipeline becomes unreachable.
+
+### 2026-08-12: specialize one-shot Windows environment ordering
+
+The ConPTY environment block used `BTreeMap<NormalizedEnvKey, (OsString,
+OsString)>` only to merge inherited entries and explicit overrides into one
+sorted, case-insensitive sequence before a single `CreateProcessW` call. The
+generic tree retained node allocation, search and split code despite the small,
+short-lived key set. A concrete platform-private sorted vector now performs
+manual binary insertion: equal normalized keys replace the original key/value
+payload, new keys enter in order, and serialization remains a linear pass.
+
+All BTree symbols become zero-byte owners. In the host-std attribution build,
+platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
+the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.
+Evidence is 53 minimal PTY tests, 85 con tests, 18 GUI black-box tests, one
+multitab journey, Windows Clippy and Linux x86-64 compilation. This is a
+specific one-shot serialization optimization, not a repository-wide ban on
+ordered maps.

@@ -478,6 +478,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   use the same exact ASCII-over-UTF-16 comparison rather than lossy text. This
   removes the remaining generic split, dynamic formatting and nested collection
   path; the official release-fast PE falls from 562,176 to 560,128 bytes.
+  Windows environment-block construction now uses a PTY-private sorted vector
+  with explicit binary insertion instead of retaining the generic BTree node
+  allocator and split machinery. It preserves normalized UTF-16 key order,
+  case-insensitive last-write replacement, original override spelling and the
+  exact double-NUL block contract consumed by `CreateProcessW`. BTree symbols
+  become zero-byte owners; attributed platform text falls from 91.6 to 84.6
+  KiB, total text from 409.5 to 403.5 KiB, and the official release-fast PE from
+  560,128 to 552,448 bytes.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

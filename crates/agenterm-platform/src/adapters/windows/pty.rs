@@ -1,6 +1,6 @@
 //! Direct Windows ConPTY adapter.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -2193,7 +2193,7 @@ fn environment_block(command: &ChildCommand) -> io::Result<Option<Vec<u16>>> {
     if command.env.is_empty() {
         return Ok(None);
     }
-    let mut environment = BTreeMap::<NormalizedEnvKey, (OsString, OsString)>::new();
+    let mut environment = SortedEnvironment::new();
     for (key, value) in env::vars_os() {
         environment.insert(NormalizedEnvKey::from_os_str(&key), (key, value));
     }
@@ -2228,12 +2228,80 @@ fn environment_block(command: &ChildCommand) -> io::Result<Option<Vec<u16>>> {
     Ok(Some(block))
 }
 
+struct SortedEnvironment(Vec<(NormalizedEnvKey, (OsString, OsString))>);
+
+impl SortedEnvironment {
+    const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn insert(&mut self, key: NormalizedEnvKey, value: (OsString, OsString)) {
+        let mut low = 0;
+        let mut high = self.0.len();
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if self.0[middle].0 < key {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if low < self.0.len() && self.0[low].0 == key {
+            self.0[low].1 = value;
+        } else {
+            self.0.insert(low, (key, value));
+        }
+    }
+}
+
+impl IntoIterator for SortedEnvironment {
+    type Item = (NormalizedEnvKey, (OsString, OsString));
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct NormalizedEnvKey(Vec<u16>);
 
 impl NormalizedEnvKey {
     fn from_os_str(value: &OsStr) -> Self {
         Self(value.encode_wide().map(ascii_upper_unit).collect())
+    }
+}
+
+#[cfg(test)]
+mod sorted_environment_tests {
+    use super::*;
+
+    #[test]
+    fn sorted_environment_orders_and_replaces_by_normalized_key() {
+        let mut environment = SortedEnvironment::new();
+        environment.insert(
+            NormalizedEnvKey::from_os_str(OsStr::new("ZED")),
+            (OsString::from("ZED"), OsString::from("first")),
+        );
+        environment.insert(
+            NormalizedEnvKey::from_os_str(OsStr::new("alpha")),
+            (OsString::from("alpha"), OsString::from("one")),
+        );
+        environment.insert(
+            NormalizedEnvKey::from_os_str(OsStr::new("ALPHA")),
+            (OsString::from("ALPHA"), OsString::from("two")),
+        );
+        let values = environment
+            .into_iter()
+            .map(|(_, pair)| pair)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            [
+                (OsString::from("ALPHA"), OsString::from("two")),
+                (OsString::from("ZED"), OsString::from("first")),
+            ]
+        );
     }
 }
 

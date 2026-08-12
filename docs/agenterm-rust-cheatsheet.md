@@ -440,6 +440,16 @@ whose entries are unsupported. Streaming that complete grammar, plus exact
 ASCII-wide environment-key comparison, removed another 2,048 bytes after the
 fixed-extension leaf had already landed.
 
+Choose a container from the complete lifecycle, not only asymptotic lookup. A
+small environment map built once, overwritten a few times, then consumed in
+sorted order before one FFI call does not need a generic tree node engine. A
+concrete sorted `Vec` with manual binary insertion preserves ordering and
+last-write semantics while making allocation, split and traversal families
+unreachable. In the ConPTY environment block this removed every linked BTree
+symbol and reduced the staged PE by 7,680 bytes. Do not generalize this to
+long-lived or mutation-heavy maps; use measured cardinality, lifecycle and the
+final link map.
+
 Every platform Cargo feature must activate the native declaration features used
 by its own adapter. Do not rely on a product's unrelated feature union to make
 Win32 functions compile: test the minimal capability graph as well as the real
