@@ -1150,6 +1150,11 @@ struct DrainOutcome {
     bytes: usize,
 }
 
+#[inline(never)]
+fn single_field_json(name: &'static str, value: json::JsonValue) -> json::JsonValue {
+    json::object(vec![(name, value)])
+}
+
 impl ConApp {
     fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
         let mut workspace = workspace::Workspace::default();
@@ -1738,12 +1743,12 @@ impl ConApp {
                         ])
                     })
                     .collect();
-                Ok(json::object(vec![("tabs", json::JsonValue::Array(tabs))]))
+                Ok(single_field_json("tabs", json::JsonValue::Array(tabs)))
             }
             CliCommand::PerfStats => Ok(self.perf_stats.json()),
             CliCommand::ResetPerfStats => {
                 self.perf_stats.reset(window.present_stats());
-                Ok(json::object(vec![("reset", true.into())]))
+                Ok(single_field_json("reset", true.into()))
             }
             CliCommand::NewTab { parent } => (|| {
                 if let Some(parent) = parent {
@@ -1765,13 +1770,13 @@ impl ConApp {
                 self.mark_chrome_full();
                 self.workspace.set_active(id);
                 window.request_redraw();
-                json::object(vec![("active", tab_id_json(Some(id)))])
+                single_field_json("active", tab_id_json(Some(id)))
             }),
             CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
                 self.workspace.set_active(id);
                 self.close_active_session(window)
                     .map_err(|error| error.to_string())?;
-                Ok(json::object(vec![("closed", tab_id_json(Some(id)))]))
+                Ok(single_field_json("closed", tab_id_json(Some(id))))
             }),
             CliCommand::CapturePane { target, max_bytes } => {
                 self.control_session_mut(target).map(|session| {
@@ -1791,13 +1796,13 @@ impl ConApp {
                 self.control_session_mut(target).map(|session| {
                     session.scroll_to_bottom();
                     session.write_pty(text.as_bytes());
-                    json::object(vec![("sent_bytes", text.len().into())])
+                    single_field_json("sent_bytes", text.len().into())
                 })
             }
             CliCommand::SendPaste { target, text } => {
                 self.control_session_mut(target).map(|session| {
                     session.paste_text(&text);
-                    json::object(vec![("sent_bytes", text.len().into())])
+                    single_field_json("sent_bytes", text.len().into())
                 })
             }
             CliCommand::SendKeys { target, keys } => {
@@ -1806,7 +1811,7 @@ impl ConApp {
                         let (key, ctrl, alt, shift) = parse_control_key(key)?;
                         session.inject_key(key, ctrl, alt, shift);
                     }
-                    Ok(json::object(vec![("sent_keys", keys.len().into())]))
+                    Ok(single_field_json("sent_keys", keys.len().into()))
                 })
             }
             CliCommand::SendMouse {
@@ -1833,7 +1838,7 @@ impl ConApp {
                         session.inject_pointer_button(window, row, column, button, state);
                     }
                 }
-                Ok(json::object(vec![("delivered", true.into())]))
+                Ok(single_field_json("delivered", true.into()))
             }),
             CliCommand::SendWheel {
                 target,
@@ -1844,7 +1849,7 @@ impl ConApp {
             } => self.control_session_mut(target).and_then(|session| {
                 Self::validate_control_cell(session, row, column)?;
                 session.inject_wheel(window, row, column, f32::from(notches), ctrl);
-                Ok(json::object(vec![("delivered_notches", notches.into())]))
+                Ok(single_field_json("delivered_notches", notches.into()))
             }),
             CliCommand::ScreenshotPane { target, output } => {
                 self.control_target(target).and_then(|id| {
@@ -1879,7 +1884,7 @@ impl ConApp {
                     .get(&id)
                     .is_some_and(|session| session.screen_contains(&text))
                 {
-                    return Ok(json::object(vec![("matched", true.into())]));
+                    return Ok(single_field_json("matched", true.into()));
                 }
                 self.control_waits.push(PendingControlWait {
                     target: id,
@@ -1914,7 +1919,7 @@ impl ConApp {
             if matched {
                 let _ = wait
                     .reply
-                    .send(Ok(json::object(vec![("matched", true.into())])));
+                    .send(Ok(single_field_json("matched", true.into())));
             } else if now >= wait.deadline {
                 let _ = wait.reply.send(Err(format!(
                     "wait-text timed out waiting for {:?}",
@@ -4212,7 +4217,10 @@ impl PixelWindowApplication for ConApp {
                     self.composer_select_all = false;
                     self.update_composer_ime_anchor(window)?;
                     self.mark_composer_dirty();
-                    window.focus();
+                    // A physical client click has already activated and
+                    // focused this top-level window. Re-entering native focus
+                    // here synchronously emits another focus-message chain
+                    // from inside pointer dispatch and can disrupt painting.
                     self.request_dirty_redraw(window);
                     return Ok(PixelWindowDirective::Continue);
                 }

@@ -502,6 +502,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   transfers ownership, and the final UTF-16 NUL is explicit. This removes one
   allocation and full-text copy per publication while the official release-fast
   PE falls from 551,936 to 551,424 bytes.
+  Eleven fixed one-field control replies now share one concrete non-inlined JSON
+  constructor instead of repeating the generic object path at every command and
+  wait boundary. Their field names, values and ordering remain byte compatible;
+  the official release-fast PE falls from 551,424 to 549,888 bytes. A physical
+  composer click also no longer calls native focus from inside its pointer
+  callback: Win32 has already activated the receiving top-level window, and the
+  redundant `SetForegroundWindow`/`SetFocus` chain could reenter dispatch and
+  disturb presentation. A synchronous native-click plus character probe kept
+  the HWND alive and visible and localized 5,921 of 6,049 changed pixels to the
+  composer band. Evidence is 85 unit tests, 18 GUI black-box tests, one isolated
+  multitab control test, Windows x64 Clippy and Linux x64 compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
