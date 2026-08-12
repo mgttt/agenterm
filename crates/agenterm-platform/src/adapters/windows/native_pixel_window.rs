@@ -52,7 +52,7 @@ use windows_sys::Win32::{
             WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
             WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
             WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW,
-            WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            WS_OVERLAPPEDWINDOW,
         },
     },
 };
@@ -448,6 +448,14 @@ struct Backend {
     ime_allowed: Cell<bool>,
 }
 
+/// A visible `CreateWindowExW` can synchronously deliver `WM_PAINT` before the
+/// call returns. Product geometry is not authoritative until
+/// `PixelWindowApplication::opened`, so native pixel windows are created hidden
+/// and shown only by the deferred command after `opened` completes.
+fn initial_window_style() -> u32 {
+    WS_OVERLAPPEDWINDOW
+}
+
 impl Backend {
     fn submit_command(&self, command: NativeCommand) -> Result<(), PixelWindowError> {
         if self.control.closed.get() {
@@ -753,7 +761,7 @@ pub(crate) fn run_pixel_window(
             0,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            initial_window_style(),
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             initial_metrics.physical_width as i32,
