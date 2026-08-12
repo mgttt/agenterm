@@ -618,3 +618,20 @@ GUI/PTY smokes use the real `DISPLAY=:1` desktop or CI Xvfb instead.
 Rhai REPL and `agenterm cli script repl` were removed with Phase C Wave 4.5 —
 invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery uses
 `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).
+
+## Reasonix dispatch and local skill index
+
+本机 Reasonix 可用于派单开工与经验检索(与 agenterm 自身 tooling 无关,供跨 agent 协作):
+
+- **CLI**: `E:\app\Reasonix-windows-amd64\reasonix-cli.exe`(v1.24.1;用户 PATH 已含该目录,`reasonix` 命令可用)。
+- **派单**: `reasonix run --auto -p "<任务>" --output-format json`(headless 一次性会话;`--auto` 必需,否则 `[permissions] mode=ask` 下会卡工具审批;`--preset light|balanced|delivery`、`--model`、`--trajectory run.jsonl` 可选)。
+- **常驻**: `reasonix serve --addr 127.0.0.1:8787`(默认 auth none,仅回环;`--auth token` 可收紧)。
+
+本地技能库 `D:\skills\`(reasonix 已注册为 skill 根,`[skills].paths = ["D:/skills"]`):
+
+| 技能 | 用途 |
+|---|---|
+| `reasonix-dispatch` | 调 reasonix 派单的接口/命令/注意事项(4 条本地接口可用性) |
+| `agenterm-cu` | 本仓 Rust computer-use(`cu.exe` + platform 的 window-enum/window-op/input-inject) |
+| `windows-control` | PowerShell 零依赖窗口/进程控制(无编译环境兜底) |
+| `deepseek-pro-flash-mix` | reasonix 模型分工(executor=flash / planner=pro / review·research=pro) |
