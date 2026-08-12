@@ -204,7 +204,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   script runtime. Its fixed GUI-lifetime local CLI uses stable `@N` tab IDs for
   `list-tabs`, `new-tab`, `select-tab`, `close-tab`, `capture-pane`,
   `screenshot-pane`, `send-text`, `send-keys`, cell-addressed mouse
-  press/release/move/click, `send-wheel`, and bounded `wait-text`. The CLI
+  press/release/move/click, `send-wheel`, bounded `wait-text`, logical-client
+  `resize-window`, and GUI-lifetime `close-window`. The CLI
   connects only to an explicitly configured local pipe or Unix-socket endpoint;
   its private transport uses a versioned, length-prefixed typed frame rather
   than a nullable JSON envelope. Opcodes and field order are fixed; invalid

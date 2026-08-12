@@ -297,6 +297,14 @@ Optimize work removed, not just instructions made clever.
 5. Measure cold build, warm build, binary size, frame latency, and throughput
    separately. Improving one does not prove the others.
 
+For resize profiling, drive the real host through `agenterm-con cli
+resize-window --width N --height N`, use a blocking screenshot as the render
+fence, then read `perf-stats`. A successful command reply only proves that the
+native size request was accepted; PNG IHDR dimensions prove that the backing
+surface actually changed. End automated journeys with `close-window` so the GUI
+event loop, PTYs, listener, and native handles follow the production shutdown
+path instead of being abandoned by a test-process kill.
+
 Never infer performance from source appearance or binary size. A package split
 may improve compilation without changing PE bytes; a typed correctness state
 machine may add bytes while removing a data-loss or deadlock path. Report both
@@ -382,6 +390,7 @@ If a recurring answer was hard to discover, add the proven rule here.
 - On the pinned Rust 1.97 toolchain, `Ord::min` and `Ord::max` are not stable const-trait calls. Do not mark ordinary geometry helpers `const fn` without a real compile-time consumer; remove unnecessary constness instead of duplicating clear operations with manual branches.
 - An associated constructor inside impl Type<'_> does not automatically bind an input borrow to the returned type. For borrowed wrappers, write impl<'a> Type<'a> and accept/return &'a ... / Type<'a> explicitly.
 - Do not assume a native window or softbuffer preserves pixels across frames or resize unless its typed contract says so. A frame contract must expose retention, generation, and content validity, then require an explicit `None`, `Full`, or bounded partial commit. Raster directly only into valid retained backing; force full after first allocation, resize, DPI change, failed render, or failed present. Keep a product-owned retained fallback and full-copy only for explicitly transient hosts.
+- A trailing-edge PTY resize debounce does not by itself optimize live window resizing. If every native size notification reallocates or invalidates backing and forces a full raster, the expensive work still occurs at pointer frequency. Encapsulate host interaction phases such as Win32 `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE` in the platform contract, keep Unix/macOS debounce as the fallback, and reuse or scale validated retained pixels during the interaction only when the backing contract can prove their lifetime. Perform one exact grid/PTTY convergence and full raster at the end. Do not leak HWND messages into product UI or claim an event enum alone as an optimization.
 - Keep product damage and native present rectangles as separate typed boundaries even when both are half-open pixel rectangles. Product code owns why pixels changed; platform code owns clipping, coordinate conversion, invalidation, and fallback.
 - A Windows paint path must pair a successful BeginPaint with EndPaint, treat PAINTSTRUCT.rcPaint as the OS expose authority, and check each API's own failure convention. A negative DIB height is top-down, so StretchDIBits source Y matches client Y; do not apply a bottom-up inversion.
 - Do not report partial-present latency from a timer that ends before the native present call. Add platform timing or use ETW before making that claim.

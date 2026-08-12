@@ -493,7 +493,8 @@ A standalone console host (conhost equivalent). No server, mux, or Fleet.
 Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   agenterm-con --control pipe:\\\\.\\pipe\\agenterm-con-test
   agenterm-con cli --control pipe:\\\\.\\pipe\\agenterm-con-test list-tabs
-  ... perf-stats | reset-perf-stats
+  ... perf-stats | reset-perf-stats | close-window
+  ... resize-window --width N --height N
   ... new-tab [--parent TAB]
   ... select-tab --target TAB | close-tab --target TAB
   ... capture-pane [--target TAB] [--max-bytes N]
@@ -1742,6 +1743,14 @@ impl ConApp {
                 self.perf_stats.reset(window.present_stats());
                 Ok(single_field_json("reset", true.into()))
             }
+            CliCommand::CloseWindow => {
+                self.exit = true;
+                Ok(single_field_json("closing", true.into()))
+            }
+            CliCommand::ResizeWindow { width, height } => window
+                .request_logical_inner_size(LogicalSize::new(f64::from(width), f64::from(height)))
+                .map_err(|error| error.to_string())
+                .map(|()| json::object(vec![("width", width.into()), ("height", height.into())])),
             CliCommand::NewTab { parent } => (|| {
                 if let Some(parent) = parent {
                     self.control_target(Some(parent))?;

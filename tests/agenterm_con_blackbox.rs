@@ -198,7 +198,7 @@ fn unique_control_endpoint(dir: &Path) -> String {
     format!("unix:{}", dir.join("control.sock").to_string_lossy())
 }
 
-fn invoke_control(endpoint: &str, args: &[String]) -> Result<(), String> {
+fn invoke_control_output(endpoint: &str, args: &[String]) -> Result<String, String> {
     let output = Command::new(binary())
         .arg("cli")
         .arg("--control")
@@ -207,13 +207,17 @@ fn invoke_control(endpoint: &str, args: &[String]) -> Result<(), String> {
         .output()
         .map_err(|error| format!("launch control command {args:?}: {error}"))?;
     if output.status.success() {
-        return Ok(());
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
     Err(format!(
         "control command {args:?} failed ({:?}): {}",
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     ))
+}
+
+fn invoke_control(endpoint: &str, args: &[String]) -> Result<(), String> {
+    invoke_control_output(endpoint, args).map(|_| ())
 }
 
 fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
@@ -235,7 +239,22 @@ fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
         let object = command
             .as_object()
             .ok_or_else(|| "journey command must be an object".to_owned())?;
-        if let Some(text) = object.get("text").and_then(serde_json::Value::as_str) {
+        if object
+            .get("reset_perf")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            invoke_control(endpoint, &["reset-perf-stats".to_owned()])?;
+        } else if let Some(path) = object.get("perf_stats").and_then(serde_json::Value::as_str) {
+            let stats = invoke_control_output(endpoint, &["perf-stats".to_owned()])?;
+            std::fs::write(path, stats).map_err(|error| format!("write perf stats: {error}"))?;
+        } else if object
+            .get("close_window")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            invoke_control(endpoint, &["close-window".to_owned()])?;
+        } else if let Some(text) = object.get("text").and_then(serde_json::Value::as_str) {
             invoke_control(endpoint, &["send-text".to_owned(), text.to_owned()])?;
         } else if let Some(text) = object.get("paste").and_then(serde_json::Value::as_str) {
             invoke_control(endpoint, &["send-paste".to_owned(), text.to_owned()])?;
@@ -272,6 +291,17 @@ fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
                     "screenshot-pane".to_owned(),
                     "--output".to_owned(),
                     path.to_owned(),
+                ],
+            )?;
+        } else if let Some(size) = object.get("resize") {
+            invoke_control(
+                endpoint,
+                &[
+                    "resize-window".to_owned(),
+                    "--width".to_owned(),
+                    journey_u64(size, "width")?.to_string(),
+                    "--height".to_owned(),
+                    journey_u64(size, "height")?.to_string(),
                 ],
             )?;
         } else if let Some(point) = object.get("mouse_move") {
@@ -1203,6 +1233,113 @@ fn controlled_screenshot_produces_a_valid_nonempty_png() {
         bytes.len()
     );
     let _ = session.child.kill();
+}
+
+#[test]
+fn controlled_resize_changes_the_native_render_surface() {
+    let _guard = gui_test_guard();
+    let dir = scratch_dir("resize-window");
+    let before_path = dir.join("before.png");
+    let after_path = dir.join("after.png");
+    let script = write_journey(
+        &dir,
+        &format!(
+            r#"[
+                {{"screenshot": {}}},
+                {{"resize": {{"width": 640, "height": 420}}}},
+                {{"screenshot": {}}}
+            ]"#,
+            serde_json::to_string(before_path.to_str().unwrap()).unwrap(),
+            serde_json::to_string(after_path.to_str().unwrap()).unwrap()
+        ),
+    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(before_path.exists() && after_path.exists()) {
+        assert!(
+            Instant::now() < deadline,
+            "resize screenshots were not written"
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+
+    fn png_size(path: &Path) -> (u32, u32) {
+        let bytes = std::fs::read(path).expect("read screenshot");
+        assert!(bytes.len() >= 24 && bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+        (
+            u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
+            u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
+        )
+    }
+
+    let before = png_size(&before_path);
+    let after = png_size(&after_path);
+    assert!(
+        after.0 < before.0 && after.1 < before.1,
+        "native surface did not shrink: before={before:?}, after={after:?}"
+    );
+    let _ = session.child.kill();
+}
+
+#[test]
+fn controlled_resize_storm_reports_successful_frames_and_exits_cleanly() {
+    let _guard = gui_test_guard();
+    let dir = scratch_dir("resize-perf");
+    let png_path = dir.join("fence.png");
+    let stats_path = dir.join("perf.json");
+    let mut commands = vec![r#"{"reset_perf":true}"#.to_owned()];
+    for _ in 0..4 {
+        for (width, height) in [(720, 460), (1180, 740), (640, 420), (1100, 680)] {
+            commands.push(format!(
+                r#"{{"resize":{{"width":{width},"height":{height}}}}}"#
+            ));
+        }
+    }
+    commands.push(format!(
+        r#"{{"screenshot":{}}}"#,
+        serde_json::to_string(png_path.to_str().unwrap()).unwrap()
+    ));
+    commands.push(format!(
+        r#"{{"perf_stats":{}}}"#,
+        serde_json::to_string(stats_path.to_str().unwrap()).unwrap()
+    ));
+    commands.push(r#"{"close_window":true}"#.to_owned());
+    let script = write_journey(&dir, &format!("[{}]", commands.join(",")));
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !stats_path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "resize perf stats were not written"
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let stats: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&stats_path).expect("read resize perf stats"))
+            .expect("parse resize perf stats");
+    eprintln!("agenterm-con resize perf: {stats}");
+    let frames = stats["frames"].as_u64().expect("frames");
+    assert!(frames > 0, "resize journey rendered no frames");
+    assert_eq!(stats["observed_frames"].as_u64(), Some(frames));
+    assert_eq!(stats["present_failure"].as_u64(), Some(0));
+    assert_eq!(stats["present_success"].as_u64(), Some(frames));
+
+    while session
+        .child
+        .try_wait()
+        .expect("poll controlled host")
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "close-window did not exit the host"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

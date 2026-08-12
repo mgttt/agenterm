@@ -75,6 +75,11 @@ pub enum CliCommand {
     ListTabs,
     PerfStats,
     ResetPerfStats,
+    CloseWindow,
+    ResizeWindow {
+        width: u16,
+        height: u16,
+    },
     NewTab {
         parent: Option<TabId>,
     },
@@ -185,6 +190,7 @@ impl MouseButton {
 
 const DEFAULT_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
+const MAX_WINDOW_DIMENSION: u16 = 16_384;
 
 #[inline(never)]
 pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
@@ -205,6 +211,17 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
         "reset-perf-stats" => {
             cursor.finish()?;
             CliCommand::ResetPerfStats
+        }
+        "close-window" => {
+            cursor.finish()?;
+            CliCommand::CloseWindow
+        }
+        "resize-window" => {
+            let width = cursor.required_u16("--width")?;
+            let height = cursor.required_u16("--height")?;
+            cursor.finish()?;
+            validate_window_size(width, height)?;
+            CliCommand::ResizeWindow { width, height }
         }
         "new-tab" => {
             let parent = cursor.optional_tab("--parent")?;
@@ -337,7 +354,16 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
 }
 
 pub fn usage() -> String {
-    "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
+    "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
+}
+
+fn validate_window_size(width: u16, height: u16) -> Result<(), String> {
+    if width == 0 || height == 0 || width > MAX_WINDOW_DIMENSION || height > MAX_WINDOW_DIMENSION {
+        return Err(format!(
+            "window width and height must be between 1 and {MAX_WINDOW_DIMENSION}"
+        ));
+    }
+    Ok(())
 }
 
 #[inline(never)]
@@ -798,6 +824,12 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
         CliCommand::ListTabs => wire.byte(0),
         CliCommand::PerfStats => wire.byte(1),
         CliCommand::ResetPerfStats => wire.byte(2),
+        CliCommand::CloseWindow => wire.byte(15),
+        CliCommand::ResizeWindow { width, height } => {
+            wire.byte(14);
+            wire.u16(width);
+            wire.u16(height);
+        }
         CliCommand::NewTab { parent } => {
             wire.byte(3);
             wire.optional_tab(parent);
@@ -986,6 +1018,13 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
             target: wire.optional_tab()?,
             text: wire.string()?,
         },
+        14 => {
+            let width = wire.u16()?;
+            let height = wire.u16()?;
+            validate_window_size(width, height)?;
+            CliCommand::ResizeWindow { width, height }
+        }
+        15 => CliCommand::CloseWindow,
         _ => return Err("unknown control command opcode".to_owned()),
     };
     wire.finish()?;
@@ -1360,6 +1399,11 @@ mod tests {
             CliCommand::ListTabs,
             CliCommand::PerfStats,
             CliCommand::ResetPerfStats,
+            CliCommand::CloseWindow,
+            CliCommand::ResizeWindow {
+                width: 960,
+                height: 600,
+            },
             CliCommand::NewTab {
                 parent: Some(TabId::new(1)),
             },
@@ -1423,6 +1467,7 @@ mod tests {
         assert!(decode_request(&trailing).is_err());
 
         assert!(decode_request(&[10, 0, 3, 0, 0, 0, 0, 0]).is_err());
+        assert!(decode_request(&[14, 0, 0, 1, 0]).is_err());
         assert!(decode_response(&[9]).is_err());
     }
 }

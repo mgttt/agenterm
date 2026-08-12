@@ -240,6 +240,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   取代异常膨胀的泛型 `collect<Result<...>>`。`cargo-bloat` 等会改变 rustc flags 的分析
   构建必须使用隔离 `--target-dir`；与 build-std 官方图共用 target 会留下不匹配的
   core/compiler_builtins fingerprint，profile clean 不能可靠回收，禁止再次污染交付图。
+- 公开控制面还拥有 `resize-window --width N --height N` 与 `close-window`。前者使用
+  `PixelWindow::request_logical_inner_size` 的跨平台合同，由 Windows adapter 下沉到原生
+  User32 sizing，后者只结束当前 GUI 生命周期，不建立常驻 authority。黑盒测试用缩放
+  前后 PNG IHDR 证明真实 backing surface 改变，并以截图、`perf-stats`、正常进程退出
+  形成完成栅栏。当前 16-step debug resize journey 为 35/35 direct、35/35 native present、
+  0 failure、0 host copy；平均 raster 10,207 us、最大 32,877 us。该证据定位下一层债务：
+  platform 尚未抽象 Win32 live-resize begin/end，逐次 native resize 仍使 backing 失效并
+  full raster。后续应在 platform backing-store 边界利用宿主交互阶段，Unix/macOS 保留
+  debounce fallback；不得把 HWND 消息泄漏到 con，也不得把仅新增 FFI enum 冒充优化。
   后续隔离 bloat 证明 size profile 仍把 config、参数、脚本和 CLI codec 过度内联进
   `main` / offline 入口；这些既有可测边界显式禁止内联，并以固定 8-byte 数组装配
   `ATC1` header，避免通用可变尾切片。官方同 profile PE 从 737,280 B 降至
@@ -482,6 +491,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   后续加入的可靠 PTY 固定环、同步语义和通用原子文件发布状态机，不以回退关闭、
   背压或覆盖/durability 正确性换体积；
 - tree depth 已下沉为 UI-core 的迭代 O(n) typed kernel，替代 con 每节点重复扫描 parent；20,000 深链、缺父、重复 ID、自环和多节点环均有单测；
+- con 的 resize/close 自动化增量使 exact unwind+trace-only release-fast PE 从 529,920 B
+  增至 532,480 B（+2,560 B），仍高于 512 KiB 预算 8,192 B。该增长换取真实窗口尺寸
+  驱动、原生表面证据和正常资源退出，不作为尺寸收益；证据为 89 units、21 GUI
+  black-box、Windows x64 Clippy 和独立 custom-std build。
 - UI-core dirty region/row kernel 描述保守 raster candidate；vendored `vt100` 在 mutation 层输出无分配 row/cursor/model/viewport damage，以逐 Cell 精确比较作为无碰撞测试 oracle，未知 callback、resize、alternate screen 与 viewport 变化保守升级 full；con 在 PTY Wake 阶段先 drain 再按 changed rows 与旧/新 cursor 请求 redraw，公开 perf stats 同时记录 candidate、host direct/copy 和 platform-owned native present 证据；pixel-window frame 合同声明 backing 为 retained 或 transient，并要求提交 `None`/`Full`/bounded partial。Windows con 直接 raster 到 native retained XRGB buffer，allocation/resize/DPI 失效后强制 full；Unix/macOS 继续由产品 retained frame 向 transient softbuffer 完整复制。Windows adapter 将 typed physical rect 映射为 `InvalidateRect`，以 `PAINTSTRUCT.rcPaint` 驱动 top-down `StretchDIBits` partial present，并以 RAII 保证 `BeginPaint`/`EndPaint` exactly once、拒绝短 scanline 和 renderer error；Unix/macOS 当前 full present fallback，并在 event-loop 边界将 application panic 收敛为 typed failure；配对 Windows release 探针中 idle 平均 render 895 us -> 360 us（-59.8%），50-step send/wait 为 1,310 us -> 992 us（-24.3%），新版 250/250 direct、0 copy frame/pixel；post-row-damage Windows release 探针为 33/33 partial raster candidate、dirty/frame 约 0.40%、33/33 native present 成功，平台 ledger 仍诚实区分一次 529,584-pixel OS full expose 与 70,560 partial pixels；旧版 2/5、2/13 candidate 与约 6.7%/12.1% render 降幅仅为方向性历史证据，不作为发布资格基准；Win32 host 的 userdata owner、dispatch phase 和 bounded deferred queue 阻止同步 User32/IMM FFI 在 application/frame borrow 内重建 `&mut HostState`，复制 DPI/IME 等消息数据后再重放，nested paint validate 后重新 invalidate，overflow/nonconvergence typed-fail；随后将窗口回调和 deferred item 各收敛为一个 panic boundary，并以单一 typed message class 替代重复的 stateless/stateful matcher；原 abort 配置下同 profile release-fast PE 从 622,080 B 降至 621,568 B，512 B 收益全部落在 `.text` raw，`.rsrc` 不变；但该 profile 使 `catch_unwind` 在交付版直接 abort，测试默认 unwind 曾掩盖这一合同破坏。现由 `con-dev` / `con-release-fast` / `con-release` 独立构建完整 unwind 依赖图，Rh build 将其 `agenterm-con` 精确覆盖进原 staging 目录而不改变主程序 abort profile；三处 staged bytes SHA-256 相同，release-fast unwind PE 当前为 849,920 B，87 个单测、16 个黑盒（2 个既有 ignore）、1 个多标签控制面测试及专门的 release-profile panic containment test 通过。官方 con 构建现以显式 target、固定 `rust-src` 和局部 `RUSTC_BOOTSTRAP` 使用 Rust 1.97 `backtrace-trace-only + panic-unwind` 自建 std；自建 std 基线为 790,016 B，GDI+ 共享截图后当前为 790,528 B；精确 profile 的 87 个单测、16 个黑盒（2 个既有 ignore）、1 个控制面测试、x64 Clippy 与 Windows aarch64 编译通过；六平台 Candidate 与 sealed-byte 可复现性仍由发布门最终证明，512 KiB 仍是目标，不以恢复 abort 换体积；100-title OSC 公共压力为 883/883 direct、0 copy、0 present failure；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，
