@@ -420,6 +420,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   list/new/select/close replies 调用 `format!`。nullable parent 仍输出 JSON null，CLI parser
   和窗口 chrome 动态文本不受影响。精确 PE 从 532,480 B 降至 531,456 B（-1,024 B），
   88 units、multitab public control 和 Windows x64 Clippy 通过。
+- con chrome repaint 不再通过 `format!` / concatenation 构造 tree `@N  title`、composer
+  destination 或 `composer + IME preedit + cursor`。同一 product-local raster primitive
+  在一次 metrics/clip pass 中消费 borrowed segments，ID digits 来自栈 `itoa` buffer；
+  platform 仍只拥有 font raster mechanism，不接收 con 文案策略。CJK + 非 cell 对齐 clip
+  的 joined/segmented framebuffer oracle、89 units、18 GUI black-box 和 Clippy 通过；精确
+  PE 保持 531,456 B，无尺寸代价地删除三处每帧 heap construction。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

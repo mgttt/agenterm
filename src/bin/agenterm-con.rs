@@ -2108,11 +2108,12 @@ impl ConApp {
                 .map(|terminal| terminal.current_title.as_str())
                 .filter(|title| !title.is_empty())
                 .unwrap_or(node.title.as_str());
-            paint_chrome_text(
+            let mut id = itoa::Buffer::new();
+            paint_chrome_text_parts(
                 &mut surface,
                 indent,
                 y + 7,
-                &format!("@{}  {}", node.id.get(), title),
+                &["@", id.format(node.id.get()), "  ", title],
                 text,
                 14,
                 tree_width.saturating_sub(indent + 38),
@@ -2131,11 +2132,12 @@ impl ConApp {
 
         let active_id = self.workspace.active().map(|id| id.get()).unwrap_or(0);
         let input_y = layout.composer.y;
-        paint_chrome_text(
+        let mut active_id_text = itoa::Buffer::new();
+        paint_chrome_text_parts(
             &mut surface,
             tree_width + 12,
             input_y + 7,
-            &format!("SEND TO @{}", active_id),
+            &["SEND TO @", active_id_text.format(active_id)],
             if self.composer_focused { accent } else { muted },
             11,
             layout.composer.width.saturating_sub(24),
@@ -2171,15 +2173,20 @@ impl ConApp {
             layout.composer_send.height,
             active_bg.to_xrgb(),
         );
-        let mut composer = format!("{}{}", self.composer, self.composer_preedit);
-        if self.composer_focused && !self.composer_select_all {
-            composer.push('|');
-        }
-        paint_chrome_text(
+        let composer_cursor = if self.composer_focused && !self.composer_select_all {
+            "|"
+        } else {
+            ""
+        };
+        paint_chrome_text_parts(
             &mut surface,
             layout.composer_input.x + 10,
             layout.composer_input.y + 12,
-            &composer,
+            &[
+                self.composer.as_str(),
+                self.composer_preedit.as_str(),
+                composer_cursor,
+            ],
             text,
             15,
             layout.composer_input.width.saturating_sub(20),
@@ -4926,31 +4933,45 @@ fn paint_chrome_text(
     font_size_px: u16,
     max_width: u32,
 ) {
+    paint_chrome_text_parts(surface, x, y, &[text], color, font_size_px, max_width);
+}
+
+fn paint_chrome_text_parts(
+    surface: &mut Surface<'_>,
+    x: u32,
+    y: u32,
+    parts: &[&str],
+    color: Rgb,
+    font_size_px: u16,
+    max_width: u32,
+) {
     let metrics = font::cell_metrics(font_size_px);
     let cell_w = metrics.width.max(1);
     let cell_h = metrics.height.max(1);
     let mut cursor = x;
     let limit = x.saturating_add(max_width).min(surface.width);
-    for character in text.chars() {
-        if cursor.saturating_add(cell_w) > limit {
-            break;
+    for part in parts {
+        for character in part.chars() {
+            if cursor.saturating_add(cell_w) > limit {
+                return;
+            }
+            if surface.intersects_rect(cursor, y, cell_w, cell_h)
+                && let Some(glyph) = font::raster(character, font_size_px)
+            {
+                surface.blit_glyph(
+                    &glyph,
+                    CellRect {
+                        x: cursor,
+                        y,
+                        w: cell_w,
+                        h: cell_h,
+                    },
+                    color,
+                    0.0,
+                );
+            }
+            cursor = cursor.saturating_add(cell_w);
         }
-        if surface.intersects_rect(cursor, y, cell_w, cell_h)
-            && let Some(glyph) = font::raster(character, font_size_px)
-        {
-            surface.blit_glyph(
-                &glyph,
-                CellRect {
-                    x: cursor,
-                    y,
-                    w: cell_w,
-                    h: cell_h,
-                },
-                color,
-                0.0,
-            );
-        }
-        cursor = cursor.saturating_add(cell_w);
     }
 }
 
@@ -4972,6 +4993,33 @@ fn first_grapheme(contents: &str) -> char {
 mod tests {
     use super::*;
     use agenterm_platform::input::ModifierState;
+
+    #[test]
+    fn chrome_text_parts_match_joined_text_with_clipping() {
+        let width = 160;
+        let height = 32;
+        let mut joined_pixels = vec![0; width * height];
+        let mut parts_pixels = vec![0; width * height];
+        paint_chrome_text(
+            &mut Surface::new(&mut joined_pixels, width as u32, height as u32),
+            3,
+            2,
+            "@12  中abc|",
+            Rgb(240, 240, 240),
+            14,
+            73,
+        );
+        paint_chrome_text_parts(
+            &mut Surface::new(&mut parts_pixels, width as u32, height as u32),
+            3,
+            2,
+            &["@", "12", "  ", "中abc", "|"],
+            Rgb(240, 240, 240),
+            14,
+            73,
+        );
+        assert_eq!(parts_pixels, joined_pixels);
+    }
 
     fn parser() -> vt100::Parser<ConCallbacks> {
         vt100::Parser::<ConCallbacks>::new_with_callbacks(24, 80, 0, ConCallbacks::default())

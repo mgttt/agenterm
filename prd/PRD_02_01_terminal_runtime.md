@@ -652,6 +652,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Nullable parents remain JSON null and chrome/title text is unchanged. The
   exact PE falls from 532,480 to 531,456 bytes; all 88 units, the isolated
   multitab public-control journey and Windows x64 Clippy pass.
+  Chrome repaint no longer allocates joined strings for tree labels, composer
+  destination, committed input, IME preedit and cursor. One product-local text
+  raster pass consumes borrowed segments and stack-formatted tab digits under a
+  shared clip limit. A CJK/non-cell-aligned pixel oracle proves exact parity;
+  89 units, 18 GUI black-box tests and Clippy pass. The exact PE remains
+  531,456 bytes while three per-repaint heap constructions are removed.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

@@ -671,6 +671,16 @@ parents. This removed `format!` allocation from control replies and reduced the
 exact PE from 532,480 to 531,456 bytes. Do not reuse the variant for arbitrary
 prefixed text: its value is that the type proves the complete wire grammar.
 
+Avoid building a temporary `String` when a fixed-cell painter can consume
+borrowed segments under one metrics/clip pass. Con's chrome now paints tree
+`@N  title`, composer destination, committed text, IME preedit and cursor from
+stack `itoa` digits plus borrowed slices. A pixel oracle compares joined and
+segmented CJK text under a non-cell-aligned clip and requires exact framebuffer
+equality. This removes three heap constructions from every relevant chrome
+repaint while keeping the exact PE at 531,456 bytes. Keep the segmented painter
+product-local: the strings are con UI policy, while font rasterization remains
+the shared platform mechanism.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns
