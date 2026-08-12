@@ -668,6 +668,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   the prior build. The accepted trade removes variable topology work from
   chrome and resize repaint; evidence is 89 units, 18 GUI black-box tests, one
   control journey and Windows x64 con Clippy.
+  Shared x86 pixel dispatch now gives blend and RGB8 pack independent lazy ISA
+  selectors instead of storing both function pointers in one initialized
+  structure. The standalone host consumes only blend, so final-link evidence
+  drops the unused SSSE3 pack kernel, scalar pack kernel and SSSE3 selector to
+  zero bytes while retaining AVX2/SSE2 blend. The exact custom-std PE remains
+  531,968 bytes because the net text reduction is below one 512-byte file
+  alignment step. Evidence is 35 UI-core tests, 89 con units, Windows x64
+  Clippy, and Windows ARM64 plus Linux x64 consumer compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

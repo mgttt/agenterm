@@ -18,50 +18,34 @@ pub fn blend_mask_xrgb(destination: &mut [u32], alpha: &[u8], foreground: u32) {
 type Kernel = unsafe fn(*mut u32, *const u8, usize, u32);
 
 #[cfg(target_arch = "x86_64")]
-struct X86Kernels {
-    blend: Kernel,
-    pack: PackKernel,
-}
-
-#[cfg(target_arch = "x86_64")]
-fn x86_kernels() -> &'static X86Kernels {
+fn selected_kernel() -> Kernel {
     use std::sync::OnceLock;
-    static KERNELS: OnceLock<X86Kernels> = OnceLock::new();
-    KERNELS.get_or_init(|| {
-        let features = detect_x86_features();
-        X86Kernels {
-            blend: if features.avx2 {
-                avx2_kernel
-            } else {
-                sse2_kernel
-            },
-            pack: if features.ssse3 {
-                ssse3_pack_kernel
-            } else {
-                scalar_pack_kernel
-            },
+    static KERNEL: OnceLock<Kernel> = OnceLock::new();
+    *KERNEL.get_or_init(|| {
+        if x86_avx2_available() {
+            avx2_kernel
+        } else {
+            sse2_kernel
         }
     })
 }
 
 #[cfg(target_arch = "x86_64")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct X86Features {
-    ssse3: bool,
-    avx2: bool,
-}
-
-#[cfg(target_arch = "x86_64")]
-fn detect_x86_features() -> X86Features {
+fn x86_avx2_available() -> bool {
     use core::arch::x86_64::{__cpuid, __cpuid_count};
 
     let maximum_leaf = __cpuid(0).eax;
     let leaf1 = __cpuid(1);
-    let ssse3 = leaf1.ecx & (1 << 9) != 0;
     let avx_os_support = leaf1.ecx & ((1 << 27) | (1 << 28)) == ((1 << 27) | (1 << 28));
     let ymm_state_enabled = avx_os_support && unsafe { xgetbv0() } & 0b110 == 0b110;
-    let avx2 = maximum_leaf >= 7 && ymm_state_enabled && __cpuid_count(7, 0).ebx & (1 << 5) != 0;
-    X86Features { ssse3, avx2 }
+    maximum_leaf >= 7 && ymm_state_enabled && __cpuid_count(7, 0).ebx & (1 << 5) != 0
+}
+
+#[cfg(target_arch = "x86_64")]
+fn x86_ssse3_available() -> bool {
+    use core::arch::x86_64::__cpuid;
+
+    __cpuid(1).ecx & (1 << 9) != 0
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -78,11 +62,6 @@ unsafe fn xgetbv0() -> u64 {
         );
     }
     u64::from(low) | u64::from(high) << 32
-}
-
-#[cfg(target_arch = "x86_64")]
-fn selected_kernel() -> Kernel {
-    x86_kernels().blend
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -312,7 +291,15 @@ type PackKernel = unsafe fn(*const u32, *mut u8, usize);
 
 #[cfg(target_arch = "x86_64")]
 fn selected_pack_kernel() -> PackKernel {
-    x86_kernels().pack
+    use std::sync::OnceLock;
+    static KERNEL: OnceLock<PackKernel> = OnceLock::new();
+    *KERNEL.get_or_init(|| {
+        if x86_ssse3_available() {
+            ssse3_pack_kernel
+        } else {
+            scalar_pack_kernel
+        }
+    })
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -549,7 +536,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn avx2_is_bit_exact_when_available() {
-        if detect_x86_features().avx2 {
+        if x86_avx2_available() {
             exercise(avx2_kernel);
         }
     }
@@ -557,7 +544,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn ssse3_pack_is_byte_exact_when_available() {
-        if detect_x86_features().ssse3 {
+        if x86_ssse3_available() {
             exercise_pack(ssse3_pack_kernel);
         }
     }
@@ -565,9 +552,14 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn narrow_x86_probe_matches_the_standard_oracle() {
-        let features = detect_x86_features();
-        assert_eq!(features.ssse3, std::is_x86_feature_detected!("ssse3"));
-        assert_eq!(features.avx2, std::is_x86_feature_detected!("avx2"));
+        assert_eq!(
+            x86_ssse3_available(),
+            std::is_x86_feature_detected!("ssse3")
+        );
+        assert_eq!(
+            x86_avx2_available(),
+            std::is_x86_feature_detected!("avx2")
+        );
     }
 
     #[cfg(target_arch = "aarch64")]

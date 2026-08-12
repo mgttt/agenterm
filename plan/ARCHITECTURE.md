@@ -433,6 +433,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   531,456 B 增加一个 512 B alignment 档；89 units、18 GUI black-box、1 control journey 和
   Windows x64 con Clippy 通过。该有界尺寸成本换取高频 chrome/resize 路径的确定性工作量，
   不把缓存或 con 产品拓扑下沉到 platform。
+- UI-core 的 x86 pixel dispatch 不再用一个 `X86Kernels` owner 同时持有 blend 与 RGB8
+  pack 函数指针。两个公开 kernel 各自 lazy 探测所需 ISA：blend 只选择 AVX2/SSE2，pack
+  只选择 SSSE3/scalar。con 只消费 blend，final-link 中 `ssse3_pack_kernel`、scalar pack 与
+  SSSE3 selector 均从 83 B/相关 glue 归零；AVX2 blend 保持。精确 custom-std PE 仍为
+  531,968 B，净 text 收益小于 512 B 文件对齐档。35 UI-core、89 con units、Windows x64
+  Clippy、Windows ARM64 与 Linux x64 consumer checks 通过。这是删除未使用汇编并改善
+  DCE 边界，不是为尺寸复制产品特判。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter
