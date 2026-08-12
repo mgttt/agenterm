@@ -1671,6 +1671,14 @@ impl ConApp {
     }
 
     fn dispatch_control(&mut self, window: &PixelWindow, request: control::IncomingRequest) {
+        #[inline(never)]
+        fn tab_id_json(id: Option<workspace::TabId>) -> json::JsonValue {
+            match id {
+                Some(id) => format!("@{}", id.get()).into(),
+                None => json::JsonValue::Null,
+            }
+        }
+
         use control::CliCommand;
         self.perf_stats.sync_present_stats(window.present_stats());
         let mut reply = Some(request.reply);
@@ -1684,11 +1692,8 @@ impl ConApp {
                     .map(|node| {
                         let session = self.sessions.get(&node.id);
                         json::object(vec![
-                            ("id", format!("@{}", node.id.get()).into()),
-                            (
-                                "parent",
-                                json::nullable(node.parent.map(|id| format!("@{}", id.get()))),
-                            ),
+                            ("id", tab_id_json(Some(node.id))),
+                            ("parent", tab_id_json(node.parent)),
                             (
                                 "title",
                                 session
@@ -1724,27 +1729,21 @@ impl ConApp {
                     .active()
                     .ok_or_else(|| "new terminal was not activated".to_owned())?;
                 Ok(json::object(vec![
-                    ("id", format!("@{}", id.get()).into()),
-                    (
-                        "parent",
-                        json::nullable(parent.map(|id| format!("@{}", id.get()))),
-                    ),
+                    ("id", tab_id_json(Some(id))),
+                    ("parent", tab_id_json(parent)),
                 ]))
             })(),
             CliCommand::SelectTab { target } => self.control_target(Some(target)).map(|id| {
                 self.mark_chrome_full();
                 self.workspace.set_active(id);
                 window.request_redraw();
-                json::object(vec![("active", format!("@{}", id.get()).into())])
+                json::object(vec![("active", tab_id_json(Some(id)))])
             }),
             CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
                 self.workspace.set_active(id);
                 self.close_active_session(window)
                     .map_err(|error| error.to_string())?;
-                Ok(json::object(vec![(
-                    "closed",
-                    format!("@{}", id.get()).into(),
-                )]))
+                Ok(json::object(vec![("closed", tab_id_json(Some(id)))]))
             }),
             CliCommand::CapturePane { target, max_bytes } => {
                 self.control_session_mut(target).map(|session| {

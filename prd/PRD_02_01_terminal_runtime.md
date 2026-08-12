@@ -415,6 +415,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   bytes, and `.pdata` from 29,220 to 29,076 bytes. Evidence is 83 unit tests,
   18 public-control GUI black-box journeys, one multitab control journey, and
   Windows x64 Clippy.
+  Stable `@TAB_ID` JSON values from list, new, select, and close now pass
+  through one concrete non-inlined optional-id formatter. Six call sites retain
+  the exact string/null schema while eliminating repeated `format!`, map, and
+  nullable state machines. An explicit `match` is intentional: an equivalent
+  `Option::map_or` helper reduced sections but not the aligned file, while a
+  handwritten stack decimal encoder grew it. The official release-fast PE falls
+  from 616,448 to 615,936 bytes; `.text` falls from 402,924 to 402,348 bytes,
+  `.rdata` from 171,362 to 171,354 bytes, and `.pdata` from 29,076 to 29,064
+  bytes. Evidence is 83 unit tests, 18 public-control GUI black-box journeys,
+  one multitab control journey, Windows x64 Clippy, and Linux x64 compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

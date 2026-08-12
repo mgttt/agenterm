@@ -163,6 +163,23 @@ x64 PE 同期仍为 619,520 B（`.text` 404,348 B），不得把归因样本的 
 汇总值与正式节区直接相减。该证据否决继续优先微调像素 ISA，下一轮先审计
 control/CLI 的重复状态机和错误格式化。
 
+同日三项最终 PE 淘汰实验不得重复凭源码直觉重做：把 `SendMouse` 与
+`SendWheel` 的 target/cell 校验抽成具体函数只令 `.text -32 B`、`.rdata
++16 B`，619 KiB 对齐后的文件不变；以 21 字节栈缓冲替换七种 JSON 整数
+`ToString` 时 `.text` 不变、`.rdata +88 B`、`.reloc +12 B`；给 Win32
+`window_proc_inner` 加 `inline(never)` 后所有节区完全不变，证明 LLVM 原本
+就未内联它，bloat 把 6,946 B 记到 unwind thunk 只是归因边界。三者均已
+回退。只有能删除仍未被其它调用保留的运行时族、或跨过最终文件对齐边界
+的候选才进入实现。
+
+随后把 list/new/select/close 的六处稳定 `@TAB_ID` JSON 表示集中到一个
+非泛型、非内联的 `Option<TabId> -> JsonValue` 边界。`map_or` 版本净减 384
+节区字节但文件不变；改为显式 `match` 后 `.text -576 B`、`.rdata -8 B`、
+`.pdata -12 B`，release-fast PE 从 616,448 降至 615,936 B。继续把 helper
+下沉为手写栈十进制却使 PE 增长 512 B，故回到集中 `format!`。结论是先消除
+重复所有权/closure 状态机，再让已链接的标准格式化完成叶子工作；“更接近
+汇编”不是独立收益指标。
+
 ### 5.2 死代码灰度归档流程
 编译器已经在持续报告死代码——先把信号清单化,再按"冷却期"分级处置,
 不在活跃 lane 的热文件上直接动刀:
