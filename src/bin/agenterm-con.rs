@@ -29,6 +29,9 @@ mod font;
 mod json;
 #[path = "agenterm-con/palette.rs"]
 mod palette;
+#[cfg(windows)]
+#[path = "agenterm-con/startup.rs"]
+mod startup;
 #[path = "agenterm-con/ui.rs"]
 mod ui;
 #[path = "agenterm-con/workspace.rs"]

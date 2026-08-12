@@ -484,6 +484,25 @@ over boundary and sampled representations. Con removed all four CRT imports and
 one 512-byte PE alignment unit this way. Prefer this portable scalar truth over
 assembly until emitted-code or hot-path evidence justifies SSE/NEON dispatch.
 
+On Windows MSVC, replacing `mainCRTStartup` is safe only if the replacement
+still reaches rustc's generated C `main`; calling the product function directly
+skips `lang_start`, runtime initialization, panic containment and cleanup.
+Windows std ignores C `argc`/`argv` and parses `GetCommandLineW`, so `0/null` is
+valid for the generated wrapper. Explicitly walk `.CRT$XI*` then `.CRT$XC*`
+before it, and `.CRT$XP*` then `.CRT$XT*` after it. Never walk `.CRT$XL*`: the PE
+TLS Directory makes those callbacks loader-owned, and manual invocation would
+double-run thread cleanup. Test the boundary with a test-only `.CRT$XCU`
+constructor that must fire before Rust test main.
+
+If Rust rejects a `#[link_name = "main"]` declaration as a duplicate generated
+entry, use the smallest architecture seam rather than reimplementing runtime:
+an x86_64 `jmp main` or ARM64 `b main` trampoline preserves the C ABI and return
+address. Keep initialization in Rust. Link `vcruntime`/`ucrt` import libraries
+explicitly because the removed CRT startup object formerly pulled them in
+implicitly. Suppress LNK4210 only after XI/XC/XP/XT and loader-owned XL are all
+accounted for. In con this removed 5,120 staged bytes and four startup-only UCRT
+DLL families while retaining unwind.
+
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A
 temporary exclusively created by the platform beside a destination does not

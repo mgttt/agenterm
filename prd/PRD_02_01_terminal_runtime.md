@@ -543,6 +543,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   disappear from the final import table and release-fast falls from 548,864 to
   548,352 bytes. Evidence is 86 con unit, 18 GUI black-box, one multitab control,
   Windows Clippy and Linux x64 compile.
+  Windows startup now enters through a con-owned loader boundary instead of
+  `mainCRTStartup`. Rust executes XI/XC constructors, calls rustc's generated
+  `main` through a one-instruction architecture trampoline, then executes XP/XT
+  terminators; the PE loader remains the sole XL/TLS callback authority. Thus
+  `lang_start`, panic containment, Unicode command-line parsing and Rust cleanup
+  remain intact. Five startup-only UCRT DLL families collapse to the required
+  `VCRUNTIME140` unwind edge plus `ucrt-heap/free`; release-fast falls from
+  548,352 to 543,232 bytes. A test-only XCU constructor proves execution before
+  Rust test main. Evidence is 87 unit tests, a complete 18-test GUI rerun, one
+  multitab control journey, Windows Clippy and Linux x64 compile. ARM64 reaches
+  final link with its `b main` trampoline; this workstation lacks ARM64
+  `vcruntime.lib`, so exact ARM64 link remains CI/native-toolchain evidence.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

@@ -424,6 +424,32 @@ contract is already small, deterministic and shared by Windows/Linux/macOS;
 future SSE/NEON leaves need both exact parity and a measured final-artifact or
 hot-path win.
 
+### 2026-08-12: con-owned Windows loader entry
+
+The final PE still carried MSVC's default `mainCRTStartup` and five UCRT startup
+DLL families even though Windows `std::sys::init` ignores C `argc`/`argv` and
+`std::env::args` parses `GetCommandLineW`. Con now enters through a dedicated
+`startup.rs`: it walks `.CRT$XI*` and `.CRT$XC*`, invokes rustc's generated C
+`main` with `0/null`, walks `.CRT$XP*` and `.CRT$XT*`, then calls `ExitProcess`.
+The loader remains the only owner of `.CRT$XL*` callbacks through the nonzero PE
+Thread Storage Directory. This preserves `lang_start`, Rust runtime init,
+panic/unwind containment, cleanup and Unicode argv behavior.
+
+Rust cannot declare `#[link_name = "main"]` beside its generated entry in the
+custom-std build. The narrow ISA boundary is therefore a same-ABI tail branch:
+x86_64 uses `jmp main`; ARM64 uses `b main`. No product logic or initialization
+lives in assembly. A test-only `.CRT$XCU` entry proves the constructor walker ran
+before Rust test main. Explicit `vcruntime` and `ucrt` import libraries retain
+only actual unwind/memory leaves, while `/IGNORE:4210` is justified because XI,
+XC, XP and XT are manually owned and XL is loader-owned.
+
+The official x64 release-fast PE falls from 548,352 to 543,232 bytes. Startup
+UCRT runtime, math, stdio and locale imports disappear; only VCRUNTIME and the
+unwind chain's `ucrt-heap/free` remain. ARM64 completes Rust/codegen including
+the assembly trampoline but cannot final-link on this workstation because its
+MSVC ARM64 import libraries are not installed; do not describe that as an ARM64
+link pass.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

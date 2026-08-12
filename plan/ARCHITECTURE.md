@@ -89,7 +89,7 @@ src/platform/adapters/       主机实现（物理目录）
 | `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；`server` = 无窗权威；`cli` = 共享控制平面入口 |
 | `agenterm-com` | `src/bin/agenterm-com.rs` | 极简 Windows Console-subsystem 转发器；交付名 `agenterm.com`，同步等待 `agenterm.exe` |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
-| `agenterm-con` | `crates/agenterm-con/Cargo.toml` + `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 独立最小依赖 package；conhost 等价物（单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；局部纯 UI 规则与适配状态机分离） |
+| `agenterm-con` | `crates/agenterm-con/Cargo.toml` + `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 独立最小依赖 package；conhost 等价物（单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；`startup.rs` 独占 Windows loader/CRT 边界；局部纯 UI 规则与适配状态机分离） |
 
 `agenterm-con` 的窗口机制仍只能从 `agenterm-platform` 选择。Windows 已有
 `native-pixel-window` host：直接使用 User32 消息泵、GDI XRGB buffer 与

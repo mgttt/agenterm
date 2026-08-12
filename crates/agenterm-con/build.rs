@@ -11,6 +11,13 @@ fn main() {
     );
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rustc-link-lib=dylib=vcruntime");
+        println!("cargo:rustc-link-lib=dylib=ucrt");
+        println!("cargo:rustc-link-arg-bin=agenterm-con=/ENTRY:agenterm_con_entry");
+        // `startup.rs` explicitly walks XI/XC/XP/XT while the PE loader owns
+        // XL through the TLS Directory. The default CRT entry is intentionally
+        // absent, so link.exe cannot infer that every `.CRT` family is handled.
+        println!("cargo:rustc-link-arg-bin=agenterm-con=/IGNORE:4210");
         winresource::WindowsResource::new()
             .set_icon(ICON)
             .compile()
