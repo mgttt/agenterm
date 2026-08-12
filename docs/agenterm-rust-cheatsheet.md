@@ -422,3 +422,14 @@ convert once at the typed boundary. Use an explicit ordered comparison helper
 when NaN behavior must match `clamp`; permit `clippy::manual_clamp` only with a
 measured link-size reason. Verify removal in the final link map, because source
 search alone cannot prove the formatting family became unreachable.
+
+## Parse only the transport a consumer can instantiate
+
+A shared enum may support more mechanisms than a small consumer. Calling its
+generic `FromStr` and rejecting an unused variant afterward still links every
+parser branch. Prefer a platform-owned typed constructor for the mechanism set
+that the caller can actually instantiate, while keeping the generic constructor
+for richer consumers. In the con control path, a native named-pipe/Unix-socket
+constructor made the entire `core::net::parser` family unreachable and reduced
+the staged PE by 6,656 bytes without removing TCP support from the workbench.
+This is mechanism-specific linkage, not an authorization profile.

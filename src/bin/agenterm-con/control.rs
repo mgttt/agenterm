@@ -4,7 +4,6 @@
 //! scripting language, mux protocol, workspace store, or background service.
 
 use std::io::{Read as _, Write as _};
-use std::str::FromStr as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -691,7 +690,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     let request = parse_cli(args)?;
     let endpoint = parse_native_endpoint(&request.control)?;
     let mut stream = NativeStream::connect(&endpoint, CONNECT_TIMEOUT)
-        .map_err(|error| format!("connect {}: {error}", endpoint))?;
+        .map_err(|error| format!("connect {}: {error}", request.control))?;
     stream
         .set_io_timeout(GUI_RESPONSE_TIMEOUT)
         .map_err(|error| error.to_string())?;
@@ -725,17 +724,23 @@ fn read_wire_request(stream: &mut NativeStream) -> Result<CliCommand, String> {
 }
 
 fn parse_native_endpoint(value: &str) -> Result<IpcEndpoint, String> {
-    let endpoint = IpcEndpoint::from_str(value).map_err(|error| error.to_string())?;
-    endpoint
-        .validate_local()
-        .map_err(|error| error.to_string())?;
-    if !matches!(
-        endpoint,
-        IpcEndpoint::NamedPipe(_) | IpcEndpoint::UnixSocket(_)
-    ) {
-        return Err("agenterm-con control requires pipe:<name> or unix:<absolute-path>".to_owned());
+    IpcEndpoint::from_native_address(value).map_err(|_| {
+        "agenterm-con control requires pipe:<name> or unix:<absolute-path>".to_owned()
+    })
+}
+
+#[cfg(test)]
+mod native_endpoint_tests {
+    use super::*;
+
+    #[test]
+    fn con_control_accepts_native_ipc_and_rejects_tcp() {
+        assert_eq!(
+            parse_native_endpoint("pipe:agenterm-test"),
+            Ok(IpcEndpoint::NamedPipe("agenterm-test".to_owned()))
+        );
+        assert!(parse_native_endpoint("tcp:127.0.0.1:42").is_err());
     }
-    Ok(endpoint)
 }
 
 const MAX_WIRE_KEYS: usize = 16_384;

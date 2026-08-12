@@ -253,3 +253,18 @@ fell from 155.8 KiB to 131.7 KiB. The official release-fast PE fell from 615,936
 to 580,096 bytes, a 35,840-byte reduction. Evidence: 84 unit tests, 18 GUI
 black-box tests, one multitab control journey, Windows all-target Clippy, and a
 Linux x86-64 con check.
+
+### 2026-08-12: native IPC endpoint boundary
+
+`agenterm-con` exposes only the OS-native local control mechanisms already in
+its product contract: Windows named pipes and Unix-domain sockets. Routing those
+addresses through generic `IpcEndpoint::from_str` retained IPv4/IPv6 parsing and
+TCP authority formatting even though con rejected TCP afterward. The platform
+now owns `IpcEndpoint::from_native_address`; the workbench's generic TCP parser
+and endpoint enum remain unchanged.
+
+The con link map now reports zero bytes for `core::net::parser`. Unstripped
+`.text` fell from 425.0 KiB to 419.5 KiB and the official release-fast PE fell
+from 580,096 to 573,440 bytes. Evidence: the platform constructor test, 85 con
+unit tests, 18 GUI black-box tests, one multitab control journey, Windows
+all-target Clippy, and Linux x86-64 con compilation.

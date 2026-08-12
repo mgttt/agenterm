@@ -426,9 +426,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `FromStr<f64>`, while ordered floating bounds use explicit no-format branches
   instead of retaining `f64::clamp` panic formatting. All `f64` parse/format
   symbols disappear from the measured executable; the official release-fast PE
-  falls again from 615,936 to 580,096 bytes. The corresponding unstripped
+  falls again from 615,936 to 580,096 bytes. A platform-owned
+  `IpcEndpoint::from_native_address` constructor then lets con accept only its
+  named-pipe/Unix-socket mechanisms without routing through the generic TCP
+  authority parser or endpoint formatter. The generic workbench TCP API remains
+  unchanged; con's linked `core::net::parser` region becomes zero bytes and the
+  official release-fast PE falls from 580,096 to 573,440 bytes. The corresponding unstripped
   `.text` falls from 448.5 KiB to 425.0 KiB and attributed `std` text from
-  155.8 KiB to 131.7 KiB. Evidence is 84 unit tests, 18 public-control GUI
+  155.8 KiB to 131.7 KiB. Evidence is 85 unit tests, 18 public-control GUI
   black-box journeys, one multitab control journey, Windows x64 Clippy, and
   Linux x64 compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while

@@ -83,6 +83,22 @@ pub enum IpcEndpoint {
 }
 
 impl IpcEndpoint {
+    /// Parses an OS-native local transport without linking TCP authority or
+    /// IP-address parsing into consumers that cannot use network transport.
+    pub fn from_native_address(address: &str) -> Result<Self, ParseIpcEndpointError> {
+        if let Some(path) = address.strip_prefix("unix:") {
+            nonempty_endpoint_value(path)?;
+            return PathBuf::from(path)
+                .is_absolute()
+                .then(|| Self::UnixSocket(path.to_owned()))
+                .ok_or(ParseIpcEndpointError);
+        }
+        if let Some(name) = address.strip_prefix("pipe:") {
+            return nonempty_endpoint_value(name).map(|()| Self::NamedPipe(name.to_owned()));
+        }
+        Err(ParseIpcEndpointError)
+    }
+
     pub fn from_legacy_address(address: &str) -> Result<Self, ParseIpcEndpointError> {
         parse_tcp_authority(address).map(|(host, port)| Self::Tcp { host, port })
     }
@@ -244,5 +260,15 @@ mod tests {
                 .validate_local()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn native_address_parser_excludes_tcp_before_generic_network_parsing() {
+        assert_eq!(
+            IpcEndpoint::from_native_address("pipe:agenterm-test"),
+            Ok(IpcEndpoint::NamedPipe("agenterm-test".to_owned()))
+        );
+        assert!(IpcEndpoint::from_native_address("unix:relative.sock").is_err());
+        assert!(IpcEndpoint::from_native_address("tcp:127.0.0.1:42").is_err());
     }
 }
