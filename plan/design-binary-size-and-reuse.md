@@ -331,3 +331,19 @@ unreachable from con's screenshot/snapshot path without weakening the public
 contract. The official release-fast PE fell from 566,784 to 563,200 bytes.
 Evidence is 46 focused platform tests, 85 con tests, 18 GUI black-box tests and
 one isolated multitab control journey.
+
+### 2026-08-12: compare fixed Windows extensions as native units
+
+ConPTY admits only direct `.exe` and `.com` application images. Its PATHEXT
+filter previously converted each `OsStr` to UTF-8, trimmed a prefix, allocated a
+lowercase `String`, then matched two three-byte constants. A shared Windows leaf
+now consumes exactly three UTF-16 units, folds ASCII in registers, accepts an
+optional leading dot only for PATHEXT values, and rejects extra or non-Unicode
+units. Direct path and PATHEXT checks share the leaf. The official release-fast
+PE fell from 563,200 to 562,176 bytes while all con public journeys passed.
+
+The audit also found that the nominally independent `pty` Cargo feature relied
+on `ipc` to activate `windows-sys/Win32_Security`, which gates declarations used
+by process, pipe and Job creation. `pty` now declares that dependency itself;
+this changes no con linkage because its existing feature graph already enabled
+it, but makes the reusable platform capability self-contained.

@@ -462,6 +462,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Linux x64 compilation. The file-publication increment additionally passes all
   46 focused platform tests, 85 con tests, 18 public-control GUI black-box
   journeys and the isolated multitab control journey.
+  Windows executable admission now compares the exact `.exe`/`.com` PATHEXT
+  leaf directly over native UTF-16 code units instead of converting `OsStr` to
+  UTF-8 and allocating a lowercase `String`. The same allocation-free helper
+  owns direct-path extension checks, including non-Unicode rejection. The
+  official release-fast PE falls again from 563,200 to 562,176 bytes. The
+  platform `pty` feature also declares its own `Win32_Security` declaration
+  dependency rather than relying on con's unrelated `ipc` feature to make
+  `CreateProcessW`, pipes and Job APIs visible; the minimal capability graph and
+  the full con graph are both compile-owned.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

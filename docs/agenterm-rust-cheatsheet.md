@@ -422,6 +422,21 @@ sharing retries belong there; product path policy does not. Removing three
 redundant canonicalization passes from con's atomic screenshot/snapshot path
 reduced the staged PE by 3,584 bytes; merely wrapping them in FFI would not.
 
+When a Windows-native field admits a tiny fixed ASCII vocabulary, compare its
+`OsStr` as UTF-16 units instead of calling `to_str`, `to_string_lossy`, trimming
+and allocating lowercase text. Keep grammar distinctions explicit: a PATHEXT
+entry may have one leading dot, while `Path::extension` has already removed it;
+reject extra units and unpaired surrogates rather than normalizing them. Sharing
+one exact `.exe`/`.com` leaf removed 1,024 bytes from con's staged PE. This rule
+does not apply to user text or general Unicode case folding.
+
+Every platform Cargo feature must activate the native declaration features used
+by its own adapter. Do not rely on a product's unrelated feature union to make
+Win32 functions compile: test the minimal capability graph as well as the real
+product graph. `pty` needs `Win32_Security` because windows-sys gates process,
+pipe and Job creation declarations through that module even when no product
+authorization policy is involved.
+
 ## Floating text and clamp linkage (measured 2026-08-12)
 
 Keeping `f64` geometry does not require keeping the standard float text runtime.

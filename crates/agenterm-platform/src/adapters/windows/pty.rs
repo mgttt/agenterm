@@ -1966,26 +1966,67 @@ fn append_extension(path: &Path, extension: &OsStr) -> PathBuf {
 
 fn is_direct_application_path(path: &Path) -> bool {
     path.extension()
-        .and_then(OsStr::to_str)
-        .map(|extension| {
-            extension.eq_ignore_ascii_case("exe") || extension.eq_ignore_ascii_case("com")
-        })
+        .map(|extension| is_exe_or_com(extension, false))
         .unwrap_or(true)
 }
 
 fn is_direct_application_extension(extension: &OsStr) -> bool {
-    extension
-        .to_str()
-        .map(|extension| {
-            matches!(
-                extension
-                    .trim_start_matches('.')
-                    .to_ascii_lowercase()
-                    .as_str(),
-                "exe" | "com"
-            )
-        })
-        .unwrap_or(false)
+    is_exe_or_com(extension, true)
+}
+
+fn is_exe_or_com(value: &OsStr, allow_leading_dot: bool) -> bool {
+    let mut units = value.encode_wide();
+    let Some(mut first) = units.next() else {
+        return false;
+    };
+    if allow_leading_dot && first == b'.' as u16 {
+        let Some(unit) = units.next() else {
+            return false;
+        };
+        first = unit;
+    }
+    let (Some(second), Some(third), None) = (units.next(), units.next(), units.next()) else {
+        return false;
+    };
+    matches!(
+        (
+            ascii_lower(first),
+            ascii_lower(second),
+            ascii_lower(third)
+        ),
+        (b'e', b'x', b'e') | (b'c', b'o', b'm')
+    )
+}
+
+const fn ascii_lower(unit: u16) -> u8 {
+    if unit >= b'A' as u16 && unit <= b'Z' as u16 {
+        (unit + (b'a' - b'A') as u16) as u8
+    } else if unit <= u8::MAX as u16 {
+        unit as u8
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod application_extension_tests {
+    use super::*;
+    use std::os::windows::ffi::OsStringExt as _;
+
+    #[test]
+    fn direct_application_extension_is_exact_ascii_and_allocation_free() {
+        for extension in ["exe", "EXE", "com", "CoM"] {
+            assert!(is_exe_or_com(OsStr::new(extension), false));
+        }
+        for extension in [".exe", ".EXE", ".com", ".CoM"] {
+            assert!(is_exe_or_com(OsStr::new(extension), true));
+        }
+        for extension in ["", ".", "ex", "exe2", "..exe", ".bat", " exe"] {
+            assert!(!is_exe_or_com(OsStr::new(extension), true));
+        }
+        let non_unicode = OsString::from_wide(&[b'e' as u16, 0xd800, b'e' as u16]);
+        assert!(!is_exe_or_com(&non_unicode, false));
+    }
 }
 
 fn effective_env_value(command: &ChildCommand, name: &str) -> Option<OsString> {
