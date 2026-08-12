@@ -218,12 +218,15 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
             .is_some_and(|bytes| bytes >= OUTPUT_BYTES),
         "PTY receipt did not cover the fixed payload: {perf}"
     );
-    assert!(
-        perf["pty_budget_yields"]
-            .as_u64()
-            .is_some_and(|yields| yields > 0),
-        "fixed payload never exercised bounded PTY scheduling: {perf}"
-    );
+    // The native pipe may deliver chunks below the per-Wake budget even for a
+    // large payload, in which case zero yields is the correct result rather
+    // than evidence that scheduling was bypassed. The deterministic
+    // `wake_budget_is_shared_without_multiplying_by_tab_count` unit test owns
+    // forced backlog/yield behavior; this public journey owns real throughput,
+    // complete draining, sibling responsiveness and the published counter.
+    let pty_budget_yields = perf["pty_budget_yields"]
+        .as_u64()
+        .expect("PTY budget yield receipt must remain numeric");
     assert_eq!(perf["present_failure"], 0);
     assert_eq!(perf["host_copy_frames"], 0);
 
@@ -234,7 +237,7 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
             "elapsed_ms": elapsed.as_millis(),
             "bytes_per_second": bytes_per_second,
             "pty_drained_bytes": perf["pty_drained_bytes"],
-            "pty_budget_yields": perf["pty_budget_yields"],
+            "pty_budget_yields": pty_budget_yields,
             "present_failure": perf["present_failure"],
             "host_copy_frames": perf["host_copy_frames"]
         })

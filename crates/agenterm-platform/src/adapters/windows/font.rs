@@ -7,8 +7,8 @@ use windows_sys::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleDC, CreateFontW,
     DEFAULT_CHARSET, DeleteDC, DeleteObject, FF_MODERN, FIXED, FIXED_PITCH, FW_NORMAL, GDI_ERROR,
     GGI_MARK_NONEXISTING_GLYPHS, GGO_GLYPH_INDEX, GGO_GRAY8_BITMAP, GLYPHMETRICS, GetDC,
-    GetDeviceCaps, GetGlyphIndicesW, GetGlyphOutlineW, GetTextFaceW, GetTextMetricsW, HGDIOBJ,
-    LOGPIXELSY, MAT2, OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, TEXTMETRICW,
+    GetDeviceCaps, GetFontData, GetGlyphIndicesW, GetGlyphOutlineW, GetTextFaceW, GetTextMetricsW,
+    HGDIOBJ, LOGPIXELSY, MAT2, OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, TEXTMETRICW,
 };
 
 use crate::contract::font::{
@@ -18,6 +18,8 @@ use crate::contract::font::{
 
 const MAX_GLYPH_DIM: u32 = 4096;
 const MAX_GLYPH_BYTES: u32 = MAX_GLYPH_DIM * MAX_GLYPH_DIM;
+const MAX_CMAP_BYTES: u32 = 4 * 1024 * 1024;
+const CMAP_TAG: u32 = u32::from_le_bytes(*b"cmap");
 const RASTER_FAMILIES: &[&str] = &[
     "NSimSun",
     "Sarasa Fixed SC",
@@ -61,11 +63,11 @@ impl RasterFaces {
         }
     }
 
-    fn face(&mut self, index: usize) -> Result<&PixelFace, FontError> {
+    fn face(&mut self, index: usize) -> Result<&mut PixelFace, FontError> {
         if self.faces[index].is_none() {
             self.faces[index] = Some(PixelFace::create(RASTER_FAMILIES[index], self.size_px)?);
         }
-        self.faces[index].as_ref().ok_or(FontError::CreateFailed)
+        self.faces[index].as_mut().ok_or(FontError::CreateFailed)
     }
 }
 
@@ -124,6 +126,8 @@ struct PixelFace {
     font: HGDIOBJ,
     previous: HGDIOBJ,
     metrics: TEXTMETRICW,
+    cmap_attempted: bool,
+    cmap: Option<Box<[u8]>>,
 }
 
 impl Drop for PixelFace {
@@ -192,7 +196,45 @@ impl PixelFace {
             font,
             previous,
             metrics,
+            cmap_attempted: false,
+            cmap: None,
         })
+    }
+
+    fn glyph_index(&mut self, ch: char, utf16: &[u16]) -> Result<Option<u16>, FontError> {
+        if utf16.len() == 1 {
+            let mut glyph_index = 0u16;
+            let mapped = unsafe {
+                GetGlyphIndicesW(
+                    self.dc,
+                    utf16.as_ptr(),
+                    1,
+                    &mut glyph_index,
+                    GGI_MARK_NONEXISTING_GLYPHS,
+                )
+            };
+            return Ok(
+                (mapped != GDI_ERROR as u32 && glyph_index != u16::MAX).then_some(glyph_index)
+            );
+        }
+        if !self.cmap_attempted {
+            self.cmap_attempted = true;
+            let required = unsafe { GetFontData(self.dc, CMAP_TAG, 0, ptr::null_mut(), 0) };
+            if required != GDI_ERROR as u32 && required != 0 && required <= MAX_CMAP_BYTES {
+                let mut bytes = vec![0u8; required as usize];
+                let copied = unsafe {
+                    GetFontData(self.dc, CMAP_TAG, 0, bytes.as_mut_ptr().cast(), required)
+                };
+                if copied == GDI_ERROR as u32 || copied != required {
+                    return Err(FontError::RasterFailed);
+                }
+                self.cmap = Some(bytes.into_boxed_slice());
+            }
+        }
+        Ok(self
+            .cmap
+            .as_deref()
+            .and_then(|cmap| cmap_format_12_glyph_index(cmap, ch as u32)))
     }
 
     fn actual_name(&self) -> Result<String, FontError> {
@@ -269,9 +311,6 @@ pub(crate) fn rasterizer_name() -> Result<String, FontError> {
 pub(crate) fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, FontError> {
     let mut utf16 = [0u16; 2];
     let units = ch.encode_utf16(&mut utf16);
-    if units.len() != 1 {
-        return Ok(None);
-    }
     let size_px = size_px.clamp(8, 72);
     RASTER_FACES
         .try_with(|slot| {
@@ -279,19 +318,9 @@ pub(crate) fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, F
             renderer.reset(size_px);
             for index in 0..RASTER_FAMILIES.len() {
                 let face = renderer.face(index)?;
-                let mut glyph_index = 0u16;
-                let mapped = unsafe {
-                    GetGlyphIndicesW(
-                        face.dc,
-                        units.as_ptr(),
-                        1,
-                        &mut glyph_index,
-                        GGI_MARK_NONEXISTING_GLYPHS,
-                    )
-                };
-                if mapped == GDI_ERROR as u32 || glyph_index == u16::MAX {
+                let Some(glyph_index) = face.glyph_index(ch, units)? else {
                     continue;
-                }
+                };
                 if let Some(glyph) = raster_face(face, glyph_index)? {
                     return Ok(Some(glyph));
                 }
@@ -299,6 +328,80 @@ pub(crate) fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, F
             Ok(None)
         })
         .map_err(|_| FontError::RasterFailed)?
+}
+
+fn cmap_format_12_glyph_index(cmap: &[u8], codepoint: u32) -> Option<u16> {
+    fn be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+        let value = bytes.get(offset..offset.checked_add(2)?)?;
+        Some(u16::from_be_bytes([value[0], value[1]]))
+    }
+    fn be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+        let value = bytes.get(offset..offset.checked_add(4)?)?;
+        Some(u32::from_be_bytes([value[0], value[1], value[2], value[3]]))
+    }
+    fn lookup(cmap: &[u8], offset: usize, codepoint: u32) -> Option<u16> {
+        if be_u16(cmap, offset)? != 12 || be_u16(cmap, offset.checked_add(2)?)? != 0 {
+            return None;
+        }
+        let length = usize::try_from(be_u32(cmap, offset.checked_add(4)?)?).ok()?;
+        let end = offset.checked_add(length)?;
+        if length < 16 || end > cmap.len() {
+            return None;
+        }
+        let groups = usize::try_from(be_u32(cmap, offset.checked_add(12)?)?).ok()?;
+        let group_bytes = groups.checked_mul(12)?;
+        if 16usize.checked_add(group_bytes)? > length {
+            return None;
+        }
+        let mut low = 0usize;
+        let mut high = groups;
+        while low < high {
+            let middle = low + (high - low) / 2;
+            let group = offset
+                .checked_add(16)?
+                .checked_add(middle.checked_mul(12)?)?;
+            let start = be_u32(cmap, group)?;
+            let finish = be_u32(cmap, group.checked_add(4)?)?;
+            if codepoint < start {
+                high = middle;
+            } else if codepoint > finish {
+                low = middle + 1;
+            } else {
+                let first_glyph = be_u32(cmap, group.checked_add(8)?)?;
+                let glyph = first_glyph.checked_add(codepoint - start)?;
+                return u16::try_from(glyph).ok().filter(|glyph| *glyph != 0);
+            }
+        }
+        None
+    }
+
+    if be_u16(cmap, 0)? != 0 {
+        return None;
+    }
+    let records = usize::from(be_u16(cmap, 2)?);
+    let records_end = 4usize.checked_add(records.checked_mul(8)?)?;
+    if records_end > cmap.len() {
+        return None;
+    }
+    // Prefer the Windows UCS-4 encoding, then accept a Unicode-platform
+    // format-12 table. Both offsets are relative to the start of `cmap`.
+    for unicode_platform in [false, true] {
+        for index in 0..records {
+            let record = 4 + index * 8;
+            let platform = be_u16(cmap, record)?;
+            let encoding = be_u16(cmap, record + 2)?;
+            if (!unicode_platform && !(platform == 3 && encoding == 10))
+                || (unicode_platform && platform != 0)
+            {
+                continue;
+            }
+            let offset = usize::try_from(be_u32(cmap, record + 4)?).ok()?;
+            if let Some(glyph) = lookup(cmap, offset, codepoint) {
+                return Some(glyph);
+            }
+        }
+    }
+    None
 }
 
 fn raster_face(face: &PixelFace, glyph_index: u16) -> Result<Option<RasterGlyph>, FontError> {
@@ -485,8 +588,39 @@ mod tests {
     }
 
     #[test]
-    fn supplementary_scalar_fails_safely_without_splitting_surrogates() {
-        assert_eq!(rasterize('😀', 16), Ok(None));
+    fn format_12_maps_supplementary_scalars_without_utf16_splitting() {
+        let mut cmap = Vec::new();
+        cmap.extend_from_slice(&0u16.to_be_bytes());
+        cmap.extend_from_slice(&1u16.to_be_bytes());
+        cmap.extend_from_slice(&3u16.to_be_bytes());
+        cmap.extend_from_slice(&10u16.to_be_bytes());
+        cmap.extend_from_slice(&12u32.to_be_bytes());
+        cmap.extend_from_slice(&12u16.to_be_bytes());
+        cmap.extend_from_slice(&0u16.to_be_bytes());
+        cmap.extend_from_slice(&28u32.to_be_bytes());
+        cmap.extend_from_slice(&0u32.to_be_bytes());
+        cmap.extend_from_slice(&1u32.to_be_bytes());
+        cmap.extend_from_slice(&0x1_0000u32.to_be_bytes());
+        cmap.extend_from_slice(&0x1_0002u32.to_be_bytes());
+        cmap.extend_from_slice(&400u32.to_be_bytes());
+
+        assert_eq!(cmap_format_12_glyph_index(&cmap, 0x1_0001), Some(401));
+        assert_eq!(cmap_format_12_glyph_index(&cmap, 0xffff), None);
+        assert_eq!(
+            cmap_format_12_glyph_index(&cmap[..cmap.len() - 1], 0x1_0001),
+            None
+        );
+    }
+
+    #[test]
+    fn native_rasterizer_produces_a_supplementary_outline_glyph() {
+        let glyph = rasterize('𝄞', 20)
+            .expect("GDI supplementary raster call")
+            .expect("installed Windows symbol font covers musical symbol");
+        assert!(glyph.width <= MAX_GLYPH_DIM);
+        assert!(glyph.height <= MAX_GLYPH_DIM);
+        assert_eq!(glyph.alpha.len(), (glyph.width * glyph.height) as usize);
+        assert!(glyph.alpha.iter().any(|alpha| *alpha != 0));
     }
 
     #[test]

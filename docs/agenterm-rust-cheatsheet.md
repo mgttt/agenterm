@@ -940,3 +940,14 @@ provides `CARGO_BIN_EXE_*` for a binary owned by another package. Use
 cross-compilation to keep checking the static contract. Never skip the static
 schema, ownership, or evidence checks merely because that target cell cannot
 execute the sibling binary.
+## Windows supplementary glyphs without a second font stack
+
+`GetGlyphIndicesW` maps UTF-16 code units, so passing a surrogate pair does not
+prove one Unicode scalar was mapped. For a selected GDI TrueType/OpenType face,
+the small product-neutral path is: read a strictly bounded `cmap` table with
+`GetFontData`, parse the big-endian format-12 UCS-4 groups with checked offsets,
+then pass the resulting glyph index to `GetGlyphOutlineW` with
+`GGO_GLYPH_INDEX`. Keep BMP characters on `GetGlyphIndicesW`, cache at most one
+bounded table per live face, and treat absent/malformed tables as local missing
+coverage. This handles nominal supplementary outline glyphs; it does not claim
+color emoji, variation sequences, or run shaping, which require DirectWrite.

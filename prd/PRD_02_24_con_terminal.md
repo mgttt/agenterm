@@ -144,9 +144,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   cleanup. Con no longer opens or parses font files; ab_glyph and ttf_parser are
   absent from its Windows production graph. Linux/macOS retain equivalent
   file-font behavior inside a shared platform portable adapter.
-- [~] the current GDI leaf accepts one UTF-16 unit and returns a missing glyph
-  for supplementary scalars rather than splitting a surrogate pair. Broader
-  emoji fallback is an explicit later DirectWrite tradeoff, not a shipped claim.
+- [x] the Windows GDI leaf maps supplementary scalars through the selected
+  face's bounded OpenType `cmap` format-12 table, then rasterizes the resulting
+  glyph index through the existing bounded `GetGlyphOutlineW` path. BMP lookup
+  remains on `GetGlyphIndicesW`; malformed, oversized or absent tables fail as
+  a local missing glyph without splitting surrogate pairs. Color emoji,
+  variation selectors and run shaping remain an explicit later DirectWrite
+  tradeoff rather than a shipped claim.
 - [x] Windows native glyph faces survive platform raster cache misses at one
   active pixel size: the adapter lazily creates only the GDI families reached by
   coverage, keeps each HDC/HFONT on its creating thread, and drops the whole RAII
