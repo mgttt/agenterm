@@ -442,7 +442,10 @@ extern "C" fn host_fs_read_call(
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
         Err(error) => {
-            record_host_error("rh_std_fs_read_to_string", &error.to_string());
+            record_host_error(
+                "rh_std_fs_read_to_string",
+                &format!("{error} (path={path})"),
+            );
             return -5;
         }
     };

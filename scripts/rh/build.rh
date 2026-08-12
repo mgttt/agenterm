@@ -113,7 +113,11 @@ fn promote_bootstrap_worker(repo, candidate, cache_name) {
     }
     std::fs::rename(stamp_temp, cache_stamp);
     print("AgenTerm bootstrap worker: promoted last-known-good agenterm");
-    0
+    // 1 = the candidate was proven (direct_file + `rh version` self-check) and
+    // may be adopted as the engine for the remaining nested tasks. The early
+    // return above yields 0: nothing was validated, so the caller must keep the
+    // bootstrap worker.
+    1
 }
 
 fn target_arch(target) {
@@ -750,7 +754,7 @@ fn entry() {
         }
         let promoted_worker =
             std::path::join(profile_directory, bootstrap_name).display;
-        promote_bootstrap_worker(
+        let promoted = promote_bootstrap_worker(
             repo,
             promoted_worker,
             bootstrap_name
@@ -758,7 +762,14 @@ fn entry() {
         // The LKG may only be old enough to seed the current source. Once the
         // candidate proves its rh entry, use that engine for every remaining
         // nested task so new task syntax/API never falls back mid-build.
-        worker = promoted_worker;
+        //
+        // Adopt it only when the file is actually there. Without the bootstrap
+        // cache environment promote_bootstrap_worker is a no-op that validates
+        // nothing, so its return value alone cannot vouch for the path.
+        let _promoted = promoted;
+        if direct_file(promoted_worker) != 0 {
+            worker = promoted_worker;
+        }
     }
 
     if action == "clippy" {
@@ -890,6 +901,22 @@ fn entry() {
         cargo_output = std::path::join(repo, "target-release").display;
         development_target = std::path::join(repo, "target").display;
         let stdout_path = repo + ".build.stdout.tmp";
+        // This block cleans BOTH target trees, and `worker` lives inside one of
+        // them (target-release/release/agenterm.exe after the promotion above,
+        // or target/debug/agenterm.exe when bootstrapped). `cargo clean` then
+        // deletes the binary that the remaining stages still have to spawn --
+        // the candidate lane's `process_spawn: os error 3`. Run the cleanup
+        // stages from a copy parked outside both trees.
+        let cleanup_worker = repo + ".build-cleanup-worker.tmp.exe";
+        std::fs::try_remove_file(cleanup_worker);
+        std::fs::copy(worker, cleanup_worker);
+        // std::fs::exists borrows; direct_file() is a script fn and would move
+        // the binding that try_remove_file still needs at the end of the block.
+        require(
+            std::fs::exists(cleanup_worker),
+            "build_cleanup_worker_missing"
+        );
+        worker = cleanup_worker;
         let report_code = std::process::command_stdout_file(
             worker,
             [
@@ -1021,6 +1048,9 @@ fn entry() {
             print(dev_clean_stdout);
         }
         std::fs::try_remove_file(stdout_path);
+        // `worker` is the cleanup copy from here on; naming cleanup_worker again
+        // would move a binding the assignment above already consumed.
+        std::fs::try_remove_file(worker);
     }
 
     print("");

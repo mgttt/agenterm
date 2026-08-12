@@ -688,14 +688,44 @@ fn command_start(command: &mut ScriptCommand) -> Result<ScriptChild, Box<EvalAlt
     spawn_owned(command)
 }
 
+/// Name what a failed spawn was actually asked to do.
+///
+/// A bare `io::Error` identifies neither the program nor the directory it was
+/// resolved against, so an `os error 3` from deep inside a gate chain used to
+/// be unactionable — the operator could not tell a missing executable from a
+/// missing working directory from a missing redirect target.
+fn spawn_context(command: &ScriptCommand) -> String {
+    let mut detail = format!("program={}", command.program);
+    if let Some(dir) = command.current_dir.as_ref() {
+        detail.push_str(&format!(" current_dir={}", dir.display()));
+    }
+    if let Some(path) = command.stdout_file.as_ref() {
+        detail.push_str(&format!(" stdout_file={}", path.display()));
+    }
+    if let Some(path) = command.stderr_file.as_ref() {
+        detail.push_str(&format!(" stderr_file={}", path.display()));
+    }
+    let arguments = command
+        .arguments
+        .iter()
+        .take(6)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !arguments.is_empty() {
+        detail.push_str(&format!(" args=[{arguments}]"));
+    }
+    detail
+}
+
 fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult>> {
     let mut process = Command::new(&command.program);
     process.args(&command.arguments).stdin(Stdio::piped());
     child_process_tree::configure_command(&mut process)
         .map_err(|error| format!("process_tree_configure: {error}"))?;
     if let Some(path) = command.stdout_file.as_ref() {
-        let file =
-            std::fs::File::create(path).map_err(|error| format!("process_stdout_file: {error}"))?;
+        let file = std::fs::File::create(path)
+            .map_err(|error| format!("process_stdout_file: {error} (path={})", path.display()))?;
         process.stdout(Stdio::from(file));
     } else {
         process.stdout(Stdio::piped());
@@ -706,8 +736,8 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
         // the caller's console and owns real std handles.
         process.stderr(Stdio::inherit());
     } else if let Some(path) = command.stderr_file.as_ref() {
-        let file =
-            std::fs::File::create(path).map_err(|error| format!("process_stderr_file: {error}"))?;
+        let file = std::fs::File::create(path)
+            .map_err(|error| format!("process_stderr_file: {error} (path={})", path.display()))?;
         process.stderr(Stdio::from(file));
     } else {
         process.stderr(Stdio::piped());
@@ -727,7 +757,7 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     }
     let mut child = process
         .spawn()
-        .map_err(|error| format!("process_spawn: {error}"))?;
+        .map_err(|error| format!("process_spawn: {error} ({})", spawn_context(command)))?;
     let process_tree = match child_process_tree::ProcessTreeGuard::attach(&child) {
         Ok(process_tree) => process_tree,
         Err(error) => {

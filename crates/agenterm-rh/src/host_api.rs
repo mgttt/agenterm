@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 100;
+pub const RH_CODEGEN_REVISION: u32 = 101;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -991,6 +991,31 @@ pub fn emit_host_runtime(out: &mut String) {
          fn rh_command_stderr_inherit(command: &mut RhCommand) {\n\
              command.stderr_inherit = true;\n\
          }\n\n\
+         fn rh_command_spawn_context(command: &RhCommand) -> String {\n\
+             // A bare io::Error names neither the program nor the directory it\n\
+             // was resolved against, so `os error 3` used to be unactionable.\n\
+             let mut detail = format!(\"program={}\", command.program);\n\
+             if let Some(dir) = &command.current_dir {\n\
+                 detail.push_str(&format!(\" current_dir={dir}\"));\n\
+             }\n\
+             if let Some(path) = &command.stdout_file {\n\
+                 detail.push_str(&format!(\" stdout_file={path}\"));\n\
+             }\n\
+             if let Some(path) = &command.stderr_file {\n\
+                 detail.push_str(&format!(\" stderr_file={path}\"));\n\
+             }\n\
+             let args = command\n\
+                 .args\n\
+                 .iter()\n\
+                 .take(6)\n\
+                 .cloned()\n\
+                 .collect::<Vec<_>>()\n\
+                 .join(\" \");\n\
+             if !args.is_empty() {\n\
+                 detail.push_str(&format!(\" args=[{args}]\"));\n\
+             }\n\
+             detail\n\
+         }\n\n\
          fn rh_command_build(command: &RhCommand) -> std::process::Command {\n\
              let mut process = std::process::Command::new(&command.program);\n\
              process.args(&command.args);\n\
@@ -1012,7 +1037,9 @@ pub fn emit_host_runtime(out: &mut String) {
                  match std::fs::File::create(path) {\n\
                      Ok(file) => { process.stdout(std::process::Stdio::from(file)); }\n\
                      Err(error) => {\n\
-                         let _ = rh_fail(&format!(\"process_stdout_file: {error}\"));\n\
+                         let _ = rh_fail(&format!(\n\
+                             \"process_stdout_file: {error} (path={path})\"\n\
+                         ));\n\
                          process.stdout(std::process::Stdio::null());\n\
                      }\n\
                  }\n\
@@ -1257,7 +1284,10 @@ pub fn emit_host_runtime(out: &mut String) {
                      )\n\
                  }\n\
                  Err(error) => {\n\
-                     let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
+                     let _ = rh_fail(&format!(\n\
+                         \"process_spawn: {error} ({})\",\n\
+                         rh_command_spawn_context(command)\n\
+                     ));\n\
                      RhOutput {\n\
                          success: 0,\n\
                          exit_code: -1,\n\
@@ -1278,7 +1308,10 @@ pub fn emit_host_runtime(out: &mut String) {
                      RhChild::new(child.id() as INT, Some(child), command.capture_limit)\n\
                  }\n\
                  Err(error) => {\n\
-                     let _ = rh_fail(&format!(\"process_spawn: {error}\"));\n\
+                     let _ = rh_fail(&format!(\n\
+                         \"process_spawn: {error} ({})\",\n\
+                         rh_command_spawn_context(command)\n\
+                     ));\n\
                      RhChild::exited(0, command.capture_limit)\n\
                  }\n\
              }\n\
