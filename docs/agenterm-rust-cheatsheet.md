@@ -626,6 +626,20 @@ The probe was reverted. A native ISA probe is a win only after link attribution
 shows it removes the complete generic detector or provides measured hot-path
 latency that justifies two detectors.
 
+That prerequisite can change after dependency-feature work. VTE's `std`
+feature only enables `memchr/std`; its parser API is unchanged without it. Con's
+vendored vt100 now disables that feature, so x86_64 ESC scans retain baseline
+SSE2 while dropping memchr's AVX2 runtime dispatcher. UI-core then became the
+last production `std_detect` owner. One `OnceLock<X86Kernels>` now caches direct
+blend and RGB-pack function pointers selected by a narrow CPUID probe; AVX2 is
+accepted only with CPUID AVX + OSXSAVE, XCR0 XMM/YMM state from bounded `xgetbv`
+inline assembly, and CPUID.7 AVX2. The probe matches the standard oracle in
+tests, while the oracle is test-only. Paired custom-std builds measured 538,112
+to 537,600 bytes for VTE no-std, then 537,600 to 536,064 bytes after replacing
+the final detector. Bloat `.text` fell from 348.5 to 346.5 KiB and no linked
+`std_detect::detect_features` symbol remained. This is the required sequence:
+remove every owner first, then replace the final authority once.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

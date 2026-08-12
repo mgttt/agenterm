@@ -615,6 +615,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   claim complete family removal. Evidence is 88 con unit tests, the complete
   multitab wait-text control journey, 18 GUI black-box tests, Windows x64
   Clippy, Windows aarch64 con check and Linux x64 con check.
+  Its x86_64 ISA dispatch now has one shared authority rather than independent
+  standard-library and dependency detectors. Vendored vt100 disables VTE's
+  std-only memchr runtime dispatch; VTE parser semantics are unchanged and ESC
+  scans retain mandatory x86_64 SSE2. UI-core caches both pixel blend and RGB
+  pack function pointers from one CPUID probe, using bounded `xgetbv` inline
+  assembly before any AVX2 call to require OS-managed XMM/YMM state. The probe
+  agrees with the standard oracle in tests, all 88 con units pass, and Windows
+  x64/ARM64 plus Linux x64 consumer graphs compile. Paired custom-std evidence
+  is 538,112 -> 537,600 -> 536,064 bytes; bloat `.text` is 348.5 -> 346.5 KiB
+  and the final link has no `std_detect::detect_features` owner.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

@@ -390,6 +390,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   AVX2/SSSE3 dispatch，oracle 与像素/con 测试均通过，但其它 owner 仍保留
   `std_detect::detect_features`，bloat `.text` 从 348.5 KiB 增至 349.0 KiB，精确
   538,112 B PE 仅因 alignment 未变化。该双 detector 方案已撤回。
+  后续依赖归因确认剩余 production owner 是 `vte/std -> memchr/std`；vt100 关闭 VTE
+  这个只控制 memchr runtime dispatch、并不改变 parser API 的 feature 后，x86_64 ESC
+  scan 保留 baseline SSE2，PE 从 538,112 B 降至 537,600 B。此时 UI-core 成为最终 owner，
+  一个 `OnceLock<X86Kernels>` 以 CPUID + 有界 `xgetbv` inline asm 同时选择 blend AVX2/SSE2
+  与 RGB-pack SSSE3/scalar 直接函数指针；AVX2 必须同时满足 AVX、OSXSAVE、XCR0 XMM/YMM
+  和 CPUID.7 位。组合后 PE 为 536,064 B（总计 -2,048 B），bloat `.text` 从 348.5
+  降至 346.5 KiB，最终链接不再含 `std_detect::detect_features`。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter
