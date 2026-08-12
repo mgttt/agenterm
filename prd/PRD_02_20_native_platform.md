@@ -585,6 +585,13 @@ integrated validation recorded below):
   retains the same contract in Rust, while Linux/macOS remain behind the common
   facade. Missing or malformed blocks fail without exposing raw pointers to
   products.
+- [x] The Windows font adapter retains lazily created GDI faces for one active
+  pixel size on their creating thread. It does not mark NULL-compatible HDCs as
+  `Send`; size changes drop the complete RAII set, restoring the previous font
+  and deleting every HFONT/HDC. TLS teardown or reentrant borrowing fails with
+  a typed raster error. A deterministic 94-glyph probe proves one native face
+  creation at a stable size, while Unix/macOS retain their OnceLock-backed
+  file-font renderer behind the same neutral raster facade.
 - [x] Window minimized/maximized/restored semantic state and native-flag
   precedence are public platform-neutral window contracts. AgenTerm's 320x240
   CLI resize minimum and error wording remain product policy in the main crate.

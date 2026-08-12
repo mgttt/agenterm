@@ -554,6 +554,27 @@ cross the final artifact boundary. The experiment was reverted. Prefer the
 existing Rust conversion unless a caller can lend fixed output storage or a
 future link graph proves that the complete conversion family becomes dead.
 
+Likewise, do not hand-assemble a cold glyph-format loop before accounting for
+its cache and surrounding control flow. Con first moved GDI gray8 stride and
+length validation outside the per-pixel loop; that clear scalar helper grew the
+custom-std PE from 540,160 to 540,672 bytes. Replacing its inner loop with a
+bounded x86_64 inline-assembly row scanner grew it again to 541,184 bytes. Both
+versions passed padding, saturation, short-write and real ASCII/CJK GDI tests,
+but glyph conversion runs only on cache misses and no public latency evidence
+justified the size cost, so both were reverted. The higher-value native font
+target is reusable `HDC`/`HFONT` lifetime, not six arithmetic instructions.
+
+For `CreateCompatibleDC(NULL)`, Microsoft assigns HDC ownership to the creating
+thread and invalidates it when that thread exits. Do not make a cached GDI face
+`Send` merely to fit a process-global mutex. Con keeps a thread-local RAII set
+instead: one active pixel size, lazy family creation, exactly-once
+`SelectObject` restoration plus `DeleteObject`/`DeleteDC`, and a complete reset
+when size changes. `try_with` and `try_borrow_mut` convert teardown or reentry
+into a typed raster failure rather than a panic. A deterministic test rasterizes
+94 distinct printable ASCII glyphs and observes one native face creation instead
+of 94. The custom-std PE cost is 2,048 bytes (540,160 to 542,208); this is an
+accepted native-lifecycle/first-render trade, not a size optimization.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

@@ -1,4 +1,7 @@
-use std::{mem, ptr};
+use std::{cell::RefCell, mem, ptr};
+
+#[cfg(test)]
+use std::cell::Cell;
 
 use windows_sys::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleDC, CreateFontW,
@@ -26,6 +29,45 @@ const RASTER_FAMILIES: &[&str] = &[
     "Segoe UI Symbol",
     "Segoe UI Emoji",
 ];
+
+thread_local! {
+    static RASTER_FACES: RefCell<RasterFaces> = const { RefCell::new(RasterFaces::empty()) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static FACE_CREATIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+struct RasterFaces {
+    size_px: u16,
+    faces: [Option<PixelFace>; RASTER_FAMILIES.len()],
+}
+
+impl RasterFaces {
+    const fn empty() -> Self {
+        Self {
+            size_px: 0,
+            faces: [const { None }; RASTER_FAMILIES.len()],
+        }
+    }
+
+    fn reset(&mut self, size_px: u16) {
+        if self.size_px != size_px {
+            *self = Self {
+                size_px,
+                faces: std::array::from_fn(|_| None),
+            };
+        }
+    }
+
+    fn face(&mut self, index: usize) -> Result<&PixelFace, FontError> {
+        if self.faces[index].is_none() {
+            self.faces[index] = Some(PixelFace::create(RASTER_FAMILIES[index], self.size_px)?);
+        }
+        self.faces[index].as_ref().ok_or(FontError::CreateFailed)
+    }
+}
 
 const PRIMARY_CANDIDATES: &[FontFileCandidate] = &[
     FontFileCandidate {
@@ -143,6 +185,8 @@ impl PixelFace {
             }
             return Err(FontError::MetricsFailed);
         }
+        #[cfg(test)]
+        FACE_CREATIONS.with(|count| count.set(count.get() + 1));
         Ok(Self {
             dc,
             font,
@@ -229,26 +273,32 @@ pub(crate) fn rasterize(ch: char, size_px: u16) -> Result<Option<RasterGlyph>, F
         return Ok(None);
     }
     let size_px = size_px.clamp(8, 72);
-    for family in RASTER_FAMILIES {
-        let face = PixelFace::create(family, size_px)?;
-        let mut glyph_index = 0u16;
-        let mapped = unsafe {
-            GetGlyphIndicesW(
-                face.dc,
-                units.as_ptr(),
-                1,
-                &mut glyph_index,
-                GGI_MARK_NONEXISTING_GLYPHS,
-            )
-        };
-        if mapped == GDI_ERROR as u32 || glyph_index == u16::MAX {
-            continue;
-        }
-        if let Some(glyph) = raster_face(&face, glyph_index)? {
-            return Ok(Some(glyph));
-        }
-    }
-    Ok(None)
+    RASTER_FACES
+        .try_with(|slot| {
+            let mut renderer = slot.try_borrow_mut().map_err(|_| FontError::RasterFailed)?;
+            renderer.reset(size_px);
+            for index in 0..RASTER_FAMILIES.len() {
+                let face = renderer.face(index)?;
+                let mut glyph_index = 0u16;
+                let mapped = unsafe {
+                    GetGlyphIndicesW(
+                        face.dc,
+                        units.as_ptr(),
+                        1,
+                        &mut glyph_index,
+                        GGI_MARK_NONEXISTING_GLYPHS,
+                    )
+                };
+                if mapped == GDI_ERROR as u32 || glyph_index == u16::MAX {
+                    continue;
+                }
+                if let Some(glyph) = raster_face(face, glyph_index)? {
+                    return Ok(Some(glyph));
+                }
+            }
+            Ok(None)
+        })
+        .map_err(|_| FontError::RasterFailed)?
 }
 
 fn raster_face(face: &PixelFace, glyph_index: u16) -> Result<Option<RasterGlyph>, FontError> {
@@ -437,5 +487,38 @@ mod tests {
     #[test]
     fn supplementary_scalar_fails_safely_without_splitting_surrogates() {
         assert_eq!(rasterize('😀', 16), Ok(None));
+    }
+
+    #[test]
+    fn native_rasterizer_reuses_a_face_until_the_size_changes() {
+        RASTER_FACES.with(|slot| *slot.borrow_mut() = RasterFaces::empty());
+        let face_id = |size_px| {
+            RASTER_FACES.with(|slot| {
+                let mut renderer = slot.borrow_mut();
+                renderer.reset(size_px);
+                Ok::<_, FontError>(renderer.face(0)? as *const PixelFace as usize)
+            })
+        };
+        let first = face_id(16).expect("first face");
+        let second = face_id(16).expect("reused face");
+        assert_eq!(first, second);
+        RASTER_FACES.with(|slot| {
+            let mut renderer = slot.borrow_mut();
+            renderer.reset(17);
+            assert_eq!(renderer.size_px, 17);
+            assert!(renderer.faces.iter().all(Option::is_none));
+        });
+    }
+
+    #[test]
+    fn printable_ascii_reuses_one_native_face() {
+        RASTER_FACES.with(|slot| *slot.borrow_mut() = RasterFaces::empty());
+        FACE_CREATIONS.with(|count| count.set(0));
+        for byte in b'!'..=b'~' {
+            rasterize(char::from(byte), 16)
+                .expect("GDI raster call")
+                .expect("primary face covers printable ASCII");
+        }
+        FACE_CREATIONS.with(|count| assert_eq!(count.get(), 1));
     }
 }

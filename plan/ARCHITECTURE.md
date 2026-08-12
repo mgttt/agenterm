@@ -360,6 +360,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   adapter。独占 target 的 cold PE 从 540,672 B 降至 540,160 B（-512 B）；62 platform、
   87 con unit、18 GUI black-box、1 multitab control、Windows x64 Clippy、Windows
   aarch64 check 和 Linux x64 check 通过。
+- Windows font adapter 以创建线程为原生所有权边界，线程本地 `RasterFaces` 只保留一个
+  active pixel size，并按 coverage lazy 创建 GDI family；字号变化替换整个集合，通过
+  `PixelFace` RAII 恢复 `SelectObject` 并 exactly-once `DeleteObject` / `DeleteDC`。
+  `try_with` / `try_borrow_mut` 将析构期或重入收敛为 typed raster failure，不用
+  `unsafe Send` 跨线程搬运 `CreateCompatibleDC(NULL)` 所属 HDC。94 个不同 printable
+  ASCII glyph 的确定性测试将 native face 创建从 94 次降为 1 次；以 final PE
+  540,160 B -> 542,208 B（+2,048 B）换取首次渲染/新字符平滑度。69 platform、87 con、
+  18 GUI black-box、1 control、Windows x64 Clippy、Windows aarch64 font check 和 Linux
+  x64 con check 通过；Unix/macOS 保持既有 OnceLock file-font renderer。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

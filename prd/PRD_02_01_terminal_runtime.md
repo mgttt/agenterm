@@ -591,6 +591,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   62 platform and 87 con unit tests, Windows x64 Clippy, Windows aarch64 check
   and Linux x64 check pass. The complete 18-test GUI black-box run and isolated
   multitab control journey also pass.
+  Windows native glyph faces now survive platform raster cache misses at one
+  active pixel size. The adapter lazily creates only the GDI families reached
+  by coverage, keeps each HDC/HFONT on its creating thread, and drops the whole
+  RAII set when zoom selects another size. This follows the documented
+  `CreateCompatibleDC(NULL)` thread-ownership rule rather than asserting an
+  unsafe cross-thread `Send`. A deterministic 94-printable-ASCII probe reduces
+  native face creation from 94 sequences to one. The accepted release-fast cost
+  is 540,160 to 542,208 bytes (+2,048) for smoother first/new-glyph rendering.
+  Evidence is 69 platform tests, 87 con tests, 18 GUI black-box tests, one
+  multitab control journey, Windows x64 Clippy, Windows aarch64 font check and
+  Linux x64 con check.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

@@ -545,6 +545,35 @@ remained linked. The implementation is rejected and the Rust conversion stays;
 revisit only if fixed caller-owned output or a changed link graph can remove
 the entire conversion family.
 
+A second symbol-led experiment targeted the Windows GDI gray8 conversion loop.
+Hoisting stride/length validation out of each pixel made the failure boundary
+clear but grew the custom-std PE from 540,160 to 540,672 bytes. Replacing that
+scalar iterator with one bounded x86_64 inline-assembly row scanner grew the PE
+again to 541,184 bytes. Synthetic padding/saturation/short-write tests and real
+ASCII/CJK GDI rasterization passed, but the conversion runs only on glyph-cache
+misses and had no public latency evidence capable of paying for +1,024 bytes.
+Both candidates are rejected. Future font optimization should reuse native
+`HDC`/`HFONT` faces across cache misses, where the source audit found repeated
+system object creation, rather than micro-optimizing the gray8 arithmetic.
+
+That lifecycle target is now implemented in the Windows font adapter. A
+thread-local `RasterFaces` owns at most one active pixel size and lazily creates
+each GDI family only when coverage reaches it. Size changes replace the set and
+therefore run every `PixelFace` RAII cleanup; reentry and TLS teardown return
+`FontError::RasterFailed` instead of panicking. Thread-local ownership is
+deliberate: Microsoft documents that a memory DC created from NULL belongs to
+its creating thread and becomes invalid when that thread exits, so an unsafe
+`Send` wrapper would weaken the native contract merely to reuse a mutex.
+
+The deterministic creation-count test rasterizes all 94 printable ASCII glyphs
+at one size and observes one `CreateCompatibleDC`/`CreateFontW`/metrics sequence
+instead of the former 94. This costs 2,048 final bytes (540,160 to 542,208) and
+is accepted for first-render and new-glyph smoothness, not described as a size
+win. Evidence is 69 platform tests, 87 con tests, 18 GUI black-box tests, one
+multitab control journey, Windows x64 Clippy, Windows aarch64 font compilation
+and Linux x64 con compilation. Unix/macOS retain their existing OnceLock-backed
+file-font renderer behind the same facade.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.
