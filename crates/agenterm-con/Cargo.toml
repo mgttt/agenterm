@@ -22,7 +22,7 @@ name = "agenterm_con_control"
 path = "../../tests/agenterm_con_control.rs"
 
 [dependencies]
-agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "filesystem-publish", "font", "ime", "ipc", "parent-console", "pty", "runtime", "screenshot", "window"] }
+agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "filesystem-publish", "filesystem-read", "font", "ime", "ipc", "parent-console", "pty", "runtime", "screenshot", "window"] }
 agenterm-ui-core = { path = "../agenterm-ui-core" }
 itoa = "1"
 unicode-width = "0.2"

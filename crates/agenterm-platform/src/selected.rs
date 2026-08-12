@@ -130,6 +130,14 @@ pub(crate) mod filesystem_cleanup;
 #[path = "adapters/windows/filesystem_publish.rs"]
 pub(crate) mod filesystem_publish;
 
+#[cfg(all(feature = "filesystem-read", windows))]
+#[path = "adapters/windows/filesystem_read.rs"]
+pub(crate) mod filesystem_read;
+
+#[cfg(all(feature = "filesystem-read", unix))]
+#[path = "adapters/unix/filesystem_read.rs"]
+pub(crate) mod filesystem_read;
+
 #[cfg(all(
     feature = "filesystem-publish",
     any(target_os = "linux", target_os = "macos")

@@ -1,6 +1,6 @@
 //! Small bounded JSON codec for the fixed `agenterm-con` schemas.
 
-const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DEPTH: usize = 32;
 const MAX_NODES: usize = 65_536;
 const MAX_OBJECT_FIELDS: usize = 256;

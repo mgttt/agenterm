@@ -734,3 +734,15 @@ architecture-specific reduction.
 Completing a non-empty local terminal selection copies its normalized text to
 the system clipboard. A click without a range, application-owned mouse gesture,
 scrollbar drag, or tab-divider resize must not mutate clipboard contents.
+
+Configuration content uses a separate bounded `filesystem-read` capability
+rather than the complete filesystem surface. Windows opens one shared native
+handle, rejects an initial size above the parser's 4 MiB limit, loops over
+partial `ReadFile` results and checks accumulated bytes again to contain
+concurrent growth; RAII closes the handle on every return. Unix uses
+`File::take(max + 1)` under the same contract. Missing, unreadable, malformed
+and oversized configuration still fail safely to defaults. The final Windows
+link drops `std::fs::read` and `default_read_to_end` to zero; the exact
+custom-std PE falls from 531,968 to 529,920 bytes. Evidence is one focused
+platform test, 89 con units, Windows x64 Clippy, and Windows ARM64 plus Linux
+x64 consumer compilation.

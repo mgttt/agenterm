@@ -351,6 +351,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `~/.config` 合同。target-specific cold PE 从 541,184 B 降至 540,672 B（-512 B）。
   3 runtime、87 unit、18 GUI black-box、1 control、Windows Clippy 和 Linux x64 check
   通过。
+- 配置内容读取是独立 `filesystem-read` capability，不借用完整 filesystem/open/ACL 面。
+  Windows adapter 以 `CreateFileW` 的共享读取句柄、`GetFileSizeEx` 前置检查和 partial
+  `ReadFile` 循环执行产品给出的 4 MiB 上限，并在每次 append 后再次检查以拒绝并发增长；
+  OwnedHandle 在所有返回路径 exactly-once 关闭。Linux/macOS 在同一合同下以
+  `File::take(max + 1)` 实现。con 不再先由 `std::fs::read` 无界分配后才进入 JSON parser；
+  final-link 中 `std::fs::read` 与 `default_read_to_end` 均归零，新 facade 两层共 134 B。
+  精确 custom-std PE 从 531,968 B 降至 529,920 B（-2,048 B）。1 focused platform、
+  89 con units、Windows x64 Clippy、Windows ARM64 与 Linux x64 consumer checks 通过。
 - Windows 进程环境块由 selected adapter 中唯一的 `InheritedEnvironment` RAII owner
   持有，`GetEnvironmentStringsW` / `FreeEnvironmentStringsW` exactly once 合同同时服务
   ConPTY 环境合并和 runtime 的固定 ASCII 键查询；产品不再为

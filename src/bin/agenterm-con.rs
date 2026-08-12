@@ -266,7 +266,9 @@ fn load_config() -> ConConfig {
     let Some(path) = config_path() else {
         return ConConfig::default();
     };
-    let Ok(bytes) = std::fs::read(&path) else {
+    let Ok(bytes) =
+        agenterm_platform::filesystem_read::read_bounded(&path, json::MAX_INPUT_BYTES)
+    else {
         return ConConfig::default();
     };
     let Ok(config) = json::parse_config(&bytes) else {

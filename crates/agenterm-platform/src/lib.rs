@@ -225,6 +225,9 @@ pub mod filesystem_cleanup;
 #[cfg(feature = "filesystem-publish")]
 pub mod filesystem_publish;
 
+#[cfg(feature = "filesystem-read")]
+pub mod filesystem_read;
+
 #[cfg(feature = "filesystem-usage")]
 pub mod filesystem_usage;
 
