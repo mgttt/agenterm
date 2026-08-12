@@ -464,6 +464,16 @@ contract; Unix environments must preserve their native byte semantics. This
 follow-up removed another 1,024 staged bytes, but only after a same-HEAD A/B
 comparison separated an unrelated concurrent size change from the experiment.
 
+For a tiny fixed input schema, do not retain a general owned JSON DOM merely
+because the same module needs a structured output writer. Keep the boundaries
+asymmetric: scan and validate the complete input, store byte spans for known
+scalar fields, decode object keys only for semantic comparison or diagnostics,
+and skip unknown values without allocating their trees. Duplicate detection
+must compare decoded keys, including `\u` spellings, at every object depth.
+Preserve input, depth, node, field and decoded-string budgets and reject trailing
+data. In con this removed the last configuration DOM owner while preserving the
+snapshot/control writer and reduced the staged release-fast PE by 1,536 bytes.
+
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A
 temporary exclusively created by the platform beside a destination does not

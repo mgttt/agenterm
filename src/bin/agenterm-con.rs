@@ -274,25 +274,13 @@ fn load_config() -> ConConfig {
     let Ok(bytes) = std::fs::read(&path) else {
         return ConConfig::default();
     };
-    let Ok(value) = json::parse(&bytes) else {
-        return ConConfig::default();
-    };
-    let Ok(mut fields) = value.into_object("configuration") else {
-        return ConConfig::default();
-    };
-    let Ok(font_size) = json::take_f64(&mut fields, "font_size") else {
-        return ConConfig::default();
-    };
-    let Ok(cols) = json::take_u16(&mut fields, "cols") else {
-        return ConConfig::default();
-    };
-    let Ok(rows) = json::take_u16(&mut fields, "rows") else {
+    let Ok(config) = json::parse_config(&bytes) else {
         return ConConfig::default();
     };
     ConConfig {
-        font_size,
-        cols,
-        rows,
+        font_size: config.font_size,
+        cols: config.cols,
+        rows: config.rows,
     }
 }
 

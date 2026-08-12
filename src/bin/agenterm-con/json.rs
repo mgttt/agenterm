@@ -16,15 +16,6 @@ pub enum JsonValue {
     Object(Vec<(String, JsonValue)>),
 }
 
-impl JsonValue {
-    pub fn into_object(self, context: &str) -> Result<Vec<(String, Self)>, String> {
-        match self {
-            Self::Object(fields) => Ok(fields),
-            _ => Err(format!("{context} must be a JSON object")),
-        }
-    }
-}
-
 macro_rules! unsigned_value {
     ($($ty:ty),* $(,)?) => {$(
         impl From<$ty> for JsonValue {
@@ -75,32 +66,74 @@ pub fn object(fields: Vec<(&str, JsonValue)>) -> JsonValue {
     )
 }
 
-pub fn parse(bytes: &[u8]) -> Result<JsonValue, String> {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConfigValues {
+    pub font_size: Option<f64>,
+    pub cols: Option<u16>,
+    pub rows: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ValueKind {
+    Null,
+    Bool,
+    Number { start: usize, end: usize },
+    String,
+    Array,
+    Object,
+}
+
+#[derive(Clone, Copy)]
+struct KeySpan {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Clone, Copy)]
+enum ConfigField {
+    FontSize,
+    Cols,
+    Rows,
+}
+
+pub fn parse_config(bytes: &[u8]) -> Result<ConfigValues, String> {
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(format!("JSON exceeds {MAX_INPUT_BYTES} bytes"));
     }
     std::str::from_utf8(bytes).map_err(|_| "JSON is not valid UTF-8".to_owned())?;
-    let mut parser = Parser {
+    let mut parser = ConfigParser {
         bytes,
         position: 0,
         nodes: 0,
     };
-    let value = parser.value(0)?;
+    let mut config = ConfigValues {
+        font_size: None,
+        cols: None,
+        rows: None,
+    };
+    let kind = parser.value(0, Some(&mut config))?;
     parser.whitespace();
     if parser.position != bytes.len() {
         return Err(format!("trailing JSON data at byte {}", parser.position));
     }
-    Ok(value)
+    if kind != ValueKind::Object {
+        return Err("configuration must be a JSON object".to_owned());
+    }
+    Ok(config)
 }
 
-struct Parser<'a> {
+struct ConfigParser<'a> {
     bytes: &'a [u8],
     position: usize,
     nodes: usize,
 }
 
-impl Parser<'_> {
-    fn value(&mut self, depth: usize) -> Result<JsonValue, String> {
+impl ConfigParser<'_> {
+    fn value(
+        &mut self,
+        depth: usize,
+        config: Option<&mut ConfigValues>,
+    ) -> Result<ValueKind, String> {
         if depth > MAX_DEPTH {
             return Err(format!("JSON nesting exceeds {MAX_DEPTH}"));
         }
@@ -110,41 +143,101 @@ impl Parser<'_> {
         }
         self.whitespace();
         match self.peek() {
-            Some(b'n') => self.keyword(b"null", JsonValue::Null),
-            Some(b't') => self.keyword(b"true", JsonValue::Bool(true)),
-            Some(b'f') => self.keyword(b"false", JsonValue::Bool(false)),
-            Some(b'"') => self.string().map(JsonValue::String),
-            Some(b'[') => self.array(depth + 1),
-            Some(b'{') => self.object(depth + 1),
-            Some(b'-' | b'0'..=b'9') => self.number().map(JsonValue::Number),
+            Some(b'n') => {
+                self.keyword(b"null")?;
+                Ok(ValueKind::Null)
+            }
+            Some(b't') => {
+                self.keyword(b"true")?;
+                Ok(ValueKind::Bool)
+            }
+            Some(b'f') => {
+                self.keyword(b"false")?;
+                Ok(ValueKind::Bool)
+            }
+            Some(b'"') => {
+                self.skip_string()?;
+                Ok(ValueKind::String)
+            }
+            Some(b'[') => {
+                self.array(depth + 1)?;
+                Ok(ValueKind::Array)
+            }
+            Some(b'{') => self.object(depth + 1, config),
+            Some(b'-' | b'0'..=b'9') => {
+                let (start, end) = self.number_range()?;
+                Ok(ValueKind::Number { start, end })
+            }
             Some(_) => Err(format!("invalid JSON value at byte {}", self.position)),
             None => Err("unexpected end of JSON".to_owned()),
         }
     }
 
-    fn keyword(&mut self, expected: &[u8], value: JsonValue) -> Result<JsonValue, String> {
-        if self
-            .bytes
-            .get(self.position..self.position + expected.len())
-            == Some(expected)
-        {
-            self.position += expected.len();
-            Ok(value)
-        } else {
-            Err(format!("invalid JSON keyword at byte {}", self.position))
-        }
-    }
-
-    fn array(&mut self, depth: usize) -> Result<JsonValue, String> {
+    fn object(
+        &mut self,
+        depth: usize,
+        mut config: Option<&mut ConfigValues>,
+    ) -> Result<ValueKind, String> {
         self.position += 1;
         self.whitespace();
-        let mut values = Vec::new();
-        if self.consume(b']') {
-            return Ok(JsonValue::Array(values));
+        let mut keys = Vec::new();
+        let mut field_count = 0usize;
+        if self.consume(b'}') {
+            return Ok(ValueKind::Object);
         }
         loop {
-            values.push(self.value(depth)?);
-            if values.len() > MAX_NODES {
+            self.whitespace();
+            if self.peek() != Some(b'"') {
+                return Err(format!("object key expected at byte {}", self.position));
+            }
+            let key = self.skip_string()?;
+            if keys.iter().any(|existing| self.same_key(*existing, key)) {
+                let duplicate = self.decode_string(key)?;
+                return Err(format!("duplicate JSON object key {duplicate:?}"));
+            }
+            let known = config.as_deref().and_then(|_| self.config_field(key));
+            self.whitespace();
+            self.expect(b':')?;
+            let value = self.value(depth, None)?;
+            field_count += 1;
+            if field_count > MAX_OBJECT_FIELDS {
+                return Err(format!("JSON object exceeds {MAX_OBJECT_FIELDS} fields"));
+            }
+            if let Some(field) = known {
+                let config = config.as_deref_mut().expect("root config is present");
+                match field {
+                    ConfigField::FontSize => {
+                        config.font_size = self.font_size_value(value)?;
+                    }
+                    ConfigField::Cols => {
+                        config.cols = self.u16_value(value, "cols")?;
+                    }
+                    ConfigField::Rows => {
+                        config.rows = self.u16_value(value, "rows")?;
+                    }
+                }
+            }
+            keys.push(key);
+            self.whitespace();
+            if self.consume(b'}') {
+                break;
+            }
+            self.expect(b',')?;
+        }
+        Ok(ValueKind::Object)
+    }
+
+    fn array(&mut self, depth: usize) -> Result<(), String> {
+        self.position += 1;
+        self.whitespace();
+        let mut value_count = 0usize;
+        if self.consume(b']') {
+            return Ok(());
+        }
+        loop {
+            self.value(depth, None)?;
+            value_count += 1;
+            if value_count > MAX_NODES {
                 return Err("JSON array is too large".to_owned());
             }
             self.whitespace();
@@ -153,127 +246,119 @@ impl Parser<'_> {
             }
             self.expect(b',')?;
         }
-        Ok(JsonValue::Array(values))
-    }
-
-    fn object(&mut self, depth: usize) -> Result<JsonValue, String> {
-        self.position += 1;
-        self.whitespace();
-        let mut fields: Vec<(String, JsonValue)> = Vec::new();
-        if self.consume(b'}') {
-            return Ok(JsonValue::Object(fields));
-        }
-        loop {
-            self.whitespace();
-            if self.peek() != Some(b'"') {
-                return Err(format!("object key expected at byte {}", self.position));
-            }
-            let key = self.string()?;
-            if fields.iter().any(|(existing, _)| existing == &key) {
-                return Err(format!("duplicate JSON object key {key:?}"));
-            }
-            self.whitespace();
-            self.expect(b':')?;
-            let value = self.value(depth)?;
-            fields.push((key, value));
-            if fields.len() > MAX_OBJECT_FIELDS {
-                return Err(format!("JSON object exceeds {MAX_OBJECT_FIELDS} fields"));
-            }
-            self.whitespace();
-            if self.consume(b'}') {
-                break;
-            }
-            self.expect(b',')?;
-        }
-        Ok(JsonValue::Object(fields))
-    }
-
-    fn string(&mut self) -> Result<String, String> {
-        self.expect(b'"')?;
-        let mut output = String::new();
-        loop {
-            let byte = self
-                .peek()
-                .ok_or_else(|| "unterminated JSON string".to_owned())?;
-            match byte {
-                b'"' => {
-                    self.position += 1;
-                    return Ok(output);
-                }
-                b'\\' => {
-                    self.position += 1;
-                    self.escape(&mut output)?;
-                }
-                0..=0x1f => {
-                    return Err(format!("control byte in JSON string at {}", self.position));
-                }
-                0x20..=0x7f => {
-                    output.push(byte as char);
-                    self.position += 1;
-                }
-                _ => {
-                    let tail = std::str::from_utf8(&self.bytes[self.position..])
-                        .map_err(|_| "invalid UTF-8 in JSON string".to_owned())?;
-                    let ch = tail.chars().next().ok_or("invalid UTF-8 in JSON string")?;
-                    output.push(ch);
-                    self.position += ch.len_utf8();
-                }
-            }
-            if output.len() > MAX_STRING_BYTES {
-                return Err(format!("JSON string exceeds {MAX_STRING_BYTES} bytes"));
-            }
-        }
-    }
-
-    fn escape(&mut self, output: &mut String) -> Result<(), String> {
-        let escaped = self
-            .next()
-            .ok_or_else(|| "unterminated JSON escape".to_owned())?;
-        match escaped {
-            b'"' => output.push('"'),
-            b'\\' => output.push('\\'),
-            b'/' => output.push('/'),
-            b'b' => output.push('\u{0008}'),
-            b'f' => output.push('\u{000c}'),
-            b'n' => output.push('\n'),
-            b'r' => output.push('\r'),
-            b't' => output.push('\t'),
-            b'u' => {
-                let first = self.hex_quad()?;
-                let scalar = if (0xd800..=0xdbff).contains(&first) {
-                    if self.next() != Some(b'\\') || self.next() != Some(b'u') {
-                        return Err("high surrogate is not followed by a low surrogate".to_owned());
-                    }
-                    let second = self.hex_quad()?;
-                    if !(0xdc00..=0xdfff).contains(&second) {
-                        return Err("invalid low surrogate in JSON escape".to_owned());
-                    }
-                    0x1_0000 + ((u32::from(first) - 0xd800) << 10) + (u32::from(second) - 0xdc00)
-                } else if (0xdc00..=0xdfff).contains(&first) {
-                    return Err("isolated low surrogate in JSON escape".to_owned());
-                } else {
-                    u32::from(first)
-                };
-                output.push(char::from_u32(scalar).ok_or("invalid Unicode scalar")?);
-            }
-            _ => return Err(format!("invalid JSON escape \\{}", escaped as char)),
-        }
         Ok(())
     }
 
-    fn hex_quad(&mut self) -> Result<u16, String> {
-        let mut value = 0u16;
-        for _ in 0..4 {
-            let digit = self.next().ok_or("truncated Unicode escape")?;
-            value = value
-                .checked_mul(16)
-                .and_then(|value| value.checked_add(hex(digit)?))
-                .ok_or("Unicode escape overflow")?;
+    fn font_size_value(&self, value: ValueKind) -> Result<Option<f64>, String> {
+        match value {
+            ValueKind::Null => Ok(None),
+            ValueKind::Number { start, end } => {
+                let raw = self.number_text(start, end);
+                parse_finite_decimal(raw)
+                    .ok_or_else(|| "font_size is not a finite number".to_owned())
+                    .map(Some)
+            }
+            _ => Err("font_size must be a number".to_owned()),
         }
-        Ok(value)
     }
 
-    fn number(&mut self) -> Result<String, String> {
+    fn u16_value(&self, value: ValueKind, key: &str) -> Result<Option<u16>, String> {
+        match value {
+            ValueKind::Null => Ok(None),
+            ValueKind::Number { start, end } => self
+                .number_text(start, end)
+                .parse::<u16>()
+                .map(Some)
+                .map_err(|_| format!("{key} is outside its numeric range")),
+            _ => Err(format!("{key} must be a number")),
+        }
+    }
+
+    fn config_field(&self, key: KeySpan) -> Option<ConfigField> {
+        if self.key_equals(key, "font_size") {
+            Some(ConfigField::FontSize)
+        } else if self.key_equals(key, "cols") {
+            Some(ConfigField::Cols)
+        } else if self.key_equals(key, "rows") {
+            Some(ConfigField::Rows)
+        } else {
+            None
+        }
+    }
+
+    fn key_equals(&self, key: KeySpan, expected: &str) -> bool {
+        let mut position = key.start;
+        for expected in expected.chars() {
+            match next_string_char(self.bytes, &mut position, key.end) {
+                Ok(Some(actual)) if actual == expected => {}
+                _ => return false,
+            }
+        }
+        matches!(
+            next_string_char(self.bytes, &mut position, key.end),
+            Ok(None)
+        )
+    }
+
+    fn same_key(&self, left: KeySpan, right: KeySpan) -> bool {
+        let mut left_position = left.start;
+        let mut right_position = right.start;
+        loop {
+            let left_char = next_string_char(self.bytes, &mut left_position, left.end);
+            let right_char = next_string_char(self.bytes, &mut right_position, right.end);
+            match (left_char, right_char) {
+                (Ok(Some(left)), Ok(Some(right))) if left == right => {}
+                (Ok(None), Ok(None)) => return true,
+                _ => return false,
+            }
+        }
+    }
+
+    fn decode_string(&self, key: KeySpan) -> Result<String, String> {
+        let mut position = key.start;
+        let mut output = String::new();
+        while let Some(ch) = next_string_char(self.bytes, &mut position, key.end)? {
+            output.push(ch);
+        }
+        Ok(output)
+    }
+
+    fn skip_string(&mut self) -> Result<KeySpan, String> {
+        self.expect(b'"')?;
+        let start = self.position;
+        let mut decoded_bytes = 0usize;
+        loop {
+            match next_string_char(self.bytes, &mut self.position, self.bytes.len())? {
+                Some(ch) => {
+                    decoded_bytes += ch.len_utf8();
+                    if decoded_bytes > MAX_STRING_BYTES {
+                        return Err(format!("JSON string exceeds {MAX_STRING_BYTES} bytes"));
+                    }
+                }
+                None => {
+                    return Ok(KeySpan {
+                        start,
+                        end: self.position,
+                    });
+                }
+            }
+        }
+    }
+
+    fn keyword(&mut self, expected: &[u8]) -> Result<(), String> {
+        if self
+            .bytes
+            .get(self.position..self.position + expected.len())
+            == Some(expected)
+        {
+            self.position += expected.len();
+            Ok(())
+        } else {
+            Err(format!("invalid JSON keyword at byte {}", self.position))
+        }
+    }
+
+    fn number_range(&mut self) -> Result<(usize, usize), String> {
         let start = self.position;
         self.consume(b'-');
         match self.peek() {
@@ -302,9 +387,11 @@ impl Parser<'_> {
             }
             self.digits();
         }
-        Ok(std::str::from_utf8(&self.bytes[start..self.position])
-            .expect("validated ASCII number")
-            .to_owned())
+        Ok((start, self.position))
+    }
+
+    fn number_text(&self, start: usize, end: usize) -> &str {
+        std::str::from_utf8(&self.bytes[start..end]).expect("validated ASCII number")
     }
 
     fn digits(&mut self) {
@@ -343,12 +430,98 @@ impl Parser<'_> {
     fn peek(&self) -> Option<u8> {
         self.bytes.get(self.position).copied()
     }
+}
 
-    fn next(&mut self) -> Option<u8> {
-        let byte = self.peek()?;
-        self.position += 1;
-        Some(byte)
+fn next_string_char(
+    bytes: &[u8],
+    position: &mut usize,
+    end: usize,
+) -> Result<Option<char>, String> {
+    let byte = *bytes
+        .get(*position)
+        .ok_or_else(|| "unterminated JSON string".to_owned())?;
+    if byte == b'"' {
+        *position += 1;
+        return Ok(None);
     }
+    if byte == b'\\' {
+        *position += 1;
+        let escaped = *bytes
+            .get(*position)
+            .ok_or_else(|| "unterminated JSON escape".to_owned())?;
+        *position += 1;
+        return match escaped {
+            b'"' => Ok(Some('"')),
+            b'\\' => Ok(Some('\\')),
+            b'/' => Ok(Some('/')),
+            b'b' => Ok(Some('\u{0008}')),
+            b'f' => Ok(Some('\u{000c}')),
+            b'n' => Ok(Some('\n')),
+            b'r' => Ok(Some('\r')),
+            b't' => Ok(Some('\t')),
+            b'u' => {
+                let first = read_hex_quad(bytes, position, end)?;
+                let scalar = if (0xd800..=0xdbff).contains(&first) {
+                    if bytes.get(*position) != Some(&b'\\') {
+                        return Err("high surrogate is not followed by a low surrogate".to_owned());
+                    }
+                    *position += 1;
+                    if bytes.get(*position) != Some(&b'u') {
+                        return Err("high surrogate is not followed by a low surrogate".to_owned());
+                    }
+                    *position += 1;
+                    let second = read_hex_quad(bytes, position, end)?;
+                    if !(0xdc00..=0xdfff).contains(&second) {
+                        return Err("invalid low surrogate in JSON escape".to_owned());
+                    }
+                    0x1_0000 + ((u32::from(first) - 0xd800) << 10) + (u32::from(second) - 0xdc00)
+                } else if (0xdc00..=0xdfff).contains(&first) {
+                    return Err("isolated low surrogate in JSON escape".to_owned());
+                } else {
+                    u32::from(first)
+                };
+                Ok(Some(
+                    char::from_u32(scalar).ok_or("invalid Unicode scalar")?,
+                ))
+            }
+            _ => Err(format!("invalid JSON escape \\{}", escaped as char)),
+        };
+    }
+    if byte <= 0x1f {
+        return Err(format!("control byte in JSON string at {}", position));
+    }
+    if byte <= 0x7f {
+        *position += 1;
+        return Ok(Some(byte as char));
+    }
+    let tail = std::str::from_utf8(
+        bytes
+            .get(*position..end)
+            .ok_or_else(|| "invalid UTF-8 in JSON string".to_owned())?,
+    )
+    .map_err(|_| "invalid UTF-8 in JSON string".to_owned())?;
+    let ch = tail
+        .chars()
+        .next()
+        .ok_or_else(|| "invalid UTF-8 in JSON string".to_owned())?;
+    *position += ch.len_utf8();
+    Ok(Some(ch))
+}
+
+fn read_hex_quad(bytes: &[u8], position: &mut usize, end: usize) -> Result<u16, String> {
+    let mut value = 0u16;
+    for _ in 0..4 {
+        let digit = *bytes
+            .get(*position)
+            .filter(|_| *position < end)
+            .ok_or("truncated Unicode escape")?;
+        *position += 1;
+        value = value
+            .checked_mul(16)
+            .and_then(|value| value.checked_add(hex(digit)?))
+            .ok_or("Unicode escape overflow")?;
+    }
+    Ok(value)
 }
 
 fn hex(byte: u8) -> Option<u16> {
@@ -447,38 +620,6 @@ fn write_string(value: &str, output: &mut Vec<u8>) {
     }
     output.push(b'"');
 }
-
-pub fn take(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Option<JsonValue> {
-    let index = fields.iter().position(|(name, _)| name == key)?;
-    Some(fields.swap_remove(index).1)
-}
-
-fn take_number(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<String>, String> {
-    match take(fields, key) {
-        None | Some(JsonValue::Null) => Ok(None),
-        Some(JsonValue::Number(value)) => Ok(Some(value)),
-        Some(_) => Err(format!("{key} must be a number")),
-    }
-}
-
-macro_rules! number_take {
-    ($name:ident, $ty:ty) => {
-        pub fn $name(
-            fields: &mut Vec<(String, JsonValue)>,
-            key: &str,
-        ) -> Result<Option<$ty>, String> {
-            take_number(fields, key)?
-                .map(|value| {
-                    value
-                        .parse::<$ty>()
-                        .map_err(|_| format!("{key} is outside its numeric range"))
-                })
-                .transpose()
-        }
-    };
-}
-
-number_take!(take_u16, u16);
 
 pub fn parse_finite_decimal(raw: &str) -> Option<f64> {
     let bytes = raw.as_bytes();
@@ -591,23 +732,23 @@ pub fn parse_finite_decimal(raw: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-pub fn take_f64(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<f64>, String> {
-    let value = take_number(fields, key)?
-        .map(|value| {
-            parse_finite_decimal(&value).ok_or_else(|| format!("{key} is not a finite number"))
-        })
-        .transpose()?;
-    Ok(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn codec_interoperates_with_serde_json_for_unicode_and_escapes() {
-        let input = r#"{"text":"中文\n\uD83D\uDE00","array":[null,true,-12.5e2]}"#.as_bytes();
-        let value = parse(input).expect("parse valid JSON");
+    fn writer_interoperates_with_serde_json_for_unicode_and_escapes() {
+        let value = object(vec![
+            ("text", JsonValue::from("中文\n😀")),
+            (
+                "array",
+                JsonValue::Array(vec![
+                    JsonValue::Null,
+                    JsonValue::Bool(true),
+                    JsonValue::Number("-12.5e2".to_owned()),
+                ]),
+            ),
+        ]);
         let encoded = to_vec(&value);
         let oracle: serde_json::Value = serde_json::from_slice(&encoded).expect("oracle decode");
         assert_eq!(oracle["text"], "中文\n😀");
@@ -615,15 +756,32 @@ mod tests {
     }
 
     #[test]
-    fn parser_rejects_ambiguous_or_malformed_inputs() {
+    fn config_parser_extracts_known_fields_and_skips_unknown_values() {
+        let config = parse_config(
+            r#"{"font\u005fsize":11.25,"cols":132,"rows":null,"future":{"items":[true,"中文",{"x":1}]}}"#
+                .as_bytes(),
+        )
+        .expect("parse config");
+        assert_eq!(config.font_size, Some(11.25));
+        assert_eq!(config.cols, Some(132));
+        assert_eq!(config.rows, None);
+    }
+
+    #[test]
+    fn config_parser_rejects_ambiguous_malformed_or_wrong_typed_inputs() {
         for input in [
             br#"{"a":1,"a":2}"#.as_slice(),
-            br#""\uD800""#,
-            b"01",
-            b"1.",
-            b"true trailing",
+            br#"{"outer":{"a":1,"\u0061":2}}"#,
+            br#"{"font_size":"11"}"#,
+            br#"{"cols":1.5}"#,
+            br#"{"rows":65536}"#,
+            br#"{"x":"\uD800"}"#,
+            br#"{"x":01}"#,
+            br#"{"x":1.}"#,
+            br#"{} trailing"#,
+            b"true",
         ] {
-            assert!(parse(input).is_err(), "accepted {input:?}");
+            assert!(parse_config(input).is_err(), "accepted {input:?}");
         }
     }
 
@@ -651,6 +809,6 @@ mod tests {
             "[".repeat(MAX_DEPTH + 2),
             "]".repeat(MAX_DEPTH + 2)
         );
-        assert!(parse(input.as_bytes()).is_err());
+        assert!(parse_config(input.as_bytes()).is_err());
     }
 }

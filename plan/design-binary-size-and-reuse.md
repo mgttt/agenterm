@@ -390,6 +390,23 @@ release-fast PE falls from 551,424 to 550,400 bytes. Pure edge tests plus a real
 ConPTY child prove both exact `COMSPEC` inheritance and an explicit override;
 the complete con and cross-platform gates remain green.
 
+### 2026-08-12: fixed-schema configuration input without a DOM
+
+`agenterm-con` emits structured snapshots and control replies but accepts only
+three optional configuration fields. The input side now uses one bounded
+single-pass scanner rather than constructing the output `JsonValue` tree and
+then searching it. Unknown values are still parsed completely; UTF-8, escape,
+surrogate, duplicate-key, depth, node, field, string, trailing-data and numeric
+rules remain fail-closed. Only the three known numeric spans cross into typed
+conversion, and escaped key spellings compare by decoded scalar value.
+
+This is an ownership reduction, not a permissive shortcut or an FFI claim. The
+output writer remains unchanged because it still has many real producers. In a
+same-profile official release-fast comparison the staged PE falls from 550,400
+to 548,864 bytes. The useful boundary is asymmetric: stream a tiny fixed input
+schema, retain the shared structured writer where output construction remains
+real.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

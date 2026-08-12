@@ -525,6 +525,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   prove exact inherited `COMSPEC` plus an explicit override; the full 85 unit,
   18 GUI black-box and isolated multitab suites, Windows Clippy and Linux x64
   compilation also pass.
+  Configuration input no longer constructs the output-side `JsonValue` DOM.
+  One bounded single-pass scanner validates every unknown value, escape,
+  surrogate pair, duplicate key and nesting budget while decoding only
+  `font_size`, `cols` and `rows`; escaped spellings of known keys retain their
+  JSON meaning. Output snapshots and control replies keep their existing fixed
+  schemas and writer. Against the same release-fast profile the staged PE falls
+  from 550,400 to 548,864 bytes. Evidence is 86 unit tests, 17 of 18 GUI tests
+  in one run plus a passing isolated rerun of the sole snapshot-start timeout,
+  the isolated multitab control journey, Windows Clippy and Linux x64 compile.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
