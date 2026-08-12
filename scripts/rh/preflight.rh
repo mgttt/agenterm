@@ -623,10 +623,18 @@ fn entry() {
         }
     }
     if artifact_passed != 0 {
+        // The shipped set, distinct. This listed three entries with
+        // `agenterm.exe` twice, then compared that length against a DEDUPLICATED
+        // name set -- so once the manifest gained `agenterm.com` and
+        // `agenterm-con.exe` the gate compared 4 against 3 and could never pass.
+        // It is the `artifact-manifest` gate that failed the windows-x86_64
+        // Candidate leg (run 31545437443), invisibly, because the per-gate detail
+        // only prints when this task is not run with `--quiet`.
         let expected = [
             "agenterm.exe",
+            "agenterm.com",
             "agenterm-cc.exe",
-            "agenterm.exe",
+            "agenterm-con.exe",
         ];
         let names = #{};
         for artifact_entry in manifest.executables {
@@ -823,9 +831,26 @@ fn entry() {
         }
         print("PREFLIGHT JSON " + output);
     }
+    // Name the gates that failed, not just where the report was written. The
+    // per-gate FAIL lines above print only when `quiet == 0`, and the Candidate
+    // runs this quietly -- so a red left nothing but a path to
+    // `target/preflight/preflight.json`, which no step uploads. The
+    // windows-x86_64 Candidate leg (run 31545437443) failed exactly that way and
+    // could not be diagnosed from CI at all.
+    let failed_gates = "";
+    for item in gates {
+        if item.passed == 0 {
+            if failed_gates != "" {
+                failed_gates = failed_gates + "; ";
+            }
+            failed_gates =
+                failed_gates + "" + item.id + ": " + item.detail;
+        }
+    }
     require(
         passed != 0,
-        "AgenTerm read-only preflight failed; report:" + output
+        "AgenTerm read-only preflight failed; failed_gates=[" + failed_gates
+            + "]; report:" + output
     );
     0
 }
