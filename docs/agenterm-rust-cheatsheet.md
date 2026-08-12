@@ -931,3 +931,12 @@ allocation, and much less linked code. Preserve total ordering details used by
 diagnostics: sorting `(id,input_index)` ensures duplicate IDs still report the
 second input occurrence. In ui-core this removed the full generic sort family
 and saved 4,096 staged bytes while retaining the 20,000-node deep-tree test.
+
+## Cross-package executable probes
+
+An integration test compiled by cross-target `--all-targets` cannot assume Cargo
+provides `CARGO_BIN_EXE_*` for a binary owned by another package. Use
+`option_env!` to retain the native running-binary probe while allowing
+cross-compilation to keep checking the static contract. Never skip the static
+schema, ownership, or evidence checks merely because that target cell cannot
+execute the sibling binary.

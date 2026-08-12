@@ -233,9 +233,8 @@ fn png_worker() -> std::io::Result<&'static mpsc::SyncSender<PngJob>> {
                     } = job;
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let started = Instant::now();
-                        write_png_atomic(&path, &pixels, width, height).map(|()| {
-                            started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
-                        })
+                        write_png_atomic(&path, &pixels, width, height)
+                            .map(|()| started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64)
                     }))
                     .unwrap_or_else(|_| Err(std::io::Error::other("PNG worker panicked")));
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

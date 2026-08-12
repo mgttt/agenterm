@@ -2,9 +2,7 @@
 //!
 //! Machine-readable JSON on stdout; usage on stderr when arguments are bad.
 
-use agenterm_cu::{
-    Command, CurrentExecutor, CuReply, PointerButton, WindowShowState,
-};
+use agenterm_cu::{Command, CuReply, CurrentExecutor, PointerButton, WindowShowState};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -48,7 +46,7 @@ fn dispatch(args: &[String]) -> CuReply {
                 other => {
                     return usage_err(format!(
                         "window-show needs state in [hide|show|minimize|maximize|restore], got {other:?}"
-                    ))
+                    ));
                 }
             },
         },

@@ -2074,8 +2074,7 @@ impl ConApp {
             .map(|server| server.recv_batch(CONTROL_DRAIN_BUDGET_REQUESTS))
             .unwrap_or_else(|| (Vec::new(), false));
         for request in requests {
-            self.perf_stats.control_requests =
-                self.perf_stats.control_requests.saturating_add(1);
+            self.perf_stats.control_requests = self.perf_stats.control_requests.saturating_add(1);
             self.dispatch_control(window, request);
         }
         if backlog {
@@ -4602,15 +4601,16 @@ impl PixelWindowApplication for ConApp {
                 width,
                 height,
                 Box::new(move |write_result| {
-                    let result = write_result.map(|encode_ns| {
-                    json::object(vec![
-                        ("path", response_path.into()),
-                        ("width", width.into()),
-                        ("height", height.into()),
-                        ("encode_ns", encode_ns.into()),
-                    ])
-                })
-                    .map_err(|error| format!("write screenshot: {error}"));
+                    let result = write_result
+                        .map(|encode_ns| {
+                            json::object(vec![
+                                ("path", response_path.into()),
+                                ("width", width.into()),
+                                ("height", height.into()),
+                                ("encode_ns", encode_ns.into()),
+                            ])
+                        })
+                        .map_err(|error| format!("write screenshot: {error}"));
                     if let Some(reply) = shared_reply
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -4642,10 +4642,8 @@ impl PixelWindowApplication for ConApp {
                 ));
             }
             self.retained.invalidate();
-            self.perf_stats.discarded_capture_frames = self
-                .perf_stats
-                .discarded_capture_frames
-                .saturating_add(1);
+            self.perf_stats.discarded_capture_frames =
+                self.perf_stats.discarded_capture_frames.saturating_add(1);
             self.perf_stats.record_frame(render_started.elapsed());
             self.perf_stats
                 .record_raster_candidate(candidate, width, height);

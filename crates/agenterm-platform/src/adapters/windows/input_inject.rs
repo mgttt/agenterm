@@ -1,17 +1,16 @@
 //! Windows input injection (user32 FFI): pointer + Unicode keyboard.
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    mouse_event, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
-    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-    VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5,
-    VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_LEFT, VK_LWIN, VK_MENU, VK_RETURN,
-    VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, SendInput, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_F1,
+    VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_LEFT,
+    VK_LWIN, VK_MENU, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP, mouse_event,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos;
 
-use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
 use crate::CapabilityStatus;
+use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
 
 pub(crate) fn capability_status() -> CapabilityStatus {
     CapabilityStatus::Available
@@ -86,7 +85,7 @@ pub(crate) fn send_keys(shortcut: &str) -> Result<(), InputInjectError> {
                 return Err(InputInjectError::failed(
                     "unknown_modifier",
                     format!("unknown modifier '{part}'"),
-                ))
+                ));
             }
         };
         down.push(key_input(vk, 0));

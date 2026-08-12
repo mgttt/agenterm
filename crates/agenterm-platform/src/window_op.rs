@@ -1,7 +1,7 @@
 //! Window operation facade (portable entry point).
 
-pub use crate::contract::window_op::{WindowOpError, WindowShowState};
 use crate::CapabilityStatus;
+pub use crate::contract::window_op::{WindowOpError, WindowShowState};
 
 pub fn capability_status() -> CapabilityStatus {
     crate::selected::window_op::capability_status()

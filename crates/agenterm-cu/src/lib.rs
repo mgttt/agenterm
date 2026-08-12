@@ -182,8 +182,7 @@ impl CurrentExecutor {
             Command::WindowList => {
                 let windows = agenterm_platform::window_enumerate::enumerate_top_level()
                     .map_err(|e| map_enum_err(e))?;
-                serde_json::to_value(&windows)
-                    .map_err(|e| CuError::new("serialize", e.to_string()))
+                serde_json::to_value(&windows).map_err(|e| CuError::new("serialize", e.to_string()))
             }
             Command::WindowFind { pattern } => {
                 let windows = agenterm_platform::window_enumerate::enumerate_top_level()
@@ -198,8 +197,7 @@ impl CurrentExecutor {
                                 && w.process_id.to_string() == pattern[4..])
                     })
                     .collect();
-                serde_json::to_value(&hits)
-                    .map_err(|e| CuError::new("serialize", e.to_string()))
+                serde_json::to_value(&hits).map_err(|e| CuError::new("serialize", e.to_string()))
             }
             Command::WindowShow { handle, state } => {
                 let state = match state {
@@ -226,9 +224,17 @@ impl CurrentExecutor {
                 width,
                 height,
             } => {
-                agenterm_platform::window_op::move_window(*handle as isize, *x, *y, *width, *height)
-                    .map_err(|e| map_op_err(e))?;
-                Ok(serde_json::json!({ "handle": handle, "x": x, "y": y, "width": width, "height": height }))
+                agenterm_platform::window_op::move_window(
+                    *handle as isize,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                )
+                .map_err(|e| map_op_err(e))?;
+                Ok(
+                    serde_json::json!({ "handle": handle, "x": x, "y": y, "width": width, "height": height }),
+                )
             }
             Command::WindowTopmost { handle, topmost } => {
                 agenterm_platform::window_op::set_topmost(*handle as isize, *topmost)
@@ -254,12 +260,8 @@ impl CurrentExecutor {
             } => {
                 let button = match button {
                     PointerButton::Left => agenterm_platform::input_inject::PointerButton::Left,
-                    PointerButton::Right => {
-                        agenterm_platform::input_inject::PointerButton::Right
-                    }
-                    PointerButton::Middle => {
-                        agenterm_platform::input_inject::PointerButton::Middle
-                    }
+                    PointerButton::Right => agenterm_platform::input_inject::PointerButton::Right,
+                    PointerButton::Middle => agenterm_platform::input_inject::PointerButton::Middle,
                 };
                 agenterm_platform::input_inject::pointer_click(
                     agenterm_platform::input_inject::PointerPosition { x: *x, y: *y },
@@ -274,7 +276,8 @@ impl CurrentExecutor {
                 Ok(serde_json::json!({ "typed": text }))
             }
             Command::Keys { shortcut } => {
-                agenterm_platform::input_inject::send_keys(shortcut).map_err(|e| map_inject_err(e))?;
+                agenterm_platform::input_inject::send_keys(shortcut)
+                    .map_err(|e| map_inject_err(e))?;
                 Ok(serde_json::json!({ "shortcut": shortcut }))
             }
         }

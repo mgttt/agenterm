@@ -242,22 +242,20 @@ fn gui_control_surface_isolated_multitab_black_box() {
         let endpoint = endpoint.as_str();
         let child_target = child_id.as_str();
         for index in 0..24 {
-            requests.push(scope.spawn(move || {
-                match index % 3 {
-                    0 => invoke(exe, endpoint, &["list-tabs"]),
-                    1 => invoke(exe, endpoint, &["perf-stats"]),
-                    _ => invoke(
-                        exe,
-                        endpoint,
-                        &[
-                            "capture-pane",
-                            "--target",
-                            child_target,
-                            "--max-bytes",
-                            "1048576",
-                        ],
-                    ),
-                }
+            requests.push(scope.spawn(move || match index % 3 {
+                0 => invoke(exe, endpoint, &["list-tabs"]),
+                1 => invoke(exe, endpoint, &["perf-stats"]),
+                _ => invoke(
+                    exe,
+                    endpoint,
+                    &[
+                        "capture-pane",
+                        "--target",
+                        child_target,
+                        "--max-bytes",
+                        "1048576",
+                    ],
+                ),
             }));
         }
         for request in requests {
@@ -511,9 +509,8 @@ fn gui_control_surface_isolated_multitab_black_box() {
     let active_before_shots = cli_json(exe, &endpoint, &["ui-snapshot"])["active"].clone();
     let mut screenshot_jobs = Vec::new();
     for (index, flood_id) in flood_ids.iter().enumerate() {
-        let path = std::env::temp_dir().join(format!(
-            "agenterm-con-{suffix}-concurrent-shot-{index}.png"
-        ));
+        let path =
+            std::env::temp_dir().join(format!("agenterm-con-{suffix}-concurrent-shot-{index}.png"));
         let child = Command::new(exe)
             .args([
                 "cli",

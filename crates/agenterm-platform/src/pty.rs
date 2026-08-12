@@ -24,13 +24,9 @@ impl PtyShutdown {
     }
 }
 
-fn shutdown_sender() -> std::io::Result<
-    &'static std::sync::mpsc::SyncSender<PtyShutdown>,
-> {
-    type ReaperInit = Result<
-        std::sync::mpsc::SyncSender<PtyShutdown>,
-        (std::io::ErrorKind, String),
-    >;
+fn shutdown_sender() -> std::io::Result<&'static std::sync::mpsc::SyncSender<PtyShutdown>> {
+    type ReaperInit =
+        Result<std::sync::mpsc::SyncSender<PtyShutdown>, (std::io::ErrorKind, String)>;
     static SENDER: std::sync::OnceLock<ReaperInit> = std::sync::OnceLock::new();
     match SENDER.get_or_init(|| {
         let (sender, receiver) =

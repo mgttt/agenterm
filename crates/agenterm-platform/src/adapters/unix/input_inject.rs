@@ -1,7 +1,7 @@
 //! Unix placeholder: input injection is not yet wired on Linux/macOS.
 
-use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
 use crate::CapabilityStatus;
+use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
 
 pub(crate) fn capability_status() -> CapabilityStatus {
     CapabilityStatus::Unsupported {

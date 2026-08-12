@@ -220,7 +220,10 @@ fn machine_contract_matches_public_cli_and_registered_journeys() {
         );
     }
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-con"))
+    let Some(executable) = option_env!("CARGO_BIN_EXE_agenterm-con") else {
+        return;
+    };
+    let output = Command::new(executable)
         .args(["cli", "list-commands"])
         .output()
         .expect("launch agenterm-con cli list-commands");

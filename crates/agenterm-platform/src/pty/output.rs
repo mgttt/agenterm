@@ -225,5 +225,4 @@ mod tests {
         );
         assert_eq!(pipe.drain(4, |_| {}).bytes, 0);
     }
-
 }

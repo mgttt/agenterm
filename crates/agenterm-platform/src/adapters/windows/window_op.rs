@@ -3,14 +3,14 @@
 use windows_sys::Win32::{
     Foundation::HWND,
     UI::WindowsAndMessaging::{
-        MoveWindow, PostMessageW, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST,
-        SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE,
-        SW_SHOW, WM_CLOSE,
+        HWND_NOTOPMOST, HWND_TOPMOST, MoveWindow, PostMessageW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+        SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, ShowWindow,
+        WM_CLOSE,
     },
 };
 
-use crate::contract::window_op::{WindowOpError, WindowShowState};
 use crate::CapabilityStatus;
+use crate::contract::window_op::{WindowOpError, WindowShowState};
 
 pub(crate) fn capability_status() -> CapabilityStatus {
     CapabilityStatus::Available
@@ -49,7 +49,11 @@ pub(crate) fn move_window(
 }
 
 pub(crate) fn set_topmost(handle: isize, topmost: bool) -> Result<(), WindowOpError> {
-    let after = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    let after = if topmost {
+        HWND_TOPMOST
+    } else {
+        HWND_NOTOPMOST
+    };
     let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
     unsafe {
         if SetWindowPos(handle as HWND, after, 0, 0, 0, 0, flags) == 0 {

@@ -95,7 +95,7 @@ mod compact_channel_tests {
                     command: CliCommand::ListTabs,
                     reply,
                 })
-            .is_err()
+                .is_err()
         );
     }
 
@@ -106,9 +106,9 @@ mod compact_channel_tests {
         for index in 0..4 {
             let (reply, _receiver) = reply_channel();
             let should_wake = match queue.push(IncomingRequest {
-                    command: CliCommand::ListTabs,
-                    reply,
-                }) {
+                command: CliCommand::ListTabs,
+                reply,
+            }) {
                 Ok(should_wake) => should_wake,
                 Err(_) => panic!("queue has capacity"),
             };

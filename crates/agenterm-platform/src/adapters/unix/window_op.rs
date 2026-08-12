@@ -1,7 +1,7 @@
 //! Unix placeholder: window operations are not yet wired on Linux/macOS.
 
-use crate::contract::window_op::{WindowOpError, WindowShowState};
 use crate::CapabilityStatus;
+use crate::contract::window_op::{WindowOpError, WindowShowState};
 
 pub(crate) fn capability_status() -> CapabilityStatus {
     CapabilityStatus::Unsupported {

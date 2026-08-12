@@ -1,7 +1,7 @@
 //! Unix placeholder: window enumeration is not yet wired on Linux/macOS.
 
-use crate::contract::window_enumerate::{WindowEnumerateError, WindowInfo};
 use crate::CapabilityStatus;
+use crate::contract::window_enumerate::{WindowEnumerateError, WindowInfo};
 
 pub(crate) fn capability_status() -> CapabilityStatus {
     CapabilityStatus::Unsupported {

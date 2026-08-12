@@ -378,11 +378,12 @@ impl PixelWindowRunner {
                 &mut self.frame_state,
             );
             match catch_application("render", || self.application.render(window, &mut frame)) {
-                Ok(directive) => frame.write_receipt().map(|receipt| (directive, receipt)).map_err(
-                    |error: PixelFrameError| {
+                Ok(directive) => frame
+                    .write_receipt()
+                    .map(|receipt| (directive, receipt))
+                    .map_err(|error: PixelFrameError| {
                         PixelWindowError::failed("pixel_window_frame_commit_failed", error)
-                    },
-                ),
+                    }),
                 Err(error) => Err(error),
             }
         };

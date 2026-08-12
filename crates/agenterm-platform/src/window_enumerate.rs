@@ -3,8 +3,8 @@
 //! Consumers (e.g. `agenterm-cu`) call these functions; the OS-level
 //! mechanism lives in the platform adapter selected by `crate::selected`.
 
-pub use crate::contract::window_enumerate::{WindowBounds, WindowEnumerateError, WindowInfo};
 use crate::CapabilityStatus;
+pub use crate::contract::window_enumerate::{WindowBounds, WindowEnumerateError, WindowInfo};
 
 pub fn capability_status() -> CapabilityStatus {
     crate::selected::window_enumerate::capability_status()

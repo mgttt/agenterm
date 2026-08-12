@@ -3,17 +3,17 @@
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HWND, INVALID_HANDLE_VALUE, LPARAM},
     System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     },
     UI::WindowsAndMessaging::{
-        EnumWindows, GetForegroundWindow, GetWindowRect, GetWindowTextW,
-        GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+        EnumWindows, GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
+        IsIconic, IsWindowVisible,
     },
 };
 
-use crate::contract::window_enumerate::{WindowBounds, WindowEnumerateError, WindowInfo};
 use crate::CapabilityStatus;
+use crate::contract::window_enumerate::{WindowBounds, WindowEnumerateError, WindowInfo};
 
 pub(crate) fn capability_status() -> CapabilityStatus {
     CapabilityStatus::Available

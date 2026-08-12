@@ -1,7 +1,7 @@
 //! Input injection facade (portable entry point).
 
-pub use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
 use crate::CapabilityStatus;
+pub use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
 
 pub fn capability_status() -> CapabilityStatus {
     crate::selected::input_inject::capability_status()
