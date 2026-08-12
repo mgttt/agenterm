@@ -608,9 +608,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Unicode normalization, or case folding; an empty needle still matches a
   visible row. x86_64 uses a bounded inline-assembly byte loop, while Windows
   aarch64 and Unix use the same scalar contract. Matrix, CJK and emoji oracle
-  tests prove parity with byte-window search. Removing the sole production
+  tests prove parity with byte-window search. Replacing the wait-text
   `str::contains` owner drops the isolated custom-std release-fast PE from
-  542,208 to 537,600 bytes. Evidence is 88 con unit tests, the complete
+  542,208 to 537,600 bytes. Later symbol attribution still finds the generic
+  pattern family through unrelated fixed-character checks, so this does not
+  claim complete family removal. Evidence is 88 con unit tests, the complete
   multitab wait-text control journey, 18 GUI black-box tests, Windows x64
   Clippy, Windows aarch64 con check and Linux x64 con check.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while

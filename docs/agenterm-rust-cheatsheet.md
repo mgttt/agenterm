@@ -582,9 +582,17 @@ lines, scan hidden scrollback, normalize Unicode, or fold case, and an empty
 needle succeeds. Its x86_64 bounded byte-search assembly preserves exactly that
 contract; Windows aarch64 and Unix use a scalar byte oracle. Synthetic byte
 matrices plus CJK/emoji cases must agree with slice-window search. Replacing the
-sole production `str::contains` call made the generic pattern/searcher family
-unreachable and reduced the custom-std PE from 542,208 to 537,600 bytes
-(-4,608), a final-link gain much larger than the leaf itself.
+wait-text production `str::contains` call reduced the custom-std PE from 542,208
+to 537,600 bytes (-4,608), a final-link gain much larger than the leaf itself. A
+later symbol build still found the generic pattern/searcher family through
+unrelated fixed-character checks, so do not describe this delta as complete
+family removal without post-change attribution.
+
+Do not mechanically rewrite every fixed-character `str::contains` as byte-slice
+membership to chase that family. In con, changing the remaining IPC and process
+convention checks for `':'`, `'='`, and NUL grew the custom-std PE from 537,600
+to 539,136 bytes while strip/split patterns still retained the framework. The
+experiment was reverted. Final-link A/B and post-change symbols both matter.
 
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer

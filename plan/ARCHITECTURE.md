@@ -373,8 +373,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   hidden scrollback、不做 Unicode normalization/case fold，空 needle 在存在可见行时命中。
   control 模块持有唯一 allocation-free UTF-8 byte-search kernel；x86_64 用有界 inline
   assembly candidate/needle 循环，Windows aarch64 与 Unix 用同语义标量回退。唯一
-  `screen_contains` 调用逐 row 委托后，通用 `str::pattern` / `StrSearcher` 家族退链，
-  isolated custom-std cold PE 从 542,208 B 降至 537,600 B（-4,608 B）。88 con unit、
+  `screen_contains` 调用逐 row 委托后，isolated custom-std cold PE 从 542,208 B 降至
+  537,600 B（-4,608 B）。后续 host-std symbol build 仍发现其它 fixed-character 检查
+  持有 `str::pattern` / `StrSearcher`，因此不得把有效尺寸 delta 扩大解释为整族退链。
+  88 con unit、
   18 GUI black-box、1 multitab wait-text control、Windows x64 Clippy、Windows aarch64
   con check 和 Linux x64 con check 通过。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制

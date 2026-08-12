@@ -590,11 +590,20 @@ matrix oracle covers empty, shorter/longer, repeated-byte and absent needles,
 plus CJK and emoji boundaries. The sole `screen_contains` call delegates each
 row to this helper without changing viewport enumeration.
 
-An isolated custom-std cold build falls from 542,208 to 537,600 bytes (-4,608),
-proving the generic pattern family left the final graph. Evidence is 88 con
-unit tests, the full wait-text multitab control journey, 18 GUI black-box tests,
-Windows x64 Clippy, Windows aarch64 con compilation and Linux x64 con
-compilation.
+An isolated custom-std cold build falls from 542,208 to 537,600 bytes (-4,608).
+A later host-std symbol build showed that unrelated fixed-character checks
+still retain generic `str::pattern`/`StrSearcher`; the measured delta is valid,
+but the earlier claim that the entire family left the graph was too broad.
+Evidence is 88 con unit tests, the full wait-text multitab control journey, 18
+GUI black-box tests, Windows x64 Clippy, Windows aarch64 con compilation and
+Linux x64 con compilation.
+
+Replacing the remaining fixed `':'`, `'='`, and NUL `str::contains` checks in
+IPC/process conventions with byte-slice membership did not remove the generic
+pattern framework: the same parser still uses strip/split patterns, and the
+isolated custom-std PE grew from 537,600 to 539,136 bytes (+1,536). The code
+experiment is rejected. Post-change symbol attribution is mandatory even when
+all visible `contains` call sites look removable.
 
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
