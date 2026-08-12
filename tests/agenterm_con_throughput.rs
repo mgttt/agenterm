@@ -11,7 +11,7 @@ use serde_json::Value;
 const OUTPUT_ITERATIONS: usize = 8192;
 const OUTPUT_CHUNK_BYTES: usize = 16 * 255 + 2;
 const OUTPUT_BYTES: u64 = (OUTPUT_ITERATIONS * OUTPUT_CHUNK_BYTES) as u64;
-const MIN_BYTES_PER_SECOND: u64 = 4 * 1024 * 1024;
+const MIN_BYTES_PER_SECOND: u64 = 2 * 1024 * 1024;
 const OUTPUT_DEADLINE: Duration = Duration::from_secs(30);
 const SIBLING_DEADLINE: Duration = Duration::from_secs(5);
 

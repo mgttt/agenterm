@@ -4261,28 +4261,11 @@ impl PixelWindowApplication for ConApp {
                 return Ok(PixelWindowDirective::Exit);
             }
             let active = self.workspace.active();
-            let pending_sessions = self
-                .sessions
-                .entries_mut()
-                .iter()
-                .filter(|(_, session)| session.pty_output.queued_len() != 0)
-                .count();
-            let mut pending_remaining = pending_sessions;
-            let mut budget_remaining = PTY_DRAIN_BUDGET_BYTES;
+            let session_budget = pty_drain_budget_per_session(self.workspace.nodes().len());
             let mut active_redraw = false;
             let mut backlog = false;
             for (id, session) in self.sessions.entries_mut() {
-                let had_output = session.pty_output.queued_len() != 0;
-                let session_budget = if had_output && pending_remaining != 0 {
-                    pty_drain_budget_per_session(pending_remaining).min(budget_remaining)
-                } else {
-                    0
-                };
                 let outcome = session.drain_pty_with_budget(session_budget);
-                if had_output {
-                    pending_remaining = pending_remaining.saturating_sub(1);
-                    budget_remaining = budget_remaining.saturating_sub(outcome.bytes);
-                }
                 self.perf_stats.pty_drained_bytes = self
                     .perf_stats
                     .pty_drained_bytes

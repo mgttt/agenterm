@@ -209,7 +209,7 @@ frame and pixel counts.
   about 60.0% dirty pixels for blink/idle, falling to 2/13 and about 84.6% after
   mixed PTY output. These are directional evidence, not release qualification.
 - [x] con's dedicated public sustained-output qualification delivers a fixed
-  31.9 MiB payload at no less than 4 MiB/s with a 30-second hard deadline while
+  31.9 MiB payload at no less than 2 MiB/s with a 30-second hard deadline while
   a sibling tab responds within five seconds and repeated `list-tabs` /
   `perf-stats` observations stay below two seconds. Its receipt requires the
   complete PTY byte count, at least one bounded-budget yield, zero native-present

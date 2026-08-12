@@ -53,10 +53,6 @@ impl BoundedOutputPipe {
         self.lock().storage.len()
     }
 
-    pub fn queued_len(&self) -> usize {
-        self.lock().length
-    }
-
     pub fn close(&self) {
         let mut state = self.lock();
         state.closed = true;
@@ -230,15 +226,4 @@ mod tests {
         assert_eq!(pipe.drain(4, |_| {}).bytes, 0);
     }
 
-    #[test]
-    fn queued_length_tracks_committed_and_drained_bytes() {
-        let pipe = BoundedOutputPipe::new(8);
-        assert_eq!(pipe.queued_len(), 0);
-        pipe.push_blocking(b"abcdef").unwrap();
-        assert_eq!(pipe.queued_len(), 6);
-        pipe.drain(4, |_| {});
-        assert_eq!(pipe.queued_len(), 2);
-        pipe.drain(8, |_| {});
-        assert_eq!(pipe.queued_len(), 0);
-    }
 }
