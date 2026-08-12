@@ -1243,9 +1243,9 @@ impl ConApp {
     fn configure_chrome(session: &mut ConTerminal, scale: f64, sidebar_width_logical: f64) {
         let scale = scale.max(1.0);
         session.set_content_insets(
-            (sidebar_width_logical * scale).round() as u32,
+            agenterm_platform::numeric::round_f64(sidebar_width_logical * scale) as u32,
             0,
-            (ui::COMPOSER_HEIGHT_DIP * scale).round() as u32,
+            agenterm_platform::numeric::round_f64(ui::COMPOSER_HEIGHT_DIP * scale) as u32,
         );
     }
 
@@ -2471,7 +2471,8 @@ impl ConTerminal {
 
     /// (Re)computes physical cell metrics from the logical font size and scale.
     fn recompute_metrics(&mut self, scale: f64) {
-        self.font_size_px = (self.font_size_logical * scale).round().max(8.0) as u16;
+        self.font_size_px =
+            agenterm_platform::numeric::round_f64(self.font_size_logical * scale).max(8.0) as u16;
         let m = font::cell_metrics(self.font_size_px);
         self.cell_w = m.width.max(1);
         self.cell_h = m.height.max(1);
@@ -3067,8 +3068,8 @@ impl ConTerminal {
         let scale = self.scale;
         let physical = |position: &LogicalPoint| {
             (
-                (position.x * scale).round() as i32,
-                (position.y * scale).round() as i32,
+                agenterm_platform::numeric::round_f64(position.x * scale) as i32,
+                agenterm_platform::numeric::round_f64(position.y * scale) as i32,
             )
         };
         match event {
@@ -3305,7 +3306,7 @@ impl ConTerminal {
             // is a *stream* of individual notch events, and reproducing a
             // crash tied to repeated cumulative resizes means replaying
             // that shape, not collapsing it into a single jump.
-            let count = notches.abs().round().max(1.0) as usize;
+            let count = agenterm_platform::numeric::round_f32(notches.abs()).max(1.0) as usize;
             for _ in 0..count.min(64) {
                 self.zoom_font(window, notches > 0.0);
             }
@@ -3487,7 +3488,7 @@ impl ConTerminal {
         position: Option<LogicalPoint>,
     ) {
         let up = notches > 0.0;
-        let count = (notches.abs().round() as usize).clamp(1, 32);
+        let count = (agenterm_platform::numeric::round_f32(notches.abs()) as usize).clamp(1, 32);
 
         // An application that grabbed the mouse gets buttons 64/65.
         let (mode, _) = self.mouse_mode();
@@ -3798,7 +3799,7 @@ impl ConTerminal {
                         _ => 0.0,
                     };
                     self.wheel_accumulator += lines;
-                    let whole = self.wheel_accumulator.trunc();
+                    let whole = agenterm_platform::numeric::trunc_f32(self.wheel_accumulator);
                     self.wheel_accumulator -= whole;
                     if whole != 0.0 {
                         self.handle_wheel(whole, &modifiers, position);
@@ -4172,9 +4173,11 @@ impl PixelWindowApplication for ConApp {
                 )
             {
                 let rows = match delta {
-                    WheelDelta::Lines { y, .. } => y.round() as isize,
+                    WheelDelta::Lines { y, .. } => {
+                        agenterm_platform::numeric::round_f32(*y) as isize
+                    }
                     WheelDelta::LogicalPixels { y, .. } => {
-                        (*y / ui::TREE_ROW_HEIGHT_DIP).round() as isize
+                        agenterm_platform::numeric::round_f64(*y / ui::TREE_ROW_HEIGHT_DIP) as isize
                     }
                     _ => 0,
                 };
@@ -4757,7 +4760,7 @@ impl<'a> Surface<'a> {
             let slant = if shear == 0.0 {
                 0
             } else {
-                ((clip_y1 - py) as f32 * shear).round() as i64
+                agenterm_platform::numeric::round_f32((clip_y1 - py) as f32 * shear) as i64
             };
             let row_start_x = start_x + slant;
             let source_x_start = (clip_x0 - row_start_x).max(0).min(i64::from(u32::MAX)) as u32;

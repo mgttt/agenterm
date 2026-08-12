@@ -47,7 +47,7 @@ impl ScaleFactor {
         if !logical_points.is_finite() || logical_points < 0.0 {
             return Err(ScaleError::InvalidLogicalExtent);
         }
-        let pixels = (logical_points * self.0).round();
+        let pixels = crate::numeric::round_f64(logical_points * self.0);
         if pixels > f64::from(u32::MAX) {
             return Err(ScaleError::PhysicalExtentOverflow);
         }
@@ -62,7 +62,7 @@ impl ScaleFactor {
         if points > f64::from(u32::MAX) {
             return Err(ScaleError::LogicalExtentOverflow);
         }
-        Ok(points.round() as u32)
+        Ok(crate::numeric::round_f64(points) as u32)
     }
 }
 

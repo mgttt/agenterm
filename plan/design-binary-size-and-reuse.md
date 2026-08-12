@@ -407,6 +407,23 @@ to 548,864 bytes. The useful boundary is asymmetric: stream a tiny fixed input
 schema, retain the shared structured writer where output construction remains
 real.
 
+### 2026-08-12: remove the CRT rounding import family
+
+The final con PE still imported `ceilf`, `round`, `roundf` and `truncf` from the
+Visual C runtime. Their owners spanned product layout, font metrics, wheel
+accumulation and the native pixel-window adapter, so replacing one call site
+could not remove the family. `agenterm-platform::numeric` now supplies concrete
+non-inlined IEEE-754 bit-level leaves shared by those boundaries. It preserves
+signed zero, infinities, NaNs, half-away-from-zero rounding and integral values;
+tests compare standard-library result bits over explicit edges and sampled f32
+bit patterns.
+
+All four imports disappear. The official release-fast PE falls from 548,864 to
+548,352 bytes. This is preferable to target assembly here: the scalar bit
+contract is already small, deterministic and shared by Windows/Linux/macOS;
+future SSE/NEON leaves need both exact parity and a measured final-artifact or
+hot-path win.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

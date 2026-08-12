@@ -60,8 +60,8 @@ pub fn cell_metrics(size_px: u16) -> CellMetrics {
     let size = size_px.clamp(8, 72);
     agenterm_platform::font::primary_metrics(size)
         .map(|metrics| CellMetrics {
-            width: metrics.cell_width.ceil().max(1.0) as u32,
-            height: metrics.cell_height.ceil().max(1.0) as u32,
+            width: agenterm_platform::numeric::ceil_f32(metrics.cell_width).max(1.0) as u32,
+            height: agenterm_platform::numeric::ceil_f32(metrics.cell_height).max(1.0) as u32,
         })
         .unwrap_or_else(|_| {
             let scale = bitmap_scale(size);

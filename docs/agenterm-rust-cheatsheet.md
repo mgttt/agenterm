@@ -474,6 +474,16 @@ Preserve input, depth, node, field and decoded-string budgets and reject trailin
 data. In con this removed the last configuration DOM owner while preserving the
 snapshot/control writer and reduced the staged release-fast PE by 1,536 bytes.
 
+When a final PE imports `ceilf`, `round`, `roundf` or `truncf`, audit every
+linked owner before replacing individual calls. Geometry conversion can use one
+shared IEEE-754 bit-level leaf: classify exponent bits, mask fractional bits,
+apply the half-unit in significand space, and preserve sign, signed zero,
+infinity and NaN payloads. Keep concrete functions non-inlined when many call
+sites share them, and compare their result bits against the standard library
+over boundary and sampled representations. Con removed all four CRT imports and
+one 512-byte PE alignment unit this way. Prefer this portable scalar truth over
+assembly until emitted-code or hot-path evidence justifies SSE/NEON dispatch.
+
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A
 temporary exclusively created by the platform beside a destination does not

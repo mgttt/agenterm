@@ -534,6 +534,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   from 550,400 to 548,864 bytes. Evidence is 86 unit tests, 17 of 18 GUI tests
   in one run plus a passing isolated rerun of the sole snapshot-start timeout,
   the isolated multitab control journey, Windows Clippy and Linux x64 compile.
+  Native geometry no longer delegates basic IEEE-754 rounding to four CRT math
+  imports. A shared product-neutral platform leaf implements exact bit-level
+  `round_f32`, `round_f64`, `ceil_f32` and `trunc_f32`; con UI, font, wheel and
+  the Windows pixel host use the same contract, while Linux/macOS compile the
+  portable scalar implementation. Standard-library oracle tests cover boundary
+  values and sampled bit patterns. `ceilf`, `round`, `roundf` and `truncf`
+  disappear from the final import table and release-fast falls from 548,864 to
+  548,352 bytes. Evidence is 86 con unit, 18 GUI black-box, one multitab control,
+  Windows Clippy and Linux x64 compile.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

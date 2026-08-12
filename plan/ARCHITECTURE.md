@@ -137,7 +137,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | 产品策略表 | `src/platform/mod.rs` + `policy/` | policy 已拆；facade/`allow(dead_code)` 半迁移见 L3 |
 | Win 主机 | `src/platform/adapters/windows/{frontend,remote_frontend}.rs` | remote 客户端；`remote_frontend` 巨石见 L2 |
 | Unix 主机 | `src/platform/adapters/unix/frontend/` | embedded 状态机；`mod`/`render` 巨石见 L2 |
-| 机制 crate | `crates/agenterm-platform/src/{selected,window,input,ipc,pty,process,shared_memory}.rs` | 无产品名 |
+| 机制 crate | `crates/agenterm-platform/src/{selected,window,numeric,input,ipc,pty,process,shared_memory}.rs` | 无产品名；`numeric` 固化 native geometry 的 IEEE-754 取整叶 |
 | 边界闸 | `src/platform/boundary_tests.rs` | 规则见 §8.2；**不**解析本文全文 |
 
 ---
@@ -201,6 +201,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   字节环：一次原生 read 要么整体提交、要么等待容量，关闭会唤醒生产者且已提交
   字节仍可排空。消费者按字节预算直接读取环内连续切片，不为每次 read 分配
   `Vec`；产品层只决定容量、每轮预算、解析和重调度策略。
+- Native geometry、DPI、字体和滚轮边界共享 `agenterm-platform::numeric` 的
+  IEEE-754 位级 `round`/`ceil`/`trunc` 叶。该模块不含产品布局政策，也不按 host
+  分叉；Windows con 借此删除 `ceilf`、`round`、`roundf`、`truncf` CRT 导入，
+  Linux/macOS 调用同一标量真值。新增 ISA 版本仍须证明逐位等价与最终产物收益。
 - Windows PTY 由 platform adapter 直接拥有 ConPTY、同步 output、可取消 overlapped
   input、`STARTUPINFOEXW`、进程等待和 `KILL_ON_JOB_CLOSE` Job Object；子进程以
   `CREATE_SUSPENDED` 创建，加入 Job 后才恢复，任一部分失败都终止未受保护的进程。

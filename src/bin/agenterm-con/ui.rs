@@ -246,7 +246,7 @@ pub fn reveal_tree_index(offset: usize, index: usize, item_count: usize, capacit
 }
 
 fn dip(value: f64, scale: f64) -> u32 {
-    (value * scale.max(1.0)).round().max(0.0) as u32
+    agenterm_platform::numeric::round_f64(value * scale.max(1.0)).max(0.0) as u32
 }
 
 pub fn terminal_scrollbar_width(scale: f64) -> u32 {

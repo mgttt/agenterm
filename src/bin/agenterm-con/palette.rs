@@ -25,7 +25,11 @@ pub fn blend(from: Rgb, to: Rgb, amount: f32) -> Rgb {
     let mix = |a: u8, b: u8| {
         let a = f32::from(a);
         let b = f32::from(b);
-        clamp_f32((a + (b - a) * amount).round(), 0.0, 255.0) as u8
+        clamp_f32(
+            agenterm_platform::numeric::round_f32(a + (b - a) * amount),
+            0.0,
+            255.0,
+        ) as u8
     };
     Rgb(mix(from.0, to.0), mix(from.1, to.1), mix(from.2, to.2))
 }

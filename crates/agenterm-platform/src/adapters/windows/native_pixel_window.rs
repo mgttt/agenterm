@@ -581,8 +581,9 @@ impl PixelWindowBackend for Backend {
         }
         let chrome_w = (outer.right - outer.left) - (client.right - client.left);
         let chrome_h = (outer.bottom - outer.top) - (client.bottom - client.top);
-        let width = (size.width * metrics.scale_factor).round() as i32 + chrome_w;
-        let height = (size.height * metrics.scale_factor).round() as i32 + chrome_h;
+        let width = crate::numeric::round_f64(size.width * metrics.scale_factor) as i32 + chrome_w;
+        let height =
+            crate::numeric::round_f64(size.height * metrics.scale_factor) as i32 + chrome_h;
         self.submit_command(NativeCommand::SetWindowSize {
             width: width.max(1),
             height: height.max(1),
@@ -631,8 +632,8 @@ impl PixelWindowBackend for Backend {
     fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError> {
         let scale = self.metrics.borrow().scale_factor;
         self.submit_command(NativeCommand::SetImeCursor {
-            x: (area.origin.x * scale).round() as i32,
-            y: (area.origin.y * scale).round() as i32,
+            x: crate::numeric::round_f64(area.origin.x * scale) as i32,
+            y: crate::numeric::round_f64(area.origin.y * scale) as i32,
         })
     }
 }
@@ -685,8 +686,10 @@ pub(crate) fn run_pixel_window(
     let scale = 1.0;
     let initial_metrics = PixelWindowMetrics {
         logical_size: options.initial_logical_size,
-        physical_width: options.initial_logical_size.width.round().max(1.0) as u32,
-        physical_height: options.initial_logical_size.height.round().max(1.0) as u32,
+        physical_width: crate::numeric::round_f64(options.initial_logical_size.width).max(1.0)
+            as u32,
+        physical_height: crate::numeric::round_f64(options.initial_logical_size.height).max(1.0)
+            as u32,
         scale_factor: scale,
     };
     let alive = Arc::new(AtomicBool::new(true));
