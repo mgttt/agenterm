@@ -397,6 +397,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   与 RGB-pack SSSE3/scalar 直接函数指针；AVX2 必须同时满足 AVX、OSXSAVE、XCR0 XMM/YMM
   和 CPUID.7 位。组合后 PE 为 536,064 B（总计 -2,048 B），bloat `.text` 从 348.5
   降至 346.5 KiB，最终链接不再含 `std_detect::detect_features`。
+- `agenterm-platform::input::NamedKey` 现同时持有 canonical name 与无分配、ASCII
+  case-insensitive alias 解析。con `send-keys` 和主程序 `ui-input key` 共享这份机制名称
+  权威，但保留各自产品策略：con 的未知 key 必须是单个字符，否则报错；workbench
+  未支持的 named key 仍按 literal text 注入，不因共享 parser 静默扩大 UI 命令集合。
+  platform all-feature alias test、主程序 pointer-input tests 和 88 con units 通过；精确
+  custom-std PE 保持 536,064 B，且 con 不再为 key name 构造 lowercase `String`。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

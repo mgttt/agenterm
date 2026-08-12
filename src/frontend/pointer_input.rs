@@ -193,22 +193,24 @@ fn coordinate(
 /// Named keys are matched case-insensitively; anything else is taken as literal
 /// text so a caller can type a character (or a whole word) directly.
 fn parse_key(value: &str) -> Result<KeyRequest, String> {
+    use agenterm_platform::input::NamedKey;
+
     if value.is_empty() {
         return Err("ui_input_key_invalid".to_owned());
     }
-    Ok(match value.to_ascii_lowercase().as_str() {
-        "enter" | "return" => KeyRequest::Enter,
-        "backspace" => KeyRequest::Backspace,
-        "delete" | "del" => KeyRequest::Delete,
-        "tab" => KeyRequest::Tab,
-        "escape" | "esc" => KeyRequest::Escape,
-        "left" | "arrowleft" => KeyRequest::ArrowLeft,
-        "right" | "arrowright" => KeyRequest::ArrowRight,
-        "up" | "arrowup" => KeyRequest::ArrowUp,
-        "down" | "arrowdown" => KeyRequest::ArrowDown,
-        "home" => KeyRequest::Home,
-        "end" => KeyRequest::End,
-        "space" => KeyRequest::Text(" ".to_owned()),
+    Ok(match NamedKey::from_name(value) {
+        Some(NamedKey::Enter) => KeyRequest::Enter,
+        Some(NamedKey::Backspace) => KeyRequest::Backspace,
+        Some(NamedKey::Delete) => KeyRequest::Delete,
+        Some(NamedKey::Tab) => KeyRequest::Tab,
+        Some(NamedKey::Escape) => KeyRequest::Escape,
+        Some(NamedKey::ArrowLeft) => KeyRequest::ArrowLeft,
+        Some(NamedKey::ArrowRight) => KeyRequest::ArrowRight,
+        Some(NamedKey::ArrowUp) => KeyRequest::ArrowUp,
+        Some(NamedKey::ArrowDown) => KeyRequest::ArrowDown,
+        Some(NamedKey::Home) => KeyRequest::Home,
+        Some(NamedKey::End) => KeyRequest::End,
+        Some(NamedKey::Space) => KeyRequest::Text(" ".to_owned()),
         _ => KeyRequest::Text(value.to_owned()),
     })
 }
@@ -374,6 +376,17 @@ mod tests {
             parse_pointer_request(&args(&["ui-input", "key"])),
             Err("ui_input_key_missing".to_owned())
         );
+        for value in ["F12", "PageUp", "Insert"] {
+            let parsed = parse_pointer_request(&args(&["ui-input", "key", "--key", value]))
+                .expect("unsupported UI key remains text");
+            assert!(matches!(
+                parsed,
+                PointerRequest::Key {
+                    key: KeyRequest::Text(ref text),
+                    ..
+                } if text == value
+            ));
+        }
     }
 
     #[test]

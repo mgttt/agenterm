@@ -48,6 +48,49 @@ pub enum NamedKey {
 }
 
 impl NamedKey {
+    /// Resolve a host-neutral key name or its established terminal alias.
+    ///
+    /// Unknown names remain caller policy: a terminal CLI can reject them,
+    /// while a UI text injector can treat them as literal text.
+    #[inline]
+    pub fn from_name(name: &str) -> Option<Self> {
+        macro_rules! named {
+            ($variant:ident, $($name:literal)|+ $(,)?) => {
+                if $(name.eq_ignore_ascii_case($name))||+ {
+                    return Some(Self::$variant);
+                }
+            };
+        }
+        named!(Enter, "enter" | "return");
+        named!(Escape, "escape" | "esc");
+        named!(Tab, "tab");
+        named!(Space, "space");
+        named!(Backspace, "backspace");
+        named!(Delete, "delete" | "del");
+        named!(Insert, "insert" | "ins");
+        named!(Home, "home");
+        named!(End, "end");
+        named!(PageUp, "pageup");
+        named!(PageDown, "pagedown");
+        named!(ArrowUp, "up" | "arrowup");
+        named!(ArrowDown, "down" | "arrowdown");
+        named!(ArrowLeft, "left" | "arrowleft");
+        named!(ArrowRight, "right" | "arrowright");
+        named!(F1, "f1");
+        named!(F2, "f2");
+        named!(F3, "f3");
+        named!(F4, "f4");
+        named!(F5, "f5");
+        named!(F6, "f6");
+        named!(F7, "f7");
+        named!(F8, "f8");
+        named!(F9, "f9");
+        named!(F10, "f10");
+        named!(F11, "f11");
+        named!(F12, "f12");
+        None
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ArrowDown => "ArrowDown",
@@ -277,6 +320,15 @@ mod tests {
         assert_eq!(event.logical, LogicalKey::Named(NamedKey::Tab));
         assert!(event.modifiers.shift);
         assert_eq!(NamedKey::Tab.as_str(), "Tab");
+    }
+
+    #[test]
+    fn named_key_parser_is_case_insensitive_and_preserves_aliases() {
+        assert_eq!(NamedKey::from_name("RETURN"), Some(NamedKey::Enter));
+        assert_eq!(NamedKey::from_name("ArrowLeft"), Some(NamedKey::ArrowLeft));
+        assert_eq!(NamedKey::from_name("ins"), Some(NamedKey::Insert));
+        assert_eq!(NamedKey::from_name("F12"), Some(NamedKey::F12));
+        assert_eq!(NamedKey::from_name("literal"), None);
     }
 
     #[test]

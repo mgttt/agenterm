@@ -4549,36 +4549,7 @@ fn parse_control_key(spec: &str) -> Result<(InjectedKey, bool, bool, bool), Stri
             _ => return Err(format!("unknown key modifier {modifier:?}")),
         }
     }
-    let named = match key_name.to_ascii_lowercase().as_str() {
-        "enter" | "return" => Some(NamedKey::Enter),
-        "escape" | "esc" => Some(NamedKey::Escape),
-        "tab" => Some(NamedKey::Tab),
-        "space" => Some(NamedKey::Space),
-        "backspace" => Some(NamedKey::Backspace),
-        "delete" | "del" => Some(NamedKey::Delete),
-        "insert" | "ins" => Some(NamedKey::Insert),
-        "home" => Some(NamedKey::Home),
-        "end" => Some(NamedKey::End),
-        "pageup" => Some(NamedKey::PageUp),
-        "pagedown" => Some(NamedKey::PageDown),
-        "up" | "arrowup" => Some(NamedKey::ArrowUp),
-        "down" | "arrowdown" => Some(NamedKey::ArrowDown),
-        "left" | "arrowleft" => Some(NamedKey::ArrowLeft),
-        "right" | "arrowright" => Some(NamedKey::ArrowRight),
-        "f1" => Some(NamedKey::F1),
-        "f2" => Some(NamedKey::F2),
-        "f3" => Some(NamedKey::F3),
-        "f4" => Some(NamedKey::F4),
-        "f5" => Some(NamedKey::F5),
-        "f6" => Some(NamedKey::F6),
-        "f7" => Some(NamedKey::F7),
-        "f8" => Some(NamedKey::F8),
-        "f9" => Some(NamedKey::F9),
-        "f10" => Some(NamedKey::F10),
-        "f11" => Some(NamedKey::F11),
-        "f12" => Some(NamedKey::F12),
-        _ => None,
-    };
+    let named = NamedKey::from_name(key_name);
     let key = if let Some(named) = named {
         InjectedKey::Named(named)
     } else {
