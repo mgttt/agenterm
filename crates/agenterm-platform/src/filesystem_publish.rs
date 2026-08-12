@@ -305,14 +305,12 @@ fn owned_destination(destination: &Path) -> Result<PathBuf, FilePublishError> {
             "destination requires a final file name",
         )
     })?;
-    crate::selected::filesystem_publish::normalize_owned_destination(destination).map_err(
-        |error| {
-            FilePublishError::new(
-                FilePublishErrorKind::Inspect,
-                format!("inspect destination parent failed: {error}"),
-            )
-        },
-    )
+    crate::selected::filesystem_publish::normalize_owned_destination(destination).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Inspect,
+            format!("inspect destination parent failed: {error}"),
+        )
+    })
 }
 
 fn create_temporary(

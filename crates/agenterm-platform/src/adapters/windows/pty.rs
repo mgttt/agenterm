@@ -1938,10 +1938,7 @@ fn executable_extensions(program: &Path, pathext: Option<&OsStr>) -> Vec<OsStrin
     extensions
 }
 
-fn append_direct_application_extensions(
-    extensions: &mut Vec<OsString>,
-    pathext: Option<&OsStr>,
-) {
+fn append_direct_application_extensions(extensions: &mut Vec<OsString>, pathext: Option<&OsStr>) {
     let Some(pathext) = pathext else {
         extensions.push(OsString::from(".COM"));
         extensions.push(OsString::from(".EXE"));
@@ -2096,7 +2093,10 @@ mod application_extension_tests {
             executable_extensions(Path::new("tool"), Some(OsStr::new(".BAT"))),
             vec![OsString::new()]
         );
-        assert!(os_str_eq_ascii_ignore_case(OsStr::new("PathExt"), "PATHEXT"));
+        assert!(os_str_eq_ascii_ignore_case(
+            OsStr::new("PathExt"),
+            "PATHEXT"
+        ));
         assert!(!os_str_eq_ascii_ignore_case(
             OsStr::new("PATHEXT2"),
             "PATHEXT"
