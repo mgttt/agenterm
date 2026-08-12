@@ -1934,28 +1934,58 @@ fn executable_extensions(program: &Path, pathext: Option<&OsStr>) -> Vec<OsStrin
         return vec![OsString::new()];
     }
     let mut extensions = vec![OsString::new()];
-    extensions.extend(
-        pathext
-            .map(|value| {
-                value
-                    .to_string_lossy()
-                    .split(';')
-                    .filter(|extension| !extension.is_empty())
-                    .map(|extension| {
-                        if extension.starts_with('.') {
-                            OsString::from(extension)
-                        } else {
-                            OsString::from(format!(".{extension}"))
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .filter(|extensions| !extensions.is_empty())
-            .unwrap_or_else(|| [".COM", ".EXE"].into_iter().map(OsString::from).collect())
-            .into_iter()
-            .filter(|extension| is_direct_application_extension(extension)),
-    );
+    append_direct_application_extensions(&mut extensions, pathext);
     extensions
+}
+
+fn append_direct_application_extensions(
+    extensions: &mut Vec<OsString>,
+    pathext: Option<&OsStr>,
+) {
+    let Some(pathext) = pathext else {
+        extensions.push(OsString::from(".COM"));
+        extensions.push(OsString::from(".EXE"));
+        return;
+    };
+    let mut segment = [0_u16; 4];
+    let mut length = 0_usize;
+    let mut overflow = false;
+    let mut saw_nonempty = false;
+    for unit in pathext.encode_wide() {
+        if unit == b';' as u16 {
+            push_direct_application_extension(extensions, &segment[..length], overflow);
+            length = 0;
+            overflow = false;
+        } else {
+            saw_nonempty = true;
+            if length < segment.len() {
+                segment[length] = unit;
+                length += 1;
+            } else {
+                overflow = true;
+            }
+        }
+    }
+    push_direct_application_extension(extensions, &segment[..length], overflow);
+    if !saw_nonempty {
+        extensions.push(OsString::from(".COM"));
+        extensions.push(OsString::from(".EXE"));
+    }
+}
+
+fn push_direct_application_extension(
+    extensions: &mut Vec<OsString>,
+    units: &[u16],
+    overflow: bool,
+) {
+    if overflow {
+        return;
+    }
+    match classify_exe_or_com(units, true) {
+        Some(DirectApplicationExtension::Exe) => extensions.push(OsString::from(".EXE")),
+        Some(DirectApplicationExtension::Com) => extensions.push(OsString::from(".COM")),
+        None => {}
+    }
 }
 
 fn append_extension(path: &Path, extension: &OsStr) -> PathBuf {
@@ -1970,32 +2000,46 @@ fn is_direct_application_path(path: &Path) -> bool {
         .unwrap_or(true)
 }
 
-fn is_direct_application_extension(extension: &OsStr) -> bool {
-    is_exe_or_com(extension, true)
+fn is_exe_or_com(value: &OsStr, allow_leading_dot: bool) -> bool {
+    let mut buffered = [0_u16; 4];
+    let mut length = 0;
+    for unit in value.encode_wide() {
+        if length == buffered.len() {
+            return false;
+        }
+        buffered[length] = unit;
+        length += 1;
+    }
+    classify_exe_or_com(&buffered[..length], allow_leading_dot).is_some()
 }
 
-fn is_exe_or_com(value: &OsStr, allow_leading_dot: bool) -> bool {
-    let mut units = value.encode_wide();
-    let Some(mut first) = units.next() else {
-        return false;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DirectApplicationExtension {
+    Exe,
+    Com,
+}
+
+fn classify_exe_or_com(
+    units: &[u16],
+    allow_leading_dot: bool,
+) -> Option<DirectApplicationExtension> {
+    let units = if allow_leading_dot && units.first() == Some(&(b'.' as u16)) {
+        &units[1..]
+    } else {
+        units
     };
-    if allow_leading_dot && first == b'.' as u16 {
-        let Some(unit) = units.next() else {
-            return false;
-        };
-        first = unit;
+    if units.len() != 3 {
+        return None;
     }
-    let (Some(second), Some(third), None) = (units.next(), units.next(), units.next()) else {
-        return false;
-    };
-    matches!(
-        (
-            ascii_lower(first),
-            ascii_lower(second),
-            ascii_lower(third)
-        ),
-        (b'e', b'x', b'e') | (b'c', b'o', b'm')
-    )
+    match (
+        ascii_lower(units[0]),
+        ascii_lower(units[1]),
+        ascii_lower(units[2]),
+    ) {
+        (b'e', b'x', b'e') => Some(DirectApplicationExtension::Exe),
+        (b'c', b'o', b'm') => Some(DirectApplicationExtension::Com),
+        _ => None,
+    }
 }
 
 const fn ascii_lower(unit: u16) -> u8 {
@@ -2027,6 +2071,37 @@ mod application_extension_tests {
         let non_unicode = OsString::from_wide(&[b'e' as u16, 0xd800, b'e' as u16]);
         assert!(!is_exe_or_com(&non_unicode, false));
     }
+
+    #[test]
+    fn pathext_stream_preserves_fallback_order_and_filters_without_text_conversion() {
+        let extensions = executable_extensions(
+            Path::new("tool"),
+            Some(OsStr::new(".BAT;EXE;.com;;.EXE;too-long")),
+        );
+        assert_eq!(
+            extensions,
+            ["", ".EXE", ".COM", ".EXE"]
+                .into_iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            executable_extensions(Path::new("tool"), Some(OsStr::new(";;;"))),
+            ["", ".COM", ".EXE"]
+                .into_iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            executable_extensions(Path::new("tool"), Some(OsStr::new(".BAT"))),
+            vec![OsString::new()]
+        );
+        assert!(os_str_eq_ascii_ignore_case(OsStr::new("PathExt"), "PATHEXT"));
+        assert!(!os_str_eq_ascii_ignore_case(
+            OsStr::new("PATHEXT2"),
+            "PATHEXT"
+        ));
+    }
 }
 
 fn effective_env_value(command: &ChildCommand, name: &str) -> Option<OsString> {
@@ -2034,9 +2109,19 @@ fn effective_env_value(command: &ChildCommand, name: &str) -> Option<OsString> {
         .env
         .iter()
         .rev()
-        .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(name))
+        .find(|(key, _)| os_str_eq_ascii_ignore_case(key, name))
         .map(|(_, value)| value.clone())
         .or_else(|| env::var_os(name))
+}
+
+fn os_str_eq_ascii_ignore_case(value: &OsStr, ascii: &str) -> bool {
+    let mut units = value.encode_wide();
+    for byte in ascii.bytes() {
+        if units.next().map(ascii_lower) != Some(ascii_lower(byte as u16)) {
+            return false;
+        }
+    }
+    units.next().is_none()
 }
 
 fn command_line(command: &ChildCommand) -> io::Result<Vec<u16>> {

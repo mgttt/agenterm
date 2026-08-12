@@ -347,3 +347,21 @@ on `ipc` to activate `windows-sys/Win32_Security`, which gates declarations used
 by process, pipe and Job creation. `pty` now declares that dependency itself;
 this changes no con linkage because its existing feature graph already enabled
 it, but makes the reusable platform capability self-contained.
+
+### 2026-08-12: stream the complete constrained PATHEXT grammar
+
+Replacing only the final `.exe`/`.com` comparison left the upstream PATHEXT
+pipeline converting to lossy UTF-8, splitting strings, dynamically prefixing a
+dot, and collecting an intermediate vector that was immediately filtered. The
+accepted grammar has at most four UTF-16 units per useful segment, so the
+Windows adapter now scans once through a fixed stack buffer and emits canonical
+candidates directly. It preserves extensionless-first lookup, configured order
+and duplicates; absent or all-empty PATHEXT falls back to `.COM/.EXE`, while a
+nonempty list containing only rejected extensions does not invent a fallback.
+Environment override key lookup shares an exact ASCII-wide comparator.
+
+The official release-fast PE fell from 562,176 to 560,128 bytes. Two focused
+minimal-feature tests, 85 con tests, 18 GUI black-box tests, one multitab
+journey, Windows Clippy and Linux x86-64 compilation pass. The result reinforces
+that a native leaf saves meaningful space only when its entire generic producer
+pipeline becomes unreachable.

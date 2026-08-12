@@ -430,6 +430,16 @@ reject extra units and unpaired surrogates rather than normalizing them. Sharing
 one exact `.exe`/`.com` leaf removed 1,024 bytes from con's staged PE. This rule
 does not apply to user text or general Unicode case folding.
 
+Trace constrained native text backward through its producer. Optimizing the
+final comparison does not remove `to_string_lossy`, `split`, `format!` or an
+intermediate `collect` that still prepares its input. When the complete grammar
+is genuinely tiny, parse it once with a bounded native-unit state machine and
+emit only typed/canonical outputs. Preserve subtle fallback semantics explicitly:
+Windows PATHEXT distinguishes an absent or all-empty list from a nonempty list
+whose entries are unsupported. Streaming that complete grammar, plus exact
+ASCII-wide environment-key comparison, removed another 2,048 bytes after the
+fixed-extension leaf had already landed.
+
 Every platform Cargo feature must activate the native declaration features used
 by its own adapter. Do not rely on a product's unrelated feature union to make
 Win32 functions compile: test the minimal capability graph as well as the real

@@ -471,6 +471,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   dependency rather than relying on con's unrelated `ipc` feature to make
   `CreateProcessW`, pipes and Job APIs visible; the minimal capability graph and
   the full con graph are both compile-owned.
+  PATHEXT enumeration now also stays native end to end: a bounded four-unit
+  streaming classifier preserves extensionless-first lookup, configured order,
+  duplicates, empty-list fallback and invalid-nonempty suppression while
+  emitting only canonical `.EXE`/`.COM` candidates. Environment override keys
+  use the same exact ASCII-over-UTF-16 comparison rather than lossy text. This
+  removes the remaining generic split, dynamic formatting and nested collection
+  path; the official release-fast PE falls from 562,176 to 560,128 bytes.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
