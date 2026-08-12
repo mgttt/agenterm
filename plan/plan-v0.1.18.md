@@ -1,17 +1,31 @@
-# AgenTerm v0.1.18 公开计划（草案）
+# AgenTerm v0.1.18 公开计划
 
-状态：**草案，待 v0.1.17 收口并由用户授权开工**（2026-08-10）
+状态：**在制唯一版本计划**（2026-08-12 起）
 不创建 tag / Candidate / Release，不触发公开更新，除非人工明确授权。
 本文件是版本执行投影，不替代 PRD、结构 SSOT 或 App Pack 详细设计。
 
-**主题：Portable App Substrate——稳定 App Host ABI + 一份 QJS App Pack 跨六格消费。**
+**主题：Portable App Substrate + 三条并行产品轨。**
 
-本版只证明动态应用底座成立：同一份密封 `.agp` 能被现有六个 OS/ISA Base
+v0.1.17 已于 2026-08-12 归档，其全部未完成叶按 `plan/README.md` §归档规则 2
+**upsert 到本文件 §11**。本版因此同时承载四条轨：
+
+| 轨 | 范围 | 本文位置 |
+|----|------|----------|
+| **A. App Substrate** | 稳定 App Host ABI + 一份 QJS `.agp` 跨六格消费 | §0–§10（原主题，未改） |
+| **B. v0.1.17 承接树** | 多窗、跨主机证据、发布链、安装尾、脚本引擎债、低成本卫生 | §11 |
+| **C. agenterm-con** | 第二产品：预算回收、独立对齐门、巨石切分、余量叶 | §12 |
+| **D. agenterm-cu** | 新立项：computer-use 底座的设计与 `current` 档原型 | §13 |
+
+轨 A 只证明动态应用底座成立：同一份密封 `.agp` 能被现有六个 OS/ISA Base
 携带、校验、加载和重载；修改 App 内容不要求重新编译六份 Base。首个真实产品语义
 迁移、远程更新、WASM 计算扩展和 APE/多架构 loader 均不在本版实现范围。
 
+**四条轨相互不阻塞**，各自有独立 Gate 与验收条件（§4、§8）。任一轨未达门只影响
+该轨，不得因此把另一轨标为完成，也不得借另一轨的绿状态替代本轨证据。
+
 > 结构 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md)。
-> 上版收口树：[`plan-v0.1.17.md`](plan-v0.1.17.md)。
+> 上版收口树（已归档，未完成叶见本文 §11）：
+> [`archive/plan-v0.1.17.md`](archive/plan-v0.1.17.md)。
 > 跨目标机制研究：[`reference-cross-target-execution.md`](reference-cross-target-execution.md)。
 > 原 App Pack 讨论与分期推演已归档为
 > [`archive/plan-agenterm-app-pack.md`](archive/plan-agenterm-app-pack.md)；本文件已吸收其仍生效的
@@ -52,14 +66,20 @@ Native Base 与 `agenterm-platform` 承担。
 2. 同一 `.agp` 字节身份被六格 Base 消费，且本机可执行格有真实加载/重载证据。
 3. App-only 改动走不调用 Cargo、不重建 Native Base 的独立权威 lane。
 
-### 0.3 前置条件
+### 0.3 轨 A 前置条件
 
-- v0.1.17 已冻结最终 capability/catalog 状态，QJS-M6、E3、E4、E5 不再处于漂移中。
-- v0.1.17 的 exact-SHA CI 与发布链剩余问题已有最终结论；本版不同时认领其活跃红。
-- `agenterm cli script` 已删除；公开引擎入口为 `agenterm rh|lua|qjs|sql`。
-- 测试不会遗留锁住构建产物的 `agenterm server` 孤儿进程。
+轨 A（App Substrate）建立在可信 Base 之上，因此以下四项必须先由 **§11 承接树**
+交付；它们现在是本版内部依赖，不再是"上一版是否收口"的外部条件：
 
-任一前置不满足时，本版保持“未开工”，不得用 App Pack 工作绕过 Base 的不可信状态。
+| 前置 | owner 叶 |
+|------|----------|
+| capability/catalog 不再漂移 | §11 QJS-M6、E3、DOC-PRD |
+| exact-SHA CI 与发布链无活跃红 | §11 R1e/R2e/R4e、T-debt |
+| `agenterm cli script` 已删除，公开入口为 `agenterm rh\|lua\|qjs\|sql` | §11 E5 |
+| 测试不遗留锁住构建产物的 `agenterm server` 孤儿进程 | §11 E4 |
+
+任一前置不满足时，**轨 A 保持"未开工"**，不得用 App Pack 工作绕过 Base 的不可信
+状态。轨 B/C/D 不受此约束，可并行推进。
 
 ---
 
@@ -294,12 +314,13 @@ X0  跨六格消费 + App-only 无 Cargo 决定性证据
 
 ### P0. 基线冻结
 
-- [ ] **P0 v0.1.17 最终状态快照**
+- [ ] **P0 轨 A 基线快照**
   - **用户问题**：动态底座不能建立在仍漂移的 Base、catalog 或 CI 红之上。
-  - **不变量**：只消费 v0.1.17 最终已证明状态；未完成项保留原 owner 和版本去向。
-  - **证据 / owner**：v0.1.17 验收表、exact-SHA CI 结论和 PRD capability 对账共同拥有。
-  - **安全失败**：任一前置仍活跃则停止 v0.1.18 产品代码工作。
-  - **非目标**：不在本版重做 v0.1.16/17 发布链或 GUI 尾账。
+  - **不变量**：只消费 §0.3 表中四项已证明的交付；未完成项保留原 owner 与去向。
+  - **证据 / owner**：§11 对应叶的验收证据、exact-SHA CI 结论和 PRD capability
+    对账共同拥有。
+  - **安全失败**：任一前置仍活跃则停止轨 A 产品代码工作（不影响轨 B/C/D）。
+  - **非目标**：不在轨 A 内重做 §11 的发布链或 GUI 尾账——那是轨 B 自己的工作。
 
 ### H1. App Host ABI v1
 
@@ -446,6 +467,10 @@ X0  跨六格消费 + App-only 无 Cargo 决定性证据
 `.agp` builder 可并行；公共 schema、根 manifest、workflow 和 Script dispatch 属于集成热区，
 由主线串行修改。最终 lint、Quick、Base matrix 与 App-only lane 在同一集成状态上串行验收。
 
+**上表只管轨 A。** 轨 C 的 GC1–GC3 见 §12，轨 D 的 GD1–GD3 见 §13；轨 B 无独立
+Gate，其叶各自带证据合同。四条轨的 Gate 互不替代：`G5` 通过不代表 con 预算已回收，
+`GC1` 全绿也不代表 App lane 成立。
+
 ---
 
 ## 5. CI 与证据分层
@@ -486,6 +511,12 @@ App lane 不是“零 CI 成本”，而是“零 Base 重编译”。签名、�
 - 不删除 Rh、Lua、SQL；Rh 继续拥有 Build/CI 与通用本地自动化。
 - 不改变现行六平台 Base 发布合同，不因 App Pack 降低 Candidate/Promotion 验证强度。
 
+轨 B/C/D 的非目标随叶登记；跨轨另加三条：
+
+- 公开 **tag / Candidate / Promotion**（除非另文授权）。
+- `agenterm-cu` 任一远程 tier（ssh/rdp/vnc）的实现，以及 cu 可执行体的公开发布。
+- 新脚本引擎（SQL 之后的下一个）开工；回退 M22f 默认 rh backend。
+
 ---
 
 ## 7. 后续版本接口
@@ -509,9 +540,11 @@ Rh 负责 Build/CI，Rust/Base 负责权威状态与原生机制。
 
 ## 8. 验收总门
 
-未授权公开发布时，**开发完成** = 下列同时成立：
+未授权公开发布时，**开发完成** = 四条轨各自成立。轨与轨之间不互相顶替。
 
-1. P0 前置快照冻结，v0.1.17 活跃红未被双重排期到本版。
+### 8.A 轨 A（App Substrate）
+
+1. P0 基线快照冻结；§0.3 的四项前置由 §11 交付且无活跃红。
 2. Host ABI v1、manifest 和稳定 snapshot schema 已进入 owning PRD/catalog，fixture 全绿。
 3. QJS 宿主六格可构建，体积、冷/热墙钟、notice 和发布预算有实际证据。
 4. `.agp` 确定性构建、hash/provenance、篡改与路径逃逸测试全绿。
@@ -520,6 +553,39 @@ Rh 负责 Build/CI，Rust/Base 负责权威状态与原生机制。
 7. 六格消费同一 `.agp` SHA；原生执行与 existence/contract-only 证据等级没有混写。
 8. 一次真实 App-only CI run 证明不调用 Cargo、不重编 Base，且合同测试全绿。
 9. `lint`、`check --quick` 与所有 owning smoke 在集成树上通过；文档 redaction 无命中。
+
+### 8.B 轨 B（v0.1.17 承接树）
+
+1. **R1e/R2e/R4e** 取得合同所列证据，不能以另一次不同配置 run 或书面猜测替代。
+2. **T-debt-linux-package / T-debt-supply-chain** 已由各自 owner 修复，或带 typed
+   skip 原因与后续版本去向；不得用宽泛 skip 伪装绿色。
+3. **W1–W4** 的干净身份、多窗、multi-client 与独占语义证据全齐。
+4. **U2** Windows 与 **O-evidence** macOS 真机证据均齐；缺主机证据时不得标完成。
+5. **L7 + L1 + DOC-PRD** 完成，且 DOC-PRD 的对账范围包含 con（23–27）与 cu
+   （28–31）两个新子树。
+6. **QJS-M6 / E1–E4** 有实现证据或明确可追踪的后续版本决定。
+7. **E5** 调用者迁移完成并删除 `agenterm cli script` 的 dispatch/help/catalog。
+
+### 8.C 轨 C（`agenterm-con`）
+
+1. con 自有对齐门与完整套件在精确 unwind profile 下全绿（GC1）。
+2. CON-C1 的每一步切分都有"公开合同字节不变"的证据（GC2）；不留半切状态。
+3. CON-budget 要么拿到可复现证据证明回到 512 KiB 内，要么如实记录仍超预算及其数值
+   （GC3）——**不得因为超预算就把这条从验收表里拿掉**。
+4. CON-C3 完成后，同一增量不再同时出现在 ARCHITECTURE 与 PRD 27/24。
+
+### 8.D 轨 D（`agenterm-cu`）
+
+1. CU-D0 设计稿与 PRD 29–31 逐条对齐，PRD 02 已登记可执行角色（GD1）。
+2. CU-D1 机制缺口表完成，每项去向明确（GD2）。
+3. CU-D2 与 CU-D3 **同时**通过（GD3）；授权/审计缺失时 `current` 档不得标记任何
+   shipped 状态。
+4. 全轨无任何 OS API 直调绕过 `agenterm-platform`，无外部 computer-use 依赖进入
+   产品图。
+
+### 8.X 跨轨
+
+1. `lint`、`check --quick` 与所有 owning smoke 在集成树上通过；文档 redaction 无命中。
 
 任一项缺证据则保持 `[ ]`，不得用“设计已定”“可以推断”或交叉编译 existence 代替完成。
 
@@ -533,20 +599,274 @@ Rh 负责 Build/CI，Rust/Base 负责权威状态与原生机制。
 | 2026-08-10 | 本版唯一结果是 Portable App Substrate，不把 APE、多架构 loader、WASM、OTA 或真实产品迁移并入 Phase 0。 |
 | 2026-08-10 | “跨平台”以同一 `.agp` 字节身份和 App-only 无 Cargo lane 为决定性证据，不宣称单一原生二进制。 |
 | 2026-08-10 | QJS App ABI 采用最小 surface，不复制 Rh 全 catalog；Gate 失败不自动回退到目标相关的 Rh AOT App。 |
+| 2026-08-12 | **v0.1.17 归档**，其未完成叶整树 upsert 至本文件 §11；本文件成为唯一在制版本计划。原"待 v0.1.17 收口再开工"的外部前置改为本版内部依赖（§0.3），轨 A 仍受其约束，轨 B/C/D 不受阻。 |
+| 2026-08-12 | `agenterm-con` 从"尾账"升为**独立产品轨**（§12），有自己的 GC1–GC3 Gate。其绿状态与工作台互不替代；PE 字节归 PRD 27/24，结构债归 ARCHITECTURE §4 C1–C3。 |
+| 2026-08-12 | **决策项 P4 拍板**：`agenterm-cu` 立项，归 PRD 28–31 专属子树，首发 `current` 档，工作名 `agenterm-remote.exe` 作废。本版只做设计与 `current` 原型（§13），任何 tier 在授权/审计通过前不得标 shipped，含 `current` 档在内不豁免。 |
 
 ---
 
 ## 10. 开工检查单
 
-1. 确认 v0.1.17 已完成或明确冻结最终未完成去向。
-2. 读取本文件 §1–§6；原 App Pack 归档稿只用于追溯，不作为执行依据。
-3. 先冻结 Host ABI/manifest fixture，再写 loader 或 Engine glue。
-4. 声明独占 pathspec；根 manifest、公共 schema、workflow 和 Script dispatch 串行修改。
-5. cheap lint/check 先于 Cargo；App-only 变更不得借机触发 Base 全矩阵。
-6. 小步提交；能力状态变化同步 owning PRD/catalog。
-7. 不创建 Candidate/Promotion，除非收到明确 exact-SHA 授权。
+1. 先认自己在哪条轨：**A** App Substrate（§0–§10）、**B** 承接树（§11）、
+   **C** `agenterm-con`（§12）、**D** `agenterm-cu`（§13）。只读本轨叶 + 跨轨非目标
+   （§6），不要把别轨的 Gate 当自己的。
+2. 归档稿（`archive/plan-v0.1.17.md`、`archive/plan-agenterm-app-pack.md`）只用于
+   追溯，不作为执行依据。
+3. 轨 A：先冻结 Host ABI/manifest fixture，再写 loader 或 Engine glue；§0.3 四项
+   前置未由轨 B 交付前不开工。
+4. 轨 C：动巨石前先跑 con 自有对齐门（GC1）；每步切分要有"公开合同字节不变"的证据。
+5. 轨 D：CU-D0 设计稿未与 PRD 29–31 对齐前不写产品代码；任何 OS 机制先看
+   `agenterm-platform` 有没有，没有就往那里加，不在 cu 直调。
+6. 声明独占 pathspec；根 manifest、公共 schema、workflow 和 Script dispatch 串行修改。
+7. cheap lint/check 先于 Cargo；App-only 变更不得借机触发 Base 全矩阵。
+8. 小步提交；能力状态变化同步 owning PRD/catalog——con 写 PRD 23–27，cu 写 28–31，
+   目录/结构债写 `ARCHITECTURE.md`，**同一事实不要写两处**。
+9. 不创建 Candidate/Promotion，除非收到明确 exact-SHA 授权。
+
+---
+
+## 11. 轨 B：承接自 v0.1.17 的收口树
+
+> 来源：[`archive/plan-v0.1.17.md`](archive/plan-v0.1.17.md)，2026-08-12 归档时按
+> `plan/README.md` §归档规则 2 整树 upsert。**已完成叶不迁入**（Rh-M23、G-P1/G-P2
+> 决策、Common-M7 等保留在归档文件中作为历史事实）。叶定义、不变量、证据与非目标
+> 保持原文效力，本节只做归口；不得因为换了文件就重写合同或悄悄降级。
+
+选择原则（继承 v0.1.14/15/16/17）：**宁可少而全绿，不要多而半途**。
+
+### W. 多 GUI / 多窗产品面
+
+- [ ] **W1 重启纪律与版本可观测** — 旧 server/GUI 混跑不得表现为无法判断身份；
+  不静默杀会话、不削弱 remain-on-exit/keep-server，版本与实例身份必须从公共 CLI
+  可读。身份不一致时明确停止并提示干净重启，非目标是全局 `taskkill` 或自动迁移。
+- [ ] **W2 As Window 黑盒（激活标签）** — 必须真开第二窗而非只 focus 原窗；spawn
+  带 `--ui-client`，endpoint/instance 选择互斥且可验证。隔离 IPC/workspace 下证明
+  GUI 进程数 +1、`ui-lease status.clients` ≥ 2、两窗均可交互。失败保留原窗与原
+  lease，非目标是同窗热切换或强制接管。
+- [ ] **W3 多 clients 可观测** — status/snapshot 不得继续谎称唯一 GUI；`attached`
+  与 `clients[]` 来自同一 lease 权威，稳定 ID 不以标题或索引代替。过期记录显式
+  stale/unavailable。
+- [ ] **W4 独占语义清扫** — 残留 `exclusive`/`already attached` 文案会让已支持的
+  多 lease 路径看似失败；As Window 源码锁仍要求 `--ui-client`，产品路径不得回退为
+  "只 focus 不双开"。发现语义不一致则保持 unavailable 并登记 `parity-gap:`。
+
+### U/O. 跨主机证据尾账
+
+- [ ] **U2 Windows 标签切换假刷新回归** — 空 composer 连点 tab 不应制造
+  `ComposerDraft` 事件风暴；无草稿变化就无草稿写入。无法取得真机时保持未完成，
+  不以单元测试代替。
+- [ ] **O-evidence macOS 多实例真机闭环** — picker/open-instance/strip 菜单需用户
+  可操作证据；切换 instance、As Window、keep-server 后再附着均指向所选权威。不把
+  交叉编译、existence-only 或 Linux X11 结果冒充 macOS 真机证据。
+
+### R′. 发布链证据收口
+
+- [ ] **R1e Candidate worker/cache 连续证据** — 同一配置连续两次 Candidate，第二次
+  必须记录 `bootstrap.worker.state==reused` 且配额未驱逐；无第二次 run 时保持未完成，
+  不为制造证据重写 cache 策略。
+- [ ] **R2e cargo-home restore 前缀证据** — 以 R1e 第二次 run 的 restore 日志证明
+  `cargo-home-candidate-v2` 前缀命中；日志缺失或 key 不同则 fail-closed 为未证明。
+- [ ] **R4e release rehearsal 无副作用证据** — 真实运行 `release.cmd --rehearse`
+  并证明无 tag、draft、Release 或远端写；任一身份/资产错误须停止且保持远端不变。
+- [ ] **T-debt-linux-package** — `linux_package` 缺 archive/SBOM/receipt 时给出最小
+  复现和确定修复；缺件必须阻止封存。
+- [ ] **T-debt-supply-chain** — 计数/catalog pin 漂移以 resolved lock graph 证据
+  收口，不一致时输出 typed diff 并失败，非目标是放宽计数或跳过依赖审计。
+
+### G′′. 安装/更新体验尾账
+
+> G-P1/G-P2 已在 v0.1.17 拍板并保留效力：无 signed asset 时自动选 unsigned-preview
+> 并强制多行信任警告；保持 server/会话、版本差异必须提示、不自动 kill、一键 apply
+> 默认关闭。
+
+- [ ] **G1** — macOS 无 signed asset 时自动选 unsigned-preview 并输出不可静默的
+  多行信任警告；缺 preview 或身份不匹配即停止，绝不把 unsigned 包装成 stable。
+- [ ] **H2** — install.sh 只从已校验的 `releases.json` 选版本与资产，index 绑定
+  sealed manifest SHA、source SHA、tag、version 与六 artifact；失败不回退到猜文件名。
+  依赖 H1 至少一轮稳定证据。
+- [ ] **G7b 版本不一致提示** — 升级前展示两端版本与继续后果；无法探测时诚实标
+  unknown，不假定相容。
+- [ ] **G7c 保持 server/会话** — 默认 keep-server 且不自动 kill；失败不得损坏现有会话。
+- [ ] **G7d 显式 apply** — 只能由显式 flag 开启且默认 off，覆盖确认、精确目标和
+  失败保会话；非目标是后台自动重启。
+
+### L′. 低成本尾账（自 v0.1.14 连续迁入）
+
+> 顺序：L7 → L1 → DOC-PRD → L5 → L6 → L4 → L2/L3。
+
+- [ ] **L7 多文件格式前置纪律** — 多文件 Rust 改动在昂贵编译前跑
+  `cargo fmt --check`/仓库 lint；格式失败安全停止，非目标是新增另一套入口。
+- [ ] **L1 身份真机回归** — 干净二进制以 custom instance 启动后 `server-list` 必须
+  显示用户 scope 标签而非误标 main；失败保留原记录并显式报身份不一致。
+- [ ] **DOC-PRD capability 对账** — 把最终 shipped/planned 状态同步到 owning PRD 与
+  稳定 catalog；plan/PRD/alignment 三方无漂移，冲突时停在 planned 而不虚报 shipped。
+  **本版新增范围**：`agenterm-con` 子树（PRD 23–27）与 `agenterm-cu` 子树
+  （PRD 28–31）也在对账范围内。
+- [ ] **L5 Control Center smoke 进 CI 评估** — 写明进入/不进入哪个 lane、墙钟预算
+  与唯一 owner；不把 GUI 工作藏入声称跳过 smoke 的 lane。
+- [ ] **L6 stale 注册记录体验** — `server-list`/cleanup 可识别 stale 但绝不误杀 live
+  server；黑盒覆盖 stale 与 live 并存。
+- [ ] **L4 Control Center 矮窗 tab 条** — 约 480px 高度仍能折叠/滚动/导航；不借此
+  启动 Control Center 大改版。
+- [ ] **L2 persistent-worker dedup 上限** — 先记录预算/淘汰决策，再实现有界行为与
+  饱和测试；不得把 robustness budget 解释成权限。
+- [ ] **L3 无 HOME/XDG 的实例目录** — 决定并验证 fallback 私有目录、符号链接与祖先
+  目录完整性；失败必须拒绝不可信共享位置。
+
+### Ux. Windows 尾账余量
+
+- [ ] **U4 generation-aware TabSelected delta**（可砍，但不得缩写成无合同优化）—
+  仅 active 变化且 screen generation 一致时省略整屏 cells；generation 落后、未知或
+  断档必须 fail-closed 拉全量。
+- [ ] **S4 同窗热切换权威（默认 v0.2）** — 若拍板实现，状态机必须是确认 → detach
+  当前 lease → 换 endpoint → 新 bootstrap；失败回到原 context 或诚实断开，绝不串
+  PTY。本版只保留去向，不把"边界文档"冒充 S4 完成。
+
+### 引擎与测试基建债
+
+- [ ] **QJS-M6 operation catalog 静态对账** — 以 `OPERATION_CATALOG` 为权威：已知
+  literal operation 在 `check`/`check-many` 通过，未知 literal 返回 typed
+  fail-closed，动态表达式标为不可静态证明且不得虚报通过。`capability` 仅为发现/
+  兼容元数据，绝非授权。
+- [ ] **E1 qjs pack 身份语义** — 决定字节码 hash 是仅 provenance 指纹还是加载权威
+  并写入公开 contract；不能把未消费 hash 描述成可执行字节绑定。
+- [ ] **E2 lua fail-closed entry** — 明确并测试缺 entry/坏 entry 的稳定错误与退出码；
+  不要求 lua 复制 rh AOT 机制。
+- [ ] **E3 rh shipped surfaces 对账** — 对 32 条 host catalog 缺失声明逐项删除、实现
+  或标 planned/unavailable；未实现 API 是产品缺口，不是权限裁剪理由。
+- [ ] **E4 测试孤儿进程** — owning tests 必须清理其 `agenterm server` 子树并证明构建
+  输出可覆盖；安全失败保留诊断但不做宽泛进程清理。
+- [ ] **E5 删除已弃用的 `agenterm cli script` 入口** — 先迁移仓库全部调用者，再由
+  CLI dispatch/help/catalog 与跨引擎黑盒证明四个按引擎入口仍可发现和执行；旧入口
+  返回稳定 typed unknown-command 失败。任何仍有 owner 的调用者未迁完时不得先删
+  dispatch。
+
+### 跨版轨态度（不变）
+
+| 轨 | 本版态度 |
+|----|----------|
+| **M** 多 agent 观察 | 文档/约定可补；大功能仍推 v0.2.x |
+| **N1** platform facade | 可选小叶；不阻塞其他 |
+| **L-CC** | 设计稿已有；实现默认 **v0.2.0** |
+| **L-NET** | 研究继续，**不进**本版 must-ship |
+| **L-CU** | **本版态度变更**：已立项，见 §13 |
+
+---
+
+## 12. 轨 C：`agenterm-con` 第二产品
+
+> 产品真理：PRD 子树 [23](../prd/PRD_02_23_agenterm_con.md) 根 +
+> [24](../prd/PRD_02_24_con_terminal.md) 终端渲染 /
+> [25](../prd/PRD_02_25_con_workspace.md) 工作区输入 /
+> [26](../prd/PRD_02_26_con_control_cli.md) 控制与 CLI /
+> [27](../prd/PRD_02_27_con_delivery.md) package 与交付。
+> 结构债：[`ARCHITECTURE.md`](ARCHITECTURE.md) §4 C1–C3。
+
+con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序的一个 bin"。本版
+**不把 con 当作尾账**，而是当作一条有自己 Gate 的产品轨。
+
+### 不变量（本轨全程）
+
+- con 的绿状态不得来自工作台测试，工作台的也不得来自 con；两条 CI 在同一 SHA
+  各自成功才进 Candidate。
+- 体积陈述必须指明 profile。不得以恢复 abort、削弱背压/durability/清洁关闭换体积。
+- PE 字节、perf 探针与证据计数只写进 PRD 27/24；目录、mod 与巨石切分只写进
+  ARCHITECTURE。见 ARCHITECTURE §4 C3。
+
+### 叶
+
+- [ ] **CON-budget 512 KiB 预算回收** — 精确 custom-std unwind/trace-only
+  `con-release-fast` 当前**超预算 9,216 B**（resize/close 自动化 +2,560、live-resize
+  retained-DIB +1,024）。用户问题是"轻量宿主"若持续超预算就名不副实。证据必须是
+  linked-symbol / disassembly / target-specific cold build，不接受增量构建数字。
+  安全失败：拿不到可复现证据就保持超预算并如实记录，不改预算定义蒙混过关。
+  非目标：回退 unwind、砍掉已验收的 resize/close 语义。
+- [ ] **CON-C1 主体巨石切分** — `src/bin/agenterm-con.rs` 6,238 行占 con 产品源码
+  60%，VT 回调、终端状态机、`ConApp`、perf 计数、待决控制请求与像素 `Surface`
+  同居。按 PRD 24/25/26 既有边界切分；**先切 `ConApp` 的待决请求与 perf 状态**
+  （已有 PRD 26 契约兜底），再动渲染路径。不变量：切分不得改变任何公开 CLI/JSON
+  合同字节；每步由 con 自有黑盒与对齐门证明无行为变化。非目标：借切分改产品语义。
+- [ ] **CON-C2 package 物理分离** — 源码与测试迁入 `crates/agenterm-con/`，消除
+  `[[bin]]`/`[[test]]` 的 `../../` 回指。迁移前 PRD 27 的物理分离条目保持 `[~]`，
+  不得因依赖图已独立就宣称布局已分离。非目标：顺手重排工作台目录。
+- [ ] **CON-C3 文档双写止血** — ARCHITECTURE 第 236–562 行的 con 体积史/证据计数
+  与 PRD 27/24 平行记录，且曾领先 PRD 两代。按 ARCHITECTURE §4 C3 的单主规则做一次
+  去重扫描：结构规则留 ARCHITECTURE，字节与证据归 PRD。证据是两文档对同一增量不再
+  各记一份。非目标：删除历史数字。
+- [ ] **CON-residual 行为余量**（承接 v0.1.17 C 组）— 真实 TUI 方向键与备用屏滚轮、
+  IME 端到端人工验收、脚本化拖拽黑盒。缺主机证据的项保持 `[ ]`，不以单测代替。
+- [ ] **CON-font 字体度量**（承接）— 采用与主程序同一原生字体/格宽度量路径，验证
+  ASCII 1 格、CJK/宽字符 2 格。非目标：在 custom rasterizer 中混拼 font face。
+- [ ] **CON-C10d 可选三叶**（承接，不阻塞 must-ship）— 回看搜索、OSC 8 链接、脏行
+  重绘各自独立验收。非目标：server attach 或完整 conhost 替代。
+
+### 轨 C Gate
+
+| Gate | 必须证明 | 不通过时 |
+|------|----------|----------|
+| **GC1** | con 自有对齐门 + 完整 con 套件在精确 unwind profile 下全绿 | 不动巨石 |
+| **GC2** | CON-C1 每一步切分后公开合同字节不变 | 回滚该步，不累积半切状态 |
+| **GC3** | CON-budget 有可复现的 linked-symbol/disassembly 证据 | 如实记录超预算，不宣称达标 |
+
+---
+
+## 13. 轨 D：`agenterm-cu` computer-use 立项
+
+> 产品真理：PRD 子树 [28](../prd/PRD_02_28_agenterm_cu.md) 根 +
+> [29](../prd/PRD_02_29_cu_command_surface.md) 命令面 /
+> [30](../prd/PRD_02_30_cu_targets_transports.md) 目标与传输 /
+> [31](../prd/PRD_02_31_cu_authorization_safety.md) 授权与审计。
+> 设计输入：[`plan-v0.1.15.md`](plan-v0.1.15.md) §5.6 主线 L-CU、
+> [`agent-human-parity-audit.md`](agent-human-parity-audit.md)（`current` 档现状）。
+
+**决策项 P4（是否立项 / 归口哪个 PRD / 首发平台）已拍板**：立项，归 PRD 28–31
+专属子树，首发 `current` 档。本轨在 v0.1.18 内**只做设计与 `current` 档原型**，
+不承诺任何 tier 进入 shipped。
+
+### 不变量（本轨全程）
+
+- 不重造第五套截图/输入实现。OS 机制一律经 `agenterm-platform`，缺什么就往 platform
+  加 typed `Available/Unsupported/Failed`，不在 cu 里直调 OS API。
+- `current` 是协议族的 local 退化档，不是临时方案。加 transport 只换传输层，不动
+  上层命令集。
+- 不继承脚本引擎那套"无限制本地运行时"姿态。**含 `current` 档在内**，任何 tier 在
+  其授权/审计/拒绝语义通过前不得标记 shipped。
+- 参考实现（隔壁 monorepo `skills/computer-use/`）只是设计输入，代码/运行时/依赖
+  一律不进产品图。
+
+### 叶
+
+- [ ] **CU-D0 设计稿落地** — 产出 `plan/design-agenterm-cu.md`：抽象命令集清单、
+  洋葱分层的具体 mod 边界、可执行形态与进程模型、`current` 档后端选型。用户问题是
+  没有设计稿就会直接长成第五套输入实现。证据是设计稿逐条对上 PRD 29/30/31 的条目，
+  且在 PRD 02 登记可执行角色。安全失败：形态未定前不写产品代码。
+- [ ] **CU-D1 platform 机制缺口测绘** — 对照命令集，列出 `agenterm-platform` 已有
+  与缺失的机制（控件树枚举是最大缺口）。证据是一张缺口表 + 每项的 typed 契约草案。
+  非目标：本叶不实现机制。
+- [ ] **CU-D2 `current` 档原型** — 在一个平台上打通"截图 + 枚举窗口 + 枚举控件树 +
+  点击 + 输入"最小竖线。不变量：结构化身份优先于像素，退化为坐标必须在结果里显式
+  可见。证据是公开黑盒对真实目标跑通并等待状态而非 sleep。安全失败：控件树不可用
+  时返回 typed 退化模式，不静默猜坐标。
+- [ ] **CU-D3 授权与审计骨架** — 与 CU-D2 同步落地，不得后补。证据是黑盒证明未授权
+  动作被拒、撤销后不再生效、已授权动作有记录、凭据不出现在任何已发布产物中。
+  安全失败：审计路径不可用则动作不执行。
+- [ ] **CU-D4 agenterm 作为 cu 目标** — 把 `ui-snapshot` 的精确 bounds 接成 cu 的
+  结构化观察源，验证"agenterm 是第一个自带结构化控件树的 computer-use 目标"这一
+  差异点。非目标：本版不做远程 tier。
+
+### 轨 D Gate
+
+| Gate | 必须证明 | 不通过时 |
+|------|----------|----------|
+| **GD1** | CU-D0 设计稿与 PRD 29–31 逐条对齐，PRD 02 已登记可执行角色 | 不写产品代码 |
+| **GD2** | CU-D1 缺口表完成，机制去向明确（进 platform 还是不做） | 不在 cu 内直调 OS API |
+| **GD3** | CU-D2 + CU-D3 同时通过 | `current` 档不得标记任何 shipped 状态 |
+
+**轨 D 非目标（本版）**：ssh/rdp/vnc 任一远程 tier 的实现、模型/规划/agent loop、
+引入外部 computer-use 框架、公开发布 cu 可执行体。
 
 ---
 
 *执行投影，非产品宪法。能力状态以 PRD 为准；本版 App Pack 架构、Phase 0 与后续去向*
-*已在本文件收敛，归档讨论稿不得重新作为活跃 SSOT。*
+*已在本文件收敛，归档讨论稿不得重新作为活跃 SSOT。v0.1.17 的未完成叶已 upsert 至*
+*§11，其归档文件只保留追溯价值。*

@@ -45,7 +45,7 @@
 |------|------|
 | **plan/ 现行索引** | [`plan/README.md`](../README.md) |
 | 当前代码线/发布链 | `plan/plan-v0.1.16.md` |
-| 下一列车收口树 | `plan/plan-v0.1.17.md` |
+| 在制唯一版本计划 | `plan/plan-v0.1.18.md` |
 | Portable App Substrate 草案 | `plan/plan-v0.1.18.md` |
 | 上一已发布版本复盘（历史） | `plan/archive/plan-v0.1.14.md` |
 | 发布链要求（版本无关） | `prd/PRD_02_17_delivery_quality.md` §Release-chain operating requirements |

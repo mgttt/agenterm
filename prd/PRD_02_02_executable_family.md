@@ -17,6 +17,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   UI-only commands (`ui-snapshot`, screenshots, composer HWND, settings)
   stay host-specific. Headless authority is likewise `agenterm server`
   (same binary, separate process), not a second executable.
+- [~] `agenterm-con`: independently packaged lightweight terminal host
+  (`crates/agenterm-con`), not a bin target or mode of `agenterm`. It is a
+  second product with its own dependency graph, `con-dev`/`con-release-fast`/
+  `con-release` unwind profiles, a 512 KiB x86_64 artifact target, and its own
+  CI. It contains no server, Fleet, mux, MCP or script runtime, and never
+  autostarts or connects to `agenterm server`. Role detail, budget status and
+  measured artifact history are owned by
+  [`agenterm-con` package and delivery](PRD_02_27_con_delivery.md); the product
+  itself by [`agenterm-con`](PRD_02_23_agenterm_con.md).
+- [ ] `agenterm-cu`: AgenTerm's own computer-use foundation. Newly accepted
+  scope under design; its executable shape, process model and any helper-process
+  requirement are not yet decided and must be registered here before delivery.
+  It supersedes the `agenterm-remote.exe` working name. Product definition,
+  boundary and gates belong to
+  [Computer-use foundation](PRD_02_28_agenterm_cu.md); it must not be delivered
+  as an undeclared background authority.
 - [x] the shipped architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory

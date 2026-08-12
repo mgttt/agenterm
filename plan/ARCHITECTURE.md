@@ -75,6 +75,22 @@ src/platform/adapters/       主机实现（物理目录）
   windows/                   replaceable remote UI ↔ agenterm server
   unix/frontend/             embedded 窗口 + 产品状态机
   linux|macos/               契约/manifest 等（非第二套业务策略）
+
+crates/agenterm-con/         第二产品 package：仅 Cargo.toml + build.rs
+                             autobins=false；[[bin]]/[[test]] 路径回指下方源码
+src/bin/agenterm-con.rs      宿主主体 6,238 行（见 §4 C1 债务）
+                             ConApp / ConTerminal / SessionStore / PerfStats /
+                             Surface / impl PixelWindowApplication
+src/bin/agenterm-con/        con 私有叶（不被主程序 mod 引用）
+  control.rs                 ATC1 固定控制语法（1,687 行，con 最大叶）
+  json.rs                    固定 schema 有界 JSON 编解码（825 行）
+  agent_interface.rs         机器可读自省 / ui-snapshot 组装
+  ui.rs                      纯 geometry + 命中；孵化层，见下方提升规则
+  workspace.rs               只拥有 tab 身份与父子关系（无 PTY/渲染/持久化）
+  composer.rs                纯单行编辑规则（剪贴板 I/O 留在宿主）
+  font.rs / palette.rs       产品侧字形缓存策略 / xterm 256 色解析
+  startup.rs                 Windows loader/CRT 边界（con 独占）
+  bitmap_glyphs.in.rs        内嵌 ASCII 兜底字模
 ```
 
 **妥当**：分叉停在「主机如何画 / 如何收事件」。  
@@ -138,6 +154,9 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | Win 主机 | `src/platform/adapters/windows/{frontend,remote_frontend}.rs` | remote 客户端；`remote_frontend` 巨石见 L2 |
 | Unix 主机 | `src/platform/adapters/unix/frontend/` | embedded 状态机；`mod`/`render` 巨石见 L2 |
 | 机制 crate | `crates/agenterm-platform/src/{selected,window,numeric,input,ipc,pty,process,shared_memory}.rs` | 无产品名；`numeric` 固化 native geometry 的 IEEE-754 取整叶 |
+| con 宿主 | `src/bin/agenterm-con.rs` | 6,238 行巨石；VT 回调/终端状态机/应用状态/perf/待决请求/Surface 同居，见 §4 C1 |
+| con 自动化 | `src/bin/agenterm-con/{control,json,agent_interface}.rs` | ATC1 语法 + 有界 JSON + 自省；公开面契约归 `prd/PRD_02_26_con_control_cli.md` |
+| con 纯规则叶 | `src/bin/agenterm-con/{ui,workspace,composer}.rs` | 孵化层：无 window/PTY 依赖；证据稳定后按下方提升顺序迁入 `src/frontend/*` |
 | 边界闸 | `src/platform/boundary_tests.rs` | 规则见 §8.2；**不**解析本文全文 |
 
 ---
@@ -154,6 +173,9 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | L3 | `platform/mod.rs` 策略过肥（input/paths/control_center/runtime/test_fixtures/workspace 已拆 `policy/`；FrontendHost 与 facade 是剩余薄层）+ `allow(dead_code)` | `policy/*` 全拆收口；禁新顶层 `is_windows_host` 蔓延；半迁移 facade 二选一（全接线或删） |
 | L4 | **结构 SSOT 未机读双向**（本文 prose + 局部 `boundary_tests`；目录树/分层文案漂移靠人） | 见 §8.4；版本 plan **S 组**执行；本文只定契约 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
+| C1 | `src/bin/agenterm-con.rs` 6,238 行 = con 产品源码 60%；VT 回调、终端状态机、`ConApp`、perf 计数、待决控制请求、像素 `Surface` 与 `PixelWindowApplication` 实现同居一文件。其余 10 个叶平均 400 行且注释明写"不拥有什么"，该纪律未施加到主文件 | 按 PRD 24/25/26 的既有边界切分：终端/渲染、工作区/输入、控制/CLI 各自成 mod；**先切 `ConApp` 的待决请求与 perf 状态**（已有 PRD 26 契约兜底），再动渲染路径 |
+| C2 | `crates/agenterm-con/` 只有 manifest + build.rs，源码仍在工作台 `src/bin/`、测试在 `tests/`，靠 `[[bin]]`/`[[test]]` 路径回指；"独立 package"只成立于依赖图，不成立于物理布局 | 源码与测试迁入 crate 内；迁移前 `prd/PRD_02_27` 的物理分离条目须保持 `[~]`，不得因依赖图已独立就宣称布局已分离 |
+| C3 | con 的 PE 体积史/证据计数在本文（§体积与复用）与 `prd/PRD_02_2{4,7}` 两处平行记录，且本文一度领先 PRD 两代增量 | 单主：PE 字节、perf 探针、证据计数归 PRD 27/24；本文只留结构规则与提升顺序。新增量禁止双写 |
 
 已清理：`src/platform/services/frontend.rs` 孤儿 re-export（无人 `mod`）——删除；入口以 `src/frontend/` 为准。
 
@@ -167,6 +189,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | 结构如何被自动勾住 / 工具边界？ | **本文 §8** |
 | 本版要修哪些叶？ | 当前版本 `plan/plan-v0.1.*.md`（结构机读化 → **S 组**） |
 | 能力是否 shipped / 验收？ | owning `prd/PRD_*.md` + `prd/alignment-contract.json` + `scripts/rh/prd-alignment.rh`（**能力**对齐，**不是**结构树） |
+| `agenterm-con` 的能力 / 边界 / 预算 / 体积史？ | `prd/PRD_02_23`（子树根）+ `24` 终端渲染 / `25` 工作区输入 / `26` 控制与 CLI / `27` package 与交付。**本文只管 con 的代码怎么摆和欠什么结构债**（§1.1 / §3 / §4 C1–C3） |
 | Win↔Unix 可见行为差距？ | `plan/plan-unix-gui-win-parity.md` + evidence matrix（**差距地图，不是结构 SSOT**） |
 | Agent 操作纪律？ | `AGENTS.md` |
 | 产品总树？ | `PRD.md` |
@@ -189,8 +212,16 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 
 ### 6.2 `agenterm` / `agenterm-con` 协同边界
 
+- **文档分工（单主）**：con 的产品能力、边界、状态、预算数字、PE 体积史与证据
+  计数归 `prd/PRD_02_23`–`27` 子树；本文只拥有 con 的物理布局（§1.1）、热文件
+  （§3）、结构债（§4 C1–C3）和下方的机制提升顺序。新增量只写一处——写 PE 字节
+  或证据计数就写进 PRD 27/24，写目录/mod/巨石切分就写进本文。见 §4 C3。
 - UI/UX 可分化：主程序是 server/script/Fleet 工作台；`agenterm-con` 是随 GUI
   生命周期结束的轻量多终端，两者不共享产品导航、持久化或 authority policy。
+- 日常 CI 与产品边界一致：`.github/workflows/ci-agenterm.yml` 拥有主程序与共享
+  mechanism gate，`.github/workflows/ci-agenterm-con.yml` 拥有 con package、`con-*`
+  unwind profile、公开 GUI 黑盒与六平台编译。Candidate 只在同一 SHA 的两条 CI
+  都成功后进入集成资格与封装；旧大一统工作流只保存在 `archive/ci/`。
 - 底层机制应汇合：PTY 生命周期、VT/宽字符、字体与渲染缓存、选择/剪贴板、
   IME/focus、鼠标/滚轮、DPI geometry、背压/调度及黑盒观测接口优先形成纯函数或
   typed platform/frontend contract；host adapter 只 present/wake/接 OS 事件。

@@ -75,6 +75,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "agenterm-cu"
+version = "0.1.0"
+dependencies = [
+ "agenterm-platform",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "agenterm-lua"
 version = "0.1.0"
 dependencies = [

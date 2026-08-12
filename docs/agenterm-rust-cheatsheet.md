@@ -448,6 +448,14 @@ a full budget independently granted to every session. Divide the fixed byte
 budget across live sessions (while preserving progress for each) so tab count
 cannot multiply GUI-thread latency.
 
+Do not divide that global producer budget across idle sessions: a quiet sibling
+must not permanently tax the only backlogged producer. Snapshot which queues
+have committed bytes, divide only among those queues, and debit actual bytes so
+unused allowance remains available later in the same event. Still visit idle
+sessions with a zero-byte budget for out-of-band completion state; output that
+races the snapshot must report backlog and repost Wake rather than exceeding
+the event budget.
+
 A bounded request queue does not by itself bound event-loop latency: one GUI
 callback can still drain every queued heavy request. Set the callback batch
 below the maximum simultaneous worker count, atomically take that fixed batch

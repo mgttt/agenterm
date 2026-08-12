@@ -22,6 +22,16 @@
       "commands": ["capture-pane", "send-keys", "send-paste", "send-text", "wait-tab-exit", "wait-text"]
     },
     {
+      "id": "con.terminal.sustained-throughput",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_24_con_terminal.md",
+      "prd_anchor": "- [x] con's dedicated public sustained-output qualification delivers a fixed",
+      "evidence": ["agenterm_con_throughput::sustained_long_output_keeps_control_and_sibling_responsive"],
+      "commands": []
+    },
+    {
       "id": "con.workspace.tree",
       "kind": "behavior",
       "status": "shipped",

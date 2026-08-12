@@ -801,7 +801,7 @@ pack 目录**外**还有一个同级文件（不属于密封内容，用户改 p
 | `plan/design-scripting-boundary-comparison.md` | Rhai/Lua/QJS 引擎边界对照 |
 | `plan/design-script-engine-trait.md` | `ScriptEngineBackend` trait 设计 |
 | `plan/ARCHITECTURE.md` | 现行结构 SSOT；三层边界 |
-| `plan/plan-v0.1.17.md` | v0.1.17 收口版；本计划在其后执行 |
+| `plan/archive/plan-v0.1.17.md` | v0.1.17 收口版；本计划在其后执行 |
 | `plan/plan-v0.1.18.md` | v0.1.18 版本执行投影；拥有该版本的范围、Gate 与验收口径，本文继续拥有 App Pack 架构和 Phase 细节 |
 | `prd/PRD_02_10_rhai_scripting.md` | Script 引擎家族产品归属 |
 | `prd/PRD_02_02_executable_family.md` | 可执行文件家族 |

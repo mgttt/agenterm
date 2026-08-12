@@ -63,6 +63,9 @@ pub enum Capability {
     Ipc,
     Pty,
     Window,
+    WindowEnumerate,
+    WindowOp,
+    InputInject,
     Input,
     Ime,
     Activation,
@@ -130,6 +133,9 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Ipc => (cfg!(feature = "ipc"), true),
         Capability::Pty => (cfg!(feature = "pty"), true),
         Capability::Window => (cfg!(feature = "window"), true),
+        Capability::WindowEnumerate => (cfg!(feature = "window-enum"), true),
+        Capability::WindowOp => (cfg!(feature = "window-op"), true),
+        Capability::InputInject => (cfg!(feature = "input-inject"), true),
         Capability::Input => (cfg!(feature = "input"), true),
         Capability::Ime => (cfg!(feature = "ime"), true),
         Capability::Activation => (cfg!(feature = "activation"), true),
@@ -242,6 +248,15 @@ pub mod ipc;
 
 #[cfg(feature = "input")]
 pub mod input;
+
+#[cfg(feature = "window-enum")]
+pub mod window_enumerate;
+
+#[cfg(feature = "window-op")]
+pub mod window_op;
+
+#[cfg(feature = "input-inject")]
+pub mod input_inject;
 
 #[cfg(feature = "input")]
 pub mod terminal_input;

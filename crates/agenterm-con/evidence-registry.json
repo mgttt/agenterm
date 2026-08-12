@@ -12,6 +12,15 @@
       "source": "tests/agenterm_con_alignment.rs"
     },
     {
+      "id": "agenterm_con_throughput::sustained_long_output_keeps_control_and_sibling_responsive",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_throughput",
+      "test_name": "sustained_long_output_keeps_control_and_sibling_responsive",
+      "source": "tests/agenterm_con_throughput.rs"
+    },
+    {
       "id": "agenterm_con_blackbox::cjk_output_from_a_real_child_process_appears_as_actual_characters",
       "kind": "public-black-box",
       "emitter": "cargo-test-harness",

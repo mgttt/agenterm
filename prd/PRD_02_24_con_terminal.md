@@ -208,7 +208,10 @@ frame and pixel counts.
 - Historical only: pre-row-damage probes observed 2/5 partial candidates at
   about 60.0% dirty pixels for blink/idle, falling to 2/13 and about 84.6% after
   mixed PTY output. These are directional evidence, not release qualification.
-- [ ] con has no sustained high-throughput and long-output performance
-  qualification of its own. The OSC stress and concurrent-producer flood
-  journeys are robustness evidence, not throughput qualification, and this gap
-  is what keeps the product outcome in [23](PRD_02_23_agenterm_con.md) partial.
+- [x] con's dedicated public sustained-output qualification delivers a fixed
+  31.9 MiB payload at no less than 4 MiB/s with a 30-second hard deadline while
+  a sibling tab responds within five seconds and repeated `list-tabs` /
+  `perf-stats` observations stay below two seconds. Its receipt requires the
+  complete PTY byte count, at least one bounded-budget yield, zero native-present
+  failures, zero host copies and clean `close-window` shutdown. This is distinct
+  from the OSC and close-under-flood robustness journeys.

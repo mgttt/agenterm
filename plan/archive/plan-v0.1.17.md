@@ -1,6 +1,25 @@
 # AgenTerm v0.1.17 公开计划
 
-状态：**迁移收敛中，待 v0.1.16 发布链收口后开工**（2026-08-10）
+> ## ⚠️ 已归档（2026-08-12）
+>
+> **v0.1.17 从未开工发布**：其收口树在 v0.1.16 发布链仍未收口期间一直待命，
+> 用户决定不再单开这一列车。
+>
+> - **未完成叶已整树 upsert** 至在制版本
+>   [`../plan-v0.1.18.md`](../plan-v0.1.18.md) **§11 轨 B**：W1–W4、U2、
+>   O-evidence、R1e/R2e/R4e、T-debt 两项、G1/H2/G7b/c/d、L′ 全组、U4、S4、
+>   QJS-M6、E1–E5、C 组余量。叶定义、不变量、证据与非目标在新文件中保持原文效力。
+> - **已完成事实留在本文**：Rh-M23 基线、G-P1/G-P2 决策、§0.2 的 v0.1.16 缺口
+>   快照、§7 决策记录。
+> - **C 组 agenterm-con 叶**另有去向：产品真理已迁入 PRD 子树
+>   [`../../prd/PRD_02_23_agenterm_con.md`](../../prd/PRD_02_23_agenterm_con.md)
+>   （23–27），执行叶迁入 `plan-v0.1.18.md` **§12 轨 C**。
+> - 本文**保留仅为追溯，不要作为执行依据**；不得从本文单独恢复叶或复活
+>   "v0.1.17 列车"。
+>
+> 原状态行（历史）：**迁移收敛中，待 v0.1.16 发布链收口后开工**（2026-08-10）
+
+状态：**已归档，不再派工**（2026-08-12）
 不创建 tag / Candidate / Release，除非人工明确授权。
 版本列车停在 **0.1.16 代码线**；本文件是 **下一列车执行投影**，不替代 PRD。
 
@@ -11,8 +30,8 @@ v0.1.16 已完成的大规模并行工作（agenterm-con 产品化、
 QuickJS 引擎、跨引擎共享层、SQL 后端）不再重复列出，仅记录其留下的未收
 缺口。
 
-> 上版工作树与证据：[`plan-v0.1.16.md`](plan-v0.1.16.md)。
-> 结构 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md)。
+> 上版工作树与证据：[`plan-v0.1.16.md`](../plan-v0.1.16.md)。
+> 结构 SSOT：[`ARCHITECTURE.md`](../ARCHITECTURE.md)。
 
 ---
 
@@ -246,7 +265,7 @@ R′. Evidence closeout
 ### Rh. 脚本引擎基线
 
 - [x] **Rh-M23** — AOT 扩面、check parity、caller wave 1 与 shim 硬化均已完成；
-  证据 SSOT 为 [`plan-rh-3.md`](plan-rh-3.md) §5。v0.1.17 不重复迁移；新的
+  证据 SSOT 为 [`plan-rh-3.md`](../plan-rh-3.md) §5。v0.1.17 不重复迁移；新的
   rh 工作只来自 E3 或明确的新里程碑。
 
 ### QJS. QuickJS 引擎缺口
@@ -382,16 +401,16 @@ R′. Evidence closeout
 
 | 文档 | 关系 |
 |------|------|
-| [`PRD.md`](../PRD.md) / `prd/*` | 产品真理；本 plan 收敛后同步 capability 状态 |
-| [`plan-v0.1.16.md`](plan-v0.1.16.md) | 上版工作树与已完成项全文 |
-| [`plan-v0.1.15.md`](plan-v0.1.15.md) | 上上版证据与推迟表全文 |
-| [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Unix 对齐地图 |
-| [`plan-rh-3.md`](plan-rh-3.md) | rh 并行轨细节 |
-| [`../prd/PRD_02_10_rhai_scripting.md`](../prd/PRD_02_10_rhai_scripting.md) | QJS-M6 operation catalog 与 Script Runtime 权威 |
-| [`design-scripting-boundary-comparison.md`](design-scripting-boundary-comparison.md) | 脚本引擎 L2 契约 |
-| [`design-script-engine-trait.md`](design-script-engine-trait.md) | trait 统一设计 |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 热文件 / 分层 |
-| [`Agents.md`](../Agents.md) | 并发、观察、开发环 |
+| [`PRD.md`](../../PRD.md) / `prd/*` | 产品真理；本 plan 收敛后同步 capability 状态 |
+| [`plan-v0.1.16.md`](../plan-v0.1.16.md) | 上版工作树与已完成项全文 |
+| [`plan-v0.1.15.md`](../plan-v0.1.15.md) | 上上版证据与推迟表全文 |
+| [`plan-unix-gui-win-parity.md`](../plan-unix-gui-win-parity.md) | Unix 对齐地图 |
+| [`plan-rh-3.md`](../plan-rh-3.md) | rh 并行轨细节 |
+| [`../prd/PRD_02_10_rhai_scripting.md`](../../prd/PRD_02_10_rhai_scripting.md) | QJS-M6 operation catalog 与 Script Runtime 权威 |
+| [`design-scripting-boundary-comparison.md`](../design-scripting-boundary-comparison.md) | 脚本引擎 L2 契约 |
+| [`design-script-engine-trait.md`](../design-script-engine-trait.md) | trait 统一设计 |
+| [`ARCHITECTURE.md`](../ARCHITECTURE.md) | 热文件 / 分层 |
+| [`Agents.md`](../../Agents.md) | 并发、观察、开发环 |
 
 ---
 

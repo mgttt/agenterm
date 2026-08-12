@@ -2,6 +2,15 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
+This module owns the workbench command line only. `agenterm-con cli` is a
+different contract with a different transport and lifetime, owned by
+[`agenterm-con` control and public CLI](PRD_02_26_con_control_cli.md). Where a
+verb spelling appears in both (`capture-pane`, `screenshot-pane`, `send-text`,
+`send-keys`, `wait-text`) it must mean the same product action; the standalone
+host omits a verb it cannot honor rather than shipping a reduced impostor. The
+two CLIs deliberately do not share a wire, a discovery mechanism, or a session
+model, and neither may be documented as a subset of the other.
+
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - Shared grammar

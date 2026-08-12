@@ -439,6 +439,30 @@ pub mod ipc;
 #[path = "adapters/windows/input.rs"]
 pub(crate) mod input;
 
+#[cfg(all(feature = "window-enum", windows))]
+#[path = "adapters/windows/window_enumerate.rs"]
+pub(crate) mod window_enumerate;
+
+#[cfg(all(feature = "window-enum", not(windows)))]
+#[path = "adapters/unix/window_enumerate.rs"]
+pub(crate) mod window_enumerate;
+
+#[cfg(all(feature = "window-op", windows))]
+#[path = "adapters/windows/window_op.rs"]
+pub(crate) mod window_op;
+
+#[cfg(all(feature = "window-op", not(windows)))]
+#[path = "adapters/unix/window_op.rs"]
+pub(crate) mod window_op;
+
+#[cfg(all(feature = "input-inject", windows))]
+#[path = "adapters/windows/input_inject.rs"]
+pub(crate) mod input_inject;
+
+#[cfg(all(feature = "input-inject", not(windows)))]
+#[path = "adapters/unix/input_inject.rs"]
+pub(crate) mod input_inject;
+
 #[cfg(all(feature = "activation", windows))]
 #[path = "adapters/windows/activation.rs"]
 pub(crate) mod activation;

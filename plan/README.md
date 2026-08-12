@@ -8,8 +8,7 @@
 | 文件 | 角色 |
 |------|------|
 | [`plan-v0.1.16.md`](plan-v0.1.16.md) | **当前代码线/发布链修复**；是否发布仍服从 exact-SHA 授权 |
-| [`plan-v0.1.17.md`](plan-v0.1.17.md) | **下一列车收口树**；承接 v0.1.16 最终仍未闭合的产品与证据叶 |
-| [`plan-v0.1.18.md`](plan-v0.1.18.md) | **草案**：Portable App Substrate；App Pack 架构、Phase 0 与后续去向已收敛于此 |
+| [`plan-v0.1.18.md`](plan-v0.1.18.md) | **在制唯一版本计划**，四条轨：A App Substrate、B v0.1.17 承接树、C `agenterm-con`、D `agenterm-cu` |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层、热文件与结构禁令 SSOT |
 | [`plan-rh-3.md`](plan-rh-3.md) | Rh 当前执行与证据轨；已归档 namespace/trace 文档不得替代它 |
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix 可见行为差距地图 |
@@ -37,6 +36,7 @@
 见 [`archive/README.md`](archive/README.md)。含：
 
 - 已发版 / 已终止版本 plan：`plan-v0.1.8` … `plan-v0.1.14`、`goal-v0.1.14`
+- 未开工即归档：`plan-v0.1.17`（2026-08-12；未完成叶已 upsert 至 `plan-v0.1.18` §11）
 - 已落地专题：`plan-agenterm-server-mode`、`plan-skins-v1`、`plan-platform-facade-v4`、`osx-cpu-improve`
 - 已完成 goal 快照：`goal-v0.1.15-server-instance-s-prime`
 - 历史过程文：`platform-ui-ux-boundary-tree`（superseded by ARCHITECTURE）

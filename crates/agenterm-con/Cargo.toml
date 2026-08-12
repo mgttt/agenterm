@@ -25,6 +25,10 @@ path = "../../tests/agenterm_con_control.rs"
 name = "agenterm_con_alignment"
 path = "../../tests/agenterm_con_alignment.rs"
 
+[[test]]
+name = "agenterm_con_throughput"
+path = "../../tests/agenterm_con_throughput.rs"
+
 [dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "filesystem-publish", "filesystem-read", "font", "ime", "ipc", "parent-console", "pty", "runtime", "screenshot", "window"] }
 agenterm-ui-core = { path = "../agenterm-ui-core", features = ["terminal-selection"] }

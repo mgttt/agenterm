@@ -21,6 +21,8 @@ pub mod host_memory;
 pub mod ime;
 #[cfg(feature = "input")]
 pub mod input;
+#[cfg(feature = "input-inject")]
+pub mod input_inject;
 #[cfg(feature = "ipc")]
 pub mod ipc_transport;
 pub mod local_clock;
@@ -58,5 +60,9 @@ pub mod terminal_input;
 pub mod ui_screenshot;
 #[cfg(feature = "webview")]
 pub mod webview;
+#[cfg(feature = "window-enum")]
+pub mod window_enumerate;
 #[cfg(all(feature = "window", feature = "input", feature = "ime"))]
 pub mod window_host;
+#[cfg(feature = "window-op")]
+pub mod window_op;

@@ -9,3 +9,5 @@
 *.log
 *.tmp
 crates/agenterm-wasmcore/target/
+target-click-regression/
+target-click-release/

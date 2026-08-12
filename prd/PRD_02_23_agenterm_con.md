@@ -23,9 +23,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] `agenterm-con` is the lightweight, green, GUI replacement for a system
   console host. It provides several independently owned local terminals without
   the workbench authority, background server, Fleet, mux, MCP, or script engines
-  of `agenterm`. It stays partial until sustained-throughput qualification
-  ([24](PRD_02_24_con_terminal.md)) and the 512 KiB artifact budget
-  ([27](PRD_02_27_con_delivery.md)) are both satisfied.
+  of `agenterm`. Its sustained-throughput qualification is shipped in
+  [24](PRD_02_24_con_terminal.md); the product stays partial until the 512 KiB
+  artifact budget in [27](PRD_02_27_con_delivery.md) is recovered.
 
 The product succeeds when a user can launch one small executable, organize
 terminals in a left-side tree, interact through a dedicated external input
