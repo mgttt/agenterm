@@ -1,6 +1,6 @@
 //! OS-neutral runtime-default service.
 
-use std::io;
+use std::{io, path::PathBuf};
 
 use crate::{contract::runtime::TerminalShellDescriptor, selected};
 
@@ -8,6 +8,11 @@ use crate::{contract::runtime::TerminalShellDescriptor, selected};
 /// name. Invalid native text is reported instead of panicking in a GUI entry.
 pub fn application_arguments() -> io::Result<Vec<String>> {
     selected::runtime::application_arguments()
+}
+
+/// Return the host's per-user roaming configuration directory.
+pub fn user_config_directory() -> io::Result<PathBuf> {
+    selected::runtime::user_config_directory()
 }
 
 pub fn default_terminal_shell() -> String {

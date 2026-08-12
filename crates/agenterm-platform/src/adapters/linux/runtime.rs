@@ -1,6 +1,6 @@
 //! Linux runtime defaults.
 
-use std::io;
+use std::{io, path::PathBuf};
 
 use crate::contract::runtime::TerminalShellDescriptor;
 
@@ -16,6 +16,13 @@ pub fn application_arguments() -> io::Result<Vec<String>> {
             })
         })
         .collect()
+}
+
+pub fn user_config_directory() -> io::Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".config"))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unavailable"))
 }
 
 pub fn default_terminal_shell() -> String {

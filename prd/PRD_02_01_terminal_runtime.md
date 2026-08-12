@@ -570,6 +570,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   passthrough and GUI-lifetime control startup are the supported evidence.
   Evidence is 87 unit tests, 18 GUI black-box tests, one multitab control
   journey, Windows x64 Clippy and Linux x64 compile.
+  The user configuration root is now selected by the same runtime facade.
+  Windows calls `SHGetFolderPathW(CSIDL_APPDATA)` into caller-owned UTF-16
+  storage, avoiding both environment-path policy in the product and the COM
+  allocation required by `SHGetKnownFolderPath`; Linux/macOS retain the
+  documented `~/.config` location. A target-specific cold build reduces
+  release-fast from 541,184 to 540,672 bytes. Evidence is three runtime tests,
+  87 unit tests, 18 GUI black-box tests, one multitab control journey, Windows
+  Clippy and Linux x64 compile.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

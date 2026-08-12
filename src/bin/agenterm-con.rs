@@ -256,17 +256,9 @@ struct ConConfig {
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return Some(std::path::PathBuf::from(appdata).join("agenterm-con.json"));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        return Some(
-            std::path::PathBuf::from(home)
-                .join(".config")
-                .join("agenterm-con.json"),
-        );
-    }
-    None
+    agenterm_platform::runtime::user_config_directory()
+        .ok()
+        .map(|directory| directory.join("agenterm-con.json"))
 }
 
 #[inline(never)]

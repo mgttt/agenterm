@@ -345,6 +345,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   现代 MSVC parser 等价。87 unit、18 public GUI black-box、1 multitab control、Windows
   x64 Clippy 和 Linux x64 check 通过。早先 484,352 B 的增量产物不可由同 HEAD 冷构建
   复现，已撤销为尺寸证据；自建 std con 的 A/B 清理必须显式携带 Windows target。
+- 用户配置根同属 `agenterm-platform::runtime`，产品只拥有 `agenterm-con.json` 文件名和
+  schema。Windows 用 `SHGetFolderPathW(CSIDL_APPDATA)` 写入 caller-owned 固定 UTF-16
+  缓冲，不引入 `SHGetKnownFolderPath` 的 COM task allocator；Linux/macOS 保持
+  `~/.config` 合同。target-specific cold PE 从 541,184 B 降至 540,672 B（-512 B）。
+  3 runtime、87 unit、18 GUI black-box、1 control、Windows Clippy 和 Linux x64 check
+  通过。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

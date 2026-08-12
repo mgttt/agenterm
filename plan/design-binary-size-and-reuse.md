@@ -487,6 +487,22 @@ std lives below the explicit Windows target. Size experiments must clean with
 the same HEAD/profile, and compare final staged bytes. A warm artifact or an
 unqualified package clean cannot establish a size delta.
 
+### 2026-08-12: native user configuration root
+
+Con previously selected `%APPDATA%`/`HOME` in product code. The runtime facade
+now owns the per-user configuration root: Windows calls
+`SHGetFolderPathW(CSIDL_APPDATA)` into a caller-owned `MAX_PATH` UTF-16 buffer,
+while Linux/macOS retain `~/.config`. The older Shell API is intentional here:
+`SHGetKnownFolderPath` returns COM task-allocated memory and would add a second
+allocator ownership edge merely to obtain a path. Product code retains only the
+configuration filename and schema.
+
+After target-specific cleaning, the official release-fast PE falls from
+541,184 to 540,672 bytes (-512 bytes). Three runtime tests, 87 con unit tests,
+18 GUI black-box tests, one isolated multitab control journey, Windows x64
+Clippy and Linux x64 compilation pass. This is a narrow native path-policy
+facade, not a reason to put arbitrary product file locations into platform.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

@@ -526,6 +526,15 @@ both owning packages with the exact target triple before each side. An earlier
 cold builds established the real 2,048-byte reduction. Never promote a warm or
 stale staged byte count into PRD evidence.
 
+For the Windows roaming configuration root, prefer
+`SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
+when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns
+COM task-allocated memory and requires `CoTaskMemFree`; do not add that allocator
+edge for a path that already fits the product contract. Keep the filename and
+schema in the product, expose only the host configuration-root mechanism from
+platform, and retain Unix behavior behind the same facade. In con this removed
+one 512-byte PE alignment unit after target-specific cold measurement.
+
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A
 temporary exclusively created by the platform beside a destination does not

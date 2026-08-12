@@ -1,10 +1,12 @@
 //! Windows runtime defaults.
 
-use std::{io, slice};
+use std::{ffi::OsString, io, os::windows::ffi::OsStringExt as _, path::PathBuf, slice};
 
 use crate::contract::runtime::TerminalShellDescriptor;
 use windows_sys::Win32::{
-    Foundation::LocalFree, System::Environment::GetCommandLineW, UI::Shell::CommandLineToArgvW,
+    Foundation::{LocalFree, MAX_PATH},
+    System::Environment::GetCommandLineW,
+    UI::Shell::{CSIDL_APPDATA, CommandLineToArgvW, SHGFP_TYPE_CURRENT, SHGetFolderPathW},
 };
 
 const MAX_COMMAND_LINE_UNITS: usize = 32_768;
@@ -41,6 +43,34 @@ pub fn application_arguments() -> io::Result<Vec<String>> {
         .skip(1)
         .map(|argument| decode_argument(*argument))
         .collect()
+}
+
+/// Resolve roaming application data into caller-owned storage. The legacy
+/// shell API is deliberate here: unlike SHGetKnownFolderPath it needs no COM
+/// task allocation and therefore has no cross-allocator cleanup edge.
+pub fn user_config_directory() -> io::Result<PathBuf> {
+    let mut path = [0_u16; MAX_PATH as usize];
+    let result = unsafe {
+        SHGetFolderPathW(
+            std::ptr::null_mut(),
+            CSIDL_APPDATA as i32,
+            std::ptr::null_mut(),
+            SHGFP_TYPE_CURRENT as u32,
+            path.as_mut_ptr(),
+        )
+    };
+    if result < 0 {
+        return Err(io::Error::other(
+            "Windows roaming configuration directory is unavailable",
+        ));
+    }
+    let length = path.iter().position(|unit| *unit == 0).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Windows returned an unterminated configuration directory",
+        )
+    })?;
+    Ok(PathBuf::from(OsString::from_wide(&path[..length])))
 }
 
 fn decode_argument(argument: *const u16) -> io::Result<String> {
@@ -84,7 +114,7 @@ pub fn preferred_terminal_lang() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{application_arguments, decode_argument};
+    use super::{application_arguments, decode_argument, user_config_directory};
 
     #[test]
     fn native_arguments_match_rust_for_the_test_process() {
@@ -99,5 +129,11 @@ mod tests {
         let argument = [0xd800, 0];
         let error = decode_argument(argument.as_ptr()).expect_err("unpaired surrogate");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn native_user_config_directory_is_absolute() {
+        let path = user_config_directory().expect("native user configuration directory");
+        assert!(path.is_absolute());
     }
 }
