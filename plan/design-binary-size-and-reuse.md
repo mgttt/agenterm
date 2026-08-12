@@ -450,6 +450,32 @@ the assembly trampoline but cannot final-link on this workstation because its
 MSVC ARM64 import libraries are not installed; do not describe that as an ARM64
 link pass.
 
+### 2026-08-12: platform-owned native process arguments
+
+After the custom loader removed CRT argv ownership, con still reached Windows
+std's complete `OsString` command-line parser through `std::env::args`. The
+runtime facade now owns a typed UTF-8 application-argument contract. Windows
+uses `GetCommandLineW` and `CommandLineToArgvW`; a guard calls `LocalFree`
+exactly once on success and every later decode failure. Argument count and each
+NUL scan are capped at the Windows command-line bound, null pointers fail, and
+unpaired UTF-16 returns `InvalidData` instead of panicking. Linux and macOS keep
+the same facade and failure shape through their native std argv adapters.
+
+This deliberately adopts the Windows shell parser, which is not identical to
+modern MSVC parsing for ambiguous hand-crafted quote sequences. It is accepted
+for this GUI product because standard launcher/Rust quoting round-trips, the
+public offline CLI and `-e` passthrough tests pass, and malformed native text
+fails closed. Do not transplant the choice into a console process merely for
+size: loading Shell32 can add startup work, and parser semantics are part of the
+public boundary.
+
+The official x64 release-fast PE falls from 543,232 to 484,352 bytes
+(-58,880 bytes) while adding `shell32.dll`. The gain proves the std parser family
+became unreachable rather than merely wrapping it in FFI. Evidence is two
+platform ownership/invalid-UTF-16 tests, 87 con unit tests, 18 GUI black-box
+tests, one isolated multitab control journey, Windows x64 Clippy and Linux x64
+compilation.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

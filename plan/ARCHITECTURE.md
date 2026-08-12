@@ -299,6 +299,8 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `OwnedHandle` Drop 关闭，不再转移进运行期 `PtyChild`。wait clone 只 duplicate
   process handle，也不再携带空 thread slot。suspended 失败仍由 armed owner 终止半成品
   process，Job assignment-before-resume 与独立 process/Job/HPCON authority 不变。
+  filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
+  每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
 - con 的 bounded JSON object constructor 不再以数组长度 `N` 形成 const-generic
   单态化；18 个冷路径调用点把字段 `Vec` 的所有权交给一个非泛型边界。隔离的同 profile
   构建中，原 `object<1>` / `object<2>` / `object<5>` 等约 2,445 B 的多份代码收敛为
@@ -332,8 +334,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   404,572 B 降至 404,348 B（-224 B），`.rdata +16 B`，其余 section 不变。83 unit、
   18 public-control black-box、1 multitab control journey、Windows x64 Clippy 和 Linux
   x64 check 通过。
-  filtered create path 与官方 PE 均保持 609.0 KiB / 623,616 B，因此该项诚实记录为
-  每会话少一个长期内核句柄和更窄运行期 owner，而非二进制尺寸优化。
+- 进程参数获取属于 `agenterm-platform::runtime`，产品不得直接选择目标 OS parser。
+  Windows adapter 由 `GetCommandLineW`、`CommandLineToArgvW` 和 exactly-once
+  `LocalFree` 持有系统缓冲区合同，并对参数数量、NUL 扫描和 UTF-16 解码做有界失败；
+  Linux/macOS adapter 在同一 UTF-8 `Result` 合同下读取 argv。con 只消费排除 image name
+  的参数，不再链接 Windows std 的通用 `OsString` parser。官方 release-fast PE 从
+  543,232 B 降至 484,352 B（-58,880 B），代价是新增 `shell32.dll`。该选择只适用于
+  已是 GUI 且接受 Windows native shell parser 的产品；手工构造的歧义引号串不冒充
+  现代 MSVC parser 等价。87 unit、18 public GUI black-box、1 multitab control、Windows
+  x64 Clippy 和 Linux x64 check 通过。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

@@ -547,7 +547,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `mainCRTStartup`. Rust executes XI/XC constructors, calls rustc's generated
   `main` through a one-instruction architecture trampoline, then executes XP/XT
   terminators; the PE loader remains the sole XL/TLS callback authority. Thus
-  `lang_start`, panic containment, Unicode command-line parsing and Rust cleanup
+  `lang_start`, panic containment, process command-line access and Rust cleanup
   remain intact. Five startup-only UCRT DLL families collapse to the required
   `VCRUNTIME140` unwind edge plus `ucrt-heap/free`; release-fast falls from
   548,352 to 543,232 bytes. A test-only XCU constructor proves execution before
@@ -555,6 +555,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   multitab control journey, Windows Clippy and Linux x64 compile. ARM64 reaches
   final link with its `b main` trampoline; this workstation lacks ARM64
   `vcruntime.lib`, so exact ARM64 link remains CI/native-toolchain evidence.
+  Process argument acquisition is now a typed `agenterm-platform::runtime`
+  contract. Windows delegates parsing to `GetCommandLineW` plus
+  `CommandLineToArgvW`, releases the system allocation exactly once with
+  `LocalFree`, bounds pointer/count/NUL traversal, and reports invalid UTF-16
+  instead of panicking at GUI startup. Linux and macOS preserve the same UTF-8
+  failure contract through their selected adapters. This removes the Windows
+  std `OsString` argument parser family at the measured cost of one existing-OS
+  `shell32.dll` edge: official release-fast falls from 543,232 to 484,352 bytes.
+  Native shell parsing intentionally does not claim equivalence for ambiguous
+  hand-crafted quote sequences; standard launcher quoting, offline CLI, `-e`
+  passthrough and GUI-lifetime control startup are the supported evidence.
+  Evidence is 87 unit tests, 18 GUI black-box tests, one multitab control
+  journey, Windows x64 Clippy and Linux x64 compile.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

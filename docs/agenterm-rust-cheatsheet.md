@@ -503,6 +503,21 @@ implicitly. Suppress LNK4210 only after XI/XC/XP/XT and loader-owned XL are all
 accounted for. In con this removed 5,120 staged bytes and four startup-only UCRT
 DLL families while retaining unwind.
 
+Treat process argv parsing as a platform contract, not an automatic
+`std::env::args` choice. For a Windows GUI that accepts native Shell parsing,
+`GetCommandLineW` plus `CommandLineToArgvW` can make Rust's generic `OsString`
+parser family unreachable. Own the returned pointer with a guard that calls
+`LocalFree` exactly once, bound argc and every UTF-16 NUL scan, and return
+`InvalidData` for null pointers or unpaired surrogates instead of panicking in
+startup. Keep Linux/macOS behind the same UTF-8 `Result` facade.
+
+This is not semantics-free: `CommandLineToArgvW` differs from modern MSVC rules
+for ambiguous hand-crafted quote sequences, and loading Shell32 can hurt a
+small console process. Require standard-launcher round trips and public CLI
+tests before adopting it. In con, which is already a GUI, the official
+release-fast PE fell from 543,232 to 484,352 bytes while adding `shell32.dll`;
+that final-link result, not the FFI declaration itself, justified retention.
+
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A
 temporary exclusively created by the platform beside a destination does not

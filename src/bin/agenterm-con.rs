@@ -407,7 +407,14 @@ fn parse_decimal(raw: &str, flag: &str) -> Result<f64, String> {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = match agenterm_platform::runtime::application_arguments() {
+        Ok(args) => args,
+        Err(error) => {
+            let message = format!("error: cannot read process arguments: {error}\n");
+            let _ = agenterm_platform::parent_console::write_stderr(&message);
+            std::process::exit(2);
+        }
+    };
 
     if let Some(code) = offline_cli_exit(&args) {
         std::process::exit(code);
