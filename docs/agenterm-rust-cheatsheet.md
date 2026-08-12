@@ -443,3 +443,15 @@ length at least equal to capacity as a resize request, cap allocation, and keep
 a non-panicking fallback. This removed the last con owner of the standard temp
 directory routine and saved one 512-byte PE alignment unit while centralizing
 the FFI behavior for other products.
+
+## Prefer deterministic sorted storage for small read-heavy maps
+
+`HashMap` can retain random seeding and hashbrown code even when a consumer has
+only two map owners. For a bounded cache whose lookups dominate expensive new
+value construction, a sorted `Vec<(K,V)>` gives contiguous O(log n) lookup and
+acceptably cold O(n) insertion. Recompute the insertion index after FIFO
+eviction; an index calculated before removal is stale when a lower key was
+deleted. For large static tree batches, sort `(id,index)` once and binary-search
+parents to retain O(n log n) behavior and deterministic duplicate diagnostics.
+Measure the final link: this pair removed the complete hashbrown/RandomState
+family from con and saved 2,048 staged bytes.

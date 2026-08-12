@@ -1,8 +1,5 @@
 //! Host-neutral tree geometry inputs that do not depend on product identity.
 
-use std::collections::HashMap;
-use std::hash::Hash;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TreeDepthNode<Id> {
     pub id: Id,
@@ -18,7 +15,7 @@ pub enum TreeDepthError<Id> {
 
 pub fn compute_tree_depths<Id>(nodes: &[TreeDepthNode<Id>]) -> Result<Vec<u32>, TreeDepthError<Id>>
 where
-    Id: Copy + Eq + Hash,
+    Id: Copy + Ord,
 {
     compute_tree_depths_by(nodes, |node| node.id, |node| node.parent)
 }
@@ -29,7 +26,7 @@ pub fn compute_tree_depths_by<Node, Id, IdOf, ParentOf>(
     parent_of: ParentOf,
 ) -> Result<Vec<u32>, TreeDepthError<Id>>
 where
-    Id: Copy + Eq + Hash,
+    Id: Copy + Ord,
     IdOf: Fn(&Node) -> Id,
     ParentOf: Fn(&Node) -> Option<Id>,
 {
@@ -40,16 +37,27 @@ where
         parents.push(parent_of(node));
     }
 
-    let mut indexes = HashMap::with_capacity(nodes.len());
-    for (index, id) in ids.iter().copied().enumerate() {
-        if indexes.insert(id, index).is_some() {
-            return Err(TreeDepthError::DuplicateId { id, index });
+    let mut indexes: Vec<(Id, usize)> = ids.iter().copied().zip(0..nodes.len()).collect();
+    indexes.sort_unstable();
+    for duplicate in indexes.windows(2) {
+        if duplicate[0].0 == duplicate[1].0 {
+            return Err(TreeDepthError::DuplicateId {
+                id: duplicate[1].0,
+                index: duplicate[1].1,
+            });
         }
     }
 
+    let index_of = |id: Id| {
+        indexes
+            .binary_search_by_key(&id, |(candidate, _)| *candidate)
+            .ok()
+            .map(|index| indexes[index].1)
+    };
+
     for (index, parent) in parents.iter().copied().enumerate() {
         if let Some(parent) = parent
-            && !indexes.contains_key(&parent)
+            && index_of(parent).is_none()
         {
             return Err(TreeDepthError::MissingParent {
                 id: ids[index],
@@ -85,14 +93,16 @@ where
             state[current] = 1;
             path.push(current);
             match parents[current] {
-                Some(parent) => current = indexes[&parent],
+                Some(parent) => current = index_of(parent).expect("validated parent index"),
                 None => break,
             }
         }
 
         for &index in path.iter().rev() {
             depths[index] = parents[index]
-                .map(|parent| depths[indexes[&parent]].saturating_add(1))
+                .map(|parent| {
+                    depths[index_of(parent).expect("validated parent index")].saturating_add(1)
+                })
                 .unwrap_or(0);
             state[index] = 2;
         }

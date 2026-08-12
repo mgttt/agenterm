@@ -5,15 +5,14 @@
 //! Arc or any other platform-produced glyph representation without making
 //! this crate depend on a font backend.
 
-use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
+use std::collections::VecDeque;
 
 /// The dimensions and font configuration that make a rasterized glyph valid.
 ///
 /// A caller must advance `font_generation` whenever the selected face,
 /// fallback chain, hinting configuration, or another raster setting changes.
 /// Pixel size is kept separately so ordinary zoom changes are also isolated.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct GlyphCacheKey {
     pub character: char,
     pub pixel_size: u16,
@@ -45,19 +44,19 @@ pub struct GlyphCacheStats {
 /// memory plus low implementation risk matter more here than perfect recency.
 pub struct GlyphCache<K, V> {
     capacity: usize,
-    values: HashMap<K, V>,
+    values: Vec<(K, V)>,
     order: VecDeque<K>,
     stats: GlyphCacheStats,
 }
 
 impl<K, V> GlyphCache<K, V>
 where
-    K: Eq + Hash + Clone,
+    K: Ord + Clone,
 {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             capacity,
-            values: HashMap::with_capacity(capacity),
+            values: Vec::with_capacity(capacity),
             order: VecDeque::with_capacity(capacity),
             stats: GlyphCacheStats::default(),
         }
@@ -77,9 +76,12 @@ where
 
     /// Looks up a value and records a hit or miss.
     pub fn get(&mut self, key: &K) -> Option<&V> {
-        if let Some(value) = self.values.get(key) {
+        if let Ok(index) = self
+            .values
+            .binary_search_by(|(candidate, _)| candidate.cmp(key))
+        {
             self.stats.hits = self.stats.hits.saturating_add(1);
-            Some(value)
+            Some(&self.values[index].1)
         } else {
             self.stats.misses = self.stats.misses.saturating_add(1);
             None
@@ -101,8 +103,11 @@ where
         if self.capacity == 0 {
             return;
         }
-        if let Some(existing) = self.values.get_mut(&key) {
-            *existing = value;
+        if let Ok(index) = self
+            .values
+            .binary_search_by(|(candidate, _)| candidate.cmp(&key))
+        {
+            self.values[index].1 = value;
             return;
         }
         while self.values.len() >= self.capacity {
@@ -110,13 +115,21 @@ where
                 self.values.clear();
                 break;
             };
-            if self.values.remove(&oldest).is_some() {
+            if let Ok(index) = self
+                .values
+                .binary_search_by(|(candidate, _)| candidate.cmp(&oldest))
+            {
+                self.values.remove(index);
                 self.stats.evictions = self.stats.evictions.saturating_add(1);
                 break;
             }
         }
         self.order.push_back(key.clone());
-        self.values.insert(key, value);
+        let insertion = self
+            .values
+            .binary_search_by(|(candidate, _)| candidate.cmp(&key))
+            .expect_err("new cache key remains absent after FIFO eviction");
+        self.values.insert(insertion, (key, value));
     }
 
     /// Removes all entries while retaining cumulative hit/miss/eviction data.
@@ -155,6 +168,17 @@ mod tests {
         assert_eq!(cache.get(&2), Some(&"two"));
         assert_eq!(cache.get(&3), Some(&"three"));
         assert_eq!(cache.stats().evictions, 1);
+    }
+
+    #[test]
+    fn eviction_recomputes_sorted_insertion_after_removing_a_lower_key() {
+        let mut cache = GlyphCache::with_capacity(2);
+        cache.insert(1, "one");
+        cache.insert(3, "three");
+        cache.insert(2, "two");
+        assert_eq!(cache.get(&2), Some(&"two"));
+        assert_eq!(cache.get(&3), Some(&"three"));
+        assert_eq!(cache.get(&1), None);
     }
 
     #[test]

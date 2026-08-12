@@ -282,3 +282,18 @@ The con link map reports zero bytes for `std::env::temp_dir`; unstripped `.text`
 fell from 419.5 KiB to 418.5 KiB. The official release-fast PE fell from 573,440
 to 572,928 bytes. The native path test, 85 con unit tests, 18 GUI black-box tests,
 one multitab control journey, Windows Clippy, and Linux x86-64 compilation pass.
+
+### 2026-08-12: deterministic shared maps without random hashing
+
+The remaining con `HashMap` owners were both in `agenterm-ui-core`: a bounded
+FIFO glyph cache and iterative tree-depth indexing. The glyph cache now uses a
+key-sorted contiguous vector: O(log n) hot lookup, O(n) cold insertion/eviction,
+which matches expensive and infrequent rasterization. Tree resolution sorts
+`(id,index)` pairs and uses O(log n) lookup, preserving O(n log n) behavior for
+the 20,000-node deep-chain case instead of regressing to quadratic scans.
+
+The con link map reports zero bytes for `hashbrown` and `RandomState`.
+Unstripped `.text` fell from 418.5 KiB to 417.0 KiB, and the official
+release-fast PE fell from 572,928 to 570,880 bytes. Evidence includes 34 ui-core
+tests, 85 con tests, 18 GUI black-box tests, one multitab journey, Windows
+Clippy, and Linux x86-64 compilation.
