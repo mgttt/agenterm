@@ -495,6 +495,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   filesystem canonicalization become zero-byte owners; total attributed text
   falls from 403.5 to 403.0 KiB and the official release-fast PE from 552,448
   to 551,936 bytes.
+  Windows selection auto-copy now counts UTF-16 units, performs one checked
+  movable `GlobalAlloc`, and encodes directly into the locked system allocation
+  instead of first collecting a Rust vector and copying it. The caller still
+  frees every allocation before successful `SetClipboardData`; only that call
+  transfers ownership, and the final UTF-16 NUL is explicit. This removes one
+  allocation and full-text copy per publication while the official release-fast
+  PE falls from 551,936 to 551,424 bytes.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

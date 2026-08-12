@@ -461,6 +461,14 @@ plus `GetFileAttributesW` removed con's last std filesystem canonicalization
 owner and saved one 512-byte PE alignment unit; Unix retained canonical parent
 resolution behind the same provenance-specific facade.
 
+For Win32 clipboard writes, the movable global allocation is the final writable
+destination, not merely an opaque sink. Count encoded UTF-16 units with checked
+arithmetic, allocate once, lock, encode directly, and append the required NUL.
+Do not collect a temporary `Vec<u16>` only to memcpy it into `GlobalAlloc`.
+Ownership remains the hard boundary: call `GlobalFree` on every failure before
+`SetClipboardData`, and never free after that call succeeds. This direct encoding
+removed one allocation/copy per selection and one 512-byte PE alignment unit.
+
 Every platform Cargo feature must activate the native declaration features used
 by its own adapter. Do not rely on a product's unrelated feature union to make
 Win32 functions compile: test the minimal capability graph as well as the real

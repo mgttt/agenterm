@@ -83,11 +83,15 @@ fn set_text_with_owner(owner: HWND, text: &str, timeout: Duration) -> Result<(),
         ));
     }
 
-    let encoded = text
+    let encoded_units = text
         .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let allocation = unsafe { GlobalAlloc(GMEM_MOVEABLE, mem::size_of_val(encoded.as_slice())) };
+        .count()
+        .checked_add(1)
+        .ok_or(ClipboardError::Backend("clipboard text is too large"))?;
+    let allocation_bytes = encoded_units
+        .checked_mul(mem::size_of::<u16>())
+        .ok_or(ClipboardError::Backend("clipboard text is too large"))?;
+    let allocation = unsafe { GlobalAlloc(GMEM_MOVEABLE, allocation_bytes) };
     if allocation.is_null() {
         return Err(ClipboardError::Backend("could not allocate clipboard text"));
     }
@@ -97,7 +101,13 @@ fn set_text_with_owner(owner: HWND, text: &str, timeout: Duration) -> Result<(),
         return Err(ClipboardError::Backend("could not lock clipboard text"));
     }
     unsafe {
-        ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len());
+        // SAFETY: GlobalAlloc reserved exactly encoded_units writable u16s;
+        // encode_utf16 emits encoded_units - 1 values and the final write owns
+        // the required clipboard NUL terminator.
+        for (index, unit) in text.encode_utf16().enumerate() {
+            destination.add(index).write(unit);
+        }
+        destination.add(encoded_units - 1).write(0);
         GlobalUnlock(allocation);
     }
     if unsafe { SetClipboardData(UNICODE_TEXT, allocation) }.is_null() {

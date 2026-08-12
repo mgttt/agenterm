@@ -402,3 +402,18 @@ zero-byte owners. Host-std attributed text fell from 403.5 to 403.0 KiB and the
 official custom-std release-fast PE from 552,448 to 551,936 bytes. Evidence is
 46 focused platform tests, 85 con tests, 18 GUI black-box tests, one multitab
 journey, Windows Clippy and Linux x86-64 compilation.
+
+### 2026-08-12: encode directly into Win32 clipboard ownership
+
+Windows clipboard publication previously collected UTF-16 plus NUL into a Rust
+vector, allocated the required movable global block, then copied the complete
+vector into that second allocation. The native destination is writable after
+`GlobalLock`, so the adapter now performs a checked UTF-16 unit count, allocates
+once, encodes directly into the block and writes the terminator explicitly.
+Every pre-transfer failure still calls `GlobalFree`; successful
+`SetClipboardData` remains the only ownership-transfer point.
+
+The official release-fast PE fell from 551,936 to 551,424 bytes while removing
+one heap allocation and full-text copy from every selection auto-copy. Evidence
+is 31 minimal clipboard tests, 85 con tests, 18 GUI black-box tests, one multitab
+journey, Windows Clippy and Linux x86-64 compilation.
