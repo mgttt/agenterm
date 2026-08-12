@@ -461,6 +461,13 @@ fn execute(command_spec, repo, scratch, sequence) {
     let scratch_path = "" + scratch;
     let seq_index = 0 + sequence;
     let seq_text = "" + seq_index;
+    // The scratch directory lives under target/, and gates are allowed to wipe
+    // target/ -- `--release` runs build.bat, whose cleanup does exactly that
+    // (`cargo clean --target-dir target`). Creating it once at startup is
+    // therefore not enough: the next gate's redirect then failed with
+    // `process_stdout_file: os error 3`. Whoever owns the directory has to
+    // guarantee it exists at the moment of use.
+    std::fs::create_dir_all(scratch_path);
     let stdout_path = std::path::join(
         scratch_path,
         "command-" + seq_text + ".stdout"
