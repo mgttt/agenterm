@@ -6,7 +6,15 @@ use std::process::Command;
 use serde_json::Value;
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if manifest
+        .join("crates/agenterm-con/alignment-contract.json")
+        .is_file()
+    {
+        manifest.to_owned()
+    } else {
+        manifest.join("../..")
+    }
 }
 
 fn load_json(path: &Path) -> Value {
