@@ -311,3 +311,23 @@ The con link map reports zero bytes for `slice::sort`; unstripped `.text` fell
 from 417.0 KiB to 414.0 KiB and the official release-fast PE fell from 570,880
 to 566,784 bytes. All 34 ui-core tests, 85 con tests, 18 GUI black-box tests, one
 multitab journey, Windows Clippy and Linux x86-64 compilation pass.
+
+### 2026-08-12: trust platform-created sibling publication
+
+The shared atomic writer canonicalized the destination parent before creating
+an exclusive sibling temporary, then its public publisher rediscovered both
+physical parents, and the Windows replacement adapter canonicalized source and
+destination yet again. Those checks are necessary for arbitrary caller-owned
+staging paths, but redundant for a temporary whose name and destination were
+derived from the same canonical parent by one platform operation.
+
+The public publisher retains full physical-parent, distinct-entry, real-file
+and symlink validation. Internal writer/path publication now uses a narrow
+owned-sibling path that revalidates callback output and destination type before
+calling the adapter. The Windows adapter is mechanism-only: it converts the two
+prepared paths to UTF-16 and performs write-through `MoveFileExW` with bounded
+sharing retries. This makes repeated `canonicalize` and path reconstruction
+unreachable from con's screenshot/snapshot path without weakening the public
+contract. The official release-fast PE fell from 566,784 to 563,200 bytes.
+Evidence is 46 focused platform tests, 85 con tests, 18 GUI black-box tests and
+one isolated multitab control journey.

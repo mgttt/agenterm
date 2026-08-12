@@ -411,6 +411,17 @@ region or measured throughput justifies the retained byte cost. Likewise, an
 FFI call saves space only when it makes an entire Rust implementation family
 unreachable; `windows-sys` declarations themselves are effectively zero-cost.
 
+For native filesystem FFI, separate caller-owned paths from paths constructed
+under a platform invariant. Arbitrary staging paths still need physical-parent,
+symlink, identity and destination-type checks. A sibling temporary exclusively
+created from one already-canonical parent may skip rediscovering that parent at
+publication, provided callback output and the destination are revalidated and
+all pre-publication failures still remove the temporary. Keep the OS adapter
+mechanism-only: prepared UTF-16 paths, atomic replace, durability and bounded
+sharing retries belong there; product path policy does not. Removing three
+redundant canonicalization passes from con's atomic screenshot/snapshot path
+reduced the staged PE by 3,584 bytes; merely wrapping them in FFI would not.
+
 ## Floating text and clamp linkage (measured 2026-08-12)
 
 Keeping `f64` geometry does not require keeping the standard float text runtime.

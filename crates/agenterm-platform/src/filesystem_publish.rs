@@ -186,7 +186,7 @@ pub fn write_file_atomic<T>(
         )
     })?;
     drop(file);
-    publish_file(&temporary, &destination)?;
+    publish_reserved_sibling(&temporary, &destination)?;
     cleanup.disarm();
     Ok(value)
 }
@@ -214,18 +214,6 @@ pub fn write_path_atomic<T>(
             format!("write prepared path failed: {error}"),
         )
     })?;
-    let metadata = fs::symlink_metadata(&temporary).map_err(|error| {
-        FilePublishError::new(
-            FilePublishErrorKind::Inspect,
-            format!("inspect prepared path failed: {error}"),
-        )
-    })?;
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(FilePublishError::new(
-            FilePublishErrorKind::InvalidInput,
-            "prepared path must remain a real regular file entry",
-        ));
-    }
     fs::OpenOptions::new()
         .write(true)
         .open(&temporary)
@@ -236,9 +224,58 @@ pub fn write_path_atomic<T>(
                 format!("sync prepared path failed: {error}"),
             )
         })?;
-    publish_file(&temporary, &destination)?;
+    publish_reserved_sibling(&temporary, &destination)?;
     cleanup.disarm();
     Ok(value)
+}
+
+/// Publishes a temporary created by `create_temporary` beside an already
+/// normalized destination. Unlike the public `publish_file`, this path does
+/// not need to rediscover whether two caller-owned paths share a physical
+/// parent: both names were derived from the same canonical parent here.
+fn publish_reserved_sibling(
+    staging: &Path,
+    destination: &Path,
+) -> Result<FilePublishOutcome, FilePublishError> {
+    let staging_metadata = fs::symlink_metadata(staging).map_err(|error| {
+        FilePublishError::new(
+            FilePublishErrorKind::Inspect,
+            format!("inspect prepared file failed: {error}"),
+        )
+    })?;
+    if !staging_metadata.file_type().is_file() || staging_metadata.file_type().is_symlink() {
+        return Err(FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "prepared path must remain a real regular file entry",
+        ));
+    }
+    let replaced_existing = match fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            true
+        }
+        Ok(_) => {
+            return Err(FilePublishError::new(
+                FilePublishErrorKind::InvalidInput,
+                "an existing destination must be a real regular file entry",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(FilePublishError::new(
+                FilePublishErrorKind::Inspect,
+                format!("inspect destination file failed: {error}"),
+            ));
+        }
+    };
+    let parent = destination.parent().expect("normalized parent");
+    publish_file_with(
+        staging,
+        destination,
+        parent,
+        replaced_existing,
+        crate::selected::filesystem_publish::replace_file,
+        crate::selected::filesystem_publish::sync_parent,
+    )
 }
 
 fn normalized_destination(destination: &Path) -> Result<PathBuf, FilePublishError> {

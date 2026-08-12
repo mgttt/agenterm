@@ -446,11 +446,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   with a shared no-allocation iterative heapsort. The sort remains deterministic
   O(n log n), preserves second-input duplicate diagnostics, and makes the entire
   generic IPN/quicksort/smallsort region unreachable; the official release-fast
-  PE falls to 566,784 bytes. The corresponding unstripped
+  PE falls to 566,784 bytes. Atomic snapshot and screenshot publication now
+  distinguishes arbitrary caller-owned staging paths from sibling temporaries
+  exclusively created by the platform. The public path keeps physical-parent,
+  symlink and distinct-entry validation; the owned sibling path revalidates the
+  completed regular file and destination type but does not rediscover the same
+  canonical parent before replacement. The Windows adapter passes those
+  prepared paths directly to `MoveFileExW` with write-through and bounded
+  sharing-violation retries instead of canonicalizing both paths again. The
+  official release-fast PE falls to 563,200 bytes while atomic failure cleanup,
+  overwrite and native PNG behavior remain covered. The corresponding unstripped
   `.text` falls from 448.5 KiB to 425.0 KiB and attributed `std` text from
   155.8 KiB to 131.7 KiB. Evidence is 85 unit tests, 18 public-control GUI
   black-box journeys, one multitab control journey, Windows x64 Clippy, and
-  Linux x64 compilation.
+  Linux x64 compilation. The file-publication increment additionally passes all
+  46 focused platform tests, 85 con tests, 18 public-control GUI black-box
+  journeys and the isolated multitab control journey.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

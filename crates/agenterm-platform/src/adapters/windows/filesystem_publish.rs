@@ -8,17 +8,6 @@ use windows_sys::Win32::{
 };
 
 pub fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
-    let source = std::fs::canonicalize(source)?;
-    let destination = std::fs::canonicalize(
-        destination
-            .parent()
-            .ok_or_else(|| std::io::Error::other("destination parent required"))?,
-    )?
-    .join(
-        destination
-            .file_name()
-            .ok_or_else(|| std::io::Error::other("destination name required"))?,
-    );
     let source = source
         .as_os_str()
         .encode_wide()
