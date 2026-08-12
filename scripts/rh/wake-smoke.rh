@@ -99,6 +99,10 @@ fn command_json(
     );
     let text = "" + output.stdout + output.stderr;
     text.trim();
+    test_harness::require(
+        text != "",
+        "wake_smoke_cli_empty_json"
+    );
     rh::json::parse(text)
 }
 
@@ -378,8 +382,8 @@ fn entry() {
             + "$c=New-Object Net.Sockets.TcpClient('" + address_parts[0]
             + "'," + address_parts[1] + "); "
             + "$s=$c.GetStream(); "
-            + "$w=New-Object IO.StreamWriter($s); "
-            + "$w.Write($req); $w.Flush(); "
+            + "$b=[Text.Encoding]::UTF8.GetBytes($req); "
+            + "$s.Write($b,0,$b.Length); $s.Flush(); "
             + "$r=New-Object IO.StreamReader($s); "
             + "$r.ReadLine(); "
             + "$c.Close()";
@@ -393,6 +397,10 @@ fn entry() {
         test_harness::require(tcp_code == 0, "wake_smoke_expired_tcp_failed");
         let response_text = std::fs::read_to_string(response_path);
         response_text.trim();
+        test_harness::require(
+            response_text != "",
+            "wake_smoke_expired_empty_response:" + response_path
+        );
         let expired = rh::json::parse(response_text);
         test_harness::require(
             expired.ok == 0

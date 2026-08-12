@@ -323,3 +323,12 @@ fall back to host evaluation for that call. Prefer them for best-effort cleanup
 5. Ask when this gate last actually ran green. A gate that never ran is more
    likely to contain an assertion that was **never** satisfiable than a
    regression.
+## Byte-exact raw protocol fixtures
+
+When a temporary Windows fixture must shell out for a raw TCP request because
+the corresponding Rh native emitter has not shipped, do not wrap the network
+stream in PowerShell `StreamWriter`. Its encoding preamble and buffering are
+not a byte-exact protocol contract. Encode the bounded request explicitly with
+`[Text.Encoding]::UTF8.GetBytes(...)` and write those bytes directly to the
+stream. Keep the shell-out migration marker and replace it with Rh
+`TcpStream` once native emission exists.
