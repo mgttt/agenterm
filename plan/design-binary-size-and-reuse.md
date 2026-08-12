@@ -534,6 +534,17 @@ A shared target produced a mismatched custom-std `compiler_builtins` link during
 concurrent work, so parallel size experiments must use an exclusive target
 directory and remove it after evidence capture.
 
+The next symbol-led experiment targeted Windows argv UTF-16 decoding:
+`decode_argument` owned about 1.4 KiB and `String::from_utf16` about 707 bytes
+in the host-std attribution build. Replacing the conversion with strict
+two-pass `WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS)` preserved normal
+argv and invalid-surrogate behavior, but an isolated custom-std cold build grew
+from 540,160 to 540,672 bytes (+512 bytes). Native ownership alone was not a
+win: required-size discovery, allocation, the second FFI call and control flow
+remained linked. The implementation is rejected and the Rust conversion stays;
+revisit only if fixed caller-owned output or a changed link graph can remove
+the entire conversion family.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

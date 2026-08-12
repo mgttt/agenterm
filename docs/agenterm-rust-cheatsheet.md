@@ -544,6 +544,16 @@ During parallel `-Z build-std` work, use an exclusive target directory; a
 shared target can mix custom `core` and `compiler_builtins` artifacts even when
 the source tree is correct.
 
+Do not replace a bounded `String::from_utf16` path with
+`WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS)` merely because the latter
+is native. Con's Windows argv experiment preserved valid arguments and rejected
+an unpaired surrogate, but the isolated custom-std release-fast PE grew from
+540,160 to 540,672 bytes. The required-size call, output allocation, second FFI
+call and surrounding branches did not remove enough linked Rust machinery to
+cross the final artifact boundary. The experiment was reverted. Prefer the
+existing Rust conversion unless a caller can lend fixed output storage or a
+future link graph proves that the complete conversion family becomes dead.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns
