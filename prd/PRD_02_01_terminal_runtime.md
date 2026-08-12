@@ -109,6 +109,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   210.0 ms for the previous fill (2.05x), while the paired con PE stayed the
   same size and `.text` increased by 48 bytes. Platform adapters continue to
   own surface/present FFI; this pure framebuffer kernel remains in UI Core.
+- [x] the Unix HiDPI terminal layer and `agenterm-con` now share
+  `RetainedXrgbFrame` for bounded allocation, dimension identity, validity and
+  exact host-copy checks. Unix keeps its exact dirty-row mask and
+  `TerminalLayerKey` product policy. Allocation/dimension failure propagates as
+  a typed pixel-window error (or screenshot error) before a stale or incomplete
+  terminal layer is presented; successful raster marks storage valid before
+  committing its key.
 - [x] dirty-frame rendering and GDI double buffering exist; live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. White-box
   analysis found that the replaceable Windows GUI cleared and repainted directly

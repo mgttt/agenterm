@@ -323,6 +323,15 @@ surface actually changed. End automated journeys with `close-window` so the GUI
 event loop, PTYs, listener, and native handles follow the production shutdown
 path instead of being abandoned by a test-process kill.
 
+When extracting retained framebuffer storage, migrate its failure contract as
+well as its `Vec`. A host that deliberately omits the terminal from its logical
+frame cannot silently ignore retained-layer allocation failure: that would
+present stale pixels or a hole. Unix HiDPI therefore maps shared
+`RetainedFrameError` into its pixel-window/screenshot result, marks storage
+valid only after raster succeeds, and commits its product key afterward. Keep
+exact dirty-row masks and invalidation keys product-owned when replacing them
+with a conservative shared interval would increase repaint work.
+
 Never infer performance from source appearance or binary size. A package split
 may improve compilation without changing PE bytes; a typed correctness state
 machine may add bytes while removing a data-loss or deadlock path. Report both

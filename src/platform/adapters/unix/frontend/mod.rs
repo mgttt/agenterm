@@ -197,7 +197,7 @@ struct TerminalLayerKey {
 #[derive(Default)]
 struct RenderBuffers {
     logical: Vec<u32>,
-    terminal_layer: Vec<u32>,
+    terminal_layer: agenterm_ui_core::RetainedXrgbFrame,
     terminal_layer_key: Option<TerminalLayerKey>,
     /// Persistent physical-resolution frame. The chrome upscale runs only
     /// when the logical frame content changes; every present then costs one
@@ -4721,18 +4721,24 @@ impl UnixApp {
         }
     }
 
-    fn render_window(&mut self, frame: &mut XrgbPixelFrame<'_>) {
+    fn render_window(&mut self, frame: &mut XrgbPixelFrame<'_>) -> Result<(), PixelWindowError> {
         note_frame_for_diagnostics();
         self.last_present = Some(Instant::now());
         let width = frame.width();
         let height = frame.height();
-        self.render_pixels(width, height, frame.pixels_mut());
+        self.render_pixels(width, height, frame.pixels_mut())
+            .map_err(|error| PixelWindowError::failed("unix_terminal_layer", error.to_string()))
     }
 
-    fn render_pixels(&mut self, width: u32, height: u32, buffer: &mut [u32]) {
+    fn render_pixels(
+        &mut self,
+        width: u32,
+        height: u32,
+        buffer: &mut [u32],
+    ) -> Result<(), agenterm_ui_core::RetainedFrameError> {
         self.sync_grid_from_tab();
         let Some(window) = self.window.as_ref() else {
-            return;
+            return Ok(());
         };
         let (logical_width, logical_height) = self.client_size();
         let ime_anchor = self.ime_anchor();
@@ -4793,7 +4799,7 @@ impl UnixApp {
             None
         };
         let Some(grid) = self.grid.as_ref() else {
-            return;
+            return Ok(());
         };
 
         let modal_active = self.modal_surface_active();
@@ -5131,15 +5137,18 @@ impl UnixApp {
                 cursor_shape: cursor_appearance.shape,
             };
             let previous = self.render_buffers.terminal_layer_key;
-            let layer_len = geometry.width as usize * geometry.height as usize;
+            let storage_requires_full = self
+                .render_buffers
+                .terminal_layer
+                .prepare(geometry.width, geometry.height)?;
             let repaint_all = match previous {
                 Some(previous) => {
-                    previous.geometry != key.geometry
+                    storage_requires_full
+                        || previous.geometry != key.geometry
                         || previous.cols != key.cols
                         || previous.rows != key.rows
                         || previous.palette != key.palette
                         || previous.selection != key.selection
-                        || self.render_buffers.terminal_layer.len() != layer_len
                 }
                 None => true,
             };
@@ -5155,9 +5164,8 @@ impl UnixApp {
                 _ => [None, None],
             };
             if repaint_all || cursor_rows.iter().any(Option::is_some) || grid.any_row_dirty() {
-                self.render_buffers.terminal_layer.resize(layer_len, 0);
                 render_terminal_layer(
-                    &mut self.render_buffers.terminal_layer,
+                    self.render_buffers.terminal_layer.pixels_mut(),
                     geometry,
                     TerminalPaint {
                         grid,
@@ -5169,13 +5177,14 @@ impl UnixApp {
                     repaint_all,
                     cursor_rows,
                 );
+                self.render_buffers.terminal_layer.mark_valid();
             }
             self.render_buffers.terminal_layer_key = Some(key);
             blit_terminal_layer(
                 &mut self.render_buffers.physical,
                 width,
                 height,
-                &self.render_buffers.terminal_layer,
+                self.render_buffers.terminal_layer.pixels(),
                 geometry,
             );
         }
@@ -5186,6 +5195,7 @@ impl UnixApp {
         if hidpi_terminal_active && let Some(grid) = self.grid.as_mut() {
             grid.clear_dirty_rows();
         }
+        Ok(())
     }
 
     fn request_close_tab(&mut self, id: u64) {
@@ -5271,7 +5281,8 @@ impl UnixApp {
             .try_reserve_exact(pixel_count)
             .map_err(|error| format!("screenshot frame allocation failed: {error}"))?;
         frame.resize(pixel_count, 0_u32);
-        self.render_pixels(metrics.physical_width, metrics.physical_height, &mut frame);
+        self.render_pixels(metrics.physical_width, metrics.physical_height, &mut frame)
+            .map_err(|error| format!("terminal render failed: {error}"))?;
         let (width, height, pixels) = self
             .render_buffers
             .take_capture()
@@ -6558,7 +6569,7 @@ impl PixelWindowApplication for UnixApp {
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         self.drain_wake_and_pty();
-        self.render_window(frame);
+        self.render_window(frame)?;
         Ok(if self.close_requested {
             PixelWindowDirective::Exit
         } else {
@@ -6948,6 +6959,27 @@ mod system_menu_tests {
         assert_eq!(buffers.logical_frame(80, 40).len(), 3_200);
         assert_eq!(buffers.logical.capacity(), capacity);
         assert_eq!(buffers.take_capture(), None);
+
+        assert!(
+            buffers
+                .terminal_layer
+                .prepare(2, 1)
+                .expect("small terminal layer")
+        );
+        buffers.terminal_layer.pixels_mut().copy_from_slice(&[4, 5]);
+        buffers.terminal_layer.mark_valid();
+        assert!(
+            !buffers
+                .terminal_layer
+                .prepare(2, 1)
+                .expect("same terminal layer")
+        );
+        let mut host = [0; 2];
+        buffers
+            .terminal_layer
+            .copy_to(&mut host, 2, 1)
+            .expect("valid layer copies");
+        assert_eq!(host, [4, 5]);
 
         buffers.capture_if_requested(2, 1, &[1, 2]);
         assert_eq!(buffers.take_capture(), None);

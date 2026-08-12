@@ -198,6 +198,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `agenterm-ui-core::terminal_selection`；主程序与 `agenterm-con` 共用该内核。
   手势阶段、native capture、auto-copy、tab authority 和 remote snapshot 的 u32
   网格适配仍在产品 frontend，不把工作台或 con 政策塞进共享 crate。
+- con 与 Unix workbench 的持久 XRGB storage 共用
+  `agenterm-ui-core::RetainedXrgbFrame`：有界分配、尺寸失效、valid commit 和
+  exact-copy 是机制；Unix `TerminalLayerKey`、精确 dirty-row mask、HiDPI 选择和
+  fallback 政策仍是产品/host 语义。共享 storage typed-fail 必须提升到
+  `PixelWindowError`/截图错误，禁止用 `expect` 或继续 present 旧 layer。
 - Win32 host 重入机制也必须汇合：共享容量、FIFO 和借用失败合同；各 host 只保留
   typed message snapshot、default-processing 和生命周期政策，禁止线程全局裸
   `(WPARAM, LPARAM)` 队列跨 HWND 复用。
