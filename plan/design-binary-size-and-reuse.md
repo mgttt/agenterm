@@ -180,6 +180,16 @@ control/CLI 的重复状态机和错误格式化。
 重复所有权/closure 状态机，再让已链接的标准格式化完成叶子工作；“更接近
 汇编”不是独立收益指标。
 
+x86 feature detection 也完成了全链实验后回退：UI-core 与 platform 的 8 处
+生产 `is_x86_feature_detected!` 曾全部替换为 CPUID/XGETBV（含 XSAVE、
+OSXSAVE、AVX、XCR0[1:2]、AVX2、SSSE3、FMA 条件），test-only oracle 与
+Rust 标准检测逐位一致。但带符号 con 图中的
+`std_detect::detect::cache::detect_and_initialize` 仍完整保留 1,688 B，说明
+另一个标准/第三方依赖仍拥有该运行时；新增两份 raw detector 使正式 PE
+增长 512 B、有效节区增长 83 B。实现已回退。只有先证明依赖图最后一个
+std_detect owner 可删除，才重开 CPUID/汇编替换，不能以仓库搜索零命中代替
+最终链接证据。
+
 ### 5.2 死代码灰度归档流程
 编译器已经在持续报告死代码——先把信号清单化,再按"冷却期"分级处置,
 不在活跃 lane 的热文件上直接动刀:
