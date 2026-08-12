@@ -369,6 +369,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   540,160 B -> 542,208 B（+2,048 B）换取首次渲染/新字符平滑度。69 platform、87 con、
   18 GUI black-box、1 control、Windows x64 Clippy、Windows aarch64 font check 和 Linux
   x64 con check 通过；Unix/macOS 保持既有 OnceLock file-font renderer。
+- con `wait-text` 的匹配权威仍是当前 viewport 的逐物理行：不拼接换行、不跨行、不扫
+  hidden scrollback、不做 Unicode normalization/case fold，空 needle 在存在可见行时命中。
+  control 模块持有唯一 allocation-free UTF-8 byte-search kernel；x86_64 用有界 inline
+  assembly candidate/needle 循环，Windows aarch64 与 Unix 用同语义标量回退。唯一
+  `screen_contains` 调用逐 row 委托后，通用 `str::pattern` / `StrSearcher` 家族退链，
+  isolated custom-std cold PE 从 542,208 B 降至 537,600 B（-4,608 B）。88 con unit、
+  18 GUI black-box、1 multitab wait-text control、Windows x64 Clippy、Windows aarch64
+  con check 和 Linux x64 con check 通过。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

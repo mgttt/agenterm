@@ -574,6 +574,28 @@ multitab control journey, Windows x64 Clippy, Windows aarch64 font compilation
 and Linux x64 con compilation. Unix/macOS retain their existing OnceLock-backed
 file-font renderer behind the same facade.
 
+### 2026-08-12: bounded wait-text byte search
+
+Host-std attribution showed about 1.8 KiB in generic `str` containment and
+another 1.4 KiB in `StrSearcher` construction, reached only by con's public
+`wait-text` polling path. The owning behavior is narrower: each current
+viewport row is searched independently as valid UTF-8 bytes, with no newline
+insertion, cross-row match, hidden-scrollback scan, normalization, or case
+folding. Empty text remains an immediate match when a visible row exists.
+
+The control module now owns one allocation-free byte-search kernel. x86_64 uses
+a bounded inline-assembly candidate/needle loop with non-aliasing output
+registers; Windows aarch64, Linux and macOS use the same scalar contract. A
+matrix oracle covers empty, shorter/longer, repeated-byte and absent needles,
+plus CJK and emoji boundaries. The sole `screen_contains` call delegates each
+row to this helper without changing viewport enumeration.
+
+An isolated custom-std cold build falls from 542,208 to 537,600 bytes (-4,608),
+proving the generic pattern family left the final graph. Evidence is 88 con
+unit tests, the full wait-text multitab control journey, 18 GUI black-box tests,
+Windows x64 Clippy, Windows aarch64 con compilation and Linux x64 con
+compilation.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

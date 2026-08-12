@@ -602,6 +602,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Evidence is 69 platform tests, 87 con tests, 18 GUI black-box tests, one
   multitab control journey, Windows x64 Clippy, Windows aarch64 font check and
   Linux x64 con check.
+  Public `wait-text` now delegates its exact per-visible-row UTF-8 containment
+  to one allocation-free control kernel. It preserves the existing authority:
+  no row joining, newline insertion, cross-row match, hidden-scrollback scan,
+  Unicode normalization, or case folding; an empty needle still matches a
+  visible row. x86_64 uses a bounded inline-assembly byte loop, while Windows
+  aarch64 and Unix use the same scalar contract. Matrix, CJK and emoji oracle
+  tests prove parity with byte-window search. Removing the sole production
+  `str::contains` owner drops the isolated custom-std release-fast PE from
+  542,208 to 537,600 bytes. Evidence is 88 con unit tests, the complete
+  multitab wait-text control journey, 18 GUI black-box tests, Windows x64
+  Clippy, Windows aarch64 con check and Linux x64 con check.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

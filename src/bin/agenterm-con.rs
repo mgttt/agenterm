@@ -3216,7 +3216,9 @@ impl ConTerminal {
     fn screen_contains(&self, needle: &str) -> bool {
         let screen = self.parser.screen();
         let cols = screen.size().1;
-        screen.rows(0, cols).any(|row| row.contains(needle))
+        screen
+            .rows(0, cols)
+            .any(|row| control::contains_utf8(&row, needle))
     }
 
     /// Synthesizes a [`NormalizedKeyEvent`] for a control key command and

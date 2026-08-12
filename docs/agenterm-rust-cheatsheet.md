@@ -575,6 +575,17 @@ into a typed raster failure rather than a panic. A deterministic test rasterizes
 of 94. The custom-std PE cost is 2,048 bytes (540,160 to 542,208); this is an
 accepted native-lifecycle/first-render trade, not a size optimization.
 
+Exact UTF-8 substring search can be a good assembly leaf when the product
+contract is narrower than Rust's generic pattern framework. Con `wait-text`
+matches each visible physical terminal row independently: it does not join
+lines, scan hidden scrollback, normalize Unicode, or fold case, and an empty
+needle succeeds. Its x86_64 bounded byte-search assembly preserves exactly that
+contract; Windows aarch64 and Unix use a scalar byte oracle. Synthetic byte
+matrices plus CJK/emoji cases must agree with slice-window search. Replacing the
+sole production `str::contains` call made the generic pattern/searcher family
+unreachable and reduced the custom-std PE from 542,208 to 537,600 bytes
+(-4,608), a final-link gain much larger than the leaf itself.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

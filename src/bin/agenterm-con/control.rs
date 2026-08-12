@@ -8,6 +8,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+#[cfg(target_arch = "x86_64")]
+use core::arch::asm;
+
 use agenterm_platform::ipc::{IpcEndpoint, IpcTransportErrorCode, NativeListener, NativeStream};
 
 use super::{
@@ -21,6 +24,96 @@ const WIRE_MAGIC: [u8; 4] = *b"ATC1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const GUI_RESPONSE_TIMEOUT: Duration = Duration::from_secs(125);
 const ACCEPT_POLL: Duration = Duration::from_millis(200);
+
+pub(crate) fn contains_utf8(haystack: &str, needle: &str) -> bool {
+    contains_bytes(haystack.as_bytes(), needle.as_bytes())
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let Some(starts) = haystack
+        .len()
+        .checked_sub(needle.len())
+        .map(|last| last + 1)
+    else {
+        return false;
+    };
+    unsafe { contains_bytes_kernel(haystack.as_ptr(), starts, needle.as_ptr(), needle.len()) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn contains_bytes_kernel(
+    candidate: *const u8,
+    starts: usize,
+    needle: *const u8,
+    needle_len: usize,
+) -> bool {
+    let result: usize;
+    let _index: usize;
+    let _left: usize;
+    let _right: usize;
+    unsafe {
+        asm!(
+            "2:",
+            "test {starts}, {starts}",
+            "jz 5f",
+            "xor {index}, {index}",
+            "3:",
+            "cmp {index}, {needle_len}",
+            "je 4f",
+            "movzx {left:e}, byte ptr [{candidate} + {index}]",
+            "movzx {right:e}, byte ptr [{needle} + {index}]",
+            "cmp {left:e}, {right:e}",
+            "jne 6f",
+            "inc {index}",
+            "jmp 3b",
+            "6:",
+            "inc {candidate}",
+            "dec {starts}",
+            "jmp 2b",
+            "4:",
+            "mov {result}, 1",
+            "jmp 7f",
+            "5:",
+            "xor {result}, {result}",
+            "7:",
+            candidate = inout(reg) candidate => _,
+            starts = inout(reg) starts => _,
+            needle = in(reg) needle,
+            needle_len = in(reg) needle_len,
+            result = out(reg) result,
+            index = out(reg) _index,
+            left = out(reg) _left,
+            right = out(reg) _right,
+            options(nostack, readonly)
+        );
+    }
+    result != 0
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+unsafe fn contains_bytes_kernel(
+    haystack: *const u8,
+    starts: usize,
+    needle: *const u8,
+    needle_len: usize,
+) -> bool {
+    for start in 0..starts {
+        let mut index = 0;
+        while index < needle_len {
+            if unsafe { *haystack.add(start + index) != *needle.add(index) } {
+                break;
+            }
+            index += 1;
+        }
+        if index == needle_len {
+            return true;
+        }
+    }
+    false
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CliRequest {
@@ -1171,6 +1264,32 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn byte_search_matches_slice_oracle_and_utf8_boundaries() {
+        assert!(contains_utf8("", ""));
+        assert!(contains_utf8("中文 terminal 😀", "terminal"));
+        assert!(contains_utf8("中文 terminal 😀", "文 t"));
+        assert!(contains_utf8("中文 terminal 😀", "😀"));
+        assert!(!contains_utf8("中文 terminal 😀", "终端"));
+
+        for haystack_len in 0..32 {
+            let haystack = (0..haystack_len)
+                .map(|index| ((index * 17 + haystack_len * 3) % 11) as u8)
+                .collect::<Vec<_>>();
+            for needle_len in 0..12 {
+                let needle = (0..needle_len)
+                    .map(|index| ((index * 7 + needle_len * 5) % 11) as u8)
+                    .collect::<Vec<_>>();
+                let expected = needle.is_empty()
+                    || (needle.len() <= haystack.len()
+                        && haystack
+                            .windows(needle.len())
+                            .any(|window| window == needle));
+                assert_eq!(contains_bytes(&haystack, &needle), expected);
+            }
+        }
     }
 
     #[test]
