@@ -403,6 +403,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   未支持的 named key 仍按 literal text 注入，不因共享 parser 静默扩大 UI 命令集合。
   platform all-feature alias test、主程序 pointer-input tests 和 88 con units 通过；精确
   custom-std PE 保持 536,064 B，且 con 不再为 key name 构造 lowercase `String`。
+- con 的 bounded JSON 输出树把 object key 限定为 `&'static str` schema literals；配置
+  parser 直接提取 typed fields，不构造任意对象，因此动态 title/text/path 只作为 owned
+  value，不能进入 key 生命周期。该 provenance 边界删除每字段 `String` 分配与二次
+  collect，精确 custom-std PE 从 536,064 B 降至 534,528 B（-1,536 B），`.text` 从
+  346.5 KiB 降至 345.5 KiB；88 units、18 GUI black-box、1 multitab control 与 Clippy
+  通过，公开 pretty JSON 保持兼容。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

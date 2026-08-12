@@ -640,6 +640,17 @@ the final detector. Bloat `.text` fell from 348.5 to 346.5 KiB and no linked
 `std_detect::detect_features` symbol remained. This is the required sequence:
 remove every owner first, then replace the final authority once.
 
+Model fixed-schema JSON keys as borrowed static data, not owned user data. Con's
+bounded JSON parser extracts typed configuration values and never constructs a
+generic object tree; every output object key is a compile-time schema literal.
+Changing `JsonValue::Object` from `Vec<(String, JsonValue)>` to
+`Vec<(&'static str, JsonValue)>` therefore removes one allocation and copy per
+field without weakening input bounds or allowing borrowed request data to
+escape. Dynamic titles, text and paths remain owned values. The exact custom-std
+PE fell from 536,064 to 534,528 bytes, `.text` from 346.5 to 345.5 KiB, and the
+public GUI/control suites preserved JSON interoperability. Do not generalize
+this representation to a parser that must retain arbitrary input keys.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

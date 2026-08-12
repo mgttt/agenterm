@@ -631,6 +631,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   while workbench UI injection still treats unsupported names as literal text.
   This shares mechanism without merging product policy, passes platform,
   workbench and all 88 con unit tests, and keeps the exact PE at 536,064 bytes.
+  Its bounded JSON output now encodes fixed schema keys as borrowed static
+  literals rather than allocating a `String` for every field before immediate
+  serialization. Dynamic terminal titles, captured text and paths remain owned
+  values; the typed configuration parser never retains arbitrary input keys.
+  This removes per-field allocation from list-tabs, snapshots and perf replies,
+  reducing the exact PE from 536,064 to 534,528 bytes and `.text` from 346.5 to
+  345.5 KiB. All 88 units, 18 GUI black-box tests, the isolated multitab control
+  journey and Windows x64 Clippy preserve the public JSON/CLI contract.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

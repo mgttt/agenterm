@@ -13,7 +13,7 @@ pub enum JsonValue {
     Number(String),
     String(String),
     Array(Vec<JsonValue>),
-    Object(Vec<(String, JsonValue)>),
+    Object(Vec<(&'static str, JsonValue)>),
 }
 
 macro_rules! unsigned_value {
@@ -57,13 +57,8 @@ pub fn nullable<T: Into<JsonValue>>(value: Option<T>) -> JsonValue {
     value.map(Into::into).unwrap_or(JsonValue::Null)
 }
 
-pub fn object(fields: Vec<(&str, JsonValue)>) -> JsonValue {
-    JsonValue::Object(
-        fields
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), value))
-            .collect(),
-    )
+pub fn object(fields: Vec<(&'static str, JsonValue)>) -> JsonValue {
+    JsonValue::Object(fields)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
