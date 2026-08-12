@@ -8,9 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-#[cfg(target_arch = "x86_64")]
-use core::arch::asm;
-
 use agenterm_platform::ipc::{IpcEndpoint, IpcTransportErrorCode, NativeListener, NativeStream};
 
 use super::{
@@ -30,89 +27,10 @@ pub(crate) fn contains_utf8(haystack: &str, needle: &str) -> bool {
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    let Some(starts) = haystack
-        .len()
-        .checked_sub(needle.len())
-        .map(|last| last + 1)
-    else {
-        return false;
-    };
-    unsafe { contains_bytes_kernel(haystack.as_ptr(), starts, needle.as_ptr(), needle.len()) }
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe fn contains_bytes_kernel(
-    candidate: *const u8,
-    starts: usize,
-    needle: *const u8,
-    needle_len: usize,
-) -> bool {
-    let result: usize;
-    let _index: usize;
-    let _left: usize;
-    let _right: usize;
-    unsafe {
-        asm!(
-            "2:",
-            "test {starts}, {starts}",
-            "jz 5f",
-            "xor {index}, {index}",
-            "3:",
-            "cmp {index}, {needle_len}",
-            "je 4f",
-            "movzx {left:e}, byte ptr [{candidate} + {index}]",
-            "movzx {right:e}, byte ptr [{needle} + {index}]",
-            "cmp {left:e}, {right:e}",
-            "jne 6f",
-            "inc {index}",
-            "jmp 3b",
-            "6:",
-            "inc {candidate}",
-            "dec {starts}",
-            "jmp 2b",
-            "4:",
-            "mov {result}, 1",
-            "jmp 7f",
-            "5:",
-            "xor {result}, {result}",
-            "7:",
-            candidate = inout(reg) candidate => _,
-            starts = inout(reg) starts => _,
-            needle = in(reg) needle,
-            needle_len = in(reg) needle_len,
-            result = out(reg) result,
-            index = out(reg) _index,
-            left = out(reg) _left,
-            right = out(reg) _right,
-            options(nostack, readonly)
-        );
-    }
-    result != 0
-}
-
-#[cfg(not(target_arch = "x86_64"))]
-unsafe fn contains_bytes_kernel(
-    haystack: *const u8,
-    starts: usize,
-    needle: *const u8,
-    needle_len: usize,
-) -> bool {
-    for start in 0..starts {
-        let mut index = 0;
-        while index < needle_len {
-            if unsafe { *haystack.add(start + index) != *needle.add(index) } {
-                break;
-            }
-            index += 1;
-        }
-        if index == needle_len {
-            return true;
-        }
-    }
-    false
+    // The architecture-specialized kernel lives in agenterm-platform: a binary
+    // under src/** may select a subsystem but not carry machine-level
+    // implementations, which both source-boundary suites enforce.
+    agenterm_platform::byte_search::contains(haystack, needle)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
