@@ -393,64 +393,9 @@ unsafe fn neon_pack_kernel(source: *const u32, destination: *mut u8, length: usi
     }
 }
 
-// Small spans are cheaper to leave to the compiler than to pay the fixed
-// architecture-kernel setup cost. This is a performance threshold only; every
-// kernel has exactly the same bounded span semantics.
-const NATIVE_FILL_MIN_PIXELS: usize = 64;
-
 #[inline]
 fn fill_xrgb_span(destination: &mut [u32], color: u32) {
-    if destination.len() < NATIVE_FILL_MIN_PIXELS {
-        destination.fill(color);
-        return;
-    }
-
-    unsafe {
-        native_fill_xrgb_span(destination.as_mut_ptr(), destination.len(), color);
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[inline]
-unsafe fn native_fill_xrgb_span(destination: *mut u32, length: usize, color: u32) {
-    unsafe {
-        core::arch::asm!(
-            "rep stosd",
-            inout("rdi") destination => _,
-            inout("rcx") length => _,
-            in("eax") color,
-            options(nostack),
-        );
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-#[target_feature(enable = "neon")]
-unsafe fn native_fill_xrgb_span(destination: *mut u32, length: usize, color: u32) {
-    use core::arch::aarch64::*;
-
-    let pixels = vdupq_n_u32(color);
-    let vector_length = length & !3;
-    let mut index = 0;
-    while index < vector_length {
-        unsafe {
-            vst1q_u32(destination.add(index), pixels);
-        }
-        index += 4;
-    }
-    if index < length {
-        unsafe {
-            core::slice::from_raw_parts_mut(destination.add(index), length - index).fill(color);
-        }
-    }
-}
-
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-#[inline]
-unsafe fn native_fill_xrgb_span(destination: *mut u32, length: usize, color: u32) {
-    unsafe {
-        core::slice::from_raw_parts_mut(destination, length).fill(color);
-    }
+    destination.fill(color);
 }
 
 /// Fills a clipped rectangle in a row-major XRGB framebuffer.

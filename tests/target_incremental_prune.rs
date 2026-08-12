@@ -682,3 +682,44 @@ fn whole_root_prune_fail_closes_on_manifest_snapshot_identity_and_lock_failures(
     drop(lock);
     fs::remove_dir_all(root).expect("remove active-root-lock fixture");
 }
+
+#[test]
+fn fingerprint_generations_keep_newest_two_per_crate() {
+    let root = initialize_fixture("fingerprint-generations");
+    let incremental = root.join("target/debug/incremental");
+    let generations = [
+        "agenterm-aaaaaaaa0001",
+        "agenterm-aaaaaaaa0002",
+        "agenterm-aaaaaaaa0003",
+    ];
+    for name in &generations {
+        fs::create_dir(incremental.join(name)).expect("create generation");
+        // Distinct mtimes so the retention sweep can order generations.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let output = run_prune(&root);
+    assert!(
+        output.status.success(),
+        "prune failed:
+stdout={}
+stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !incremental.join(generations[0]).exists(),
+        "oldest generation was retained"
+    );
+    assert!(
+        incremental.join(generations[1]).exists(),
+        "second-newest generation was removed"
+    );
+    assert!(
+        incremental.join(generations[2]).exists(),
+        "newest generation was removed"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("scope=fingerprint-generations"));
+    assert!(stdout.contains("removed=1"));
+    fs::remove_dir_all(root).expect("remove fingerprint-generations fixture");
+}

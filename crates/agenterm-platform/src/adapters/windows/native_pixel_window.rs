@@ -1658,7 +1658,13 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
         };
         state.backend.control.phase.set(previous_phase);
         let directive = match render_result {
-            Ok((directive, _receipt)) => directive,
+            Ok((directive, receipt)) => {
+                if !receipt.should_present() {
+                    apply_directive(state, Ok(directive));
+                    return Ok(());
+                }
+                directive
+            }
             Err(error) => {
                 state.frame_state.invalidate();
                 apply_directive(state, Err(error));

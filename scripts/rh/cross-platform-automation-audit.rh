@@ -273,65 +273,41 @@ fn entry() {
     require(check_task_count == 1, "cross_platform_check_task_platforms");
 
     let ci_source = std::fs::read_to_string(
-        std::path::join(repo, ".github/workflows/ci.yml").display
+        std::path::join(repo, ".github/workflows/ci-agenterm.yml").display
+    );
+    let con_ci_source = std::fs::read_to_string(
+        std::path::join(repo, ".github/workflows/ci-agenterm-con.yml").display
+    );
+    let ci_targets = [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+    ];
+    for target in ci_targets {
+        require(
+            ci_source.contains(target),
+            "cross_platform_ci_agenterm_target:" + target
+        );
+        require(
+            con_ci_source.contains(target),
+            "cross_platform_ci_con_target:" + target
+        );
+    }
+    require(
+        ci_source.contains("cargo xwin check --locked -p agenterm"),
+        "cross_platform_ci_agenterm_xwin"
     );
     require(
-        ci_source.contains(
-            "AGENTERM_BOOTSTRAP_TASK: cross-platform-automation-audit"
-        ),
-        "cross_platform_ci_evidence:cross-platform-automation-audit"
+        con_ci_source.contains("cargo xwin check --locked -p agenterm-con"),
+        "cross_platform_ci_con_xwin"
     );
     require(
-        ci_source.contains("AGENTERM_BOOTSTRAP_TASK: client-build"),
-        "cross_platform_ci_evidence:client-build"
-    );
-    require(
-        ci_source.contains("AGENTERM_BOOTSTRAP_TASK: client-clippy"),
-        "cross_platform_ci_evidence:client-clippy"
-    );
-    require(
-        ci_source.contains("AGENTERM_BOOTSTRAP_TASK: client-smoke"),
-        "cross_platform_ci_evidence:client-smoke"
-    );
-    require(
-        ci_source.contains("--test linux_script_cli"),
-        "cross_platform_ci_evidence:linux_script_cli"
-    );
-    require(
-        ci_source.contains("~/.cargo/bin/cargo-xwin"),
-        "cross_platform_ci_cargo_xwin_cache:cargo-xwin-bin"
-    );
-    require(
-        ci_source.contains("cargo-home-v2-ci-windows-aarch64-"),
-        "cross_platform_ci_cargo_xwin_cache:cargo-home-v2"
-    );
-    require(
-        ci_source.contains("cargo-target-v3-windows-aarch64-ci-"),
-        "cross_platform_ci_cargo_xwin_cache:cargo-target-v3"
-    );
-    require(
-        ci_source.contains("cargo-xwin0.23.0-"),
-        "cross_platform_ci_cargo_xwin_cache:cargo-xwin-version-dir"
-    );
-    require(
-        ci_source.contains("CARGO_XWIN_VERSION=\"0.23.0\""),
-        "cross_platform_ci_cargo_xwin_cache:cargo-xwin-version-env"
-    );
-    require(
-        ci_source.contains("cargo install cargo-xwin --locked"),
-        "cross_platform_ci_cargo_xwin_cache:cargo-install"
-    );
-    require(
-        ci_source.contains("--version \"=$CARGO_XWIN_VERSION\" --force"),
-        "cross_platform_ci_cargo_xwin_cache:cargo-install-version-pin"
-    );
-    require(
-        ci_source.contains("cargo_xwin_state=\"reused\""),
-        "cross_platform_ci_cargo_xwin_cache:reuse-state"
-    );
-    require(
-        ci_source.contains("windows_aarch64_cargo_xwin_state"),
-        "cross_platform_ci_cargo_xwin_cache:windows-aarch64-state"
+        con_ci_source.contains("--profile con-release-fast") &&
+            con_ci_source.contains("build-std=std,panic_unwind,compiler_builtins"),
+        "cross_platform_ci_con_unwind_profile"
     );
 
     let release_source = std::fs::read_to_string(

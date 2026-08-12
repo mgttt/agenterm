@@ -202,7 +202,7 @@ fn trace_anchor(focus: HWND, client: &POINT) {
         client_rect.right,
         client_rect.bottom,
     );
-    let path = crate::ipc::native_runtime_directory().join("platform-ime-debug.log");
+    let path = std::env::temp_dir().join("platform-ime-debug.log");
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
 
-      - name: Verify exact main source and successful CI
+      - name: Verify exact main source and both successful product CIs
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -38,15 +38,17 @@ jobs:
           [[ "$GITHUB_SHA" == "$SOURCE_SHA" ]]
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$SOURCE_SHA" origin/main
-          success_count="$(
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_SHA&status=success&per_page=20" \
-              --jq '.workflow_runs | length'
-          )"
-          if [[ "$success_count" -lt 1 ]]; then
-            echo "No successful CI run exists for exact SHA $SOURCE_SHA." >&2
-            exit 1
-          fi
+          for workflow in ci-agenterm.yml ci-agenterm-con.yml; do
+            success_count="$(
+              gh api \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?head_sha=$SOURCE_SHA&status=success&per_page=20" \
+                --jq '.workflow_runs | length'
+            )"
+            if [[ "$success_count" -lt 1 ]]; then
+              echo "No successful $workflow run exists for exact SHA $SOURCE_SHA." >&2
+              exit 1
+            fi
+          done
 
   build:
     needs: preflight

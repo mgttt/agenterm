@@ -26,7 +26,8 @@ fn candidate_is_manual_exact_sha_and_has_no_publish_authority() {
     assert!(CANDIDATE.contains("[[ \"$SOURCE_SHA\" =~ ^[0-9a-f]{40}$ ]]"));
     assert!(CANDIDATE.contains("[[ \"$GITHUB_SHA\" == \"$SOURCE_SHA\" ]]"));
     assert!(CANDIDATE.contains("git merge-base --is-ancestor"));
-    assert!(CANDIDATE.contains("workflows/ci.yml/runs?head_sha=$SOURCE_SHA&status=success"));
+    assert!(CANDIDATE.contains("for workflow in ci-agenterm.yml ci-agenterm-con.yml"));
+    assert!(CANDIDATE.contains("workflows/$workflow/runs?head_sha=$SOURCE_SHA&status=success"));
     assert!(CANDIDATE.contains("ref: ${{ inputs.source_sha }}"));
     assert!(CANDIDATE.contains("AGENTERM_CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}"));
     assert!(CANDIDATE.contains("git switch -C main \"%SOURCE_SHA%\""));

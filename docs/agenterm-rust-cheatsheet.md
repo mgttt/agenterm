@@ -380,6 +380,104 @@ GUI tests inherit `AGENTERM_NO_ACTIVATE=1`. Use public `wait-*` commands instead
 of fixed sleeps. A test that launches a GUI must own endpoint/workspace
 isolation and process cleanup.
 
+Keep direct terminal automation distinct from focus-routed UI automation.
+`send-keys` deliberately targets a terminal, while `send-ui-keys` must traverse
+workspace shortcuts and the current composer/terminal focus owner exactly like
+a keyboard event. For composer black-box evidence, query current physical input
+bounds through `ui-snapshot`, click those native client coordinates, and prove
+both the pre-submit PTY absence and post-submit terminal result.
+
+Process completion and host lifetime are separate states. A terminal waiter
+must publish any exit code before its completion flag with release ordering;
+the GUI consumes the flag and status with acquire ordering, retains the final
+screen, and closes only on an explicit product action. Do not make a one-shot
+`-e` child silently redefine remain-on-exit behavior for the whole host.
+
+State waits belong at the owning event loop, not in client polling loops. Keep
+them bounded by count and deadline, key them by stable IDs, wake them from the
+same transition that updates observable state, and return the completed typed
+state (`child_exit_code` included) rather than only a boolean receipt.
+
+A GUI-lifetime control listener must not spawn one detached thread per accepted
+connection. Use a fixed worker count, a bounded connection queue, a separate
+bounded GUI-request queue, and a short request-read deadline so incomplete
+clients cannot create unbounded threads or retain every worker indefinitely.
+Queue saturation may return a bounded busy response; shutdown must clear queues
+and wake all blocked workers.
+
+Every deferred control reply must have an owning cancellation path. Before a
+tab is removed, fail its waits and pending screenshot reply with the stable tab
+ID; before window shutdown, fail all remaining replies. Expose pending counts
+for black-box sequencing, and keep Drop cancellation as a fallback rather than
+the only path, because dropping the sender otherwise collapses a typed close
+into a misleading generic timeout.
+
+Closing a bounded PTY output queue only releases a producer blocked on that
+queue; it does not by itself release an OS read or process wait. Teardown must
+close product backpressure synchronously, then transfer master/child ownership
+to a platform-managed background owner that terminates the child tree, closes
+the native pseudoconsole and drops both halves. Never call potentially blocking
+`ClosePseudoConsole` on a GUI/event thread. On Unix, a detached reader's
+duplicated master fd prevents a mere product-master drop from delivering HUP
+and can otherwise strand both reader and waiter.
+
+Do not create one teardown thread per closed PTY. Transfer sessions to one
+platform reaper with bounded queueing and per-item panic containment; use an
+isolated overflow teardown only when that queue cannot accept ownership. This
+bounds normal close-storm concurrency without moving native handles back onto
+the GUI thread.
+
+Initialize the PTY reaper before acquiring a native PTY. A lazy first close can
+discover thread-creation failure only after ownership has moved into teardown;
+dropping that failed task may synchronously run the same blocking native close
+on the event thread. Startup failure before acquisition is the bounded result.
+
+On the pinned Rust 1.97 toolchain, `OnceLock::get_or_try_init` is still unstable.
+For fallible process-wide initialization without feature gates, store a
+`Result<T, (io::ErrorKind, String)>` inside `OnceLock` and reconstruct an
+`io::Error` for callers.
+
+When bounded producers and control IPC share one native wake event, service the
+bounded control queue on every wake before consuming producer work. A producer
+that reposts wakes for its remaining backlog can otherwise prevent the event
+loop from reaching `about_to_wait` and starve the very command intended to stop
+that producer.
+
+For multi-session frontends, make producer work a global per-event budget, not
+a full budget independently granted to every session. Divide the fixed byte
+budget across live sessions (while preserving progress for each) so tab count
+cannot multiply GUI-thread latency.
+
+A bounded request queue does not by itself bound event-loop latency: one GUI
+callback can still drain every queued heavy request. Set the callback batch
+below the maximum simultaneous worker count, atomically take that fixed batch
+and report whether backlog remains, then repost the native wake when needed.
+Coalesce producer wakes on the empty-to-nonempty transition. Keep wait/deadline
+evaluation outside that dispatch budget so timeout progress is never deferred
+by load.
+
+Deferred frame operations need one global owner when they change active-session
+state. A per-tab pending screenshot slot is insufficient: draining several
+requests can switch active repeatedly and render only the last target, stranding
+the others. Cover pending-render and background-encode as one bounded state,
+reject overlap explicitly, and move PNG encoding/publication off the GUI thread
+while retaining a shared one-shot reply slot for immediate close cancellation.
+Keep the pending operation at frontend scope, not inside the target session: a
+later tab selection must not make progress depend on that target remaining
+active. At render entry, capture the latest desired active tab, render the
+target, copy the frame for background work, then restore and invalidate the
+visible owner.
+
+Do not use an omitted frame commit to suppress presentation: the compatibility
+contract treats an unspecified write as a full write. Capture-only rendering
+needs an explicit discard receipt that is accepted for retained and transient
+backings, invalidates backing content, and makes every host skip native present.
+
+Feature-isolate diagnostics too. An optional adapter trace must not call an
+unrelated feature-gated module merely to choose a log directory; use the native
+temporary-directory contract when that is the documented destination. Full
+product feature union can otherwise hide an undeclared dependency indefinitely.
+
 Do not rerun a large gate to compensate for not knowing which smaller test owns
 the behavior. Add or identify the owner.
 

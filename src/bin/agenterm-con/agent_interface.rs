@@ -22,7 +22,9 @@
 //!   paths as physical input, without embedding a second script runtime.
 //!
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, mpsc};
+use std::time::Instant;
 
 use agenterm_platform::{
     filesystem_publish::{write_file_atomic, write_path_atomic},
@@ -85,6 +87,9 @@ pub struct ScreenSnapshot {
     /// False once the child process has exited. A test waiting for a
     /// command to finish should poll this rather than assume a fixed delay.
     pub child_alive: bool,
+    /// Numeric process exit code when the platform supplies one. `None` while
+    /// running and for non-numeric termination such as a Unix signal.
+    pub child_exit_code: Option<i32>,
     pub font_size_px: u16,
 }
 
@@ -138,6 +143,10 @@ fn snapshot_json(snapshot: &ScreenSnapshot) -> super::json::JsonValue {
         ),
         ("ime_preedit", snapshot.ime_preedit.as_str().into()),
         ("child_alive", snapshot.child_alive.into()),
+        (
+            "child_exit_code",
+            nullable(snapshot.child_exit_code.map(i64::from)),
+        ),
         ("font_size_px", snapshot.font_size_px.into()),
     ])
 }
@@ -195,6 +204,96 @@ pub fn write_png_atomic(
     .map_err(std::io::Error::from)
 }
 
+type PngCompletion = Box<dyn FnOnce(std::io::Result<u64>) + Send + 'static>;
+
+struct PngJob {
+    path: PathBuf,
+    pixels: Vec<u32>,
+    width: u32,
+    height: u32,
+    completion: PngCompletion,
+}
+
+type PngWorkerInit = Result<mpsc::SyncSender<PngJob>, (std::io::ErrorKind, String)>;
+
+fn png_worker() -> std::io::Result<&'static mpsc::SyncSender<PngJob>> {
+    static WORKER: OnceLock<PngWorkerInit> = OnceLock::new();
+    match WORKER.get_or_init(|| {
+        let (sender, receiver) = mpsc::sync_channel::<PngJob>(1);
+        agenterm_platform::threading::spawn_named_detached(
+            "agenterm-con-png",
+            Box::new(move || {
+                while let Ok(job) = receiver.recv() {
+                    let PngJob {
+                        path,
+                        pixels,
+                        width,
+                        height,
+                        completion,
+                    } = job;
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let started = Instant::now();
+                        write_png_atomic(&path, &pixels, width, height).map(|()| {
+                            started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+                        })
+                    }))
+                    .unwrap_or_else(|_| Err(std::io::Error::other("PNG worker panicked")));
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        completion(result);
+                    }));
+                }
+            }),
+        )
+        .map_err(|error| (error.kind(), error.to_string()))?;
+        Ok(sender)
+    }) {
+        Ok(sender) => Ok(sender),
+        Err((kind, message)) => Err(std::io::Error::new(*kind, message.clone())),
+    }
+}
+
+pub fn initialize_png_worker() -> std::io::Result<()> {
+    png_worker().map(|_| ())
+}
+
+pub fn submit_png_atomic(
+    path: PathBuf,
+    pixels: Vec<u32>,
+    width: u32,
+    height: u32,
+    completion: PngCompletion,
+) {
+    let job = PngJob {
+        path,
+        pixels,
+        width,
+        height,
+        completion,
+    };
+    let worker = match png_worker() {
+        Ok(worker) => worker,
+        Err(error) => {
+            (job.completion)(Err(error));
+            return;
+        }
+    };
+    if let Err(error) = worker.try_send(job) {
+        let (kind, message, job) = match error {
+            mpsc::TrySendError::Full(job) => (
+                std::io::ErrorKind::WouldBlock,
+                "PNG worker queue is full",
+                job,
+            ),
+            mpsc::TrySendError::Disconnected(job) => (
+                std::io::ErrorKind::BrokenPipe,
+                "PNG worker is unavailable",
+                job,
+            ),
+        };
+        (job.completion)(Err(std::io::Error::new(kind, message)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +333,7 @@ mod tests {
             )),
             ime_preedit: String::new(),
             child_alive: true,
+            child_exit_code: None,
             font_size_px: 16,
         };
         let value: serde_json::Value =
@@ -243,6 +343,7 @@ mod tests {
         assert_eq!(value["cursor"]["shape"], "block");
         assert_eq!(value["selection"][1]["col"], 4);
         assert_eq!(value["child_alive"], true);
+        assert!(value["child_exit_code"].is_null());
     }
 
     #[test]

@@ -50,6 +50,20 @@ fn entry() {
     );
     prune::direct_directory(target, "incremental_prune_target");
 
+    // Fingerprint-generation retention across every profile incremental
+    // root under TARGET. The session-level sweep below only trims inside one
+    // live `<crate>-<hash>` root; whole stale generations (the multi-GB
+    // hoard) follow the same per-crate retention rule as
+    // scripts/prune-incremental.sh.
+    let keep = prune::fingerprint_retention_keep();
+    let removed_generations = prune::prune_target_generations(target, keep);
+    if removed_generations > 0 {
+        print(
+            "Cargo incremental prune: scope=fingerprint-generations, " +
+                "keep=" + keep + ", removed=" + removed_generations
+        );
+    }
+
     let debug_profile = std::path::join(target, "debug").display;
     let incremental = std::path::join(debug_profile, "incremental").display;
     if !std::fs::exists(incremental) {

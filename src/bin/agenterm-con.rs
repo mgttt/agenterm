@@ -39,7 +39,7 @@ mod workspace;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use agent_interface::ScreenSnapshot;
@@ -183,6 +183,29 @@ const ITALIC_SHEAR: f32 = 0.21;
 const SCROLLBACK: usize = 4000;
 const PTY_QUEUE_BYTES: usize = READ_BUF * 128;
 const PTY_DRAIN_BUDGET_BYTES: usize = 128 * 1024;
+const CONTROL_DRAIN_BUDGET_REQUESTS: usize = 2;
+
+fn pty_drain_budget_per_session(session_count: usize) -> usize {
+    if session_count == 0 {
+        return 0;
+    }
+    (PTY_DRAIN_BUDGET_BYTES / session_count).max(1)
+}
+
+#[cfg(test)]
+mod pty_budget_tests {
+    use super::*;
+
+    #[test]
+    fn wake_budget_is_shared_without_multiplying_by_tab_count() {
+        assert_eq!(pty_drain_budget_per_session(0), 0);
+        assert_eq!(pty_drain_budget_per_session(1), PTY_DRAIN_BUDGET_BYTES);
+        assert_eq!(pty_drain_budget_per_session(2), PTY_DRAIN_BUDGET_BYTES / 2);
+        for count in 1..=256 {
+            assert!(pty_drain_budget_per_session(count) * count <= PTY_DRAIN_BUDGET_BYTES);
+        }
+    }
+}
 
 /// Logical (DIP) font size. 15 px is approximately 11.25 pt at 96 DPI and
 /// visually matches the 14 px tree labels. The previous value `11` was
@@ -394,7 +417,6 @@ fn main() {
     let config = load_config();
 
     let mut app = ConApp::new(working_dir.clone(), control_endpoint);
-    let command_failed = app.command_failed();
     let session = app.active_session_mut().expect("initial terminal session");
     session.command = command;
     session.snapshot_path = snapshot_path;
@@ -431,9 +453,6 @@ fn main() {
         let _ = agenterm_platform::parent_console::write_stderr(&format!("agenterm-con: {error}"));
         std::process::exit(1);
     }
-    if command_failed.load(Ordering::Acquire) {
-        std::process::exit(1);
-    }
 }
 
 const USAGE: &str = "\
@@ -448,9 +467,10 @@ Usage: agenterm-con [--no-activate] [--working-dir DIR]
 A standalone console host (conhost equivalent). No server, mux, or Fleet.
 
 Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
+  agenterm-con cli list-commands
   agenterm-con --control pipe:\\\\.\\pipe\\agenterm-con-test
   agenterm-con cli --control pipe:\\\\.\\pipe\\agenterm-con-test list-tabs
-  ... perf-stats | reset-perf-stats | close-window
+  ... ui-snapshot | perf-stats | reset-perf-stats | close-window
   ... resize-window --width N --height N
   ... new-tab [--parent TAB]
   ... select-tab --target TAB | close-tab --target TAB
@@ -459,12 +479,15 @@ Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   ... send-text [--target TAB] TEXT
   ... send-paste [--target TAB] TEXT
   ... send-keys [--target TAB] KEY...
+  ... send-ui-keys KEY...
   ... send-mouse [--target TAB] --action press|release|move|click
                  --button none|left|middle|right --column N --row N
   ... send-wheel [--target TAB] --column N --row N --notches N [--ctrl]
   ... wait-text [--target TAB] [--timeout-ms N] TEXT
+  ... wait-tab-exit --target TAB [--timeout-ms N]
 
 Keys use names such as Enter, Escape, Tab, Up, F1 or modifiers such as Ctrl+C.
+send-ui-keys follows current UI focus; send-keys always targets a terminal.
 Mouse coordinates are zero-based terminal cells. Positive wheel notches scroll up.
 
   Ctrl+Shift+T       New root terminal
@@ -553,7 +576,6 @@ struct ConTerminal {
     /// `--emit-snapshot`: written after each render when set. See
     /// `agent_interface` module docs.
     snapshot_path: Option<PathBuf>,
-    pending_control_screenshot: Option<(PathBuf, control::ReplySender)>,
 
     /// VT model. Resized in lock-step with the PTY (see `apply_resize`).
     parser: vt100::Parser<ConCallbacks>,
@@ -577,10 +599,10 @@ struct ConTerminal {
     /// The existing window wake transports notification; this atomic owns only
     /// the completion state, so no general-purpose channel is required.
     child_exit_pending: Arc<AtomicBool>,
-
-    /// Set before the waiter reports that an explicit `-e` command failed, so
-    /// `main` can return the CLI runtime-error code after the window loop exits.
-    command_failed: Arc<AtomicBool>,
+    /// Encoded optional `ExitStatus::code`, published before
+    /// `child_exit_pending` with release ordering.
+    child_exit_code_encoded: Arc<AtomicU64>,
+    child_exit_code: Option<i32>,
 
     /// Logical font size in DIPs. Adjusted by Ctrl+wheel.
     font_size_logical: f64,
@@ -660,10 +682,7 @@ struct ConTerminal {
 
 impl Drop for ConTerminal {
     fn drop(&mut self) {
-        // The reader may be blocked on a full bounded ring. Closing before the
-        // rest of the session drops preserves sync_channel's old guarantee
-        // that closing a tab cannot strand its reader thread forever.
-        self.pty_output.close();
+        self.shutdown_pty();
     }
 }
 
@@ -713,14 +732,6 @@ impl SessionStore {
     fn entries_mut(&mut self) -> &mut [(workspace::TabId, ConTerminal)] {
         self.entries.as_mut_slice()
     }
-
-    fn values(&self) -> impl Iterator<Item = &ConTerminal> {
-        self.entries.iter().map(|(_, session)| session)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 }
 
 /// One lightweight GUI process containing several isolated terminal sessions.
@@ -742,6 +753,8 @@ struct ConApp {
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
     control_waits: Vec<PendingControlWait>,
+    pending_control_screenshot: Option<PendingControlScreenshot>,
+    inflight_control_screenshot: Option<InflightControlScreenshot>,
     perf_stats: PerfStats,
     chrome_dirty: DirtyRegion,
     retained: RetainedXrgbFrame,
@@ -750,11 +763,37 @@ struct ConApp {
     frame_scale: f64,
 }
 
+impl Drop for ConApp {
+    fn drop(&mut self) {
+        self.cancel_all_control_requests(
+            "terminal window closed while control request was pending",
+        );
+    }
+}
+
 struct PendingControlWait {
     target: workspace::TabId,
-    text: String,
+    kind: PendingControlWaitKind,
     deadline: Instant,
     reply: control::ReplySender,
+}
+
+struct PendingControlScreenshot {
+    target: workspace::TabId,
+    path: PathBuf,
+    reply: control::ReplySender,
+    restore_active: Option<workspace::TabId>,
+}
+
+struct InflightControlScreenshot {
+    target: workspace::TabId,
+    reply: Arc<std::sync::Mutex<Option<control::ReplySender>>>,
+    done: Arc<AtomicBool>,
+}
+
+enum PendingControlWaitKind {
+    Text(String),
+    TabExit,
 }
 
 #[derive(Default)]
@@ -766,6 +805,8 @@ struct PerfStats {
     render_max_us: u64,
     pty_drained_bytes: u64,
     pty_budget_yields: u64,
+    control_requests: u64,
+    control_budget_yields: u64,
     full_candidate_frames: u64,
     partial_candidate_frames: u64,
     dirty_pixels: u64,
@@ -773,6 +814,7 @@ struct PerfStats {
     host_direct_frames: u64,
     host_copy_frames: u64,
     host_copy_pixels: u64,
+    discarded_capture_frames: u64,
     platform_present: PixelPresentStats,
     present_baseline: PixelPresentStats,
     present_sequence_seen: u64,
@@ -879,6 +921,8 @@ impl PerfStats {
             ("render_max_us", self.render_max_us.into()),
             ("pty_drained_bytes", self.pty_drained_bytes.into()),
             ("pty_budget_yields", self.pty_budget_yields.into()),
+            ("control_requests", self.control_requests.into()),
+            ("control_budget_yields", self.control_budget_yields.into()),
             ("full_candidate_frames", self.full_candidate_frames.into()),
             (
                 "partial_candidate_frames",
@@ -889,6 +933,10 @@ impl PerfStats {
             ("host_direct_frames", self.host_direct_frames.into()),
             ("host_copy_frames", self.host_copy_frames.into()),
             ("host_copy_pixels", self.host_copy_pixels.into()),
+            (
+                "discarded_capture_frames",
+                self.discarded_capture_frames.into(),
+            ),
             ("present_count", present.count.into()),
             ("present_success", present.success_count.into()),
             ("present_failure", present.failure_count.into()),
@@ -932,6 +980,9 @@ mod perf_stats_tests {
             "host_direct_frames",
             "host_copy_frames",
             "host_copy_pixels",
+            "discarded_capture_frames",
+            "control_requests",
+            "control_budget_yields",
         ] {
             assert!(serialized.contains(field), "missing {field}: {serialized}");
         }
@@ -1105,6 +1156,17 @@ fn single_field_json(name: &'static str, value: json::JsonValue) -> json::JsonVa
     json::object(vec![(name, value)])
 }
 
+fn tab_exit_json(id: workspace::TabId, exit_code: Option<i32>) -> json::JsonValue {
+    json::object(vec![
+        ("id", json::JsonValue::TabId(id.get())),
+        ("child_alive", false.into()),
+        (
+            "child_exit_code",
+            exit_code.map_or(json::JsonValue::Null, |code| i64::from(code).into()),
+        ),
+    ])
+}
+
 impl ConApp {
     fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
         let mut workspace = workspace::Workspace::default();
@@ -1125,6 +1187,8 @@ impl ConApp {
             control_endpoint,
             control_server: None,
             control_waits: Vec::new(),
+            pending_control_screenshot: None,
+            inflight_control_screenshot: None,
             perf_stats: PerfStats::default(),
             chrome_dirty: DirtyRegion::full(),
             retained: RetainedXrgbFrame::new(),
@@ -1132,15 +1196,6 @@ impl ConApp {
             frame_height: 0,
             frame_scale: 1.0,
         }
-    }
-
-    fn command_failed(&mut self) -> Arc<AtomicBool> {
-        Arc::clone(
-            &self
-                .active_session_mut()
-                .expect("initial terminal session")
-                .command_failed,
-        )
     }
 
     fn active_session_mut(&mut self) -> Result<&mut ConTerminal, PixelWindowError> {
@@ -1180,6 +1235,13 @@ impl ConApp {
         let id = self.workspace.active().ok_or_else(|| {
             PixelWindowError::failed("con_session_missing", "no active terminal session")
         })?;
+        self.cancel_control_for_tab(
+            id,
+            &format!(
+                "terminal @{} closed while control request was pending",
+                id.get()
+            ),
+        );
         self.sessions.remove(&id);
         self.workspace.close(id);
         if self.workspace.active().is_none() {
@@ -1645,6 +1707,67 @@ impl ConApp {
             .ok_or_else(|| "terminal disappeared".to_owned())
     }
 
+    fn cancel_control_for_tab(&mut self, id: workspace::TabId, reason: &str) {
+        let mut retained = Vec::with_capacity(self.control_waits.len());
+        for wait in std::mem::take(&mut self.control_waits) {
+            if wait.target == id {
+                let _ = wait.reply.send(Err(reason.to_owned()));
+            } else {
+                retained.push(wait);
+            }
+        }
+        self.control_waits = retained;
+        if self
+            .pending_control_screenshot
+            .as_ref()
+            .is_some_and(|screenshot| screenshot.target == id)
+            && let Some(screenshot) = self.pending_control_screenshot.take()
+        {
+            let _ = screenshot.reply.send(Err(reason.to_owned()));
+        }
+        if self
+            .inflight_control_screenshot
+            .as_ref()
+            .is_some_and(|screenshot| screenshot.target == id)
+            && let Some(screenshot) = self.inflight_control_screenshot.take()
+            && let Some(reply) = screenshot
+                .reply
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+        {
+            let _ = reply.send(Err(reason.to_owned()));
+        }
+    }
+
+    fn cancel_all_control_requests(&mut self, reason: &str) {
+        for wait in std::mem::take(&mut self.control_waits) {
+            let _ = wait.reply.send(Err(reason.to_owned()));
+        }
+        if let Some(screenshot) = self.pending_control_screenshot.take() {
+            let _ = screenshot.reply.send(Err(reason.to_owned()));
+        }
+        if let Some(screenshot) = self.inflight_control_screenshot.take()
+            && let Some(reply) = screenshot
+                .reply
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+        {
+            let _ = reply.send(Err(reason.to_owned()));
+        }
+    }
+
+    fn reap_finished_control_screenshot(&mut self) {
+        if self
+            .inflight_control_screenshot
+            .as_ref()
+            .is_some_and(|screenshot| screenshot.done.load(Ordering::Acquire))
+        {
+            self.inflight_control_screenshot = None;
+        }
+    }
+
     fn validate_control_cell(session: &ConTerminal, row: u16, column: u16) -> Result<(), String> {
         if row >= session.rows || column >= session.cols {
             return Err(format!(
@@ -1692,10 +1815,50 @@ impl ConApp {
                                 "child_alive",
                                 session.is_some_and(|session| !session.child_gone).into(),
                             ),
+                            (
+                                "child_exit_code",
+                                session
+                                    .and_then(|session| session.child_exit_code)
+                                    .map_or(json::JsonValue::Null, |code| i64::from(code).into()),
+                            ),
                         ])
                     })
                     .collect();
                 Ok(single_field_json("tabs", json::JsonValue::Array(tabs)))
+            }
+            CliCommand::UiSnapshot => {
+                window
+                    .metrics()
+                    .map_err(|error| error.to_string())
+                    .map(|metrics| {
+                        let layout = self.layout(
+                            metrics.physical_width,
+                            metrics.physical_height,
+                            metrics.scale_factor,
+                        );
+                        json::object(vec![
+                            ("active", tab_id_json(self.workspace.active())),
+                            ("composer_focused", self.composer_focused.into()),
+                            ("composer_text", self.composer.as_str().into()),
+                            ("composer_preedit", self.composer_preedit.as_str().into()),
+                            ("pending_control_waits", self.control_waits.len().into()),
+                            (
+                                "pending_control_screenshots",
+                                (usize::from(self.pending_control_screenshot.is_some())
+                                    + usize::from(self.inflight_control_screenshot.is_some()))
+                                .into(),
+                            ),
+                            (
+                                "composer_input",
+                                json::object(vec![
+                                    ("x", layout.composer_input.x.into()),
+                                    ("y", layout.composer_input.y.into()),
+                                    ("width", layout.composer_input.width.into()),
+                                    ("height", layout.composer_input.height.into()),
+                                ]),
+                            ),
+                        ])
+                    })
             }
             CliCommand::PerfStats => Ok(self.perf_stats.json()),
             CliCommand::ResetPerfStats => {
@@ -1703,6 +1866,9 @@ impl ConApp {
                 Ok(single_field_json("reset", true.into()))
             }
             CliCommand::CloseWindow => {
+                self.cancel_all_control_requests(
+                    "terminal window closed while control request was pending",
+                );
                 self.exit = true;
                 Ok(single_field_json("closing", true.into()))
             }
@@ -1774,6 +1940,28 @@ impl ConApp {
                     Ok(single_field_json("sent_keys", keys.len().into()))
                 })
             }
+            CliCommand::SendUiKeys { keys } => (|| {
+                for key in &keys {
+                    let (key, ctrl, alt, shift) = parse_control_key(key)?;
+                    let event = injected_key_event(key, ctrl, alt, shift);
+                    if self
+                        .handle_workspace_shortcut(window, &event)
+                        .map_err(|error| error.to_string())?
+                    {
+                        continue;
+                    }
+                    if self.composer_focused {
+                        self.handle_composer_key(window, &event);
+                        self.mark_composer_dirty();
+                    } else {
+                        self.active_session_mut()
+                            .map_err(|error| error.to_string())?
+                            .forward_key(&event);
+                    }
+                }
+                self.request_dirty_redraw(window);
+                Ok(single_field_json("sent_keys", keys.len().into()))
+            })(),
             CliCommand::SendMouse {
                 target,
                 action,
@@ -1813,20 +2001,19 @@ impl ConApp {
             }),
             CliCommand::ScreenshotPane { target, output } => {
                 self.control_target(target).and_then(|id| {
-                    if self.workspace.active() != Some(id) {
-                        self.workspace.set_active(id);
+                    agent_interface::initialize_png_worker()
+                        .map_err(|error| format!("initialize PNG worker: {error}"))?;
+                    if self.pending_control_screenshot.is_some()
+                        || self.inflight_control_screenshot.is_some()
+                    {
+                        return Err("a screenshot is already pending".to_owned());
                     }
-                    let session = self
-                        .sessions
-                        .get_mut(&id)
-                        .ok_or_else(|| "terminal disappeared".to_owned())?;
-                    if session.pending_control_screenshot.is_some() {
-                        return Err("a screenshot is already pending for this terminal".to_owned());
-                    }
-                    session.pending_control_screenshot = Some((
-                        PathBuf::from(output),
-                        reply.take().expect("control reply available"),
-                    ));
+                    self.pending_control_screenshot = Some(PendingControlScreenshot {
+                        target: id,
+                        path: PathBuf::from(output),
+                        reply: reply.take().expect("control reply available"),
+                        restore_active: None,
+                    });
                     window.request_redraw();
                     Ok(json::JsonValue::Null)
                 })
@@ -1848,12 +2035,31 @@ impl ConApp {
                 }
                 self.control_waits.push(PendingControlWait {
                     target: id,
-                    text,
+                    kind: PendingControlWaitKind::Text(text),
                     deadline: Instant::now() + Duration::from_millis(timeout_ms),
                     reply: reply.take().expect("control reply available"),
                 });
                 Ok(json::JsonValue::Null)
             }),
+            CliCommand::WaitTabExit { target, timeout_ms } => {
+                self.control_target(Some(target)).and_then(|id| {
+                    if self.control_waits.len() >= 32 {
+                        return Err("too many pending control wait requests".to_owned());
+                    }
+                    if let Some(session) = self.sessions.get(&id)
+                        && session.child_gone
+                    {
+                        return Ok(tab_exit_json(id, session.child_exit_code));
+                    }
+                    self.control_waits.push(PendingControlWait {
+                        target: id,
+                        kind: PendingControlWaitKind::TabExit,
+                        deadline: Instant::now() + Duration::from_millis(timeout_ms),
+                        reply: reply.take().expect("control reply available"),
+                    });
+                    Ok(json::JsonValue::Null)
+                })
+            }
         };
         if let Some(reply) = reply {
             let _ = reply.send(result);
@@ -1861,30 +2067,52 @@ impl ConApp {
     }
 
     fn drain_control(&mut self, window: &PixelWindow, now: Instant) -> Option<Instant> {
-        loop {
-            let request = self
-                .control_server
-                .as_ref()
-                .and_then(control::ControlServer::try_recv);
-            let Some(request) = request else { break };
+        self.reap_finished_control_screenshot();
+        let (requests, backlog) = self
+            .control_server
+            .as_ref()
+            .map(|server| server.recv_batch(CONTROL_DRAIN_BUDGET_REQUESTS))
+            .unwrap_or_else(|| (Vec::new(), false));
+        for request in requests {
+            self.perf_stats.control_requests =
+                self.perf_stats.control_requests.saturating_add(1);
             self.dispatch_control(window, request);
+        }
+        if backlog {
+            self.perf_stats.control_budget_yields =
+                self.perf_stats.control_budget_yields.saturating_add(1);
+            let _ = window.waker().wake();
         }
         let mut pending = Vec::new();
         let mut next = None;
         for wait in std::mem::take(&mut self.control_waits) {
-            let matched = self
-                .sessions
-                .get(&wait.target)
-                .is_some_and(|session| session.screen_contains(&wait.text));
-            if matched {
-                let _ = wait
-                    .reply
-                    .send(Ok(single_field_json("matched", true.into())));
-            } else if now >= wait.deadline {
+            let Some(session) = self.sessions.get(&wait.target) else {
                 let _ = wait.reply.send(Err(format!(
-                    "wait-text timed out waiting for {:?}",
-                    wait.text
+                    "terminal @{} disappeared while control request was pending",
+                    wait.target.get()
                 )));
+                continue;
+            };
+            let completed = match &wait.kind {
+                PendingControlWaitKind::Text(text) => session
+                    .screen_contains(text)
+                    .then(|| single_field_json("matched", true.into())),
+                PendingControlWaitKind::TabExit => session
+                    .child_gone
+                    .then(|| tab_exit_json(wait.target, session.child_exit_code)),
+            };
+            if let Some(response) = completed {
+                let _ = wait.reply.send(Ok(response));
+            } else if now >= wait.deadline {
+                let error = match &wait.kind {
+                    PendingControlWaitKind::Text(text) => {
+                        format!("wait-text timed out waiting for {text:?}")
+                    }
+                    PendingControlWaitKind::TabExit => {
+                        format!("wait-tab-exit timed out waiting for @{}", wait.target.get())
+                    }
+                };
+                let _ = wait.reply.send(Err(error));
             } else {
                 next =
                     Some(next.map_or(wait.deadline, |current: Instant| current.min(wait.deadline)));
@@ -2172,6 +2400,16 @@ impl ConApp {
 }
 
 impl ConTerminal {
+    fn shutdown_pty(&mut self) {
+        // First release product backpressure, then transfer both ownership
+        // halves. ClosePseudoConsole may block while a flooded client drains,
+        // so native teardown must never run on the GUI event thread.
+        self.pty_output.close();
+        let master = self.master.take();
+        let child = self.child.take();
+        let _ = agenterm_platform::pty::shutdown_session_detached(master, child);
+    }
+
     fn new(working_dir: Option<String>) -> Self {
         let pty_output = Arc::new(BoundedOutputPipe::new(PTY_QUEUE_BYTES));
         pty_output.close();
@@ -2180,14 +2418,14 @@ impl ConTerminal {
             command: None,
             current_title: String::new(),
             snapshot_path: None,
-            pending_control_screenshot: None,
             parser: vt100::Parser::new_with_callbacks(24, 80, SCROLLBACK, ConCallbacks::default()),
             master: None,
             child: None,
             pty_output,
             pty_wake_pending: Arc::new(AtomicBool::new(false)),
             child_exit_pending: Arc::new(AtomicBool::new(false)),
-            command_failed: Arc::new(AtomicBool::new(false)),
+            child_exit_code_encoded: Arc::new(AtomicU64::new(0)),
+            child_exit_code: None,
             font_size_logical: DEFAULT_FONT_PX,
             cell_w: 8,
             cell_h: 16,
@@ -2457,6 +2695,9 @@ impl ConTerminal {
 
     /// Spawns the shell PTY and the reader thread. Called once from `opened`.
     fn spawn_pty(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+        agenterm_platform::pty::initialize_shutdown_reaper().map_err(|error| {
+            PixelWindowError::failed("pty_reaper_init_failed", format!("{error}"))
+        })?;
         // `-e` hosts a chosen program; otherwise fall back to the user's shell.
         let (program, extra_args) = match self.command.as_ref().and_then(|argv| argv.split_first())
         {
@@ -2556,20 +2797,22 @@ impl ConTerminal {
         })?;
         let child_exit_pending = Arc::new(AtomicBool::new(false));
         let waiter_exit_pending = Arc::clone(&child_exit_pending);
+        let child_exit_code_encoded = Arc::new(AtomicU64::new(0));
+        let waiter_exit_code = Arc::clone(&child_exit_code_encoded);
         let exit_waker = window.waker();
-        let explicit_command = self.command.is_some();
-        let command_failed = Arc::clone(&self.command_failed);
         agenterm_platform::threading::spawn_named_detached(
             "agenterm-con-waiter",
             Box::new(move || {
                 let wait_result = waiter.wait();
-                if explicit_command
-                    && !wait_result
-                        .as_ref()
-                        .is_ok_and(std::process::ExitStatus::success)
-                {
-                    command_failed.store(true, Ordering::Release);
-                }
+                waiter_exit_code.store(
+                    encode_child_exit_code(
+                        wait_result
+                            .as_ref()
+                            .ok()
+                            .and_then(std::process::ExitStatus::code),
+                    ),
+                    Ordering::Release,
+                );
                 waiter_exit_pending.store(true, Ordering::Release);
                 let _ = exit_waker.wake();
             }),
@@ -2581,20 +2824,27 @@ impl ConTerminal {
         self.pty_output = output;
         self.pty_wake_pending = wake_pending;
         self.child_exit_pending = child_exit_pending;
+        self.child_exit_code_encoded = child_exit_code_encoded;
 
         Ok(())
     }
 
     fn drain_pty(&mut self) -> DrainOutcome {
+        self.drain_pty_with_budget(PTY_DRAIN_BUDGET_BYTES)
+    }
+
+    fn drain_pty_with_budget(&mut self, budget: usize) -> DrainOutcome {
         self.pty_wake_pending.store(false, Ordering::Release);
         let mut outcome = DrainOutcome::default();
         if self.child_exit_pending.swap(false, Ordering::AcqRel) {
             self.child_gone = true;
+            self.child_exit_code =
+                decode_child_exit_code(self.child_exit_code_encoded.load(Ordering::Acquire));
             outcome.redraw = true;
         }
 
         let output = Arc::clone(&self.pty_output);
-        let report = output.drain(PTY_DRAIN_BUDGET_BYTES, |bytes| {
+        let report = output.drain(budget, |bytes| {
             self.parser.process(bytes);
             outcome.changed = true;
             outcome.redraw = true;
@@ -3143,32 +3393,7 @@ impl ConTerminal {
     /// real keystroke takes, including host shortcuts and the live
     /// DECCKM/modifier-aware encoder.
     fn inject_key(&mut self, key: InjectedKey, ctrl: bool, alt: bool, shift: bool) {
-        let modifiers = ModifierState {
-            control: ctrl,
-            alt,
-            shift,
-            meta: false,
-        };
-        let logical = match key {
-            InjectedKey::Named(named) => LogicalKey::Named(named),
-            InjectedKey::Char(ch) => LogicalKey::Character(ch.to_string()),
-        };
-        let text = match key {
-            InjectedKey::Named(_) => None,
-            // Only offered as `text` when unmodified, matching how a real
-            // backend reports a plain character key versus a shortcut.
-            InjectedKey::Char(ch) if !ctrl && !alt => Some(ch.to_string()),
-            InjectedKey::Char(_) => None,
-        };
-        let event = NormalizedKeyEvent {
-            logical,
-            physical: PhysicalKeyCode::Other,
-            text,
-            state: KeyPressState::Pressed,
-            repeat: false,
-            modifiers,
-        };
-        self.forward_key(&event);
+        self.forward_key(&injected_key_event(key, ctrl, alt, shift));
     }
 
     /// Presses then releases a mouse button at a control cell coordinate
@@ -3281,6 +3506,7 @@ impl ConTerminal {
             }),
             ime_preedit: self.ime_preedit.clone(),
             child_alive: !self.child_gone,
+            child_exit_code: self.child_exit_code,
             font_size_px: self.font_size_px,
         }
     }
@@ -3984,13 +4210,6 @@ impl ConTerminal {
             fold_wake(self.last_blink_at + BLINK_INTERVAL);
         }
 
-        // A pending screenshot needs an actual render to happen — pixels
-        // only exist transiently inside render() — so it must force a
-        // redraw even when nothing else did.
-        if self.pending_control_screenshot.is_some() {
-            redraw = true;
-        }
-
         if redraw {
             window.request_redraw();
         } else if partial_redraw {
@@ -4033,11 +4252,20 @@ impl PixelWindowApplication for ConApp {
             return Ok(PixelWindowDirective::Exit);
         }
         if matches!(event, PixelWindowEvent::Wake) {
+            // PTY readers and the control server share the native wake path.
+            // A flooded PTY continuously reposts Wake while bounded output
+            // remains, so waiting until about_to_wait would starve control
+            // requests (including the request that closes that PTY).
+            let _ = self.drain_control(window, Instant::now());
+            if self.exit {
+                return Ok(PixelWindowDirective::Exit);
+            }
             let active = self.workspace.active();
+            let session_budget = pty_drain_budget_per_session(self.workspace.nodes().len());
             let mut active_redraw = false;
             let mut backlog = false;
             for (id, session) in self.sessions.entries_mut() {
-                let outcome = session.drain_pty();
+                let outcome = session.drain_pty_with_budget(session_budget);
                 self.perf_stats.pty_drained_bytes = self
                     .perf_stats
                     .pty_drained_bytes
@@ -4182,6 +4410,15 @@ impl PixelWindowApplication for ConApp {
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         self.perf_stats.sync_present_stats(window.present_stats());
+        if let Some(screenshot) = self.pending_control_screenshot.as_mut() {
+            let active = self.workspace.active();
+            screenshot.restore_active = if active == Some(screenshot.target) {
+                None
+            } else {
+                active
+            };
+            self.workspace.set_active(screenshot.target);
+        }
         let width = frame.width();
         let height = frame.height();
         let frame_info = frame.info();
@@ -4254,6 +4491,14 @@ impl PixelWindowApplication for ConApp {
         // rasterizing. A late dirty state is therefore a programming error,
         // not an excuse to label a partial frame after the fact.
         let mut candidate = self.take_dirty_candidate(width, height);
+        #[cfg(windows)]
+        if !candidate.is_empty() && !candidate.is_full() {
+            // The optimized clipped raster path can currently erase retained
+            // pixels outside its dirty bounds after pointer/composer updates.
+            // Correctness wins until that path is proven by native before/after
+            // screenshots; Windows con redraws a complete frame meanwhile.
+            candidate = DirtyRegion::full_frame(width, height);
+        }
         if host_retains_pixels && !frame_info.content_valid {
             candidate = DirtyRegion::full_frame(width, height);
         }
@@ -4329,39 +4574,82 @@ impl PixelWindowApplication for ConApp {
             self.retained.mark_valid();
             directive
         };
-        let pending_control_screenshot = {
-            let session = render_try!(self.sessions.get_mut(&active_id).ok_or_else(|| {
-                PixelWindowError::failed("con_session_missing", "active terminal session missing")
-            }));
-            session.pending_control_screenshot.take()
-        };
-        if let Some((path, reply)) = pending_control_screenshot {
-            let encode_started = Instant::now();
-            let write_result = if host_retains_pixels {
-                agent_interface::write_png_atomic(path.as_path(), frame.pixels_mut(), width, height)
+        let mut discard_capture_frame = false;
+        if let Some(screenshot) = self.pending_control_screenshot.take() {
+            let PendingControlScreenshot {
+                target,
+                path,
+                reply,
+                restore_active,
+            } = screenshot;
+            let pixels = if host_retains_pixels {
+                frame.pixels_mut().to_vec()
             } else {
-                agent_interface::write_png_atomic(
-                    path.as_path(),
-                    self.retained.pixels(),
-                    width,
-                    height,
-                )
+                self.retained.pixels().to_vec()
             };
-            let encode_ns = encode_started
-                .elapsed()
-                .as_nanos()
-                .min(u128::from(u64::MAX)) as u64;
-            let result = write_result
-                .map(|()| {
+            let response_path = path.to_string_lossy().into_owned();
+            let shared_reply = Arc::new(std::sync::Mutex::new(Some(reply)));
+            let done = Arc::new(AtomicBool::new(false));
+            self.inflight_control_screenshot = Some(InflightControlScreenshot {
+                target,
+                reply: Arc::clone(&shared_reply),
+                done: Arc::clone(&done),
+            });
+            let waker = window.waker();
+            agent_interface::submit_png_atomic(
+                path,
+                pixels,
+                width,
+                height,
+                Box::new(move |write_result| {
+                    let result = write_result.map(|encode_ns| {
                     json::object(vec![
-                        ("path", path.to_string_lossy().into_owned().into()),
+                        ("path", response_path.into()),
                         ("width", width.into()),
                         ("height", height.into()),
                         ("encode_ns", encode_ns.into()),
                     ])
                 })
-                .map_err(|error| format!("write screenshot: {error}"));
-            let _ = reply.send(result);
+                    .map_err(|error| format!("write screenshot: {error}"));
+                    if let Some(reply) = shared_reply
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .take()
+                    {
+                        let _ = reply.send(result);
+                    }
+                    done.store(true, Ordering::Release);
+                    let _ = waker.wake();
+                }),
+            );
+            if let Some(restore_active) = restore_active
+                && self.sessions.contains_key(&restore_active)
+            {
+                self.workspace.set_active(restore_active);
+                self.mark_chrome_full();
+                render_try!(self.active_session_mut()).dirty.mark_full();
+                render_try!(self.refresh_title(window));
+                window.request_redraw();
+                discard_capture_frame = true;
+            }
+        }
+        if discard_capture_frame {
+            if let Err(error) = frame.commit(PixelFrameWrite::Discard) {
+                self.retained.invalidate();
+                return Err(PixelWindowError::failed(
+                    "con_capture_frame_discard",
+                    error.to_string(),
+                ));
+            }
+            self.retained.invalidate();
+            self.perf_stats.discarded_capture_frames = self
+                .perf_stats
+                .discarded_capture_frames
+                .saturating_add(1);
+            self.perf_stats.record_frame(render_started.elapsed());
+            self.perf_stats
+                .record_raster_candidate(candidate, width, height);
+            return Ok(directive);
         }
         let write = frame_write_for_candidate(
             frame_info.retention,
@@ -4410,26 +4698,16 @@ impl PixelWindowApplication for ConApp {
             return Ok(PixelWindowDirective::Exit);
         }
         let control_deadline = self.drain_control(window, now);
-        let directive = self.active_session_mut()?.about_to_wait(window, now)?;
-        // `ConTerminal::about_to_wait` returns `Wait` for a session whose child
-        // exited so one dead tab cannot discard live siblings. With NO live
-        // session left there is nothing to host, and `agenterm-con -e CMD` must
-        // exit when its child does: `--emit-snapshot` automation and
-        // tests/agenterm_con_blackbox.rs wait for this process to exit. Without
-        // it, `-e cmd.exe /c echo X` writes its snapshot and then hangs, which
-        // stalled the first GUI test in that suite and took the windows
-        // unit-tests gate past its budget with no test completing.
-        //
-        // Checked AFTER the session runs: `child_gone` is set by `drain_pty`
-        // inside that call, so testing first sees the pre-drain value on the one
-        // wake that reports the exit. A bound control endpoint means a client is
-        // driving this GUI and may still open tabs, so that case keeps waiting.
-        if self.control_server.is_none()
-            && !self.sessions.is_empty()
-            && self.sessions.values().all(|session| session.child_gone)
-        {
+        // A control request can close the final tab while draining. Re-check
+        // before asking for an active session so explicit close is a normal
+        // host exit rather than a synthetic `con_session_missing` failure.
+        if self.exit {
             return Ok(PixelWindowDirective::Exit);
         }
+        if self.pending_control_screenshot.is_some() {
+            window.request_redraw();
+        }
+        let directive = self.active_session_mut()?.about_to_wait(window, now)?;
         Ok(match (directive, control_deadline) {
             (PixelWindowDirective::Wait, Some(deadline)) => {
                 PixelWindowDirective::WaitUntil(deadline)
@@ -4446,6 +4724,43 @@ impl PixelWindowApplication for ConApp {
 enum InjectedKey {
     Named(NamedKey),
     Char(char),
+}
+
+fn injected_key_event(key: InjectedKey, ctrl: bool, alt: bool, shift: bool) -> NormalizedKeyEvent {
+    let modifiers = ModifierState {
+        control: ctrl,
+        alt,
+        shift,
+        meta: false,
+    };
+    let logical = match key {
+        InjectedKey::Named(named) => LogicalKey::Named(named),
+        InjectedKey::Char(ch) => LogicalKey::Character(ch.to_string()),
+    };
+    let text = match key {
+        InjectedKey::Named(_) => None,
+        InjectedKey::Char(ch) if !ctrl && !alt => Some(ch.to_string()),
+        InjectedKey::Char(_) => None,
+    };
+    NormalizedKeyEvent {
+        logical,
+        physical: PhysicalKeyCode::Other,
+        text,
+        state: KeyPressState::Pressed,
+        repeat: false,
+        modifiers,
+    }
+}
+
+fn encode_child_exit_code(code: Option<i32>) -> u64 {
+    code.map_or(0, |code| u64::from(code as u32) + 1)
+}
+
+fn decode_child_exit_code(encoded: u64) -> Option<i32> {
+    encoded
+        .checked_sub(1)
+        .and_then(|bits| u32::try_from(bits).ok())
+        .map(|bits| bits as i32)
 }
 
 #[derive(Clone, Copy)]
@@ -5920,5 +6235,19 @@ mod tests {
             offline_cli_exit(&["--version".to_owned(), "x".to_owned()]),
             Some(2)
         );
+    }
+
+    #[test]
+    fn child_exit_code_encoding_preserves_complete_signed_domain() {
+        for code in [
+            None,
+            Some(i32::MIN),
+            Some(-1),
+            Some(0),
+            Some(1),
+            Some(i32::MAX),
+        ] {
+            assert_eq!(decode_child_exit_code(encode_child_exit_code(code)), code);
+        }
     }
 }

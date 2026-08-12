@@ -378,7 +378,7 @@ impl PixelWindowRunner {
                 &mut self.frame_state,
             );
             match catch_application("render", || self.application.render(window, &mut frame)) {
-                Ok(directive) => frame.write_receipt().map(|_receipt| directive).map_err(
+                Ok(directive) => frame.write_receipt().map(|receipt| (directive, receipt)).map_err(
                     |error: PixelFrameError| {
                         PixelWindowError::failed("pixel_window_frame_commit_failed", error)
                     },
@@ -387,7 +387,12 @@ impl PixelWindowRunner {
             }
         };
         let directive = match render_result {
-            Ok(directive) => directive,
+            Ok((directive, receipt)) => {
+                if !receipt.should_present() {
+                    return Ok(directive);
+                }
+                directive
+            }
             Err(error) => {
                 self.frame_state.invalidate();
                 return Err(error);

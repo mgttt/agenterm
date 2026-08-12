@@ -21,6 +21,10 @@ const WIRE_MAGIC: [u8; 4] = *b"ATC1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const GUI_RESPONSE_TIMEOUT: Duration = Duration::from_secs(125);
 const ACCEPT_POLL: Duration = Duration::from_millis(200);
+const BUSY_REPLY_TIMEOUT: Duration = Duration::from_millis(100);
+const CONTROL_WORKERS: usize = 4;
+const CONNECTION_QUEUE_CAPACITY: usize = 32;
+const REQUEST_QUEUE_CAPACITY: usize = 32;
 
 pub(crate) fn contains_utf8(haystack: &str, needle: &str) -> bool {
     contains_bytes(haystack.as_bytes(), needle.as_bytes())
@@ -68,11 +72,61 @@ mod compact_channel_tests {
         );
         assert!(receiver.recv_timeout(Duration::from_secs(1)).is_err());
     }
+
+    #[test]
+    fn request_queue_rejects_work_beyond_its_fixed_capacity() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let queue = RequestQueue::new(alive);
+        for _ in 0..REQUEST_QUEUE_CAPACITY {
+            let (reply, _receiver) = reply_channel();
+            assert!(
+                queue
+                    .push(IncomingRequest {
+                        command: CliCommand::ListTabs,
+                        reply,
+                    })
+                    .is_ok()
+            );
+        }
+        let (reply, _receiver) = reply_channel();
+        assert!(
+            queue
+                .push(IncomingRequest {
+                    command: CliCommand::ListTabs,
+                    reply,
+                })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn request_queue_coalesces_wakes_and_reports_batched_backlog() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let queue = RequestQueue::new(alive);
+        for index in 0..4 {
+            let (reply, _receiver) = reply_channel();
+            let should_wake = match queue.push(IncomingRequest {
+                    command: CliCommand::ListTabs,
+                    reply,
+                }) {
+                Ok(should_wake) => should_wake,
+                Err(_) => panic!("queue has capacity"),
+            };
+            assert_eq!(should_wake, index == 0);
+        }
+        let (first, backlog) = queue.pop_batch(2);
+        assert_eq!(first.len(), 2);
+        assert!(backlog);
+        let (second, backlog) = queue.pop_batch(2);
+        assert_eq!(second.len(), 2);
+        assert!(!backlog);
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliCommand {
     ListTabs,
+    UiSnapshot,
     PerfStats,
     ResetPerfStats,
     CloseWindow,
@@ -109,6 +163,9 @@ pub enum CliCommand {
         target: Option<TabId>,
         keys: Vec<String>,
     },
+    SendUiKeys {
+        keys: Vec<String>,
+    },
     SendMouse {
         target: Option<TabId>,
         action: MouseAction,
@@ -126,6 +183,10 @@ pub enum CliCommand {
     WaitText {
         target: Option<TabId>,
         text: String,
+        timeout_ms: u64,
+    },
+    WaitTabExit {
+        target: TabId,
         timeout_ms: u64,
     },
 }
@@ -203,6 +264,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
         "list-tabs" => {
             cursor.finish()?;
             CliCommand::ListTabs
+        }
+        "ui-snapshot" => {
+            cursor.finish()?;
+            CliCommand::UiSnapshot
         }
         "perf-stats" => {
             cursor.finish()?;
@@ -286,6 +351,16 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             }
             CliCommand::SendKeys { target, keys }
         }
+        "send-ui-keys" => {
+            let mut keys = Vec::new();
+            while let Some(key) = cursor.next() {
+                keys.push(key.to_owned());
+            }
+            if keys.is_empty() {
+                return Err("send-ui-keys requires at least one KEY".to_owned());
+            }
+            CliCommand::SendUiKeys { keys }
+        }
         "send-mouse" => {
             let target = cursor.optional_target()?;
             let action = parse_mouse_action(cursor.required_value("--action")?)?;
@@ -342,6 +417,15 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
                 timeout_ms,
             }
         }
+        "wait-tab-exit" => {
+            let target = cursor.required_tab("--target")?;
+            let timeout_ms = cursor.optional_u64("--timeout-ms")?.unwrap_or(10_000);
+            if timeout_ms == 0 || timeout_ms > 120_000 {
+                return Err("--timeout-ms must be between 1 and 120000".to_owned());
+            }
+            cursor.finish()?;
+            CliCommand::WaitTabExit { target, timeout_ms }
+        }
         _ => {
             return Err(format!(
                 "unknown agenterm-con cli command {verb:?}\n{}",
@@ -354,8 +438,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
 }
 
 pub fn usage() -> String {
-    "usage: agenterm-con cli --control ENDPOINT <list-tabs|perf-stats|reset-perf-stats|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-mouse|send-wheel|wait-text> ...".to_owned()
+    "usage: agenterm-con cli list-commands\n       agenterm-con cli --control ENDPOINT <list-tabs|ui-snapshot|perf-stats|reset-perf-stats|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-ui-keys|send-mouse|send-wheel|wait-text|wait-tab-exit> ...".to_owned()
 }
+
+const CLI_COMMAND_CATALOG: &str = "capture-pane\nclose-tab\nclose-window\nlist-commands\nlist-tabs\nnew-tab\nperf-stats\nreset-perf-stats\nresize-window\nscreenshot-pane\nselect-tab\nsend-keys\nsend-mouse\nsend-paste\nsend-text\nsend-ui-keys\nsend-wheel\nui-snapshot\nwait-tab-exit\nwait-text\n";
 
 fn validate_window_size(width: u16, height: u16) -> Result<(), String> {
     if width == 0 || height == 0 || width > MAX_WINDOW_DIMENSION || height > MAX_WINDOW_DIMENSION {
@@ -640,23 +726,27 @@ impl RequestQueue {
         }
     }
 
-    fn push(&self, request: IncomingRequest) -> Result<(), IncomingRequest> {
+    fn push(&self, request: IncomingRequest) -> Result<bool, IncomingRequest> {
         let mut items = self
             .items
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !self.alive.load(Ordering::Acquire) {
+        if !self.alive.load(Ordering::Acquire) || items.len() >= REQUEST_QUEUE_CAPACITY {
             return Err(request);
         }
+        let should_wake = items.is_empty();
         items.push_back(request);
-        Ok(())
+        Ok(should_wake)
     }
 
-    fn pop(&self) -> Option<IncomingRequest> {
-        self.items
+    fn pop_batch(&self, limit: usize) -> (Vec<IncomingRequest>, bool) {
+        let mut items = self
+            .items
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop_front()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = limit.min(items.len());
+        let batch = items.drain(..count).collect();
+        (batch, !items.is_empty())
     }
 
     fn close(&self) {
@@ -669,6 +759,65 @@ impl RequestQueue {
     }
 }
 
+struct ConnectionQueue {
+    items: std::sync::Mutex<std::collections::VecDeque<NativeStream>>,
+    ready: std::sync::Condvar,
+    alive: Arc<AtomicBool>,
+}
+
+impl ConnectionQueue {
+    fn new(alive: Arc<AtomicBool>) -> Self {
+        Self {
+            items: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            ready: std::sync::Condvar::new(),
+            alive,
+        }
+    }
+
+    fn push(&self, stream: NativeStream) -> Result<(), NativeStream> {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.alive.load(Ordering::Acquire) || items.len() >= CONNECTION_QUEUE_CAPACITY {
+            return Err(stream);
+        }
+        items.push_back(stream);
+        self.ready.notify_one();
+        Ok(())
+    }
+
+    fn pop(&self) -> Option<NativeStream> {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(stream) = items.pop_front() {
+                return Some(stream);
+            }
+            if !self.alive.load(Ordering::Acquire) {
+                return None;
+            }
+            let (next, _) = self
+                .ready
+                .wait_timeout(items, ACCEPT_POLL)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            items = next;
+        }
+    }
+
+    fn close(&self) {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.alive.store(false, Ordering::Release);
+        items.clear();
+        self.ready.notify_all();
+    }
+}
+
 pub struct IncomingRequest {
     pub command: CliCommand,
     pub reply: ReplySender,
@@ -676,6 +825,7 @@ pub struct IncomingRequest {
 
 pub struct ControlServer {
     requests: Arc<RequestQueue>,
+    connections: Arc<ConnectionQueue>,
 }
 
 impl ControlServer {
@@ -684,13 +834,31 @@ impl ControlServer {
         let mut listener = NativeListener::bind(&endpoint).map_err(|error| error.to_string())?;
         let alive = Arc::new(AtomicBool::new(true));
         let requests = Arc::new(RequestQueue::new(Arc::clone(&alive)));
-        let request_tx = Arc::clone(&requests);
-        let worker_alive = Arc::clone(&alive);
-        let wake = Arc::new(wake);
-        agenterm_platform::threading::spawn_named_detached(
+        let connections = Arc::new(ConnectionQueue::new(Arc::clone(&alive)));
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
+        for _ in 0..CONTROL_WORKERS {
+            let worker_connections = Arc::clone(&connections);
+            let request_tx = Arc::clone(&requests);
+            let worker_wake = Arc::clone(&wake);
+            if let Err(error) = agenterm_platform::threading::spawn_named_detached(
+                "agenterm-con-control-worker",
+                Box::new(move || {
+                    while let Some(stream) = worker_connections.pop() {
+                        serve_one(stream, Arc::clone(&request_tx), Arc::clone(&worker_wake));
+                    }
+                }),
+            ) {
+                connections.close();
+                requests.close();
+                return Err(format!("control worker thread: {error}"));
+            }
+        }
+        let listener_alive = Arc::clone(&alive);
+        let listener_connections = Arc::clone(&connections);
+        if let Err(error) = agenterm_platform::threading::spawn_named_detached(
             "agenterm-con-control",
             Box::new(move || {
-                while worker_alive.load(Ordering::Acquire) {
+                while listener_alive.load(Ordering::Acquire) {
                     let stream = match listener.accept(ACCEPT_POLL) {
                         Ok(stream) => stream,
                         Err(error) if error.code == IpcTransportErrorCode::AcceptTimeout => {
@@ -698,32 +866,39 @@ impl ControlServer {
                         }
                         Err(_) => break,
                     };
-                    let request_tx = request_tx.clone();
-                    let wake = Arc::clone(&wake);
-                    let _ = agenterm_platform::threading::spawn_named_detached(
-                        "agenterm-con-control-request",
-                        Box::new(move || serve_one(stream, request_tx, wake)),
-                    );
+                    if let Err(stream) = listener_connections.push(stream) {
+                        reject_busy(stream);
+                    }
                 }
             }),
-        )
-        .map_err(|error| format!("control listener thread: {error}"))?;
-        Ok(Self { requests })
+        ) {
+            connections.close();
+            requests.close();
+            return Err(format!("control listener thread: {error}"));
+        }
+        Ok(Self {
+            requests,
+            connections,
+        })
     }
 
-    pub fn try_recv(&self) -> Option<IncomingRequest> {
-        self.requests.pop()
+    pub fn recv_batch(&self, limit: usize) -> (Vec<IncomingRequest>, bool) {
+        self.requests.pop_batch(limit)
     }
 }
 
 impl Drop for ControlServer {
     fn drop(&mut self) {
         self.requests.close();
+        self.connections.close();
     }
 }
 
 #[inline(never)]
 pub fn run_cli(args: &[String]) -> Result<String, String> {
+    if args.len() == 2 && args[0] == "cli" && args[1] == "list-commands" {
+        return Ok(CLI_COMMAND_CATALOG.to_owned());
+    }
     let request = parse_cli(args)?;
     let endpoint = parse_native_endpoint(&request.control)?;
     let mut stream = NativeStream::connect(&endpoint, CONNECT_TIMEOUT)
@@ -741,18 +916,29 @@ fn serve_one(
     request_tx: Arc<RequestQueue>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
-    let _ = stream.set_io_timeout(GUI_RESPONSE_TIMEOUT);
+    let _ = stream.set_io_timeout(CONNECT_TIMEOUT);
     let response = read_wire_request(&mut stream).and_then(|command| {
+        stream
+            .set_io_timeout(GUI_RESPONSE_TIMEOUT)
+            .map_err(|error| error.to_string())?;
         let (reply, response_rx) = reply_channel();
-        request_tx
+        let should_wake = request_tx
             .push(IncomingRequest { command, reply })
             .map_err(|_| "terminal window is closing".to_owned())?;
-        wake();
+        if should_wake {
+            wake();
+        }
         response_rx
             .recv_timeout(GUI_RESPONSE_TIMEOUT)
             .map_err(|_| "terminal GUI did not respond before timeout".to_owned())?
     });
     let payload = encode_response(response);
+    let _ = write_frame(&mut stream, &payload, RESPONSE_MAX_BYTES);
+}
+
+fn reject_busy(mut stream: NativeStream) {
+    let _ = stream.set_io_timeout(BUSY_REPLY_TIMEOUT);
+    let payload = encode_response(Err("control server is busy".to_owned()));
     let _ = write_frame(&mut stream, &payload, RESPONSE_MAX_BYTES);
 }
 
@@ -822,6 +1008,7 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
     let mut wire = WireWriter::new();
     match command {
         CliCommand::ListTabs => wire.byte(0),
+        CliCommand::UiSnapshot => wire.byte(16),
         CliCommand::PerfStats => wire.byte(1),
         CliCommand::ResetPerfStats => wire.byte(2),
         CliCommand::CloseWindow => wire.byte(15),
@@ -872,6 +1059,15 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
                 wire.string(&key)?;
             }
         }
+        CliCommand::SendUiKeys { keys } => {
+            wire.byte(17);
+            let count =
+                u32::try_from(keys.len()).map_err(|_| "too many control keys".to_owned())?;
+            wire.u32(count);
+            for key in keys {
+                wire.string(&key)?;
+            }
+        }
         CliCommand::SendMouse {
             target,
             action,
@@ -910,6 +1106,11 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
             wire.string(&text)?;
             wire.u64(timeout_ms);
         }
+        CliCommand::WaitTabExit { target, timeout_ms } => {
+            wire.byte(18);
+            wire.tab(target);
+            wire.u64(timeout_ms);
+        }
     }
     if wire.bytes.len() > REQUEST_MAX_BYTES {
         return Err("control request is oversized".to_owned());
@@ -924,6 +1125,7 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
     let mut wire = WireReader::new(bytes);
     let command = match wire.byte()? {
         0 => CliCommand::ListTabs,
+        16 => CliCommand::UiSnapshot,
         1 => CliCommand::PerfStats,
         2 => CliCommand::ResetPerfStats,
         3 => CliCommand::NewTab {
@@ -963,6 +1165,17 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
                 keys.push(wire.string()?);
             }
             CliCommand::SendKeys { target, keys }
+        }
+        17 => {
+            let count = wire.u32()? as usize;
+            if count == 0 || count > MAX_WIRE_KEYS || count > wire.remaining() / 4 {
+                return Err("control key count is invalid".to_owned());
+            }
+            let mut keys = Vec::with_capacity(count);
+            for _ in 0..count {
+                keys.push(wire.string()?);
+            }
+            CliCommand::SendUiKeys { keys }
         }
         10 => {
             let target = wire.optional_tab()?;
@@ -1025,6 +1238,14 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
             CliCommand::ResizeWindow { width, height }
         }
         15 => CliCommand::CloseWindow,
+        18 => {
+            let target = wire.tab()?;
+            let timeout_ms = wire.u64()?;
+            if timeout_ms == 0 || timeout_ms > 120_000 {
+                return Err("control wait timeout is outside its allowed range".to_owned());
+            }
+            CliCommand::WaitTabExit { target, timeout_ms }
+        }
         _ => return Err("unknown control command opcode".to_owned()),
     };
     wire.finish()?;
@@ -1305,6 +1526,25 @@ mod tests {
                 "cli",
                 "--control",
                 "pipe:test",
+                "wait-tab-exit",
+                "--target",
+                "@9",
+                "--timeout-ms",
+                "250",
+            ])),
+            Ok(CliRequest {
+                control: "pipe:test".to_owned(),
+                command: CliCommand::WaitTabExit {
+                    target: TabId::new(9),
+                    timeout_ms: 250,
+                },
+            })
+        );
+        assert_eq!(
+            parse_cli(&args(&[
+                "cli",
+                "--control",
+                "pipe:test",
                 "new-tab",
                 "--parent",
                 "@9",
@@ -1397,6 +1637,7 @@ mod tests {
     fn every_control_command_survives_wire_round_trip() {
         let commands = [
             CliCommand::ListTabs,
+            CliCommand::UiSnapshot,
             CliCommand::PerfStats,
             CliCommand::ResetPerfStats,
             CliCommand::CloseWindow,
@@ -1433,6 +1674,9 @@ mod tests {
                 target: None,
                 keys: vec!["Ctrl+C".to_owned()],
             },
+            CliCommand::SendUiKeys {
+                keys: vec!["Space".to_owned(), "Ctrl+A".to_owned()],
+            },
             CliCommand::SendMouse {
                 target: None,
                 action: MouseAction::Click,
@@ -1450,6 +1694,10 @@ mod tests {
             CliCommand::WaitText {
                 target: None,
                 text: "ready".to_owned(),
+                timeout_ms: 250,
+            },
+            CliCommand::WaitTabExit {
+                target: TabId::new(5),
                 timeout_ms: 250,
             },
         ];

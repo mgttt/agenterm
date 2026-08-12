@@ -1,9 +1,10 @@
 use std::sync::LazyLock;
 
 static WORKFLOW: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci.yml").replace("\r\n", "\n"));
-static WINDOWS_FULL_GATE: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/win-full-gate.yml").replace("\r\n", "\n"));
+    LazyLock::new(|| include_str!("../.github/workflows/ci-agenterm.yml").replace("\r\n", "\n"));
+static CON_WORKFLOW: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
+});
 static CANDIDATE: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/candidate.yml").replace("\r\n", "\n"));
 static RELEASE: LazyLock<String> =
@@ -37,18 +38,6 @@ static TASK_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
         .expect("agenterm.tasks.json must be valid JSON")
 });
 
-fn job_span(name: &str, next_job: Option<&str>) -> &'static str {
-    let marker = format!("  {name}:\n");
-    let start = WORKFLOW
-        .find(marker.as_str())
-        .unwrap_or_else(|| panic!("missing CI job: {name}"));
-    let end = next_job
-        .and_then(|next| WORKFLOW.find(&format!("\n  {next}:\n")))
-        .unwrap_or(WORKFLOW.len());
-    assert!(end > start, "CI job span for {name} is empty");
-    &WORKFLOW[start..end]
-}
-
 fn normalized_task_callers(source: &str) -> String {
     source
         .replace('\\', "/")
@@ -59,8 +48,6 @@ fn normalized_task_callers(source: &str) -> String {
 #[test]
 fn ci_manifest_task_entrypoints_use_rh_front_door() {
     for (name, source) in [
-        ("ci", WORKFLOW.as_str()),
-        ("win-full-gate", WINDOWS_FULL_GATE.as_str()),
         ("candidate", CANDIDATE.as_str()),
         ("performance-experiment", PERFORMANCE_EXPERIMENT.as_str()),
     ] {
@@ -246,37 +233,30 @@ fn client_smoke_fail_closes_rh_version_probe_from_platform_manifest() {
 
 #[test]
 fn linux_x86_64_ci_proves_rh_aot_pipeline() {
-    let job = job_span("linux-x86_64", Some("linux-aarch64"));
-    assert!(job.contains("./rh-check.sh"));
-    assert!(job.contains("rh_regression") || job.contains("rh-check"));
+    assert!(WORKFLOW.contains("./rh-check.sh"));
+    assert!(WORKFLOW.contains("cargo check --locked -p agenterm"));
 }
 
 #[test]
-fn windows_ci_proves_rh_aot_pipeline() {
-    let job = job_span("windows", Some("linux-x86_64"));
-    assert!(job.contains("./rh-check.sh"));
-    assert!(job.contains("rh-aot-smoke"));
+fn split_ci_keeps_script_authority_out_of_con() {
+    assert!(!CON_WORKFLOW.contains("rh-check"));
+    assert!(!CON_WORKFLOW.contains("agenterm-rh"));
+    assert!(!CON_WORKFLOW.contains("task run"));
 }
 
 #[test]
-fn cross_cells_compile_rh_for_target() {
-    let linux = job_span("linux-aarch64", Some("macos"));
-    assert!(linux.contains("cargo check -p agenterm-rh --locked"));
-    assert!(linux.contains("aarch64-unknown-linux-gnu"));
-    assert!(linux.contains("AGENTERM_RH_QUALIFY_TARGET"));
-
-    let windows = job_span("windows-aarch64", None);
-    assert!(windows.contains("cargo check -p agenterm-rh --locked"));
-    assert!(windows.contains("aarch64-pc-windows-msvc"));
-    assert!(windows.contains("AGENTERM_RH_QUALIFY_TARGET"));
-}
-
-#[test]
-fn macos_ci_cross_compiles_rh_reference_pack() {
-    let job = job_span("macos", Some("windows-aarch64"));
-    assert!(job.contains("AGENTERM_RH_QUALIFY_TARGET"));
-    assert!(job.contains("cargo check -p agenterm-rh --locked"));
-    assert!(job.contains("cross_compiles_reference_pack_when_target_env_set"));
+fn main_and_con_keep_complete_six_cell_target_sets() {
+    for target in [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ] {
+        assert!(WORKFLOW.contains(target));
+        assert!(CON_WORKFLOW.contains(target));
+    }
 }
 
 #[test]

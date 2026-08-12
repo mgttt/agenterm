@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "product": "agenterm-con",
+  "public_commands": [
+    "capture-pane", "close-tab", "close-window", "list-commands", "list-tabs",
+    "new-tab", "perf-stats", "reset-perf-stats", "resize-window", "screenshot-pane",
+    "select-tab", "send-keys", "send-mouse", "send-paste", "send-text",
+    "send-ui-keys", "send-wheel", "ui-snapshot", "wait-tab-exit", "wait-text"
+  ],
+  "capabilities": [
+    {
+      "id": "con.terminal.sessions",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_24_con_terminal.md",
+      "prd_anchor": "- [x] each tree tab owns an independent PTY, parser, viewport and failure state",
+      "evidence": [
+        "agenterm_con_blackbox::cjk_output_from_a_real_child_process_appears_as_actual_characters",
+        "agenterm_con_blackbox::snapshot_reports_exit_code_and_retains_tab_until_explicit_close"
+      ],
+      "commands": ["capture-pane", "send-keys", "send-paste", "send-text", "wait-tab-exit", "wait-text"]
+    },
+    {
+      "id": "con.workspace.tree",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_25_con_workspace.md",
+      "prd_anchor": "- [x] `Workspace` is the sole authority for tree order, parentage and stable tab",
+      "evidence": ["agenterm_con_control::gui_control_surface_isolated_multitab_black_box"],
+      "commands": ["close-tab", "list-tabs", "new-tab", "select-tab"]
+    },
+    {
+      "id": "con.workspace.composer",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_25_con_workspace.md",
+      "prd_anchor": "- [x] composer focus isolation is owned by a Windows black-box journey: it",
+      "evidence": ["agenterm_con_blackbox::native_composer_focus_keeps_editing_keys_local_until_enter"],
+      "commands": ["send-ui-keys"]
+    },
+    {
+      "id": "con.terminal.selection-scroll",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_24_con_terminal.md",
+      "prd_anchor": "- [x] a public multi-tab journey uses `wait-tab-exit` to prove one child can",
+      "evidence": [
+        "agenterm_con_blackbox::controlled_press_drag_release_extends_a_local_selection",
+        "agenterm_con_blackbox::controlled_wheel_moves_the_real_scrollback_offset_up_then_down"
+      ],
+      "commands": ["send-mouse", "send-wheel", "ui-snapshot"]
+    },
+    {
+      "id": "con.control.observation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_26_con_control_cli.md",
+      "prd_anchor": "- [x] the fixed GUI-lifetime local CLI uses stable `@N` tab IDs for `list-tabs`,",
+      "evidence": [
+        "agenterm_con_blackbox::controlled_screenshot_produces_a_valid_nonempty_png",
+        "agenterm_con_control::gui_control_surface_isolated_multitab_black_box"
+      ],
+      "commands": ["perf-stats", "reset-perf-stats", "screenshot-pane"]
+    },
+    {
+      "id": "con.window.resize",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_24_con_terminal.md",
+      "prd_anchor": "- [x] the 16-step public resize journey dropped from 35 to 18 frames, 17 to 8",
+      "evidence": ["agenterm_con_blackbox::controlled_resize_storm_reports_successful_frames_and_exits_cleanly"],
+      "commands": ["resize-window"]
+    },
+    {
+      "id": "con.control.lifecycle",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_26_con_control_cli.md",
+      "prd_anchor": "- [x] closing a tab immediately cancels its pending text/exit waits and",
+      "evidence": ["agenterm_con_control::gui_control_surface_isolated_multitab_black_box"],
+      "commands": ["close-window"]
+    },
+    {
+      "id": "con.delivery.alignment",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "prd/PRD_02_27_con_delivery.md",
+      "prd_anchor": "- [x] `crates/agenterm-con/alignment-contract.json` maps each gated con",
+      "evidence": ["agenterm_con_alignment::machine_contract_matches_public_cli_and_registered_journeys"],
+      "commands": ["list-commands"]
+    }
+  ]
+}

@@ -21,7 +21,7 @@
       "callers": [
         "check.cmd",
         "release task",
-        ".github/workflows/ci.yml",
+        ".github/workflows/ci-agenterm.yml",
         ".github/workflows/release.yml"
       ],
       "inputs": [
@@ -882,7 +882,7 @@
       "status": "deleted",
       "callers": [
         "check task",
-        ".github/workflows/ci.yml"
+        ".github/workflows/ci-agenterm.yml"
       ],
       "inputs": [
         "staged CLI, GUI and Script binaries",
@@ -1351,7 +1351,7 @@
       "status": "deleted",
       "callers": [
         "check task",
-        ".github/workflows/ci.yml"
+        ".github/workflows/ci-agenterm.yml"
       ],
       "inputs": [
         "staged GUI, CLI and Script binaries",

@@ -1,89 +1,65 @@
 use std::sync::LazyLock;
 
-static WORKFLOW: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci.yml").replace("\r\n", "\n"));
+static AGENTERM: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/ci-agenterm.yml").replace("\r\n", "\n"));
+static CON: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
+});
 
-fn windows_job() -> &'static str {
-    let start = WORKFLOW
-        .find("  windows:\n")
-        .expect("missing Windows CI job");
-    let end = WORKFLOW
-        .find("\n  linux-x86_64:\n")
-        .expect("missing next CI job");
-    &WORKFLOW[start..end]
-}
+const CHECKOUT_SHA: &str = "08eba0b27e820071cde6df949e0beb9ba4906955";
 
 #[test]
-fn windows_ci_covers_public_native_ipc_main_and_dev_without_candidate_scope() {
-    let windows = windows_job();
-    let native_step = windows
-        .split("      - name:")
-        .find(|step| step.contains("Prove native Windows IPC main/dev authorities"))
-        .expect("missing dedicated native IPC main/dev evidence step");
-
-    assert!(native_step.contains("id: native-ipc-main-dev"));
-    assert!(native_step.contains("AGENTERM_NO_ACTIVATE: \"1\""));
-    assert!(native_step.contains("task run native-ipc-smoke"));
-    assert!(native_step.contains("--manifest agenterm.tasks.json -- --ci-main-dev"));
-    assert!(
-        windows
-            .find("Run representative public-interface slice")
-            .unwrap()
-            < windows
-                .find("Prove native Windows IPC main/dev authorities")
-                .unwrap()
-    );
-    assert!(windows.contains("windows_native_ipc_main_dev_ms:"));
-    assert!(!windows.contains("check.cmd --release"));
-    assert!(!windows.contains("--include-stress"));
-}
-
-#[test]
-fn windows_ci_uses_fail_fast_non_powershell_steps_with_millisecond_outputs() {
-    let windows = windows_job();
-    assert!(!windows.contains("shell: pwsh"));
-    assert!(!windows.contains("shell: powershell"));
-
-    for (name, command) in [
-        (
-            "Install lint components",
-            "rustup component add rustfmt clippy",
-        ),
-        (
-            "Run quality gate",
-            "./check.cmd --skip-smoke --timing target/qualification/timing.json",
-        ),
-        (
-            "Run representative public-interface slice",
-            "task run startup-smoke --manifest agenterm.tasks.json",
-        ),
-        (
-            "Prove native Windows IPC main/dev authorities",
-            "task run native-ipc-smoke \\\n            --manifest agenterm.tasks.json -- --ci-main-dev",
-        ),
-    ] {
-        let step = windows
-            .split("      - name:")
-            .find(|step| step.contains(name))
-            .unwrap_or_else(|| panic!("missing Windows CI step: {name}"));
-        assert!(step.contains("shell: bash"), "non-Bash step: {name}");
-        assert!(
-            step.contains("set -euo pipefail"),
-            "step does not propagate command failure: {name}"
-        );
-        assert!(step.contains(command), "missing owned command: {name}");
-        assert!(
-            step.contains("start_ms=$(date +%s%3N)")
-                && step.contains("duration_ms=$((end_ms - start_ms))")
-                && step.contains("echo \"duration_ms=$duration_ms\" >> \"$GITHUB_OUTPUT\""),
-            "step does not publish millisecond timing: {name}"
-        );
+fn product_ci_workflows_are_independent_and_sha_pinned() {
+    assert!(AGENTERM.contains("name: CI / agenterm"));
+    assert!(CON.contains("name: CI / agenterm-con"));
+    assert!(!AGENTERM.contains("-p agenterm-con"));
+    assert!(!CON.contains("-p agenterm --"));
+    assert!(!CON.contains("agenterm.tasks.json"));
+    assert!(!CON.contains("task run"));
+    assert!(AGENTERM.contains("-p agenterm --all-targets"));
+    assert!(AGENTERM.contains("./rh-check.sh"));
+    for source in [AGENTERM.as_str(), CON.as_str()] {
+        assert!(source.contains(CHECKOUT_SHA));
+        assert!(source.contains("persist-credentials: false"));
+        assert!(source.contains("permissions:\n  contents: read"));
+        assert!(source.contains("workflow_dispatch:"));
+        assert!(source.contains("push:"));
+        assert!(source.contains("pull_request:"));
     }
+}
 
-    let public_step = windows
-        .split("      - name:")
-        .find(|step| step.contains("Run representative public-interface slice"))
-        .expect("missing public-interface step");
-    assert!(public_step.contains("task run cli-smoke --manifest agenterm.tasks.json"));
-    assert!(public_step.contains("AGENTERM_NO_ACTIVATE: \"1\""));
+#[test]
+fn both_products_cover_all_six_target_cells() {
+    for target in [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ] {
+        assert!(AGENTERM.contains(target), "main CI misses {target}");
+        assert!(CON.contains(target), "con CI misses {target}");
+    }
+    assert!(AGENTERM.contains("cargo xwin check --locked -p agenterm"));
+    assert!(CON.contains("cargo xwin check --locked -p agenterm-con"));
+    assert!(AGENTERM.contains("gcc-aarch64-linux-gnu"));
+    assert!(CON.contains("gcc-aarch64-linux-gnu"));
+    assert!(AGENTERM.contains("runner: macos-15-intel"));
+    assert!(CON.contains("runner: macos-15-intel"));
+}
+
+#[test]
+fn con_windows_job_uses_release_equivalent_unwind_graph_and_blackbox_package() {
+    assert!(CON.contains("--profile con-release-fast"));
+    assert!(CON.contains("build-std=std,panic_unwind,compiler_builtins"));
+    assert!(CON.contains("build-std-features=panic-unwind,backtrace-trace-only"));
+    assert!(CON.contains("RUSTC_BOOTSTRAP: \"1\""));
+    assert!(CON.contains("AGENTERM_NO_ACTIVATE: \"1\""));
+    assert!(CON.contains("cargo test -Z"));
+    assert!(CON.contains("-p agenterm-con"));
+    assert!(CON.contains("cargo build -Z"));
+    assert!(CON.contains("--bin agenterm-con"));
+    assert!(CON.contains("Validate con capability and evidence contract"));
+    assert!(CON.contains("--test agenterm_con_alignment"));
 }

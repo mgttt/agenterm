@@ -217,6 +217,70 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "LOAD_DONE",
         ],
     );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-text",
+            "--target",
+            &child_id,
+            "for /F \"delims=\" %e in ('echo prompt $E^| cmd') do @set \"ESC=%e\"\r",
+        ],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-text",
+            "--target",
+            &child_id,
+            "for /L %i in (1,1,1200) do @echo %ESC%[999999999999999999;999999999999999999;999999999999999999mVT_NOISE_%i%ESC%[0m\r",
+        ],
+    );
+    thread::scope(|scope| {
+        let mut requests = Vec::new();
+        let endpoint = endpoint.as_str();
+        let child_target = child_id.as_str();
+        for index in 0..24 {
+            requests.push(scope.spawn(move || {
+                match index % 3 {
+                    0 => invoke(exe, endpoint, &["list-tabs"]),
+                    1 => invoke(exe, endpoint, &["perf-stats"]),
+                    _ => invoke(
+                        exe,
+                        endpoint,
+                        &[
+                            "capture-pane",
+                            "--target",
+                            child_target,
+                            "--max-bytes",
+                            "1048576",
+                        ],
+                    ),
+                }
+            }));
+        }
+        for request in requests {
+            let output = request.join().expect("control request thread must join");
+            assert!(
+                output.status.success(),
+                "concurrent control request failed: {}",
+                error_text(&output)
+            );
+        }
+    });
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &child_id,
+            "--timeout-ms",
+            "15000",
+            "VT_NOISE_1200",
+        ],
+    );
     let perf = cli_json(exe, &endpoint, &["perf-stats"]);
     assert!(perf["frames"].as_u64().is_some_and(|frames| frames > 0));
     assert!(
@@ -224,12 +288,18 @@ fn gui_control_surface_isolated_multitab_black_box() {
             .as_u64()
             .is_some_and(|bytes| bytes > 0)
     );
+    assert!(
+        perf["control_requests"]
+            .as_u64()
+            .is_some_and(|requests| requests >= 24)
+    );
+    assert!(perf["control_budget_yields"].as_u64().is_some());
 
     let root_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &root]);
     let child_text = cli_text(exe, &endpoint, &["capture-pane", "--target", &child_id]);
     assert!(root_text.contains("ROOT_ONLY"));
     assert!(!root_text.contains("LOAD_DONE"));
-    assert!(child_text.contains("LOAD_DONE"));
+    assert!(child_text.contains("VT_NOISE_1200"));
 
     cli_json(
         exe,
@@ -317,16 +387,372 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert!(!timed_out.status.success(), "missing text must time out");
     let invalid = invoke(exe, &endpoint, &["capture-pane", "--target", "@999999"]);
     assert!(!invalid.status.success(), "unknown tab must fail");
-    cli_json(exe, &endpoint, &["list-tabs"]);
+    let still_running = invoke(
+        exe,
+        &endpoint,
+        &["wait-tab-exit", "--target", &root, "--timeout-ms", "25"],
+    );
+    assert!(
+        !still_running.status.success(),
+        "wait-tab-exit must time out for a live terminal"
+    );
+
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-text", "--target", &child_id, "echo CHILD_FINAL\r"],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &["wait-text", "--target", &child_id, "CHILD_FINAL"],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-text", "--target", &child_id, "exit 7\r"],
+    );
+    let exited = cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-tab-exit",
+            "--target",
+            &child_id,
+            "--timeout-ms",
+            "10000",
+        ],
+    );
+    assert_eq!(exited["id"], child_id);
+    assert_eq!(exited["child_alive"], false);
+    assert_eq!(exited["child_exit_code"], 7);
+    let child_final = cli_text(exe, &endpoint, &["capture-pane", "--target", &child_id]);
+    assert!(child_final.contains("CHILD_FINAL"));
+
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-text",
+            "--target",
+            &root,
+            "echo ROOT_AFTER_CHILD_EXIT\r",
+        ],
+    );
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &root,
+            "--timeout-ms",
+            "10000",
+            "ROOT_AFTER_CHILD_EXIT",
+        ],
+    );
+    let listed_after_exit = cli_json(exe, &endpoint, &["list-tabs"]);
+    let root_state = listed_after_exit["tabs"]
+        .as_array()
+        .and_then(|tabs| tabs.iter().find(|tab| tab["id"] == root))
+        .expect("root tab remains listed");
+    let child_state = listed_after_exit["tabs"]
+        .as_array()
+        .and_then(|tabs| tabs.iter().find(|tab| tab["id"] == child_id))
+        .expect("exited child tab remains listed");
+    assert_eq!(root_state["child_alive"], true);
+    assert_eq!(child_state["child_alive"], false);
+    assert_eq!(child_state["child_exit_code"], 7);
+
+    let mut flood_ids = Vec::new();
+    for index in 0..4 {
+        let flood = cli_json(exe, &endpoint, &["new-tab", "--parent", &root]);
+        let flood_id = tab_id(&flood["id"]).to_owned();
+        let ready = format!("QUEUE_CLOSE_START_{index}");
+        let ready_command = format!("echo {ready}\r");
+        cli_json(
+            exe,
+            &endpoint,
+            &["send-text", "--target", &flood_id, &ready_command],
+        );
+        cli_json(
+            exe,
+            &endpoint,
+            &[
+                "wait-text",
+                "--target",
+                &flood_id,
+                "--timeout-ms",
+                "10000",
+                &ready,
+            ],
+        );
+        let fill = format!("QUEUE_FILL_{index}_");
+        let fill_command = format!("for /L %i in (1,1,1000000) do @echo {fill}%i\r");
+        cli_json(
+            exe,
+            &endpoint,
+            &["send-text", "--target", &flood_id, &fill_command],
+        );
+        cli_json(
+            exe,
+            &endpoint,
+            &[
+                "wait-text",
+                "--target",
+                &flood_id,
+                "--timeout-ms",
+                "10000",
+                &fill,
+            ],
+        );
+        flood_ids.push(flood_id);
+    }
+    let active_before_shots = cli_json(exe, &endpoint, &["ui-snapshot"])["active"].clone();
+    let mut screenshot_jobs = Vec::new();
+    for (index, flood_id) in flood_ids.iter().enumerate() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-con-{suffix}-concurrent-shot-{index}.png"
+        ));
+        let child = Command::new(exe)
+            .args([
+                "cli",
+                "--control",
+                &endpoint,
+                "screenshot-pane",
+                "--target",
+                flood_id,
+                "--output",
+                path.to_str().expect("screenshot path is Unicode"),
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("concurrent screenshot CLI must start");
+        screenshot_jobs.push((child, path));
+    }
+    let screenshot_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut running = false;
+        for (child, _) in &mut screenshot_jobs {
+            running |= child
+                .try_wait()
+                .expect("poll concurrent screenshot CLI")
+                .is_none();
+        }
+        if !running {
+            break;
+        }
+        assert!(
+            Instant::now() < screenshot_deadline,
+            "concurrent screenshot requests did not finish within their bounded deadline"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let mut screenshot_successes = 0;
+    let mut screenshot_busy = 0;
+    for (child, path) in screenshot_jobs {
+        let output = child
+            .wait_with_output()
+            .expect("concurrent screenshot CLI must be reapable");
+        if output.status.success() {
+            screenshot_successes += 1;
+            let bytes = fs::read(&path).expect("successful screenshot publishes its PNG");
+            assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+        } else {
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                error.contains("a screenshot is already pending"),
+                "concurrent screenshot failed without typed busy result: {error}"
+            );
+            screenshot_busy += 1;
+        }
+        let _ = fs::remove_file(path);
+    }
+    assert_eq!(screenshot_successes, 1);
+    assert_eq!(screenshot_busy, flood_ids.len() - 1);
+    let after_concurrent_shots = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(after_concurrent_shots["pending_control_screenshots"], 0);
+    assert_eq!(after_concurrent_shots["active"], active_before_shots);
+
+    let raced_path = std::env::temp_dir().join(format!("agenterm-con-{suffix}-raced-shot.png"));
+    let raced_path_text = raced_path
+        .to_str()
+        .expect("raced screenshot path is Unicode")
+        .to_owned();
+    cli_json(exe, &endpoint, &["reset-perf-stats"]);
+    let mut raced_shot = Command::new(exe)
+        .args([
+            "cli",
+            "--control",
+            &endpoint,
+            "screenshot-pane",
+            "--target",
+            &flood_ids[0],
+            "--output",
+            &raced_path_text,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("raced screenshot CLI must start");
+    cli_json(exe, &endpoint, &["select-tab", "--target", &root]);
+    let raced_deadline = Instant::now() + Duration::from_secs(10);
+    while raced_shot
+        .try_wait()
+        .expect("poll raced screenshot CLI")
+        .is_none()
+    {
+        assert!(
+            Instant::now() < raced_deadline,
+            "screenshot racing active-tab selection did not complete"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let raced_output = raced_shot
+        .wait_with_output()
+        .expect("raced screenshot CLI must be reapable");
+    assert!(
+        raced_output.status.success(),
+        "raced screenshot failed: {}",
+        error_text(&raced_output)
+    );
+    let raced_bytes = fs::read(&raced_path).expect("raced screenshot publishes its PNG");
+    assert!(raced_bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+    let _ = fs::remove_file(raced_path);
+    assert_eq!(cli_json(exe, &endpoint, &["ui-snapshot"])["active"], root);
+    assert_eq!(
+        cli_json(exe, &endpoint, &["perf-stats"])["discarded_capture_frames"],
+        1
+    );
+    for (index, flood_id) in flood_ids.iter().enumerate() {
+        let mut close_flood = Command::new(exe)
+            .args([
+                "cli",
+                "--control",
+                &endpoint,
+                "close-tab",
+                "--target",
+                flood_id,
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("flooded tab close CLI must start");
+        let close_deadline = Instant::now() + Duration::from_secs(3);
+        while close_flood
+            .try_wait()
+            .expect("poll flooded tab close")
+            .is_none()
+        {
+            assert!(
+                Instant::now() < close_deadline,
+                "closing flooded tab {index} exceeded the bounded shutdown deadline"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        let close_output = close_flood
+            .wait_with_output()
+            .expect("flooded tab close CLI must be reapable");
+        assert!(
+            close_output.status.success(),
+            "flooded tab {index} close failed: {}",
+            error_text(&close_output)
+        );
+        let listed = cli_json(exe, &endpoint, &["list-tabs"]);
+        assert!(
+            listed["tabs"]
+                .as_array()
+                .is_some_and(|tabs| tabs.iter().all(|tab| tab["id"] != *flood_id)),
+            "closed flooded tab remained in tree: {listed}"
+        );
+        let root_marker = format!("ROOT_AFTER_FLOOD_CLOSE_{index}");
+        let root_command = format!("echo {root_marker}\r");
+        cli_json(
+            exe,
+            &endpoint,
+            &["send-text", "--target", &root, &root_command],
+        );
+        cli_json(
+            exe,
+            &endpoint,
+            &[
+                "wait-text",
+                "--target",
+                &root,
+                "--timeout-ms",
+                "10000",
+                &root_marker,
+            ],
+        );
+    }
 
     cli_json(exe, &endpoint, &["close-tab", "--target", &root]);
     let after_close = cli_json(exe, &endpoint, &["list-tabs"]);
     assert_eq!(after_close["tabs"].as_array().map(Vec::len), Some(1));
     assert_eq!(after_close["tabs"][0]["id"], child_id);
     assert!(after_close["tabs"][0]["parent"].is_null());
-
-    gui.child
-        .kill()
-        .expect("GUI must remain alive through the journey");
-    gui.child.wait().expect("GUI process must be reapable");
+    let mut pending_wait = Command::new(exe)
+        .args([
+            "cli",
+            "--control",
+            &endpoint,
+            "wait-text",
+            "--target",
+            &child_id,
+            "--timeout-ms",
+            "10000",
+            "NEVER_MATCH_CLOSED_TAB",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("pending wait CLI must start");
+    let pending_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let state = cli_json(exe, &endpoint, &["ui-snapshot"]);
+        if state["pending_control_waits"].as_u64() == Some(1) {
+            assert_eq!(state["pending_control_screenshots"], 0);
+            break;
+        }
+        assert!(
+            Instant::now() < pending_deadline,
+            "wait-text was not registered before tab close: {state}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    cli_json(exe, &endpoint, &["close-tab", "--target", &child_id]);
+    let cancel_deadline = Instant::now() + Duration::from_secs(3);
+    while pending_wait
+        .try_wait()
+        .expect("poll cancelled wait CLI")
+        .is_none()
+    {
+        assert!(
+            Instant::now() < cancel_deadline,
+            "closing a tab did not cancel its pending wait"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let cancelled = pending_wait
+        .wait_with_output()
+        .expect("cancelled wait CLI must be reapable");
+    assert!(!cancelled.status.success());
+    let cancel_error = String::from_utf8_lossy(&cancelled.stderr);
+    assert!(
+        cancel_error.contains(&format!("terminal {child_id} closed")),
+        "pending wait did not receive a typed close error: {cancel_error}"
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = gui.child.try_wait().expect("poll explicitly closed GUI") {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "closing the final retained tab did not exit the GUI"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(status.success(), "explicit close failed with {status:?}");
 }

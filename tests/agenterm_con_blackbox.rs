@@ -31,6 +31,10 @@ type TestHwnd = *mut std::ffi::c_void;
 const WM_ENTERSIZEMOVE: u32 = 0x0231;
 #[cfg(windows)]
 const WM_EXITSIZEMOVE: u32 = 0x0232;
+#[cfg(windows)]
+const WM_LBUTTONDOWN: u32 = 0x0201;
+#[cfg(windows)]
+const WM_LBUTTONUP: u32 = 0x0202;
 
 #[cfg(windows)]
 #[link(name = "user32")]
@@ -268,9 +272,42 @@ fn replay_control_journey(endpoint: &str, path: &Path, host_pid: u32) -> Result<
             .and_then(serde_json::Value::as_str)
         {
             send_native_resize_phase(host_pid, phase)?;
+        } else if let Some(point) = object.get("native_click") {
+            send_native_click(host_pid, journey_u64(point, "x")?, journey_u64(point, "y")?)?;
+        } else if object
+            .get("native_click_composer")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            let state = invoke_control_output(endpoint, &["ui-snapshot".to_owned()])?;
+            let state: serde_json::Value = serde_json::from_str(&state)
+                .map_err(|error| format!("parse UI snapshot: {error}"))?;
+            let input = &state["composer_input"];
+            send_native_click(
+                host_pid,
+                journey_u64(input, "x")?.saturating_add(journey_u64(input, "width")? / 2),
+                journey_u64(input, "y")?.saturating_add(journey_u64(input, "height")? / 2),
+            )?;
+        } else if let Some(path) = object
+            .get("native_screenshot")
+            .and_then(serde_json::Value::as_str)
+        {
+            capture_native_window(host_pid, Path::new(path))?;
         } else if let Some(path) = object.get("perf_stats").and_then(serde_json::Value::as_str) {
             let stats = invoke_control_output(endpoint, &["perf-stats".to_owned()])?;
             std::fs::write(path, stats).map_err(|error| format!("write perf stats: {error}"))?;
+        } else if let Some(path) = object
+            .get("ui_snapshot")
+            .and_then(serde_json::Value::as_str)
+        {
+            let state = invoke_control_output(endpoint, &["ui-snapshot".to_owned()])?;
+            std::fs::write(path, state).map_err(|error| format!("write UI snapshot: {error}"))?;
+        } else if let Some(path) = object
+            .get("capture_text")
+            .and_then(serde_json::Value::as_str)
+        {
+            let text = invoke_control_output(endpoint, &["capture-pane".to_owned()])?;
+            std::fs::write(path, text).map_err(|error| format!("write capture text: {error}"))?;
         } else if object
             .get("close_window")
             .and_then(serde_json::Value::as_bool)
@@ -291,6 +328,16 @@ fn replay_control_journey(endpoint: &str, path: &Path, host_pid: u32) -> Result<
             }
             spec.push_str(key);
             invoke_control(endpoint, &["send-keys".to_owned(), spec])?;
+        } else if let Some(keys) = object.get("ui_keys").and_then(serde_json::Value::as_array) {
+            let mut args = vec!["send-ui-keys".to_owned()];
+            for key in keys {
+                args.push(
+                    key.as_str()
+                        .ok_or_else(|| "ui_keys entries must be strings".to_owned())?
+                        .to_owned(),
+                );
+            }
+            invoke_control(endpoint, &args)?;
         } else if let Some(ms) = object.get("wait_ms").and_then(serde_json::Value::as_u64) {
             std::thread::sleep(Duration::from_millis(ms));
         } else if let Some(text) = object.get("wait_text").and_then(serde_json::Value::as_str) {
@@ -360,7 +407,7 @@ fn replay_control_journey(endpoint: &str, path: &Path, host_pid: u32) -> Result<
 }
 
 #[cfg(windows)]
-fn send_native_resize_phase(host_pid: u32, phase: &str) -> Result<(), String> {
+fn find_process_window(host_pid: u32) -> Result<TestHwnd, String> {
     struct Search {
         pid: u32,
         hwnd: TestHwnd,
@@ -391,12 +438,65 @@ fn send_native_resize_phase(host_pid: u32, phase: &str) -> Result<(), String> {
     if search.hwnd.is_null() {
         return Err(format!("no native window found for con pid {host_pid}"));
     }
+    Ok(search.hwnd)
+}
+
+#[cfg(windows)]
+fn capture_native_window(host_pid: u32, path: &Path) -> Result<(), String> {
+    use agenterm_platform::screenshot::{
+        NativeCaptureArea, ScreenshotWindowHandle, capture_native_window_png,
+    };
+
+    let hwnd = find_process_window(host_pid)?;
+    let handle = unsafe { ScreenshotWindowHandle::from_raw(hwnd as isize) }
+        .ok_or_else(|| "native window handle was null".to_owned())?;
+    capture_native_window_png(
+        handle,
+        path,
+        NativeCaptureArea::Client {
+            left: 0,
+            top: 0,
+            width: 800,
+            height: 480,
+        },
+    )
+    .map(|_| ())
+    .map_err(|error| format!("capture native con window: {error}"))
+}
+
+#[cfg(windows)]
+fn send_native_click(host_pid: u32, x: u64, y: u64) -> Result<(), String> {
+    let hwnd = find_process_window(host_pid)?;
+    let x = u16::try_from(x).map_err(|_| "native click x exceeds u16".to_owned())?;
+    let y = u16::try_from(y).map_err(|_| "native click y exceeds u16".to_owned())?;
+    let lparam = isize::try_from(u32::from(x) | (u32::from(y) << 16))
+        .map_err(|_| "native click coordinates exceed LPARAM".to_owned())?;
+    unsafe {
+        SendMessageW(hwnd, WM_LBUTTONDOWN, 1, lparam);
+        SendMessageW(hwnd, WM_LBUTTONUP, 0, lparam);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn send_native_click(_host_pid: u32, _x: u64, _y: u64) -> Result<(), String> {
+    Err("native window clicks are unavailable on this host".to_owned())
+}
+
+#[cfg(not(windows))]
+fn capture_native_window(_host_pid: u32, _path: &Path) -> Result<(), String> {
+    Err("native window screenshots are unavailable on this host".to_owned())
+}
+
+#[cfg(windows)]
+fn send_native_resize_phase(host_pid: u32, phase: &str) -> Result<(), String> {
+    let hwnd = find_process_window(host_pid)?;
     let message = match phase {
         "begin" => WM_ENTERSIZEMOVE,
         "end" => WM_EXITSIZEMOVE,
         _ => return Err(format!("unknown native resize phase {phase:?}")),
     };
-    unsafe { SendMessageW(search.hwnd, message, 0, 0) };
+    unsafe { SendMessageW(hwnd, message, 0, 0) };
     Ok(())
 }
 
@@ -641,14 +741,13 @@ fn removed_script_flag_fails_fast_without_opening_a_window() {
 }
 
 #[test]
-fn dash_e_passthrough_reaches_the_real_child_process() {
+fn dash_e_passthrough_retains_final_screen_after_child_exit() {
     let _guard = gui_test_guard();
     // Proves -e's argv passthrough end-to-end: not just that the CLI parser
     // builds the right Vec<String> (that's unit-tested), but that a real
     // spawned program actually receives it and its actual output lands on
-    // screen. Uses /c (not /k) so the child exits on its own once the
-    // command finishes, letting the natural child-exit path close the
-    // session instead of requiring a kill.
+    // screen. Uses /c (not /k) so the child exits on its own while the host
+    // must retain the tab and its final frame.
     let dir = scratch_dir("dash-e");
     let args = command_shell_args("echo DASH_E_PASSTHROUGH_MARKER");
     let mut session = ConSession::spawn(&dir, &args);
@@ -656,20 +755,23 @@ fn dash_e_passthrough_reaches_the_real_child_process() {
         ConSession::screen_text(snapshot).contains("DASH_E_PASSTHROUGH_MARKER")
     });
 
-    // The child (cmd /c) exits on its own after running the command; the
-    // whole agenterm-con process must follow it down without being killed —
-    // this is the child_gone -> Exit wiring, which nothing else automates.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Ok(Some(_status)) = session.child.try_wait() {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "process did not exit after its child did"
-        );
-        std::thread::sleep(Duration::from_millis(30));
-    }
+    let exited = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["child_alive"] == false
+    });
+    assert_eq!(exited["child_exit_code"], 0, "{exited}");
+    assert!(
+        ConSession::screen_text(&exited).contains("DASH_E_PASSTHROUGH_MARKER"),
+        "final child output was not retained: {exited}"
+    );
+    assert!(
+        session
+            .child
+            .try_wait()
+            .expect("poll retained host")
+            .is_none(),
+        "host exited when its only child completed"
+    );
+    let _ = session.child.kill();
 }
 
 #[test]
@@ -764,11 +866,19 @@ fn cjk_output_from_a_real_child_process_appears_as_actual_characters() {
     session.wait_for(Duration::from_secs(10), |snapshot| {
         ConSession::screen_text(snapshot).contains("CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}")
     });
-    let _ = session.child.wait();
+    let exited = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["child_alive"] == false
+    });
+    assert_eq!(exited["child_exit_code"], 0, "{exited}");
+    assert!(
+        ConSession::screen_text(&exited).contains("CJK_MARKER_\u{4e2d}\u{6587}\u{5b57}\u{5f62}"),
+        "final CJK output was not retained: {exited}"
+    );
+    let _ = session.child.kill();
 }
 
 #[test]
-fn snapshot_reports_a_live_child_until_it_exits() {
+fn snapshot_reports_exit_code_and_retains_tab_until_explicit_close() {
     let _guard = gui_test_guard();
     // child_alive is the field a test (or agent) should poll instead of
     // guessing a fixed delay before asserting a command finished. Verify it
@@ -791,17 +901,27 @@ fn snapshot_reports_a_live_child_until_it_exits() {
     });
     assert_eq!(snapshot["child_alive"], true);
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Ok(Some(_)) = session.child.try_wait() {
-            break;
-        }
+    let exited = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["child_alive"] == false
+    });
+    assert_eq!(exited["child_exit_code"], 0, "{exited}");
+    assert!(
+        ConSession::screen_text(&exited).contains("READY_MARKER"),
+        "final screen was discarded after child exit: {exited}"
+    );
+    let retain_deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < retain_deadline {
         assert!(
-            Instant::now() < deadline,
-            "process never exited after its child did"
+            session
+                .child
+                .try_wait()
+                .expect("poll retained host")
+                .is_none(),
+            "host exited before the tab was explicitly closed"
         );
-        std::thread::sleep(Duration::from_millis(30));
+        std::thread::sleep(Duration::from_millis(20));
     }
+    let _ = session.child.kill();
 }
 
 #[test]
@@ -937,6 +1057,124 @@ fn controlled_click_produces_a_local_selection_at_the_clicked_cell() {
     assert_eq!(snapshot["selection"][0]["col"], 5, "{snapshot}");
     assert_eq!(snapshot["selection"][1]["row"], 3, "{snapshot}");
     assert_eq!(snapshot["selection"][1]["col"], 5, "{snapshot}");
+    let _ = session.child.kill();
+}
+
+#[cfg(windows)]
+#[test]
+fn controlled_terminal_click_keeps_native_pixels_stable_outside_local_feedback() {
+    let _guard = gui_test_guard();
+    let dir = scratch_dir("click-native-pixels");
+    let before_path = dir.join("before.png");
+    let after_path = dir.join("after.png");
+    let script = write_journey(
+        &dir,
+        &format!(
+            r#"[
+                {{"text": "echo CLICK_PIXEL_MARKER\r"}},
+                {{"wait_text": "CLICK_PIXEL_MARKER", "timeout_ms": 15000}},
+                {{"wait_ms": 300}},
+                {{"native_screenshot": {}}},
+                {{"native_click": {{"x": 420, "y": 220}}}},
+                {{"wait_ms": 100}},
+                {{"native_screenshot": {}}}
+            ]"#,
+            serde_json::to_string(before_path.to_str().unwrap()).unwrap(),
+            serde_json::to_string(after_path.to_str().unwrap()).unwrap(),
+        ),
+    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
+    session.wait_for(Duration::from_secs(10), |_| {
+        before_path.exists() && after_path.exists()
+    });
+
+    fn decode(path: &Path) -> (usize, usize, Vec<u8>, png::ColorType) {
+        let decoder = png::Decoder::new(std::fs::File::open(path).expect("open native screenshot"));
+        let mut reader = decoder.read_info().expect("read native screenshot info");
+        let mut bytes = vec![0; reader.output_buffer_size()];
+        let info = reader
+            .next_frame(&mut bytes)
+            .expect("decode native screenshot");
+        bytes.truncate(info.buffer_size());
+        (
+            info.width as usize,
+            info.height as usize,
+            bytes,
+            info.color_type,
+        )
+    }
+
+    let (before_width, before_height, before, before_color) = decode(&before_path);
+    let (after_width, after_height, after, after_color) = decode(&after_path);
+    assert_eq!((after_width, after_height), (before_width, before_height));
+    fn visible_pixels(bytes: &[u8], color: png::ColorType) -> usize {
+        match color {
+            png::ColorType::Rgb => bytes
+                .chunks_exact(3)
+                .filter(|pixel| pixel.iter().any(|channel| *channel > 0x20))
+                .count(),
+            png::ColorType::Rgba => bytes
+                .chunks_exact(4)
+                .filter(|pixel| pixel[..3].iter().any(|channel| *channel > 0x20))
+                .count(),
+            other => panic!("unexpected native screenshot color type {other:?}"),
+        }
+    }
+    let before_visible = visible_pixels(&before, before_color);
+    let after_visible = visible_pixels(&after, after_color);
+    assert!(
+        after_visible * 10 >= before_visible * 9,
+        "terminal click erased visible native pixels: before={before_visible}, after={after_visible}"
+    );
+    let _ = session.child.kill();
+}
+
+#[cfg(windows)]
+#[test]
+fn native_composer_focus_keeps_editing_keys_local_until_enter() {
+    let _guard = gui_test_guard();
+    let dir = scratch_dir("composer-focus-routing");
+    let before_submit = dir.join("before-submit.txt");
+    let ui_state = dir.join("ui-state.json");
+    let script = write_journey(
+        &dir,
+        &format!(
+            r#"[
+                {{"text":"echo COMPOSER_READY\r"}},
+                {{"wait_text":"COMPOSER_READY"}},
+                {{"native_click_composer":true}},
+                {{"ui_keys":["e","c","h","o","Space","S","T","A","L","E"]}},
+                {{"ui_keys":["Ctrl+A","e","c","h","o","Space","C","O","M","P","O","S","E","R","_","O","K"]}},
+                {{"ui_keys":["Ctrl+A","Ctrl+C","Ctrl+X","Ctrl+V","Space","F","I","N","A","L"]}},
+                {{"ui_snapshot":{}}},
+                {{"capture_text":{}}},
+                {{"ui_keys":["Enter"]}},
+                {{"wait_text":"COMPOSER_OK FINAL"}}
+            ]"#,
+            serde_json::to_string(ui_state.to_str().unwrap()).unwrap(),
+            serde_json::to_string(before_submit.to_str().unwrap()).unwrap(),
+        ),
+    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
+    let completed = session.wait_for(Duration::from_secs(15), |snapshot| {
+        ConSession::screen_text(snapshot).contains("COMPOSER_OK FINAL")
+    });
+    assert_eq!(completed["child_alive"], true, "{completed}");
+
+    let state: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&ui_state).expect("UI snapshot must be written before submit"),
+    )
+    .expect("UI snapshot must be JSON");
+    assert_eq!(state["composer_focused"], true, "{state}");
+    assert_eq!(state["composer_text"], "echo COMPOSER_OK FINAL", "{state}");
+    let terminal_before = std::fs::read_to_string(&before_submit)
+        .expect("terminal capture must be written before submit");
+    assert!(
+        !terminal_before.contains("COMPOSER_OK") && !terminal_before.contains("STALE"),
+        "focused composer keys leaked into the PTY before Enter: {terminal_before:?}"
+    );
     let _ = session.child.kill();
 }
 

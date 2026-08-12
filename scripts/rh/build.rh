@@ -900,6 +900,48 @@ fn entry() {
         }
     }
 
+    // The default release-fast lane stages without the dev-only incremental
+    // producer, but its debug/ and release-fast/ incremental caches grow the
+    // same way. Prune stale fingerprint generations on every native build so
+    // target/ stops growing between explicit dev builds.
+    if profile == "release-fast" && external_target == 0 {
+        let fast_cleanup_failed = 0;
+        let fast_cleanup_error = "";
+        let fast_repo = repo_dir(repo_arg);
+        let fast_manifest =
+            std::path::join(fast_repo, "agenterm.tasks.json").display;
+        let fast_prune_stdout = fast_repo + ".build-prune.stdout.tmp";
+        let fast_prune_arguments = [
+            "rh", "task", "run", "prune-target-incremental",
+            "--manifest", fast_manifest,
+            "--", fast_repo, cargo_output
+        ];
+        let fast_prune_code = std::process::command_stdout_file(
+            worker,
+            fast_prune_arguments,
+            300000,
+            fast_prune_stdout,
+            #{
+                current_dir: fast_repo,
+                env: environment,
+            }
+        );
+        if fast_prune_code != 0 {
+            fast_cleanup_failed = 1;
+            let fast_prune_text = std::fs::read_to_string(fast_prune_stdout);
+            fast_prune_text.trim();
+            fast_cleanup_error =
+                "prune:exit=" + fast_prune_code + ":" + fast_prune_text;
+        }
+        std::fs::try_remove_file(fast_prune_stdout);
+        if fast_cleanup_failed != 0 {
+            print(
+                "WARNING: release-fast incremental prune skipped (" +
+                    fast_cleanup_error + ")"
+            );
+        }
+    }
+
     if profile == "release" && external_target == 0 {
         repo = repo_dir(repo_arg);
         task_manifest = std::path::join(repo, "agenterm.tasks.json").display;

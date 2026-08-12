@@ -339,6 +339,13 @@ pub(crate) fn capture_native_window_png(
             "BitBlt/GetDIBits screenshot capture failed",
         ));
     }
+    // GetDIBits produced BGRX, not BGRA. The high byte is undefined and may
+    // vary between captures; GDI+ can otherwise reinterpret a later frame as
+    // RGBA and encode alpha=0, making valid RGB pixels appear transparent or
+    // black. XRGB window captures are always opaque.
+    for pixel in bgrx.chunks_exact_mut(4) {
+        pixel[3] = 0xff;
+    }
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {

@@ -18,6 +18,13 @@ bypassing it. Human interaction and local CLI automation operate on the same
 tabs, PTYs, drafts, settings, and observable state. A process exiting never
 silently destroys its tab.
 
+The repository ships two products, not one program with a light mode.
+`agenterm` is the workbench described above. `agenterm-con` is an independently
+packaged lightweight terminal host with no server, Fleet, mux, MCP or script
+runtime; it reuses shared platform and UI-core mechanisms but owns its own
+requirements, budget, tests and CI. Neither product may claim a capability or a
+green status from the other's evidence.
+
 The visual language favors industrial confidence over decoration: repeated
 integer-grid spacing, solid right-angle connections, strict baseline
 alignment, restrained colors, and explicit boundaries should make the fleet
@@ -44,6 +51,18 @@ This file is the canonical product entry point, product constitution, and
 second-level tree. Linked `prd/PRD_*.md` modules own third-level requirements,
 decisions, status, and acceptance detail. A requirement has exactly one owning
 module; other documents link to it instead of copying it.
+
+A module may be a subtree root when one product is large enough to need its own
+second-level tree. Two subtrees exist today: `agenterm-con` (23, with 24-27) and
+`agenterm-cu` (28, with 29-31). The root owns the product definition, boundary,
+invariants and gates; the children own third-level requirements. A shared kernel
+consumed by more than one product keeps its requirement in the owning shared
+module and is referenced, not copied, from the subtree.
+
+A subtree may be opened before a product exists, to hook newly accepted scope
+into the tree so it cannot accumulate inside an unrelated module. Such a subtree
+carries only `[ ]` requirements until its own evidence arrives; opening it is
+not a version commitment.
 
 Public version plans live under [`plan/`](plan/). They record sequencing,
 dependencies, risks, decisions, and delivery history, but remain execution
@@ -101,6 +120,19 @@ AgenTerm — local agent & process fleet work OS
 ├─ 平台抽象
 │  └─ 20 Native platform        Win/macOS/Linux 原生适配（窗口/输入/IME/DPI/剪贴板/字体）
 │
+├─ agenterm-con（第二产品子树）
+│  └─ 23 agenterm-con           产品定义、边界、不变量、安全失败（子树根）
+│     ├─ 24 Terminal & rendering   PTY、VT 行级 damage、present、字形、ISA、渲染性能
+│     ├─ 25 Workspace & input      Tab 树、chrome、composer、滚动条、选择、剪贴板
+│     ├─ 26 Control & public CLI   agenterm-con cli、ATC1 帧、JSON 契约、证据发布
+│     └─ 27 Package & delivery     独立 package、con-* profile、512 KiB 预算、独立 CI
+│
+├─ agenterm-cu（computer-use 子树 · 全部 planned）
+│  └─ 28 agenterm-cu            自有 computer-use 底座：定义、边界、不变量、晋升门
+│     ├─ 29 Command surface       抽象命令集、洋葱分层、结构化控件树、确定性等待
+│     ├─ 30 Targets & transports  current/ssh/rdp/vnc 目标族、平台后端、会话模型
+│     └─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
+│
 └─ 未来面（里程碑 / 灵感）
    ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
    ├─ 19 Inspiration backlog      灵感花园、北极星层、晋升路径（非 shipped）
@@ -134,6 +166,15 @@ AgenTerm — local agent & process fleet work OS
 | 20 | [Native platform abstraction](prd/PRD_02_20_native_platform.md) | Win/macOS/Linux 窗口/输入/IME/DPI/剪贴板/字体契约 |
 | 21 | [Control Center (`agenterm-cc`)](prd/PRD_02_21_control_center.md) | 独立次级工作区：Fleet cockpit/workflow/extension/info 投影 |
 | 22 | [Decentralized network (`agenterm-net`)](prd/PRD_02_22_decentralized_network.md) | libp2p 身份、IPFS 内容寻址、存储、传输、服务集成契约 |
+| 23 | [Lightweight terminal host (`agenterm-con`)](prd/PRD_02_23_agenterm_con.md) | 子树根：产品定义、边界、不变量、跨面证据、安全失败 |
+| 24 | [`agenterm-con` terminal and rendering](prd/PRD_02_24_con_terminal.md) | PTY 会话、VT 行级 damage、present、字形、ISA、渲染性能证据 |
+| 25 | [`agenterm-con` workspace and input](prd/PRD_02_25_con_workspace.md) | Tab 树权威、chrome、composer、滚动条/分隔条、选择与剪贴板 |
+| 26 | [`agenterm-con` control and public CLI](prd/PRD_02_26_con_control_cli.md) | 公共命令集、`ATC1` 传输、JSON 契约、快照/截图证据发布 |
+| 27 | [`agenterm-con` package and delivery](prd/PRD_02_27_con_delivery.md) | 独立 package、`con-*` unwind profile、体积预算、独立 CI、体积历史 |
+| 28 | [Computer-use foundation (`agenterm-cu`)](prd/PRD_02_28_agenterm_cu.md) | 子树根：自有 computer-use 底座的定义、边界、不变量、晋升门（全部 planned） |
+| 29 | [`agenterm-cu` command surface](prd/PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树观察、确定性等待 |
+| 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、平台后端、会话与进程模型 |
+| 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
 
 ## Non-negotiable invariants
 
@@ -161,6 +202,13 @@ Clippy with warnings denied, production Rhai checks, unit tests, `dist/`
 artifact generation, CLI smoke, and semantic UX smoke all pass. Rendering
 changes additionally require
 `screenshot` or `screenshot-pane` inspection.
+
+`agenterm-con` has its own ordinary gate: the matching custom-std
+`con-release-fast` Clippy, unit, public GUI black-box, panic-containment and
+artifact build path, plus its six compile cells. Candidate preflight requires a
+successful run of both `.github/workflows/ci-agenterm.yml` and
+`.github/workflows/ci-agenterm-con.yml` at the exact source SHA; one product's
+green status never substitutes for the other's.
 
 An unpublished release candidate uses
 `.\check.cmd --release --include-stress` on a clean commit and must emit one

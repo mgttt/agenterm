@@ -1,0 +1,90 @@
+name: CI / agenterm
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-agenterm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: agenterm quality and shared contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install Rust quality components
+        run: rustup component add rustfmt clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy workbench targets
+        run: cargo clippy --locked -p agenterm --all-targets -- -D warnings
+      - name: Test workbench library
+        run: cargo test --locked -p agenterm --lib
+      - name: Test shared UI core
+        run: cargo test --locked -p agenterm-ui-core --lib
+      - name: Test platform contracts
+        run: cargo test --locked -p agenterm-platform --lib --all-features
+      - name: Prove Rh AOT pack pipeline
+        run: ./rh-check.sh
+
+  target-cells:
+    name: agenterm / ${{ matrix.cell }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cell: win-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            kind: native
+          - cell: win-aarch64
+            runner: ubuntu-latest
+            target: aarch64-pc-windows-msvc
+            kind: xwin
+          - cell: lnx-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            kind: native
+          - cell: lnx-aarch64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            kind: linux-cross
+          - cell: osx-aarch64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            kind: native
+          - cell: osx-x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            kind: native
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+      - name: Install Windows cross tooling
+        if: matrix.kind == 'xwin'
+        run: cargo install cargo-xwin --locked
+      - name: Install Linux aarch64 linker
+        if: matrix.kind == 'linux-cross'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Check agenterm through cargo-xwin
+        if: matrix.kind == 'xwin'
+        run: cargo xwin check --locked -p agenterm --all-targets --target ${{ matrix.target }}
+      - name: Check agenterm native/cross target
+        if: matrix.kind != 'xwin'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo check --locked -p agenterm --all-targets --target ${{ matrix.target }}

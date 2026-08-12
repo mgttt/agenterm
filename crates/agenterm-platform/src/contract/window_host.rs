@@ -160,6 +160,9 @@ pub struct PixelFrameInfo {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PixelFrameWrite {
+    /// The application used this frame as temporary scratch/capture storage.
+    /// Hosts must not present it, and retained content becomes invalid.
+    Discard,
     None,
     Full,
     Partial(PixelRect),
@@ -169,6 +172,12 @@ pub enum PixelFrameWrite {
 pub struct PixelFrameWriteReceipt {
     pub write: PixelFrameWrite,
     pub generation: PixelFrameGeneration,
+}
+
+impl PixelFrameWriteReceipt {
+    pub const fn should_present(self) -> bool {
+        !matches!(self.write, PixelFrameWrite::Discard)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -430,6 +439,7 @@ impl<'a> XrgbPixelFrame<'a> {
         }
 
         let validation = match write {
+            PixelFrameWrite::Discard => Ok(()),
             PixelFrameWrite::Full => Ok(()),
             PixelFrameWrite::None => match self.info().retention {
                 PixelBackingRetention::Transient => Err(PixelFrameError::TransientRequiresFull),
@@ -473,7 +483,7 @@ impl<'a> XrgbPixelFrame<'a> {
             return Err(error);
         }
 
-        self.state.content_valid = true;
+        self.state.content_valid = !matches!(write, PixelFrameWrite::Discard);
         let receipt = PixelFrameWriteReceipt {
             write,
             generation: self.state.generation,
@@ -906,6 +916,26 @@ mod tests {
                     .write,
                 PixelFrameWrite::None
             );
+        }
+    }
+
+    #[test]
+    fn discarded_frames_are_never_presentable_and_invalidate_backing_content() {
+        for retention in [
+            PixelBackingRetention::Transient,
+            PixelBackingRetention::RetainedAcrossFrames,
+        ] {
+            let mut state = PixelFrameState::new(retention);
+            let mut pixels = vec![0; 4];
+            let receipt = {
+                let mut frame = XrgbPixelFrame::new(&mut pixels, 2, 2, 1.0, &mut state);
+                frame
+                    .commit(PixelFrameWrite::Discard)
+                    .expect("discard is valid for every host retention")
+            };
+            assert_eq!(receipt.write, PixelFrameWrite::Discard);
+            assert!(!receipt.should_present());
+            assert!(!state.info().content_valid);
         }
     }
 

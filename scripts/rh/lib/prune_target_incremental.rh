@@ -1076,3 +1076,166 @@ fn run_after_lock(
         skipped_remove_failure
     );
 }
+
+
+// ---------------------------------------------------------------------------
+// Fingerprint-generation retention sweep.
+//
+// The session-level sweep above only trims inside a single live
+// `<crate>-<hash>` fingerprint root. The real hoard is stale generations
+// themselves: every build shape (profile, feature set, `--bin` selection,
+// extra RUSTFLAGS) mints a fresh `<crate>-<hash>` directory that Cargo never
+// removes. Keep the `KEEP` most recently modified generations per crate and
+// drop the rest, exactly like scripts/prune-incremental.sh. Guessing wrong is
+// safe: the only cost is that one crate unit recompiles from scratch.
+
+fn fingerprint_retention_keep() {
+    let keep = 2;
+    if std::env::has("AGENTERM_INCREMENTAL_KEEP") {
+        let parsed = decimal_parse(std::env::get("AGENTERM_INCREMENTAL_KEEP"));
+        if parsed >= 1 {
+            keep = parsed;
+        }
+    }
+    keep
+}
+
+// Strip the trailing `-<base36 hash>` from a fingerprint generation name,
+// returning the crate name, or "" when the name is not a fingerprint root.
+fn fingerprint_generation_crate(name) {
+    let last_dash = -1;
+    for index in 0..name.len {
+        if name.sub_string(index, 1) == "-" {
+            last_dash = index;
+        }
+    }
+    if last_dash <= 0 || last_dash >= name.len - 1 {
+        return "";
+    }
+    let hash_part = name.sub_string(last_dash + 1, name.len - last_dash - 1);
+    if is_base36_text(hash_part) == 0 {
+        return "";
+    }
+    name.sub_string(0, last_dash)
+}
+
+// rustc fingerprint hashes are base36 and can exceed the 12-character bound
+// of the numeric `base36()` helper, so validate the alphabet instead.
+fn is_base36_text(value) {
+    if value == "" || value.len > 32 {
+        return 0;
+    }
+    let alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+    for character in value {
+        if !alphabet.contains(character.to_string()) {
+            return 0;
+        }
+    }
+    1
+}
+
+fn collect_generations(incremental) {
+    let generations = [];
+    for entry in std::fs::read_dir(incremental) {
+        if entry.is_dir {
+            let name = "" + entry.file_name;
+            let crate_key = fingerprint_generation_crate(name);
+            if crate_key == "" {
+                continue;
+            }
+            let path = std::path::join(incremental, name).display;
+            if !std::fs::exists(path) {
+                continue;
+            }
+            let mtime = session_modified_millis(path);
+            if mtime == 0 {
+                continue;
+            }
+            generations.push(#{
+                crate_key: crate_key,
+                name: name,
+                path: path,
+                mtime: mtime
+            });
+        }
+    }
+    generations
+}
+
+// Returns the number of generations removed from one incremental root.
+fn prune_generations(incremental, keep) {
+    require(incremental != "", "prune_generations_empty");
+    let generations = collect_generations(incremental);
+    let removed = 0;
+    for index in 0..generations.len {
+        let crate_key = "" + generations[index].crate_key;
+        let newer = 0;
+        for other in 0..generations.len {
+            if generations[other].crate_key == crate_key
+                    && generations[other].mtime > generations[index].mtime {
+                newer += 1;
+            }
+        }
+        if newer >= keep {
+            let remove_code = remove_incremental_root(generations[index].path);
+            if remove_code == 1 {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+fn is_direct_directory(path) {
+    if !std::fs::exists(path) {
+        return 0;
+    }
+    let metadata = std::fs::symlink_metadata(path);
+    if metadata.is_dir && !metadata.is_symlink && !metadata.is_reparse_point {
+        1
+    } else {
+        0
+    }
+}
+
+// Sweep every profile incremental root under TARGET at both depths
+// (`<profile>/incremental` and cross `triple/<profile>/incremental`). A
+// profile whose `.cargo-lock` is missing or actively held is skipped, so a
+// concurrent cargo build can never lose its live cache. Returns the total
+// number of removed generations.
+fn prune_target_generations(target, keep) {
+    require(target != "", "prune_target_generations_empty");
+    let removed = 0;
+    for depth_1 in std::fs::read_dir(target) {
+        if depth_1.is_dir {
+            let depth_1_path =
+                std::path::join(target, "" + depth_1.file_name).display;
+            let profile_roots = [];
+            profile_roots.push(depth_1_path);
+            for depth_2 in std::fs::read_dir(depth_1_path) {
+                if depth_2.is_dir {
+                    let depth_2_path =
+                        std::path::join(depth_1_path, "" + depth_2.file_name).display;
+                    profile_roots.push(depth_2_path);
+                }
+            }
+            for profile_root in profile_roots {
+                let cargo_lock_path =
+                    std::path::join(profile_root, ".cargo-lock").display;
+                if direct_file(cargo_lock_path) == 0 {
+                    continue;
+                }
+                if lock_available(cargo_lock_path) == 0 {
+                    continue;
+                }
+                let incremental =
+                    std::path::join(profile_root, "incremental").display;
+                if is_direct_directory(incremental) == 0 {
+                    continue;
+                }
+                removed += prune_generations(incremental, keep);
+            }
+        }
+    }
+    removed
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "product": "agenterm-con",
+  "evidence": [
+    {
+      "id": "agenterm_con_alignment::machine_contract_matches_public_cli_and_registered_journeys",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_alignment",
+      "test_name": "machine_contract_matches_public_cli_and_registered_journeys",
+      "source": "tests/agenterm_con_alignment.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::cjk_output_from_a_real_child_process_appears_as_actual_characters",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "cjk_output_from_a_real_child_process_appears_as_actual_characters",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::controlled_press_drag_release_extends_a_local_selection",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "controlled_press_drag_release_extends_a_local_selection",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::controlled_resize_storm_reports_successful_frames_and_exits_cleanly",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "controlled_resize_storm_reports_successful_frames_and_exits_cleanly",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::controlled_screenshot_produces_a_valid_nonempty_png",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "controlled_screenshot_produces_a_valid_nonempty_png",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::controlled_wheel_moves_the_real_scrollback_offset_up_then_down",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "controlled_wheel_moves_the_real_scrollback_offset_up_then_down",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::native_composer_focus_keeps_editing_keys_local_until_enter",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "native_composer_focus_keeps_editing_keys_local_until_enter",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_blackbox::snapshot_reports_exit_code_and_retains_tab_until_explicit_close",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "snapshot_reports_exit_code_and_retains_tab_until_explicit_close",
+      "source": "tests/agenterm_con_blackbox.rs"
+    },
+    {
+      "id": "agenterm_con_control::gui_control_surface_isolated_multitab_black_box",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_control",
+      "test_name": "gui_control_surface_isolated_multitab_black_box",
+      "source": "tests/agenterm_con_control.rs"
+    }
+  ]
+}
