@@ -58,7 +58,14 @@ jobs:
         include:
           - platform_id: windows-x86_64
             runner: windows-latest
-            timeout_minutes: 45
+            # 90, not 45: this is the heaviest leg -- full release quality gate,
+            # release-profile build, packaging and staging -- and it runs against
+            # the Candidate-only `cargo-target-*-candidate-` cache prefix, so a
+            # cold one has nothing warm to lean on. Candidate run 31551243623
+            # spent 48m09s here and was killed at the 45m budget (GitHub records a
+            # job timeout as `cancelled`), which skipped `aggregate` after the
+            # other five legs had already succeeded.
+            timeout_minutes: 90
           - platform_id: windows-aarch64
             runner: ubuntu-latest
             timeout_minutes: 45
