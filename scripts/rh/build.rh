@@ -639,7 +639,12 @@ fn entry() {
     }
     con_cargo_args.push(action);
     con_cargo_args.push("-Z");
-    con_cargo_args.push("build-std=std,panic_unwind");
+    // Rust 1.97 core formats f16 and therefore references compiler-rt half
+    // conversion intrinsics. Keep compiler_builtins in the explicit build-std
+    // root set so its target cfg is rebuilt with core; reusing an older
+    // non-f16 builtins archive otherwise leaves __truncsfhf2/__extendhfsf2
+    // unresolved on MSVC.
+    con_cargo_args.push("build-std=std,panic_unwind,compiler_builtins");
     con_cargo_args.push("-Z");
     con_cargo_args.push(
         "build-std-features=panic-unwind,backtrace-trace-only"

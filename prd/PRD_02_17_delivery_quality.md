@@ -355,6 +355,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   reporting exposes resolved path, development/release-scratch/external kind,
   cleanup authority, bytes, age, and profile totals before repo-local release
   cleanup
+- [x] the con custom-standard-library build names `compiler_builtins` beside
+  `std` and `panic_unwind`; this keeps Rust 1.97 reliable-f16 cfg aligned with
+  `core` and prevents late MSVC failures on `__truncsfhf2` and
+  `__extendhfsf2`. An isolated cold Windows x64 build is the regression
+  evidence because a warm target can retain the mismatched archive.
 - [x] distributable builds use and clean the dedicated repo-local
   `target-release/` scratch directory without deleting the incremental
   development `target/` cache
