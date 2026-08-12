@@ -168,7 +168,7 @@ pub fn write_file_atomic<T>(
     destination: &Path,
     write: impl FnOnce(&mut fs::File) -> io::Result<T>,
 ) -> Result<T, FilePublishError> {
-    let destination = normalized_destination(destination)?;
+    let destination = owned_destination(destination)?;
     let parent = destination.parent().expect("normalized parent");
     let name = destination.file_name().expect("normalized file name");
     let (temporary, mut file) = create_temporary(parent, name)?;
@@ -202,7 +202,7 @@ pub fn write_path_atomic<T>(
     destination: &Path,
     write: impl FnOnce(&Path) -> io::Result<T>,
 ) -> Result<T, FilePublishError> {
-    let destination = normalized_destination(destination)?;
+    let destination = owned_destination(destination)?;
     let parent = destination.parent().expect("normalized parent");
     let name = destination.file_name().expect("normalized file name");
     let (temporary, file) = create_temporary(parent, name)?;
@@ -296,6 +296,23 @@ fn normalized_destination(destination: &Path) -> Result<PathBuf, FilePublishErro
         )
     })?;
     Ok(parent.join(name))
+}
+
+fn owned_destination(destination: &Path) -> Result<PathBuf, FilePublishError> {
+    destination.file_name().ok_or_else(|| {
+        FilePublishError::new(
+            FilePublishErrorKind::InvalidInput,
+            "destination requires a final file name",
+        )
+    })?;
+    crate::selected::filesystem_publish::normalize_owned_destination(destination).map_err(
+        |error| {
+            FilePublishError::new(
+                FilePublishErrorKind::Inspect,
+                format!("inspect destination parent failed: {error}"),
+            )
+        },
+    )
 }
 
 fn create_temporary(

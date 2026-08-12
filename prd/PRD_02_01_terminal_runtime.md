@@ -486,6 +486,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   become zero-byte owners; attributed platform text falls from 91.6 to 84.6
   KiB, total text from 409.5 to 403.5 KiB, and the official release-fast PE from
   560,128 to 552,448 bytes.
+  Owned snapshot/screenshot writers now freeze their destination through a
+  platform facade distinct from the public caller-owned staging publisher.
+  Windows uses bounded `GetFullPathNameW` plus `GetFileAttributesW` directory
+  validation before creating the sibling temporary; Unix retains canonical
+  parent resolution. The public publisher still owns physical-parent, symlink
+  and distinct-entry validation. In con, `normalized_destination` and std
+  filesystem canonicalization become zero-byte owners; total attributed text
+  falls from 403.5 to 403.0 KiB and the official release-fast PE from 552,448
+  to 551,936 bytes.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

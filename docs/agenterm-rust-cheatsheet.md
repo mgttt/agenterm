@@ -450,6 +450,17 @@ symbol and reduced the staged PE by 7,680 bytes. Do not generalize this to
 long-lived or mutation-heavy maps; use measured cardinality, lifecycle and the
 final link map.
 
+Model filesystem path provenance before choosing normalization. An arbitrary
+caller-owned staging path needs physical-parent, link and identity checks. A
+temporary exclusively created by the platform beside a destination does not
+need to rediscover those relationships, but it still must freeze an absolute
+path before callbacks, validate the parent directory and revalidate callback
+output. Keep these as separate typed/facade paths rather than a boolean that can
+silently weaken the public publisher. On Windows, bounded `GetFullPathNameW`
+plus `GetFileAttributesW` removed con's last std filesystem canonicalization
+owner and saved one 512-byte PE alignment unit; Unix retained canonical parent
+resolution behind the same provenance-specific facade.
+
 Every platform Cargo feature must activate the native declaration features used
 by its own adapter. Do not rely on a product's unrelated feature union to make
 Win32 functions compile: test the minimal capability graph as well as the real

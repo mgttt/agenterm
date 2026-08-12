@@ -383,3 +383,22 @@ Evidence is 53 minimal PTY tests, 85 con tests, 18 GUI black-box tests, one
 multitab journey, Windows Clippy and Linux x86-64 compilation. This is a
 specific one-shot serialization optimization, not a repository-wide ban on
 ordered maps.
+
+### 2026-08-12: split trusted sibling destination preparation
+
+The public atomic publisher accepts arbitrary caller-owned staging and
+destination paths, so it must canonicalize physical parents and reject links or
+identity aliases. The snapshot/screenshot writers instead create their own
+exclusive temporary from the destination parent and need only freeze an
+absolute target before invoking a callback, validate that parent as a directory,
+and revalidate callback output. Routing both through the public identity path
+retained std filesystem canonicalization in con without adding authority.
+
+A separate platform facade now models this provenance. Unix keeps canonical
+parent behavior; Windows uses bounded `GetFullPathNameW` and
+`GetFileAttributesW`, while the public publisher remains unchanged. In the con
+link, `normalized_destination` and std filesystem canonicalization become
+zero-byte owners. Host-std attributed text fell from 403.5 to 403.0 KiB and the
+official custom-std release-fast PE from 552,448 to 551,936 bytes. Evidence is
+46 focused platform tests, 85 con tests, 18 GUI black-box tests, one multitab
+journey, Windows Clippy and Linux x86-64 compilation.
