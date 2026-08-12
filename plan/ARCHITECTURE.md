@@ -379,7 +379,17 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   88 con unit、
   18 GUI black-box、1 multitab wait-text control、Windows x64 Clippy、Windows aarch64
   con check 和 Linux x64 con check 通过。
+- Windows PTY 中三处 `std::env::current_dir` 曾以有界 `GetCurrentDirectoryW` retry
+  loop 替换；explicit/relative-PATH/resolved-image 语义测试通过；初始跨时点观察为
+  537,600 B 到 538,624 B，随后同状态反向构建确认现行 baseline 为 538,112 B，故可归因
+  成本是一档 512 B PE alignment。该实验已撤回：标准库本就是薄原生包装时，
+  重写 buffer sizing、目录变化竞态和错误转换不构成有价值的 FFI 边界；应等待共享
+  platform 合同、caller-owned storage 或 final-link dead-code 证据。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
+  ISA 探测也受 final-link 证据约束：一次 CPUID + `xgetbv` inline-asm 窄探针曾合并
+  AVX2/SSSE3 dispatch，oracle 与像素/con 测试均通过，但其它 owner 仍保留
+  `std_detect::detect_features`，bloat `.text` 从 348.5 KiB 增至 349.0 KiB，精确
+  538,112 B PE 仅因 alignment 未变化。该双 detector 方案已撤回。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

@@ -594,6 +594,38 @@ convention checks for `':'`, `'='`, and NUL grew the custom-std PE from 537,600
 to 539,136 bytes while strip/split patterns still retained the framework. The
 experiment was reverted. Final-link A/B and post-change symbols both matter.
 
+The same rule applies when `std` is already a thin native wrapper. Replacing
+the three Windows PTY uses of `std::env::current_dir` with a bounded
+`GetCurrentDirectoryW` retry loop preserved explicit-path, relative-PATH and
+resolved-image behavior, but grew the exact custom-std PE from 537,600 to
+538,624 bytes in the initial unpaired observation. A same-state reverse build
+established the current baseline as 538,112 bytes, so the attributable cost is
+one 512-byte alignment step. The replacement duplicated buffer sizing, directory-change race
+handling and error conversion without removing enough standard-library code,
+so it was reverted. Keep `std::env::current_dir` until a shared platform
+contract, fixed caller storage, or final-link evidence changes that trade.
+
+Do not force tiny leaf helpers across a crate boundary merely to remove source
+duplication. The workbench and con each had a six-line UTF-8 prefix clamp for
+capture output. Moving it into `agenterm-ui-core` preserved CJK/emoji behavior
+but grew con's exact custom-std PE from 538,112 to 538,624 bytes, one 512-byte
+alignment step, because the
+former product-local loop no longer optimized in place. The move was reverted.
+Share protocol types, state machines and substantial kernels; tolerate a tiny
+semantic duplicate when the public contract is stable, tests agree and the
+final-link cost of a cross-crate call is larger than the maintenance benefit.
+
+Before replacing `is_x86_feature_detected!`, prove that the generic detector's
+last production owner is in scope. UI-core briefly combined its AVX2 and SSSE3
+dispatch into one cached CPUID probe, with OSXSAVE/AVX checks and a bounded
+`xgetbv` assembly leaf for XMM/YMM state. The probe matched the standard oracle
+and all pixel/con tests passed, but another link owner retained
+`std_detect::detect_features`; bloat `.text` grew from 348.5 to 349.0 KiB while
+the exact 538,112-byte PE merely hid the increase inside existing alignment.
+The probe was reverted. A native ISA probe is a win only after link attribution
+shows it removes the complete generic detector or provides measured hot-path
+latency that justifies two detectors.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns
