@@ -346,6 +346,11 @@ pub enum PixelWindowEvent {
     Wake,
     Reopen,
     CloseRequested,
+    /// The native host entered a modal, pointer-driven window resize.
+    /// Hosts without a distinct interaction phase may omit this event.
+    ResizeInteractionStarted,
+    /// The native host left its modal resize after publishing final metrics.
+    ResizeInteractionEnded,
     GeometryChanged {
         change: GeometryChange,
         metrics: PixelWindowMetrics,

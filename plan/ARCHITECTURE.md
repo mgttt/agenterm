@@ -249,9 +249,14 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   backing、显式 `InvalidateRect`、系统 expose 和 settled geometry redraw 已拥有完整失效
   权威，无需 User32 在每次宽高变化时强制全客户区刷新。相同 journey 从 35 降至 18 帧、
   17 降至 8 full candidates、9,632,800 降至 6,485,040 dirty pixels，native present 总耗时
-  从 25.715 ms 降至 16.302 ms，PNG geometry 不变且仍为 0 failure/0 copy。更深一层仍可在
-  platform backing-store 边界利用 Win32 live-resize begin/end，Unix/macOS 保留 debounce
-  fallback；不得把 HWND 消息泄漏到 con，也不得把仅新增 FFI enum 冒充优化。
+  从 25.715 ms 降至 16.302 ms，PNG geometry 不变且仍为 0 failure/0 copy。platform 随后
+  将 `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE` 封装为 optional host-neutral lifecycle：交互中
+  的 `WM_SIZE` 只更新客户区 metrics，已成功提交且尺寸一致的 retained top-down DIB 由
+  GDI 在 `BeginPaint` clip 下缩放，不推进 generation、不调用产品 renderer；退出时发布
+  最终 geometry、推进 generation 并显式 crisp redraw。相同 16-step journey 降至 3-5
+  product frames、1-2 full candidates，11-13 platform presents 全成功，最低 dirty pixels
+  为 748,000，仍为 0 failure/0 copy。Unix/macOS 不伪造 lifecycle，继续使用 geometry+
+  debounce fallback；HWND 消息没有泄漏到 con 产品状态机。
   后续隔离 bloat 证明 size profile 仍把 config、参数、脚本和 CLI codec 过度内联进
   `main` / offline 入口；这些既有可测边界显式禁止内联，并以固定 8-byte 数组装配
   `ATC1` header，避免通用可变尾切片。官方同 profile PE 从 737,280 B 降至
@@ -498,6 +503,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   增至 532,480 B（+2,560 B），仍高于 512 KiB 预算 8,192 B。该增长换取真实窗口尺寸
   驱动、原生表面证据和正常资源退出，不作为尺寸收益；证据为 89 units、21 GUI
   black-box、Windows x64 Clippy 和独立 custom-std build。
+- Win32 live-resize retained-DIB fast path 使 exact PE 从 532,480 B 增至 533,504 B
+ （+1,024 B），以 16-step raster/full-frame 大幅下降接受，不虚报为尺寸优化；512 KiB
+  预算当前超出 9,216 B。共享事件合同同时通过 Linux x64 与 Windows ARM64 consumer
+  compilation，Windows 黑盒通过 PID/HWND 系统消息和正式 resize CLI 覆盖真实 FFI 链。
 - UI-core dirty region/row kernel 描述保守 raster candidate；vendored `vt100` 在 mutation 层输出无分配 row/cursor/model/viewport damage，以逐 Cell 精确比较作为无碰撞测试 oracle，未知 callback、resize、alternate screen 与 viewport 变化保守升级 full；con 在 PTY Wake 阶段先 drain 再按 changed rows 与旧/新 cursor 请求 redraw，公开 perf stats 同时记录 candidate、host direct/copy 和 platform-owned native present 证据；pixel-window frame 合同声明 backing 为 retained 或 transient，并要求提交 `None`/`Full`/bounded partial。Windows con 直接 raster 到 native retained XRGB buffer，allocation/resize/DPI 失效后强制 full；Unix/macOS 继续由产品 retained frame 向 transient softbuffer 完整复制。Windows adapter 将 typed physical rect 映射为 `InvalidateRect`，以 `PAINTSTRUCT.rcPaint` 驱动 top-down `StretchDIBits` partial present，并以 RAII 保证 `BeginPaint`/`EndPaint` exactly once、拒绝短 scanline 和 renderer error；Unix/macOS 当前 full present fallback，并在 event-loop 边界将 application panic 收敛为 typed failure；配对 Windows release 探针中 idle 平均 render 895 us -> 360 us（-59.8%），50-step send/wait 为 1,310 us -> 992 us（-24.3%），新版 250/250 direct、0 copy frame/pixel；post-row-damage Windows release 探针为 33/33 partial raster candidate、dirty/frame 约 0.40%、33/33 native present 成功，平台 ledger 仍诚实区分一次 529,584-pixel OS full expose 与 70,560 partial pixels；旧版 2/5、2/13 candidate 与约 6.7%/12.1% render 降幅仅为方向性历史证据，不作为发布资格基准；Win32 host 的 userdata owner、dispatch phase 和 bounded deferred queue 阻止同步 User32/IMM FFI 在 application/frame borrow 内重建 `&mut HostState`，复制 DPI/IME 等消息数据后再重放，nested paint validate 后重新 invalidate，overflow/nonconvergence typed-fail；随后将窗口回调和 deferred item 各收敛为一个 panic boundary，并以单一 typed message class 替代重复的 stateless/stateful matcher；原 abort 配置下同 profile release-fast PE 从 622,080 B 降至 621,568 B，512 B 收益全部落在 `.text` raw，`.rsrc` 不变；但该 profile 使 `catch_unwind` 在交付版直接 abort，测试默认 unwind 曾掩盖这一合同破坏。现由 `con-dev` / `con-release-fast` / `con-release` 独立构建完整 unwind 依赖图，Rh build 将其 `agenterm-con` 精确覆盖进原 staging 目录而不改变主程序 abort profile；三处 staged bytes SHA-256 相同，release-fast unwind PE 当前为 849,920 B，87 个单测、16 个黑盒（2 个既有 ignore）、1 个多标签控制面测试及专门的 release-profile panic containment test 通过。官方 con 构建现以显式 target、固定 `rust-src` 和局部 `RUSTC_BOOTSTRAP` 使用 Rust 1.97 `backtrace-trace-only + panic-unwind` 自建 std；自建 std 基线为 790,016 B，GDI+ 共享截图后当前为 790,528 B；精确 profile 的 87 个单测、16 个黑盒（2 个既有 ignore）、1 个控制面测试、x64 Clippy 与 Windows aarch64 编译通过；六平台 Candidate 与 sealed-byte 可复现性仍由发布门最终证明，512 KiB 仍是目标，不以恢复 abort 换体积；100-title OSC 公共压力为 883/883 direct、0 copy、0 present failure；
   con 的 resolved normal graph 为 59 行且不含 winit、softbuffer、Rhai、HTTP/TLS 或
   任一脚本 engine。拆包主要消除冷构建污染并允许 Windows con 默认选 native host，

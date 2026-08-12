@@ -46,12 +46,13 @@ use windows_sys::Win32::{
             SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
             SWP_NOZORDER, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
             SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CANCELMODE,
-            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
-            WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT,
-            WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
-            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-            WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE,
-            WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE,
+            WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+            WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
+            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
+            WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
+            WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW,
+            WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     },
 };
@@ -138,6 +139,8 @@ enum NativeCommand {
 enum PendingNativeEvent {
     CloseRequested,
     Destroy,
+    ResizeInteractionStarted,
+    ResizeInteractionEnded,
     Size {
         minimized: bool,
     },
@@ -653,6 +656,7 @@ struct HostState {
     frame_width: u32,
     frame_height: u32,
     frame_scale_bits: u64,
+    interactive_resize: bool,
 }
 
 pub(crate) fn run_pixel_window(
@@ -735,6 +739,7 @@ pub(crate) fn run_pixel_window(
         frame_width: 0,
         frame_height: 0,
         frame_scale_bits: 0,
+        interactive_resize: false,
     };
     let user_data = Box::new(NativeWindowUserData {
         host: RefCell::new(state),
@@ -1001,6 +1006,8 @@ fn classify_native_message(message: u32) -> NativeMessageClass {
         WM_CLOSE
         | WM_DESTROY
         | WM_NCDESTROY
+        | WM_ENTERSIZEMOVE
+        | WM_EXITSIZEMOVE
         | WM_SIZE
         | WM_DPICHANGED
         | WM_SETFOCUS
@@ -1068,6 +1075,8 @@ unsafe fn snapshot_native_message(
     let snapshot = match message {
         WM_CLOSE => PendingNativeEvent::CloseRequested,
         WM_DESTROY => PendingNativeEvent::Destroy,
+        WM_ENTERSIZEMOVE => PendingNativeEvent::ResizeInteractionStarted,
+        WM_EXITSIZEMOVE => PendingNativeEvent::ResizeInteractionEnded,
         WM_SIZE => PendingNativeEvent::Size {
             minimized: wparam == 1,
         },
@@ -1168,9 +1177,23 @@ fn dispatch_pending_event(state: &mut HostState, hwnd: HWND, event: PendingNativ
             dispatch_event(state, PixelWindowEvent::CloseRequested);
         }
         PendingNativeEvent::Destroy => state.exit = true,
+        PendingNativeEvent::ResizeInteractionStarted => {
+            if !state.interactive_resize {
+                state.interactive_resize = true;
+                dispatch_event(state, PixelWindowEvent::ResizeInteractionStarted);
+            }
+        }
+        PendingNativeEvent::ResizeInteractionEnded => {
+            if state.interactive_resize {
+                state.interactive_resize = false;
+                update_metrics(state, GeometryChange::Resized, true);
+                dispatch_event(state, PixelWindowEvent::ResizeInteractionEnded);
+                state.backend.request_redraw();
+            }
+        }
         PendingNativeEvent::Size { minimized } => {
             if !minimized {
-                update_metrics(state, GeometryChange::Resized, true);
+                update_metrics(state, GeometryChange::Resized, !state.interactive_resize);
             }
         }
         PendingNativeEvent::DpiChanged { suggested } => {
@@ -1569,6 +1592,25 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
 
     let result = (|| {
         let metrics = *state.backend.metrics.borrow();
+        if state.interactive_resize
+            && reusable_resize_backing(
+                state.frame_state.info().content_valid,
+                state.frame_width,
+                state.frame_height,
+                state.pixels.len(),
+            )
+            && !paint_should_skip(unsafe { IsIconic(hwnd) } != 0, metrics)
+        {
+            return present_scaled_resize_backing(
+                &state.backend,
+                dc,
+                session.paint_rect(),
+                metrics,
+                &state.pixels,
+                state.frame_width,
+                state.frame_height,
+            );
+        }
         sync_frame_geometry(state, metrics);
         if paint_should_skip(unsafe { IsIconic(hwnd) } != 0, metrics) {
             return Ok(());
@@ -1700,6 +1742,92 @@ fn paint(state: &mut HostState, hwnd: HWND) -> Result<(), PixelWindowError> {
     result
 }
 
+fn reusable_resize_backing(
+    content_valid: bool,
+    width: u32,
+    height: u32,
+    pixel_count: usize,
+) -> bool {
+    content_valid
+        && width > 0
+        && height > 0
+        && u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|count| usize::try_from(count).ok())
+            == Some(pixel_count)
+}
+
+fn present_scaled_resize_backing(
+    backend: &Backend,
+    dc: HDC,
+    paint_rect: Win32Rect,
+    metrics: PixelWindowMetrics,
+    pixels: &[u32],
+    source_width: u32,
+    source_height: u32,
+) -> Result<(), PixelWindowError> {
+    let Some(exposed) =
+        stretch_geometry_for_paint(paint_rect, metrics.physical_width, metrics.physical_height)
+    else {
+        return Ok(());
+    };
+    let exposed_width =
+        u64::try_from(exposed.destination.right - exposed.destination.left).unwrap_or(0);
+    let exposed_height =
+        u64::try_from(exposed.destination.bottom - exposed.destination.top).unwrap_or(0);
+    let requested_pixels = exposed_width.saturating_mul(exposed_height);
+    let frame_pixels =
+        u64::from(metrics.physical_width).saturating_mul(u64::from(metrics.physical_height));
+    let region = if requested_pixels == frame_pixels {
+        PixelPresentRegion::Full
+    } else {
+        PixelPresentRegion::Partial
+    };
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: source_width as i32,
+            biHeight: -(source_height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..unsafe { mem::zeroed() }
+        },
+        ..unsafe { mem::zeroed() }
+    };
+    let started = Instant::now();
+    let copied = unsafe {
+        StretchDIBits(
+            dc,
+            0,
+            0,
+            metrics.physical_width as i32,
+            metrics.physical_height as i32,
+            0,
+            0,
+            source_width as i32,
+            source_height as i32,
+            pixels.as_ptr().cast(),
+            &info,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        )
+    };
+    let result = validate_stretch_copy(copied, source_height as i32);
+    backend.present.borrow_mut().record(
+        elapsed_ns_since(started),
+        requested_pixels,
+        if result.is_ok() { requested_pixels } else { 0 },
+        region,
+        if result.is_ok() {
+            PixelPresentOutcome::Succeeded
+        } else {
+            PixelPresentOutcome::Failed
+        },
+    );
+    result.map(|_| ())
+}
+
 fn validate_stretch_copy(
     copied_scanlines: i32,
     requested_scanlines: i32,
@@ -1787,7 +1915,9 @@ fn update_metrics(state: &mut HostState, change: GeometryChange, notify: bool) {
         scale_factor: scale,
     };
     *state.backend.metrics.borrow_mut() = metrics;
-    sync_frame_geometry(state, metrics);
+    if !state.interactive_resize || !matches!(change, GeometryChange::Resized) {
+        sync_frame_geometry(state, metrics);
+    }
     if notify && state.opened && metrics.is_drawable() {
         dispatch_event(state, PixelWindowEvent::GeometryChanged { change, metrics });
     }
@@ -2144,6 +2274,15 @@ mod tests {
     }
 
     #[test]
+    fn live_resize_reuses_only_a_complete_committed_backing() {
+        assert!(reusable_resize_backing(true, 100, 50, 5_000));
+        assert!(!reusable_resize_backing(false, 100, 50, 5_000));
+        assert!(!reusable_resize_backing(true, 0, 50, 0));
+        assert!(!reusable_resize_backing(true, 100, 50, 4_999));
+        assert!(!reusable_resize_backing(true, u32::MAX, u32::MAX, 0));
+    }
+
+    #[test]
     fn minimized_or_nondrawable_metrics_suppress_paint() {
         let metrics = PixelWindowMetrics {
             logical_size: LogicalSize::new(100.0, 80.0),
@@ -2248,6 +2387,14 @@ mod tests {
         );
         assert_eq!(
             classify_native_message(WM_SIZE),
+            NativeMessageClass::Stateful
+        );
+        assert_eq!(
+            classify_native_message(WM_ENTERSIZEMOVE),
+            NativeMessageClass::Stateful
+        );
+        assert_eq!(
+            classify_native_message(WM_EXITSIZEMOVE),
             NativeMessageClass::Stateful
         );
         assert_eq!(

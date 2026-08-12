@@ -25,6 +25,24 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+type TestHwnd = *mut std::ffi::c_void;
+#[cfg(windows)]
+const WM_ENTERSIZEMOVE: u32 = 0x0231;
+#[cfg(windows)]
+const WM_EXITSIZEMOVE: u32 = 0x0232;
+
+#[cfg(windows)]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn EnumWindows(
+        callback: Option<unsafe extern "system" fn(TestHwnd, isize) -> i32>,
+        lparam: isize,
+    ) -> i32;
+    fn GetWindowThreadProcessId(hwnd: TestHwnd, process_id: *mut u32) -> u32;
+    fn SendMessageW(hwnd: TestHwnd, message: u32, wparam: usize, lparam: isize) -> isize;
+}
+
 const TEST_JOURNEY_ARG: &str = "--test-control-journey";
 
 fn binary() -> &'static str {
@@ -220,7 +238,7 @@ fn invoke_control(endpoint: &str, args: &[String]) -> Result<(), String> {
     invoke_control_output(endpoint, args).map(|_| ())
 }
 
-fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
+fn replay_control_journey(endpoint: &str, path: &Path, host_pid: u32) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if invoke_control(endpoint, &["list-tabs".to_owned()]).is_ok() {
@@ -245,6 +263,11 @@ fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
             == Some(true)
         {
             invoke_control(endpoint, &["reset-perf-stats".to_owned()])?;
+        } else if let Some(phase) = object
+            .get("native_resize_phase")
+            .and_then(serde_json::Value::as_str)
+        {
+            send_native_resize_phase(host_pid, phase)?;
         } else if let Some(path) = object.get("perf_stats").and_then(serde_json::Value::as_str) {
             let stats = invoke_control_output(endpoint, &["perf-stats".to_owned()])?;
             std::fs::write(path, stats).map_err(|error| format!("write perf stats: {error}"))?;
@@ -336,6 +359,54 @@ fn replay_control_journey(endpoint: &str, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn send_native_resize_phase(host_pid: u32, phase: &str) -> Result<(), String> {
+    struct Search {
+        pid: u32,
+        hwnd: TestHwnd,
+    }
+
+    unsafe extern "system" fn find_process_window(hwnd: TestHwnd, lparam: isize) -> i32 {
+        let search = unsafe { &mut *(lparam as *mut Search) };
+        let mut pid = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid == search.pid {
+            search.hwnd = hwnd;
+            0
+        } else {
+            1
+        }
+    }
+
+    let mut search = Search {
+        pid: host_pid,
+        hwnd: std::ptr::null_mut(),
+    };
+    unsafe {
+        EnumWindows(
+            Some(find_process_window),
+            (&mut search as *mut Search) as isize,
+        )
+    };
+    if search.hwnd.is_null() {
+        return Err(format!("no native window found for con pid {host_pid}"));
+    }
+    let message = match phase {
+        "begin" => WM_ENTERSIZEMOVE,
+        "end" => WM_EXITSIZEMOVE,
+        _ => return Err(format!("unknown native resize phase {phase:?}")),
+    };
+    unsafe { SendMessageW(search.hwnd, message, 0, 0) };
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn send_native_resize_phase(_host_pid: u32, phase: &str) -> Result<(), String> {
+    Err(format!(
+        "native resize phase {phase:?} is unavailable on this host"
+    ))
+}
+
 fn journey_u64(value: &serde_json::Value, field: &str) -> Result<u64, String> {
     value
         .get(field)
@@ -423,12 +494,13 @@ impl ConSession {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn agenterm-con");
+        let host_pid = child.id();
         let driver_error = std::sync::Arc::new(std::sync::Mutex::new(None));
         let driver = journey.map(|journey| {
             let endpoint = endpoint.clone();
             let error_slot = std::sync::Arc::clone(&driver_error);
             std::thread::spawn(move || {
-                if let Err(error) = replay_control_journey(&endpoint, &journey) {
+                if let Err(error) = replay_control_journey(&endpoint, &journey, host_pid) {
                     *error_slot
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error);
@@ -1290,12 +1362,18 @@ fn controlled_resize_storm_reports_successful_frames_and_exits_cleanly() {
     let png_path = dir.join("fence.png");
     let stats_path = dir.join("perf.json");
     let mut commands = vec![r#"{"reset_perf":true}"#.to_owned()];
+    if cfg!(windows) {
+        commands.push(r#"{"native_resize_phase":"begin"}"#.to_owned());
+    }
     for _ in 0..4 {
         for (width, height) in [(720, 460), (1180, 740), (640, 420), (1100, 680)] {
             commands.push(format!(
                 r#"{{"resize":{{"width":{width},"height":{height}}}}}"#
             ));
         }
+    }
+    if cfg!(windows) {
+        commands.push(r#"{"native_resize_phase":"end"}"#.to_owned());
     }
     commands.push(format!(
         r#"{{"screenshot":{}}}"#,
@@ -1324,17 +1402,21 @@ fn controlled_resize_storm_reports_successful_frames_and_exits_cleanly() {
     eprintln!("agenterm-con resize perf: {stats}");
     let frames = stats["frames"].as_u64().expect("frames");
     assert!(frames > 0, "resize journey rendered no frames");
-    assert!(
-        frames <= 24,
-        "native resize invalidated too many frames: {frames}"
-    );
-    assert!(
-        stats["full_candidate_frames"].as_u64().unwrap_or(u64::MAX) <= 10,
-        "native resize restored full-client class invalidation: {stats}"
-    );
+    if cfg!(windows) {
+        assert!(frames <= 6, "live resize rerasterized too often: {stats}");
+        assert!(
+            stats["full_candidate_frames"].as_u64().unwrap_or(u64::MAX) <= 2,
+            "live resize repeatedly forced full raster: {stats}"
+        );
+    } else {
+        assert!(
+            frames <= 24,
+            "native resize invalidated too many frames: {frames}"
+        );
+    }
     assert_eq!(stats["observed_frames"].as_u64(), Some(frames));
     assert_eq!(stats["present_failure"].as_u64(), Some(0));
-    assert_eq!(stats["present_success"].as_u64(), Some(frames));
+    assert!(stats["present_success"].as_u64().unwrap_or(0) >= frames);
 
     while session
         .child
