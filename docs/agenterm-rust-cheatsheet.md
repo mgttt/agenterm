@@ -235,6 +235,14 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   reduced `.text` by 224 B, and crossed one PE alignment block for a 512 B
   artifact reduction. Keep signed parsing on `FromStr` until its separate
   grammar and range semantics have matching evidence.
+- Format diagnostics through the narrowest type that owns their public range.
+  `Duration::as_millis()` returns `u128`; formatting it directly can retain the
+  complete `u128` decimal formatter even when the native timeout boundary is
+  only `u32` or `u64`. Preserve semantics with an explicit checked or saturating
+  conversion and test the extreme value before claiming a size win. In the
+  Windows PTY adapter this removed the 1,043-byte linked formatter and moved the
+  exact custom-std PE from 533,504 to 531,968 bytes. This rule applies to cold
+  diagnostics, not to values whose real contract requires 128-bit precision.
 - Do not change an unwind-enabled native host to `panic = "abort"` merely to
   remove runtime bytes. `agenterm-con` catches panics at WNDPROC, deferred-work,
   and native-thread FFI boundaries; abort changes that containment contract

@@ -675,3 +675,14 @@ NEON iteration, while `inline(always)` produced one register-only
 `umull`/`uzp2`/`uqxtn` pipeline and removed the separate helper symbol. Scalar
 parity remains the semantic authority; future compiler upgrades must recheck the
 assembly before retaining or extending this exception.
+
+### Narrow diagnostic formatting at native boundaries
+
+Exact linker-map attribution found that one PTY timeout diagnostic formatted
+`Duration::as_millis()` as `u128` even though the operational wait boundary is
+narrower. The shared platform adapter now saturates to `u64` before formatting,
+preserving ordinary output and defining the theoretical overflow result. This
+removes the 1,043-byte `u128` formatter and changes the measured same-profile
+custom-std PE from 533,504 to 531,968 bytes. Focused exact/saturation tests and
+con Clippy own the boundary; this is shared platform logic, not a con-only
+formatting workaround.

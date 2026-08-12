@@ -1796,8 +1796,15 @@ fn hresult_from_win32(error: u32) -> i32 {
 fn write_timeout(timeout: Duration) -> io::Error {
     io::Error::new(
         io::ErrorKind::TimedOut,
-        format!("PTY write made no progress for {} ms", timeout.as_millis()),
+        format!(
+            "PTY write made no progress for {} ms",
+            bounded_duration_millis(timeout)
+        ),
     )
+}
+
+fn bounded_duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn wait_timeout_millis(timeout: Duration) -> u32 {
@@ -1818,6 +1825,24 @@ fn pty_error(
     error: impl std::fmt::Display,
 ) -> PtyError {
     PtyError::failed(operation, code, error)
+}
+
+#[cfg(test)]
+mod timeout_format_tests {
+    use super::*;
+
+    #[test]
+    fn duration_millis_are_exact_or_saturate_before_formatting() {
+        assert_eq!(
+            bounded_duration_millis(Duration::from_millis(12_345)),
+            12_345
+        );
+        assert_eq!(bounded_duration_millis(Duration::MAX), u64::MAX);
+        assert_eq!(
+            write_timeout(Duration::from_millis(250)).to_string(),
+            "PTY write made no progress for 250 ms"
+        );
+    }
 }
 
 fn last_error_code() -> u32 {

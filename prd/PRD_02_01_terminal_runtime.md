@@ -757,3 +757,11 @@ write contract. Linux/macOS retain locked stdio adapters. A public Unicode
 unknown-argument test proves redirected stderr preserves the original text and
 exit code 2. The exact custom-std PE remains 529,920 bytes; this increment is
 accepted for Unicode and handle ownership rather than claimed as a size gain.
+
+Linker-map evidence further showed that the PTY timeout error retained the
+standard `u128` formatter solely because `Duration::as_millis()` exposes a
+wider intermediate than the timeout contract needs. The shared platform
+adapter now saturates that diagnostic value to `u64`, with exact ordinary and
+extreme-value tests. The same-profile custom-std executable falls from 533,504
+to 531,968 bytes after the 1,043-byte formatter disappears; terminal timeout
+behavior and native wait ownership are unchanged.
