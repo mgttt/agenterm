@@ -16,6 +16,7 @@
 | [`precision-audit.md`](precision-audit.md) | 窄域正确性审计与仍开放项 |
 | [`agent-human-parity-audit.md`](agent-human-parity-audit.md) | Agent↔Human 输入/观察 parity 的现行审计与剩余叶 |
 | [`goal-crate-platform.md`](goal-crate-platform.md) / [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) | platform crate 边界、机制漏点与固定执行句式 |
+| [`plan-libagenterm.md`](plan-libagenterm.md) | `libagenterm.{so,dylib,dll}` 机制层 C ABI 设计与 Phase 0 判决门；**已接受规划、尚未实现**，预计由 `agenterm`、`agenterm-con`、`agenterm-cu` 共同消费 |
 | [`goal-agenterm-osx.md`](goal-agenterm-osx.md) | macOS 原生证据与安装尾账 goal |
 | [`plan-multiplatform-gui.md`](plan-multiplatform-gui.md) | Linux/macOS GUI 交付里程碑 |
 | [`plan-control-center-ux.md`](plan-control-center-ux.md) / [`design-control-center-ux.md`](design-control-center-ux.md) | Control Center 任务书与实现级设计 |

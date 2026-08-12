@@ -102,7 +102,7 @@ incremental = true
 
 # The lightweight host is small enough that one codegen unit adds little local
 # latency but prevents the default staged development PE from fragmenting past
-# its 512 KiB product budget. Other workspace packages retain 16-way codegen.
+# its strict sub-1-MiB product budget. Other workspace packages retain 16-way codegen.
 [profile.release-fast.package.agenterm-con]
 codegen-units = 1
 

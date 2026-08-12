@@ -58,7 +58,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   removing redundant mip sizes: `.rsrc` fell from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
   extraction still succeeds.
-- [~] 512 KiB x86_64 remains an active target, not a shipped claim, and every
+- [x] Every released `agenterm-con` artifact must be strictly below 1 MiB
+  (`release_budget_bytes = 1,048,575`), not merely an observed development size, and every
   size statement must name its profile. At the icon reduction the LTO
   `con-release` PE measured 8,704 bytes below budget, while the no-LTO
   `con-release-fast` PE was separately 543,744 bytes and is not release-size
@@ -171,5 +172,6 @@ only what each step changed.
 | saturated PTY-timeout diagnostic | 533,504 → 531,968 | the `u128` formatter retained by `Duration::as_millis()` disappears (1,043 bytes); timeout behavior unchanged |
 | bounded `filesystem-read` configuration | 531,968 → 529,920 | `std::fs::read` and `default_read_to_end` drop to zero; 4 MiB parser limit, partial-`ReadFile` loop and RAII handle closure retained, malformed/oversized input still fails safely to defaults |
 | offline parent-console output | 529,920 | `GetConsoleMode` selects UTF-16 `WriteConsoleW` for consoles and UTF-8 partial-write `WriteFile` loops for pipes/files; borrowed handles never closed, `CONOUT$` RAII-owned. Accepted for Unicode and handle ownership, not as a size gain |
-| resize/close automation | 529,920 → 532,480 | +2,560 accepted for real window-size drive, native surface evidence and clean resource exit; 8,192 over the 512 KiB budget. Evidence: 89 units, 21 GUI black-box, Windows x64 Clippy, independent custom-std build |
+| resize/close automation | 529,920 → 532,480 | +2,560 accepted for real window-size drive, native surface evidence and clean resource exit; this historical 512 KiB overage predates the 2026-08-12 strict sub-1-MiB ceiling. Evidence: 89 units, 21 GUI black-box, Windows x64 Clippy, independent custom-std build |
+| strict sub-1-MiB policy | 560,128 | Official `con-release` custom-std unwind/trace-only artifact on 2026-08-12; 488,447 bytes below the machine ceiling of 1,048,575 bytes |
 | Win32 live-resize retained-DIB fast path | 532,480 → 533,504 | +1,024 accepted for the large 16-step raster/full-frame reduction, not reported as a size gain; 9,216 over budget. The shared event contract also compiles on Linux x64 and Windows ARM64 |

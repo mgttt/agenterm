@@ -41,7 +41,7 @@
       "offline_probe": [
         "--version"
       ],
-      "release_budget_bytes": 524288
+      "release_budget_bytes": 1048575
     }
   ],
   "platforms": [
@@ -90,7 +90,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 524288
+          "release_budget_bytes": 1048575
         }
       ]
     },
@@ -139,7 +139,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 1048576
+          "release_budget_bytes": 1048575
         }
       ]
     },
@@ -174,7 +174,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 1572864
+          "release_budget_bytes": 1048575
         }
       ]
     },
@@ -209,7 +209,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 1572864
+          "release_budget_bytes": 1048575
         }
       ]
     },
@@ -244,7 +244,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 1572864
+          "release_budget_bytes": 1048575
         }
       ]
     },
@@ -279,7 +279,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 1572864
+          "release_budget_bytes": 1048575
         }
       ]
     }

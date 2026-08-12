@@ -585,7 +585,7 @@ track remains planned, but every declared dependency must still pass.
 - [~] `agenterm-con` second-product track (independent of the workbench version
   gates): the standalone host ships in ordinary builds and has its own CI, but
   no release version is committed to it yet. Its promotion gate is explicit —
-  the 512 KiB x86_64 artifact budget met without reverting to abort, and a
+  the strict sub-1-MiB artifact budget met without reverting to abort, and a
   sustained high-throughput/long-output qualification of its own — and both
   belong to the [`agenterm-con` subtree](PRD_02_23_agenterm_con.md). Until both
   pass, con is delivered as an ordinary artifact rather than a versioned product

@@ -125,7 +125,7 @@ AgenTerm — local agent & process fleet work OS
 │     ├─ 24 Terminal & rendering   PTY、VT 行级 damage、present、字形、ISA、渲染性能
 │     ├─ 25 Workspace & input      Tab 树、chrome、composer、滚动条、选择、剪贴板
 │     ├─ 26 Control & public CLI   agenterm-con cli、ATC1 帧、JSON 契约、证据发布
-│     └─ 27 Package & delivery     独立 package、con-* profile、512 KiB 预算、独立 CI
+│     └─ 27 Package & delivery     独立 package、con-* profile、<1 MiB 预算、独立 CI
 │
 ├─ agenterm-cu（computer-use 子树 · 全部 planned）
 │  └─ 28 agenterm-cu            自有 computer-use 底座：定义、边界、不变量、晋升门

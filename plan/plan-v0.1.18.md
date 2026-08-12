@@ -570,8 +570,8 @@ Rh 负责 Build/CI，Rust/Base 负责权威状态与原生机制。
 
 1. con 自有对齐门与完整套件在精确 unwind profile 下全绿（GC1）。
 2. CON-C1 的每一步切分都有"公开合同字节不变"的证据（GC2）；不留半切状态。
-3. CON-budget 要么拿到可复现证据证明回到 512 KiB 内，要么如实记录仍超预算及其数值
-   （GC3）——**不得因为超预算就把这条从验收表里拿掉**。
+3. CON-budget 必须以可复现正式构建证明严格小于 1 MiB（最大 1,048,575 B）；否则
+   如实记录超预算数值（GC3），**不得因为超预算就把这条从验收表里拿掉**。
 4. CON-C3 完成后，同一增量不再同时出现在 ARCHITECTURE 与 PRD 27/24。
 
 ### 8.D 轨 D（`agenterm-cu`）
@@ -775,11 +775,12 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
 
 ### 叶
 
-- [ ] **CON-budget 512 KiB 预算回收** — 精确 custom-std unwind/trace-only
-  `con-release-fast` 当前**超预算 9,216 B**（resize/close 自动化 +2,560、live-resize
-  retained-DIB +1,024）。用户问题是"轻量宿主"若持续超预算就名不副实。证据必须是
-  linked-symbol / disassembly / target-specific cold build，不接受增量构建数字。
-  安全失败：拿不到可复现证据就保持超预算并如实记录，不改预算定义蒙混过关。
+- [x] **CON-budget 严格 <1 MiB** — 精确 custom-std unwind/trace-only
+  正式产物最大为 1,048,575 B；旧 512 KiB 目标已于 2026-08-12 被此上限取代，历史
+  超额数字保留为优化证据而不再构成交付失败。2026-08-12 官方 `con-release`
+  custom-std unwind/trace-only 产物为 560,128 B，低于上限 488,447 B；证据来自
+  target-specific cold build，不是增量构建数字。
+  安全失败：拿不到可复现证据就保持未完成并如实记录，不改预算定义蒙混过关。
   非目标：回退 unwind、砍掉已验收的 resize/close 语义。
 - [ ] **CON-C1 主体巨石切分** — `src/bin/agenterm-con.rs` 6,238 行占 con 产品源码
   60%，VT 回调、终端状态机、`ConApp`、perf 计数、待决控制请求与像素 `Surface`

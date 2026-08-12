@@ -20,7 +20,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] `agenterm-con`: independently packaged lightweight terminal host
   (`crates/agenterm-con`), not a bin target or mode of `agenterm`. It is a
   second product with its own dependency graph, `con-dev`/`con-release-fast`/
-  `con-release` unwind profiles, a 512 KiB x86_64 artifact target, and its own
+  `con-release` unwind profiles, a strict sub-1-MiB artifact ceiling, and its own
   CI. It contains no server, Fleet, mux, MCP or script runtime, and never
   autostarts or connects to `agenterm server`. Role detail, budget status and
   measured artifact history are owned by

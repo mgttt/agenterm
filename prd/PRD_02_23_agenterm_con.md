@@ -16,7 +16,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 | 24 | [Terminal and rendering](PRD_02_24_con_terminal.md) | PTY、VT、行级 damage、present、字形、ISA、渲染性能 |
 | 25 | [Workspace and input](PRD_02_25_con_workspace.md) | Tab 树、chrome、composer、滚动条、选择、剪贴板、焦点 |
 | 26 | [Control protocol and public CLI](PRD_02_26_con_control_cli.md) | `agenterm-con cli`、`ATC1` 帧、JSON 契约、快照/截图证据 |
-| 27 | [Package, budget and delivery](PRD_02_27_con_delivery.md) | 独立 package、`con-*` profile、512 KiB 预算、独立 CI、体积历史 |
+| 27 | [Package, budget and delivery](PRD_02_27_con_delivery.md) | 独立 package、`con-*` profile、严格小于 1 MiB、独立 CI、体积历史 |
 
 ## Product outcome
 
@@ -24,7 +24,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   console host. It provides several independently owned local terminals without
   the workbench authority, background server, Fleet, mux, MCP, or script engines
   of `agenterm`. Its sustained-throughput qualification is shipped in
-  [24](PRD_02_24_con_terminal.md); the product stays partial until the 512 KiB
+  [24](PRD_02_24_con_terminal.md); the product stays partial until the strict sub-1-MiB
   artifact budget in [27](PRD_02_27_con_delivery.md) is recovered.
 
 The product succeeds when a user can launch one small executable, organize

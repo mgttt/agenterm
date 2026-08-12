@@ -353,7 +353,7 @@ itself still exists and is load-bearing — it carries the
 depends on. Do not delete it. Default `build.bat` stages **release-fast** into
 `dist/` (optimized, no LTO, parallel codegen, incremental under
 `target/release-fast/`; only the small `agenterm-con` package uses one codegen
-unit so its staged development PE stays close to the 512 KiB release budget).
+unit so its staged development PE stays below the strict 1 MiB release ceiling).
 Pure debug PE remains `target/debug/` via ordinary
 `cargo build` or explicit `build.bat dev`. A final `release` build uses the
 dedicated repo-local `target-release/` scratch directory, stages all
