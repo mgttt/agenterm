@@ -17,6 +17,12 @@ use windows_sys::Win32::{
 };
 
 pub fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    // Verbatim spelling only — the canonicalize() this replaced also resolved
+    // symlinks, which owned-sibling publication deliberately no longer pays for.
+    // What it must not drop is MAX_PATH escape: MoveFileExW on a plain 280-byte
+    // path fails ERROR_PATH_NOT_FOUND.
+    let source = verbatim(full_path(source)?);
+    let destination = verbatim(full_path(destination)?);
     let source = source
         .as_os_str()
         .encode_wide()
@@ -61,7 +67,7 @@ pub fn sync_parent(_parent: &Path) -> std::io::Result<()> {
 }
 
 pub fn normalize_owned_destination(destination: &Path) -> std::io::Result<PathBuf> {
-    let destination = full_path(destination)?;
+    let destination = verbatim(full_path(destination)?);
     let parent = destination
         .parent()
         .ok_or_else(|| std::io::Error::other("destination parent required"))?;
@@ -84,6 +90,32 @@ pub fn normalize_owned_destination(destination: &Path) -> std::io::Result<PathBu
         ));
     }
     Ok(destination)
+}
+
+/// Re-attach the verbatim prefix that `fs::canonicalize` used to supply.
+///
+/// `GetFullPathNameW` normalizes but returns a *plain* Win32 path, and plain
+/// paths stay bound by MAX_PATH — every subsequent `GetFileAttributesW` /
+/// `CreateFileW` / `MoveFileExW` on a deep destination would fail with
+/// ERROR_PATH_NOT_FOUND. Prefixing is safe precisely because the path is
+/// already fully normalized: verbatim only disables the normalization we just
+/// performed ourselves.
+fn verbatim(path: PathBuf) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    let Some(Component::Prefix(prefix)) = path.components().next() else {
+        return path;
+    };
+    // \\server\share\rest keeps its two leading separators only in the plain
+    // form; the verbatim spelling replaces them with the UNC\ marker.
+    let (skip, lead) = match prefix.kind() {
+        Prefix::Disk(_) => (0_usize, r"\\?\"),
+        Prefix::UNC(..) => (2_usize, r"\\?\UNC\"),
+        _ => return path,
+    };
+    let mut units: Vec<u16> = lead.encode_utf16().collect();
+    units.extend(path.as_os_str().encode_wide().skip(skip));
+    PathBuf::from(OsString::from_wide(&units))
 }
 
 fn full_path(path: &Path) -> std::io::Result<PathBuf> {
@@ -121,5 +153,54 @@ fn full_path(path: &Path) -> std::io::Result<PathBuf> {
             ));
         }
         output.resize(capacity, 0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_prefixes_only_plain_win32_spellings() {
+        assert_eq!(
+            verbatim(PathBuf::from(r"C:\publish\manifest.json")),
+            PathBuf::from(r"\\?\C:\publish\manifest.json")
+        );
+        assert_eq!(
+            verbatim(PathBuf::from(r"\\host\share\manifest.json")),
+            PathBuf::from(r"\\?\UNC\host\share\manifest.json")
+        );
+        // Already verbatim, and device namespaces, must pass through untouched.
+        assert_eq!(
+            verbatim(PathBuf::from(r"\\?\C:\publish\manifest.json")),
+            PathBuf::from(r"\\?\C:\publish\manifest.json")
+        );
+        assert_eq!(
+            verbatim(PathBuf::from(r"\\?\UNC\host\share\manifest.json")),
+            PathBuf::from(r"\\?\UNC\host\share\manifest.json")
+        );
+    }
+
+    #[test]
+    fn normalized_destinations_survive_beyond_max_path() {
+        let mut deep =
+            std::env::temp_dir().join(format!("agenterm-publish-long-{}", std::process::id()));
+        while deep.as_os_str().len() < 280 {
+            deep.push("qualified-package-boundary-segment");
+        }
+        std::fs::create_dir_all(&deep).expect("deep parent");
+        let normalized = normalize_owned_destination(&deep.join("manifest.json"))
+            .expect("a deep destination must normalize");
+        assert!(
+            normalized
+                .as_os_str()
+                .to_string_lossy()
+                .starts_with(r"\\?\"),
+            "deep destinations must be handed on in verbatim form: {normalized:?}"
+        );
+        std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("agenterm-publish-long-{}", std::process::id())),
+        )
+        .expect("cleanup");
     }
 }
