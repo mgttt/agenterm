@@ -14,13 +14,16 @@ struct PtyShutdown {
 }
 
 impl PtyShutdown {
-    fn run(self) {
+    fn run(mut self) {
         if let Some(child) = self.child.as_ref() {
             let _ = child.terminate_forcefully();
             child.close_pseudoconsole();
         }
-        drop(self.master);
-        drop(self.child);
+        // Locals drop in reverse declaration order, so the master is released
+        // before the child. Avoid an explicit `drop`: some adapter placeholder
+        // children intentionally carry no Drop implementation.
+        let _child = self.child.take();
+        let _master = self.master.take();
     }
 }
 

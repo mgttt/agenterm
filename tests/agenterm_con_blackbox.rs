@@ -1020,17 +1020,15 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
 }
 
 #[test]
-fn controlled_click_produces_a_local_selection_at_the_clicked_cell() {
+fn controlled_click_without_drag_does_not_create_a_selection() {
     let _guard = gui_test_guard();
     // Closes the gap this session's own plan doc flagged in plain writing:
     // the original hidden driver had no mouse commands. cmd.exe never negotiates mouse
     // reporting (DECSET 1000/1002/1003), so a real click here always falls
-    // through `handle_pointer_button`'s local path — a single left click
-    // selects exactly the clicked cell (both selection endpoints equal),
-    // which is state a script/agent can observe nowhere except this
-    // wiring: the encoder-level pieces (`register_click`, `hit_test`) are
-    // already unit-tested in isolation, but never through a live session
-    // driven through the public control endpoint.
+    // through `handle_pointer_button`'s local path. A press and release at
+    // the same cell must not leave a zero-length selection: that would keep
+    // the cell inverted and steal the next Ctrl+C/right-click. This test
+    // proves the public control endpoint drives that same physical path.
     let dir = scratch_dir("click-selection");
     // `wait_text`, not a guessed `wait_ms`: `drain_pty` clears the selection
     // on any new output ("new output clears stale selection"), so a click
@@ -1050,13 +1048,25 @@ fn controlled_click_produces_a_local_selection_at_the_clicked_cell() {
     );
     let args = interactive_shell_args(&script);
     let mut session = ConSession::spawn(&dir, &args);
+    session
+        .driver
+        .take()
+        .expect("control journey driver")
+        .join()
+        .expect("control journey thread");
+    if let Some(error) = session
+        .driver_error
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+    {
+        panic!("control journey failed: {error}");
+    }
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
-        snapshot["selection"].is_array()
+        ConSession::screen_text(snapshot).contains("CLICK_MARKER")
+            && snapshot["selection"].is_null()
     });
-    assert_eq!(snapshot["selection"][0]["row"], 3, "{snapshot}");
-    assert_eq!(snapshot["selection"][0]["col"], 5, "{snapshot}");
-    assert_eq!(snapshot["selection"][1]["row"], 3, "{snapshot}");
-    assert_eq!(snapshot["selection"][1]["col"], 5, "{snapshot}");
+    assert!(snapshot["selection"].is_null(), "{snapshot}");
     let _ = session.child.kill();
 }
 

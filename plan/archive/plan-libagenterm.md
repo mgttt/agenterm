@@ -10,8 +10,8 @@
 
 状态：**已接受规划、尚未实现**（2026-08-12）。本文件是当前唯一执行 SSOT；Phase 0 后再进 PRD（§7）。
 目标消费者：`agenterm`、`agenterm-con`、`agenterm-cu`。
-关联：[`ARCHITECTURE.md`](ARCHITECTURE.md) §1.0、[`plan-v0.1.18.md`](plan-v0.1.18.md) §1、
-[`plan-ape-thin-shell-dynamic-packages.md`](plan-ape-thin-shell-dynamic-packages.md)
+关联：[`ARCHITECTURE.md`](../ARCHITECTURE.md) §1.0、[`plan-v0.1.18.md`](../plan-v0.1.18.md) §1、
+[`plan-ape-thin-shell-dynamic-packages.md`](../plan-ape-thin-shell-dynamic-packages.md)
 
 ---
 
