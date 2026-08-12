@@ -27,6 +27,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy workbench targets
         run: cargo clippy --locked -p agenterm --all-targets -- -D warnings
+      - name: Build script worker prerequisite
+        run: cargo build --locked -p agenterm --bin agenterm
       - name: Test workbench library
         run: cargo test --locked -p agenterm --lib
       - name: Test shared UI core
