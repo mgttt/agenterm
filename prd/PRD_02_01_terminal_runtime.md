@@ -513,6 +513,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   the HWND alive and visible and localized 5,921 of 6,049 changed pixels to the
   composer band. Evidence is 85 unit tests, 18 GUI black-box tests, one isolated
   multitab control test, Windows x64 Clippy and Linux x64 compilation.
+  Windows ConPTY environment inheritance now calls `GetEnvironmentStringsW`
+  directly and frees that borrowed block through one adapter-owned RAII guard.
+  A bounded UTF-16 scan and ordered streaming merge preserve hidden `=C:` drive
+  entries, inherited variables, ASCII-case-insensitive last override semantics,
+  validation and the required double NUL before the existing `CreateProcessW`
+  boundary. This removes the `std::env::vars_os` object/normalization pipeline
+  while Unix and macOS retain their platform adapters. Against the same source
+  state after the long-path publication fix, the official release-fast PE falls
+  from 551,424 to 550,400 bytes. Two pure merge tests and two real ConPTY tests
+  prove exact inherited `COMSPEC` plus an explicit override; the full 85 unit,
+  18 GUI black-box and isolated multitab suites, Windows Clippy and Linux x64
+  compilation also pass.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

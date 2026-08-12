@@ -452,6 +452,18 @@ symbol and reduced the staged PE by 7,680 bytes. Do not generalize this to
 long-lived or mutation-heavy maps; use measured cardinality, lifecycle and the
 final link map.
 
+After specializing a container, trace its producer again. On Windows,
+`std::env::vars_os` already reaches `GetEnvironmentStringsW`, but it also
+materializes owned key/value objects before product overrides are applied. A
+platform adapter may instead own the native block lifetime directly: pair
+`GetEnvironmentStringsW` with `FreeEnvironmentStringsW`, bound the terminating
+double-NUL scan, recognize hidden `=C:` drive keys by their second `=`, and
+stream-merge validated case-insensitive overrides into the Unicode block passed
+to `CreateProcessW`. Keep this Windows-only mechanism behind the neutral PTY
+contract; Unix environments must preserve their native byte semantics. This
+follow-up removed another 1,024 staged bytes, but only after a same-HEAD A/B
+comparison separated an unrelated concurrent size change from the experiment.
+
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A
 temporary exclusively created by the platform beside a destination does not

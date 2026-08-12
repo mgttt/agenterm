@@ -1,5 +1,6 @@
 //! Direct Windows ConPTY adapter.
 
+use std::cmp::Ordering as CmpOrdering;
 use std::collections::VecDeque;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -31,6 +32,7 @@ use windows_sys::Win32::System::Console::{
     KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, ResizePseudoConsole, SetConsoleCtrlHandler,
     WriteConsoleInputW,
 };
+use windows_sys::Win32::System::Environment::{FreeEnvironmentStringsW, GetEnvironmentStringsW};
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -2193,83 +2195,182 @@ fn environment_block(command: &ChildCommand) -> io::Result<Option<Vec<u16>>> {
     if command.env.is_empty() {
         return Ok(None);
     }
-    let mut environment = SortedEnvironment::new();
-    for (key, value) in env::vars_os() {
-        environment.insert(NormalizedEnvKey::from_os_str(&key), (key, value));
-    }
-    for (key, value) in &command.env {
-        if key.is_empty()
-            || key
-                .encode_wide()
-                .any(|unit| unit == 0 || unit == b'=' as u16)
-            || value.encode_wide().any(|unit| unit == 0)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "environment key is empty, contains '=' or NUL, or value contains NUL",
-            ));
+    let overrides = EnvironmentOverrides::from_command(command)?;
+    let inherited = InheritedEnvironment::capture()?;
+    Ok(Some(merge_environment_block(
+        inherited.units()?,
+        &overrides,
+    )))
+}
+
+const MAX_ENVIRONMENT_UNITS: usize = 32 * 1024 * 1024;
+
+struct InheritedEnvironment(*mut u16);
+
+impl InheritedEnvironment {
+    fn capture() -> io::Result<Self> {
+        let block = unsafe { GetEnvironmentStringsW() };
+        if block.is_null() {
+            Err(last_os_error())
+        } else {
+            Ok(Self(block))
         }
-        environment.insert(
-            NormalizedEnvKey::from_os_str(key),
-            (key.clone(), value.clone()),
-        );
     }
+
+    fn units(&self) -> io::Result<&[u16]> {
+        let mut length = 0usize;
+        while length < MAX_ENVIRONMENT_UNITS {
+            let unit = unsafe { *self.0.add(length) };
+            length += 1;
+            if unit == 0 && (length == 1 || unsafe { *self.0.add(length) } == 0) {
+                if length != 1 {
+                    length += 1;
+                }
+                return Ok(unsafe { std::slice::from_raw_parts(self.0, length) });
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "inherited environment block is not terminated",
+        ))
+    }
+}
+
+impl Drop for InheritedEnvironment {
+    fn drop(&mut self) {
+        unsafe {
+            FreeEnvironmentStringsW(self.0);
+        }
+    }
+}
+
+struct EncodedEnvironmentEntry {
+    key_len: usize,
+    units: Vec<u16>,
+}
+
+impl EncodedEnvironmentEntry {
+    fn key(&self) -> &[u16] {
+        &self.units[..self.key_len]
+    }
+}
+
+struct EnvironmentOverrides(Vec<EncodedEnvironmentEntry>);
+
+impl EnvironmentOverrides {
+    fn from_command(command: &ChildCommand) -> io::Result<Self> {
+        let mut overrides = Self(Vec::new());
+        for (key, value) in &command.env {
+            let key = key.encode_wide().collect::<Vec<_>>();
+            let value = value.encode_wide().collect::<Vec<_>>();
+            if key.is_empty()
+                || key.iter().any(|unit| *unit == 0 || *unit == b'=' as u16)
+                || value.contains(&0)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "environment key is empty, contains '=' or NUL, or value contains NUL",
+                ));
+            }
+            let key_len = key.len();
+            let mut units = key;
+            units.push(b'=' as u16);
+            units.extend(value);
+            overrides.insert(EncodedEnvironmentEntry { key_len, units });
+        }
+        Ok(overrides)
+    }
+
+    fn insert(&mut self, entry: EncodedEnvironmentEntry) {
+        let mut low = 0usize;
+        let mut high = self.0.len();
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if compare_environment_keys(self.0[middle].key(), entry.key()) == CmpOrdering::Less {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if self
+            .0
+            .get(low)
+            .is_some_and(|current| compare_environment_keys(current.key(), entry.key()).is_eq())
+        {
+            self.0[low] = entry;
+        } else {
+            self.0.insert(low, entry);
+        }
+    }
+}
+
+fn merge_environment_block(inherited: &[u16], overrides: &EnvironmentOverrides) -> Vec<u16> {
     let mut block = Vec::new();
-    for (_normalized, (key, value)) in environment {
-        block.extend(key.encode_wide());
-        block.push(b'=' as u16);
-        block.extend(value.encode_wide());
+    let mut inherited_at = 0usize;
+    let mut override_at = 0usize;
+    while inherited_at < inherited.len() && inherited[inherited_at] != 0 {
+        let entry_end = inherited[inherited_at..]
+            .iter()
+            .position(|unit| *unit == 0)
+            .map_or(inherited.len(), |offset| inherited_at + offset);
+        let entry = &inherited[inherited_at..entry_end];
+        let Some(key) = environment_entry_key(entry) else {
+            inherited_at = entry_end.saturating_add(1);
+            continue;
+        };
+        let mut keep_inherited = true;
+        while let Some(override_entry) = overrides.0.get(override_at) {
+            match compare_environment_keys(override_entry.key(), key) {
+                CmpOrdering::Less => {
+                    block.extend_from_slice(&override_entry.units);
+                    block.push(0);
+                    override_at += 1;
+                }
+                CmpOrdering::Equal => {
+                    block.extend_from_slice(&override_entry.units);
+                    block.push(0);
+                    override_at += 1;
+                    keep_inherited = false;
+                    break;
+                }
+                CmpOrdering::Greater => break,
+            }
+        }
+        if keep_inherited {
+            block.extend_from_slice(entry);
+            block.push(0);
+        }
+        inherited_at = entry_end.saturating_add(1);
+    }
+    for entry in &overrides.0[override_at..] {
+        block.extend_from_slice(&entry.units);
         block.push(0);
     }
     if block.is_empty() {
         block.push(0);
     }
     block.push(0);
-    Ok(Some(block))
+    block
 }
 
-struct SortedEnvironment(Vec<(NormalizedEnvKey, (OsString, OsString))>);
+fn environment_entry_key(entry: &[u16]) -> Option<&[u16]> {
+    let search_start = usize::from(entry.first() == Some(&(b'=' as u16)));
+    let separator = entry
+        .get(search_start..)?
+        .iter()
+        .position(|unit| *unit == b'=' as u16)?
+        + search_start;
+    (separator != 0).then_some(&entry[..separator])
+}
 
-impl SortedEnvironment {
-    const fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    fn insert(&mut self, key: NormalizedEnvKey, value: (OsString, OsString)) {
-        let mut low = 0;
-        let mut high = self.0.len();
-        while low < high {
-            let middle = low + (high - low) / 2;
-            if self.0[middle].0 < key {
-                low = middle + 1;
-            } else {
-                high = middle;
-            }
-        }
-        if low < self.0.len() && self.0[low].0 == key {
-            self.0[low].1 = value;
-        } else {
-            self.0.insert(low, (key, value));
+fn compare_environment_keys(left: &[u16], right: &[u16]) -> CmpOrdering {
+    for (left, right) in left.iter().copied().zip(right.iter().copied()) {
+        match ascii_upper_unit(left).cmp(&ascii_upper_unit(right)) {
+            CmpOrdering::Equal => {}
+            ordering => return ordering,
         }
     }
-}
-
-impl IntoIterator for SortedEnvironment {
-    type Item = (NormalizedEnvKey, (OsString, OsString));
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-struct NormalizedEnvKey(Vec<u16>);
-
-impl NormalizedEnvKey {
-    fn from_os_str(value: &OsStr) -> Self {
-        Self(value.encode_wide().map(ascii_upper_unit).collect())
-    }
+    left.len().cmp(&right.len())
 }
 
 #[cfg(test)]
@@ -2277,30 +2378,30 @@ mod sorted_environment_tests {
     use super::*;
 
     #[test]
-    fn sorted_environment_orders_and_replaces_by_normalized_key() {
-        let mut environment = SortedEnvironment::new();
-        environment.insert(
-            NormalizedEnvKey::from_os_str(OsStr::new("ZED")),
-            (OsString::from("ZED"), OsString::from("first")),
-        );
-        environment.insert(
-            NormalizedEnvKey::from_os_str(OsStr::new("alpha")),
-            (OsString::from("alpha"), OsString::from("one")),
-        );
-        environment.insert(
-            NormalizedEnvKey::from_os_str(OsStr::new("ALPHA")),
-            (OsString::from("ALPHA"), OsString::from("two")),
-        );
-        let values = environment
-            .into_iter()
-            .map(|(_, pair)| pair)
+    fn native_environment_merge_preserves_drive_entries_and_replaces_case_insensitively() {
+        let command = ChildCommand::new("cmd.exe")
+            .env("Path", "new")
+            .env("alpha", "first")
+            .env("ALPHA", "two");
+        let overrides = EnvironmentOverrides::from_command(&command).expect("valid overrides");
+        let inherited = "=C:=C:\\old\0alpha=old\0PATH=old\0ZED=last\0\0"
+            .encode_utf16()
             .collect::<Vec<_>>();
+        let actual = String::from_utf16(&merge_environment_block(&inherited, &overrides))
+            .expect("valid UTF-16");
+        assert_eq!(actual, "=C:=C:\\old\0ALPHA=two\0Path=new\0ZED=last\0\0");
+    }
+
+    #[test]
+    fn native_environment_merge_validates_overrides_and_empty_double_nul() {
+        let invalid = ChildCommand::new("cmd.exe").env("BAD=KEY", "value");
+        assert!(EnvironmentOverrides::from_command(&invalid).is_err());
+
+        let command = ChildCommand::new("cmd.exe").env("TERM", "xterm");
+        let overrides = EnvironmentOverrides::from_command(&command).expect("valid override");
         assert_eq!(
-            values,
-            [
-                (OsString::from("ALPHA"), OsString::from("two")),
-                (OsString::from("ZED"), OsString::from("first")),
-            ]
+            merge_environment_block(&[0], &overrides),
+            "TERM=xterm\0\0".encode_utf16().collect::<Vec<_>>()
         );
     }
 }
@@ -2483,6 +2584,39 @@ mod tests {
         assert!(
             rendered.contains("agenterm-direct-conpty"),
             "missing child output: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn direct_conpty_inherits_system_environment_and_applies_override() {
+        let shell = std::env::var_os("COMSPEC").expect("Windows COMSPEC");
+        let expected_shell = shell.to_string_lossy().into_owned();
+        let spawned = super::ChildCommand::new(shell)
+            .arg("/D")
+            .arg("/C")
+            .arg("echo inherited=%COMSPEC% override=%AGENTERM_PTY_ENV_TEST%")
+            .env("AGENTERM_PTY_ENV_TEST", "native-block")
+            .spawn()
+            .expect("spawn direct ConPTY child with environment override");
+        let (master, mut child) = spawned.into_parts();
+        let status = child.wait().expect("wait for direct ConPTY child");
+        assert!(status.success(), "child status: {status:?}");
+        child.close_pseudoconsole();
+
+        let mut output = Vec::new();
+        let mut chunk = [0u8; 512];
+        loop {
+            let amount = master.io().read(&mut chunk).expect("read ConPTY output");
+            if amount == 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..amount]);
+        }
+        let rendered = String::from_utf8_lossy(&output);
+        let expected = format!("inherited={expected_shell} override=native-block");
+        assert!(
+            rendered.contains(&expected),
+            "missing exact inherited environment and override {expected:?}: {rendered:?}"
         );
     }
 }

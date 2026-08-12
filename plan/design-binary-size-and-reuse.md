@@ -376,6 +376,20 @@ short-lived key set. A concrete platform-private sorted vector now performs
 manual binary insertion: equal normalized keys replace the original key/value
 payload, new keys enter in order, and serialization remains a linear pass.
 
+A later same-profile experiment traced the remaining producer rather than
+replacing only its container. The Windows adapter now acquires the inherited
+UTF-16 block directly with `GetEnvironmentStringsW`, releases it with
+`FreeEnvironmentStringsW`, and performs a bounded ordered merge into the exact
+double-NUL block consumed by `CreateProcessW`. Hidden `=C:` entries and inherited
+key spelling remain intact; explicit keys are validated and replace inherited
+keys ASCII-case-insensitively with last override winning. This makes the
+`std::env::vars_os` enumeration, `OsString` pair and separate normalized-key
+allocation pipeline unreachable from this owner. On the same HEAD, after the
+unrelated long-path publication fix moved the baseline, the official
+release-fast PE falls from 551,424 to 550,400 bytes. Pure edge tests plus a real
+ConPTY child prove both exact `COMSPEC` inheritance and an explicit override;
+the complete con and cross-platform gates remain green.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.
