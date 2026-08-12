@@ -1324,6 +1324,14 @@ fn controlled_resize_storm_reports_successful_frames_and_exits_cleanly() {
     eprintln!("agenterm-con resize perf: {stats}");
     let frames = stats["frames"].as_u64().expect("frames");
     assert!(frames > 0, "resize journey rendered no frames");
+    assert!(
+        frames <= 24,
+        "native resize invalidated too many frames: {frames}"
+    );
+    assert!(
+        stats["full_candidate_frames"].as_u64().unwrap_or(u64::MAX) <= 10,
+        "native resize restored full-client class invalidation: {stats}"
+    );
     assert_eq!(stats["observed_frames"].as_u64(), Some(frames));
     assert_eq!(stats["present_failure"].as_u64(), Some(0));
     assert_eq!(stats["present_success"].as_u64(), Some(frames));

@@ -39,20 +39,19 @@ use windows_sys::Win32::{
             VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
-            CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-            DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
-            GetWindowLongPtrW, GetWindowRect, IDC_ARROW, IDC_SIZEWE, IsIconic, IsWindowVisible,
-            IsZoomed, KillTimer, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW,
-            RegisterClassW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-            SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
-            SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-            TranslateMessage, WM_APP, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
-            WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_IME_CHAR, WM_IME_COMPOSITION,
-            WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-            WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
-            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WM_SYSKEYUP,
-            WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            CREATESTRUCTW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+            DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW, GetWindowLongPtrW,
+            GetWindowRect, IDC_ARROW, IDC_SIZEWE, IsIconic, IsWindowVisible, IsZoomed, KillTimer,
+            LoadCursorW, MSG, PM_REMOVE, PeekMessageW, PostMessageW, RegisterClassW, SW_HIDE,
+            SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
+            SWP_NOZORDER, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+            SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CANCELMODE,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
+            WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT,
+            WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+            WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE,
+            WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     },
 };
@@ -666,7 +665,10 @@ pub(crate) fn run_pixel_window(
     }
     let class_name = wide_null(CLASS_NAME);
     let window_class = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
+        // Pixel backing and explicit invalidation own redraw. CS_HREDRAW /
+        // CS_VREDRAW would make User32 invalidate the complete client on every
+        // live-resize step, defeating retained pixels and partial present.
+        style: 0,
         lpfnWndProc: Some(window_proc),
         hInstance: instance,
         hCursor: unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) },

@@ -245,10 +245,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   User32 sizing，后者只结束当前 GUI 生命周期，不建立常驻 authority。黑盒测试用缩放
   前后 PNG IHDR 证明真实 backing surface 改变，并以截图、`perf-stats`、正常进程退出
   形成完成栅栏。当前 16-step debug resize journey 为 35/35 direct、35/35 native present、
-  0 failure、0 host copy；平均 raster 10,207 us、最大 32,877 us。该证据定位下一层债务：
-  platform 尚未抽象 Win32 live-resize begin/end，逐次 native resize 仍使 backing 失效并
-  full raster。后续应在 platform backing-store 边界利用宿主交互阶段，Unix/macOS 保留
-  debounce fallback；不得把 HWND 消息泄漏到 con，也不得把仅新增 FFI enum 冒充优化。
+  0 failure、0 host copy。Windows pixel class 随后移除 `CS_HREDRAW | CS_VREDRAW`；retained
+  backing、显式 `InvalidateRect`、系统 expose 和 settled geometry redraw 已拥有完整失效
+  权威，无需 User32 在每次宽高变化时强制全客户区刷新。相同 journey 从 35 降至 18 帧、
+  17 降至 8 full candidates、9,632,800 降至 6,485,040 dirty pixels，native present 总耗时
+  从 25.715 ms 降至 16.302 ms，PNG geometry 不变且仍为 0 failure/0 copy。更深一层仍可在
+  platform backing-store 边界利用 Win32 live-resize begin/end，Unix/macOS 保留 debounce
+  fallback；不得把 HWND 消息泄漏到 con，也不得把仅新增 FFI enum 冒充优化。
   后续隔离 bloat 证明 size profile 仍把 config、参数、脚本和 CLI codec 过度内联进
   `main` / offline 入口；这些既有可测边界显式禁止内联，并以固定 8-byte 数组装配
   `ATC1` header，避免通用可变尾切片。官方同 profile PE 从 737,280 B 降至
