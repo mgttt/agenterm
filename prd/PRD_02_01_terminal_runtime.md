@@ -658,6 +658,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   shared clip limit. A CJK/non-cell-aligned pixel oracle proves exact parity;
   89 units, 18 GUI black-box tests and Clippy pass. The exact PE remains
   531,456 bytes while three per-repaint heap constructions are removed.
+  Tree depth is now a `Workspace`-owned derived cache aligned with node order.
+  Root and child creation append their known depth in O(1); close and direct
+  child promotion rebuild through the shared UI-core typed algorithm, which
+  remains the sole authority for missing parents, duplicate ids, cycles and
+  complete topology resolution. Chrome paint borrows the immutable depth slice
+  instead of sorting, allocating and resolving every parent chain per frame.
+  The exact custom-std PE is 531,968 bytes, one 512-byte alignment step above
+  the prior build. The accepted trade removes variable topology work from
+  chrome and resize repaint; evidence is 89 units, 18 GUI black-box tests, one
+  control journey and Windows x64 con Clippy.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

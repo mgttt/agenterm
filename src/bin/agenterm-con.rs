@@ -2078,9 +2078,7 @@ impl ConApp {
         );
 
         let nodes = self.workspace.nodes();
-        let depths =
-            agenterm_ui_core::compute_tree_depths_by(nodes, |node| node.id, |node| node.parent)
-                .unwrap_or_else(|_| vec![0; nodes.len()]);
+        let depths = self.workspace.depths();
         for (visible_index, (node_index, node)) in nodes
             .iter()
             .enumerate()

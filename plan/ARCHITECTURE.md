@@ -426,6 +426,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   platform 仍只拥有 font raster mechanism，不接收 con 文案策略。CJK + 非 cell 对齐 clip
   的 joined/segmented framebuffer oracle、89 units、18 GUI black-box 和 Clippy 通过；精确
   PE 保持 531,456 B，无尺寸代价地删除三处每帧 heap construction。
+- con `Workspace` 现在与节点顺序共同持有派生 tree depths；新增 root/child 时 O(1) 追加，
+  只有 close 导致节点删除或直接子节点提升时才调用 UI-core 的 typed tree-depth kernel 重建。
+  UI-core 仍是缺父、重复 ID、环和完整拓扑计算的唯一算法权威，paint 只借用 immutable
+  depth slice，不再每帧排序、分配和解析全部父链。精确 custom-std PE 为 531,968 B，相对
+  531,456 B 增加一个 512 B alignment 档；89 units、18 GUI black-box、1 control journey 和
+  Windows x64 con Clippy 通过。该有界尺寸成本换取高频 chrome/resize 路径的确定性工作量，
+  不把缓存或 con 产品拓扑下沉到 platform。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

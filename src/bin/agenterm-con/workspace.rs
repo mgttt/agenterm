@@ -32,6 +32,7 @@ pub struct TabNode {
 #[derive(Debug)]
 pub struct Workspace {
     nodes: Vec<TabNode>,
+    depths: Vec<u32>,
     active: Option<TabId>,
     next_id: u64,
 }
@@ -40,6 +41,7 @@ impl Default for Workspace {
     fn default() -> Self {
         Self {
             nodes: Vec::new(),
+            depths: Vec::new(),
             active: None,
             next_id: 1,
         }
@@ -49,6 +51,10 @@ impl Default for Workspace {
 impl Workspace {
     pub fn nodes(&self) -> &[TabNode] {
         &self.nodes
+    }
+
+    pub fn depths(&self) -> &[u32] {
+        &self.depths
     }
 
     pub const fn active(&self) -> Option<TabId> {
@@ -68,13 +74,13 @@ impl Workspace {
     }
 
     pub fn add_root(&mut self, title: String) -> TabId {
-        self.add(None, title)
+        self.add(None, title, 0)
     }
 
     pub fn add_child(&mut self, parent: TabId, title: String) -> Option<TabId> {
-        self.node(parent)
-            .is_some()
-            .then(|| self.add(Some(parent), title))
+        let parent_index = self.nodes.iter().position(|node| node.id == parent)?;
+        let depth = self.depths[parent_index].saturating_add(1);
+        Some(self.add(Some(parent), title, depth))
     }
 
     pub fn close(&mut self, id: TabId) -> Option<TabNode> {
@@ -85,6 +91,12 @@ impl Workspace {
                 node.parent = removed.parent;
             }
         }
+        self.depths = agenterm_ui_core::compute_tree_depths_by(
+            &self.nodes,
+            |node| node.id,
+            |node| node.parent,
+        )
+        .unwrap_or_else(|_| vec![0; self.nodes.len()]);
         if self.active == Some(id) {
             self.active = self
                 .nodes
@@ -95,10 +107,11 @@ impl Workspace {
         Some(removed)
     }
 
-    fn add(&mut self, parent: Option<TabId>, title: String) -> TabId {
+    fn add(&mut self, parent: Option<TabId>, title: String, depth: u32) -> TabId {
         let id = TabId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         self.nodes.push(TabNode { id, parent, title });
+        self.depths.push(depth);
         self.active = Some(id);
         id
     }
@@ -120,6 +133,7 @@ mod tests {
 
         assert_eq!(workspace.node(child).unwrap().parent, Some(root));
         assert_eq!(workspace.node(grandchild).unwrap().parent, Some(child));
+        assert_eq!(workspace.depths(), &[0, 1, 2]);
     }
 
     #[test]
