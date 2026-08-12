@@ -143,11 +143,16 @@ impl RetainedXrgbFrame {
     ) -> Result<(), RetainedFrameError> {
         let expected = checked_pixel_len(width, height)?;
         if self.width != width || self.height != height {
+            // `expected` is what the host surface asked for; `actual` is what
+            // this frame holds. Reversing them made the message name the host's
+            // dimensions as the retained frame's, which points a reader at the
+            // wrong side of a resize race — the one thing this error exists to
+            // disambiguate.
             return Err(RetainedFrameError::DimensionMismatch {
-                expected_width: self.width,
-                expected_height: self.height,
-                actual_width: width,
-                actual_height: height,
+                expected_width: width,
+                expected_height: height,
+                actual_width: self.width,
+                actual_height: self.height,
             });
         }
         if self.pixels.len() != expected || destination.len() != expected {
@@ -244,6 +249,30 @@ mod tests {
             error,
             RetainedFrameError::CapacityExceeded { .. } | RetainedFrameError::LengthOverflow { .. }
         ));
+    }
+
+    #[test]
+    fn dimension_mismatch_names_the_retained_frame_as_the_actual_side() {
+        let mut frame = RetainedXrgbFrame::new();
+        frame.prepare(2, 1).expect("small frame is valid");
+        frame.mark_valid();
+        let error = frame
+            .copy_to(&mut [0; 12], 4, 3)
+            .expect_err("a resized host surface must be rejected");
+        assert_eq!(
+            error,
+            RetainedFrameError::DimensionMismatch {
+                expected_width: 4,
+                expected_height: 3,
+                actual_width: 2,
+                actual_height: 1,
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            "retained frame is 2x1, expected 4x3",
+            "the message must describe the frame, not the host surface"
+        );
     }
 
     #[test]

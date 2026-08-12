@@ -347,8 +347,16 @@ fn cargo_unit_primary_spec(environment) {
         // windows every one of them failed with "agenterm-con is missing at
         // target/debug/agenterm-con.exe". Naming both packages builds the
         // binary and keeps the tests where they are.
+        // `-p agenterm-ui-core` is load-bearing for the same reason: a
+        // dependency crate's own `#[cfg(test)]` modules are NOT built or run
+        // by `cargo test -p agenterm`. ui-core holds the hand-written
+        // SSE2/AVX2/SSSE3/NEON pixel kernels behind `unsafe fn(*mut u32, ...)`
+        // plus the retained-frame and damage state machines, and its 35 tests
+        // -- including the bit-exactness oracles for every kernel -- had never
+        // been executed by any gate on any architecture. Naming the package is
+        // what makes them run.
         "test", "--quiet", "--locked", "--all-features",
-        "-p", "agenterm", "-p", "agenterm-con", "--",
+        "-p", "agenterm", "-p", "agenterm-con", "-p", "agenterm-ui-core", "--",
         "--skip", "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
         "--skip", "preflight_benchmark_task_measures_clean_public_worker_runs",
         "--skip", "prd_alignment_task_matches_public_catalogs_and_fails_closed",

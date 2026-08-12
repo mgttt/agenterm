@@ -110,6 +110,17 @@ jobs:
         run: >-
           cargo test --locked -p agenterm-platform
           --no-default-features --features locking
+      # ui-core carries the hand-written SSE2/AVX2/SSSE3/NEON pixel kernels and
+      # their bit-exactness oracles. Every matrix entry here is a NATIVE runner,
+      # so this is the only place in CI where the aarch64 NEON kernels actually
+      # execute rather than merely compile -- `cargo test -p agenterm` does not
+      # build a dependency crate's own test modules, so before this step the
+      # kernels had never been run by any gate. The crate has zero dependencies,
+      # which is why testing it on all four platforms costs seconds.
+      - name: Run host-neutral UI core tests
+        run: >-
+          cargo test --locked -p agenterm-ui-core
+          --target ${{ matrix.target }}
       - name: Run platform Unix tests
         if: matrix.unix_tests
         run: >-

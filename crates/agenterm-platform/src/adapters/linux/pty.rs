@@ -320,7 +320,12 @@ fn child_setup(
             return Err(io::Error::last_os_error());
         }
 
-        if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as libc::c_ulong, 0) == -1 {
+        // `libc::Ioctl`, not `c_ulong`: the request type is `c_ulong` on
+        // linux-gnu but `c_int` on linux-musl, so hard-coding the glibc
+        // spelling made this adapter fail to COMPILE for any musl target —
+        // "linux" that only means linux-gnu. `libc::Ioctl` is the alias that
+        // resolves to whichever the target actually uses.
+        if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as libc::Ioctl, 0) == -1 {
             return Err(io::Error::last_os_error());
         }
 
