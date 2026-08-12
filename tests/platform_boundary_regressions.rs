@@ -26,11 +26,21 @@ const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 12] = [
 // design. The stronger native-boundary audit still rejects raw OS APIs in the
 // three Rust-runtime entrypoints and separately constrains the size-bounded,
 // no_std CUI trampoline.
+//
+// `agenterm-con/startup.rs` joins them as a loader entry: it defines the
+// linker-visible entry symbol and the `.CRT$X*` initializer arrays of its own
+// binary, plus the per-architecture `global_asm!` thunk that jumps to rustc's
+// generated `main`. All three are properties of the crate being linked, so
+// there is no form of them that could live behind the platform crate's API.
+// Keep this list in step with NATIVE_ENTRYPOINT_EXEMPTIONS in
+// src/platform/boundary_tests.rs -- the two suites audit the same tree and a
+// file exempt from one but not the other reddens only the lane that runs both.
 const HOST_BRANCH_ENTRYPOINT_EXEMPTIONS: &[&str] = &[
     "src/bin/agenterm.rs",
     "src/bin/agenterm-cc.rs",
     "src/bin/agenterm-con.rs",
     "src/bin/agenterm-com.rs",
+    "src/bin/agenterm-con/startup.rs",
 ];
 
 #[test]
