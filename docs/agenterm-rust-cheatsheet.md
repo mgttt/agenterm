@@ -410,3 +410,15 @@ unit and was reverted. Keep assembly only when it removes the original linked
 region or measured throughput justifies the retained byte cost. Likewise, an
 FFI call saves space only when it makes an entire Rust implementation family
 unreachable; `windows-sys` declarations themselves are effectively zero-cost.
+
+## Floating text and clamp linkage (measured 2026-08-12)
+
+Keeping `f64` geometry does not require keeping the standard float text runtime.
+A single `FromStr<f64>` owner retains `dec2flt`; `f64::clamp` also retains its
+invalid-bound panic plus `Debug`/`flt2dec`, even when product bounds are ordered
+constants. For bounded configuration and CLI schemas, parse decimal syntax with
+an integer significand and decimal exponent, reject non-finite overflow, then
+convert once at the typed boundary. Use an explicit ordered comparison helper
+when NaN behavior must match `clamp`; permit `clippy::manual_clamp` only with a
+measured link-size reason. Verify removal in the final link map, because source
+search alone cannot prove the formatting family became unreachable.

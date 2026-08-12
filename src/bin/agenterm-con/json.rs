@@ -480,17 +480,121 @@ macro_rules! number_take {
 
 number_take!(take_u16, u16);
 
+pub fn parse_finite_decimal(raw: &str) -> Option<f64> {
+    let bytes = raw.as_bytes();
+    let mut index = 0usize;
+    let negative = bytes.first() == Some(&b'-');
+    if negative {
+        index = 1;
+    }
+    if index == bytes.len() {
+        return None;
+    }
+
+    let mut significand = 0u64;
+    let mut significant_digits = 0u32;
+    let mut kept_digits = 0u32;
+    let mut fraction_digits = 0u32;
+    let mut saw_digit = false;
+    let mut fraction = false;
+    while let Some(&byte) = bytes.get(index) {
+        match byte {
+            b'0'..=b'9' => {
+                saw_digit = true;
+                if fraction {
+                    fraction_digits = fraction_digits.saturating_add(1);
+                }
+                let digit = u64::from(byte - b'0');
+                if significant_digits != 0 || digit != 0 {
+                    significant_digits = significant_digits.saturating_add(1);
+                    if kept_digits < 18 {
+                        significand = significand * 10 + digit;
+                        kept_digits += 1;
+                    }
+                }
+                index += 1;
+            }
+            b'.' if !fraction => {
+                fraction = true;
+                index += 1;
+                if !bytes.get(index).is_some_and(u8::is_ascii_digit) {
+                    return None;
+                }
+            }
+            _ => break,
+        }
+    }
+    if !saw_digit {
+        return None;
+    }
+
+    let mut explicit_exponent = 0i32;
+    if bytes.get(index).is_some_and(|byte| matches!(byte, b'e' | b'E')) {
+        index += 1;
+        let exponent_negative = bytes.get(index) == Some(&b'-');
+        if exponent_negative || bytes.get(index) == Some(&b'+') {
+            index += 1;
+        }
+        let exponent_start = index;
+        while let Some(&byte) = bytes.get(index) {
+            if !byte.is_ascii_digit() {
+                break;
+            }
+            explicit_exponent = explicit_exponent
+                .saturating_mul(10)
+                .saturating_add(i32::from(byte - b'0'))
+                .min(10_000);
+            index += 1;
+        }
+        if index == exponent_start {
+            return None;
+        }
+        if exponent_negative {
+            explicit_exponent = -explicit_exponent;
+        }
+    }
+    if index != bytes.len() {
+        return None;
+    }
+    if significand == 0 {
+        return Some(if negative { -0.0 } else { 0.0 });
+    }
+
+    let dropped_digits = significant_digits.saturating_sub(kept_digits);
+    let exponent = explicit_exponent as i64 - i64::from(fraction_digits)
+        + i64::from(dropped_digits);
+    if exponent > 308 {
+        return None;
+    }
+    if exponent < -400 {
+        return Some(if negative { -0.0 } else { 0.0 });
+    }
+    let mut value = significand as f64;
+    if exponent >= 0 {
+        for _ in 0..exponent {
+            value *= 10.0;
+        }
+    } else {
+        for _ in exponent..0 {
+            value /= 10.0;
+            if value == 0.0 {
+                break;
+            }
+        }
+    }
+    if negative {
+        value = -value;
+    }
+    value.is_finite().then_some(value)
+}
+
 pub fn take_f64(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<f64>, String> {
     let value = take_number(fields, key)?
         .map(|value| {
-            value
-                .parse::<f64>()
-                .map_err(|_| format!("{key} is not a finite number"))
+            parse_finite_decimal(&value)
+                .ok_or_else(|| format!("{key} is not a finite number"))
         })
         .transpose()?;
-    if value.is_some_and(|value| !value.is_finite()) {
-        return Err(format!("{key} is not a finite number"));
-    }
     Ok(value)
 }
 
@@ -518,6 +622,23 @@ mod tests {
             b"true trailing",
         ] {
             assert!(parse(input).is_err(), "accepted {input:?}");
+        }
+    }
+
+    #[test]
+    fn finite_decimal_parser_covers_cli_and_json_number_forms() {
+        for (raw, expected) in [
+            ("11", 11.0),
+            ("11.25", 11.25),
+            ("1.125e1", 11.25),
+            ("-12.5E-2", -0.125),
+            ("0.0000000000000000000012", 1.2e-21),
+        ] {
+            let actual = parse_finite_decimal(raw).expect("finite decimal");
+            assert!((actual - expected).abs() <= expected.abs().max(1.0) * 1e-14);
+        }
+        for raw in ["", "-", "+1", "1.", "1e", "NaN", "inf", "1e999"] {
+            assert_eq!(parse_finite_decimal(raw), None, "accepted {raw}");
         }
     }
 

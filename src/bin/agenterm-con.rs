@@ -229,6 +229,17 @@ const PTY_DRAIN_BUDGET_BYTES: usize = 128 * 1024;
 /// pixels, not points, and therefore rendered smaller than intended.
 const DEFAULT_FONT_PX: f64 = 15.0;
 
+#[allow(clippy::manual_clamp)] // f64::clamp retains the large float-format panic path.
+fn clamp_font_size(value: f64) -> f64 {
+    if value < 8.0 {
+        8.0
+    } else if value > 36.0 {
+        36.0
+    } else {
+        value
+    }
+}
+
 /// Configuration loaded from `agenterm-con.json` (analogous to conhost
 /// "Defaults" — persist font size, window geometry, etc. without a GUI dialog).
 ///
@@ -319,10 +330,10 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
             other if other.starts_with("--working-dir=") => {
                 parsed.working_dir = Some(other["--working-dir=".len()..].to_owned());
             }
-            "--font-size" => parsed.font_size = next_value(&mut rest, "--font-size")?,
+            "--font-size" => parsed.font_size = next_decimal(&mut rest, "--font-size")?,
             other if other.starts_with("--font-size=") => {
                 parsed.font_size =
-                    Some(parse_value(&other["--font-size=".len()..], "--font-size")?);
+                    Some(parse_decimal(&other["--font-size=".len()..], "--font-size")?);
             }
             "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
             "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
@@ -387,6 +398,22 @@ fn parse_value<T: std::str::FromStr>(raw: &str, flag: &str) -> Result<T, String>
     })
 }
 
+fn next_decimal<'a>(
+    rest: &mut impl Iterator<Item = &'a String>,
+    flag: &str,
+) -> Result<Option<f64>, String> {
+    let raw = rest
+        .next()
+        .ok_or_else(|| format!("error: {flag} requires a value\n"))?;
+    parse_decimal(raw, flag).map(Some)
+}
+
+fn parse_decimal(raw: &str, flag: &str) -> Result<f64, String> {
+    json::parse_finite_decimal(raw).ok_or_else(|| {
+        format!("error: {flag} expects a finite number, got '{raw}'\n")
+    })
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -423,7 +450,7 @@ fn main() {
     session.snapshot_path = snapshot_path;
     // Config values (lowest priority)
     if let Some(fs) = config.font_size {
-        session.font_size_logical = fs.clamp(8.0, 36.0);
+        session.font_size_logical = clamp_font_size(fs);
     }
     if let Some(cols) = config.cols {
         session.cols = cols.max(2);
@@ -433,7 +460,7 @@ fn main() {
     }
     // CLI flags override config
     if let Some(fs) = font_size {
-        session.font_size_logical = fs.clamp(8.0, 36.0);
+        session.font_size_logical = clamp_font_size(fs);
     }
     if let Some(cols) = initial_cols {
         session.cols = cols.max(2);
@@ -3433,7 +3460,7 @@ impl ConTerminal {
     /// second, undebounced path.
     fn zoom_font(&mut self, window: &PixelWindow, grow: bool) {
         let delta_size = if grow { 1.0 } else { -1.0 };
-        self.font_size_logical = (self.font_size_logical + delta_size).clamp(8.0, 36.0);
+        self.font_size_logical = clamp_font_size(self.font_size_logical + delta_size);
         self.dirty.mark_full();
         // Cell metrics (and therefore what glyphs look like) update right
         // away, independent of the debounce below, so the zoom still reads

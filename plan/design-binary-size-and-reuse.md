@@ -237,3 +237,19 @@ std_detect owner 可删除，才重开 CPUID/汇编替换，不能以仓库搜�
 - Size-sensitive assembly is accepted only when final staged bytes shrink or a
   separately measured hot-path gain justifies the exact cost. Instruction-count
   intuition is not evidence, and moving code behind an FFI symbol is not removal.
+
+### 2026-08-12: remove the floating text-conversion owner
+
+The con geometry remains floating point, but its two text boundaries no longer
+use `FromStr<f64>`: JSON `font_size` and `--font-size` share one bounded finite
+decimal parser with integer significand/exponent accumulation. Ordered product
+bounds use explicit branches rather than `f64::clamp`, whose impossible-bound
+panic retains float debug formatting. A local `manual_clamp` lint exception is
+allowed only on those measured helpers.
+
+Measured effect: the unstripped executable lost every `f64` symbol reported by
+cargo-bloat, `.text` fell from 448.5 KiB to 425.0 KiB, and attributed `std` text
+fell from 155.8 KiB to 131.7 KiB. The official release-fast PE fell from 615,936
+to 580,096 bytes, a 35,840-byte reduction. Evidence: 84 unit tests, 18 GUI
+black-box tests, one multitab control journey, Windows all-target Clippy, and a
+Linux x86-64 con check.

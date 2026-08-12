@@ -213,7 +213,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   only after atomic PNG output has crossed the platform durability barrier, and
   a malformed request or failed child may
   only fail that request/session, never terminate unrelated sessions or the
-  window. The owning suite now includes 88 binary unit tests plus a Windows
+  window. The owning suite now includes 84 binary unit tests plus a Windows
   public-CLI black-box journey covering isolated parent/child PTYs, raw text,
   key, mouse and wheel delivery, bounded wait failure, capture isolation,
   renderer-owned PNG evidence, parent promotion and orphan-free cleanup.
@@ -241,7 +241,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   platform boundary can remove winit/softbuffer from the linked con path without
   changing product state. The independently owned `agenterm-con` package now
   selects that host by default on Windows while Linux/macOS select the portable
-  host; its x86_64 release PE is currently 585,216 bytes versus 1,046,528 bytes
+  host; that migration measured a 585,216-byte x86_64 release PE versus 1,046,528 bytes
   for the original portable host. Its screenshot writer is one platform-owned
   contract with target adapters: Windows passes a validated clipped pointer and
   original XRGB stride directly to the system GDI+ PNG codec, while Linux/macOS
@@ -420,11 +420,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   the exact string/null schema while eliminating repeated `format!`, map, and
   nullable state machines. An explicit `match` is intentional: an equivalent
   `Option::map_or` helper reduced sections but not the aligned file, while a
-  handwritten stack decimal encoder grew it. The official release-fast PE falls
-  from 616,448 to 615,936 bytes; `.text` falls from 402,924 to 402,348 bytes,
-  `.rdata` from 171,362 to 171,354 bytes, and `.pdata` from 29,076 to 29,064
-  bytes. Evidence is 83 unit tests, 18 public-control GUI black-box journeys,
-  one multitab control journey, Windows x64 Clippy, and Linux x64 compilation.
+  handwritten stack decimal encoder grew it. Stable tab-id JSON first reduced
+  the official release-fast PE from 616,448 to 615,936 bytes. The shared finite
+  decimal boundary now parses JSON configuration and `--font-size` without
+  `FromStr<f64>`, while ordered floating bounds use explicit no-format branches
+  instead of retaining `f64::clamp` panic formatting. All `f64` parse/format
+  symbols disappear from the measured executable; the official release-fast PE
+  falls again from 615,936 to 580,096 bytes. The corresponding unstripped
+  `.text` falls from 448.5 KiB to 425.0 KiB and attributed `std` text from
+  155.8 KiB to 131.7 KiB. Evidence is 84 unit tests, 18 public-control GUI
+  black-box journeys, one multitab control journey, Windows x64 Clippy, and
+  Linux x64 compilation.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

@@ -51,10 +51,13 @@ impl Layout {
 
     pub fn with_sidebar_width(width: u32, height: u32, scale: f64, sidebar_dip: f64) -> Self {
         let scale = scale.max(1.0);
-        let maximum = (f64::from(width) / scale - TERMINAL_MIN_WIDTH_DIP)
-            .clamp(SIDEBAR_MIN_WIDTH_DIP, SIDEBAR_MAX_WIDTH_DIP);
+        let maximum = clamp_f64(
+            f64::from(width) / scale - TERMINAL_MIN_WIDTH_DIP,
+            SIDEBAR_MIN_WIDTH_DIP,
+            SIDEBAR_MAX_WIDTH_DIP,
+        );
         let sidebar_width =
-            dip(sidebar_dip.clamp(SIDEBAR_MIN_WIDTH_DIP, maximum), scale).min(width);
+            dip(clamp_f64(sidebar_dip, SIDEBAR_MIN_WIDTH_DIP, maximum), scale).min(width);
         let composer_height = dip(COMPOSER_HEIGHT_DIP, scale).min(height);
         let composer = Rect {
             x: sidebar_width,
@@ -248,9 +251,23 @@ pub fn terminal_scrollbar_width(scale: f64) -> u32 {
 }
 
 pub fn sidebar_width_from_pointer(pointer_x: f64, client_width: f64) -> f64 {
-    let maximum =
-        (client_width - TERMINAL_MIN_WIDTH_DIP).clamp(SIDEBAR_MIN_WIDTH_DIP, SIDEBAR_MAX_WIDTH_DIP);
-    pointer_x.clamp(SIDEBAR_MIN_WIDTH_DIP, maximum)
+    let maximum = clamp_f64(
+        client_width - TERMINAL_MIN_WIDTH_DIP,
+        SIDEBAR_MIN_WIDTH_DIP,
+        SIDEBAR_MAX_WIDTH_DIP,
+    );
+    clamp_f64(pointer_x, SIDEBAR_MIN_WIDTH_DIP, maximum)
+}
+
+#[allow(clippy::manual_clamp)] // Callers establish ordered bounds; avoid fmt panic glue.
+fn clamp_f64(value: f64, minimum: f64, maximum: f64) -> f64 {
+    if value < minimum {
+        minimum
+    } else if value > maximum {
+        maximum
+    } else {
+        value
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -21,14 +21,24 @@ impl Rgb {
 /// the background rather than a separate palette entry.
 #[inline]
 pub fn blend(from: Rgb, to: Rgb, amount: f32) -> Rgb {
+    let amount = clamp_f32(amount, 0.0, 1.0);
     let mix = |a: u8, b: u8| {
         let a = f32::from(a);
         let b = f32::from(b);
-        (a + (b - a) * amount.clamp(0.0, 1.0))
-            .round()
-            .clamp(0.0, 255.0) as u8
+        clamp_f32((a + (b - a) * amount).round(), 0.0, 255.0) as u8
     };
     Rgb(mix(from.0, to.0), mix(from.1, to.1), mix(from.2, to.2))
+}
+
+#[allow(clippy::manual_clamp)] // Float bounds are ordered constants; avoid fmt panic glue.
+fn clamp_f32(value: f32, minimum: f32, maximum: f32) -> f32 {
+    if value < minimum {
+        minimum
+    } else if value > maximum {
+        maximum
+    } else {
+        value
+    }
 }
 
 /// Builds the standard 256-entry xterm palette once.
