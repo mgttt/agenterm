@@ -415,6 +415,11 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   delivery count 不再逐字段 `to_string` 分配，精确 PE 从 534,528 B 降至 532,480 B
   （-2,048 B）。88 units、multitab control、Windows x64 Clippy、Windows ARM64 与 Linux
   x64 consumer checks 通过。
+- stable tab ID 在 workspace 中保持 `u64`、在公开 JSON 中保持 string `"@N"`；con output
+  tree 以专用 typed variant 将 quote、`@` 与 `itoa` digits 直接写入最终 buffer，不再为
+  list/new/select/close replies 调用 `format!`。nullable parent 仍输出 JSON null，CLI parser
+  和窗口 chrome 动态文本不受影响。精确 PE 从 532,480 B 降至 531,456 B（-1,024 B），
+  88 units、multitab public control 和 Windows x64 Clippy 通过。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

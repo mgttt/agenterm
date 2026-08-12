@@ -12,6 +12,7 @@ pub enum JsonValue {
     Bool(bool),
     Unsigned(u64),
     Signed(i64),
+    TabId(u64),
     #[cfg(test)]
     RawNumber(String),
     String(String),
@@ -553,6 +554,11 @@ fn write_value(value: &JsonValue, output: &mut Vec<u8>, indent: Option<usize>, d
         }
         JsonValue::Signed(value) => {
             output.extend_from_slice(itoa::Buffer::new().format(*value).as_bytes());
+        }
+        JsonValue::TabId(value) => {
+            output.extend_from_slice(b"\"@");
+            output.extend_from_slice(itoa::Buffer::new().format(*value).as_bytes());
+            output.push(b'"');
         }
         #[cfg(test)]
         JsonValue::RawNumber(value) => output.extend_from_slice(value.as_bytes()),

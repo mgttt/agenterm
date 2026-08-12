@@ -662,6 +662,15 @@ field and reduced the exact PE from 534,528 to 532,480 bytes. Declare a crate
 you call directly even when another dependency already happens to pull it in;
 transitive availability is not an API contract.
 
+Keep protocol-formatted identifiers typed until the final writer when their
+wire spelling is fixed. Con's stable tab ID is a `u64` internally and a JSON
+string `"@N"` publicly. A dedicated output-tree variant writes the quote,
+prefix and integer directly through the existing `itoa` buffer; it does not
+change CLI parsing, workspace identity, window-title formatting or nullable
+parents. This removed `format!` allocation from control replies and reduced the
+exact PE from 532,480 to 531,456 bytes. Do not reuse the variant for arbitrary
+prefixed text: its value is that the type proves the complete wire grammar.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

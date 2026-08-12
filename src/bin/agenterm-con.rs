@@ -1698,7 +1698,7 @@ impl ConApp {
         #[inline(never)]
         fn tab_id_json(id: Option<workspace::TabId>) -> json::JsonValue {
             match id {
-                Some(id) => format!("@{}", id.get()).into(),
+                Some(id) => json::JsonValue::TabId(id.get()),
                 None => json::JsonValue::Null,
             }
         }
