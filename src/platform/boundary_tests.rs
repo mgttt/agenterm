@@ -62,7 +62,15 @@ const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsyste
 /// a custom `mainCRTStartup` export, and direct `#[link]` kernel32 imports.
 /// It cannot delegate to the platform crate (the crate's runtime would blow
 /// the trampoline's 64KiB staged-size budget), so the whole file is exempt.
-const NATIVE_ENTRYPOINT_EXEMPTIONS: &[&str] = &["src/bin/agenterm-com.rs"];
+///
+/// `agenterm-con/startup.rs` is the same category for the same structural
+/// reason: it declares the linker-visible entry symbol and the `.CRT$X*`
+/// initializer arrays *of its own binary*. Those must be compiled into the
+/// crate being linked, so relocating them behind the platform crate's API is
+/// not possible even in principle — unlike ordinary native mechanics, which
+/// stay barred from `src/**`.
+const NATIVE_ENTRYPOINT_EXEMPTIONS: &[&str] =
+    &["src/bin/agenterm-com.rs", "src/bin/agenterm-con/startup.rs"];
 
 #[test]
 fn production_sources_use_platform_crate_as_the_only_native_boundary() {
