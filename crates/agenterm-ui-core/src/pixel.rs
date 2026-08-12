@@ -556,10 +556,7 @@ mod tests {
             x86_ssse3_available(),
             std::is_x86_feature_detected!("ssse3")
         );
-        assert_eq!(
-            x86_avx2_available(),
-            std::is_x86_feature_detected!("avx2")
-        );
+        assert_eq!(x86_avx2_available(), std::is_x86_feature_detected!("avx2"));
     }
 
     #[cfg(target_arch = "aarch64")]

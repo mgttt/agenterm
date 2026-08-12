@@ -20,10 +20,8 @@ mod tests {
 
     #[test]
     fn exact_limit_succeeds_and_one_byte_over_fails() {
-        let path = std::env::temp_dir().join(format!(
-            "agenterm-bounded-read-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("agenterm-bounded-read-{}", std::process::id()));
         std::fs::write(&path, b"12345").expect("fixture");
         assert_eq!(read_bounded(&path, 5).expect("exact read"), b"12345");
         let error = read_bounded(&path, 4).expect_err("over limit");

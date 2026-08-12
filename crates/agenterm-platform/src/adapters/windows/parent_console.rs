@@ -12,9 +12,7 @@ fn write(message: &str, to_stderr: bool) -> bool {
     use std::os::windows::io::FromRawHandle as _;
     use windows_sys::Win32::{
         Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
-        Storage::FileSystem::{
-            CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-        },
+        Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING},
         System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
     };
 
@@ -35,7 +33,16 @@ fn write(message: &str, to_stderr: bool) -> bool {
     let Ok(_guard) = super::console::ConsoleGuard::attach_parent() else {
         return false;
     };
-    const CONOUT: &[u16] = &[b'C' as u16, b'O' as u16, b'N' as u16, b'O' as u16, b'U' as u16, b'T' as u16, b'$' as u16, 0];
+    const CONOUT: &[u16] = &[
+        b'C' as u16,
+        b'O' as u16,
+        b'N' as u16,
+        b'O' as u16,
+        b'U' as u16,
+        b'T' as u16,
+        b'$' as u16,
+        0,
+    ];
     let raw = unsafe {
         CreateFileW(
             CONOUT.as_ptr(),

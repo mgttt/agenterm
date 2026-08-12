@@ -266,8 +266,7 @@ fn load_config() -> ConConfig {
     let Some(path) = config_path() else {
         return ConConfig::default();
     };
-    let Ok(bytes) =
-        agenterm_platform::filesystem_read::read_bounded(&path, json::MAX_INPUT_BYTES)
+    let Ok(bytes) = agenterm_platform::filesystem_read::read_bounded(&path, json::MAX_INPUT_BYTES)
     else {
         return ConConfig::default();
     };
