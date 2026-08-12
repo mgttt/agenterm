@@ -431,7 +431,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named-pipe/Unix-socket mechanisms without routing through the generic TCP
   authority parser or endpoint formatter. The generic workbench TCP API remains
   unchanged; con's linked `core::net::parser` region becomes zero bytes and the
-  official release-fast PE falls from 580,096 to 573,440 bytes. The corresponding unstripped
+  official release-fast PE falls from 580,096 to 573,440 bytes. Windows IME
+  diagnostics now reuse the platform runtime-directory facade, whose adapter
+  calls `GetTempPathW` through a bounded growable UTF-16 buffer instead of
+  retaining `std::env::temp_dir`; that std owner becomes zero bytes and the
+  official release-fast PE falls again to 572,928 bytes. The corresponding unstripped
   `.text` falls from 448.5 KiB to 425.0 KiB and attributed `std` text from
   155.8 KiB to 131.7 KiB. Evidence is 85 unit tests, 18 public-control GUI
   black-box journeys, one multitab control journey, Windows x64 Clippy, and

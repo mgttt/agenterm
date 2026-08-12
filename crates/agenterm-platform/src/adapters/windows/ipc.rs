@@ -1,11 +1,11 @@
 //! Windows named-pipe adapter for the target-neutral local IPC facade.
 
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     io::{self, Read, Write},
     mem::size_of,
     os::windows::{
-        ffi::OsStrExt as _,
+        ffi::{OsStrExt as _, OsStringExt as _},
         io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle as _, OwnedHandle, RawHandle},
     },
     ptr,
@@ -24,7 +24,7 @@ use windows_sys::Win32::{
     },
     Storage::FileSystem::{
         CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_GENERIC_READ,
-        FILE_GENERIC_WRITE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+        FILE_GENERIC_WRITE, GetTempPathW, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
     },
     System::{
         IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
@@ -50,7 +50,34 @@ const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
 const PIPE_NAME_MAX_UTF16: usize = 256;
 
 pub(crate) fn native_runtime_directory() -> std::path::PathBuf {
-    std::env::temp_dir()
+    const INITIAL_UNITS: usize = 261;
+    const MAX_UNITS: usize = 32_768;
+
+    let mut buffer = vec![0u16; INITIAL_UNITS];
+    loop {
+        let length = unsafe {
+            // SAFETY: buffer is writable for its advertised length and remains
+            // alive for the call. GetTempPathW writes at most that capacity.
+            GetTempPathW(buffer.len() as u32, buffer.as_mut_ptr())
+        } as usize;
+        if length == 0 || length >= MAX_UNITS {
+            return std::path::PathBuf::from(".");
+        }
+        if length < buffer.len() {
+            return std::path::PathBuf::from(OsString::from_wide(&buffer[..length]));
+        }
+        buffer.resize(length.saturating_add(1), 0);
+    }
+}
+
+#[cfg(test)]
+mod runtime_directory_tests {
+    #[test]
+    fn native_temp_directory_is_absolute_and_nonempty() {
+        let path = super::native_runtime_directory();
+        assert!(path.is_absolute(), "native temp path: {path:?}");
+        assert!(!path.as_os_str().is_empty());
+    }
 }
 
 pub(crate) fn trusted_user_identity() -> io::Result<TrustedUserIdentity> {

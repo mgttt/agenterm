@@ -433,3 +433,13 @@ for richer consumers. In the con control path, a native named-pipe/Unix-socket
 constructor made the entire `core::net::parser` family unreachable and reduced
 the staged PE by 6,656 bytes without removing TCP support from the workbench.
 This is mechanism-specific linkage, not an authorization profile.
+
+## Windows temporary paths through the platform facade
+
+Do not call `std::env::temp_dir` from a Windows-only adapter merely for a debug
+or scratch path. Reuse the platform runtime-directory contract and implement its
+Windows leaf with `GetTempPathW`: pass a writable UTF-16 buffer, treat a returned
+length at least equal to capacity as a resize request, cap allocation, and keep
+a non-panicking fallback. This removed the last con owner of the standard temp
+directory routine and saved one 512-byte PE alignment unit while centralizing
+the FFI behavior for other products.

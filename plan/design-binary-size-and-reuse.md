@@ -268,3 +268,17 @@ The con link map now reports zero bytes for `core::net::parser`. Unstripped
 from 580,096 to 573,440 bytes. Evidence: the platform constructor test, 85 con
 unit tests, 18 GUI black-box tests, one multitab control journey, Windows
 all-target Clippy, and Linux x86-64 con compilation.
+
+### 2026-08-12: native Windows temporary directory
+
+The production owner of `std::env::temp_dir` in con was the optional platform
+IME anchor trace. It now reuses the platform runtime-directory facade. The
+Windows adapter calls `GetTempPathW` with a bounded growable UTF-16 buffer,
+returns an absolute system path on success, and degrades to the process-relative
+current directory without panic if the OS call fails or exceeds the bound.
+Linux/macOS adapters are unchanged.
+
+The con link map reports zero bytes for `std::env::temp_dir`; unstripped `.text`
+fell from 419.5 KiB to 418.5 KiB. The official release-fast PE fell from 573,440
+to 572,928 bytes. The native path test, 85 con unit tests, 18 GUI black-box tests,
+one multitab control journey, Windows Clippy, and Linux x86-64 compilation pass.
