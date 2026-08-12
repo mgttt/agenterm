@@ -38,7 +38,7 @@ where
     }
 
     let mut indexes: Vec<(Id, usize)> = ids.iter().copied().zip(0..nodes.len()).collect();
-    indexes.sort_unstable();
+    sort_index_pairs(&mut indexes);
     for duplicate in indexes.windows(2) {
         if duplicate[0].0 == duplicate[1].0 {
             return Err(TreeDepthError::DuplicateId {
@@ -109,6 +109,37 @@ where
     }
 
     Ok(depths)
+}
+
+fn sort_index_pairs<Id: Ord>(values: &mut [(Id, usize)]) {
+    let len = values.len();
+    for root in (0..len / 2).rev() {
+        sift_down(values, root, len);
+    }
+    for end in (1..len).rev() {
+        values.swap(0, end);
+        sift_down(values, 0, end);
+    }
+}
+
+fn sift_down<Id: Ord>(values: &mut [(Id, usize)], mut root: usize, end: usize) {
+    loop {
+        let left = root * 2 + 1;
+        if left >= end {
+            return;
+        }
+        let right = left + 1;
+        let child = if right < end && values[left] < values[right] {
+            right
+        } else {
+            left
+        };
+        if values[root] >= values[child] {
+            return;
+        }
+        values.swap(root, child);
+        root = child;
+    }
 }
 
 #[cfg(test)]

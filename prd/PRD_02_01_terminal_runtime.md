@@ -441,7 +441,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   uses binary lookup. This preserves deterministic eviction, typed
   duplicate/missing/cycle failures, and the 20,000-node non-recursive test
   without retaining randomized hashing. `hashbrown` and `RandomState` become
-  zero-byte owners and the official release-fast PE falls to 570,880 bytes. The corresponding unstripped
+  zero-byte owners and the official release-fast PE falls to 570,880 bytes. The
+  tree index then replaces its generic `slice::sort_unstable` monomorphization
+  with a shared no-allocation iterative heapsort. The sort remains deterministic
+  O(n log n), preserves second-input duplicate diagnostics, and makes the entire
+  generic IPN/quicksort/smallsort region unreachable; the official release-fast
+  PE falls to 566,784 bytes. The corresponding unstripped
   `.text` falls from 448.5 KiB to 425.0 KiB and attributed `std` text from
   155.8 KiB to 131.7 KiB. Evidence is 85 unit tests, 18 public-control GUI
   black-box journeys, one multitab control journey, Windows x64 Clippy, and

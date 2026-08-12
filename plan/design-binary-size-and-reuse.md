@@ -297,3 +297,17 @@ Unstripped `.text` fell from 418.5 KiB to 417.0 KiB, and the official
 release-fast PE fell from 572,928 to 570,880 bytes. Evidence includes 34 ui-core
 tests, 85 con tests, 18 GUI black-box tests, one multitab journey, Windows
 Clippy, and Linux x86-64 compilation.
+
+### 2026-08-12: remove generic sort monomorphization
+
+After replacing tree hashing, generic `slice::sort_unstable` became a new final
+owner: its `(TabId,index)` monomorphization retained IPN sort, quicksort and
+smallsort. Tree indexing needs deterministic O(n log n), not the full adaptive
+sort family. `agenterm-ui-core` now uses a no-allocation iterative heapsort for
+index pairs; tuple order still places duplicate input indexes in ascending order,
+so the typed error continues to identify the second occurrence.
+
+The con link map reports zero bytes for `slice::sort`; unstripped `.text` fell
+from 417.0 KiB to 414.0 KiB and the official release-fast PE fell from 570,880
+to 566,784 bytes. All 34 ui-core tests, 85 con tests, 18 GUI black-box tests, one
+multitab journey, Windows Clippy and Linux x86-64 compilation pass.

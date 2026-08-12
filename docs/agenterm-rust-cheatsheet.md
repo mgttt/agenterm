@@ -455,3 +455,14 @@ deleted. For large static tree batches, sort `(id,index)` once and binary-search
 parents to retain O(n log n) behavior and deterministic duplicate diagnostics.
 Measure the final link: this pair removed the complete hashbrown/RandomState
 family from con and saved 2,048 staged bytes.
+
+## Generic sort can dominate a tiny specialized index
+
+Replacing a hash map with a sorted vector is incomplete size work if
+`slice::sort_unstable` becomes the new last owner. Its adaptive generic
+monomorphization can be several KiB. When the contract only needs deterministic
+O(n log n), a small iterative heapsort provides bounded stack, no auxiliary
+allocation, and much less linked code. Preserve total ordering details used by
+diagnostics: sorting `(id,input_index)` ensures duplicate IDs still report the
+second input occurrence. In ui-core this removed the full generic sort family
+and saved 4,096 staged bytes while retaining the 20,000-node deep-tree test.
