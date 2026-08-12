@@ -526,6 +526,24 @@ both owning packages with the exact target triple before each side. An earlier
 cold builds established the real 2,048-byte reduction. Never promote a warm or
 stale staged byte count into PRD evidence.
 
+For a Windows process that already needs the complete inherited environment
+for `CreateProcessW`, share one RAII `GetEnvironmentStringsW` block instead of
+adding independent std and `GetEnvironmentVariableW` paths. Keep the block
+borrowed, cap the double-NUL scan, and pair it with `FreeEnvironmentStringsW`
+exactly once. If product callers need only fixed protocol keys, state an ASCII
+key contract rather than silently weakening a general Unicode API.
+
+The con x86_64 scanner is a valid inline-assembly exception because an isolated
+cold final PE fell from 540,672 to 540,160 bytes and Windows aarch64 retained a
+tested Rust fallback. Inline-assembly scratch registers that are written before
+all inputs are consumed must use `out(reg)`, not `lateout(reg)`: LLVM may alias a
+`lateout` with an input, and this scanner's first version corrupted a live
+pointer and access-violated. Test the raw bounded leaf with synthetic empty,
+missing, hidden-drive and truncated blocks, not only the OS-owned happy path.
+During parallel `-Z build-std` work, use an exclusive target directory; a
+shared target can mix custom `core` and `compiler_builtins` artifacts even when
+the source tree is correct.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

@@ -32,7 +32,6 @@ use windows_sys::Win32::System::Console::{
     KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, ResizePseudoConsole, SetConsoleCtrlHandler,
     WriteConsoleInputW,
 };
-use windows_sys::Win32::System::Environment::{FreeEnvironmentStringsW, GetEnvironmentStringsW};
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -2196,52 +2195,11 @@ fn environment_block(command: &ChildCommand) -> io::Result<Option<Vec<u16>>> {
         return Ok(None);
     }
     let overrides = EnvironmentOverrides::from_command(command)?;
-    let inherited = InheritedEnvironment::capture()?;
+    let inherited = crate::selected::environment::InheritedEnvironment::capture()?;
     Ok(Some(merge_environment_block(
         inherited.units()?,
         &overrides,
     )))
-}
-
-const MAX_ENVIRONMENT_UNITS: usize = 32 * 1024 * 1024;
-
-struct InheritedEnvironment(*mut u16);
-
-impl InheritedEnvironment {
-    fn capture() -> io::Result<Self> {
-        let block = unsafe { GetEnvironmentStringsW() };
-        if block.is_null() {
-            Err(last_os_error())
-        } else {
-            Ok(Self(block))
-        }
-    }
-
-    fn units(&self) -> io::Result<&[u16]> {
-        let mut length = 0usize;
-        while length < MAX_ENVIRONMENT_UNITS {
-            let unit = unsafe { *self.0.add(length) };
-            length += 1;
-            if unit == 0 && (length == 1 || unsafe { *self.0.add(length) } == 0) {
-                if length != 1 {
-                    length += 1;
-                }
-                return Ok(unsafe { std::slice::from_raw_parts(self.0, length) });
-            }
-        }
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "inherited environment block is not terminated",
-        ))
-    }
-}
-
-impl Drop for InheritedEnvironment {
-    fn drop(&mut self) {
-        unsafe {
-            FreeEnvironmentStringsW(self.0);
-        }
-    }
 }
 
 struct EncodedEnvironmentEntry {

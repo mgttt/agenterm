@@ -576,6 +576,15 @@ integrated validation recorded below):
   duplicate-variable policy, mutate the caller environment, or impose Agent or
   Script Runtime permissions. Minimal-feature Windows tests prove all five
   contracts without enabling `process-spawn`.
+- [x] Windows PTY and runtime capabilities share one selected-adapter owner for
+  the system UTF-16 environment block. It pairs `GetEnvironmentStringsW` and
+  `FreeEnvironmentStringsW`, exposes only bounded borrowed units and fixed
+  ASCII-key lookup internally, and keeps ConPTY merge and runtime defaults from
+  duplicating native ownership. The measured x86_64 lookup leaf uses inline
+  assembly with explicit non-aliasing register constraints; Windows aarch64
+  retains the same contract in Rust, while Linux/macOS remain behind the common
+  facade. Missing or malformed blocks fail without exposing raw pointers to
+  products.
 - [x] Window minimized/maximized/restored semantic state and native-flag
   precedence are public platform-neutral window contracts. AgenTerm's 320x240
   CLI resize minimum and error wording remain product policy in the main crate.

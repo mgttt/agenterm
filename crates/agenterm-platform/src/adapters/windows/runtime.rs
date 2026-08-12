@@ -2,7 +2,9 @@
 
 use std::{ffi::OsString, io, os::windows::ffi::OsStringExt as _, path::PathBuf, slice};
 
-use crate::contract::runtime::TerminalShellDescriptor;
+use crate::{
+    contract::runtime::TerminalShellDescriptor, selected::environment::InheritedEnvironment,
+};
 use windows_sys::Win32::{
     Foundation::{LocalFree, MAX_PATH},
     System::Environment::GetCommandLineW,
@@ -73,6 +75,12 @@ pub fn user_config_directory() -> io::Result<PathBuf> {
     Ok(PathBuf::from(OsString::from_wide(&path[..length])))
 }
 
+pub fn ascii_environment_variable_present(name: &str) -> bool {
+    InheritedEnvironment::capture()
+        .and_then(|environment| environment.find_ascii(name).map(|value| value.is_some()))
+        .unwrap_or(false)
+}
+
 fn decode_argument(argument: *const u16) -> io::Result<String> {
     if argument.is_null() {
         return Err(invalid_native_arguments());
@@ -96,7 +104,17 @@ fn invalid_native_arguments() -> io::Error {
 }
 
 pub fn default_terminal_shell() -> String {
-    std::env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned())
+    InheritedEnvironment::capture()
+        .ok()
+        .and_then(|environment| {
+            environment
+                .find_ascii("COMSPEC")
+                .ok()
+                .flatten()
+                .and_then(|value| String::from_utf16(value).ok())
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| r"C:\Windows\System32\cmd.exe".to_owned())
 }
 
 pub const fn primary_terminal_shell() -> TerminalShellDescriptor {
@@ -114,7 +132,10 @@ pub fn preferred_terminal_lang() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{application_arguments, decode_argument, user_config_directory};
+    use super::{
+        application_arguments, ascii_environment_variable_present, decode_argument,
+        default_terminal_shell, user_config_directory,
+    };
 
     #[test]
     fn native_arguments_match_rust_for_the_test_process() {
@@ -135,5 +156,17 @@ mod tests {
     fn native_user_config_directory_is_absolute() {
         let path = user_config_directory().expect("native user configuration directory");
         assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn native_environment_query_matches_process_environment() {
+        assert_eq!(
+            ascii_environment_variable_present("PATH"),
+            std::env::var_os("PATH").is_some()
+        );
+        assert!(!ascii_environment_variable_present(
+            "AGENTERM_ENVIRONMENT_SENTINEL_DOES_NOT_EXIST"
+        ));
+        assert!(!default_terminal_shell().is_empty());
     }
 }

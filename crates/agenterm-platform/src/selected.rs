@@ -45,6 +45,10 @@ pub(crate) mod threading;
 #[path = "adapters/unix/threading.rs"]
 pub(crate) mod threading;
 
+#[cfg(all(windows, any(feature = "pty", feature = "runtime")))]
+#[path = "adapters/windows/environment.rs"]
+pub(crate) mod environment;
+
 #[cfg(all(feature = "console-interrupt", windows))]
 #[path = "adapters/windows/console_interrupt.rs"]
 pub(crate) mod console_interrupt;

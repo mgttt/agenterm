@@ -25,6 +25,10 @@ pub fn user_config_directory() -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unavailable"))
 }
 
+pub fn ascii_environment_variable_present(name: &str) -> bool {
+    name.is_ascii() && std::env::var_os(name).is_some()
+}
+
 pub fn default_terminal_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
 }

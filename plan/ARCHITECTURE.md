@@ -351,6 +351,15 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   `~/.config` 合同。target-specific cold PE 从 541,184 B 降至 540,672 B（-512 B）。
   3 runtime、87 unit、18 GUI black-box、1 control、Windows Clippy 和 Linux x64 check
   通过。
+- Windows 进程环境块由 selected adapter 中唯一的 `InheritedEnvironment` RAII owner
+  持有，`GetEnvironmentStringsW` / `FreeEnvironmentStringsW` exactly once 合同同时服务
+  ConPTY 环境合并和 runtime 的固定 ASCII 键查询；产品不再为
+  `AGENTERM_NO_ACTIVATE` 选择 std parser，`COMSPEC` 也复用同一块。x86_64 的有界、
+  无分配查找是经 final-PE 证明的 inline-assembly 叶子，scratch 使用不可与输入别名的
+  `out(reg)`；Windows aarch64 保留同语义 Rust 回退，Linux/macOS 保留 facade 后的 std
+  adapter。独占 target 的 cold PE 从 540,672 B 降至 540,160 B（-512 B）；62 platform、
+  87 con unit、18 GUI black-box、1 multitab control、Windows x64 Clippy、Windows
+  aarch64 check 和 Linux x64 check 通过。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

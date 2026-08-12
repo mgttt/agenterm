@@ -429,7 +429,8 @@ fn main() {
         command,
         snapshot_path,
     } = parsed;
-    no_activate |= std::env::var_os("AGENTERM_NO_ACTIVATE").is_some();
+    no_activate |=
+        agenterm_platform::runtime::ascii_environment_variable_present("AGENTERM_NO_ACTIVATE");
 
     // Load config file: CLI flags override config, config overrides defaults.
     let config = load_config();

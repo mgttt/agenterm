@@ -503,6 +503,37 @@ After target-specific cleaning, the official release-fast PE falls from
 Clippy and Linux x64 compilation pass. This is a narrow native path-policy
 facade, not a reason to put arbitrary product file locations into platform.
 
+### 2026-08-12: shared native environment block and measured x64 leaf
+
+Windows PTY environment inheritance and runtime defaults now share one
+`InheritedEnvironment` owner in the selected platform adapter. It pairs
+`GetEnvironmentStringsW` with `FreeEnvironmentStringsW` exactly once and lends
+the bounded double-NUL UTF-16 block to both the ConPTY merge and fixed ASCII
+runtime lookup. The product no longer reaches generic Rust environment parsing
+for `AGENTERM_NO_ACTIVATE`, and default-shell lookup reuses the same block for
+`COMSPEC`. Linux and macOS retain their std-backed implementation behind the
+same ASCII-key facade.
+
+The x86_64 Windows lookup is a narrow inline-assembly leaf: it scans at most
+32 Mi UTF-16 units, folds only ASCII letters, returns a borrowed value span,
+and distinguishes absent keys from malformed termination without allocating.
+Its scratch outputs use non-overlapping `out(reg)` constraints; `lateout` was
+rejected after it allowed an input pointer alias and produced an access
+violation. Windows aarch64 keeps the equivalent bounded Rust scanner rather
+than pretending x64 assembly is portable.
+
+An isolated target-specific cold build reduces release-fast from 540,672 to
+540,160 bytes (-512 bytes). Two direct environment/scanner tests include empty
+values, case folding, hidden drive entries, missing keys and a truncated block;
+the complete 62 platform and 87 con unit suites pass. Windows x64 Clippy,
+Windows aarch64 platform compilation and Linux x64 con compilation pass. A
+complete 18-test GUI black-box run and the isolated multitab control journey
+also pass against the integrated source.
+
+A shared target produced a mismatched custom-std `compiler_builtins` link during
+concurrent work, so parallel size experiments must use an exclusive target
+directory and remove it after evidence capture.
+
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
 the official custom-std release-fast PE fell from 560,128 to 552,448 bytes.

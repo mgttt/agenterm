@@ -578,6 +578,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   release-fast from 541,184 to 540,672 bytes. Evidence is three runtime tests,
   87 unit tests, 18 GUI black-box tests, one multitab control journey, Windows
   Clippy and Linux x64 compile.
+  Windows runtime environment lookup now shares the PTY adapter's single
+  `GetEnvironmentStringsW`/`FreeEnvironmentStringsW` RAII owner instead of
+  linking a second query path. `AGENTERM_NO_ACTIVATE` presence and `COMSPEC`
+  value lookup use a bounded fixed-ASCII facade; Linux/macOS retain the same
+  facade through their std adapters. On Windows x86_64, the block lookup is a
+  measured allocation-free inline-assembly leaf with explicit malformed-block
+  signaling and non-aliasing output-register constraints. Windows aarch64 uses
+  the equivalent bounded Rust path. An isolated target-specific cold build
+  reduces release-fast from 540,672 to 540,160 bytes. Direct scanner tests cover
+  case folding, empty values, hidden drive entries, absence and truncation; all
+  62 platform and 87 con unit tests, Windows x64 Clippy, Windows aarch64 check
+  and Linux x64 check pass. The complete 18-test GUI black-box run and isolated
+  multitab control journey also pass.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon

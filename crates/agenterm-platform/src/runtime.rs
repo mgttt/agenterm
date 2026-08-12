@@ -15,6 +15,11 @@ pub fn user_config_directory() -> io::Result<PathBuf> {
     selected::runtime::user_config_directory()
 }
 
+/// Report whether the process environment contains the ASCII `name`.
+pub fn ascii_environment_variable_present(name: &str) -> bool {
+    selected::runtime::ascii_environment_variable_present(name)
+}
+
 pub fn default_terminal_shell() -> String {
     selected::runtime::default_terminal_shell()
 }
