@@ -1291,15 +1291,17 @@ impl ConApp {
             return;
         }
         let layout = self.layout(self.frame_width, self.frame_height, self.frame_scale);
-        let right = layout
-            .composer_send
-            .x
-            .saturating_add(layout.composer_send.width);
+        // The whole composer band, not just the control row. The "SEND TO @N"
+        // label is painted at `composer.y + 7` -- above `composer_input.y` --
+        // and its color tracks `composer_focused`, so marking only the controls
+        // left the label showing the previous focus state until some unrelated
+        // damage happened to cover it. The band is the provable bound: every
+        // pixel `paint_chrome` derives from composer state lives inside it.
         self.mark_chrome_rect(
-            layout.composer_input.x,
-            layout.composer_input.y,
-            right.saturating_sub(layout.composer_input.x),
-            layout.composer_input.height,
+            layout.composer.x,
+            layout.composer.y,
+            self.frame_width.saturating_sub(layout.composer.x),
+            self.frame_height.saturating_sub(layout.composer.y),
         );
     }
 
@@ -4960,10 +4962,23 @@ fn paint_chrome_text_parts(
     let limit = x.saturating_add(max_width).min(surface.width);
     for part in parts {
         for character in part.chars() {
-            if cursor.saturating_add(cell_w) > limit {
+            // The same width rule `paint_cells` and the terminal IME preedit
+            // already apply: a double-width character owns two cells. Advancing
+            // one narrow cell per character truncated every wide glyph to half
+            // its width via the CellRect clip in `blit_glyph`, then started the
+            // next character on top of the remains -- which is exactly why CJK
+            // typed into the composer rendered as overlapping garbage while
+            // ASCII stayed crisp.
+            let cells = if unicode_width::UnicodeWidthChar::width(character).unwrap_or(1) > 1 {
+                2
+            } else {
+                1
+            };
+            let span_w = cell_w.saturating_mul(cells);
+            if cursor.saturating_add(span_w) > limit {
                 return;
             }
-            if surface.intersects_rect(cursor, y, cell_w, cell_h)
+            if surface.intersects_rect(cursor, y, span_w, cell_h)
                 && let Some(glyph) = font::raster(character, font_size_px)
             {
                 surface.blit_glyph(
@@ -4971,14 +4986,14 @@ fn paint_chrome_text_parts(
                     CellRect {
                         x: cursor,
                         y,
-                        w: cell_w,
+                        w: span_w,
                         h: cell_h,
                     },
                     color,
                     0.0,
                 );
             }
-            cursor = cursor.saturating_add(cell_w);
+            cursor = cursor.saturating_add(span_w);
         }
     }
 }
@@ -5027,6 +5042,45 @@ mod tests {
             73,
         );
         assert_eq!(parts_pixels, joined_pixels);
+    }
+
+    /// A double-width character must consume two cells in chrome text exactly
+    /// as it does in the terminal grid. Asserted by composition rather than by
+    /// glyph appearance: painting "中A" in one call must equal painting "中"
+    /// then "A" two cells along. Under the one-cell-per-character advance this
+    /// replaced, the "A" landed one narrow cell in -- on top of the truncated
+    /// right half of the wide glyph -- which is what made CJK typed into the
+    /// composer render as overlapping garbage.
+    #[test]
+    fn wide_chrome_characters_occupy_two_cells() {
+        let width = 160u32;
+        let height = 32u32;
+        let size = 15u16;
+        let cell_w = font::cell_metrics(size).width.max(1);
+        let color = Rgb(240, 240, 240);
+
+        let mut together = vec![0u32; (width * height) as usize];
+        paint_chrome_text(
+            &mut Surface::new(&mut together, width, height),
+            3,
+            2,
+            "中A",
+            color,
+            size,
+            width,
+        );
+
+        let mut apart = vec![0u32; (width * height) as usize];
+        {
+            let mut surface = Surface::new(&mut apart, width, height);
+            paint_chrome_text(&mut surface, 3, 2, "中", color, size, width);
+            paint_chrome_text(&mut surface, 3 + 2 * cell_w, 2, "A", color, size, width);
+        }
+
+        assert_eq!(
+            together, apart,
+            "a wide character must advance two cells, leaving the next glyph clear of it"
+        );
     }
 
     fn parser() -> vt100::Parser<ConCallbacks> {
