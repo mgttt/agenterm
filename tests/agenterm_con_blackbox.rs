@@ -1404,9 +1404,20 @@ fn controlled_resize_storm_reports_successful_frames_and_exits_cleanly() {
     assert!(frames > 0, "resize journey rendered no frames");
     if cfg!(windows) {
         assert!(frames <= 6, "live resize rerasterized too often: {stats}");
+        let full_frames = stats["full_candidate_frames"]
+            .as_u64()
+            .expect("full candidate frames");
+        let partial_frames = stats["partial_candidate_frames"]
+            .as_u64()
+            .expect("partial candidate frames");
         assert!(
-            stats["full_candidate_frames"].as_u64().unwrap_or(u64::MAX) <= 2,
-            "live resize repeatedly forced full raster: {stats}"
+            partial_frames > 0 && full_frames < frames,
+            "live resize never reused a partial raster: {stats}"
+        );
+        assert!(
+            stats["dirty_pixels"].as_u64().expect("dirty pixels")
+                < stats["frame_pixels"].as_u64().expect("frame pixels"),
+            "live resize rasterized every candidate pixel: {stats}"
         );
     } else {
         assert!(
