@@ -2840,7 +2840,7 @@ impl ConTerminal {
                 && !event.modifiers.alt
                 && !event.modifiers.shift
                 && text.eq_ignore_ascii_case("c")
-                && self.selection.is_some()
+                && self.active_selection().is_some()
             {
                 self.copy_selection();
                 self.selection = None;
@@ -3073,8 +3073,23 @@ impl ConTerminal {
         }
     }
 
+    /// The selection as far as anything outside the drag gesture is concerned.
+    ///
+    /// A left press seeds `selection` with `(point, point)` so a drag has an
+    /// anchor to extend from, but a degenerate range covers no text. The
+    /// product already encoded that in `selection_should_auto_copy`, which
+    /// refuses to copy it -- every other consumer treated it as a real
+    /// one-cell selection. That single omission produced three separate
+    /// symptoms from one plain click: the clicked cell stayed inverted for the
+    /// rest of the session, a following right-click copied nothing instead of
+    /// pasting, and bare Ctrl+C took the copy branch and returned, so the
+    /// child process never received SIGINT.
+    fn active_selection(&self) -> Option<(TerminalPoint, TerminalPoint)> {
+        self.selection.filter(|(anchor, focus)| anchor != focus)
+    }
+
     fn copy_selection(&self) {
-        let Some((start, end)) = self.selection else {
+        let Some((start, end)) = self.active_selection() else {
             return;
         };
         let text = selection_text(self.parser.screen(), start, end);
@@ -3252,7 +3267,7 @@ impl ConTerminal {
             },
             scroll_offset: self.scroll_offset,
             max_scrollback,
-            selection: self.selection.map(|(a, b)| {
+            selection: self.active_selection().map(|(a, b)| {
                 (
                     agent_interface::PointSnapshot {
                         row: a.row,
@@ -3506,11 +3521,17 @@ impl ConTerminal {
                 self.selecting = false;
                 if selection_should_auto_copy(self.selection) {
                     self.copy_selection();
+                } else {
+                    // The drag never left its anchor cell, so no selection was
+                    // ever made. Dropping the seed here keeps the stored state
+                    // equal to what every consumer already sees through
+                    // `active_selection`.
+                    self.selection = None;
                 }
             }
             (PointerButton::Right, true) => {
                 // Right-click: copy if a selection exists, else paste.
-                if self.selection.is_some() {
+                if self.active_selection().is_some() {
                     self.copy_selection();
                     self.selection = None;
                 } else {
@@ -3801,7 +3822,7 @@ impl ConTerminal {
         paint_cells_at(
             &mut surface,
             screen,
-            self.selection,
+            self.active_selection(),
             self.cell_w,
             self.cell_h,
             self.default_fg,
@@ -5484,6 +5505,41 @@ mod tests {
         // accidentally select a word.
         assert_eq!(app.register_click(here), 2);
         assert_eq!(app.register_click(elsewhere), 1);
+    }
+
+    /// A plain click seeds a drag anchor, not a selection. Rendering, copying,
+    /// and the Ctrl+C / right-click branches must all agree that a degenerate
+    /// range is nothing — otherwise one click leaves its cell inverted forever,
+    /// bare Ctrl+C copies an empty string instead of interrupting the child,
+    /// and right-click stops pasting.
+    #[test]
+    fn a_click_without_a_drag_is_not_a_selection() {
+        let mut app = ConTerminal::new(None);
+        let point = TerminalPoint { row: 2, col: 4 };
+
+        app.selection = Some((point, point));
+        assert_eq!(
+            app.active_selection(),
+            None,
+            "an anchor-only range covers no cells and must not render or copy"
+        );
+
+        let dragged = TerminalPoint { row: 2, col: 7 };
+        app.selection = Some((point, dragged));
+        assert_eq!(
+            app.active_selection(),
+            Some((point, dragged)),
+            "a real drag stays a selection"
+        );
+
+        // The stored state agrees with what consumers see, so the next
+        // right-click pastes rather than copying nothing.
+        app.selection = Some((point, point));
+        app.selecting = true;
+        if !selection_should_auto_copy(app.selection) {
+            app.selection = None;
+        }
+        assert_eq!(app.selection, None);
     }
 
     fn argv(values: &[&str]) -> Vec<String> {
