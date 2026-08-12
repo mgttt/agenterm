@@ -142,62 +142,19 @@ impl vt100::Callbacks for ConCallbacks {
     }
 }
 
-/// A terminal cell coordinate used for selection hit-testing.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TerminalPoint {
-    row: u16,
-    col: u16,
-}
+use agenterm_ui_core::terminal_selection::{
+    TerminalPoint, normalize_endpoints, terminal_selection_text, visible_row_selection,
+    word_selection,
+};
 
 fn selection_should_auto_copy(selection: Option<(TerminalPoint, TerminalPoint)>) -> bool {
     selection.is_some_and(|(anchor, focus)| anchor != focus)
 }
 
-impl TerminalPoint {
-    /// Returns the normalized (top-left, bottom-right) bounds of a selection.
-    fn normalize(a: TerminalPoint, b: TerminalPoint) -> (TerminalPoint, TerminalPoint) {
-        if a.row < b.row || (a.row == b.row && a.col <= b.col) {
-            (a, b)
-        } else {
-            (b, a)
-        }
-    }
-}
-
 /// Extracts text from the VT screen between two points (inclusive).
 /// Produces Windows CRLF line joins, trims trailing whitespace per row.
 fn selection_text(screen: &vt100::Screen, a: TerminalPoint, b: TerminalPoint) -> String {
-    let (start, end) = TerminalPoint::normalize(a, b);
-    let (_, cols) = screen.size();
-    let mut result = String::new();
-    for row in start.row..=end.row {
-        let col_start = if row == start.row { start.col } else { 0 };
-        let col_end = if row == end.row { end.col + 1 } else { cols };
-        let mut row_text = String::new();
-        for col in col_start..col_end {
-            if let Some(cell) = screen.cell(row, col) {
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-                if cell.has_contents() {
-                    // A wide cell contributes its full text here; its
-                    // continuation cell is skipped by the guard above.
-                    row_text.push_str(cell.contents());
-                } else {
-                    row_text.push(' ');
-                }
-            } else {
-                row_text.push(' ');
-            }
-        }
-        // Trim trailing spaces on each row (conhost behavior).
-        let trimmed = row_text.trim_end();
-        if row > start.row {
-            result.push_str("\r\n");
-        }
-        result.push_str(trimmed);
-    }
-    result
+    terminal_selection_text(screen, a, b)
 }
 
 /// Trailing-edge debounce for resize: drag storms produce dozens of geometry
@@ -2432,7 +2389,7 @@ impl ConTerminal {
     }
 
     fn mark_selection(&mut self, selection: Option<(TerminalPoint, TerminalPoint)>) {
-        let Some((start, end)) = selection.map(|(a, b)| TerminalPoint::normalize(a, b)) else {
+        let Some((start, end)) = selection.map(|(a, b)| normalize_endpoints(a, b)) else {
             return;
         };
         let mut rows = DirtyRows::empty();
@@ -2776,85 +2733,13 @@ impl ConTerminal {
 
     /// Expands to the word around `point`, or `None` if that cell is blank.
     fn word_at(&self, point: TerminalPoint) -> Option<(TerminalPoint, TerminalPoint)> {
-        let screen = self.parser.screen();
-        let (_, cols) = screen.size();
-        if !self.is_word_cell(point.row, point.col) {
-            return None;
-        }
-        let mut start = point.col;
-        while start > 0 && self.is_word_cell(point.row, start - 1) {
-            start -= 1;
-        }
-        let mut end = point.col;
-        while end + 1 < cols && self.is_word_cell(point.row, end + 1) {
-            end += 1;
-        }
-        Some((
-            TerminalPoint {
-                row: point.row,
-                col: start,
-            },
-            TerminalPoint {
-                row: point.row,
-                col: end,
-            },
-        ))
+        word_selection(self.parser.screen(), point)
     }
 
-    /// Whether a cell participates in a double-click word.
-    ///
-    /// Deliberately more permissive than conhost's space-only rule: `/`, `.`,
-    /// `-`, and `:` stay inside the word so a path or URL selects in one click,
-    /// which is the common case in a terminal.
-    fn is_word_cell(&self, row: u16, col: u16) -> bool {
-        let Some(cell) = self.parser.screen().cell(row, col) else {
-            return false;
-        };
-        if !cell.has_contents() {
-            return false;
-        }
-        cell.contents().chars().next().is_some_and(|character| {
-            !character.is_whitespace()
-                && !matches!(
-                    character,
-                    '(' | ')'
-                        | '['
-                        | ']'
-                        | '{'
-                        | '}'
-                        | '<'
-                        | '>'
-                        | '\''
-                        | '"'
-                        | '`'
-                        | '|'
-                        | ';'
-                        | ','
-                )
-        })
-    }
-
-    /// Expands to the whole *logical* line, following soft wrapping, so a
-    /// triple-click on a long wrapped command selects all of it rather than
-    /// just the visual row the pointer happened to land on.
-    fn line_at(&self, point: TerminalPoint) -> (TerminalPoint, TerminalPoint) {
-        let screen = self.parser.screen();
-        let (rows, cols) = screen.size();
-        let mut start = point.row;
-        while start > 0 && screen.row_wrapped(start - 1) {
-            start -= 1;
-        }
-        let mut end = point.row;
-        while end + 1 < rows && screen.row_wrapped(end) {
-            end += 1;
-        }
-        (
-            TerminalPoint { row: start, col: 0 },
-            TerminalPoint {
-                row: end,
-                col: cols.saturating_sub(1),
-            },
-        )
+    /// Triple-click owns one visible terminal row; soft-wrapped neighbors are
+    /// separate selectable rows, matching the professional-selection contract.
+    fn line_at(&self, point: TerminalPoint) -> Option<(TerminalPoint, TerminalPoint)> {
+        visible_row_selection(self.parser.screen(), point.row)
     }
 
     /// Draws the in-progress composition starting at the cursor cell and
@@ -3612,7 +3497,7 @@ impl ConTerminal {
                     }
                     // Third click and beyond select the whole logical line.
                     _ => {
-                        self.selection = Some(self.line_at(point));
+                        self.selection = self.line_at(point);
                         self.selecting = false;
                     }
                 }
@@ -4877,7 +4762,7 @@ fn paint_cells_at(
 
             // Selection highlight: invert fg/bg for selected cells.
             if let Some((sa, sb)) = selection {
-                let (lo, hi) = TerminalPoint::normalize(sa, sb);
+                let (lo, hi) = normalize_endpoints(sa, sb);
                 if row >= lo.row && row <= hi.row {
                     let col_start = if row == lo.row { lo.col } else { 0 };
                     let col_end = if row == hi.row { hi.col } else { u16::MAX };
@@ -5540,7 +5425,7 @@ mod tests {
     }
 
     #[test]
-    fn double_click_selects_a_word_and_keeps_paths_whole() {
+    fn double_click_uses_shared_terminal_word_classes() {
         let mut app = ConTerminal::new(None);
         app.parser.screen_mut().set_size(4, 40);
         app.parser.process(b"cd /usr/local/bin (note)");
@@ -5557,12 +5442,16 @@ mod tests {
         let (start, end) = app.word_at(hit).expect("word inside parens");
         assert_eq!((start.col, end.col), (19, 22));
 
-        // A blank cell yields no word rather than an empty selection.
-        assert!(app.word_at(TerminalPoint { row: 0, col: 2 }).is_none());
+        // Whitespace is its own terminal word class rather than being folded
+        // into either adjacent command token.
+        let (start, end) = app
+            .word_at(TerminalPoint { row: 0, col: 2 })
+            .expect("blank run is selectable");
+        assert_eq!((start.col, end.col), (2, 2));
     }
 
     #[test]
-    fn triple_click_follows_soft_wrapping_to_the_whole_logical_line() {
+    fn triple_click_selects_only_the_visible_row() {
         let mut app = ConTerminal::new(None);
         app.parser.screen_mut().set_size(4, 10);
         // 15 characters over a 10-column grid soft-wraps onto row 1.
@@ -5572,10 +5461,10 @@ mod tests {
             "row 0 should be wrapped"
         );
 
-        // Clicking the continuation row still selects from the start of the
-        // logical line, not just the visual row under the pointer.
-        let (start, end) = app.line_at(TerminalPoint { row: 1, col: 2 });
-        assert_eq!((start.row, start.col), (0, 0));
+        let (start, end) = app
+            .line_at(TerminalPoint { row: 1, col: 2 })
+            .expect("visible row");
+        assert_eq!((start.row, start.col), (1, 0));
         assert_eq!((end.row, end.col), (1, 9));
     }
 

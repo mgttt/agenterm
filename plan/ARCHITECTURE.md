@@ -194,6 +194,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 底层机制应汇合：PTY 生命周期、VT/宽字符、字体与渲染缓存、选择/剪贴板、
   IME/focus、鼠标/滚轮、DPI geometry、背压/调度及黑盒观测接口优先形成纯函数或
   typed platform/frontend contract；host adapter 只 present/wake/接 OS 事件。
+- 物理 VT 选择的坐标归一化、单词/宽字符边界、可见行和 CRLF 文本抽取归
+  `agenterm-ui-core::terminal_selection`；主程序与 `agenterm-con` 共用该内核。
+  手势阶段、native capture、auto-copy、tab authority 和 remote snapshot 的 u32
+  网格适配仍在产品 frontend，不把工作台或 con 政策塞进共享 crate。
 - Win32 host 重入机制也必须汇合：共享容量、FIFO 和借用失败合同；各 host 只保留
   typed message snapshot、default-processing 和生命周期政策，禁止线程全局裸
   `(WPARAM, LPARAM)` 队列跨 HWND 复用。
@@ -205,6 +209,10 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   IEEE-754 位级 `round`/`ceil`/`trunc` 叶。该模块不含产品布局政策，也不按 host
   分叉；Windows con 借此删除 `ceilf`、`round`、`roundf`、`truncf` CRT 导入，
   Linux/macOS 调用同一标量真值。新增 ISA 版本仍须证明逐位等价与最终产物收益。
+- 纯 framebuffer 像素内核归 `agenterm-ui-core::pixel`，不属于 OS adapter。
+  XRGB 长 span 在 x86-64 使用有界 `rep stosd`、AArch64 使用 NEON；安全 facade
+  统一裁剪、溢出和不完整尾行语义，短 span/其他 ISA 使用标量真值。platform 只
+  管 native surface 生命周期与 present，不用 GDI/Cairo/CoreGraphics 分叉同一填充。
 - Windows PTY 由 platform adapter 直接拥有 ConPTY、同步 output、可取消 overlapped
   input、`STARTUPINFOEXW`、进程等待和 `KILL_ON_JOB_CLOSE` Job Object；子进程以
   `CREATE_SUSPENDED` 创建，加入 Job 后才恢复，任一部分失败都终止未受保护的进程。

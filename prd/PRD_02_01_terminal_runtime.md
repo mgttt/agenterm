@@ -52,6 +52,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] window-icon system menu exposes focus-aware Copy and Paste: native
   edit controls receive their standard messages, while terminal Copy uses
   the active cell selection and terminal Paste uses the active PTY
+- [x] physical VT selection semantics are shared by the workbench and
+  `agenterm-con` through `agenterm-ui-core`: endpoint normalization, bounded
+  visible-row selection, Unicode/path word classes, wide-cell continuation
+  handling, Windows CRLF joins, and trailing-space trimming have one kernel.
+  Gesture phase, native capture, auto-copy, tab authority, and remote snapshot
+  adaptation remain product-owned. Triple-click selects one visible row rather
+  than silently crossing soft-wrap boundaries. Shared-kernel, workbench, and
+  con tests cover forward/reverse CJK extraction and the multi-click contract.
 - v0.1.8 professional-selection slice (P0), informed by the reviewed PuTTY
   terminal model
   - [ ] professional selection extends the shipped basic state machine with
@@ -93,6 +101,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   journey owns native clipboard-to-PTY delivery, `terminal.pasted`, and delayed
   stale-target cancellation. Exact-SHA `b4f1622` CI run `30724960474` passed
   that complete journey on Linux x86_64 and both macOS architectures.
+- [x] shared XRGB rectangle fill preserves one clipped safe API across hosts:
+  spans below 64 pixels retain compiler fill, x86-64 long spans use a bounded
+  `rep stosd` leaf, and AArch64 long spans use NEON with an exact scalar tail.
+  Boundary, clipping, partial-row and guard tests are bit-exact to the scalar
+  oracle. A release-mode 200-frame 1920x1080 A/B measured 102.3 ms versus
+  210.0 ms for the previous fill (2.05x), while the paired con PE stayed the
+  same size and `.text` increased by 48 bytes. Platform adapters continue to
+  own surface/present FFI; this pure framebuffer kernel remains in UI Core.
 - [x] dirty-frame rendering and GDI double buffering exist; live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. White-box
   analysis found that the replaceable Windows GUI cleared and repainted directly

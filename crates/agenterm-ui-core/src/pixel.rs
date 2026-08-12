@@ -393,6 +393,66 @@ unsafe fn neon_pack_kernel(source: *const u32, destination: *mut u8, length: usi
     }
 }
 
+// Small spans are cheaper to leave to the compiler than to pay the fixed
+// architecture-kernel setup cost. This is a performance threshold only; every
+// kernel has exactly the same bounded span semantics.
+const NATIVE_FILL_MIN_PIXELS: usize = 64;
+
+#[inline]
+fn fill_xrgb_span(destination: &mut [u32], color: u32) {
+    if destination.len() < NATIVE_FILL_MIN_PIXELS {
+        destination.fill(color);
+        return;
+    }
+
+    unsafe {
+        native_fill_xrgb_span(destination.as_mut_ptr(), destination.len(), color);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn native_fill_xrgb_span(destination: *mut u32, length: usize, color: u32) {
+    unsafe {
+        core::arch::asm!(
+            "rep stosd",
+            inout("rdi") destination => _,
+            inout("rcx") length => _,
+            in("eax") color,
+            options(nostack),
+        );
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn native_fill_xrgb_span(destination: *mut u32, length: usize, color: u32) {
+    use core::arch::aarch64::*;
+
+    let pixels = vdupq_n_u32(color);
+    let vector_length = length & !3;
+    let mut index = 0;
+    while index < vector_length {
+        unsafe {
+            vst1q_u32(destination.add(index), pixels);
+        }
+        index += 4;
+    }
+    if index < length {
+        unsafe {
+            core::slice::from_raw_parts_mut(destination.add(index), length - index).fill(color);
+        }
+    }
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[inline]
+unsafe fn native_fill_xrgb_span(destination: *mut u32, length: usize, color: u32) {
+    unsafe {
+        core::slice::from_raw_parts_mut(destination, length).fill(color);
+    }
+}
+
 /// Fills a clipped rectangle in a row-major XRGB framebuffer.
 ///
 /// `stride` is the physical pixel width of a row. A partial trailing row is
@@ -424,11 +484,11 @@ pub fn fill_xrgb_rect(
     }
 
     if x == 0 && span == stride {
-        destination[y * stride..bottom * stride].fill(color);
+        fill_xrgb_span(&mut destination[y * stride..bottom * stride], color);
     } else {
         for row in y..bottom {
             let start = row * stride + x;
-            destination[start..start + span].fill(color);
+            fill_xrgb_span(&mut destination[start..start + span], color);
         }
     }
 }
@@ -485,6 +545,31 @@ mod tests {
         }
     }
 
+    fn scalar_fill_rect(
+        destination: &mut [u32],
+        stride: u32,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        color: u32,
+    ) {
+        let stride = stride as usize;
+        if stride == 0 || width == 0 || height == 0 {
+            return;
+        }
+        let rows = destination.len() / stride;
+        let x = (x as usize).min(stride);
+        let y = (y as usize).min(rows);
+        let right = x.saturating_add(width as usize).min(stride);
+        let bottom = y.saturating_add(height as usize).min(rows);
+        for row in y..bottom {
+            for column in x..right {
+                destination[row * stride + column] = color;
+            }
+        }
+    }
+
     #[test]
     fn scalar_is_the_bit_exact_reference() {
         exercise(scalar_kernel);
@@ -525,6 +610,47 @@ mod tests {
             }
         }
         assert_eq!(&pixels[20..], &[0xaaaa_aaaa; 2]);
+    }
+
+    #[test]
+    fn span_fill_matches_scalar_around_dispatch_boundary_and_preserves_guards() {
+        let lengths = [
+            0,
+            NATIVE_FILL_MIN_PIXELS - 1,
+            NATIVE_FILL_MIN_PIXELS,
+            NATIVE_FILL_MIN_PIXELS + 1,
+            NATIVE_FILL_MIN_PIXELS + 7,
+            NATIVE_FILL_MIN_PIXELS * 8 + 3,
+        ];
+        for length in lengths {
+            let mut expected = vec![0xa5a5_a5a5; length + 4];
+            let mut actual = expected.clone();
+            expected[2..2 + length].fill(0x12ab_cdef);
+            fill_xrgb_span(&mut actual[2..2 + length], 0x12ab_cdef);
+            assert_eq!(actual, expected, "length={length}");
+            assert_eq!(&actual[..2], &[0xa5a5_a5a5; 2]);
+            assert_eq!(&actual[2 + length..], &[0xa5a5_a5a5; 2]);
+        }
+    }
+
+    #[test]
+    fn rectangular_fill_is_bit_exact_to_scalar_for_clipping_and_row_spans() {
+        let cases = [
+            (17, 3, 2, 9, 5),
+            (67, 1, 1, 65, 3),
+            (67, 66, 0, u32::MAX, 4),
+            (64, 0, 2, 64, u32::MAX),
+            (64, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        ];
+        for (stride, x, y, width, height) in cases {
+            let complete = stride as usize * 7;
+            let mut expected = vec![0xdead_beef; complete + 3];
+            let mut actual = expected.clone();
+            scalar_fill_rect(&mut expected, stride, x, y, width, height, 0x0012_3456);
+            fill_xrgb_rect(&mut actual, stride, x, y, width, height, 0x0012_3456);
+            assert_eq!(actual, expected, "stride={stride} x={x} y={y}");
+            assert_eq!(&actual[complete..], &[0xdead_beef; 3]);
+        }
     }
 
     #[cfg(target_arch = "x86_64")]

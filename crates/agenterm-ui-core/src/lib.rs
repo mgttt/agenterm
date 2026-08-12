@@ -4,6 +4,8 @@ pub mod damage;
 pub mod glyph_cache;
 pub mod pixel;
 pub mod retained_frame;
+#[cfg(feature = "terminal-selection")]
+pub mod terminal_selection;
 pub mod tree;
 
 pub use damage::{DirtyRegion, DirtyRows, PixelRect};

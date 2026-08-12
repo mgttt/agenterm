@@ -155,6 +155,9 @@ dependencies = [
 [[package]]
 name = "agenterm-ui-core"
 version = "0.1.16"
+dependencies = [
+ "vt100",
+]
 
 [[package]]
 name = "agenterm-wasmcore"

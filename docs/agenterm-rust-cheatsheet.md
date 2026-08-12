@@ -264,6 +264,16 @@ already lower to vectorized runtime/compiler code. Inspect and benchmark first.
 Keep a shared safe geometry wrapper when it removes duplicated clipping, but do
 not maintain ISA forks without a measured gain.
 
+That inspection can also disprove the optimistic case. In the staged con PE,
+`fill_xrgb_rect` emitted two scalar per-pixel store/branch loops rather than
+`rep stosd`, SIMD, or a runtime call. A bounded x86-64 `rep stosd` span leaf and
+an AArch64 NEON peer retain the same safe clipping facade; spans below 64 pixels
+stay scalar to avoid setup cost. Paired exact-state con PEs remained the same
+size while `.text` grew 48 bytes and the ISA PE gained exactly one `F3 AB`
+signature. A release-mode 200-frame 1920x1080 A/B measured 102.3 ms versus
+210.0 ms (2.05x), with final buffers compared bit-for-bit. This is sufficient
+evidence to retain a compact ISA fork; GUI frame timing alone was too noisy.
+
 ---
 
 ## 6. Bounded concurrency and shutdown
@@ -646,6 +656,16 @@ former product-local loop no longer optimized in place. The move was reverted.
 Share protocol types, state machines and substantial kernels; tolerate a tiny
 semantic duplicate when the public contract is stable, tests agree and the
 final-link cost of a cross-crate call is larger than the maintenance benefit.
+
+A cross-product extraction is justified when it removes an observable semantic
+fork rather than only repeated syntax. The workbench and `agenterm-con` once
+carried separate VT word, visible/logical-row and clipboard-text rules; con's
+triple-click crossed soft wraps while the product contract required one visible
+row. `agenterm-ui-core::terminal_selection` now owns the physical-screen kernel,
+behind an optional `terminal-selection` feature so unrelated UI-core consumers
+do not acquire `vt100`. Product gesture/capture/authority state stays outside.
+Require shared-kernel tests plus both product suites, and make no size claim
+until an exact-profile final-link A/B is measured.
 
 Before replacing `is_x86_feature_detected!`, prove that the generic detector's
 last production owner is in scope. UI-core briefly combined its AVX2 and SSSE3

@@ -9,3 +9,10 @@ repository = "https://github.com/mgttt/agenterm"
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+default = []
+terminal-selection = ["dep:vt100"]
+
+[dependencies]
+vt100 = { version = "0.16", optional = true }

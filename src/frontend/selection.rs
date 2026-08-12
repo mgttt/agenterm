@@ -96,11 +96,7 @@ impl<Id: Clone + PartialEq, Point: Copy + PartialEq> ClickChain<Id, Point> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct TerminalPoint {
-    pub(crate) row: u16,
-    pub(crate) col: u16,
-}
+pub(crate) use agenterm_ui_core::terminal_selection::TerminalPoint;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TerminalSelection {
@@ -410,18 +406,7 @@ pub(crate) fn word_selection(
     screen: &vt100::Screen,
     point: TerminalPoint,
 ) -> Option<(TerminalPoint, TerminalPoint)> {
-    let (start, end) =
-        word_selection_bounds(&screen, (u32::from(point.row), u32::from(point.col)))?;
-    Some((
-        TerminalPoint {
-            row: u16::try_from(start.0).ok()?,
-            col: u16::try_from(start.1).ok()?,
-        },
-        TerminalPoint {
-            row: u16::try_from(end.0).ok()?,
-            col: u16::try_from(end.1).ok()?,
-        },
-    ))
+    agenterm_ui_core::terminal_selection::word_selection(screen, point)
 }
 
 pub(crate) fn remote_word_selection(
@@ -485,15 +470,7 @@ pub(crate) fn visible_row_selection(
     screen: &vt100::Screen,
     row: u16,
 ) -> Option<(TerminalPoint, TerminalPoint)> {
-    let (rows, cols) = screen.size();
-    let point = clamp_point(TerminalPoint { row, col: 0 }, rows, cols)?;
-    Some((
-        point,
-        TerminalPoint {
-            row: point.row,
-            col: cols - 1,
-        },
-    ))
+    agenterm_ui_core::terminal_selection::visible_row_selection(screen, row)
 }
 
 pub(crate) fn remote_visible_row_selection(
@@ -580,34 +557,11 @@ pub(crate) fn terminal_selection_text(
     screen: &vt100::Screen,
     selection: TerminalSelection,
 ) -> String {
-    let (rows, cols) = screen.size();
-    if rows == 0 || cols == 0 {
-        return String::new();
-    }
-    let (mut start, mut end) = selection.bounds();
-    start.row = start.row.min(rows - 1);
-    start.col = start.col.min(cols - 1);
-    end.row = end.row.min(rows - 1);
-    end.col = end.col.min(cols - 1);
-
-    let mut selected = String::new();
-    for row in start.row..=end.row {
-        let first_col = if row == start.row { start.col } else { 0 };
-        let last_col = if row == end.row { end.col } else { cols - 1 };
-        let mut line = String::new();
-        for col in first_col..=last_col {
-            match screen.cell(row, col) {
-                Some(cell) if cell.is_wide_continuation() => {}
-                Some(cell) if !cell.contents().is_empty() => line.push_str(cell.contents()),
-                _ => line.push(' '),
-            }
-        }
-        selected.push_str(line.trim_end_matches(' '));
-        if row != end.row {
-            selected.push_str("\r\n");
-        }
-    }
-    selected
+    agenterm_ui_core::terminal_selection::terminal_selection_text(
+        screen,
+        selection.anchor,
+        selection.focus,
+    )
 }
 
 #[cfg(test)]
