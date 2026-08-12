@@ -514,9 +514,17 @@ startup. Keep Linux/macOS behind the same UTF-8 `Result` facade.
 This is not semantics-free: `CommandLineToArgvW` differs from modern MSVC rules
 for ambiguous hand-crafted quote sequences, and loading Shell32 can hurt a
 small console process. Require standard-launcher round trips and public CLI
-tests before adopting it. In con, which is already a GUI, the official
-release-fast PE fell from 543,232 to 484,352 bytes while adding `shell32.dll`;
-that final-link result, not the FFI declaration itself, justified retention.
+tests before adopting it. In con, which is already a GUI, target-specific cold
+A/B reduced the official release-fast PE from 543,232 to 541,184 bytes while
+adding `shell32.dll`; that final-link result, not the FFI declaration itself,
+justified retention.
+
+When a product uses `-Z build-std` with an explicit target, `cargo clean -p`
+without `--target` does not clean that product graph. For con size A/B, clean
+both owning packages with the exact target triple before each side. An earlier
+484,352-byte incremental argv artifact failed this provenance test; same-HEAD
+cold builds established the real 2,048-byte reduction. Never promote a warm or
+stale staged byte count into PRD evidence.
 
 Model filesystem path provenance before choosing normalization. An arbitrary
 caller-owned staging path needs physical-parent, link and identity checks. A

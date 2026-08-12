@@ -560,9 +560,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `CommandLineToArgvW`, releases the system allocation exactly once with
   `LocalFree`, bounds pointer/count/NUL traversal, and reports invalid UTF-16
   instead of panicking at GUI startup. Linux and macOS preserve the same UTF-8
-  failure contract through their selected adapters. This removes the Windows
-  std `OsString` argument parser family at the measured cost of one existing-OS
-  `shell32.dll` edge: official release-fast falls from 543,232 to 484,352 bytes.
+  failure contract through their selected adapters. At the measured cost of one
+  existing-OS `shell32.dll` edge, target-specific cold A/B shows official
+  release-fast falling from 543,232 to 541,184 bytes. The earlier 484,352-byte
+  incremental artifact did not reproduce from the same HEAD after an explicit
+  Windows-target package clean and is not size evidence.
   Native shell parsing intentionally does not claim equivalence for ambiguous
   hand-crafted quote sequences; standard launcher quoting, offline CLI, `-e`
   passthrough and GUI-lifetime control startup are the supported evidence.

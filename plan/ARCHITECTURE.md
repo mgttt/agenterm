@@ -338,11 +338,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   Windows adapter 由 `GetCommandLineW`、`CommandLineToArgvW` 和 exactly-once
   `LocalFree` 持有系统缓冲区合同，并对参数数量、NUL 扫描和 UTF-16 解码做有界失败；
   Linux/macOS adapter 在同一 UTF-8 `Result` 合同下读取 argv。con 只消费排除 image name
-  的参数，不再链接 Windows std 的通用 `OsString` parser。官方 release-fast PE 从
-  543,232 B 降至 484,352 B（-58,880 B），代价是新增 `shell32.dll`。该选择只适用于
+  的参数，不再由产品直接选择 std parser。target-specific cold A/B 的官方
+  release-fast PE 从 543,232 B 降至 541,184 B（-2,048 B），代价是新增
+  `shell32.dll`。该选择只适用于
   已是 GUI 且接受 Windows native shell parser 的产品；手工构造的歧义引号串不冒充
   现代 MSVC parser 等价。87 unit、18 public GUI black-box、1 multitab control、Windows
-  x64 Clippy 和 Linux x64 check 通过。
+  x64 Clippy 和 Linux x64 check 通过。早先 484,352 B 的增量产物不可由同 HEAD 冷构建
+  复现，已撤销为尺寸证据；自建 std con 的 A/B 清理必须显式携带 Windows target。
 - 像素热循环由 `agenterm-ui-core::pixel` 持有标量真值与 ISA dispatch；产品不得复制
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+

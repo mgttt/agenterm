@@ -469,12 +469,23 @@ fails closed. Do not transplant the choice into a console process merely for
 size: loading Shell32 can add startup work, and parser semantics are part of the
 public boundary.
 
-The official x64 release-fast PE falls from 543,232 to 484,352 bytes
-(-58,880 bytes) while adding `shell32.dll`. The gain proves the std parser family
-became unreachable rather than merely wrapping it in FFI. Evidence is two
+The reproducible official x64 release-fast PE falls from 543,232 to 541,184
+bytes (-2,048 bytes) while adding `shell32.dll`. This is enough to retain the
+typed native ownership boundary but does not prove every std argument symbol
+became unreachable. Evidence is two
 platform ownership/invalid-UTF-16 tests, 87 con unit tests, 18 GUI black-box
 tests, one isolated multitab control journey, Windows x64 Clippy and Linux x64
 compilation.
+
+An earlier incremental build reported 484,352 bytes. Restoring the same HEAD
+later produced 541,184 bytes, and a target-specific cold A/B then reproduced
+543,232 bytes for `std::env::args` and 541,184 bytes for native argv. The smaller
+incremental artifact is therefore rejected as provenance evidence. `cargo clean
+-p agenterm-con -p agenterm-platform` cleans the host layout only; con's custom
+std lives below the explicit Windows target. Size experiments must clean with
+`--target x86_64-pc-windows-msvc` (or the actual target), rebuild both sides from
+the same HEAD/profile, and compare final staged bytes. A warm artifact or an
+unqualified package clean cannot establish a size delta.
 
 All BTree symbols become zero-byte owners. In the host-std attribution build,
 platform text fell from 91.6 to 84.6 KiB and total text from 409.5 to 403.5 KiB;
