@@ -14,8 +14,8 @@ use crate::contract::font::{
 /// (`src/platform/adapters/unix/frontend/font.rs` `resolved_name`), which looks
 /// broken rather than merely unstyled. macOS does not share this risk: its
 /// candidates live at stable system paths.
-pub(crate) fn candidates() -> Vec<FontFileCandidate> {
-    vec![
+pub(crate) fn candidates() -> &'static [FontFileCandidate] {
+    &[
         FontFileCandidate {
             name: "DejaVu Sans Mono",
             components: &[
@@ -80,8 +80,8 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
 /// Noto Sans CJK is already a primary candidate above, but only as a last
 /// resort — on a system that found DejaVu first it is never reached, which is
 /// exactly the gap this list closes.
-pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
-    vec![
+pub(crate) fn fallback_candidates() -> &'static [FontFileCandidate] {
+    &[
         FontFileCandidate {
             name: "Noto Sans CJK",
             components: &[
@@ -120,7 +120,7 @@ pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
 
 pub(crate) fn probe() -> FontDiscovery {
     let mut available_families = Vec::new();
-    for candidate in candidates() {
+    for &candidate in candidates() {
         if candidate.exists() && !available_families.contains(&candidate.name) {
             available_families.push(candidate.name);
         }
@@ -137,7 +137,8 @@ pub(crate) fn primary_family_name() -> Result<&'static str, FontError> {
 
 pub(crate) fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
     let candidate = candidates()
-        .into_iter()
+        .iter()
+        .copied()
         .find(|candidate| candidate.exists())
         .ok_or(FontError::Unavailable)?;
     let data = std::fs::read(candidate.absolute_path()).map_err(|_| FontError::MetricsFailed)?;
@@ -196,7 +197,7 @@ mod tests {
         );
         assert!(facts.available_families.iter().all(|family| {
             candidates()
-                .into_iter()
+                .iter()
                 .any(|candidate| candidate.name == *family && candidate.exists())
         }));
     }

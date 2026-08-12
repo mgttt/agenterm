@@ -224,3 +224,16 @@ std_detect owner 可删除，才重开 CPUID/汇编替换，不能以仓库搜�
 .text 8.13MiB — agenterm 22.4%、C 代码(LuaJIT+QuickJS+SQLite)19.8%、sqlparser
 19.6%、rhai 11.2%、std 6.6%。较上一次测量的显著变化:rusqlite/SQLite 的加入把
 无名 C 行从 0.76MiB 抬到 1.62MiB(sql M1 的代价,预算内)。
+
+### 2026-08-12: static font catalogs and assembly leaf threshold
+
+- Platform font candidates are immutable build-time catalogs. Expose them as
+  `&'static [FontFileCandidate]`; keep `Vec` only for runtime discovery results.
+  This removes false ownership and Unix renderer-initialization allocations.
+- A Win64 `global_asm!` GDI gray8-to-alpha leaf passed its owning test but grew
+  the staged con PE from 615,936 B to 616,448 B. The compiler already optimized
+  the bounded Rust loop well; the extra ABI boundary and validation helper cost
+  one 512-byte PE alignment unit. The experiment was fully reverted.
+- Size-sensitive assembly is accepted only when final staged bytes shrink or a
+  separately measured hot-path gain justifies the exact cost. Instruction-count
+  intuition is not evidence, and moving code behind an FFI symbol is not removal.

@@ -399,3 +399,14 @@ If a recurring answer was hard to discover, add the proven rule here.
 - A cursor over process-owned `&[String]` should return borrowed `&str`; clone only when a parsed value enters an owned request or state field. Borrow verbs, flags, numeric text, and validation-only tags through the whole parse. This can remove allocator calls, clone error paths, string-drop unwind metadata, and literals together: the con control parser reduced the final PE by 3,072 bytes without changing its grammar or wire protocol. Verify exact errors and round trips because an ownership optimization is still a parser behavior change until tests prove otherwise.
 - Centralize repeated fixed-schema formatting at one concrete non-inlined boundary, then compare control-flow spellings in the final artifact. For six con `@TAB_ID` JSON sites, `Option::map_or` saved 384 section bytes but did not cross file alignment; an explicit `match` saved 596 section bytes and 512 final PE bytes. Replacing the remaining `format!` with handwritten stack decimal conversion grew the PE by 512 bytes because constant division, buffer copying, and relocation cost outweighed local fmt scaffolding while integer formatting remained live elsewhere. Keep the measured match, not the assembly-looking version.
 - Replacing every repository call to `is_x86_feature_detected!` does not prove `std_detect` disappears. A dependency or custom `std` path may retain the same cache. Verify the final symbol graph after CPUID/XGETBV replacement; in con, raw detectors matched the standard oracle for SSE2/SSSE3/AVX/AVX2/FMA but `std_detect::detect_and_initialize` remained 1,688 bytes and the final PE grew by 512 bytes. Keep raw detection only when the last linked owner is removed and OSXSAVE plus XCR0 state checks remain exact.
+
+## Assembly and FFI size rule (measured 2026-08-12)
+
+Treat `global_asm!` as a target-specific leaf accelerator, not a default size
+optimization. Validate buffers once in Rust, preserve the platform ABI and a
+portable fallback, then compare the final staged binary. A tested Win64 GDI
+pixel-conversion leaf increased `agenterm-con.exe` by one 512-byte file-alignment
+unit and was reverted. Keep assembly only when it removes the original linked
+region or measured throughput justifies the retained byte cost. Likewise, an
+FFI call saves space only when it makes an entire Rust implementation family
+unreachable; `windows-sys` declarations themselves are effectively zero-cost.

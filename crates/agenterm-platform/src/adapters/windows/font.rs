@@ -27,6 +27,56 @@ const RASTER_FAMILIES: &[&str] = &[
     "Segoe UI Emoji",
 ];
 
+const PRIMARY_CANDIDATES: &[FontFileCandidate] = &[
+    FontFileCandidate {
+        name: "Sarasa Fixed SC",
+        components: &["C:", "Windows", "Fonts", "sarasa-mono-sc-regular.ttf"],
+    },
+    FontFileCandidate {
+        name: "Sarasa Fixed SC",
+        components: &["C:", "Windows", "Fonts", "sarasaMonoSC-Regular.ttf"],
+    },
+    FontFileCandidate {
+        name: "Cascadia Code",
+        components: &["C:", "Windows", "Fonts", "cascadia.ttf"],
+    },
+    FontFileCandidate {
+        name: "Cascadia Mono",
+        components: &["C:", "Windows", "Fonts", "cascadiamono.ttf"],
+    },
+    FontFileCandidate {
+        name: "Consolas",
+        components: &["C:", "Windows", "Fonts", "consola.ttf"],
+    },
+    FontFileCandidate {
+        name: "Courier New",
+        components: &["C:", "Windows", "Fonts", "cour.ttf"],
+    },
+];
+
+const FALLBACK_CANDIDATES: &[FontFileCandidate] = &[
+    FontFileCandidate {
+        name: "SimSun / NSimSun",
+        components: &["C:", "Windows", "Fonts", "simsun.ttc"],
+    },
+    FontFileCandidate {
+        name: "Microsoft YaHei",
+        components: &["C:", "Windows", "Fonts", "msyh.ttc"],
+    },
+    FontFileCandidate {
+        name: "MS Gothic",
+        components: &["C:", "Windows", "Fonts", "msgothic.ttc"],
+    },
+    FontFileCandidate {
+        name: "Malgun Gothic",
+        components: &["C:", "Windows", "Fonts", "malgun.ttf"],
+    },
+    FontFileCandidate {
+        name: "Segoe UI Emoji",
+        components: &["C:", "Windows", "Fonts", "seguiemj.ttf"],
+    },
+];
+
 struct PixelFace {
     dc: *mut core::ffi::c_void,
     font: HGDIOBJ,
@@ -115,37 +165,12 @@ impl PixelFace {
     }
 }
 
-pub(crate) fn candidates() -> Vec<FontFileCandidate> {
+pub(crate) const fn candidates() -> &'static [FontFileCandidate] {
     // Windows monospace font files. Ordered by preference; the first readable
     // file wins. Sarasa Fixed SC is preferred for broad Chinese coverage,
     // then Cascadia Code / Consolas for fallback. Paths are absolute and use
     // backslashes on Windows.
-    vec![
-        FontFileCandidate {
-            name: "Sarasa Fixed SC",
-            components: &["C:", "Windows", "Fonts", "sarasa-mono-sc-regular.ttf"],
-        },
-        FontFileCandidate {
-            name: "Sarasa Fixed SC",
-            components: &["C:", "Windows", "Fonts", "sarasaMonoSC-Regular.ttf"],
-        },
-        FontFileCandidate {
-            name: "Cascadia Code",
-            components: &["C:", "Windows", "Fonts", "cascadia.ttf"],
-        },
-        FontFileCandidate {
-            name: "Cascadia Mono",
-            components: &["C:", "Windows", "Fonts", "cascadiamono.ttf"],
-        },
-        FontFileCandidate {
-            name: "Consolas",
-            components: &["C:", "Windows", "Fonts", "consola.ttf"],
-        },
-        FontFileCandidate {
-            name: "Courier New",
-            components: &["C:", "Windows", "Fonts", "cour.ttf"],
-        },
-    ]
+    PRIMARY_CANDIDATES
 }
 
 /// Fonts consulted only for glyphs the primary face does not have.
@@ -155,32 +180,11 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
 /// blank cells (width reserved, glyph absent). These are never chosen as the
 /// primary face (cell metrics must come from the monospace font); they are only
 /// used for missing glyphs.
-pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
-    vec![
-        // SimSun's collection includes NSimSun (New Song), the traditional
-        // fixed-width Chinese terminal face. Keep it ahead of proportional UI
-        // fonts so CJK glyphs fill the terminal's two-cell-wide grid cleanly.
-        FontFileCandidate {
-            name: "SimSun / NSimSun",
-            components: &["C:", "Windows", "Fonts", "simsun.ttc"],
-        },
-        FontFileCandidate {
-            name: "Microsoft YaHei",
-            components: &["C:", "Windows", "Fonts", "msyh.ttc"],
-        },
-        FontFileCandidate {
-            name: "MS Gothic",
-            components: &["C:", "Windows", "Fonts", "msgothic.ttc"],
-        },
-        FontFileCandidate {
-            name: "Malgun Gothic",
-            components: &["C:", "Windows", "Fonts", "malgun.ttf"],
-        },
-        FontFileCandidate {
-            name: "Segoe UI Emoji",
-            components: &["C:", "Windows", "Fonts", "seguiemj.ttf"],
-        },
-    ]
+pub(crate) const fn fallback_candidates() -> &'static [FontFileCandidate] {
+    // SimSun's collection includes NSimSun (New Song), the traditional
+    // fixed-width Chinese terminal face. Keep it ahead of proportional UI
+    // fonts so CJK glyphs fill the terminal's two-cell-wide grid cleanly.
+    FALLBACK_CANDIDATES
 }
 
 pub(crate) fn probe() -> FontDiscovery {

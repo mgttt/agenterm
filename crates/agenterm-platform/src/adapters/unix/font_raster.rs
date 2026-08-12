@@ -18,7 +18,7 @@ struct Renderer {
     faces: Vec<Face>,
 }
 
-type CandidateSource = fn() -> Vec<FontFileCandidate>;
+type CandidateSource = fn() -> &'static [FontFileCandidate];
 
 fn renderer(primary: CandidateSource, fallback: CandidateSource) -> &'static Renderer {
     static RENDERER: OnceLock<Renderer> = OnceLock::new();
@@ -27,14 +27,14 @@ fn renderer(primary: CandidateSource, fallback: CandidateSource) -> &'static Ren
     })
 }
 
-fn load_faces(primary: Vec<FontFileCandidate>, fallback: Vec<FontFileCandidate>) -> Vec<Face> {
+fn load_faces(primary: &[FontFileCandidate], fallback: &[FontFileCandidate]) -> Vec<Face> {
     let mut faces = Vec::new();
-    for candidate in primary {
+    for &candidate in primary {
         if push_faces(&mut faces, candidate) {
             break;
         }
     }
-    for candidate in fallback {
+    for &candidate in fallback {
         push_faces(&mut faces, candidate);
     }
     faces

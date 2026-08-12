@@ -31,7 +31,7 @@ impl FontError {
     }
 }
 
-pub fn candidates() -> Vec<FontFileCandidate> {
+pub fn candidates() -> &'static [FontFileCandidate] {
     selected::font::candidates()
 }
 
@@ -41,7 +41,7 @@ pub fn candidates() -> Vec<FontFileCandidate> {
 /// Without coverage fallbacks, CJK and emoji can still render as blank cells
 /// (cell width reserved, glyphs missing). These are never selected as the
 /// primary face.
-pub fn fallback_candidates() -> Vec<FontFileCandidate> {
+pub fn fallback_candidates() -> &'static [FontFileCandidate] {
     selected::font::fallback_candidates()
 }
 

@@ -5,8 +5,8 @@ use crate::contract::font::{
     RasterGlyph,
 };
 
-pub(crate) fn candidates() -> Vec<FontFileCandidate> {
-    vec![
+pub(crate) fn candidates() -> &'static [FontFileCandidate] {
+    &[
         FontFileCandidate {
             name: "SF Mono",
             components: &["System", "Library", "Fonts", "SFNSMono.ttf"],
@@ -24,8 +24,8 @@ pub(crate) fn candidates() -> Vec<FontFileCandidate> {
 
 /// Fonts consulted only for glyphs the primary face does not have, so CJK and
 /// emoji do not render as blank cells. Never chosen as the primary face.
-pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
-    vec![
+pub(crate) fn fallback_candidates() -> &'static [FontFileCandidate] {
+    &[
         FontFileCandidate {
             name: "PingFang",
             components: &["System", "Library", "Fonts", "PingFang.ttc"],
@@ -43,7 +43,7 @@ pub(crate) fn fallback_candidates() -> Vec<FontFileCandidate> {
 
 pub(crate) fn probe() -> FontDiscovery {
     let mut available_families = Vec::new();
-    for candidate in candidates() {
+    for &candidate in candidates() {
         if candidate.exists() && !available_families.contains(&candidate.name) {
             available_families.push(candidate.name);
         }
@@ -60,7 +60,8 @@ pub(crate) fn primary_family_name() -> Result<&'static str, FontError> {
 
 pub(crate) fn primary_metrics(size_px: u16) -> Result<FontMetrics, FontError> {
     let candidate = candidates()
-        .into_iter()
+        .iter()
+        .copied()
         .find(|candidate| candidate.exists())
         .ok_or(FontError::Unavailable)?;
     let data = std::fs::read(candidate.absolute_path()).map_err(|_| FontError::MetricsFailed)?;
