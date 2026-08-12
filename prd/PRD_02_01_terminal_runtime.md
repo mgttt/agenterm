@@ -746,3 +746,13 @@ link drops `std::fs::read` and `default_read_to_end` to zero; the exact
 custom-std PE falls from 531,968 to 529,920 bytes. Evidence is one focused
 platform test, 89 con units, Windows x64 Clippy, and Windows ARM64 plus Linux
 x64 consumer compilation.
+
+Offline parent-console output now distinguishes a real Windows console from an
+inherited redirected stream. `GetConsoleMode` selects UTF-16 `WriteConsoleW`
+for console handles and UTF-8 partial-write `WriteFile` loops for pipes/files;
+borrowed standard handles are never closed. If parent attachment is required,
+the `CONOUT$` handle is one RAII-owned `CreateFileW` result and follows the same
+write contract. Linux/macOS retain locked stdio adapters. A public Unicode
+unknown-argument test proves redirected stderr preserves the original text and
+exit code 2. The exact custom-std PE remains 529,920 bytes; this increment is
+accepted for Unicode and handle ownership rather than claimed as a size gain.

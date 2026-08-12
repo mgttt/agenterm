@@ -173,6 +173,7 @@ parent-console = [
     "windows-sys/Win32_Security",
     "windows-sys/Win32_Storage_FileSystem",
     "windows-sys/Win32_System_Console",
+    "windows-sys/Win32_System_IO",
     "windows-sys/Win32_System_Threading",
 ]
 runtime = [

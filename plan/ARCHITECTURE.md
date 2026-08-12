@@ -221,6 +221,13 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   完整 `process`；GUI launcher 的父控制台输出与目标 shell/locale 默认值分别由
   `parent-console`、`runtime` 拥有。完整 `process` 仅为兼容聚合窄机制，con 必须显式
   声明所需 feature，不得因此获得进程枚举、控制、指标、安全或 spawn 面。
+- Windows `parent-console` adapter 不再用 `File/OpenOptions` 混淆 console 与重定向流。
+  有效 inherited handle 由 `GetConsoleMode` 分类：console 以 UTF-16 `WriteConsoleW` 输出，
+  pipe/file 以 UTF-8 `WriteFile` partial-write loop 输出；借用 std handle 不关闭。attach-parent
+  fallback 以 `CreateFileW(CONOUT$)` 创建唯一 RAII owner，并走同一分类 helper。Linux/macOS
+  保持锁定 stdio adapter。精确 custom-std PE 保持 529,920 B；Unicode 未知参数经重定向
+  stderr 原样往返，89 con units、Windows x64 Clippy、Windows ARM64 与 Linux x64 checks
+  通过。该项以 Unicode/handle ownership 正确性接受，不虚报同 alignment 档为尺寸收益。
 - 同一规则适用于正交文件机制：`screenshot`、`font` 不携带完整 `filesystem`，`ipc`
   不携带未使用的 `locking`。截图落盘由产品显式选择 `filesystem-publish`；IPC adapter
   只拥有 endpoint、transport 与调用者 identity，不能借 feature 依赖隐式扩大文件面。

@@ -1331,3 +1331,15 @@ fn rapid_ctrl_wheel_zoom_burst_against_a_repainting_tui_survives() {
     eprintln!("survived: last snapshot = {last_snapshot:?}");
     let _ = session.child.kill();
 }
+
+#[test]
+fn offline_cli_preserves_unicode_diagnostics_through_redirected_stderr() {
+    let output = Command::new(binary())
+        .arg("--未知选项")
+        .output()
+        .expect("run invalid Unicode argument");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("stderr remains UTF-8");
+    assert!(stderr.contains("--未知选项"), "{stderr}");
+}
