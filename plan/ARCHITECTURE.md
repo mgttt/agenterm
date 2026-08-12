@@ -409,6 +409,12 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
   collect，精确 custom-std PE 从 536,064 B 降至 534,528 B（-1,536 B），`.text` 从
   346.5 KiB 降至 345.5 KiB；88 units、18 GUI black-box、1 multitab control 与 Clippy
   通过，公开 pretty JSON 保持兼容。
+- 同一 fixed-schema codec 将生产 number 保留为 typed `u64` / `i64`，到最终 response
+  buffer 才经 con 直接声明的 `itoa` 格式化；fractional config 继续由专用 parser 处理，
+  任意 raw decimal string variant 只在 `cfg(test)` oracle 存在。perf、snapshot、截图尺寸和
+  delivery count 不再逐字段 `to_string` 分配，精确 PE 从 534,528 B 降至 532,480 B
+  （-2,048 B）。88 units、multitab control、Windows x64 Clippy、Windows ARM64 与 Linux
+  x64 consumer checks 通过。
   CPU 探测。Windows 截图不再打包 XRGB 或自行计算 PNG checksum：platform adapter
   将已校验 clip 的首像素指针和原 framebuffer stride 直接交给 GDI+
   `GdipCreateBitmapFromScan0` / `GdipSaveImageToFile`。Linux/macOS 继续由 portable adapter

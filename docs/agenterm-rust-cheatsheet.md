@@ -651,6 +651,17 @@ PE fell from 536,064 to 534,528 bytes, `.text` from 346.5 to 345.5 KiB, and the
 public GUI/control suites preserved JSON interoperability. Do not generalize
 this representation to a parser that must retain arbitrary input keys.
 
+Apply the same provenance rule to fixed-schema integer values. Con's production
+JSON outputs only signed or unsigned integers; decimal fractions belong to the
+typed configuration parser and never enter the output tree. `JsonValue` now
+stores `u64`/`i64` until final serialization, where a directly declared `itoa`
+dependency writes into the existing response buffer. A raw decimal-string
+variant exists only under `cfg(test)` for codec interoperability. This removes
+one `to_string` allocation per perf, snapshot, dimension and delivery-count
+field and reduced the exact PE from 534,528 to 532,480 bytes. Declare a crate
+you call directly even when another dependency already happens to pull it in;
+transitive availability is not an API contract.
+
 For the Windows roaming configuration root, prefer
 `SHGetFolderPathW(CSIDL_APPDATA)` with a caller-owned `MAX_PATH` UTF-16 buffer
 when that legacy length contract is acceptable. `SHGetKnownFolderPath` returns

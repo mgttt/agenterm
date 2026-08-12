@@ -10,7 +10,10 @@ const MAX_STRING_BYTES: usize = 1024 * 1024;
 pub enum JsonValue {
     Null,
     Bool(bool),
-    Number(String),
+    Unsigned(u64),
+    Signed(i64),
+    #[cfg(test)]
+    RawNumber(String),
     String(String),
     Array(Vec<JsonValue>),
     Object(Vec<(&'static str, JsonValue)>),
@@ -19,7 +22,7 @@ pub enum JsonValue {
 macro_rules! unsigned_value {
     ($($ty:ty),* $(,)?) => {$(
         impl From<$ty> for JsonValue {
-            fn from(value: $ty) -> Self { Self::Number(value.to_string()) }
+            fn from(value: $ty) -> Self { Self::Unsigned(value as u64) }
         }
     )*};
 }
@@ -27,7 +30,7 @@ macro_rules! unsigned_value {
 macro_rules! signed_value {
     ($($ty:ty),* $(,)?) => {$(
         impl From<$ty> for JsonValue {
-            fn from(value: $ty) -> Self { Self::Number(value.to_string()) }
+            fn from(value: $ty) -> Self { Self::Signed(value as i64) }
         }
     )*};
 }
@@ -545,7 +548,14 @@ fn write_value(value: &JsonValue, output: &mut Vec<u8>, indent: Option<usize>, d
     match value {
         JsonValue::Null => output.extend_from_slice(b"null"),
         JsonValue::Bool(value) => output.extend_from_slice(if *value { b"true" } else { b"false" }),
-        JsonValue::Number(value) => output.extend_from_slice(value.as_bytes()),
+        JsonValue::Unsigned(value) => {
+            output.extend_from_slice(itoa::Buffer::new().format(*value).as_bytes());
+        }
+        JsonValue::Signed(value) => {
+            output.extend_from_slice(itoa::Buffer::new().format(*value).as_bytes());
+        }
+        #[cfg(test)]
+        JsonValue::RawNumber(value) => output.extend_from_slice(value.as_bytes()),
         JsonValue::String(value) => write_string(value, output),
         JsonValue::Array(values) => {
             output.push(b'[');
@@ -740,7 +750,7 @@ mod tests {
                 JsonValue::Array(vec![
                     JsonValue::Null,
                     JsonValue::Bool(true),
-                    JsonValue::Number("-12.5e2".to_owned()),
+                    JsonValue::RawNumber("-12.5e2".to_owned()),
                 ]),
             ),
         ]);

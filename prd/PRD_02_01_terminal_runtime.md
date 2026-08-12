@@ -639,6 +639,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   reducing the exact PE from 536,064 to 534,528 bytes and `.text` from 346.5 to
   345.5 KiB. All 88 units, 18 GUI black-box tests, the isolated multitab control
   journey and Windows x64 Clippy preserve the public JSON/CLI contract.
+  Fixed-schema numeric values likewise remain typed `u64`/`i64` until the final
+  response buffer instead of allocating a decimal `String` per field. Con uses
+  its direct `itoa` dependency for final formatting; arbitrary raw decimal text
+  is test-only, while fractional configuration keeps its dedicated bounded
+  parser. The exact PE falls from 534,528 to 532,480 bytes. All 88 units, the
+  multitab control journey, Windows x64 Clippy and Windows ARM64/Linux x64
+  consumer checks pass.
   Its Windows resource retains the existing icon's 16/32/64 PNG frames while
   removing redundant mip sizes: `.rsrc` falls from 90,112 to 8,704 bytes, the
   source ICO is capped at 16 KiB by the build script, and Windows shell icon
