@@ -724,9 +724,8 @@ fn read_wire_request(stream: &mut NativeStream) -> Result<CliCommand, String> {
 }
 
 fn parse_native_endpoint(value: &str) -> Result<IpcEndpoint, String> {
-    IpcEndpoint::from_native_address(value).map_err(|_| {
-        "agenterm-con control requires pipe:<name> or unix:<absolute-path>".to_owned()
-    })
+    IpcEndpoint::from_native_address(value)
+        .map_err(|_| "agenterm-con control requires pipe:<name> or unix:<absolute-path>".to_owned())
 }
 
 #[cfg(test)]

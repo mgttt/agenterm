@@ -332,8 +332,10 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
             }
             "--font-size" => parsed.font_size = next_decimal(&mut rest, "--font-size")?,
             other if other.starts_with("--font-size=") => {
-                parsed.font_size =
-                    Some(parse_decimal(&other["--font-size=".len()..], "--font-size")?);
+                parsed.font_size = Some(parse_decimal(
+                    &other["--font-size=".len()..],
+                    "--font-size",
+                )?);
             }
             "--cols" => parsed.cols = next_value(&mut rest, "--cols")?,
             "--rows" => parsed.rows = next_value(&mut rest, "--rows")?,
@@ -409,9 +411,8 @@ fn next_decimal<'a>(
 }
 
 fn parse_decimal(raw: &str, flag: &str) -> Result<f64, String> {
-    json::parse_finite_decimal(raw).ok_or_else(|| {
-        format!("error: {flag} expects a finite number, got '{raw}'\n")
-    })
+    json::parse_finite_decimal(raw)
+        .ok_or_else(|| format!("error: {flag} expects a finite number, got '{raw}'\n"))
 }
 
 fn main() {

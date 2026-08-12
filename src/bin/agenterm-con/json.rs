@@ -529,7 +529,10 @@ pub fn parse_finite_decimal(raw: &str) -> Option<f64> {
     }
 
     let mut explicit_exponent = 0i32;
-    if bytes.get(index).is_some_and(|byte| matches!(byte, b'e' | b'E')) {
+    if bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
+    {
         index += 1;
         let exponent_negative = bytes.get(index) == Some(&b'-');
         if exponent_negative || bytes.get(index) == Some(&b'+') {
@@ -561,8 +564,8 @@ pub fn parse_finite_decimal(raw: &str) -> Option<f64> {
     }
 
     let dropped_digits = significant_digits.saturating_sub(kept_digits);
-    let exponent = explicit_exponent as i64 - i64::from(fraction_digits)
-        + i64::from(dropped_digits);
+    let exponent =
+        explicit_exponent as i64 - i64::from(fraction_digits) + i64::from(dropped_digits);
     if exponent > 308 {
         return None;
     }
@@ -591,8 +594,7 @@ pub fn parse_finite_decimal(raw: &str) -> Option<f64> {
 pub fn take_f64(fields: &mut Vec<(String, JsonValue)>, key: &str) -> Result<Option<f64>, String> {
     let value = take_number(fields, key)?
         .map(|value| {
-            parse_finite_decimal(&value)
-                .ok_or_else(|| format!("{key} is not a finite number"))
+            parse_finite_decimal(&value).ok_or_else(|| format!("{key} is not a finite number"))
         })
         .transpose()?;
     Ok(value)

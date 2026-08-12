@@ -56,8 +56,11 @@ impl Layout {
             SIDEBAR_MIN_WIDTH_DIP,
             SIDEBAR_MAX_WIDTH_DIP,
         );
-        let sidebar_width =
-            dip(clamp_f64(sidebar_dip, SIDEBAR_MIN_WIDTH_DIP, maximum), scale).min(width);
+        let sidebar_width = dip(
+            clamp_f64(sidebar_dip, SIDEBAR_MIN_WIDTH_DIP, maximum),
+            scale,
+        )
+        .min(width);
         let composer_height = dip(COMPOSER_HEIGHT_DIP, scale).min(height);
         let composer = Rect {
             x: sidebar_width,
