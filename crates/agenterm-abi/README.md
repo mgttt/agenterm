@@ -59,6 +59,45 @@ cargo fmt --all -- --check
 > `agenterm-abi`**（Cargo 依赖声明用它）；**lib/crate 名是 `agenterm`**（Rust
 > `use agenterm::` 与产物文件名用它）。
 
+## 静态链接（C 消费者，里程碑 18 实测）
+
+静态库文件名：Windows **`agenterm.lib`**，Unix **`libagenterm.a`**，位于
+`target/<profile>/`（profile 为 `abi-dev` 或 `abi-release`）。Rust `staticlib`
+静态进 C 程序时，**C 侧必须补齐 Rust 运行时的系统库依赖**——这是里程碑 18
+实测得出的，不是猜的：先只链静态库，把链接器报的 unresolved symbol 抓下来，
+按实际缺失逐个补。
+
+**Windows / MSVC 实测系统库列表**（kernel32 由 MSVC 链接器默认自动链接，
+无需显式给出）：
+
+```
+cl /nologo /W4 /WX /Iinclude examples/c/agenterm_probe.c target/abi-dev/agenterm.lib ws2_32.lib ntdll.lib ole32.lib user32.lib uxtheme.lib dwmapi.lib /Fe:probe.exe
+```
+
+对应符号分布：`ws2_32` = Winsock2（recv/send/accept/WSA*…）、`ntdll` =
+NtCreateFile/NtOpenFile/NtWriteFile/RtlGetVersion 等、`ole32` = COM 与
+drag-drop、`user32` = 触摸输入、`uxtheme` = SetWindowTheme、`dwmapi` = DWM
+窗口属性。以上命令假定已设置 MSVC 工具链环境（`vcvars64.bat`），`cl` 才能
+沿 INCLUDE/LIB 找到头文件与系统库。
+
+**gcc / clang（Unix）**——Linux 初始集（若在 CI 上实测报缺符号，按链接器
+输出逐个补，并回填这里）：
+
+```
+cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/libagenterm.a -o probe -ldl -lpthread -lm
+```
+
+macOS 尚未实测（可能还需 AppKit/CoreFoundation 等 framework），以 CI 实测
+为准。
+
+**panic 围栏同样适用于静态库**：静态链接**不消除 C 边界**，所以静态库
+一样必须用 `--profile abi-release` / `abi-dev` 构建；默认 `dev` / `release`
+（abort）会被 `compile_error!` 闸挡住（见上）。`c_static_link.rs` 是这条
+路径的链接回归闸：找不到静态库、编译失败、链接失败、运行非 0 都红。
+
+**静态 vs 动态取舍**：静态省去随行 dll（自包含、部署简单），但产物更大、
+且升级库要重新链接；动态则运行时加载、升级只需替换库文件。
+
 ## `allow-abort-profile` feature（逃生舱，默认关闭）
 
 该 feature 是给**没有 C 边界的 Rust 原生 rlib 消费者**（如 `agenterm-cu`

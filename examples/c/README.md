@@ -33,6 +33,23 @@ cl /nologo /W4 /WX /Iinclude examples/c/agenterm_probe.c target/abi-dev/agenterm
 cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c -o probe -Ltarget/abi-dev -lagenterm
 ```
 
+## Static link (no DLL, self-contained executable)
+
+Link the staticlib instead of the import library / shared object. A Rust
+`staticlib` needs the C side to supply the Rust runtime's system libraries;
+the MSVC list below is measured (see
+`crates/agenterm-abi/README.md` — 静态链接), the Unix list is the initial set
+for CI to calibrate. Run needs no DLL and no `LD_LIBRARY_PATH`:
+
+```
+cl /nologo /W4 /WX /Iinclude examples/c/agenterm_probe.c target/abi-dev/agenterm.lib ws2_32.lib ntdll.lib ole32.lib user32.lib uxtheme.lib dwmapi.lib /Fe:probe.exe   (Windows/MSVC, after vcvars64)
+cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/libagenterm.a -o probe -ldl -lpthread -lm   (Linux)
+```
+
+This is the same `agenterm_probe.c` exercised by
+`crates/agenterm-abi/tests/c_static_link.rs`, which fails the build if the
+static link cannot be made to work.
+
 ## Run
 
 `agenterm.dll` must sit next to the executable (Windows searches the
