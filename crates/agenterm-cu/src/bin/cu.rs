@@ -82,6 +82,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         "click" => {
             let window = flag_isize(&mut args, "--window");
             let node = flag_value(&mut args, "--node");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
             let coords = flag_coords(&mut args, "--coords");
             let degraded = args.iter().any(|arg| arg == "--degraded");
             args.retain(|arg| arg != "--degraded");
@@ -95,6 +97,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 target,
                 window,
                 node,
+                name,
+                role,
                 coords,
                 degraded,
                 clicks,
@@ -103,24 +107,72 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         }
         "focus" => {
             let window = flag_isize(&mut args, "--window");
-            let node = flag_value(&mut args, "--node").unwrap_or_default();
-            if node.is_empty() {
-                return usage_err("focus requires --node <path-id>");
+            let node = flag_value(&mut args, "--node");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if node.as_ref().is_none_or(|value| value.is_empty())
+                && name.as_ref().is_none_or(|value| value.is_empty())
+            {
+                return usage_err(
+                    "focus requires --node <path-id> or --window <handle> --name <pattern>",
+                );
             }
             Command::Focus {
                 target,
                 window,
                 node,
+                name,
+                role,
             }
         }
-        "send-text" => Command::SendText {
-            target,
-            text: args.join(" "),
-        },
-        "send-keys" => Command::SendKeys {
-            target,
-            keys: args.join("+"),
-        },
+        "send-text" => {
+            // `--` ends flag parsing so the text may itself start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            Command::SendText {
+                target,
+                text: literal_text.unwrap_or_else(|| args.join(" ")),
+                window,
+                name,
+                role,
+            }
+        }
+        "send-keys" => {
+            // `--` ends flag parsing so a chord may itself start with a dash.
+            let literal_keys = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join("+")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            Command::SendKeys {
+                target,
+                keys: literal_keys.unwrap_or_else(|| args.join("+")),
+                window,
+                name,
+                role,
+            }
+        }
+        "window-place" => {
+            let action = flag_value(&mut args, "--action")
+                .or_else(|| args.first().cloned())
+                .unwrap_or_default();
+            if action.is_empty() {
+                return usage_err("window-place requires --action <id>");
+            }
+            let window = flag_isize(&mut args, "--window");
+            Command::WindowPlace {
+                target,
+                action,
+                window,
+            }
+        }
         "wait" => {
             let timeout_ms = flag_u64(&mut args, "--timeout-ms").unwrap_or(5_000);
             let condition = if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
@@ -129,9 +181,15 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 WaitCondition::WindowTitleContains { pattern }
             } else if let Some(handle) = flag_isize(&mut args, "--focused-handle") {
                 WaitCondition::FocusedHandle { handle }
+            } else if let Some(pattern) = flag_value(&mut args, "--node-name-contains") {
+                WaitCondition::NodeNameContains {
+                    pattern,
+                    role: flag_value(&mut args, "--node-role"),
+                    window: flag_isize(&mut args, "--window"),
+                }
             } else {
                 return usage_err(
-                    "wait requires one of --window-count-gte, --window-title-contains, or --focused-handle",
+                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, or --node-name-contains",
                 );
             };
             Command::Wait {
@@ -244,11 +302,26 @@ Commands:
   windows
   tree [--window HANDLE]
   screenshot --out PATH [--window HANDLE]
-  click (--window HANDLE --node ID | --coords X,Y --degraded) [--button left|right|middle] [--clicks N]
-  focus [--window HANDLE] --node ID
-  send-text <text...>
-  send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
-  wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE)
+  click (--window HANDLE --node ID | --window HANDLE --name PAT [--role ROLE] | --coords X,Y --degraded)
+        [--button left|right|middle] [--clicks N]
+                              --name reuses wait NodeNameContains matching, then the --node AT-SPI path
+  focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
+  send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
+                              --name focuses that node first (same matcher as click/focus),
+                              then types; `--` ends flag parsing
+  send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
+                              e.g. ctrl+c / alt+f4 / enter; --name focuses that node first
+                              (same matcher as click/focus/send-text), then sends
+  wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
+                        | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])
+                              node conditions poll the accessibility tree and fail typed
+                              ("timeout") instead of returning met:false
+  window-place --action <id> [--window HANDLE]
+      ids: center|fullscreen|left-half|right-half|top-half|bottom-half
+           upper-left|lower-left|upper-right|lower-right
+           next-third|previous-third|next-display|previous-display
+           larger|smaller|undo|redo
+           (or SpectacleWindowAction* constants)
 
 All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"error":..}}
 "#

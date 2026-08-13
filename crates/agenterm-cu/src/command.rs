@@ -39,6 +39,14 @@ pub enum Command {
         window: Option<isize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         node: Option<String>,
+        /// Accessible-name substring; resolved with the same showing/visible
+        /// matcher as `WaitCondition::NodeNameContains` (exactly one match),
+        /// then acted via `--node`. Two or more showing hits are
+        /// `a11y_node_ambiguous`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         coords: Option<[i32; 2]>,
         #[serde(default)]
@@ -52,15 +60,36 @@ pub enum Command {
         target: TargetRef,
         #[serde(skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
-        node: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
     },
     SendText {
         target: TargetRef,
         text: String,
+        /// Optional accessible-name addressing: focus the matched node first,
+        /// resolved with the same matcher as `Focus`, then type into it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
     },
     SendKeys {
         target: TargetRef,
         keys: String,
+        /// Optional accessible-name addressing: focus the matched node first,
+        /// resolved with the same matcher as `Focus`, then send the chord.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
     },
     Wait {
         target: TargetRef,
@@ -68,14 +97,37 @@ pub enum Command {
         #[serde(flatten)]
         condition: WaitCondition,
     },
+    WindowPlace {
+        target: TargetRef,
+        action: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "wait", rename_all = "kebab-case")]
 pub enum WaitCondition {
-    WindowCountGte { count: usize },
-    WindowTitleContains { pattern: String },
-    FocusedHandle { handle: isize },
+    WindowCountGte {
+        count: usize,
+    },
+    WindowTitleContains {
+        pattern: String,
+    },
+    FocusedHandle {
+        handle: isize,
+    },
+    /// Polls the accessibility tree until exactly one showing node matches.
+    /// Two or more showing hits fail typed (`a11y_node_ambiguous`) instead of
+    /// picking the first. Never falls back to pixels: addressing stays
+    /// `accessibility-tree`.
+    NodeNameContains {
+        pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+    },
 }
 
 fn default_clicks() -> u32 {
@@ -94,6 +146,7 @@ impl Command {
             Self::SendText { .. } => "send-text".into(),
             Self::SendKeys { .. } => "send-keys".into(),
             Self::Wait { .. } => "wait".into(),
+            Self::WindowPlace { .. } => "window-place".into(),
         }
     }
 
@@ -107,7 +160,8 @@ impl Command {
             | Self::Focus { target, .. }
             | Self::SendText { target, .. }
             | Self::SendKeys { target, .. }
-            | Self::Wait { target, .. } => *target,
+            | Self::Wait { target, .. }
+            | Self::WindowPlace { target, .. } => *target,
         }
     }
 
@@ -116,7 +170,8 @@ impl Command {
             Self::Click { .. }
             | Self::Focus { .. }
             | Self::SendText { .. }
-            | Self::SendKeys { .. } => crate::auth::Grant::Actuate,
+            | Self::SendKeys { .. }
+            | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }
     }

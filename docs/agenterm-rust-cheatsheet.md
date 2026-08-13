@@ -1020,6 +1020,25 @@ reading those empty names through libagenterm's two-stage string ABI, a
 `cap==0` probe that reports `required==0` is the empty payload — do not call
 again with `cap==0`, or `buffer_too_small` will fail the whole tree.
 
+## Name addressing is wait-matching then the node path
+
+`cu click --name` / `cu focus --name` must not grow a second actuation
+backend. Resolve with the same showing/visible + case-insensitive
+substring matcher as `wait --node-name-contains`, then call the existing
+`--node` AT-SPI path. Require `--window`, reject `--name` combined with
+`--node` or `--coords`, and return typed `a11y_node_not_found` on a miss.
+Two or more showing/visible hits must return typed `a11y_node_ambiguous`
+with the match count — never silently pick the first. The same uniqueness
+rule applies to `wait --node-name-contains`. Never satisfy a name click
+with a screenshot or degraded coordinates.
+
+`cu send-text --name` and `cu send-keys --name` are the same rule plus one
+ordering constraint: resolve and focus the node BEFORE injecting any
+keystroke, so a miss types nothing instead of spraying text or a chord into
+whatever happened to be focused. Their payload argument is positional, so
+parse `--` as the end of flags — otherwise text (or a chord) that starts with
+a dash is eaten as a flag.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must

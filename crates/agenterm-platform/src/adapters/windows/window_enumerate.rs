@@ -105,3 +105,21 @@ fn process_name(pid: u32) -> String {
         name
     }
 }
+
+pub(crate) fn list_screens()
+-> Result<Vec<crate::contract::window_enumerate::ScreenInfo>, WindowEnumerateError> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1) as u32;
+    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(1) as u32;
+    let bounds = WindowBounds {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    Ok(vec![crate::contract::window_enumerate::ScreenInfo {
+        frame: bounds,
+        visible: bounds,
+        primary: true,
+    }])
+}

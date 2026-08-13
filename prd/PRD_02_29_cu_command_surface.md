@@ -70,6 +70,25 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   backend as `tree`. Coordinate `click` is a separate degraded path requiring
   an explicit marker; it never substitutes silently when structured actuation
   was requested.
+- [~] structured `click` / `focus` also accept an accessible name
+  (`--window` + `--name` + optional `--role`). Resolution reuses the
+  `wait --node-name-contains` matcher (showing/visible, case-insensitive
+  substring) and then acts on the existing node-path a11y path. A miss is
+  typed `a11y_node_not_found`. Two or more showing matches are typed
+  `a11y_node_ambiguous` (with the match count); the command must not pick
+  the first. Name addressing must not parse tree dumps, take screenshots,
+  or fall through to `--coords`.
+- [~] `send-text` accepts the same name addressing (`--window` + `--name` +
+  optional `--role`, with `--` ending flag parsing). It focuses the matched
+  node through the node-path path, then types; without `--name` it stays the
+  plain "type into whatever is focused" verb. A miss or an ambiguous name
+  types nothing and fails typed, so a loop-until caller never sprays text
+  at the wrong control.
+- [~] `send-keys` accepts that same name addressing (`--window` + `--name` +
+  optional `--role`, with `--` ending flag parsing). It focuses the matched
+  node first, then sends the chord; without `--name` it stays the plain
+  "send to whatever is focused" verb. A miss or an ambiguous name sends no
+  chord at all.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

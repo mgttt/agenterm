@@ -84,6 +84,65 @@ err = json.loads(sys.argv[1])["error"]
 assert err["code"] == "a11y_node_not_found"
 PY
 
+echo "== name-addressed click requires --window =="
+OUT="$(run_json --target current --grant actuate click --name Reload)"
+test "$(json_field "$OUT" ok)" = "False"
+python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] == "invalid_input"
+PY
+
+echo "== name-addressed click missing node fails typed =="
+HANDLE="$(python3 - "$("$CU" --target current --grant observe windows)" <<'PY'
+import json, sys
+payload = json.loads(sys.argv[1])
+if payload.get("ok") and payload.get("data"):
+    print(payload["data"][0]["handle"])
+PY
+)"
+if [[ -n "${HANDLE:-}" ]]; then
+  OUT="$(run_json --target current --grant actuate click --window "$HANDLE" --name agenterm-no-such-control)"
+  test "$(json_field "$OUT" ok)" = "False"
+  python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] in ("a11y_node_not_found", "unsupported")
+PY
+  OUT="$(run_json --target current --grant actuate send-text --window "$HANDLE" --name agenterm-no-such-control -- hello)"
+  test "$(json_field "$OUT" ok)" = "False"
+  python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] in ("a11y_node_not_found", "unsupported")
+PY
+  OUT="$(run_json --target current --grant actuate send-keys --window "$HANDLE" --name agenterm-no-such-control -- enter)"
+  test "$(json_field "$OUT" ok)" = "False"
+  python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] in ("a11y_node_not_found", "unsupported")
+PY
+fi
+
+echo "== name-addressed send-text requires --window =="
+OUT="$(run_json --target current --grant actuate send-text --name Reload -- hello)"
+test "$(json_field "$OUT" ok)" = "False"
+python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] == "invalid_input"
+PY
+
+echo "== name-addressed send-keys requires --window =="
+OUT="$(run_json --target current --grant actuate send-keys --name Reload -- enter)"
+test "$(json_field "$OUT" ok)" = "False"
+python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] == "invalid_input"
+PY
+
 echo "== structured at-spi click when node exists =="
 OUT="$(run_json --target current --grant observe tree)"
 NODE_ID="$(python3 - "$OUT" <<'PY'

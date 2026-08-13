@@ -279,6 +279,7 @@ window-enum = [
     "windows-sys/Win32_System_Threading",
 ]
 window-op = [
+    "dep:x11rb",
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_UI_WindowsAndMessaging",

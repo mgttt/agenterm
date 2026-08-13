@@ -11,15 +11,17 @@ Orchestrator agents (not humans staring at pixels) should run:
 ```text
 loop until goal:
   observe structured state (windows, control tree, typed capabilities)
-  act by structured identity (window + node path id) when a tree exists
+  act by structured identity (window + node path, or window + accessible name)
+    click / focus / send-text / send-keys all take --name, so no step parses node ids
   wait on observable conditions with bounded timeouts — never sleep
 ```
 
 `cu` is capability, not judgment: no planner, model, or agent loop ships here.
 
-Named window placement (`window-place`, Spectacle action catalog) is accepted
-product scope under [`prd/PRD_02_32_cu_window_placement.md`](../../prd/PRD_02_32_cu_window_placement.md).
-Implementation **starts in v0.1.19**; it is not in the current command enum.
+Named window placement (`window-place`) is in the command enum. Geometry
+follows the Spectacle catalog
+([PRD 32](../../prd/PRD_02_32_cu_window_placement.md)). Apply uses
+`agenterm-platform` `move_window`. Requires `--grant actuate`.
 
 ## Native accessibility mapping (按图索骥)
 
@@ -46,11 +48,14 @@ audited separately from AT-SPI actuation.
 | `windows` | X11 window enumeration (`agenterm-platform`) |
 | `tree` | AT-SPI2 flattened control tree with role, name, states, bounds, actions |
 | `click --node <path>` | AT-SPI2 `Action` (`click` / `press`, else default `DoAction(0)` when the node exposes actions) |
+| `click --window --name PAT [--role ROLE]` | same showing/visible name matcher as `wait --node-name-contains` (exactly one hit), then the `--node` AT-SPI path |
 | `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
+| `focus --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection |
+| `send-text` / `send-keys` `--window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path, then that keyboard injection |
 | `screenshot` | typed `unsupported` on Linux native capture |
-| `wait` | polls window state |
+| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`) |
 
 ### Tree JSON shape (UIA-like)
 
@@ -108,11 +113,34 @@ cu --target current --grant observe tree --window 0x3c00007
 # Structured click by node path (AT-SPI)
 cu --target current --grant actuate click --node /3/0/0/1/0
 
+# Structured click / focus by accessible name — no tree-dump parsing, no --coords.
+# Two or more showing hits fail typed (`a11y_node_ambiguous`) instead of picking the first.
+cu --target current --grant observe,act click --window 25165828 --name Reload
+cu --target current --grant observe,act focus --window 25165828 --name Reload --role button
+
 # Structured focus
 cu --target current --grant actuate focus --node /3/0/0/1/0
 
+# Type into a control by accessible name — focuses that node first, then types.
+# `--` ends flag parsing so the text may start with a dash.
+cu --target current --grant observe,act send-text --window 25165828 \
+  --name "Address and search bar" -- hello
+
+# Send a chord to a control by accessible name — same matcher, focus, then keys.
+cu --target current --grant observe,act send-keys --window 25165828 \
+  --name "Address and search bar" -- enter
+
 # Wait for at least one window, 3s max
 cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
+
+# Wait for a control to appear in one window's accessibility tree (no screenshot).
+# The handle is the decimal `handle` from `cu windows`; a match needs a showing
+# (or visible) node, and a timeout is a typed `ok:false` / `error.code=timeout`.
+cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
+  --node-name-contains Reload --node-role button
+
+# Place the focused window (Spectacle catalog)
+cu --target current --grant actuate window-place --action left-half
 
 # Refused without actuate grant
 cu --target current --grant observe send-text hello
