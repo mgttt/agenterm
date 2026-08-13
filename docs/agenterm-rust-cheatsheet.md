@@ -951,3 +951,14 @@ then pass the resulting glyph index to `GetGlyphOutlineW` with
 bounded table per live face, and treat absent/malformed tables as local missing
 coverage. This handles nominal supplementary outline glyphs; it does not claim
 color emoji, variation sequences, or run shaping, which require DirectWrite.
+
+## Integration-test paths are gate ownership
+
+Cargo automatically discovers every `tests/*.rs` file for the package rooted
+at that manifest. Pointing a second package's explicit `[[test]]` entry at the
+same root-level file does not transfer ownership: both packages run it, under
+different profiles and binary-resolution contexts. Product-specific GUI and
+black-box tests must physically live under the owning package's `tests/`
+directory, use package-relative `[[test]]` paths when explicit registration is
+needed, and publish repo-relative evidence paths separately. Confirm ownership
+through Cargo metadata, not only by observing one green invocation.

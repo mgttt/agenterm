@@ -343,7 +343,7 @@ fn cargo_unit_primary_spec(environment) {
         // became its own workspace package, and a bare `cargo test` (which
         // resolves to the root package here) therefore no longer builds
         // `agenterm-con.exe`. The 16 black-box tests in
-        // `tests/agenterm_con_blackbox.rs` spawn that real binary, so on
+        // `crates/agenterm-con/tests/agenterm_con_blackbox.rs` spawns that real binary, so on
         // windows every one of them failed with "agenterm-con is missing at
         // target/debug/agenterm-con.exe". Naming both packages builds the
         // binary and keeps the tests where they are.

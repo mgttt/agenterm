@@ -92,6 +92,9 @@ fn machine_contract_matches_public_cli_and_registered_journeys() {
         let target = required_str(item, "test_target");
         let test_name = required_str(item, "test_name");
         let source = required_str(item, "source");
+        let package_source = source
+            .strip_prefix("crates/agenterm-con/")
+            .unwrap_or_else(|| panic!("con evidence source must be package-owned: {source}"));
         assert_eq!(required_str(item, "kind"), "public-black-box");
         assert_eq!(required_str(item, "emitter"), "cargo-test-harness");
         assert_eq!(required_str(item, "platform"), "windows-x86_64");
@@ -110,7 +113,7 @@ fn machine_contract_matches_public_cli_and_registered_journeys() {
         );
         assert!(
             manifest.contains(&format!("name = \"{target}\""))
-                && manifest.contains(&format!("path = \"../../{source}\"")),
+                && manifest.contains(&format!("path = \"{package_source}\"")),
             "registered target {target} and source {source} are absent from Cargo.toml"
         );
     }
