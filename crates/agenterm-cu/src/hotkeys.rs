@@ -65,6 +65,10 @@ mod macos {
     type EventHandlerRef = *mut c_void;
     type EventHandlerCallRef = *mut c_void;
 
+    // One `#[link]` per framework is the documented way to link several of
+    // them to a single extern block; clippy reads the repeated attribute name
+    // as a copy-paste slip.
+    #[allow(clippy::duplicated_attributes)]
     #[link(name = "Carbon", kind = "framework")]
     #[link(name = "CoreFoundation", kind = "framework")]
     #[link(name = "ApplicationServices", kind = "framework")]
@@ -303,14 +307,12 @@ mod macos {
             return;
         };
         let stamp = std::path::PathBuf::from(home).join(".local/share/agenterm/ax-relaunch.stamp");
-        if let Ok(meta) = std::fs::metadata(&stamp) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(age) = modified.elapsed() {
-                    if age.as_secs() < 20 {
-                        return;
-                    }
-                }
-            }
+        if let Ok(meta) = std::fs::metadata(&stamp)
+            && let Ok(modified) = meta.modified()
+            && let Ok(age) = modified.elapsed()
+            && age.as_secs() < 20
+        {
+            return;
         }
         if let Some(dir) = stamp.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -381,17 +383,17 @@ mod macos {
             window: None,
         };
         let reply = host.executor.execute(&command);
-        if !reply.ok {
-            if let Some(error) = reply.error {
-                eprintln!(
-                    "cu hotkeys: {} failed: {} ({})",
-                    action.kebab(),
-                    error.message,
-                    error.code
-                );
-                if error.code == "ax_api_disabled" {
-                    relaunch_for_ax();
-                }
+        if !reply.ok
+            && let Some(error) = reply.error
+        {
+            eprintln!(
+                "cu hotkeys: {} failed: {} ({})",
+                action.kebab(),
+                error.message,
+                error.code
+            );
+            if error.code == "ax_api_disabled" {
+                relaunch_for_ax();
             }
         }
         0

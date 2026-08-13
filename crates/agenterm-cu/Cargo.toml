@@ -16,6 +16,12 @@ serde_json = "1"
 # gone entirely.
 libloading = "0.8"
 
+# These feature lists must stay complete on their own. Until milestone 46 the
+# crate also depended on `agenterm-platform`, whose winit tree enabled
+# `NSRunningApplication` and `NSThread` for us; Cargo feature unification made
+# that invisible, and dropping the dependency took them away. Only the macOS CI
+# job compiles this target, so anything missing here fails there and nowhere
+# else.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5.2"
 objc2-app-kit = { version = "0.2.2", features = [
@@ -27,6 +33,8 @@ objc2-app-kit = { version = "0.2.2", features = [
     "NSMenu",
     "NSMenuItem",
     "NSResponder",
+    # Defines NSApplicationActivationPolicy, which -setActivationPolicy: takes.
+    "NSRunningApplication",
     "NSStatusBar",
     "NSStatusBarButton",
     "NSStatusItem",
@@ -35,6 +43,8 @@ objc2-app-kit = { version = "0.2.2", features = [
 ] }
 objc2-foundation = { version = "0.2.2", features = [
     "NSDictionary",
+    # Gates MainThreadMarker::new(); the default feature set is just "std".
+    "NSThread",
     "NSValue",
 ] }
 

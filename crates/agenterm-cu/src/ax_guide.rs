@@ -78,10 +78,10 @@ pub fn open_accessibility_settings() {
         let workspace = NSWorkspace::sharedWorkspace();
         for raw in SETTINGS_URLS {
             let s = NSString::from_str(raw);
-            if let Some(url) = NSURL::URLWithString(&s) {
-                if workspace.openURL(&url) {
-                    return;
-                }
+            if let Some(url) = NSURL::URLWithString(&s)
+                && workspace.openURL(&url)
+            {
+                return;
             }
         }
     }
