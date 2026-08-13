@@ -1,0 +1,32 @@
+[package]
+name = "size-probe"
+version = "0.1.16"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+description = "Milestone 15: static vs dynamic two-variant size probe for Phase 0 criterion 2"
+license = "MIT OR Apache-2.0"
+
+# The two binaries are explicit; `autobins = false` also keeps this package
+# from being auto-discovered as the root package's example target.
+autobins = false
+
+[[bin]]
+name = "size-probe-variant-a-static"
+path = "src/variant_a_static.rs"
+
+[[bin]]
+name = "size-probe-variant-b-dynamic"
+path = "src/variant_b_dynamic.rs"
+
+[dependencies]
+# Variant A only: statically links the mechanism code it actually calls
+# (runtime / clipboard / process / parent-console). `process` already pulls
+# in `parent-console` and `runtime`; `clipboard` is explicit.
+agenterm-platform = { path = "../../crates/agenterm-platform", features = ["process", "clipboard"] }
+
+# Variant B only: the dynamic path never depends on agenterm-platform; it
+# dlopens the libagenterm cdylib through this tiny loader. `libloading` is
+# the only non-std dependency of variant B, so the mechanism code cannot
+# statically enter its artifact.
+libloading = "0.8"
