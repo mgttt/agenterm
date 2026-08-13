@@ -40,9 +40,9 @@ cargo fmt --all -- --check
 
 | 形态 | Windows | Unix（Linux/macOS） | 适用场景 |
 |------|---------|---------------------|----------|
-| 动态库 `cdylib` | `agenterm_abi.dll`（+ 导入库 `agenterm_abi.dll.lib`） | `libagenterm_abi.so` / `libagenterm_abi.dylib` | C 消费者常规交付：运行时加载，升级只需替换库文件 |
-| 静态库 `staticlib` | `agenterm_abi.lib` | `libagenterm_abi.a` | C 消费者嵌入场景：链接进可执行文件，不想携带动态库文件 |
-| Rust 库 `rlib` | `libagenterm_abi.rlib` | `libagenterm_abi.rlib` | 进程内 Rust 消费者（`agenterm-cu`）直接 `use agenterm_abi::`，无需 dlopen |
+| 动态库 `cdylib` | `agenterm.dll`（+ 导入库 `agenterm.dll.lib`） | `libagenterm.so` / `libagenterm.dylib` | C 消费者常规交付：运行时加载，升级只需替换库文件 |
+| 静态库 `staticlib` | `agenterm.lib` | `libagenterm.a` | C 消费者嵌入场景：链接进可执行文件，不想携带动态库文件 |
+| Rust 库 `rlib` | `libagenterm.rlib` | `libagenterm.rlib` | 进程内 Rust 消费者（`agenterm-cu`）直接 `use agenterm::`，无需 dlopen |
 
 三者均位于 `target/<profile>/`（profile 为 `abi-dev` 或 `abi-release`）。
 
@@ -54,10 +54,10 @@ cargo fmt --all -- --check
 会被 `compile_error!` 闸挡住。除非开启 `allow-abort-profile`——但那样
 构建出的库没有 `catch_unwind` 围栏，只适合没有 C 边界的 Rust 内部消费者。
 
-> **命名事实**：产物文件名是 `agenterm_abi.*`（包名 `agenterm-abi`，
-> `[lib] name` 未改）。`plan/plan-v0.1.18.md` §14 的产品称呼是
-> `libagenterm.{so,dylib,dll}`，与本产物不同名。改名需要单独评估——
-> 会波及 `agenterm-cu` 的 `use agenterm_abi::` 与根包，本轮不做。
+> **命名**：产物文件名现在是 `libagenterm.{a,so,dylib}` / `agenterm.dll`，
+> 与 `plan/plan-v0.1.18.md` §14 一致（里程碑 17 完成改名）。**package 名仍是
+> `agenterm-abi`**（Cargo 依赖声明用它）；**lib/crate 名是 `agenterm`**（Rust
+> `use agenterm::` 与产物文件名用它）。
 
 ## `allow-abort-profile` feature（逃生舱，默认关闭）
 

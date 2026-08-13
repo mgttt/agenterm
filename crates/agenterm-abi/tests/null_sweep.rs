@@ -136,9 +136,9 @@ fn cdylib_path() -> PathBuf {
     let deps = exe.parent().expect("test binary has a parent dir");
     let profile_dir = deps.parent().expect("deps dir has a parent dir");
     const CANDIDATES: [&str; 3] = [
-        "agenterm_abi.dll",      // Windows
-        "libagenterm_abi.so",    // Linux
-        "libagenterm_abi.dylib", // macOS
+        "agenterm.dll",      // Windows
+        "libagenterm.so",    // Linux
+        "libagenterm.dylib", // macOS
     ];
     for dir in [profile_dir, deps] {
         for name in CANDIDATES {

@@ -12,7 +12,7 @@
 //! the system temp directory and are cleaned up; nothing is written into the
 //! repository tree.
 
-use agenterm_abi::{ABI_MAJOR, ABI_MINOR};
+use agenterm::{ABI_MAJOR, ABI_MINOR};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -106,9 +106,9 @@ fn locate_cdylib() -> PathBuf {
     let deps = exe.parent().expect("test binary has a parent dir");
     let profile_dir = deps.parent().expect("deps dir has a parent dir");
     const CANDIDATES: [&str; 3] = [
-        "agenterm_abi.dll",      // Windows
-        "libagenterm_abi.so",    // Linux
-        "libagenterm_abi.dylib", // macOS
+        "agenterm.dll",      // Windows
+        "libagenterm.so",    // Linux
+        "libagenterm.dylib", // macOS
     ];
     for dir in [profile_dir, deps] {
         for name in CANDIDATES {
@@ -127,12 +127,12 @@ fn locate_cdylib() -> PathBuf {
 }
 
 /// Windows-only link input: the MSVC import library next to the cdylib.
-/// Unix links the shared object directly with -lagenterm_abi.
+/// Unix links the shared object directly with -lagenterm.
 fn locate_import_lib(cdylib: &Path) -> Option<PathBuf> {
     if !cfg!(windows) {
         return None;
     }
-    let p = cdylib.with_file_name("agenterm_abi.dll.lib");
+    let p = cdylib.with_file_name("agenterm.dll.lib");
     if p.is_file() { Some(p) } else { None }
 }
 
@@ -244,7 +244,7 @@ fn c_consumer_compiles_links_and_runs() {
             cc.arg(lib);
         } else {
             let lib_dir = cdylib.parent().expect("cdylib has a parent dir");
-            cc.arg("-L").arg(lib_dir).arg("-lagenterm_abi");
+            cc.arg("-L").arg(lib_dir).arg("-lagenterm");
         }
     }
     run_or_panic("C compile/link", &mut cc);
