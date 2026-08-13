@@ -156,6 +156,10 @@ jobs:
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_identity -- --nocapture
       - name: pkg-config static consumption (end to end)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test pkgconfig_consume -- --nocapture
+      - name: Install and consume from the installed tree (abi-release)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_consume -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu
@@ -228,6 +232,10 @@ jobs:
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_identity -- --nocapture
       - name: pkg-config static consumption (end to end)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test pkgconfig_consume -- --nocapture
+      - name: Install and consume from the installed tree (abi-release)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_consume -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu

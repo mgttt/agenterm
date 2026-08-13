@@ -227,3 +227,99 @@ macOS 上 `Libs.private` 以 `-framework` **参数对**展开（`-framework` 与
 （`ldconfig` / dyld 的默认搜索路径可覆盖）。若 CI 证明某条动态消费链因此
 缺库，先把证据贴出来再讨论是否给 `.pc` 补 rpath——那是对外合同
 （`libagenterm.pc.in`），不经证据不改。
+
+## 真安装：`packaging/install.sh`（里程碑 61）
+
+`generate-pc.sh` 只生成 `.pc`，从来没把构建产物真正"装"进一个 prefix；
+而里程碑 56 证明安装布局不平凡——Linux 的 `DT_SONAME` 意味着消费者
+`DT_NEEDED` 记的是 `libagenterm.so.1`，磁盘上必须有**那个版本化文件**，
+`libagenterm.so` 只是链接期符号链接；cargo 又只产出裸名
+`libagenterm.so`。`packaging/install.sh` 就是补上的真实安装步骤：它把
+构建产物按标准布局装到 prefix，装完自检，并且是幂等的（同一 prefix 装
+两次结果一致）。**端到端硬证据**是
+`crates/agenterm-abi/tests/install_consume.rs`（里程碑 61）：它建临时
+prefix、跑真正的 `install.sh`、只用安装出来的树做 pkg-config 动态与静态
+消费并运行 probe——本机是 Windows 只能 `SKIP:`，真实运行发生在 CI 的
+linux / macos job（`AGENTERM_ABI_PROFILE_DIR=target/abi-release`）。
+
+一条真实可复制的命令行（从仓库根、Windows/Git Bash 以 `--system linux`
+验证——`auto` 在 MSYS 上按设计报错，见下）：
+
+```sh
+$ sh packaging/install.sh --prefix /tmp/agenterm-m61-prefix/installed \
+    --artifacts /tmp/agenterm-m61-prefix/artifacts --system linux
+generate-pc.sh: wrote /tmp/agenterm-m61-prefix/installed/lib/pkgconfig/libagenterm.pc (Libs.private selected for: linux)
+install.sh: installed libagenterm 0.1.16 (linux layout) into /tmp/agenterm-m61-prefix/installed
+install.sh:   include: /tmp/agenterm-m61-prefix/installed/include/agenterm.h
+install.sh:   lib:     /tmp/agenterm-m61-prefix/installed/lib/libagenterm.a
+install.sh:   lib:     /tmp/agenterm-m61-prefix/installed/lib/libagenterm.so.1
+install.sh:   lib:     /tmp/agenterm-m61-prefix/installed/lib/libagenterm.so -> libagenterm.so.1
+install.sh:   pc:      /tmp/agenterm-m61-prefix/installed/lib/pkgconfig/libagenterm.pc
+$ find /tmp/agenterm-m61-prefix/installed \( -type f -o -type l \) | sort
+/tmp/agenterm-m61-prefix/installed/include/agenterm.h
+/tmp/agenterm-m61-prefix/installed/lib/libagenterm.a
+/tmp/agenterm-m61-prefix/installed/lib/libagenterm.so
+/tmp/agenterm-m61-prefix/installed/lib/libagenterm.so.1
+/tmp/agenterm-m61-prefix/installed/lib/pkgconfig/libagenterm.pc
+```
+
+参数（与 `generate-pc.sh` 同风格）：
+
+- `--prefix <dir>`（必需）、`--libdir <dir>`（默认 `$prefix/lib`）、
+  `--includedir <dir>`（默认 `$prefix/include`）；
+- `--artifacts <dir>`：产物目录，默认从仓库推断 `target/abi-release`
+  （CI 的 linux / macos job 用 `--profile abi-release` 构建，产物正好在
+  那里）；本机开发若用 `abi-dev` 构建，显式指过去即可；
+- `--version <ver>`：写进 `.pc` 的版本，默认读
+  `crates/agenterm-abi/Cargo.toml`（不传就是在验证这条默认路径）；
+- `--system auto|linux|darwin`：默认 `auto` 按 `uname -s` 选，**其他
+  平台（含 Windows 的 MSYS/MINGW）明确报错退出**，绝不装出半个布局；
+  `linux` / `darwin` 显式覆盖仅供测试与交叉打包：
+
+  ```sh
+  $ sh packaging/install.sh --prefix /tmp/agenterm-m61-prefix/x --artifacts /tmp/agenterm-m61-prefix/artifacts
+  install.sh: unsupported platform 'MINGW64_NT-10.0-20348' -- refusing to install half a layout. This script serves Unix; use --system=linux|darwin only for tests and cross packaging.
+  $ echo $?
+  1
+  ```
+
+装出来的布局（Linux 与 macOS 各一条，均本机真实跑出）：
+
+| 平台 | 布局 |
+|------|------|
+| Linux 布局 | `$includedir/agenterm.h`；`$libdir/libagenterm.a`；`$libdir/libagenterm.so.1`（真身）+ `$libdir/libagenterm.so -> libagenterm.so.1`（链接期符号链接）；`$libdir/pkgconfig/libagenterm.pc` |
+| macOS 布局 | `$includedir/agenterm.h`；`$libdir/libagenterm.a`；`$libdir/libagenterm.dylib`（install name 已是 `@rpath/libagenterm.dylib`，**不需要**版本化文件名）；`$libdir/pkgconfig/libagenterm.pc` |
+
+**`.1` 从哪来、为什么不会与 `build.rs` 漂移**：`install.sh` 从
+`crates/agenterm-abi/src/lib.rs` 的 `abi_version!(<major>, ...)` 解析 ABI
+主版本（`sed` 提取第一个 `abi_version!(<数字>,` 的数字，校验必须是数字），
+与 `build.rs` 的漂移守卫**同源**——`build.rs` 断言 `src/lib.rs` 含
+`abi_version!(1,`，ABI major 一改它自己编译失败；`install.sh` 从不硬编码
+`.1`，同一行源解析到新 major 自动跟上。两者派生自同一个源头，不存在第
+二处可遗忘。不用 `<OUT_DIR>/soname.txt` 是因为安装脚本不在 Cargo 构建
+里运行、拿不到 `OUT_DIR`。
+
+**消费者怎么用**（装完之后）：
+
+```sh
+# 动态消费：链接行来自 pkg-config（不带 --static）
+PKG_CONFIG_PATH=/tmp/agenterm-m61-prefix/installed/lib/pkgconfig \
+  cc $(pkg-config --cflags --libs libagenterm) examples/c/agenterm_probe.c -o probe
+# 运行时只靠安装目录被找到——绝不把 target/ 塞进搜索路径
+LD_LIBRARY_PATH=/tmp/agenterm-m61-prefix/installed/lib ./probe   # Linux
+DYLD_LIBRARY_PATH=/tmp/agenterm-m61-prefix/installed/lib ./probe  # macOS
+
+# 静态消费：--static 追加 Libs.private（系统库），产物自包含无需搜索路径
+PKG_CONFIG_PATH=/tmp/agenterm-m61-prefix/installed/lib/pkgconfig \
+  cc $(pkg-config --cflags --libs --static libagenterm) examples/c/agenterm_probe.c -o probe
+./probe
+```
+
+这是里程碑 61 的唯一硬证据路径：运行时 `LD_LIBRARY_PATH` /
+`DYLD_LIBRARY_PATH` 只允许指向**安装目录**（`install_consume.rs` 就是这么
+做的），证明"装出来的版本化库真的能被消费者解析"。Linux 动态消费若因
+rpath / 搜索路径找不到库，照实报告并给出链接器/加载器原始报错，再由人
+决定是否给 `.pc` 补 `-Wl,-rpath`（那是对外合同，不经证据不改）；macOS
+的 `@rpath/libagenterm.dylib` 同理——需要消费者自带 rpath，若 CI 上
+动态那半跑不起来，如实贴出报错。
+
