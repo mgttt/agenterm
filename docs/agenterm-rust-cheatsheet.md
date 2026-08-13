@@ -1041,6 +1041,21 @@ package, update every boundary, native-API, hygiene, and architecture scanner
 to include the new source root explicitly; otherwise a correct Cargo move can
 silently create an audit blind spot.
 
+## Shared integration-test helpers are per-crate dead code
+
+Every `tests/*.rs` compiles as its own crate, so helpers moved into
+`tests/common/mod.rs` (e.g. a shared C-toolchain discovery module) look dead
+to every test crate that does not reference them — gate the module with
+`#[allow(dead_code)]` exactly like the existing `system_libs` module, and say
+in the comment why (it is cross-crate shared, not genuinely dead).
+
+Related clippy trap when moving long doc comments into a nested shared module:
+`doc_lazy_continuation` treats a doc line starting with `+` (or `-` / `*`) as
+a markdown list item, so a phrase like "(milestones 21b\n + 21c)" that gets
+split across lines — harmless at the top level of a test file — becomes a
+hard clippy error once the same comment lives one module deeper. Keep
+list-like tokens on one line when re-flowing doc comments.
+
 ## Canonical paths are not cross-runtime command arguments
 
 Windows `std::fs::canonicalize` can return a `\\?\` verbatim path. That is a
