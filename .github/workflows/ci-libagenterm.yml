@@ -73,6 +73,10 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test c_window_static -- --nocapture
+      - name: Enumerate while hosting a window (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test enumerate_while_hosting -- --nocapture
       - name: Symbol presence (abi-dev artifacts)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
       - name: Symbol presence (abi-release artifacts)
@@ -146,6 +150,10 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test c_window_static -- --nocapture
+      - name: Enumerate while hosting a window (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test enumerate_while_hosting -- --nocapture
       - name: Symbol presence (abi-dev artifacts)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
       - name: Symbol presence (abi-release artifacts)
@@ -226,6 +234,10 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test c_window_static -- --nocapture
+      - name: Enumerate while hosting a window (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test enumerate_while_hosting -- --nocapture
       - name: Symbol presence (abi-dev artifacts)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
       - name: Symbol presence (abi-release artifacts)
