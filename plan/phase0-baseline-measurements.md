@@ -10,70 +10,107 @@
 - 工作树非干净（`plan/`、`prd/`、`AGENTS.md` 等有其它会话的在途修改），与本次测量无关
 - 构建入口：仓库既有发布入口（`build.bat` → `scripts/bootstrap.cmd` → `rh task run build`）
 - 目标：`x86_64-pc-windows-msvc`（本机 Windows）
+- 每条构建命令都真实执行；字节数取自命令退出后对产物文件的实际 `stat`/`sha256sum`
 
 ## 1. 实测数字表
 
-四条构建命令均在本机真实执行，字节数为命令退出后对产物文件的实际 stat。
-
 | 产物 | 构建命令原文 | 字节数 | <= 1,048,575 B |
 |------|--------------|--------|----------------|
-| `libagenterm`（cdylib） | `cargo build -p agenterm-abi --profile abi-release` → `target/abi-release/agenterm_abi.dll` | 待填 | 待填 |
-| `agenterm-con`（EXE） | `build.bat`（`con-release-fast` + build-std `panic-unwind,backtrace-trace-only`）→ `dist/agenterm-con.exe` | 待填 | 待填 |
-| `agenterm`（主 EXE） | `cargo build --release --bin agenterm` → `target/release/agenterm.exe` | 待填 | 待填 |
-| `agenterm-cu`（EXE） | `cargo build -p agenterm-cu --release` → `target/release/cu.exe` | 待填 | 待填 |
+| `libagenterm`（cdylib） | `cargo build -p agenterm-abi --profile abi-release` → `target/abi-release/agenterm_abi.dll` | **400,896** | **是** |
+| `agenterm-con`（EXE） | `build.bat`（`con-release-fast` + build-std `panic-unwind,backtrace-trace-only`）→ `dist/agenterm-con.exe` | **629,760** | **是** |
+| `agenterm`（主 EXE） | `cargo build --release --bin agenterm` → `target/release/agenterm.exe` | **4,224,512** | **否**（判据 1 不约束主 EXE，仅报告） |
+| `agenterm-cu`（EXE） | `cargo build -p agenterm-cu --release` → `target/release/cu.exe` | **351,232** | **是**（判据 1 不约束 cu，仅报告） |
 
-### con 与历史值的对照
+> 判据 1（独立产物预算）只约束 `libagenterm.{dll,so,dylib}` 与迁移后的 con EXE。
+> 主 EXE 与 cu 的 `<= 1,048,575 B` 列仅如实报告，不代表它们承诺满足该预算。
 
-`.reasonix-dispatch/phase0-baseline.json` 记录的 con 历史值为 **629,760 B**（2026-08-12 采集，`dist/agenterm-con.exe`）。
-本轮实测值与历史值是否一致、差异原因，见下。
+### 1.1 con 与历史值的对照
+
+`.reasonix-dispatch/phase0-baseline.json` 记录的 con 历史值为 **629,760 B**
+（2026-08-12 采集，`dist/agenterm-con.exe`，HEAD `f628b0e7`）。
+
+- 本轮实测 **629,760 B**，与历史值**字节数完全一致**。
+- 注意：期间 con 源码已迁入自有包 `crates/agenterm-con`
+  （`02f3630b refactor(con): move source into owning package`），HEAD 也从 `f628b0e7`
+  推进到 `6ae55378`；字节数不受影响，说明 con 二进制尺寸稳定。
+- 二进制哈希不同（历史 `8802EFF7...`，本轮 `842bf552...`），差异来自嵌入的 build
+  identity（git commit / 工作树 dirty 状态），不影响产物尺寸。
+- 构建通道说明：首轮以默认通道（cargo stderr 直接继承）运行 `build.bat` 出现
+  `build_cargo:exit=101`，stderr 因宿主 GUI 进程句柄问题不可见；以 `CI=1` 通道
+  （build.rh 内仅切换 cargo stderr 捕获方式，编译内容与产物语义不变）重跑成功，
+  四条产物均由此成功运行的官方入口产出。
 
 ## 2. 盈亏平衡分析
 
 ### 2.1 当前形态：三个消费者各自静态链接
 
-- `agenterm`（主 EXE）：静态链接机制代码
-- `agenterm-con`：静态链接机制代码
-- `agenterm-cu`：通过 **rlib 静态链接** `agenterm-abi`（`crates/agenterm-cu/Cargo.toml` 里是 path 依赖，
-  代码直接 `use agenterm_abi::`），**不是 dlopen 动态消费**
+| 消费者 | 静态链接机制代码方式 |
+|--------|----------------------|
+| `agenterm`（主 EXE） | 普通 crate 静态链接 |
+| `agenterm-con` | 普通 crate 静态链接 |
+| `agenterm-cu` | 通过 **rlib 静态链接** `agenterm-abi`（`crates/agenterm-cu/Cargo.toml` 为 path 依赖，代码直接 `use agenterm_abi::`） |
 
-静态链接下机制字节在三个产物中各带一份，总字节 = 三者之和：`待填` B。
+静态链接下机制字节在三个产物中各带一份：
 
-> **重要事实（判据 2 防误读）**：`agenterm-cu` 已"接入 libagenterm"（rlib path 依赖 + 直接
-> `use agenterm_abi::`）**不等于**已产生共享字节收益——静态链接下每个消费者仍各带一份机制代码。
-> "接入"只是 API 层打通，不构成判据 2（共享收益）的证据。
+**总字节 = 4,224,512 + 629,760 + 351,232 = 5,205,504 B**
+
+> **重要事实（判据 2 防误读）**：`agenterm-cu` 已"接入 libagenterm"（rlib path 依赖 +
+> 直接 `use agenterm_abi::`）**不等于**已产生共享字节收益——静态链接下每个消费者仍各带
+> 一份机制代码。"接入"只是 API 层打通，不构成判据 2（共享收益）的证据。要让判据 2 有
+> 字节级证据，必须实测"迁移后"（一份 dylib + 三个瘦身消费者）的密封总字节，本轮未测。
 
 ### 2.2 迁移后的理论形态
 
-迁到 dylib 后：`libagenterm.dll` **一份** + 三个瘦身后的消费者（各自通过 dlopen/链接消费同一份 dll）。
+迁到 dylib 后：`libagenterm.dll` **一份** + 三个瘦身后的消费者（各自 dlopen/链接同一份 dll）。
+共享收益 = 三个消费者迁移后减少的字节之和，减去新增的 dll 体积。
 
-### 2.3 盈亏平衡点公式
+### 2.3 盈亏平衡点公式（按实测重算）
 
-设每个消费者迁移后平均减少 `S` 字节，净收益 = `3 * S - sizeof(libagenterm.dll)`。
+设每个消费者迁移后平均减少 `S` 字节，则：
 
-- 实测 dll 字节数：`待填` B
-- 实测阈值：`S > 待填 B`（= `dll 字节数 / 3`）才算真省
-- 与 brief 给出的参考阈值 **120,320 B**（= 360,960 / 3）的差异及原因：待填
+```
+净收益 = 3 * S - sizeof(libagenterm.dll)
+```
+
+- 实测 dll 字节数：**400,896 B**
+- 实测盈亏平衡阈值：**S > 400,896 / 3 = 133,632 B**
+- 即：每个消费者平均要瘦掉 **> 133,632 B**（三份合计砍掉 > 400,896 B）才抵消一份
+  dll 的成本，才是真省。
+- 与 brief 参考阈值 **120,320 B**（= 360,960 / 3）比较：实测 dll 比参考口径大
+  39,936 B，阈值相应抬高 **13,312 B**。参考值不是实测，以本表实测阈值为准。
+
+参考量级：主 EXE 4,224,512 B、con 629,760 B、cu 351,232 B。每个消费者要砍
+>133.6 KB 的机制字节，意味着当前静态链接的机制代码在该消费者中必须显著大于
+133.6 KB（三消费者各不相同，最终以"迁移后"实测为准）。
 
 ## 3. 未测项清单（诚实声明）
 
-以下各项**本轮没有测**，且每一项都写明前置条件（全部需要 con 的 dylib 消费变体）：
+以下各项**本轮没有测**，且每项都写明前置条件（全部需要 con 的 dylib 消费变体）：
 
-| 未测项 | 前置条件 | 本轮状态 |
-|--------|----------|----------|
-| 渲染性能四项（16-step resize journey 的 frame / full-candidate / dirty-pixel / native-present 与静态版差异 < 5%） | con 的 dylib 变体可运行渲染旅程 | **未测** |
-| 行为等价（90 单测 + 21 GUI 黑盒 + 多标签控制旅程全绿；公开 CLI/JSON 合同字节不变） | 迁移后产物（含 con dylib 变体） | **未测** |
-| 迁移后各产物字节（dylib + 三个瘦身消费者） | con 的 dylib 消费变体 | **未测** |
+| 未测项 | 判据 | 前置条件 | 本轮状态 |
+|--------|------|----------|----------|
+| 渲染性能四项：16-step resize journey 的 frame / full-candidate / dirty-pixel / native-present 与静态版差异 < 5% | 判据 3 | con 的 dylib 变体可运行渲染旅程 | **未测** |
+| 行为等价：90 单测 + 21 GUI 黑盒 + 多标签控制旅程全绿；公开 CLI/JSON 合同字节不变 | 判据 4 | 迁移后产物（含 con dylib 变体） | **未测** |
+| 迁移后各产物字节（一份 dylib + 三个瘦身消费者，密封总字节） | 判据 2 "迁移后"列 | con 的 dylib 消费变体 | **未测** |
+| `libagenterm.{so,dylib}` 跨平台产物尺寸 | 判据 1 全平台列 | 本机为 Windows，仅测了 `dll` | **未测** |
 
-以上均不得解读为"待定 / 大概率通过"——在 con 的 dylib 变体存在并实测之前，判据 2 的"迁移后"列、
-判据 3、判据 4 全部视为未达成。
+以上均不得解读为"待定 / 大概率通过"——在 con 的 dylib 变体存在并实测之前，
+判据 2 的"迁移后"列、判据 3、判据 4 全部视为未达成。
 
 ## 4. 构建结果与退出码
 
-每条构建命令的真实退出码与失败原因（若有）见下表：
-
 | 构建命令 | 退出码 | 备注 |
 |----------|--------|------|
-| `cargo build -p agenterm-abi --profile abi-release` | 待填 | |
-| `build.bat`（con-release-fast + build-std） | 待填 | |
-| `cargo build --release --bin agenterm` | 待填 | |
-| `cargo build -p agenterm-cu --release` | 待填 | |
+| `cargo build -p agenterm-abi --profile abi-release` | **0** | 增量命中，产物 400,896 B |
+| `build.bat`（con-release-fast + build-std） | **0** | 首轮默认通道失败（`build_cargo:exit=101`，stderr 因宿主 GUI 句柄不可见），`CI=1` 通道重跑成功；`CI` 仅切换 cargo stderr 捕获方式，不改变编译内容 |
+| `cargo build --release --bin agenterm` | **0** | 冷编译 3m44s，产物 4,224,512 B |
+| `cargo build -p agenterm-cu --release` | **0** | 产物 351,232 B |
+
+产物哈希（本轮实测，SHA-256）：
+
+| 产物 | SHA-256 |
+|------|---------|
+| `target/abi-release/agenterm_abi.dll` | `99d9119c931ae6b4101acc227542a5d2903a09fe38bab2070e9d1397230dc374` |
+| `dist/agenterm-con.exe` | `842bf55235fe8971e06f5462fbe1f8121bf10a858a4e1b27c4a05683a18df9c4` |
+| `target/release/agenterm.exe` | `bd32dbe5d7e7e8cd0b0e40678da9aadb2c87e49bbf950c353f98b2ab92184b2e` |
+| `target/release/cu.exe` | `55aa35c967223b18819bf63fbfe5fc102e05b630a840a4c416ed78d86d36cd63` |
