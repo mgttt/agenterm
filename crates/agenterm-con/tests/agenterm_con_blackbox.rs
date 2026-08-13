@@ -15,11 +15,10 @@
 //! harness and is translated into ordinary `agenterm-con cli` invocations;
 //! the product binary intentionally has no script runtime.
 //!
-//! Known gap, stated plainly rather than left implicit: these tests cover
-//! the *text* that ends up on screen, not that it was *painted correctly* in
-//! pixels (that's `paint_cells`'s own unit tests) or that IME composition
-//! works (there is no way to drive a real IME headlessly; that remains
-//! manually-verified only — see plan/plan-v0.1.16.md).
+//! Ordinary CI remains no-activate and cannot prove a desktop IME. The ignored
+//! Windows native-IME acceptance test deliberately takes foreground focus and
+//! uses physical `SendInput` virtual keys; it never substitutes Unicode input
+//! or synthetic `WM_IME_*` messages for the real input-method path.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -28,6 +27,14 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 type TestHwnd = *mut std::ffi::c_void;
 #[cfg(windows)]
+#[repr(C)]
+struct TestRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+#[cfg(windows)]
 const WM_ENTERSIZEMOVE: u32 = 0x0231;
 #[cfg(windows)]
 const WM_EXITSIZEMOVE: u32 = 0x0232;
@@ -35,6 +42,18 @@ const WM_EXITSIZEMOVE: u32 = 0x0232;
 const WM_LBUTTONDOWN: u32 = 0x0201;
 #[cfg(windows)]
 const WM_LBUTTONUP: u32 = 0x0202;
+#[cfg(windows)]
+const WM_INPUTLANGCHANGEREQUEST: u32 = 0x0050;
+#[cfg(windows)]
+const WM_IME_CONTROL: u32 = 0x0283;
+#[cfg(windows)]
+const IMC_SETCONVERSIONMODE: usize = 0x0002;
+#[cfg(windows)]
+const IMC_SETOPENSTATUS: usize = 0x0006;
+#[cfg(windows)]
+const IME_CMODE_NATIVE: isize = 0x0001;
+#[cfg(windows)]
+const KLF_ACTIVATE: u32 = 0x0000_0001;
 
 #[cfg(windows)]
 #[link(name = "user32")]
@@ -44,7 +63,17 @@ unsafe extern "system" {
         lparam: isize,
     ) -> i32;
     fn GetWindowThreadProcessId(hwnd: TestHwnd, process_id: *mut u32) -> u32;
+    fn GetWindowRect(hwnd: TestHwnd, rect: *mut TestRect) -> i32;
+    fn GetForegroundWindow() -> TestHwnd;
+    fn SetForegroundWindow(hwnd: TestHwnd) -> i32;
+    fn LoadKeyboardLayoutW(layout_id: *const u16, flags: u32) -> isize;
     fn SendMessageW(hwnd: TestHwnd, message: u32, wparam: usize, lparam: isize) -> isize;
+}
+
+#[cfg(windows)]
+#[link(name = "imm32")]
+unsafe extern "system" {
+    fn ImmGetDefaultIMEWnd(hwnd: TestHwnd) -> TestHwnd;
 }
 
 const TEST_JOURNEY_ARG: &str = "--test-control-journey";
@@ -534,6 +563,57 @@ fn send_native_click(host_pid: u32, x: u64, y: u64) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn activate_native_simplified_chinese_ime(host_pid: u32) -> Result<(), String> {
+    use agenterm_platform::input_inject::{PointerButton, PointerPosition, pointer_click};
+
+    let hwnd = find_process_window(host_pid)?;
+    if unsafe { SetForegroundWindow(hwnd) } == 0 || unsafe { GetForegroundWindow() } != hwnd {
+        return Err("Windows denied foreground activation for native IME acceptance".to_owned());
+    }
+
+    let mut rect = TestRect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return Err("GetWindowRect failed for native IME acceptance".to_owned());
+    }
+    pointer_click(
+        PointerPosition {
+            x: rect.left.saturating_add((rect.right - rect.left) / 2),
+            y: rect.top.saturating_add((rect.bottom - rect.top) / 2),
+        },
+        PointerButton::Left,
+        1,
+    )
+    .map_err(|error| format!("activate native con window: {error:?}"))?;
+
+    let layout_id = "00000804\0".encode_utf16().collect::<Vec<_>>();
+    let layout = unsafe { LoadKeyboardLayoutW(layout_id.as_ptr(), KLF_ACTIVATE) };
+    if layout == 0 {
+        return Err("Simplified Chinese keyboard layout 00000804 is not installed".to_owned());
+    }
+    unsafe { SendMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, layout) };
+
+    let ime_window = unsafe { ImmGetDefaultIMEWnd(hwnd) };
+    if ime_window.is_null() {
+        return Err("the native con window has no default IME window".to_owned());
+    }
+    unsafe {
+        SendMessageW(ime_window, WM_IME_CONTROL, IMC_SETOPENSTATUS, 1);
+        SendMessageW(
+            ime_window,
+            WM_IME_CONTROL,
+            IMC_SETCONVERSIONMODE,
+            IME_CMODE_NATIVE,
+        );
+    }
+    Ok(())
+}
+
 #[cfg(not(windows))]
 fn send_native_click(_host_pid: u32, _x: u64, _y: u64) -> Result<(), String> {
     Err("native window clicks are unavailable on this host".to_owned())
@@ -621,6 +701,14 @@ impl ConSession {
     /// must come before any `-e`, matching this binary's own contract that
     /// `-e` consumes the remainder of the command line verbatim.
     fn spawn<S: AsRef<std::ffi::OsStr>>(dir: &Path, extra_args: &[S]) -> Self {
+        Self::spawn_with_activation(dir, extra_args, false)
+    }
+
+    fn spawn_with_activation<S: AsRef<std::ffi::OsStr>>(
+        dir: &Path,
+        extra_args: &[S],
+        activate: bool,
+    ) -> Self {
         let snapshot_path = dir.join("snapshot.json");
         let mut child_args: Vec<std::ffi::OsString> = extra_args
             .iter()
@@ -637,10 +725,12 @@ impl ConSession {
             });
         let endpoint = unique_control_endpoint(dir);
         let mut command = Command::new(binary());
-        command
-            .arg("--no-activate")
-            .arg("--emit-snapshot")
-            .arg(&snapshot_path);
+        if activate {
+            command.env_remove("AGENTERM_NO_ACTIVATE");
+        } else {
+            command.arg("--no-activate");
+        }
+        command.arg("--emit-snapshot").arg(&snapshot_path);
         if journey.is_some() {
             command.arg("--control").arg(&endpoint);
         }
@@ -723,6 +813,57 @@ impl ConSession {
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires an interactive Windows desktop and installed Microsoft Pinyin"]
+fn native_microsoft_pinyin_preedit_and_commit_reach_the_real_window() {
+    use agenterm_platform::input_inject::send_keys;
+
+    let _guard = gui_test_guard();
+    let dir = scratch_dir("native-pinyin");
+    let args = ["-e", "cmd.exe", "/k"];
+    let session = ConSession::spawn_with_activation(&dir, &args, true);
+    session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["child_alive"] == true
+    });
+    activate_native_simplified_chinese_ime(session.child.id())
+        .expect("prepare real Simplified Chinese IME");
+
+    for key in ["n", "i", "h", "a", "o"] {
+        send_keys(key).unwrap_or_else(|error| panic!("inject physical {key} key: {error:?}"));
+    }
+    let composing = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["ime_preedit"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    });
+    assert!(
+        composing["ime_preedit"]
+            .as_str()
+            .is_some_and(|text| text.to_ascii_lowercase().contains("nihao")),
+        "Microsoft Pinyin did not expose the expected native preedit: {composing}"
+    );
+
+    send_keys("space").expect("commit the first Microsoft Pinyin candidate");
+    let committed = session.wait_for(Duration::from_secs(10), |snapshot| {
+        snapshot["ime_preedit"] == "" && ConSession::screen_text(snapshot).contains("你好")
+    });
+    assert!(
+        ConSession::screen_text(&committed).contains("你好"),
+        "native IME commit did not reach the terminal: {committed}"
+    );
+
+    let screenshot = dir.join("native-pinyin.png");
+    capture_native_window(session.child.id(), &screenshot).expect("capture native IME result");
+    assert!(
+        std::fs::metadata(&screenshot)
+            .expect("native IME screenshot metadata")
+            .len()
+            > 100,
+        "native IME screenshot was empty"
+    );
 }
 
 impl Drop for ConSession {

@@ -20,14 +20,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Product outcome
 
-- [~] `agenterm-con` is the lightweight, green, GUI replacement for a system
+- [x] `agenterm-con` is the lightweight, green, GUI replacement for a system
   console host. It provides several independently owned local terminals without
   the workbench authority, background server, Fleet, mux, MCP, or script engines
   of `agenterm`. Its sustained-throughput qualification is shipped in
   [24](PRD_02_24_con_terminal.md), and the strict sub-1-MiB artifact budget in
-  [27](PRD_02_27_con_delivery.md) is recovered. The product stays partial until
-  the native Chinese-IME keyboard acceptance in [25](PRD_02_25_con_workspace.md)
-  is complete.
+  [27](PRD_02_27_con_delivery.md) is recovered, and the native Chinese-IME
+  keyboard acceptance in [25](PRD_02_25_con_workspace.md) is shipped.
 
 The product succeeds when a user can launch one small executable, organize
 terminals in a left-side tree, interact through a dedicated external input

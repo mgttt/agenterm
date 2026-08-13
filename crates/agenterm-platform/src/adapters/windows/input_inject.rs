@@ -107,7 +107,15 @@ pub(crate) fn send_keys(shortcut: &str) -> Result<(), InputInjectError> {
                     format!("unknown key '{key}'"),
                 ));
             }
-            let code = chars[0] as u16;
+            let code = virtual_key_for_character(chars[0]).ok_or_else(|| {
+                InputInjectError::failed(
+                    "unknown_key",
+                    format!(
+                        "character '{}' has no layout-independent physical key; use type_text for Unicode text",
+                        chars[0]
+                    ),
+                )
+            })?;
             down.push(key_input(code, 0));
             up.push(key_input(code, KEYEVENTF_KEYUP));
         }
@@ -116,6 +124,16 @@ pub(crate) fn send_keys(shortcut: &str) -> Result<(), InputInjectError> {
     let mut all = down;
     all.extend(up);
     send_batch(&all)
+}
+
+fn virtual_key_for_character(character: char) -> Option<u16> {
+    if character.is_ascii_alphabetic() {
+        Some(character.to_ascii_uppercase() as u16)
+    } else if character.is_ascii_digit() {
+        Some(character as u16)
+    } else {
+        None
+    }
 }
 
 fn named_vk(lower: &str) -> Option<u16> {
@@ -179,4 +197,18 @@ fn send_batch(inputs: &[INPUT]) -> Result<(), InputInjectError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::virtual_key_for_character;
+
+    #[test]
+    fn physical_ascii_keys_map_to_windows_virtual_keys() {
+        assert_eq!(virtual_key_for_character('n'), Some(u16::from(b'N')));
+        assert_eq!(virtual_key_for_character('N'), Some(u16::from(b'N')));
+        assert_eq!(virtual_key_for_character('5'), Some(u16::from(b'5')));
+        assert_eq!(virtual_key_for_character('?'), None);
+        assert_eq!(virtual_key_for_character('中'), None);
+    }
 }

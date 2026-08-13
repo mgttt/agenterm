@@ -424,6 +424,14 @@ structured observation; invalidate only the owning chrome when it changes.
 Publish stable typed defaults for unknown state, because background/no-activate
 windows legitimately lack a thread-local focused input context.
 
+Native IME acceptance must use a real focused desktop window plus physical
+virtual-key or scan-code `SendInput`; `KEYEVENTF_UNICODE` bypasses conversion,
+and synthetic `WM_IME_*` can manufacture false preedit/commit evidence. A Rust
+`char` value is not a Windows virtual-key code: map ASCII letters to uppercase
+`VK_A..VK_Z`, keep digits in `VK_0..VK_9`, reject unsupported characters, and
+pair every key down with key up. Final CJK text and observed native preedit are
+the behavior evidence; status labels and screenshots are supporting evidence.
+
 Feature-gate an adapter facade on both its contract prerequisites and at least
 one concrete provider feature. `input + ime` can expose IME facts without
 selecting a pixel host; compiling `run_pixel_window` in that graph leaves its

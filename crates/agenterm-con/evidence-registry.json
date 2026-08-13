@@ -75,6 +75,15 @@
       "source": "crates/agenterm-con/tests/agenterm_con_blackbox.rs"
     },
     {
+      "id": "agenterm_con_blackbox::native_microsoft_pinyin_preedit_and_commit_reach_the_real_window",
+      "kind": "public-black-box",
+      "emitter": "cargo-test-harness",
+      "platform": "windows-x86_64",
+      "test_target": "agenterm_con_blackbox",
+      "test_name": "native_microsoft_pinyin_preedit_and_commit_reach_the_real_window",
+      "source": "crates/agenterm-con/tests/agenterm_con_blackbox.rs"
+    },
+    {
       "id": "agenterm_con_blackbox::snapshot_reports_exit_code_and_retains_tab_until_explicit_close",
       "kind": "public-black-box",
       "emitter": "cargo-test-harness",

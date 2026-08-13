@@ -107,8 +107,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `ImeEvent` path as the native host. Its bounded public journey proves terminal
   preedit visibility, CJK commit delivery to the PTY, composer-only
   preedit/commit, and an explicit exited-child failure that preserves the
-  uncommitted preedit. This automated route evidence narrows but does not replace
-  the required human Microsoft Pinyin keyboard acceptance.
+  uncommitted preedit. This owns deterministic product routing; the separate
+  native Microsoft Pinyin journey below owns the Windows message/input-method
+  boundary and does not substitute synthetic `ImeEvent` delivery for it.
 - [x] composer submission is transactional: it clears text and snaps the live
   viewport only after the active PTY accepts the complete text plus Enter. An
   exited child or write failure restores the exact bounded text without the
@@ -174,16 +175,28 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Native adoption gate
 
-- [~] the feature-gated native Win32 pixel host proved the platform boundary can
+- [x] the feature-gated native Win32 pixel host proved the platform boundary can
   remove winit/softbuffer from the linked con path without changing product
   state, and is now the Windows default while Linux/macOS select the portable
   host. Native IME preedit/commit from IMM32, candidate anchoring in documented
   client coordinates, matched pointer capture/loss cancellation, and DPI
-  suggested rectangles are wired; human Chinese-IME keyboard acceptance remains
-  required before the IME surface is claimed complete. The shared platform
-  capability now truthfully reports this shipped native mechanism as available
-  on a displayed Windows host; that mechanism fact does not substitute for the
-  remaining human keyboard acceptance.
+  suggested rectangles are wired. The shared platform capability truthfully
+  reports this native mechanism as available only on a displayed Windows host.
+- [x] `native_microsoft_pinyin_preedit_and_commit_reach_the_real_window` is the
+  explicit interactive-desktop acceptance gate. It activates the real con HWND,
+  requests installed Simplified Chinese layout `00000804`, opens native
+  conversion, injects physical `VK_N/I/H/A/O` events through `SendInput`, then
+  requires non-empty OS preedit, committed `你好` in the PTY-backed screen, an
+  empty final preedit and a non-empty native PNG. It never uses Unicode injection
+  or synthetic `WM_IME_*`; ordinary no-activate CI leaves this test ignored, and
+  a Windows qualification desktop runs it explicitly with
+  `$env:RUSTC_BOOTSTRAP='1'; cargo test -Z
+  build-std=std,panic_unwind,compiler_builtins -Z
+  build-std-features=panic-unwind,backtrace-trace-only --locked --profile
+  con-release-fast --target x86_64-pc-windows-msvc -p agenterm-con --test
+  agenterm_con_blackbox
+  native_microsoft_pinyin_preedit_and_commit_reach_the_real_window -- --ignored
+  --exact`.
 - [x] con caches the focused surface's platform `ImeStatus` on open,
   focus/keyboard/IME events and explicit snapshot observation. The external
   input header renders its bounded label (`off`, input-method name plus
