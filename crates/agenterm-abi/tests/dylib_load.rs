@@ -2197,11 +2197,35 @@ fn runtime_two_stage_rejects_null_out_len() {
     );
 }
 
+/// Milestone 43/45 guard shared by the window/screen tests below:
+/// `agt_window_enumerate`, `agt_screen_list` (which reuses the same
+/// mechanism) and the enumeration step of `agt_native_window_show` all depend
+/// on the WINDOW_ENUMERATE capability. On a headless host the mechanism is
+/// absent and the cap=0 probe must answer `AGT_UNSUPPORTED` (never
+/// `AGT_FAILED`, never `AGT_OK`) — assert that contract, print the skip, and
+/// tell the caller to return. Returns false when the capability is available,
+/// in which case the caller keeps its existing `AGT_FAILED` assertions.
+fn window_enumerate_unsupported_probe(lib: &Library, probe_st: i32, what: &str) -> bool {
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    let cap = unsafe { query(AGT_CAP_WINDOW_ENUMERATE) };
+    if cap == AGT_UNSUPPORTED {
+        eprintln!("SKIP (headless): AGT_CAP_WINDOW_ENUMERATE unsupported for {what}");
+        assert_eq!(
+            probe_st, AGT_UNSUPPORTED,
+            "{what}: cap=0 probe must return AGT_UNSUPPORTED when the mechanism is absent, got {probe_st}"
+        );
+        true
+    } else {
+        false
+    }
+}
+
 /// Milestone 43: two-stage `agt_window_enumerate` round trip. Probes with
 /// cap=0/buf=NULL (the legal "how big?" probe), allocates the required count,
 /// calls again and asserts AGT_OK with at least one record carrying a
 /// non-empty title. Window titles are never printed — they may contain user
-/// privacy.
+/// privacy. On a headless host the mechanism is absent: the probe must return
+/// AGT_UNSUPPORTED and the test skips (see `window_enumerate_unsupported_probe`).
 #[test]
 fn window_enumerate_roundtrip_returns_window_with_title() {
     let lib = load();
@@ -2209,6 +2233,9 @@ fn window_enumerate_roundtrip_returns_window_with_title() {
 
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    if window_enumerate_unsupported_probe(lib, st, "agt_window_enumerate roundtrip") {
+        return;
+    }
     assert_eq!(
         st, AGT_FAILED,
         "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
@@ -2268,13 +2295,17 @@ fn window_enumerate_roundtrip_returns_window_with_title() {
 
 /// Milestone 43: a deliberately too-small cap returns
 /// AGT_FAILED{code="buffer_too_small"} and *out_count reports the required
-/// (larger) count.
+/// (larger) count. On a headless host the mechanism is absent: the probe must
+/// return AGT_UNSUPPORTED and the test skips.
 #[test]
 fn window_enumerate_small_cap_reports_required_count() {
     let lib = load();
     let list: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    if window_enumerate_unsupported_probe(lib, st, "agt_window_enumerate small_cap") {
+        return;
+    }
     assert_eq!(st, AGT_FAILED);
     assert!(
         required > 1,
@@ -2315,6 +2346,8 @@ fn window_enumerate_rejects_null_out_count() {
 /// cap=0/buf=NULL (the legal "how big?" probe), allocates the required count,
 /// calls again and asserts AGT_OK with at least one screen carrying a
 /// non-empty frame and exactly one primary screen (platform contract).
+/// `agt_screen_list` reuses the WINDOW_ENUMERATE mechanism: on a headless host
+/// the probe must return AGT_UNSUPPORTED and the test skips.
 #[test]
 fn screen_list_roundtrip_reports_valid_screens() {
     let lib = load();
@@ -2322,6 +2355,9 @@ fn screen_list_roundtrip_reports_valid_screens() {
 
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    if window_enumerate_unsupported_probe(lib, st, "agt_screen_list roundtrip") {
+        return;
+    }
     assert_eq!(
         st, AGT_FAILED,
         "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
@@ -2366,13 +2402,17 @@ fn screen_list_roundtrip_reports_valid_screens() {
 
 /// Milestone 45: a deliberately too-small cap returns
 /// AGT_FAILED{code="buffer_too_small"} and *out_count reports the required
-/// (larger) count.
+/// (larger) count. On a headless host the mechanism is absent: the probe must
+/// return AGT_UNSUPPORTED and the test skips.
 #[test]
 fn screen_list_small_cap_reports_required_count() {
     let lib = load();
     let list: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    if window_enumerate_unsupported_probe(lib, st, "agt_screen_list small_cap") {
+        return;
+    }
     assert_eq!(st, AGT_FAILED, "cap=0 probe must fail, got {st}");
     assert!(
         required >= 1,
@@ -2489,7 +2529,11 @@ fn native_window_show_rejects_zero_handle() {
 /// Milestone 43: `agt_native_window_show(<valid handle>, 99)` ->
 /// AGT_FAILED{code="bad_state"}. The handle comes from a real enumeration,
 /// but the state is invalid, so the state validation rejects the call before
-/// any platform call — the window is never actually moved.
+/// any platform call — the window is never actually moved. On a headless host
+/// the enumeration step itself is unavailable: the probe must return
+/// AGT_UNSUPPORTED and the test skips (the pure parameter rejection is
+/// covered by `native_window_show_rejects_zero_handle`, which validates
+/// before the capability check).
 #[test]
 fn native_window_show_rejects_bad_state() {
     let lib = load();
@@ -2498,6 +2542,9 @@ fn native_window_show_rejects_bad_state() {
 
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    if window_enumerate_unsupported_probe(lib, st, "agt_native_window_show bad_state") {
+        return;
+    }
     assert_eq!(st, AGT_FAILED, "cap=0 probe must fail, got {st}");
     assert!(
         required > 0,
