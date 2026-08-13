@@ -8,9 +8,11 @@ license = "MIT OR Apache-2.0"
 autolib = false
 
 [lib]
-# cdylib is the delivery artifact; rlib lets in-process consumers (agenterm-cu)
-# call the same agt_* exports without dlopen.
-crate-type = ["cdylib", "rlib"]
+# cdylib —— 交付给 C 消费者的动态库（.dll / .so / .dylib）
+# staticlib —— 交付给 C 消费者的静态库（.a / Windows .lib），
+#   导出同一批 agt_* 符号，适合不想带动态库文件的嵌入场景
+# rlib —— 进程内 Rust 消费者（agenterm-cu）直接 `use agenterm_abi::`
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
 # Escapes the `panic = "abort"` compile_error! gate for Rust-native rlib
