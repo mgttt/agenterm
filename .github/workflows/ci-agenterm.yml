@@ -109,12 +109,14 @@ jobs:
         run: |
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: C ABI evidence (abi-release artifacts)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: |
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
@@ -144,12 +146,14 @@ jobs:
         run: |
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: C ABI evidence (abi-release artifacts)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: |
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
@@ -180,11 +184,13 @@ jobs:
         run: |
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: C ABI evidence (abi-release artifacts)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: |
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
