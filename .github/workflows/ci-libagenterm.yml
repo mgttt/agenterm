@@ -59,6 +59,10 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: C window rendezvous, statically linked (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test c_window_static -- --nocapture
       - name: Symbol presence (abi-dev artifacts)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
       - name: Symbol presence (abi-release artifacts)
@@ -120,6 +124,10 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: C window rendezvous, statically linked (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test c_window_static -- --nocapture
       - name: Symbol presence (abi-dev artifacts)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
       - name: Symbol presence (abi-release artifacts)
@@ -184,6 +192,10 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: C window rendezvous, statically linked (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test c_window_static -- --nocapture
       - name: Symbol presence (abi-dev artifacts)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
       - name: Symbol presence (abi-release artifacts)
