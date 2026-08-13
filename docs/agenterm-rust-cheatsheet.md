@@ -347,6 +347,14 @@ sizes as if profile policy were implementation growth.
 Repository delivery spans `{x86_64,aarch64} x {win,lnx,osx}`. One host build
 cannot prove code hidden behind another target's `cfg`.
 
+- A successful Linux compile does not prove dynamically loaded GUI runtime
+  libraries exist in the test image. X11 journeys using winit under Xvfb need
+  the `libxkbcommon-x11` runtime (`libxkbcommon-x11-0` on Ubuntu); otherwise
+  event-loop creation can abort before the product exposes its control endpoint.
+  Preserve child stderr in black-box launch harnesses so a missing `dlopen`
+  dependency is reported as the first failure instead of a generic startup
+  timeout or signal.
+
 - Put shared semantics outside target modules.
 - Keep selected adapter APIs type-identical across hosts.
 - Compile aarch64 when adding NEON or pointer-width-sensitive FFI.

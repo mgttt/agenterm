@@ -109,7 +109,9 @@ jobs:
         run: cargo check --locked -p agenterm-con --all-targets --target ${{ matrix.target }}
       - name: Install Linux AT-SPI runtime
         if: matrix.cell == 'lnx-x86_64'
-        run: sudo apt-get update && sudo apt-get install -y at-spi2-core dbus-x11 xvfb
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          at-spi2-core dbus-x11 libxkbcommon-x11-0 xvfb
       - name: Test real Linux AT-SPI con chrome
         if: matrix.cell == 'lnx-x86_64'
         env:
