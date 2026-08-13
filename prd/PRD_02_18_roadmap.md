@@ -577,11 +577,17 @@ track remains planned, but every declared dependency must still pass.
   [`plan/plan-v0.1.15.md`](../plan/plan-v0.1.15.md) §5.6 — whether to start
   L-CU, which PRD owns it, and its first platform — is resolved as **accepted
   scope with a dedicated subtree**, owned by
-  [Computer-use foundation](PRD_02_28_agenterm_cu.md). No version is assigned
-  and no milestone may claim it. Its first gate is the `current` tier proving
-  the abstract command set end to end on one platform with public black-box
-  evidence, and no tier ships before its authorization/audit requirements
+  [Computer-use foundation](PRD_02_28_agenterm_cu.md) (children 29–32).
+  The subtree root still has no shipped version. **v0.1.19 starts** the
+  window-placement increment
+  ([32](PRD_02_32_cu_window_placement.md)); that is a start-of-work gate,
+  not a claim that `cu` or placement is shipped. The first *subtree*
+  promotion gate remains the `current` tier proving the abstract command set
+  end to end on one platform with public black-box evidence, and no tier
+  ships before its authorization/audit requirements
   ([31](PRD_02_31_cu_authorization_safety.md)) pass for that tier.
+  Execution projection for 32:
+  [`plan/plan-v0.1.19.md`](../plan/plan-v0.1.19.md).
 - [~] `agenterm-con` second-product track (independent of the workbench version
   gates): the standalone host ships in ordinary builds and has its own CI, but
   no release version is committed to it yet. Its promotion gate is explicit —

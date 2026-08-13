@@ -4,7 +4,7 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 This module is the root of the `agenterm-cu` product subtree. It owns the
 product definition, the boundary against every existing observation/control
-surface, the governing invariants, and the promotion gates. Its three child
+surface, the governing invariants, and the promotion gates. Its four child
 modules own third-level requirements.
 
 `agenterm-cu` is newly opened scope. Design and implementation are in progress;
@@ -15,7 +15,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Subtree map
 
-`agenterm-cu` is organized as four sibling branches under this root. Platform
+`agenterm-cu` is organized as four child modules under this root, plus the
+platform-accessibility backends that live under targets/transports. Platform
 accessibility backends are an explicit branch under targets/transports — not a
 footnote inside a table.
 
@@ -28,7 +29,8 @@ agenterm-cu (28)
 │       ├── Windows: native API + UIA
 │       ├── macOS: AX (NSAccessibility)
 │       └── Linux: AT-SPI2
-└── authorization, safety and audit (31)
+├── authorization, safety and audit (31)
+└── window placement (32)
 ```
 
 Structured `tree` observation and `click` / `focus` by node identity are
@@ -46,6 +48,7 @@ fork a fifth screenshot stack.
 | 29 | [Command surface and layering](PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树与确定性等待 |
 | 30 | [Targets and transports](PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport 抽象、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2） |
 | 31 | [Authorization, safety and audit](PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义与证据 |
+| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放动作（Spectacle 目录）：几何核 + `window-place`；v0.1.19 开工 |
 
 ## Product outcome
 
@@ -85,6 +88,7 @@ fork a fifth screenshot stack.
 - The abstract command set and its layering contract ([29](PRD_02_29_cu_command_surface.md)).
 - The target family and transport selection ([30](PRD_02_30_cu_targets_transports.md)).
 - The authorization, audit and refusal model ([31](PRD_02_31_cu_authorization_safety.md)).
+- Named window-placement actions and their geometry contract ([32](PRD_02_32_cu_window_placement.md)).
 
 ### Not owned here — must be consumed, not forked
 
@@ -144,9 +148,10 @@ independent implementation.
 - [~] Linux `current` has first black-box evidence for AT-SPI2 `tree` and
   structured `click` / `focus` by node path (`scripts/cu-linux-smoke.sh` against
   the real `cu` binary). Windows UIA and macOS AX are not claimed in this slice.
-- [ ] no version is assigned. Roadmap ownership is
-  [18 Focused product roadmap](PRD_02_18_roadmap.md); presence in the product
-  tree does not promise a release.
+- [ ] the subtree root still has no shipped version. Roadmap ownership is
+  [18 Focused product roadmap](PRD_02_18_roadmap.md). **v0.1.19 starts**
+  window placement ([32](PRD_02_32_cu_window_placement.md)) as a cu increment;
+  that assignment does not promote this root or any other child.
 - [ ] no capability may be marked shipped on design documents, reference
   assets, or a passing unit test alone. The evidence standard is the same as the
   rest of the tree: a public black-box journey against the real executable.
@@ -162,4 +167,6 @@ Design and sequencing live in
 current-tier gap input
 [`plan/agent-human-parity-audit.md`](../plan/agent-human-parity-audit.md).
 Those are execution projections; accepted scope and status belong to this
-subtree.
+subtree. Window-placement sequencing lives in
+[`plan/plan-v0.1.19.md`](../plan/plan-v0.1.19.md); v0.1.18 remains the
+in-progress unique version plan until it closes.

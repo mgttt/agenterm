@@ -17,6 +17,10 @@ loop until goal:
 
 `cu` is capability, not judgment: no planner, model, or agent loop ships here.
 
+Named window placement (`window-place`, Spectacle action catalog) is accepted
+product scope under [`prd/PRD_02_32_cu_window_placement.md`](../../prd/PRD_02_32_cu_window_placement.md).
+Implementation **starts in v0.1.19**; it is not in the current command enum.
+
 ## Native accessibility mapping (按图索骥)
 
 | Concern | Windows | Linux (`current` slice) | macOS (planned) |

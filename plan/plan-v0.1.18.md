@@ -248,6 +248,7 @@ authority。Phase 0 的价值是证明边界和交付解耦，而不是展示脚
 | 原专题 Phase | 建议版本 | 仍需交付的完整结果 |
 |--------------|----------|--------------------|
 | **Phase 1** | v0.1.19 | 首条真实 CC 静态语义竖线；typed callback、等价短期 fallback、interrupt、熔断、event；迁完一块删一块 Rust 重复 |
+| **cu window-place** | v0.1.19 | 开始把 Spectacle 命名摆放收进 `agenterm-cu`（[PRD 32](../prd/PRD_02_32_cu_window_placement.md)）。与 Phase 1 并行、互不阻塞。详见 [`plan-v0.1.19.md`](plan-v0.1.19.md) |
 | **Phase 2** | v0.1.20+ | CC nav/empty/settings 静态语义；CC 经 IPC 缓存并响应 reload invalidation；进入本 Phase 时 fallback 改为最小安全态 |
 | **Phase 3** | v0.1.20+ 独立授权 | signed channel、静默下载但显式 apply、staging、atomic rollback、密钥轮换/吊销与磁盘代际上限 |
 | **Phase 4** | v0.2.x | 主 GUI toolbar/shortcut/context-menu 等声明式语义；Win/Unix 同 pack parity；仍不进入终端网格渲染 |
@@ -530,7 +531,7 @@ App lane 不是“零 CI 成本”，而是“零 Base 重编译”。签名、�
 
 | 后续 | 建议范围 | 本版必须留下的稳定接口 |
 |------|----------|--------------------------|
-| **v0.1.19** | Phase 1：一条真实 CC 静态语义竖线 | typed callback、等价 fallback、interrupt、event、persisted disabled 熔断和 doctor 恢复 |
+| **v0.1.19** | Phase 1：一条真实 CC 静态语义竖线；**并行开工** cu `window-place`（PRD 32） | CC：typed callback、等价 fallback、interrupt、event、persisted disabled 熔断和 doctor 恢复。cu：几何 fixture + macOS `current` 摆放竖线，见 [`plan-v0.1.19.md`](plan-v0.1.19.md) |
 | **v0.1.19+（独立授权）** | ape + thin shells 架构重构 | Phase A：拆分 `crates/agenterm-ape/`，将根 crate 的 ~110 个产品逻辑文件搬入独立 crate，~55 个平台薄壳文件留在根 crate。详见 [`plan-ape-thin-shell-dynamic-packages.md`](plan-ape-thin-shell-dynamic-packages.md)。 |
 | **v0.1.20+** | Phase 2：CC 静态语义扩面 | nav→empty/settings→layout 顺序、IPC cache/invalidation、fallback 切最小安全态、Win/Unix parity 与 i18n |
 | **v0.1.20+（独立授权）** | Phase 3：签名更新 | channel、离线公钥、显式 apply、rollback、audit、prev 一代、staging 上限与密钥轮换/吊销 |
@@ -886,7 +887,9 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
 | **GD3** | CU-D2 + CU-D3 同时通过 | `current` 档不得标记任何 shipped 状态 |
 
 **轨 D 非目标（本版）**：ssh/rdp/vnc 任一远程 tier 的实现、模型/规划/agent loop、
-引入外部 computer-use 框架、公开发布 cu 可执行体。
+引入外部 computer-use 框架、公开发布 cu 可执行体、**命名窗口摆放**（Spectacle
+目录 → `window-place`）。摆放叶已收录为 [PRD 32](../prd/PRD_02_32_cu_window_placement.md)，
+**v0.1.19 开工**，见 [`plan-v0.1.19.md`](plan-v0.1.19.md)；不得提前塞进本版轨 D。
 
 ---
 

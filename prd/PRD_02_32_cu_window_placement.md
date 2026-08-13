@@ -1,0 +1,166 @@
+# `agenterm-cu` window placement
+
+Parent: [Computer-use foundation (`agenterm-cu`)](PRD_02_28_agenterm_cu.md)
+
+This module owns **named window-placement actions** on the computer-use
+surface: given a window identity and an action id, compute a destination
+rectangle and apply it through the platform accessibility backend. It does
+not own transports ([30](PRD_02_30_cu_targets_transports.md)), grants
+([31](PRD_02_31_cu_authorization_safety.md)), or the rest of the command set
+([29](PRD_02_29_cu_command_surface.md)).
+
+Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
+
+## Why this module exists
+
+- [ ] an agent that can click and type still cannot *arrange* a desktop.
+  Human window managers (Spectacle, Rectangle, and the system tiling keys)
+  are a distinct skill: move the focused — or a named — window into a
+  predictable region without dragging.
+- [ ] the product gap is not another menu-bar hotkey host. The daily-driver
+  host remains the MIT Spectacle 1.2.1 rebuild. This module absorbs the
+  **action catalog and geometry contract** into `cu`, so an orchestrator can
+  issue the same placement without pixels or screenshots.
+- [ ] implementation starts in **v0.1.19**. That version opens the work; it
+  does not have to finish every action. Status stays `[ ]` until public
+  black-box evidence exists against the real `cu` binary.
+
+Provenance (read-only, not a product dependency):
+[mgttt/spectacle](https://github.com/mgttt/spectacle) fork of eczarny/Spectacle,
+MIT. Catalog: `docs/FEATURE-CATALOG.md` in that repository. Action string
+constants are copied as the public id space. JavaScript calculation files and
+the ObjC specs are the executable specification; the Rust port is a
+clean-room rewrite against those fixtures, not a link of the app.
+
+## Subtree position
+
+```text
+agenterm-cu (28)
+├── command surface (29)          ← registers the verb only
+├── targets / transports (30)
+├── authorization / audit (31)    ← actuate + JSONL
+└── window placement (32)         ← this module: ids, geometry, apply pipeline
+```
+
+## Product outcome
+
+- [ ] `cu window-place` applies one named action to one window on a `current`
+  (later: remote) target and returns the before/after rect plus the resolved
+  action id.
+- [ ] it succeeds when an agent can tile, third-cycle, move-across-displays,
+  and grow/shrink a real window by structured identity, wait on the resulting
+  bounds, and see `refused` / `unsupported` / `failed` as distinct outcomes.
+
+## Command contract
+
+- [ ] verb: `window-place`.
+- [ ] required: `--target`, `--grant actuate`, `--action <id>`.
+- [ ] optional: `--window HANDLE`. Absent handle means the focused top-level
+  window of the frontmost application (Spectacle's historical default).
+- [ ] action ids are a closed enum. Two spellings, one meaning:
+
+  | kebab (CLI) | stable constant |
+  |-------------|-----------------|
+  | `center` | `SpectacleWindowActionCenter` |
+  | `fullscreen` | `SpectacleWindowActionFullscreen` |
+  | `left-half` | `SpectacleWindowActionLeftHalf` |
+  | `right-half` | `SpectacleWindowActionRightHalf` |
+  | `top-half` | `SpectacleWindowActionTopHalf` |
+  | `bottom-half` | `SpectacleWindowActionBottomHalf` |
+  | `upper-left` | `SpectacleWindowActionUpperLeft` |
+  | `lower-left` | `SpectacleWindowActionLowerLeft` |
+  | `upper-right` | `SpectacleWindowActionUpperRight` |
+  | `lower-right` | `SpectacleWindowActionLowerRight` |
+  | `next-third` | `SpectacleWindowActionNextThird` |
+  | `previous-third` | `SpectacleWindowActionPreviousThird` |
+  | `next-display` | `SpectacleWindowActionNextDisplay` |
+  | `previous-display` | `SpectacleWindowActionPreviousDisplay` |
+  | `larger` | `SpectacleWindowActionLarger` |
+  | `smaller` | `SpectacleWindowActionSmaller` |
+  | `undo` | `SpectacleWindowActionUndo` |
+  | `redo` | `SpectacleWindowActionRedo` |
+
+- [ ] unknown action → typed `invalid_input`. No alias soup beyond the table.
+- [ ] machine-readable result includes `action`, `window`, `before`, `after`,
+  `screen`, and whether quantized / clamped adjustment ran.
+- [ ] `wait` already owned by [29](PRD_02_29_cu_command_surface.md) is the
+  only legal way to observe completion. Workflows must not sleep.
+
+## Geometry contract (must match Spectacle 1.2)
+
+- [ ] input: window rect, source visible frame, destination visible frame
+  (top-origin). Output: destination rect. Pure function; no AppKit in the
+  core.
+- [ ] half actions cycle `1/2 → 2/3 → 1/3` when the window's mid-line is
+  within 1 pt of the candidate; otherwise they snap to `1/2`.
+- [ ] corner actions cycle width thirds inside that quadrant the same way.
+- [ ] `next-third` / `previous-third` walk horizontal thirds then vertical
+  thirds.
+- [ ] `center` does not resize. `fullscreen` uses `visibleFrame`, never a
+  macOS Space fullscreen.
+- [ ] `larger` / `smaller` grow or shrink while keeping edges that already
+  touch the visible frame attached.
+- [ ] results use rounding that does not leave a 1–2 px gap under the menu
+  bar (Spectacle #700).
+- [ ] apply pipeline, in order: write size/position/size → quantized shrink
+  by 2 pt down to 85% then center in the target → clamp to visible frame.
+- [ ] sheet / system-dialog roles refuse with `failed`.
+- [ ] application min/max size is honored; the pipeline may undershoot the
+  ideal rect but must not report success with a fabricated frame.
+
+`undo` / `redo` are **deferred leaves**. They need per-application history
+that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
+`unsupported` with that reason rather than invent a second history model.
+
+## Layering
+
+- [ ] `spectacle-core` (name of the geometry crate or module) is pure Rust
+  and has no OS imports. Fixture tests are the promotion evidence for the
+  math.
+- [ ] applying a rect is an `agenterm-platform` mechanism (AX / UIA /
+  `_NET_WM` as each backend grows). `cu` must not call AX directly.
+- [ ] macOS is the first apply backend because that is where the catalog was
+  proven. Linux/Windows placement is the same verb on a later backend; the
+  command set does not fork.
+
+## Authorization
+
+- [ ] `window-place` is actuation. `observe` is not enough.
+- [ ] [31](PRD_02_31_cu_authorization_safety.md) applies in full: no grant →
+  `refused`; audit write failure → do not apply; no coordinate fallback.
+
+## Explicit non-goals
+
+- [ ] no menu bar, no global hotkeys, no login item, no `Shortcuts.json`.
+  Those stay in the Spectacle 1.2.1 host until a separate product decision.
+- [ ] no drag-to-snap, no tile occupancy grid, no batch layout of
+  non-addressed windows.
+- [ ] no Rectangle-only features (gaps, almost-maximize, custom regions)
+  unless they later earn their own ids.
+- [ ] no embedding of Spectacle.app, Sparkle, Carthage, or JavaScriptCore.
+- [ ] no screenshot/OCR placement.
+
+## Version gate
+
+- [ ] **v0.1.19 starts this module.** Suggested first increment (must-start,
+  not must-finish-the-catalog):
+  1. freeze ids (this file + Spectacle `FEATURE-CATALOG`);
+  2. port geometry for `center` / `fullscreen` / four halves with fixture
+     parity;
+  3. `cu window-place` on `current` + macOS AX set-rect through platform;
+  4. grant/audit black-box.
+- [ ] later increments on the same module: thirds, corners, display walk,
+  larger/smaller, then undo/redo.
+- [ ] roadmap ownership:
+  [18](PRD_02_18_roadmap.md); execution projection:
+  [`plan/plan-v0.1.19.md`](../plan/plan-v0.1.19.md). v0.1.18 remains the
+  in-progress unique version plan until it closes. This module must not be
+  marked shipped from design text alone.
+
+## Evidence
+
+- [ ] pure tests: every frozen action's fixtures agree with Spectacle's
+  calculation specs within 1 pt.
+- [ ] black-box: real `cu` on a real macOS session places a visible window
+  and a subsequent `windows` / `wait` observation shows the new bounds.
+- [ ] unauthorized call is `refused` and does not move the window.

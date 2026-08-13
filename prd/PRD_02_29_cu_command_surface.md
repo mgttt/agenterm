@@ -37,7 +37,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [ ] the initial set covers observation and actuation:
   screenshot; window enumeration; control-tree enumeration; pointer
   press/release/move/click/drag; wheel; keyboard text and named keys; clipboard
-  read/write; file transfer in both directions.
+  read/write; file transfer in both directions; **named window placement**
+  (`window-place`, owned by [32](PRD_02_32_cu_window_placement.md)).
 - [ ] every command carries an explicit target reference and returns a typed
   result. There is no ambient "current target" that a caller can forget to set.
 - [ ] verb spellings converge with the existing AgenTerm surfaces where the

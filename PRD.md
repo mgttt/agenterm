@@ -136,7 +136,8 @@ AgenTerm — local agent & process fleet work OS
 │     │     ├─ Windows           native API + UIA
 │     │     ├─ macOS             AX (NSAccessibility)
 │     │     └─ Linux             AT-SPI2
-│     └─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
+│     ├─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
+     └─ 32 Window placement     命名摆放（Spectacle 目录）→ `window-place`；v0.1.19 开工
 │
 └─ 未来面（里程碑 / 灵感）
    ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
@@ -180,6 +181,7 @@ AgenTerm — local agent & process fleet work OS
 | 29 | [`agenterm-cu` command surface](prd/PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树观察、确定性等待 |
 | 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2）、会话模型 |
 | 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
+| 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放动作与几何合同（Spectacle 收录）；v0.1.19 开始做进 `cu` |
 
 ## Non-negotiable invariants
 
