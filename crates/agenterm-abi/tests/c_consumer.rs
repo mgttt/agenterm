@@ -78,6 +78,81 @@ fn target_env_name() -> &'static str {
     }
 }
 
+/// Where the toolchain puts debug info — appended to the size printout so CI
+/// log readers do not compare sizes across families: MSVC keeps it in a
+/// separate `.pdb`, Unix embeds DWARF in the binary itself, so a
+/// debug-profile probe is much smaller on Windows for that reason alone.
+/// MSVC vs everything else is the only split that matters here
+/// (mingw/Unix both embed).
+fn debug_info_note() -> &'static str {
+    if cfg!(target_env = "msvc") {
+        "debug info separate .pdb on MSVC"
+    } else {
+        "DWARF embedded"
+    }
+}
+
+/// Raw `AGENTERM_ABI_PROFILE_DIR` value, if set. An explicit override names
+/// the artifact tree to measure (CI sets `target/abi-release`); the raw value
+/// is kept for the size printout so the log shows exactly what was
+/// configured.
+fn profile_dir_override_raw() -> Option<String> {
+    std::env::var("AGENTERM_ABI_PROFILE_DIR").ok()
+}
+
+/// Resolved override directory. Relative values resolve against the repo
+/// root: the test process CWD is the crate dir, while CI passes
+/// `target/abi-release` relative to the workspace root.
+fn profile_dir_override() -> Option<PathBuf> {
+    let raw = profile_dir_override_raw()?;
+    let p = PathBuf::from(&raw);
+    Some(if p.is_absolute() {
+        p
+    } else {
+        repo_root().join(p)
+    })
+}
+
+/// Directory the ABI artifact is looked up in: the `AGENTERM_ABI_PROFILE_DIR`
+/// override when set, otherwise the profile dir derived from the test
+/// binary's own path (target/<profile>/deps/ -> target/<profile>/).
+fn active_profile_dir() -> PathBuf {
+    if let Some(dir) = profile_dir_override() {
+        return dir;
+    }
+    let exe = std::env::current_exe().expect("current_exe()");
+    let deps = exe.parent().expect("test binary has a parent dir");
+    deps.parent()
+        .expect("deps dir has a parent dir")
+        .to_path_buf()
+}
+
+/// Active Cargo profile name for the size printout. An explicit
+/// `AGENTERM_ABI_PROFILE_DIR` wins (its raw value is printed, e.g.
+/// `target/abi-release`); otherwise the profile name is derived from the
+/// test binary's own path: it lives in `target/<profile>/deps/` (the same
+/// layout `locate_cdylib` relies on), so the `deps` parent's name is the
+/// profile, e.g. "abi-dev". Avoids the compile-time `env!("PROFILE")`, which
+/// current Cargo no longer provides to rustc, and the run-time `PROFILE` var,
+/// which Cargo does not set in the test process.
+fn profile_name() -> String {
+    if let Some(raw) = profile_dir_override_raw() {
+        return raw;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return "unknown".to_string();
+    };
+    let Some(profile_dir) = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+    else {
+        return "unknown".to_string();
+    };
+    profile_dir.to_string()
+}
+
 /// Locate a C compiler whose ABI matches the Rust target this test was
 /// compiled for. The cdylib ships the Rust target's ABI, so the C toolchain
 /// must agree with it:
@@ -174,20 +249,28 @@ fn find_msvc_tool() -> Option<cc::Tool> {
     cc::windows_registry::find_tool(&format!("{arch}-pc-windows-msvc"), "cl.exe")
 }
 
-/// Locate the cdylib built under the active profile (same layout as
-/// tests/dylib_load.rs): the test binary sits in target/<profile>/deps/, the
-/// cdylib in target/<profile>/. Missing cdylib = hard test failure, never a
-/// silent skip.
+/// Locate the cdylib. An explicit `AGENTERM_ABI_PROFILE_DIR` wins (relative
+/// values resolve against the repo root, matching how CI passes
+/// `target/abi-release`) and is searched directly; otherwise the default
+/// layout (same as tests/dylib_load.rs) is used: the test binary sits in
+/// target/<profile>/deps/, the cdylib in target/<profile>/. Missing cdylib =
+/// hard test failure, never a silent skip.
 fn locate_cdylib() -> PathBuf {
-    let exe = std::env::current_exe().expect("current_exe()");
-    let deps = exe.parent().expect("test binary has a parent dir");
-    let profile_dir = deps.parent().expect("deps dir has a parent dir");
     const CANDIDATES: [&str; 3] = [
         "agenterm.dll",      // Windows
         "libagenterm.so",    // Linux
         "libagenterm.dylib", // macOS
     ];
-    for dir in [profile_dir, deps] {
+    let profile_dir = active_profile_dir();
+    // The deps/ fallback is only meaningful for the test binary's own profile
+    // tree; an explicit override looks only in the configured directory.
+    let mut dirs = vec![profile_dir.clone()];
+    if profile_dir_override().is_none() {
+        let exe = std::env::current_exe().expect("current_exe()");
+        let deps = exe.parent().expect("test binary has a parent dir");
+        dirs.push(deps.to_path_buf());
+    }
+    for dir in &dirs {
         for name in CANDIDATES {
             let p = dir.join(name);
             if p.exists() {
@@ -329,7 +412,12 @@ fn c_consumer_compiles_links_and_runs() {
     // ---- report size (print only, no assertion: it varies too much across
     // platforms/toolchains to pin a number) --------------------------------
     let probe_size = std::fs::metadata(&exe).map(|m| m.len()).unwrap_or(0);
-    eprintln!("c_consumer: dynamically linked probe = {probe_size} bytes");
+    eprintln!(
+        "c_consumer: dynamically linked probe = {probe_size} bytes \
+         (profile={}, {})",
+        profile_name(),
+        debug_info_note()
+    );
 
     // ---- run ------------------------------------------------------------
     if cfg!(windows) {

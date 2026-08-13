@@ -63,7 +63,9 @@ pub enum AccessibilityTreeError {
 }
 
 impl AccessibilityTreeError {
-    #[cfg_attr(not(feature = "a11y-tree"), allow(dead_code))]
+    // Only a selected native backend constructs typed mechanism failures; the
+    // neutral contract remains available when the selected backend is a stub.
+    #[allow(dead_code)]
     pub(crate) fn failed(code: &'static str, message: impl ToString) -> Self {
         Self::Failed {
             code: code.into(),

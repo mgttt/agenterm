@@ -84,6 +84,81 @@ fn target_env_name() -> &'static str {
     }
 }
 
+/// Where the toolchain puts debug info — appended to the size printout so CI
+/// log readers do not compare sizes across families: MSVC keeps it in a
+/// separate `.pdb`, Unix embeds DWARF in the binary itself, so a
+/// debug-profile static probe is much smaller on Windows for that reason
+/// alone. MSVC vs everything else is the only split that matters here
+/// (mingw/Unix both embed).
+fn debug_info_note() -> &'static str {
+    if cfg!(target_env = "msvc") {
+        "debug info separate .pdb on MSVC"
+    } else {
+        "DWARF embedded"
+    }
+}
+
+/// Raw `AGENTERM_ABI_PROFILE_DIR` value, if set. An explicit override names
+/// the artifact tree to measure (CI sets `target/abi-release`); the raw value
+/// is kept for the size printout so the log shows exactly what was
+/// configured.
+fn profile_dir_override_raw() -> Option<String> {
+    std::env::var("AGENTERM_ABI_PROFILE_DIR").ok()
+}
+
+/// Resolved override directory. Relative values resolve against the repo
+/// root: the test process CWD is the crate dir, while CI passes
+/// `target/abi-release` relative to the workspace root.
+fn profile_dir_override() -> Option<PathBuf> {
+    let raw = profile_dir_override_raw()?;
+    let p = PathBuf::from(&raw);
+    Some(if p.is_absolute() {
+        p
+    } else {
+        repo_root().join(p)
+    })
+}
+
+/// Directory the ABI artifact is looked up in: the `AGENTERM_ABI_PROFILE_DIR`
+/// override when set, otherwise the profile dir derived from the test
+/// binary's own path (target/<profile>/deps/ -> target/<profile>/).
+fn active_profile_dir() -> PathBuf {
+    if let Some(dir) = profile_dir_override() {
+        return dir;
+    }
+    let exe = std::env::current_exe().expect("current_exe()");
+    let deps = exe.parent().expect("test binary has a parent dir");
+    deps.parent()
+        .expect("deps dir has a parent dir")
+        .to_path_buf()
+}
+
+/// Active Cargo profile name for the size printout. An explicit
+/// `AGENTERM_ABI_PROFILE_DIR` wins (its raw value is printed, e.g.
+/// `target/abi-release`); otherwise the profile name is derived from the
+/// test binary's own path: it lives in `target/<profile>/deps/` (the same
+/// layout `locate_staticlib` relies on), so the `deps` parent's name is the
+/// profile, e.g. "abi-dev". Avoids the compile-time `env!("PROFILE")`, which
+/// current Cargo no longer provides to rustc, and the run-time `PROFILE` var,
+/// which Cargo does not set in the test process.
+fn profile_name() -> String {
+    if let Some(raw) = profile_dir_override_raw() {
+        return raw;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return "unknown".to_string();
+    };
+    let Some(profile_dir) = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+    else {
+        return "unknown".to_string();
+    };
+    profile_dir.to_string()
+}
+
 /// Locate a C compiler whose ABI matches the Rust target this test was
 /// compiled for. The staticlib ships the Rust target's ABI, so the C
 /// toolchain must agree with it:
@@ -180,19 +255,27 @@ fn find_msvc_tool() -> Option<cc::Tool> {
     cc::windows_registry::find_tool(&format!("{arch}-pc-windows-msvc"), "cl.exe")
 }
 
-/// Locate the staticlib built under the active profile (same layout as
-/// tests/artifacts.rs): the test binary sits in target/<profile>/deps/, the
-/// staticlib in target/<profile>/. Missing staticlib = hard test failure,
-/// never a silent skip.
+/// Locate the staticlib. An explicit `AGENTERM_ABI_PROFILE_DIR` wins (relative
+/// values resolve against the repo root, matching how CI passes
+/// `target/abi-release`) and is searched directly; otherwise the default
+/// layout (same as tests/artifacts.rs) is used: the test binary sits in
+/// target/<profile>/deps/, the staticlib in target/<profile>/. Missing
+/// staticlib = hard test failure, never a silent skip.
 fn locate_staticlib() -> PathBuf {
-    let exe = std::env::current_exe().expect("current_exe()");
-    let deps = exe.parent().expect("test binary has a parent dir");
-    let profile_dir = deps.parent().expect("deps dir has a parent dir");
     const CANDIDATES: [&str; 2] = [
         "agenterm.lib",  // Windows staticlib
         "libagenterm.a", // Unix staticlib
     ];
-    for dir in [profile_dir, deps] {
+    let profile_dir = active_profile_dir();
+    // The deps/ fallback is only meaningful for the test binary's own profile
+    // tree; an explicit override looks only in the configured directory.
+    let mut dirs = vec![profile_dir.clone()];
+    if profile_dir_override().is_none() {
+        let exe = std::env::current_exe().expect("current_exe()");
+        let deps = exe.parent().expect("test binary has a parent dir");
+        dirs.push(deps.to_path_buf());
+    }
+    for dir in &dirs {
         for name in CANDIDATES {
             let p = dir.join(name);
             if p.exists() {
@@ -329,6 +412,45 @@ fn run_or_panic(label: &str, cmd: &mut Command) -> std::process::Output {
     out
 }
 
+/// Unix-only: strip a COPY of the probe and print the before/after sizes.
+/// Never strips the real probe — it still has to run as the static-link
+/// proof. A missing `strip` on PATH is not a failure (some minimal images
+/// omit it): print a note and skip. No size assertion — sizes vary too much
+/// across toolchains to pin a number.
+#[cfg(unix)]
+fn strip_report(exe: &Path) {
+    let before = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
+    let stripped = exe.with_extension("stripped");
+    if let Err(e) = std::fs::copy(exe, &stripped) {
+        eprintln!("c_static_link: cannot copy probe for strip: {e}");
+        return;
+    }
+    match Command::new("strip").arg(&stripped).output() {
+        Ok(out) if out.status.success() => {
+            let after = std::fs::metadata(&stripped).map(|m| m.len()).unwrap_or(0);
+            eprintln!(
+                "c_static_link: stripped probe = {after} bytes \
+                 (was {before} before strip, {})",
+                debug_info_note()
+            );
+        }
+        Ok(out) => {
+            eprintln!(
+                "c_static_link: `strip` failed with {}: {} — skipping \
+                 stripped-size measurement",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "c_static_link: `strip` not available on PATH ({e}) — skipping \
+                 stripped-size measurement"
+            );
+        }
+    }
+}
+
 #[test]
 fn c_consumer_static_links_and_runs() {
     let Some(compiler) = find_c_compiler("c_static_link") else {
@@ -430,8 +552,19 @@ fn c_consumer_static_links_and_runs() {
         .unwrap_or("?");
     eprintln!(
         "c_static_link: statically linked probe = {probe_size} bytes \
-         ({lib_name} = {lib_size} bytes)"
+         (profile={}, {}) \
+         ({lib_name} = {lib_size} bytes)",
+        profile_name(),
+        debug_info_note()
     );
+
+    // Unix-only: measure the stripped size of a COPY of the probe — the real
+    // one still has to run below, and the copy is what the released binary
+    // would look like after the toolchain strips DWARF. Windows is skipped:
+    // debug info lives in a separate .pdb there, so there is nothing to
+    // strip from the binary itself.
+    #[cfg(unix)]
+    strip_report(&exe);
 
     // ---- run (no DLL, no LD_LIBRARY_PATH: the probe is self-contained) ---
     // The static link is only proven by the probe running with NO
