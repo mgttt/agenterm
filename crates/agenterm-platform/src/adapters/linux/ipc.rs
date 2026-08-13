@@ -632,8 +632,15 @@ fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> Transpo
         resolved.push(component.as_os_str());
         match std::fs::symlink_metadata(&resolved) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                // Resolve host-provided roots (e.g. `/tmp`) once, then continue
-                // creating private leaves under the real directory.
+                // `/tmp` is a platform-provided alias on macOS. It is the one
+                // symlink accepted here; resolving arbitrary caller-provided
+                // ancestry would let an endpoint escape its requested owner.
+                if resolved != Path::new("/tmp") {
+                    return Err(unsafe_endpoint(
+                        endpoint,
+                        "Unix runtime directory ancestry contains a symlink",
+                    ));
+                }
                 resolved = std::fs::canonicalize(&resolved)
                     .map_err(|error| transport_io(endpoint, error))?;
                 let meta = std::fs::symlink_metadata(&resolved)
@@ -701,24 +708,11 @@ fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> Transpo
             "Unix runtime directory is not private to the effective UID",
         ));
     }
-    // Host temp helpers (and `create_dir_all`) often leave 0o755 leaves. When we
-    // already own the directory, tighten it to 0o700 so control sockets match
-    // the Windows named-pipe "private to this user" posture without forcing
-    // every caller to remember Unix modes.
     if metadata.mode() & 0o077 != 0 {
-        use std::os::unix::fs::PermissionsExt as _;
-        let mut permissions = metadata.permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&resolved, permissions)
-            .map_err(|error| transport_io(endpoint, error))?;
-        let metadata =
-            std::fs::symlink_metadata(&resolved).map_err(|error| transport_io(endpoint, error))?;
-        if metadata.mode() & 0o077 != 0 {
-            return Err(unsafe_endpoint(
-                endpoint,
-                "Unix runtime directory is not private to the effective UID",
-            ));
-        }
+        return Err(unsafe_endpoint(
+            endpoint,
+            "Unix runtime directory is not private to the effective UID",
+        ));
     }
     if let Ok(canonical) = std::fs::canonicalize(&resolved) {
         resolved = canonical;

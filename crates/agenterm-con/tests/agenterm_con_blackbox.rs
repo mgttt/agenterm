@@ -236,7 +236,17 @@ fn scratch_dir(label: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
         let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
     }
-    std::fs::canonicalize(&dir).unwrap_or(dir)
+    #[cfg(unix)]
+    {
+        std::fs::canonicalize(&dir).unwrap_or(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows canonicalization introduces a `\\?\` verbatim prefix.
+        // Native children accept it, but Git for Windows' MSYS `less.exe`
+        // treats its backslashes as shell escapes and loses every separator.
+        dir
+    }
 }
 
 fn write_journey(dir: &Path, commands_json: &str) -> PathBuf {

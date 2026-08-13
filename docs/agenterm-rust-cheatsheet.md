@@ -962,3 +962,20 @@ black-box tests must physically live under the owning package's `tests/`
 directory, use package-relative `[[test]]` paths when explicit registration is
 needed, and publish repo-relative evidence paths separately. Confirm ownership
 through Cargo metadata, not only by observing one green invocation.
+
+## Canonical paths are not cross-runtime command arguments
+
+Windows `std::fs::canonicalize` can return a `\\?\` verbatim path. That is a
+valid native Win32 path but not a portable argument for MSYS programs, which
+interpret backslashes as escapes. Canonicalize only where identity/security
+requires it; for a newly created Windows test scratch directory passed to both
+native and MSYS children, retain the ordinary absolute path instead.
+
+## Unix IPC may resolve only platform-owned aliases
+
+Do not canonicalize arbitrary symlink ancestry while validating a Unix socket
+runtime directory. A narrowly documented host alias such as macOS `/tmp` may be
+resolved, but caller-created symlinks must fail as unsafe. Likewise, reject an
+existing directory with group/other permission bits; never silently `chmod` a
+caller-owned path to make an unsafe endpoint appear valid. Only directories
+created by the adapter may be initialized at `0700`.
