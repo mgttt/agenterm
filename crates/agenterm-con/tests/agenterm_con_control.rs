@@ -485,10 +485,13 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert_eq!(exited["child_exit_code"], 7);
     let child_final = cli_text(exe, &endpoint, &["capture-pane", "--target", &child_id]);
     assert!(child_final.contains("CHILD_FINAL"));
+    let selected_exited = cli_json(exe, &endpoint, &["select-tab", "--target", &child_id]);
+    assert_eq!(selected_exited["active"], child_id);
     for arguments in [
         vec!["send-text", "--target", &child_id, "late text"],
         vec!["send-paste", "--target", &child_id, "late paste"],
         vec!["send-keys", "--target", &child_id, "A"],
+        vec!["send-ui-keys", "A"],
     ] {
         let rejected = invoke(exe, &endpoint, &arguments);
         assert!(
