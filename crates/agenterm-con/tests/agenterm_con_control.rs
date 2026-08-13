@@ -515,6 +515,46 @@ fn gui_control_surface_isolated_multitab_black_box() {
         );
     }
 
+    let exited_mouse = cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "click",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    assert_eq!(exited_mouse["delivered"], true);
+    assert_eq!(exited_mouse["route"], "selection");
+    assert_eq!(exited_mouse["changed"], true);
+
+    let exited_wheel = cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-wheel",
+            "--target",
+            &child_id,
+            "--column",
+            "0",
+            "--row",
+            "0",
+            "--notches",
+            "1",
+        ],
+    );
+    assert_eq!(exited_wheel["route"], "scrollback");
+    assert_eq!(exited_wheel["delivered_notches"], 1);
+    assert_eq!(exited_wheel["changed"], true);
+
     cli_json(
         exe,
         &endpoint,

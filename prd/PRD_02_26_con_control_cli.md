@@ -58,6 +58,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Application mouse write failures fail the CLI request, while physical pointer
   input remains best-effort across concurrent child exit and keeps gesture
   ownership through release.
+- [x] a retained exited tab remains locally interactive: public control evidence
+  captures its final pane, selects it, performs a local selection click, and
+  routes wheel input to bounded scrollback without reopening or writing its PTY.
+  Keyboard/text/paste remain explicit failures, so observation does not imply a
+  live input channel.
+- [x] direct route tests prove application mouse and alternate-screen wheel
+  writes propagate a closed PTY instead of constructing success outcomes. A
+  failed application report does not commit its last-reported cell or gesture
+  ownership, preserving the next physical/control gesture's routing state.
 - [x] public `wait-text` delegates exact per-visible-row UTF-8 containment to one
   allocation-free control kernel. It preserves the existing authority: no row
   joining, newline insertion, cross-row match, hidden-scrollback scan, Unicode

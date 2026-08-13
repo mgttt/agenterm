@@ -5813,6 +5813,34 @@ mod tests {
     }
 
     #[test]
+    fn application_mouse_failure_does_not_commit_reported_cell() {
+        let mut app = ConTerminal::new(None);
+        app.parser.process(b"\x1b[?1000h");
+        let point = TerminalPoint { row: 2, col: 3 };
+
+        let error = app
+            .report_mouse_checked(0, point, true, false, &ModifierState::default())
+            .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        assert_eq!(app.last_reported_cell, None);
+        assert!(!app.mouse_dragging);
+        assert_eq!(app.active_button, None);
+    }
+
+    #[test]
+    fn alternate_screen_wheel_propagates_closed_pty() {
+        let mut app = ConTerminal::new(None);
+        app.parser.process(b"\x1b[?1049h");
+
+        let error = app
+            .handle_wheel(-1.0, &ModifierState::default(), None)
+            .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
     fn offline_help_and_version_are_solo() {
         assert_eq!(offline_cli_exit(&["--version".to_owned()]), Some(0));
         assert_eq!(offline_cli_exit(&["--help".to_owned()]), Some(0));
