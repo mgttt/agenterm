@@ -20,10 +20,13 @@ name = "size-probe-variant-b-dynamic"
 path = "src/variant_b_dynamic.rs"
 
 [dependencies]
-# Variant A only: statically links the mechanism code it actually calls
-# (runtime / clipboard / process / parent-console). `process` already pulls
-# in `parent-console` and `runtime`; `clipboard` is explicit.
-agenterm-platform = { path = "../../crates/agenterm-platform", features = ["process", "clipboard"] }
+# Variant A only: statically links the mechanism code it actually calls.
+# `process` already pulls in `parent-console` and `runtime`; `clipboard` is
+# explicit. Milestone 23 adds `pty` plus the pixel-window host: the
+# `window_host` module and its `run_pixel_window` entry require
+# `window` + `input` + `ime` (same feature set the libagenterm ABI itself
+# enables), so `native-pixel-window` alone is not enough to compile it.
+agenterm-platform = { path = "../../crates/agenterm-platform", features = ["process", "clipboard", "pty", "native-pixel-window", "input", "ime"] }
 
 # Variant B only: the dynamic path never depends on agenterm-platform; it
 # dlopens the libagenterm cdylib through this tiny loader. `libloading` is
