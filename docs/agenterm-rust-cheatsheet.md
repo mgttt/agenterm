@@ -1116,14 +1116,19 @@ through to XTest / `input_inject::send_keys`. A miss types nothing.
 
 `cu send-text --name` resolves the same unique showing node, then writes
 through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`)
-when present. Chrome named fields expose `Text` (read) but not
-`EditableText`; those write through AT-SPI `Text` plus the renderer AX
-set-value and are confirmed by `GetText`. A named showing node that does
-not expose a writeable text interface typed-fails (`a11y_text_unavailable`).
-That path never falls through to XTest / `input_inject::type_text`. Explicit
-`--coords` or no `--name` may still inject. Their payload argument is
-positional, so parse `--` as the end of flags — otherwise text (or a chord)
-that starts with a dash is eaten as a flag.
+when present. Chrome and WebKitGTK named fields expose `Text` (read) but
+not `EditableText`. Chrome writes through AT-SPI `Text` plus the renderer
+AX set-value. WebKit 2.52 never registers `EditableText` even on a
+`<textarea id="composer-input">` (Reasonix composer); that write uses the
+AT-SPI `id` / name attributes plus the eval helper loaded by
+`scripts/reasonix-desktop-a11y.sh`, then is confirmed by `GetText`.
+`GenerateKeyboardEvent` on X11 is XTest — do not use it as a silent
+fallback. A named showing node that does not expose a writeable text
+interface typed-fails (`a11y_text_unavailable`). That path never falls
+through to XTest / `input_inject::type_text`. Explicit `--coords` or no
+`--name` may still inject. Their payload argument is positional, so parse
+`--` as the end of flags — otherwise text (or a chord) that starts with a
+dash is eaten as a flag.
 
 ## Do not drop the AT-SPI bus between resolve and keys
 
@@ -1197,6 +1202,15 @@ implementation on one target only. Give the facade a capability predicate
 are on. This also removes the second failure mode of the `cfg` pair: the
 `#[cfg(not(...))]` stub method has no caller on that host, and `-D warnings`
 turns `dead_code` into a build error only on that one target cell.
+
+The same `target_os` ban applies inside `crates/agenterm-platform/src/*.rs`
+facades. `selected.rs` and `adapters/**` are the only legal OS-selection
+sites; a one-line Linux probe such as `last_text_write_via` still has to
+live on the selected module, with the off-host stub returning the documented
+default. Platform adapters also cannot read `AGENTERM_*` environment names
+(`platform_crate_has_no_agenterm_product_dependency_or_source_coupling`).
+Use `PLATFORM_*` (already used for IME). Product launchers and LD_PRELOAD
+helpers must read and export that same `PLATFORM_*` name, not `AGENTERM_*`.
 
 ## File existence is not writer completion
 
