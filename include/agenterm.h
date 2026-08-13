@@ -72,6 +72,19 @@ typedef struct {
  * record. Returns AGT_OK on success. */
 agt_status agt_last_error(agt_error* out);
 
+/* LINK FORM: pick ONE per process. libagenterm ships both a shared library
+ * and a static archive, and a process that ends up with both -- say by
+ * linking the archive and also loading a plugin that dlopens the library --
+ * gets two copies whose error state is INDEPENDENT. That is measured on
+ * Windows, Linux and macOS alike, not assumed. A failure raised through one
+ * copy is invisible to agt_last_error on the other, and worse, the other copy
+ * keeps reporting whatever error IT last recorded, so a caller reads a
+ * plausible diagnostic that belongs to a different call entirely. The same
+ * split applies to the snapshot that agt_a11y_tree_snapshot hands to
+ * agt_a11y_tree_node and the other accessors: take the snapshot and read it
+ * through the same copy. Handles (agt_pty_t, agt_window_t, ...) likewise
+ * belong to the copy that created them. */
+
 /* --- capability negotiation ----------------------------------------- */
 
 typedef enum {

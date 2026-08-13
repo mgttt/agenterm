@@ -150,11 +150,8 @@ fn mixed_static_and_dynamic_linkage_probe() {
         "probe reported a fatal error (dynamic copy unusable):\n{stdout}"
     );
 
-    // The two CERTAIN facts: both copies are the same ABI and run in the same
-    // process. Cross-copy last_error / A11Y_SNAPSHOT behavior is the measured
-    // unknown and is deliberately NOT asserted — that is the milestone's
-    // whole point, and the assertions only become possible once all three
-    // platforms' data is in.
+    // Validity checks first: both copies are the same ABI and run in the same
+    // process, or none of the readings below mean anything.
     let abi_version = ((ABI_MAJOR as u32) << 16) | ABI_MINOR as u32;
     let expected_abi = format!("0x{abi_version:08x}");
     let static_abi = field(&stdout, "static_abi_version=");
@@ -181,5 +178,46 @@ fn mixed_static_and_dynamic_linkage_probe() {
     assert_ne!(
         static_pid, "0",
         "agt_process_self() must report a real pid, got 0"
+    );
+
+    // The measured behaviour, now pinned. Windows, Linux and macOS all
+    // reported these four readings identically on the first run, including
+    // Linux, where symbol interposition could in principle have collapsed the
+    // two copies onto one LAST_ERROR and did not: agt_process_list and
+    // agt_last_error never call each other, so each touches its own module's
+    // TLS directly and interposing the exported functions cannot merge them.
+    //
+    // These assertions exist because include/agenterm.h now states the rule
+    // they describe. If the isolation ever changes -- in either direction --
+    // the documented contract is wrong and this fails rather than the header
+    // quietly becoming a lie.
+    let control_static = field(&stdout, "static_read_after_static_trigger=");
+    let control_dynamic = field(&stdout, "dynamic_read_after_dynamic_trigger=");
+    assert!(
+        control_static.contains("out_count is null"),
+        "control A: the static copy must read back its OWN failure, got {control_static:?}"
+    );
+    assert!(
+        control_dynamic.contains("buf is null"),
+        "control C: the dynamic copy must read back its OWN failure, got {control_dynamic:?}"
+    );
+    // The two copies were deliberately failed with DIFFERENT messages, which
+    // is what makes these two readings legible at all.
+    let cross_to_dynamic = field(&stdout, "dynamic_read_after_static_trigger=");
+    assert!(
+        cross_to_dynamic.starts_with("none:"),
+        "the dynamic copy must not see a failure raised through the static copy, \
+         got {cross_to_dynamic:?}"
+    );
+    let cross_to_static = field(&stdout, "static_read_after_dynamic_trigger=");
+    assert!(
+        cross_to_static.contains("out_count is null"),
+        "the static copy must still hold its own stale error rather than the one \
+         the dynamic copy just raised, got {cross_to_static:?}"
+    );
+    assert!(
+        !cross_to_static.contains("buf is null"),
+        "the static copy must not observe the dynamic copy's failure, got \
+         {cross_to_static:?}"
     );
 }

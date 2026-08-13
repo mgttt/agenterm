@@ -189,6 +189,23 @@ macOS 上 `Libs.private` 以 `-framework` **参数对**展开（`-framework` 与
 `pkgconfig_consume` 端到端测试在 Linux/macOS 上逐字验证，若与上表
 `Libs.private` 实测值有任何出入，测试当场红。
 
+## 一个进程只选一种链接形态（里程碑 59）
+
+本仓同时交付动态库与静态库,**打包时不要让同一个进程两者都拿到**。
+典型出事路径:主程序静态链 `libagenterm.a`,又加载一个 dlopen
+`libagenterm.so` 的插件 —— 进程里就有两份副本,**错误状态互相独立**。
+
+这是 `tests/mixed_linkage.rs` 在 Windows / Linux / macOS 上**实测**的,
+不是推断:通过一份副本触发失败,另一份的 `agt_last_error` 读不到;
+更糟的是它会继续报**自己上一次**记下的错误,于是调用方读到一条
+看起来合理、其实属于另一次调用的诊断。`agt_a11y_tree_snapshot` 与其
+访问器之间的快照、以及各类句柄(`agt_pty_t` / `agt_window_t`)同理 ——
+谁创建的就由谁读。
+
+规则写在 `include/agenterm.h` 的 `agt_last_error` 声明旁边,
+上面那条测试把这四条实测行为钉住了:哪天隔离性变了(往任一方向),
+测试会红,而不是让头文件里的说法悄悄变成假话。
+
 ## 安装身份：`DT_SONAME` 与 `@rpath`（里程碑 56）
 
 库被安装（`libagenterm.so` / `libagenterm.dylib` 落到 `$libdir`）之后，
