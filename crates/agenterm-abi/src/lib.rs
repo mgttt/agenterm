@@ -347,8 +347,42 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 /// may still be absent, e.g. a headless build). Mechanisms that have not
 /// shipped yet report `AGT_UNSUPPORTED` (a product gap, never a permission
 /// statement).
+///
+/// **The parameter is `u32`, not the `agt_capability` enum — a soundness
+/// decision, not an ABI choice.** `agt_capability` is a `#[repr(C)]` 16-variant
+/// enum (discriminants 1..=16) passed by value from C, and a C caller can pass
+/// any `int`. Constructing a Rust enum from an out-of-range integer is
+/// **immediate undefined behavior** — it happens at function entry, before the
+/// `match` runs — so a `_ =>` wildcard arm can only catch *legal-but-unhandled*
+/// variants and never an out-of-range value; it was false comfort. Receiving
+/// `u32` instead is machine-code-identical to receiving the enum (`#[repr(C)]`
+/// enums are passed as `int`), so this does **not** break the ABI:
+/// `include/agenterm.h` still declares `agt_capability` and C callers change
+/// nothing. Out-of-range values now fall through to the `_` arm and map to
+/// `AGT_UNSUPPORTED` (external behavior unchanged this round). The
+/// discriminants below are derived from the enum with `as u32`, never
+/// hand-copied magic numbers — any rename/reorder/revalue of the enum follows
+/// through at compile time instead of drifting.
 #[unsafe(no_mangle)]
-pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
+pub extern "C" fn agt_capability_query(cap: u32) -> agt_status {
+    // Discriminants derived from the enum itself, never hand-written.
+    const AGT_CAP_PTY: u32 = agt_capability::AGT_CAP_PTY as u32;
+    const AGT_CAP_PROCESS_SPAWN: u32 = agt_capability::AGT_CAP_PROCESS_SPAWN as u32;
+    const AGT_CAP_PROCESS_OBSERVE: u32 = agt_capability::AGT_CAP_PROCESS_OBSERVE as u32;
+    const AGT_CAP_WINDOW_HOST: u32 = agt_capability::AGT_CAP_WINDOW_HOST as u32;
+    const AGT_CAP_WINDOW_ENUMERATE: u32 = agt_capability::AGT_CAP_WINDOW_ENUMERATE as u32;
+    const AGT_CAP_WINDOW_OP: u32 = agt_capability::AGT_CAP_WINDOW_OP as u32;
+    const AGT_CAP_SCREENSHOT: u32 = agt_capability::AGT_CAP_SCREENSHOT as u32;
+    const AGT_CAP_CLIPBOARD: u32 = agt_capability::AGT_CAP_CLIPBOARD as u32;
+    const AGT_CAP_IME: u32 = agt_capability::AGT_CAP_IME as u32;
+    const AGT_CAP_INPUT_INJECT: u32 = agt_capability::AGT_CAP_INPUT_INJECT as u32;
+    const AGT_CAP_IPC: u32 = agt_capability::AGT_CAP_IPC as u32;
+    const AGT_CAP_FONT_RASTER: u32 = agt_capability::AGT_CAP_FONT_RASTER as u32;
+    const AGT_CAP_FILESYSTEM_PUBLISH: u32 = agt_capability::AGT_CAP_FILESYSTEM_PUBLISH as u32;
+    const AGT_CAP_SHARED_MEMORY: u32 = agt_capability::AGT_CAP_SHARED_MEMORY as u32;
+    const AGT_CAP_PARENT_CONSOLE: u32 = agt_capability::AGT_CAP_PARENT_CONSOLE as u32;
+    const AGT_CAP_ACCESSIBILITY_TREE: u32 = agt_capability::AGT_CAP_ACCESSIBILITY_TREE as u32;
+
     fn capability_ok(status: CapabilityStatus) -> agt_status {
         if matches!(status, CapabilityStatus::Available) {
             agt_status::AGT_OK
@@ -357,23 +391,32 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
         }
     }
     match cap {
-        agt_capability::AGT_CAP_PTY
-        | agt_capability::AGT_CAP_SCREENSHOT
-        | agt_capability::AGT_CAP_PROCESS_OBSERVE
-        | agt_capability::AGT_CAP_CLIPBOARD
-        | agt_capability::AGT_CAP_PARENT_CONSOLE => agt_status::AGT_OK,
+        AGT_CAP_PTY
+        | AGT_CAP_SCREENSHOT
+        | AGT_CAP_PROCESS_OBSERVE
+        | AGT_CAP_CLIPBOARD
+        | AGT_CAP_PARENT_CONSOLE => agt_status::AGT_OK,
+        // Mechanisms that have not shipped this round report AGT_UNSUPPORTED
+        // (a product gap, never a permission statement). Listed explicitly so
+        // every derived discriminant constant above is exercised by the match.
+        AGT_CAP_PROCESS_SPAWN
+        | AGT_CAP_IME
+        | AGT_CAP_IPC
+        | AGT_CAP_FONT_RASTER
+        | AGT_CAP_FILESYSTEM_PUBLISH
+        | AGT_CAP_SHARED_MEMORY => agt_status::AGT_UNSUPPORTED,
         // AppKit requires the window event loop on the main thread; this ABI
         // hosts it on a library-private thread, so the window host mechanism
         // does not exist on macOS (`agt_window_open` returns AGT_UNSUPPORTED
         // there, and a retry can never succeed).
-        agt_capability::AGT_CAP_WINDOW_HOST => {
+        AGT_CAP_WINDOW_HOST => {
             if cfg!(target_os = "macos") {
                 agt_status::AGT_UNSUPPORTED
             } else {
                 agt_status::AGT_OK
             }
         }
-        agt_capability::AGT_CAP_ACCESSIBILITY_TREE => {
+        AGT_CAP_ACCESSIBILITY_TREE => {
             if a11y_mechanism_available() {
                 agt_status::AGT_OK
             } else {
@@ -383,15 +426,16 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
         // Milestone 43: report the host's real capability status for the
         // native-window and input-injection mechanisms (never a blanket
         // AGT_OK — Linux/macOS hosts may not implement them).
-        agt_capability::AGT_CAP_WINDOW_ENUMERATE => {
+        AGT_CAP_WINDOW_ENUMERATE => {
             capability_ok(agenterm_platform::window_enumerate::capability_status())
         }
-        agt_capability::AGT_CAP_WINDOW_OP => {
-            capability_ok(agenterm_platform::window_op::capability_status())
-        }
-        agt_capability::AGT_CAP_INPUT_INJECT => {
-            capability_ok(agenterm_platform::input_inject::capability_status())
-        }
+        AGT_CAP_WINDOW_OP => capability_ok(agenterm_platform::window_op::capability_status()),
+        AGT_CAP_INPUT_INJECT => capability_ok(agenterm_platform::input_inject::capability_status()),
+        // Every value not listed above — including any out-of-range int a C
+        // caller can pass (0, negatives, > 16) — maps to AGT_UNSUPPORTED.
+        // With an integer parameter this arm is reachable for arbitrary
+        // input; under the old enum parameter it never was (constructing the
+        // enum from the out-of-range int was UB first).
         _ => agt_status::AGT_UNSUPPORTED,
     }
     // Pure match — no panic surface; the fence is kept for uniformity.

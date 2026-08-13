@@ -8,12 +8,23 @@
 //! skipping would leave the defects unproven.
 
 use agenterm::{ABI_MAJOR, ABI_MINOR};
+use common::capabilities::{
+    AGT_CAP_ACCESSIBILITY_TREE, AGT_CAP_CLIPBOARD, AGT_CAP_INPUT_INJECT, AGT_CAP_PARENT_CONSOLE,
+    AGT_CAP_PROCESS_OBSERVE, AGT_CAP_PROCESS_SPAWN, AGT_CAP_PTY, AGT_CAP_SCREENSHOT,
+    AGT_CAP_WINDOW_ENUMERATE, AGT_CAP_WINDOW_HOST, AGT_CAP_WINDOW_OP,
+};
 use libloading::{Library, Symbol};
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+/// Shared test-side capability constants + C-toolchain helpers. The AGT_CAP_*
+/// discriminants live in `common::capabilities` (the single hand-written test
+/// copy, gated against the header and the Rust enum by
+/// `capability_enum_gate.rs`) — never re-typed here.
+mod common;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -105,19 +116,8 @@ impl Default for agt_window_info {
 const AGT_OK: i32 = 0;
 const AGT_UNSUPPORTED: i32 = 1;
 const AGT_FAILED: i32 = 2;
-const AGT_CAP_PTY: i32 = 1;
-const AGT_CAP_PROCESS_SPAWN: i32 = 2;
-const AGT_CAP_PROCESS_OBSERVE: i32 = 3;
-const AGT_CAP_WINDOW_HOST: i32 = 4;
-const AGT_CAP_WINDOW_ENUMERATE: i32 = 5;
-const AGT_CAP_WINDOW_OP: i32 = 6;
-const AGT_CAP_SCREENSHOT: i32 = 7;
-const AGT_CAP_CLIPBOARD: i32 = 8;
-const AGT_CAP_INPUT_INJECT: i32 = 10;
-const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
-const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
 const PROBE: &[u8] = b"agenterm-abi-probe";
 
 /// PNG signature: `89 50 4E 47 0D 0A 1A 0A`.
@@ -428,6 +428,62 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     assert_eq!(unsafe { f(AGT_CAP_PARENT_CONSOLE) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_SPAWN) }, AGT_UNSUPPORTED);
+}
+
+/// Milestone 53 defect 3 gate, part 1: out-of-range discriminants are legal
+/// C input (the C caller can pass any `int`), so they must never crash the
+/// process and must map to AGT_UNSUPPORTED — not UB, not AGT_FAILED. The
+/// soundness fix (`agt_capability_query` takes an integer and dispatches on
+/// it) is what makes this well-defined; under the old enum parameter these
+/// calls were undefined behavior.
+#[test]
+fn capability_query_out_of_range_returns_unsupported() {
+    let lib = load();
+    let f: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    // 0 (before the enum), 17 (just past the last variant), far beyond,
+    // negative ints (reinterpreted as huge u32 on the library side) — all
+    // must land on the unknown-value branch.
+    for cap in [0i32, 17, 9999, -1, i32::MIN, i32::MAX] {
+        let st = unsafe { f(cap) };
+        assert_eq!(
+            st, AGT_UNSUPPORTED,
+            "out-of-range capability {cap} must return AGT_UNSUPPORTED, got {st}"
+        );
+    }
+}
+
+/// Milestone 53 defect 3 gate, part 2: every valid discriminant 1..=16 must
+/// return AGT_OK or AGT_UNSUPPORTED — never AGT_FAILED (spec 3.1: the three
+/// states must not be merged). Driven by `common::capabilities::ALL`, the
+/// gated single source of test-side numbers.
+#[test]
+fn capability_query_all_valid_discriminants_never_failed() {
+    let lib = load();
+    let f: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    for &cap in &common::capabilities::ALL {
+        let st = unsafe { f(cap) };
+        assert!(
+            st == AGT_OK || st == AGT_UNSUPPORTED,
+            "valid capability {cap} must return AGT_OK or AGT_UNSUPPORTED, got {st}"
+        );
+    }
+}
+
+/// Milestone 53 defect 3 gate, part 3: at least one capability must be
+/// AGT_OK, otherwise a library-wide "everything unsupported" regression would
+/// still pass part 2. Bound to AGT_CAP_PTY deliberately: PTY is a
+/// compile-time mechanism on every built library with no display dependency,
+/// so this cannot false-red on headless CI (unlike window/input capabilities,
+/// which legitimately report AGT_UNSUPPORTED on some hosts).
+#[test]
+fn capability_query_at_least_one_ok() {
+    let lib = load();
+    let f: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    assert_eq!(
+        unsafe { f(common::capabilities::AGT_CAP_PTY) },
+        AGT_OK,
+        "AGT_CAP_PTY must be AGT_OK on every built library"
+    );
 }
 
 #[test]

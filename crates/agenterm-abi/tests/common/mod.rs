@@ -504,3 +504,59 @@ pub mod toolchain {
         out
     }
 }
+
+/// Milestone 53: the AGT_CAP_* discriminant numbers used by the black-box
+/// dlopen tests (`dylib_load.rs`).
+///
+/// This is the single hand-written test-side copy of the capability
+/// numbering. The same numbers also live in `include/agenterm.h`
+/// (`AGT_CAP_*`) and in the `agt_capability` enum in `src/lib.rs`;
+/// `capability_enum_gate.rs` verifies this table against BOTH of those
+/// (names AND values, in declaration order), so inserting/moving/renaming a
+/// variant in any of the three places fails the gate instead of silently
+/// pointing the tests at a different capability. The `ALL` array is assembled
+/// from the constants above — never a second hand-written list.
+///
+/// `#[allow(dead_code)]` for the same reason as the other modules here: each
+/// `tests/*.rs` is an independent crate, and a given test file only reads the
+/// subset it needs.
+#[allow(dead_code)]
+pub mod capabilities {
+    pub const AGT_CAP_PTY: i32 = 1;
+    pub const AGT_CAP_PROCESS_SPAWN: i32 = 2;
+    pub const AGT_CAP_PROCESS_OBSERVE: i32 = 3;
+    pub const AGT_CAP_WINDOW_HOST: i32 = 4;
+    pub const AGT_CAP_WINDOW_ENUMERATE: i32 = 5;
+    pub const AGT_CAP_WINDOW_OP: i32 = 6;
+    pub const AGT_CAP_SCREENSHOT: i32 = 7;
+    pub const AGT_CAP_CLIPBOARD: i32 = 8;
+    pub const AGT_CAP_IME: i32 = 9;
+    pub const AGT_CAP_INPUT_INJECT: i32 = 10;
+    pub const AGT_CAP_IPC: i32 = 11;
+    pub const AGT_CAP_FONT_RASTER: i32 = 12;
+    pub const AGT_CAP_FILESYSTEM_PUBLISH: i32 = 13;
+    pub const AGT_CAP_SHARED_MEMORY: i32 = 14;
+    pub const AGT_CAP_PARENT_CONSOLE: i32 = 15;
+    pub const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
+
+    /// All 16 discriminants in declaration order, derived from the constants
+    /// above so it can never drift from them.
+    pub const ALL: [i32; 16] = [
+        AGT_CAP_PTY,
+        AGT_CAP_PROCESS_SPAWN,
+        AGT_CAP_PROCESS_OBSERVE,
+        AGT_CAP_WINDOW_HOST,
+        AGT_CAP_WINDOW_ENUMERATE,
+        AGT_CAP_WINDOW_OP,
+        AGT_CAP_SCREENSHOT,
+        AGT_CAP_CLIPBOARD,
+        AGT_CAP_IME,
+        AGT_CAP_INPUT_INJECT,
+        AGT_CAP_IPC,
+        AGT_CAP_FONT_RASTER,
+        AGT_CAP_FILESYSTEM_PUBLISH,
+        AGT_CAP_SHARED_MEMORY,
+        AGT_CAP_PARENT_CONSOLE,
+        AGT_CAP_ACCESSIBILITY_TREE,
+    ];
+}
