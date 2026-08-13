@@ -43,6 +43,8 @@ cat > "${APP}/Contents/Info.plist" <<'EOF'
   <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>AgentermCu 需要辅助功能权限才能按快捷键移动其他窗口。请打开「AgentermCu」开关，不要选旧的 agenterm-cu。</string>
 </dict>
 </plist>
 EOF
@@ -92,6 +94,5 @@ launchctl kickstart -k "gui/$(id -u)/${LABEL}"
 echo "installed ${APP}"
 echo "cli ${BIN}"
 echo "launchd ${LABEL} loaded"
-echo "enable Accessibility for: AgentermCu (${APP})"
-open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+echo "if Accessibility is off, AgentermCu opens Settings and shows a card for AgentermCu"
 echo "Spectacle defaults: ⌥⌘←/→/↑/↓  ⌥⌘C/F/Z  ⌃⌘←/→  …"

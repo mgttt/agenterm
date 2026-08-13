@@ -5,6 +5,9 @@
 
 pub mod audit;
 pub mod auth;
+#[cfg(target_os = "macos")]
+pub mod ax_guide;
+pub mod ax_guide_policy;
 pub mod command;
 pub mod executor;
 pub mod hotkeys;

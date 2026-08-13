@@ -1161,3 +1161,15 @@ race a marker emitted from process-launch arguments against control discovery.
 After the control endpoint is ready, inject a marker through the public input
 interface and wait for that marker through the public observation interface;
 buffered PTY input then provides the rendezvous with actual child readiness.
+
+## A TCC card must not steal the Settings click
+
+macOS Accessibility onboarding (`AXIsProcessTrusted` / Settings
+`Privacy_Accessibility`) fails if the helper activates itself on a timer.
+`activateIgnoringOtherApps` or `makeKeyAndOrderFront` every poll makes System
+Settings lose key status, so the user cannot flip **AgentermCu**. Detect trust
+loss on a short poll, but: open the pane at most once per cooldown unless
+trust was revoked; skip reopen while Settings is frontmost; `orderFrontRegardless`
+the instruction card without becoming key; put the exact bundle name on a
+highlighted field. Prove the reopen policy with a clock + flags unit test, not
+a live Settings session.

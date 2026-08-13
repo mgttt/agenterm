@@ -91,7 +91,6 @@ mod macos {
             actual_size: *mut u32,
             data: *mut c_void,
         ) -> i32;
-        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> u8;
     }
 
     struct Bind {
@@ -207,7 +206,6 @@ mod macos {
             eprintln!("cu hotkeys: failed to start NSApplication");
             return 1;
         }
-        prompt_ax();
         let auth = Authorization::new([Grant::Observe, Grant::Actuate].into_iter().collect());
         let mut host = Host {
             executor: Executor::new(auth),
@@ -253,7 +251,8 @@ mod macos {
                 }
             }
         }
-        eprintln!("cu hotkeys: listening with Spectacle defaults (Accessibility required)");
+        eprintln!("cu hotkeys: listening with Spectacle defaults");
+        crate::ax_guide::start();
         run_nsapp();
         0
     }
@@ -278,16 +277,6 @@ mod macos {
         };
         unsafe {
             NSApplication::sharedApplication(mtm).run();
-        }
-    }
-
-    fn prompt_ax() {
-        unsafe {
-            if AXIsProcessTrustedWithOptions(std::ptr::null()) == 0 {
-                eprintln!(
-                    "cu hotkeys: enable Accessibility for this binary, then restart the agent"
-                );
-            }
         }
     }
 
@@ -336,6 +325,9 @@ mod macos {
                     error.message,
                     error.code
                 );
+                if error.code == "ax_api_disabled" {
+                    crate::ax_guide::nudge();
+                }
             }
         }
         0
