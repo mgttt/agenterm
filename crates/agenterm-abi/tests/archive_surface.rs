@@ -40,9 +40,8 @@ enum Class {
     Agt,
     /// Rust v0 (`_R...`) / legacy (`_ZN...`) mangled names. Safe: they carry
     /// the crate disambiguator hash, so a name collision with consumer
-    /// symbols is effectively impossible. (On Mach-O these names are stored
-    /// raw — `_R...` already starts with `_`, so ld64 does not add a C
-    /// prefix; legacy `_ZN...` likewise.)
+    /// symbols is effectively impossible. Matched after the Mach-O `_` strip
+    /// in `classify`, since ld64 prefixes these like any other symbol.
     RustMangled,
     /// compiler-builtins (`__divdi3`, `__udivmodti4`, `__rust_i128_*`,
     /// `__addtf3`, ...; on Windows also as `.weak.__divdi3` /
@@ -128,19 +127,20 @@ fn is_libm_name(name: &str) -> bool {
 /// Platform-specific rules are split with `#[cfg]`; each platform's
 /// "unclassified" set must still be EMPTY (that is the assertion below).
 fn classify(name: &str, is_weak: bool) -> Option<Class> {
-    // Rust-mangled names match on their raw form on every platform (see the
-    // `Class::RustMangled` doc). Mach-O prefixes plain C symbols with `_`,
-    // so `agt_*` and the other C-space names are matched after stripping
-    // exactly one leading `_` on macOS only.
-    if name.starts_with("_R") || name.starts_with("_ZN") {
-        return Some(Class::RustMangled);
-    }
+    // Mach-O prefixes EVERY symbol with `_`, Rust-mangled ones included: the
+    // raw name is `__RINv...`, not `_RINv...`. Measured — an earlier version
+    // matched `_R` before stripping and classified zero of 29922 mangled
+    // names on macOS. Strip first, then every check below works in one name
+    // space on all three platforms.
     let n = if cfg!(target_os = "macos") {
         name.strip_prefix('_').unwrap_or(name)
     } else {
         name
     };
 
+    if n.starts_with("_R") || n.starts_with("_ZN") {
+        return Some(Class::RustMangled);
+    }
     if n.starts_with("agt_") {
         return Some(Class::Agt);
     }
