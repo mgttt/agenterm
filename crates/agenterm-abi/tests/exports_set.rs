@@ -158,3 +158,75 @@ fn header_is_pure_ascii() {
         panic!("include/agenterm.h contains non-ASCII byte 0x{b:02x} at line {line_no}: {line}");
     }
 }
+
+/// The third boundary gate from plan §14 ("产品名闸"): an export must carry
+/// the `agt_` prefix and must name an OS MECHANISM, never a product concept.
+///
+/// The mechanism layer's whole premise is that it knows nothing about the
+/// products above it, and export names are where that leaks first: once
+/// `agt_tab_activate` exists, the boundary has already moved and every
+/// consumer inherits agenterm-con's vocabulary. The other two gates
+/// (exports.txt as the single source of truth, header/implementation drift)
+/// were built long ago; this one had not been.
+///
+/// Today's 55 exports are all mechanisms -- pty, window, screenshot, process,
+/// a11y, clipboard, parent_console, runtime, input, screen, native_window --
+/// so this gate is green on arrival. That is the point: it pins a discipline
+/// that currently holds, so the first violation is the one that turns red.
+///
+/// Matching is per underscore-separated SEGMENT, never substring. A substring
+/// check would reject `agt_parent_console_write_stdout` for containing "con",
+/// which is exactly the sort of false positive that gets a gate deleted.
+#[test]
+fn exports_name_mechanisms_not_products() {
+    /// Product names and product-layer vocabulary. Each entry is a concept
+    /// that belongs to a consumer, not to an OS mechanism.
+    const PRODUCT_WORDS: &[&str] = &[
+        // Product names.
+        "agenterm",
+        "con",
+        "cu",
+        // agenterm-con's own vocabulary: a terminal multiplexer's concepts,
+        // not something an operating system offers.
+        "tab",
+        "session",
+        "workspace",
+        "pane",
+        "split",
+        // Presentation choices that belong to a product's UI.
+        "theme",
+        "palette",
+        "layout",
+        "profile",
+        "prompt",
+        // "terminal" is deliberately here: the mechanism the OS provides is a
+        // PTY, and `agt_pty_*` already names it. An `agt_terminal_*` export
+        // would mean a product concept had been pushed down.
+        "terminal",
+        // The window-placement catalog is a cu-level concept; the mechanism
+        // is agt_native_window_move / _rect.
+        "spectacle",
+    ];
+
+    let mut violations: Vec<String> = Vec::new();
+    for name in expected_exports() {
+        let Some(rest) = name.strip_prefix("agt_") else {
+            violations.push(format!("{name}: missing the agt_ prefix"));
+            continue;
+        };
+        for segment in rest.split('_') {
+            if PRODUCT_WORDS.contains(&segment) {
+                violations.push(format!(
+                    "{name}: segment {segment:?} is a product concept, not an OS mechanism"
+                ));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} export name(s) carry product vocabulary across the mechanism \
+         boundary:\n  {}",
+        violations.len(),
+        violations.join("\n  ")
+    );
+}
