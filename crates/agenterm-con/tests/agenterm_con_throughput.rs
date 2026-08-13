@@ -116,6 +116,7 @@ fn tab_id(value: &Value) -> &str {
 }
 
 #[test]
+#[ignore = "owned by the dedicated sustained-output qualification gate"]
 fn sustained_long_output_keeps_control_and_sibling_responsive() {
     let exe = agenterm_con_binary();
     let exe = exe.as_path();

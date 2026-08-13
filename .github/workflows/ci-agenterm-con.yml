@@ -45,7 +45,7 @@ jobs:
           cargo test -Z build-std=std,panic_unwind,compiler_builtins
           -Z build-std-features=panic-unwind,backtrace-trace-only
           --locked --profile con-release-fast --target x86_64-pc-windows-msvc
-          -p agenterm-con --test agenterm_con_throughput -- --nocapture
+          -p agenterm-con --test agenterm_con_throughput -- --ignored --nocapture
       - name: Test exact con profile
         run: >-
           cargo test -Z build-std=std,panic_unwind,compiler_builtins
