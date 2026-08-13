@@ -1192,6 +1192,14 @@ leave ownership with the normal dispatch error path and register no latent
 entry, so a small number of hostile or mistaken requests cannot exhaust the
 control surface indefinitely.
 
+## Saturate native geometry before narrowing coordinates
+
+Treat window dimensions, DPI scales, pointer coordinates, and row indexes as
+hostile numeric inputs. Clamp `NaN` explicitly, use saturating coordinate
+arithmetic, and perform checked narrowing before multiplying indexes or scaled
+values; an ordinary comparison does not constrain `NaN`, and unchecked casts
+or products can collapse or panic at native callback boundaries.
+
 ## Raw-handle field widths can vary by compilation target
 
 A variant in a cross-platform raw-handle enum can expose a different integer

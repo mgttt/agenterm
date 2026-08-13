@@ -29,6 +29,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Win32/PTY state. An out-of-range hit or scroll safely becomes background or a
   bounded no-op, and a hit beyond the last row clamps rather than selecting or
   closing an unrelated terminal.
+- [x] chrome geometry treats NaN pointer/sidebar values as the minimum safe
+  bound and saturates extreme DPI padding and row-coordinate arithmetic.
+  Untrusted/extreme dimensions cannot wrap a close target onto another row,
+  overflow layout construction, or collapse the sidebar through an unordered
+  floating-point comparison.
 - [x] shared iterative tree-depth resolution sorts `(id,index)` pairs and uses
   binary lookup, preserving typed duplicate/missing/cycle failures and the
   20,000-node non-recursive test without randomized hashing. Its index replaces

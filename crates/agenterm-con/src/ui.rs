@@ -70,7 +70,8 @@ impl Layout {
         };
         let padding = dip(12.0, scale);
         let label_height = dip(24.0, scale);
-        let send_width = dip(76.0, scale).min(composer.width.saturating_sub(padding * 2));
+        let send_width =
+            dip(76.0, scale).min(composer.width.saturating_sub(padding.saturating_mul(2)));
         let control_y = composer.y.saturating_add(label_height);
         let control_height = composer
             .height
@@ -153,7 +154,11 @@ impl Layout {
                 .saturating_sub(size),
             y: self
                 .tree_header_height
-                .saturating_add(visible_row as u32 * self.tree_row_height)
+                .saturating_add(
+                    u32::try_from(visible_row)
+                        .unwrap_or(u32::MAX)
+                        .saturating_mul(self.tree_row_height),
+                )
                 .saturating_add((self.tree_row_height.saturating_sub(size)) / 2),
             width: size,
             height: size,
@@ -264,7 +269,7 @@ pub fn sidebar_width_from_pointer(pointer_x: f64, client_width: f64) -> f64 {
 
 #[allow(clippy::manual_clamp)] // Callers establish ordered bounds; avoid fmt panic glue.
 fn clamp_f64(value: f64, minimum: f64, maximum: f64) -> f64 {
-    if value < minimum {
+    if value.is_nan() || value < minimum {
         minimum
     } else if value > maximum {
         maximum
@@ -414,5 +419,19 @@ mod tests {
             (g.track.left, g.track.right, g.track.bottom),
             (1188, 1200, 704)
         );
+    }
+
+    #[test]
+    fn extreme_geometry_inputs_saturate_without_panicking_or_collapsing_sidebar() {
+        let layout = Layout::with_sidebar_width(u32::MAX, u32::MAX, f64::INFINITY, f64::NAN);
+        assert_eq!(layout.sidebar.width, u32::MAX);
+        assert_eq!(layout.composer.width, 0);
+        assert_eq!(layout.composer_send.width, 0);
+
+        let close = layout.tree_close_rect(usize::MAX, f64::INFINITY);
+        assert_eq!(close.y, u32::MAX);
+
+        assert_eq!(sidebar_width_from_pointer(f64::NAN, 1000.0), 180.0);
+        assert_eq!(sidebar_width_from_pointer(300.0, f64::NAN), 180.0);
     }
 }
