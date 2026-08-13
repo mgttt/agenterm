@@ -55,9 +55,11 @@ pub fn start() {
     tick();
     let _ = std::thread::Builder::new()
         .name("ax-guide".into())
-        .spawn(|| loop {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            Queue::main().exec_async(|| tick());
+        .spawn(|| {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                Queue::main().exec_async(|| tick());
+            }
         });
 }
 

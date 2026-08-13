@@ -1175,6 +1175,15 @@ After the control endpoint is ready, inject a marker through the public input
 interface and wait for that marker through the public observation interface;
 buffered PTY input then provides the rendezvous with actual child readiness.
 
+## Raw-handle field widths can vary by compilation target
+
+A variant in a cross-platform raw-handle enum can expose a different integer
+width on different targets even when the match arm is shared source. Do not
+choose one conversion from the host build alone. Use target-compiled `cfg`
+branches when one target has a provably infallible conversion and another
+requires a checked conversion, then compile both target cells. This avoids
+both silent narrowing and a Clippy fix that fails to type-check elsewhere.
+
 ## A TCC card must not steal the Settings click
 
 macOS Accessibility onboarding (`AXIsProcessTrusted` / Settings
