@@ -97,6 +97,8 @@ jobs:
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_identity -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+      - name: Test agenterm-platform (all test targets)
+        run: cargo test --locked -p agenterm-platform --all-features --tests
       - name: Clippy agenterm-platform (all features)
         run: cargo clippy --locked -p agenterm-platform --all-features --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu
@@ -182,6 +184,8 @@ jobs:
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_consume -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+      - name: Test agenterm-platform (all test targets)
+        run: cargo test --locked -p agenterm-platform --all-features --tests
       - name: Clippy agenterm-platform (all features)
         run: cargo clippy --locked -p agenterm-platform --all-features --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu
@@ -268,6 +272,8 @@ jobs:
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_consume -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+      - name: Test agenterm-platform (all test targets)
+        run: cargo test --locked -p agenterm-platform --all-features --tests
       - name: Clippy agenterm-platform (all features)
         run: cargo clippy --locked -p agenterm-platform --all-features --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu
