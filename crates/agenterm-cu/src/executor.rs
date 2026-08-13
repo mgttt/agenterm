@@ -100,7 +100,7 @@ impl Executor {
                 serde_json::to_value(&windows)
                     .map_err(|error| CuError::new("serialize", error.to_string()))
             }
-            Command::Tree { window, .. } => Ok(tree_payload(*window)),
+            Command::Tree { window, .. } => tree_payload(*window),
             Command::Screenshot { path, window, .. } => screenshot(path, *window),
             Command::Click {
                 window,
@@ -111,6 +111,7 @@ impl Executor {
                 button,
                 ..
             } => click(*window, node.as_deref(), *coords, *degraded, *clicks, *button),
+            Command::Focus { window, node, .. } => focus(*window, node),
             Command::SendText { text, .. } => {
                 agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
                 Ok(serde_json::json!({ "typed": text }))
@@ -136,24 +137,28 @@ fn capabilities_payload() -> serde_json::Value {
         "target": "current",
         "capabilities": {
             "windows": status(agenterm_platform::Capability::WindowEnumerate),
-            "tree": "Unsupported",
+            "tree": status(agenterm_platform::Capability::AccessibilityTree),
             "screenshot": status(agenterm_platform::Capability::Screenshot),
             "input": status(agenterm_platform::Capability::InputInject),
         },
-        "notes": {
-            "tree": "AT-SPI2 control-tree enumeration is not wired in agenterm-platform on Linux; callers receive typed degraded tree responses until it ships."
+        "mapping": {
+            "windows": "Win32 EnumWindows / Linux X11 _NET_CLIENT_LIST / macOS AX (planned)",
+            "tree": "Windows UIA / Linux AT-SPI2 / macOS AX (planned)",
         }
     })
 }
 
-fn tree_payload(window: Option<isize>) -> serde_json::Value {
-    serde_json::json!({
-        "degraded": true,
-        "reason": "control-tree unavailable: AT-SPI2 is not wired in agenterm-platform",
-        "addressing": "none",
-        "window": window,
-        "nodes": []
-    })
+fn tree_payload(window: Option<isize>) -> Result<serde_json::Value, CuError> {
+    let tree =
+        agenterm_platform::accessibility_tree::tree_for_window(window).map_err(map_a11y_err)?;
+    Ok(serde_json::json!({
+        "degraded": false,
+        "backend": tree.backend,
+        "addressing": "accessibility-tree",
+        "window": tree.window_handle,
+        "root_id": tree.root_id,
+        "nodes": tree.nodes,
+    }))
 }
 
 fn screenshot(path: &str, window: Option<isize>) -> Result<serde_json::Value, CuError> {
@@ -187,16 +192,27 @@ fn click(
     button: PointerButton,
 ) -> Result<serde_json::Value, CuError> {
     if let Some(node_id) = node {
-        let _ = (window, node_id);
-        return Err(CuError::new(
-            "unsupported",
-            "structured node click requires a control tree; tree is unavailable on this target",
-        ));
+        for _ in 0..clicks.max(1) {
+            agenterm_platform::accessibility_tree::perform_node_action(
+                window,
+                node_id,
+                agenterm_platform::accessibility_tree::AccessibilityNodeAction::Click,
+            )
+            .map_err(map_a11y_err)?;
+        }
+        return Ok(serde_json::json!({
+            "addressing": "accessibility-tree",
+            "node": node_id,
+            "window": window,
+            "action": "click",
+            "clicks": clicks,
+            "button": button,
+        }));
     }
     let Some([x, y]) = coords else {
         return Err(CuError::new(
             "invalid_input",
-            "click requires --window + --node when a control tree exists, or --coords with --degraded",
+            "click requires --window + --node for structured AT-SPI actuation, or --coords with --degraded",
         ));
     };
     if !degraded {
@@ -222,6 +238,21 @@ fn click(
         "window": window,
         "button": button,
         "clicks": clicks,
+    }))
+}
+
+fn focus(window: Option<isize>, node_id: &str) -> Result<serde_json::Value, CuError> {
+    agenterm_platform::accessibility_tree::perform_node_action(
+        window,
+        node_id,
+        agenterm_platform::accessibility_tree::AccessibilityNodeAction::Focus,
+    )
+    .map_err(map_a11y_err)?;
+    Ok(serde_json::json!({
+        "addressing": "accessibility-tree",
+        "node": node_id,
+        "window": window,
+        "action": "focus",
     }))
 }
 
@@ -289,6 +320,20 @@ fn map_inject_err(error: agenterm_platform::input_inject::InputInjectError) -> C
     }
 }
 
+fn map_a11y_err(
+    error: agenterm_platform::accessibility_tree::AccessibilityTreeError,
+) -> CuError {
+    match error {
+        agenterm_platform::accessibility_tree::AccessibilityTreeError::Unsupported { reason } => {
+            CuError::new("unsupported", reason.to_string())
+        }
+        agenterm_platform::accessibility_tree::AccessibilityTreeError::Failed { code, message } => {
+            CuError::new(code.to_string(), message)
+        }
+        _ => CuError::new("unknown", "unknown accessibility-tree error"),
+    }
+}
+
 fn map_screenshot_err(
     error: agenterm_platform::contract::ui_screenshot::UiScreenshotError,
 ) -> CuError {
@@ -328,13 +373,13 @@ mod tests {
     }
 
     #[test]
-    fn node_click_fails_when_tree_unavailable() {
+    fn node_click_uses_accessibility_tree_when_node_is_set() {
         let auth = Authorization::new([Grant::Actuate].into_iter().collect());
         let executor = Executor::new(auth);
         let command = Command::Click {
             target: TargetRef::Current,
-            window: Some(42),
-            node: Some("btn-1".into()),
+            window: None,
+            node: Some("/0/999999".into()),
             coords: None,
             degraded: false,
             clicks: 1,
@@ -342,7 +387,11 @@ mod tests {
         };
         let reply = executor.execute(&command);
         assert!(!reply.ok);
-        assert_eq!(reply.error.as_ref().unwrap().code, "unsupported");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"),
+            "unexpected code: {code}"
+        );
     }
 
     #[test]

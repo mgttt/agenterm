@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Public black-box smoke for agenterm-cu on Linux/X11 (or Xvfb).
+# Public black-box smoke for agenterm-cu on Linux/X11 + AT-SPI2.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,14 +38,22 @@ echo "== windows =="
 OUT="$(run_json --target current --grant observe windows)"
 test "$(json_field "$OUT" ok)" = "True"
 
-echo "== degraded tree =="
+echo "== at-spi tree =="
 OUT="$(run_json --target current --grant observe tree)"
 test "$(json_field "$OUT" ok)" = "True"
 python3 - "$OUT" <<'PY'
 import json, sys
 data = json.loads(sys.argv[1])["data"]
-assert data["degraded"] is True
-assert "AT-SPI2" in data["reason"]
+assert data["degraded"] is False
+assert data["backend"] == "at-spi2"
+assert data["addressing"] == "accessibility-tree"
+assert len(data["nodes"]) > 0
+node = data["nodes"][0]
+for key in ("id", "role", "name", "states", "bounds", "actions"):
+    assert key in node
+bounds = node["bounds"]
+for key in ("x", "y", "width", "height"):
+    assert key in bounds
 PY
 
 echo "== wait window-count =="
@@ -66,13 +74,36 @@ OUT="$(run_json --target current --grant actuate click --coords 1,1 --degraded)"
 test "$(json_field "$OUT" ok)" = "True"
 test -s "$AGENTERM_CU_AUDIT_PATH"
 
-echo "== node click stays unsupported =="
-OUT="$(run_json --target current --grant actuate click --window 1 --node btn-1)"
+echo "== invalid at-spi node path fails typed =="
+OUT="$(run_json --target current --grant actuate click --node /0/999999)"
 test "$(json_field "$OUT" ok)" = "False"
 python3 - "$OUT" <<'PY'
 import json, sys
 err = json.loads(sys.argv[1])["error"]
-assert err["code"] == "unsupported"
+assert err["code"] == "a11y_node_not_found"
 PY
+
+echo "== structured at-spi click when node exists =="
+OUT="$(run_json --target current --grant observe tree)"
+NODE_ID="$(python3 - "$OUT" <<'PY'
+import json, sys
+nodes = json.loads(sys.argv[1])["data"]["nodes"]
+for node in nodes:
+    if any(action.lower() == "click" for action in node.get("actions", [])):
+        print(node["id"])
+        break
+PY
+)"
+if [[ -n "${NODE_ID:-}" ]]; then
+  OUT="$(run_json --target current --grant actuate click --node "$NODE_ID")"
+  test "$(json_field "$OUT" ok)" = "True"
+  python3 - "$OUT" <<'PY'
+import json, sys
+data = json.loads(sys.argv[1])["data"]
+assert data["addressing"] == "accessibility-tree"
+PY
+else
+  echo "SKIP: no AT-SPI node with click action in current desktop tree"
+fi
 
 echo "PASS: cu-linux-smoke"

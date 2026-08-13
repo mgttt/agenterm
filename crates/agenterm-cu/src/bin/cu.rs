@@ -103,6 +103,18 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 button,
             }
         }
+        "focus" => {
+            let window = flag_isize(&mut args, "--window");
+            let node = flag_value(&mut args, "--node").unwrap_or_default();
+            if node.is_empty() {
+                return usage_err("focus requires --node <path-id>");
+            }
+            Command::Focus {
+                target,
+                window,
+                node,
+            }
+        }
         "send-text" => Command::SendText {
             target,
             text: args.join(" "),
@@ -235,6 +247,7 @@ Commands:
   tree [--window HANDLE]
   screenshot --out PATH [--window HANDLE]
   click (--window HANDLE --node ID | --coords X,Y --degraded) [--button left|right|middle] [--clicks N]
+  focus [--window HANDLE] --node ID
   send-text <text...>
   send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE)

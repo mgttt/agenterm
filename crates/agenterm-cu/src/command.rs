@@ -48,6 +48,12 @@ pub enum Command {
         #[serde(default)]
         button: PointerButton,
     },
+    Focus {
+        target: TargetRef,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        node: String,
+    },
     SendText {
         target: TargetRef,
         text: String,
@@ -90,6 +96,7 @@ impl Command {
             Self::Tree { .. } => "tree".into(),
             Self::Screenshot { .. } => "screenshot".into(),
             Self::Click { .. } => "click".into(),
+            Self::Focus { .. } => "focus".into(),
             Self::SendText { .. } => "send-text".into(),
             Self::SendKeys { .. } => "send-keys".into(),
             Self::Wait { .. } => "wait".into(),
@@ -103,6 +110,7 @@ impl Command {
             | Self::Tree { target, .. }
             | Self::Screenshot { target, .. }
             | Self::Click { target, .. }
+            | Self::Focus { target, .. }
             | Self::SendText { target, .. }
             | Self::SendKeys { target, .. }
             | Self::Wait { target, .. } => *target,
@@ -111,7 +119,7 @@ impl Command {
 
     pub fn required_grant(&self) -> crate::auth::Grant {
         match self {
-            Self::Click { .. } | Self::SendText { .. } | Self::SendKeys { .. } => {
+            Self::Click { .. } | Self::Focus { .. } | Self::SendText { .. } | Self::SendKeys { .. } => {
                 crate::auth::Grant::Actuate
             }
             _ => crate::auth::Grant::Observe,

@@ -11,29 +11,69 @@ Orchestrator agents (not humans staring at pixels) should run:
 ```text
 loop until goal:
   observe structured state (windows, control tree, typed capabilities)
-  act by structured identity (window + node id) when a tree exists
+  act by structured identity (window + node path id) when a tree exists
   wait on observable conditions with bounded timeouts — never sleep
 ```
 
 `cu` is capability, not judgment: no planner, model, or agent loop ships here.
 
+## Native accessibility mapping (按图索骥)
+
+| Concern | Windows | Linux (`current` slice) | macOS (planned) |
+|---------|---------|------------------------|-----------------|
+| Window list | Win32 `EnumWindows` | X11 `_NET_CLIENT_LIST` | `AXUIElement` application windows |
+| Control tree | **UIA** (`IUIAutomation`) | **AT-SPI2** (`org.a11y.atspi.*` on D-Bus) | **AX** (`NSAccessibility`) |
+| Node identity | automation id + runtime id + bounds | path id (`/0/2/5`) + role + name + bounds | AX path + role + title + bounds |
+| Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action::do_action("click")` / `Component::grab_focus` | `AXPress` / `AXRaise` |
+| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (future) / `input-inject` | AX value + events |
+| Screenshot | GDI native capture | typed `unsupported` (no OCR substitute) | typed `unsupported` (planned) |
+
+Linux `tree` and structured `click` / `focus` use **AT-SPI2 only**. If the
+accessibility bus is unavailable (no session bus, headless without a11y), commands
+return typed `unsupported` / `failed` — never a silent coordinate fallback.
+
+Coordinate clicks remain available only with explicit `--degraded` and are
+audited separately from AT-SPI actuation.
+
 ## Linux `current` slice
 
-The `current` target is the in-process local tier of the future
-`ssh`/`rdp`/`vnc` family. On Linux/X11 today:
+| Command | Backend |
+|---------|---------|
+| `windows` | X11 window enumeration (`agenterm-platform`) |
+| `tree` | AT-SPI2 flattened control tree with role, name, states, bounds, actions |
+| `click --node <path>` | AT-SPI2 `Action` (`click` / `press`) |
+| `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
+| `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
+| `send-text` / `send-keys` | XTest keyboard injection |
+| `screenshot` | typed `unsupported` on Linux native capture |
+| `wait` | polls window state |
 
-| Command | Status |
-|---------|--------|
-| `windows` | Wired through `agenterm-platform` X11 enumeration |
-| `tree` | Typed **degraded** — AT-SPI2 is not wired in platform yet |
-| `screenshot` | Command exists; native window capture returns typed `unsupported` on Linux |
-| `click` / `send-text` / `send-keys` | Wired through platform XTest input injection |
-| `wait` | Polls window state until a condition is met or timeout |
+### Tree JSON shape (UIA-like)
 
-Structured node clicks require a control tree. When the tree is unavailable,
-`click --window … --node …` returns typed `unsupported`. Coordinate clicks are
-only accepted with an explicit `--degraded` marker so success never hides pixel
-guessing.
+```json
+{
+  "degraded": false,
+  "backend": "at-spi2",
+  "addressing": "accessibility-tree",
+  "root_id": "/0",
+  "nodes": [
+    {
+      "id": "/3/0/0/1/0",
+      "parent_id": "/3/0/0/1",
+      "role": "toggle button",
+      "name": "Applications",
+      "states": ["enabled", "visible"],
+      "bounds": {"x": 8, "y": 0, "width": 26, "height": 28},
+      "actions": ["Click"],
+      "text": null
+    }
+  ]
+}
+```
+
+Node ids are **child-index paths** from each application root (`/0`, `/1`, …).
+Re-query `tree` after navigation if the UI mutates; actuation resolves the path
+at call time and returns `a11y_node_not_found` when the path is stale.
 
 ## Authorization and audit
 
@@ -55,8 +95,17 @@ cu --target current --grant observe capabilities
 # List top-level windows
 cu --target current --grant observe windows
 
-# Degraded control tree response
+# AT-SPI control tree (all application roots)
 cu --target current --grant observe tree
+
+# Scoped tree for one X11 window handle
+cu --target current --grant observe tree --window 0x3c00007
+
+# Structured click by node path (AT-SPI)
+cu --target current --grant actuate click --node /3/0/0/1/0
+
+# Structured focus
+cu --target current --grant actuate focus --node /3/0/0/1/0
 
 # Wait for at least one window, 3s max
 cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
@@ -64,7 +113,7 @@ cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
 # Refused without actuate grant
 cu --target current --grant observe send-text hello
 
-# Audited coordinate click (explicit degraded mode)
+# Audited coordinate click (explicit degraded mode only)
 cu --target current --grant actuate click --coords 100,200 --degraded
 
 # JSON command envelope
@@ -73,7 +122,8 @@ cu exec --grant observe,actuate --json '{"verb":"windows","target":"current"}'
 
 ## Black-box evidence
 
-From the repository root on a host with `DISPLAY` set (X11 or Xvfb):
+From the repository root on a host with `DISPLAY` set (X11 or Xvfb) and a
+running AT-SPI registry (`at-spi2-registryd`):
 
 ```bash
 ./scripts/cu-linux-smoke.sh
@@ -82,7 +132,7 @@ From the repository root on a host with `DISPLAY` set (X11 or Xvfb):
 ## Layering
 
 ```text
-native primitive     agenterm-platform (owned there, consumed here)
+native primitive     agenterm-platform (AT-SPI2 / X11 / XTest — owned there)
     ↑
 abstract command     agenterm-cu library (`Command`, typed `CuReply`)
     ↑

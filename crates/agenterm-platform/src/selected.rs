@@ -443,6 +443,14 @@ pub(crate) mod input;
 #[path = "adapters/windows/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
 
+#[cfg(all(feature = "a11y-tree", target_os = "linux"))]
+#[path = "adapters/linux/accessibility_tree.rs"]
+pub(crate) mod accessibility_tree;
+
+#[cfg(all(feature = "a11y-tree", not(target_os = "linux")))]
+#[path = "adapters/unix/accessibility_tree.rs"]
+pub(crate) mod accessibility_tree;
+
 #[cfg(all(feature = "window-enum", target_os = "linux"))]
 #[path = "adapters/linux/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
