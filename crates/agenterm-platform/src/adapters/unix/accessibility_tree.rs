@@ -19,6 +19,8 @@ pub(crate) fn tree_for_window(
     })
 }
 
+pub(crate) fn drain_bus() {}
+
 pub(crate) fn perform_node_action(
     _window_handle: Option<isize>,
     _node_id: &str,

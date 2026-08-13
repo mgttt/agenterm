@@ -22,3 +22,7 @@ pub fn perform_node_action(
 ) -> Result<(), AccessibilityTreeError> {
     crate::selected::accessibility_tree::perform_node_action(window_handle, node_id, action)
 }
+
+pub fn drain_bus() {
+    crate::selected::accessibility_tree::drain_bus()
+}

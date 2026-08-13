@@ -301,6 +301,7 @@ fn send_text(
     mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
         .map_err(map_mechanism_err)?;
     agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
+    agenterm_platform::accessibility_tree::drain_bus();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
@@ -329,6 +330,7 @@ fn send_keys(
     mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
         .map_err(map_mechanism_err)?;
     agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
+    agenterm_platform::accessibility_tree::drain_bus();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",

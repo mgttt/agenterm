@@ -1,7 +1,7 @@
 //! Linux AT-SPI2 accessibility tree and node actuation.
 
 use std::collections::VecDeque;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use atspi::connection::AccessibilityConnection;
 use atspi::proxy::accessible::{AccessibleProxy, ObjectRefExt};
@@ -21,15 +21,45 @@ const MAX_NODES: usize = 1_000;
 const MAX_DEPTH: u32 = 32;
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
-static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static RUNTIME: OnceLock<&'static tokio::runtime::Runtime> = OnceLock::new();
+static SHARED_CONNECTION: OnceLock<Mutex<Option<AccessibilityConnection>>> = OnceLock::new();
 
 fn runtime() -> &'static tokio::runtime::Runtime {
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime for AT-SPI")
+    *RUNTIME.get_or_init(|| {
+        // Leak: dropping this runtime at process exit aborts in-flight zbus
+        // tasks and can take the a11y bus / Chrome's AT-SPI bridge with it.
+        Box::leak(Box::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime for AT-SPI"),
+        ))
     })
+}
+
+fn shared_connection_slot() -> &'static Mutex<Option<AccessibilityConnection>> {
+    SHARED_CONNECTION.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_connection() -> Option<AccessibilityConnection> {
+    shared_connection_slot()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+fn remember_connection(conn: AccessibilityConnection) -> AccessibilityConnection {
+    let mut slot = shared_connection_slot()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = slot.as_ref() {
+        return existing.clone();
+    }
+    // Leak one owner so process teardown cannot Drop the zbus connection
+    // (that Drop talks to the a11y bus while the runtime is dying).
+    let leaked: &'static AccessibilityConnection = Box::leak(Box::new(conn.clone()));
+    *slot = Some(leaked.clone());
+    conn
 }
 
 pub(crate) fn capability_status() -> CapabilityStatus {
@@ -60,6 +90,18 @@ pub(crate) fn tree_for_window(
             )
         })?
     })
+}
+
+/// Keep the shared a11y-bus connection pumping until the toolkit finishes
+/// emitting events from the last keystroke. Exiting immediately after XTest
+/// closes the socket under those events and Chrome's renderer tree dies.
+pub(crate) fn drain_bus() {
+    if cached_connection().is_none() {
+        return;
+    }
+    runtime().block_on(async {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    });
 }
 
 pub(crate) fn perform_node_action(
@@ -151,7 +193,11 @@ async fn perform_node_action_async(
     match action {
         AccessibilityNodeAction::Click => invoke_click_action(&proxy).await,
         AccessibilityNodeAction::Focus => {
+            if node_reports_focused(&proxy).await {
+                return Ok(());
+            }
             if invoke_named_action(&proxy, &["focus"]).await.is_ok() {
+                wait_until_focused(&proxy).await;
                 return Ok(());
             }
             let proxies = proxy.proxies().await.map_err(map_atspi_err)?;
@@ -159,20 +205,30 @@ async fn perform_node_action_async(
                 .component()
                 .await
                 .map_err(|error| map_atspi_err(error))?;
-            component
-                .grab_focus()
-                .await
-                .map_err(map_atspi_err)
-                .map(|_| ())
+            component.grab_focus().await.map_err(map_atspi_err)?;
+            wait_until_focused(&proxy).await;
+            Ok(())
         }
     }
 }
 
+/// One AT-SPI bus connection per process.
+///
+/// `send-keys --name` snapshots the tree, focuses the node, then injects
+/// XTest. Opening a fresh `AccessibilityConnection` for each of those steps
+/// (and dropping it before the key event) tears Chrome's renderer tree down
+/// and can crash the browser, so the next named command sees
+/// `a11y_node_not_found` / `accessibility-tree mechanism unavailable`.
+/// Clone the shared connection instead of dropping the a11y bus.
 async fn connect() -> Result<AccessibilityConnection, AccessibilityTreeError> {
     hydrate_session_bus_env();
-    AccessibilityConnection::new()
-        .await
-        .map_err(|error| AccessibilityTreeError::failed("a11y_connect_failed", error.to_string()))
+    if let Some(conn) = cached_connection() {
+        return Ok(conn);
+    }
+    let conn = AccessibilityConnection::new().await.map_err(|error| {
+        AccessibilityTreeError::failed("a11y_connect_failed", error.to_string())
+    })?;
+    Ok(remember_connection(conn))
 }
 
 fn hydrate_session_bus_env() {
@@ -419,6 +475,22 @@ async fn states_from_proxy(proxy: &AccessibleProxy<'_>) -> Vec<String> {
         .await
         .map(state_labels)
         .unwrap_or_default()
+}
+
+async fn node_reports_focused(proxy: &AccessibleProxy<'_>) -> bool {
+    states_from_proxy(proxy)
+        .await
+        .iter()
+        .any(|state| state == "focused")
+}
+
+async fn wait_until_focused(proxy: &AccessibleProxy<'_>) {
+    for _ in 0..10 {
+        if node_reports_focused(proxy).await {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 fn state_labels(state: StateSet) -> Vec<String> {
