@@ -165,7 +165,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | con 待决控制 | `crates/agenterm-con/src/control_pending.rs` | bounded wait/screenshot、deadline、tab/window 取消、reply exactly-once；session/frame 探针仍由宿主提供 |
 | con 性能观测 | `crates/agenterm-con/src/perf.rs` | 计数、platform-present 基线、稳定 JSON 投影与 owning 单测；不拥有渲染/PTY/control policy |
 | con raster target | `crates/agenterm-con/src/raster_surface.rs` | clip、XRGB rect fill、glyph-mask blend；不拥有 terminal/chrome paint policy、window 或 frame commit |
-| con terminal paint | `crates/agenterm-con/src/terminal_paint.rs` | vt100 cell 属性、选区反色、宽字符跨度与 glyph/decorations；不拥有 cursor/IME、chrome、window 或 frame commit |
+| con terminal paint | `crates/agenterm-con/src/terminal_paint.rs` | vt100 cell 属性、选区反色、宽字符跨度、glyph/decorations 与 cursor visibility/overlay；不拥有 IME、chrome、window 或 frame commit |
 | con 纯规则叶 | `crates/agenterm-con/src/{ui,workspace,composer}.rs` | 孵化层：无 window/PTY 依赖；证据稳定后按下方提升顺序迁入 `src/frontend/*` |
 | 边界闸 | `src/platform/boundary_tests.rs` | 规则见 §8.2；**不**解析本文全文 |
 
@@ -183,7 +183,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | L3 | `platform/mod.rs` 策略过肥（input/paths/control_center/runtime/test_fixtures/workspace 已拆 `policy/`；FrontendHost 与 facade 是剩余薄层）+ `allow(dead_code)` | `policy/*` 全拆收口；禁新顶层 `is_windows_host` 蔓延；半迁移 facade 二选一（全接线或删） |
 | L4 | **结构 SSOT 未机读双向**（本文 prose + 局部 `boundary_tests`；目录树/分层文案漂移靠人） | 见 §8.4；版本 plan **S 组**执行；本文只定契约 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
-| C1 | **进行中**：`perf.rs` 已拥有性能观测，`control_pending.rs` 已拥有 bounded request 生命周期，`raster_surface.rs` 已拥有 clipped XRGB target，`terminal_paint.rs` 已拥有 vt100 cell paint policy，`composer.rs` 已统一 external-input 状态与编辑不变量，`session_store.rs` 已拥有小规模稳定 TabId 到会话值的存储策略；cursor/IME/chrome 组合及 clipboard/PTY authority 仍留宿主，未把旧巨石换成新巨石。精确 unwind profile 基线为 100 单测、23 GUI 黑盒、控制与吞吐门全绿；VT 回调、终端状态机、应用编排与 `PixelWindowApplication` 仍同居 | 下一叶按 PRD 24/25/26 边界继续切工作区/输入编排；每步保持公开 CLI/JSON 字节不变 |
+| C1 | **进行中**：`perf.rs` 已拥有性能观测，`control_pending.rs` 已拥有 bounded request 生命周期，`raster_surface.rs` 已拥有 clipped XRGB target，`terminal_paint.rs` 已拥有 vt100 cell 与 cursor visibility/overlay paint policy，`composer.rs` 已统一 external-input 状态与编辑不变量，`session_store.rs` 已拥有小规模稳定 TabId 到会话值的存储策略；IME/chrome 组合及 clipboard/PTY authority 仍留宿主，未把旧巨石换成新巨石。精确 unwind profile 基线为 104 单测、23 GUI 黑盒、控制与吞吐门全绿；VT 回调、终端状态机、应用编排与 `PixelWindowApplication` 仍同居 | 下一叶按 PRD 24/25/26 边界继续切工作区/输入编排；每步保持公开 CLI/JSON 字节不变 |
 | C2 | **已收**：源码与测试均在 `crates/agenterm-con/` 内，manifest 无 `../../` 回指；根包边界测试继续扫描 con 源码 | 保持 package 物理所有权与 Cargo 所有权一致；迁移不得形成 native API 审计盲区 |
 | C3 | con 的 PE 体积史/证据计数在本文（§体积与复用）与 `prd/PRD_02_2{4,7}` 两处平行记录，且本文一度领先 PRD 两代增量 | 单主：PE 字节、perf 探针、证据计数归 PRD 27/24；本文只留结构规则与提升顺序。新增量禁止双写 |
 

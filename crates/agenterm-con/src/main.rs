@@ -62,7 +62,7 @@ use raster_surface::{CellRect, Surface};
 use session_store::SessionStore;
 #[cfg(test)]
 use terminal_paint::paint_cells;
-use terminal_paint::paint_cells_at;
+use terminal_paint::{CursorPaintSpec, cursor_visible, paint_cells_at, paint_cursor};
 
 /// VT callback storage for OSC sequences (window title, etc.) and terminal
 /// query replies (see `unhandled_csi` below) that need to be written back
@@ -3001,9 +3001,7 @@ impl ConTerminal {
             vt100::CursorShape::Underline => "underline",
             vt100::CursorShape::Bar => "bar",
         };
-        let visible_now = !screen.hide_cursor()
-            && self.scroll_offset == 0
-            && (!screen.cursor_blinking() || self.blink_visible);
+        let visible_now = cursor_visible(screen, self.scroll_offset, self.blink_visible);
         ScreenSnapshot {
             cols,
             rows,
@@ -3560,8 +3558,6 @@ impl ConTerminal {
         let scrollbar_active = self.scrollbar_drag.is_some();
         let screen = self.parser.screen();
         let cursor = screen.cursor_position();
-        let cursor_hidden = screen.hide_cursor();
-        let cursor_shape = screen.cursor_shape();
         self.last_cursor = Some(TerminalPoint {
             row: cursor.0,
             col: cursor.1,
@@ -3570,7 +3566,6 @@ impl ConTerminal {
         // by the timer in about_to_wait. conhost draws the caret the same
         // way — this is parity, not an enhancement — but getting it right
         // matters for vim/nvim, which switch shape *and* blink per mode.
-        let cursor_visible_now = !screen.cursor_blinking() || self.blink_visible;
         paint_cells_at(
             &mut surface,
             screen,
@@ -3594,67 +3589,22 @@ impl ConTerminal {
             self.draw_preedit(&mut surface, cursor)
         };
 
-        // Cursor. Hidden while scrolled back (it would point at a cell the
-        // application is no longer writing to) or mid-blink-off.
-        if !cursor_hidden && self.scroll_offset == 0 && cursor_visible_now {
-            let cursor_col = u32::from(cursor.1) + preedit_cells;
-            let cx = self.content_left_px + cursor_col * self.cell_w;
-            let cy = self.content_top_px + u32::from(cursor.0) * self.cell_h;
-            if cx < fw && cy < fh {
-                // A wide (CJK) glyph under the cursor must be covered whole,
-                // otherwise a block cursor would bisect it.
-                let under = (preedit_cells == 0)
-                    .then(|| screen.cell(cursor.0, cursor.1))
-                    .flatten();
-                let span = match under {
-                    Some(cell) if cell.is_wide() => self.cell_w * 2,
-                    _ => self.cell_w,
-                };
-
-                match cursor_shape {
-                    vt100::CursorShape::Block => {
-                        // Drawn as a properly inverted cell rather than an
-                        // opaque fill, so the character underneath stays
-                        // readable — you can see what you're about to type
-                        // over, as in conhost.
-                        surface.fill_rect(cx, cy, span, self.cell_h, self.default_fg.to_xrgb());
-                        let glyph = under.filter(|cell| cell.has_contents()).and_then(|cell| {
-                            font::raster(first_grapheme(cell.contents()), self.font_size_px)
-                        });
-                        if let Some(glyph) = glyph {
-                            surface.blit_glyph(
-                                &glyph,
-                                CellRect {
-                                    x: cx,
-                                    y: cy,
-                                    w: span,
-                                    h: self.cell_h,
-                                },
-                                self.default_bg,
-                                0.0,
-                            );
-                        }
-                    }
-                    // Underline/bar are decorations, not a cover: the glyph
-                    // paint_cells already drew stays as-is underneath them.
-                    vt100::CursorShape::Underline => {
-                        const THICKNESS: u32 = 2;
-                        let y = cy + self.cell_h.saturating_sub(THICKNESS);
-                        surface.fill_rect(cx, y, span, THICKNESS, self.default_fg.to_xrgb());
-                    }
-                    vt100::CursorShape::Bar => {
-                        const THICKNESS: u32 = 2;
-                        surface.fill_rect(
-                            cx,
-                            cy,
-                            THICKNESS,
-                            self.cell_h,
-                            self.default_fg.to_xrgb(),
-                        );
-                    }
-                }
-            }
-        }
+        paint_cursor(
+            &mut surface,
+            screen,
+            CursorPaintSpec {
+                cell_w: self.cell_w,
+                cell_h: self.cell_h,
+                default_fg: self.default_fg,
+                default_bg: self.default_bg,
+                font_size_px: self.font_size_px,
+                left: self.content_left_px,
+                top: self.content_top_px,
+                scroll_offset: self.scroll_offset,
+                preedit_cells,
+                blink_visible: self.blink_visible,
+            },
+        );
 
         surface.fill_rect(
             scrollbar.track.left.max(0) as u32,
@@ -4470,12 +4420,6 @@ fn paint_chrome_text_parts(
             cursor = cursor.saturating_add(span_w);
         }
     }
-}
-
-/// Returns the first non-combining character so combining marks do not each
-/// rasterize into their own cell-wide glyph.
-fn first_grapheme(contents: &str) -> char {
-    contents.chars().next().unwrap_or(' ')
 }
 
 // ---------------------------------------------------------------------------
