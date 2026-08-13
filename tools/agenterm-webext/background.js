@@ -2,7 +2,7 @@ import { getConfig, saveSnapshot, getAlertState, setAlertState } from "./lib/sto
 import { sendUsageAlert } from "./lib/notifier.js";
 import { providers } from "./providers/index.js";
 
-const ALARM_NAME = "usage-watch-poll";
+const ALARM_NAME = "agenterm-webext-poll";
 const ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6h between repeat alerts per provider
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -71,7 +71,7 @@ async function pollProvider(provider) {
       snapshot = results?.[0]?.result;
       if (snapshot) break;
     } catch (err) {
-      console.warn(`[usage-watch] executeScript failed for ${provider.id}:`, err);
+      console.warn(`[agenterm-webext] executeScript failed for ${provider.id}:`, err);
     }
   }
 
@@ -87,7 +87,7 @@ async function pollProvider(provider) {
       snapshot = results?.[0]?.result;
       await chrome.tabs.remove(tab.id);
     } catch (err) {
-      console.warn(`[usage-watch] background tab poll failed for ${provider.id}:`, err);
+      console.warn(`[agenterm-webext] background tab poll failed for ${provider.id}:`, err);
     }
   }
 
@@ -101,6 +101,14 @@ function runExtractorInPage() {
   const patterns = [
     { id: "cursor", prefixes: ["https://cursor.com/dashboard", "https://cursor.com/agents"] },
     { id: "grok", prefixes: ["https://grok.com", "https://accounts.x.ai"] },
+    {
+      id: "chatgpt",
+      prefixes: [
+        "https://chatgpt.com",
+        "https://chat.openai.com",
+        "https://platform.openai.com",
+      ],
+    },
   ];
   let providerId = null;
   for (const p of patterns) {
@@ -158,6 +166,38 @@ function runExtractorInPage() {
       limit = Number(of[2]);
       remainingPct = Math.max(0, Math.round(((limit - used) / limit) * 100));
     }
+  }
+
+  if (providerId === "chatgpt") {
+    const planMatch = text.match(/ChatGPT\s+(Plus|Pro|Team|Business|Enterprise|Free)/i);
+    if (planMatch) {
+      plan = planMatch[1];
+    } else {
+      const plain = text.match(/\b(Business|Team|Enterprise|Pro|Plus|Free)\b/i);
+      if (plain) plan = plain[1];
+    }
+    const rem = text.match(/(\d+(?:\.\d+)?)\s*%\s*remaining/i);
+    if (rem) remainingPct = Number(rem[1]);
+    const usedPct = text.match(/(\d+(?:\.\d+)?)\s*%\s*used/i);
+    if (usedPct) {
+      used = Number(usedPct[1]);
+      remainingPct = Math.max(0, 100 - used);
+    }
+    const usedBefore = text.match(/used\s+(\d+(?:\.\d+)?)\s*%/i);
+    if (usedBefore) {
+      used = Number(usedBefore[1]);
+      remainingPct = Math.max(0, 100 - used);
+    }
+    const of = text.match(/(\d+)\s*of\s*(\d+)\s*(?:messages?|requests?|chats?)/i);
+    if (of) {
+      used = Number(of[1]);
+      limit = Number(of[2]);
+      remainingPct = Math.max(0, Math.round(((limit - used) / limit) * 100));
+    }
+    const reset = text.match(/resets?\s+(?:on\s+)?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i);
+    if (reset) resetAt = reset[1];
+    const billing = text.match(/billing\s+period\s+ends?\s+([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i);
+    if (billing) resetAt = billing[1];
   }
 
   if (limitsReached) remainingPct = 0;

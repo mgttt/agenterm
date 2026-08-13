@@ -1,6 +1,6 @@
-# Usage Watch
+# AgenTerm WebExt
 
-Chrome/Chromium Manifest V3 extension that monitors AI provider usage quotas and alerts when remaining usage is low.
+Chrome/Chromium Manifest V3 extension for AgenTerm browser integration. **Usage monitoring** is the first module; the shell is designed so more capabilities can plug in without rewrites.
 
 **Owner:** WJ C (`wanjochan@gmail.com`)
 
@@ -9,7 +9,7 @@ Chrome/Chromium Manifest V3 extension that monitors AI provider usage quotas and
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked**
-4. Select this folder: `tools/usage-watch` (from the repository root)
+4. Select this folder: `tools/agenterm-webext` (from the repository root)
 
 No build step required for the extension itself. Icons and scripts load directly.
 
@@ -21,13 +21,14 @@ Keep browser sessions active on the dashboards you enable:
 |----------|--------|
 | **Cursor** | `https://cursor.com/dashboard`, `/dashboard/usage`, `/dashboard/spending`, `https://cursor.com/agents` |
 | **Grok / xAI** | `https://grok.com`, `https://accounts.x.ai` |
-| Stubs (off by default) | Anthropic console, OpenAI platform, GitHub Copilot settings |
+| **ChatGPT / OpenAI** | `https://chatgpt.com`, `https://chat.openai.com`, `https://platform.openai.com/usage`, `/settings`, `/account/usage` |
+| Stubs (off by default) | Anthropic console, GitHub Copilot settings |
 
 The extension reads the DOM (and embedded JSON when present). It does not store passwords or tokens.
 
 ## Options
 
-Open from the extension icon → **Options**, or `chrome://extensions` → Usage Watch → **Extension options**.
+Open from the extension icon → **Options**, or `chrome://extensions` → AgenTerm WebExt → **Extension options**.
 
 - **Email destination** — default `wanjochan@gmail.com`
 - **Threshold %** — alert when *remaining* usage ≤ this (default 15%), or when a “limit reached” banner is detected
@@ -46,7 +47,15 @@ Open from the extension icon → **Options**, or `chrome://extensions` → Usage
 - **Content scripts** run on matched provider pages and push snapshots when the DOM changes.
 - **Background service worker** runs a `chrome.alarm` every N minutes, reuses open tabs or opens background tabs, executes extraction, stores results in `chrome.storage.local`, and fires alerts when thresholds are crossed (with a 6-hour cooldown per provider).
 
-## Add a new provider
+## Architecture — growing beyond usage
+
+This extension will grow beyond usage monitoring. The pluggable surface is `providers/`:
+
+- Each **module** (usage for Cursor, Grok, ChatGPT, …) is a provider file exporting `id`, `name`, `matchUrls`, `extractFromDom`, and optional `extractFromJson`.
+- Register new modules in `providers/index.js`.
+- Future non-usage capabilities can follow the same pattern (new provider or a shared `modules/` tree) without rewriting the MV3 shell (`background.js`, options, notifications).
+
+## Add a new provider (usage module)
 
 1. Create `providers/your-provider.js`:
 
@@ -74,11 +83,12 @@ export const yourProvider = {
 4. Optionally add a `content_scripts` match block (or rely on background `executeScript`).
 5. Add default config in `lib/types.js` under `providers`.
 6. Add a fixture HTML under `fixtures/` and a test case in `tests/extractors.test.js`.
+7. Extend `runExtractorInPage` in `background.js` and `detectProvider` in `content/content.js` for alarm polls and live DOM pushes.
 
 ## Tests
 
 ```bash
-cd tools/usage-watch
+cd tools/agenterm-webext
 npm install
 npm test
 ```
@@ -93,10 +103,11 @@ Tests parse redacted fixture HTML with jsdom — no live credentials or tokens.
 
 ## Tuning extractors
 
-Cursor and Grok UIs change often. After a live pass, adjust regex/selectors in:
+Provider UIs change often. After a live pass, adjust regex/selectors in:
 
 - `providers/cursor.js`
 - `providers/grok.js`
+- `providers/chatgpt.js`
 - `content/content.js` (content-script duplicate for live pages)
 - `background.js` (`runExtractorInPage` for alarm polls)
 

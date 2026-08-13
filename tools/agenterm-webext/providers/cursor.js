@@ -3,6 +3,7 @@ import {
   findLimitReachedBanner,
   findPlanName,
   parseResetDate,
+  parseMoney,
   deepSearch,
   textOf,
 } from "../lib/extract-helpers.js";

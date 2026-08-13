@@ -1,8 +1,8 @@
 const NAMES = {
   cursor: "Cursor",
   grok: "Grok",
+  chatgpt: "ChatGPT",
   anthropic: "Anthropic",
-  openai: "OpenAI",
   github_copilot: "Copilot",
 };
 

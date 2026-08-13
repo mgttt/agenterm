@@ -4,8 +4,8 @@ import { providers } from "../providers/index.js";
 const PROVIDER_LABELS = {
   cursor: "Cursor (dashboard / usage / agents)",
   grok: "Grok / xAI",
+  chatgpt: "ChatGPT / OpenAI (chat + platform usage)",
   anthropic: "Anthropic — stub",
-  openai: "OpenAI — stub",
   github_copilot: "GitHub Copilot — stub",
 };
 

@@ -1,15 +1,15 @@
 import { cursorProvider } from "./cursor.js";
 import { grokProvider } from "./grok.js";
+import { chatgptProvider } from "./chatgpt.js";
 import { anthropicProvider } from "./stub-anthropic.js";
-import { openaiProvider } from "./stub-openai.js";
 import { githubCopilotProvider } from "./stub-github.js";
 
-/** All registered providers. Add a new file + import here. */
+/** All registered providers (usage modules and future capabilities). Add a file + import here. */
 export const providers = [
   cursorProvider,
   grokProvider,
+  chatgptProvider,
   anthropicProvider,
-  openaiProvider,
   githubCopilotProvider,
 ];
 
