@@ -1,11 +1,11 @@
 //! Windows window operations (user32 FFI): show/move/topmost/close.
 
 use windows_sys::Win32::{
-    Foundation::HWND,
+    Foundation::{HWND, RECT},
     UI::WindowsAndMessaging::{
-        HWND_NOTOPMOST, HWND_TOPMOST, MoveWindow, PostMessageW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-        SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, ShowWindow,
-        WM_CLOSE,
+        GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, MoveWindow, PostMessageW, SW_HIDE,
+        SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos, ShowWindow, WM_CLOSE,
     },
 };
 
@@ -64,6 +64,31 @@ pub(crate) fn set_topmost(handle: isize, topmost: bool) -> Result<(), WindowOpEr
         }
     }
     Ok(())
+}
+
+pub(crate) fn window_rect(
+    handle: isize,
+) -> Result<crate::contract::window_enumerate::WindowBounds, WindowOpError> {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        if GetWindowRect(handle as HWND, &mut rect) == 0 {
+            return Err(WindowOpError::failed(
+                "get_window_rect_failed",
+                "GetWindowRect returned 0",
+            ));
+        }
+    }
+    Ok(crate::contract::window_enumerate::WindowBounds {
+        x: rect.left,
+        y: rect.top,
+        width: (rect.right - rect.left).max(0) as u32,
+        height: (rect.bottom - rect.top).max(0) as u32,
+    })
 }
 
 pub(crate) fn close(handle: isize) -> Result<(), WindowOpError> {

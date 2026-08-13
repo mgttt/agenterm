@@ -117,6 +117,7 @@ impl Executor {
                 condition,
                 ..
             } => wait(*timeout_ms, condition),
+            Command::WindowPlace { action, window, .. } => window_place(action, *window),
         }
     }
 }
@@ -138,10 +139,12 @@ fn capabilities_payload() -> serde_json::Value {
             "tree": tree_status,
             "screenshot": status(agenterm_platform::Capability::Screenshot),
             "input": status(agenterm_platform::Capability::InputInject),
+            "window_place": status(agenterm_platform::Capability::WindowOp),
         },
         "mapping": {
-            "windows": "Win32 EnumWindows / Linux X11 _NET_CLIENT_LIST / macOS AX (planned)",
+            "windows": "Win32 EnumWindows / Linux X11 _NET_CLIENT_LIST / macOS CGWindowList",
             "tree": "libagenterm agt_a11y_* → Windows UIA / Linux AT-SPI2 / macOS AX",
+            "window_place": "Spectacle catalog via platform move_window (Win32 / X11 / macOS AX)",
         },
         "gaps": {
             "windows": "still agenterm-platform until agt_window_enumerate ships",
@@ -386,6 +389,82 @@ fn name_scope(pattern: &str, role: Option<&str>) -> String {
     }
 }
 
+fn window_place(action_raw: &str, window: Option<isize>) -> Result<serde_json::Value, CuError> {
+    let action = crate::place::PlaceAction::parse(action_raw).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            format!("unknown window-place action '{action_raw}'"),
+        )
+    })?;
+    let windows =
+        agenterm_platform::window_enumerate::enumerate_top_level().map_err(map_enum_err)?;
+    let screens = agenterm_platform::window_enumerate::list_screens().map_err(map_enum_err)?;
+    if screens.is_empty() {
+        return Err(CuError::new("failed", "no screens available"));
+    }
+    let target_window = if let Some(handle) = window {
+        windows
+            .iter()
+            .find(|item| item.handle == handle)
+            .ok_or_else(|| CuError::new("failed", format!("window handle {handle} not found")))?
+    } else {
+        windows
+            .iter()
+            .find(|item| item.focused)
+            .or_else(|| windows.first())
+            .ok_or_else(|| CuError::new("failed", "no top-level window to place"))?
+    };
+    let handle = target_window.handle;
+    let app_key = format!("{}:{}", target_window.process_id, target_window.app_name);
+    let mut history = crate::place::PlaceHistory::open()
+        .map_err(|error| CuError::new("failed", format!("history: {error}")))?;
+    let before = crate::place::read_rect(handle)
+        .unwrap_or_else(|_| crate::place::rect_from_bounds(target_window.bounds));
+    let geo_screens: Vec<_> = screens.iter().map(crate::place::screen_from_info).collect();
+
+    let (after_target, used_history) = if action.is_history() {
+        let step = if matches!(action, crate::place::PlaceAction::Undo) {
+            history.undo(&app_key)
+        } else {
+            history.redo(&app_key)
+        };
+        let Some((hist_handle, rect)) = step else {
+            return Err(CuError::new(
+                "unsupported",
+                format!("{} has no {} history", app_key, action.kebab()),
+            ));
+        };
+        (rect, Some(hist_handle))
+    } else {
+        let dest = crate::place::place(action, before, &geo_screens)
+            .ok_or_else(|| CuError::new("failed", "could not compute destination rectangle"))?;
+        (dest, None)
+    };
+
+    let apply_handle = used_history.unwrap_or(handle);
+    let visible = crate::place::place(crate::place::PlaceAction::Fullscreen, before, &geo_screens)
+        .unwrap_or(before);
+    let (after, quantized, clamped) =
+        crate::place::apply_rect(apply_handle, after_target, visible).map_err(map_op_err)?;
+    if !action.is_history() {
+        history.record(&app_key, apply_handle, before, after);
+    }
+    history
+        .save()
+        .map_err(|error| CuError::new("failed", format!("history save: {error}")))?;
+
+    Ok(serde_json::json!({
+        "action": action.kebab(),
+        "spectacle_id": action.spectacle_id(),
+        "window": apply_handle,
+        "app": app_key,
+        "before": { "x": before.x, "y": before.y, "width": before.width, "height": before.height },
+        "after": { "x": after.x, "y": after.y, "width": after.width, "height": after.height },
+        "quantized": quantized,
+        "clamped": clamped,
+    }))
+}
+
 fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value, CuError> {
     if let WaitCondition::NodeNameContains {
         pattern,
@@ -527,6 +606,18 @@ fn node_is_showing(node: &mechanism::A11yNode) -> bool {
     node.states
         .iter()
         .any(|state| state.eq_ignore_ascii_case("showing") || state.eq_ignore_ascii_case("visible"))
+}
+
+fn map_op_err(error: agenterm_platform::window_op::WindowOpError) -> CuError {
+    match error {
+        agenterm_platform::window_op::WindowOpError::Unsupported { reason } => {
+            CuError::new("unsupported", reason.to_string())
+        }
+        agenterm_platform::window_op::WindowOpError::Failed { code, message } => {
+            CuError::new(code.to_string(), message)
+        }
+        _ => CuError::new("unknown", "unknown window-op error"),
+    }
 }
 
 fn map_enum_err(error: agenterm_platform::window_enumerate::WindowEnumerateError) -> CuError {
@@ -803,5 +894,33 @@ mod tests {
         let reply = executor.execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "refused");
+    }
+
+    #[test]
+    fn window_place_without_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth);
+        let command = Command::WindowPlace {
+            target: TargetRef::Current,
+            action: "left-half".into(),
+            window: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
+    }
+
+    #[test]
+    fn window_place_unknown_action_is_invalid() {
+        let auth = Authorization::new([Grant::Actuate].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::WindowPlace {
+            target: TargetRef::Current,
+            action: "tile-magic".into(),
+            window: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
     }
 }

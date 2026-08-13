@@ -79,6 +79,12 @@ pub enum Command {
         #[serde(flatten)]
         condition: WaitCondition,
     },
+    WindowPlace {
+        target: TargetRef,
+        action: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -120,6 +126,7 @@ impl Command {
             Self::SendText { .. } => "send-text".into(),
             Self::SendKeys { .. } => "send-keys".into(),
             Self::Wait { .. } => "wait".into(),
+            Self::WindowPlace { .. } => "window-place".into(),
         }
     }
 
@@ -133,7 +140,8 @@ impl Command {
             | Self::Focus { target, .. }
             | Self::SendText { target, .. }
             | Self::SendKeys { target, .. }
-            | Self::Wait { target, .. } => *target,
+            | Self::Wait { target, .. }
+            | Self::WindowPlace { target, .. } => *target,
         }
     }
 
@@ -142,7 +150,8 @@ impl Command {
             Self::Click { .. }
             | Self::Focus { .. }
             | Self::SendText { .. }
-            | Self::SendKeys { .. } => crate::auth::Grant::Actuate,
+            | Self::SendKeys { .. }
+            | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }
     }

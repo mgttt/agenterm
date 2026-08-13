@@ -133,6 +133,20 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             target,
             keys: args.join("+"),
         },
+        "window-place" => {
+            let action = flag_value(&mut args, "--action")
+                .or_else(|| args.first().cloned())
+                .unwrap_or_default();
+            if action.is_empty() {
+                return usage_err("window-place requires --action <id>");
+            }
+            let window = flag_isize(&mut args, "--window");
+            Command::WindowPlace {
+                target,
+                action,
+                window,
+            }
+        }
         "wait" => {
             let timeout_ms = flag_u64(&mut args, "--timeout-ms").unwrap_or(5_000);
             let condition = if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
@@ -272,6 +286,12 @@ Commands:
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])
                               node conditions poll the accessibility tree and fail typed
                               ("timeout") instead of returning met:false
+  window-place --action <id> [--window HANDLE]
+      ids: center|fullscreen|left-half|right-half|top-half|bottom-half
+           upper-left|lower-left|upper-right|lower-right
+           next-third|previous-third|next-display|previous-display
+           larger|smaller|undo|redo
+           (or SpectacleWindowAction* constants)
 
 All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"error":..}}
 "#

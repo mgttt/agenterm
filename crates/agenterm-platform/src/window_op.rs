@@ -21,6 +21,12 @@ pub fn move_window(
     crate::selected::window_op::move_window(handle, x, y, width, height)
 }
 
+pub fn window_rect(
+    handle: isize,
+) -> Result<crate::contract::window_enumerate::WindowBounds, WindowOpError> {
+    crate::selected::window_op::window_rect(handle)
+}
+
 pub fn set_topmost(handle: isize, topmost: bool) -> Result<(), WindowOpError> {
     crate::selected::window_op::set_topmost(handle, topmost)
 }

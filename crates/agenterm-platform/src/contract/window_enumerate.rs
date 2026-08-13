@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-/// Bounds of a top-level window in physical screen pixels.
+/// Bounds of a top-level window in physical screen pixels (top-origin).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WindowBounds {
@@ -10,6 +10,15 @@ pub struct WindowBounds {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+}
+
+/// One display in top-origin coordinates (same space as [`WindowBounds`]).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ScreenInfo {
+    pub frame: WindowBounds,
+    pub visible: WindowBounds,
+    pub primary: bool,
 }
 
 /// A snapshot of one visible top-level window.

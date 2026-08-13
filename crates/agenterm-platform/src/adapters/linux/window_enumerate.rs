@@ -305,6 +305,28 @@ pub(crate) fn enumerate_top_level() -> Result<Vec<WindowInfo>, WindowEnumerateEr
     Ok(out)
 }
 
+pub(crate) fn list_screens()
+-> Result<Vec<crate::contract::window_enumerate::ScreenInfo>, WindowEnumerateError> {
+    let context = connect()?;
+    let geom = context
+        .connection
+        .get_geometry(context.root)
+        .map_err(|_| failed("root geometry request failed"))?
+        .reply()
+        .map_err(|_| failed("root geometry reply failed"))?;
+    let bounds = WindowBounds {
+        x: i32::from(geom.x),
+        y: i32::from(geom.y),
+        width: u32::from(geom.width),
+        height: u32::from(geom.height),
+    };
+    Ok(vec![crate::contract::window_enumerate::ScreenInfo {
+        frame: bounds,
+        visible: bounds,
+        primary: true,
+    }])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

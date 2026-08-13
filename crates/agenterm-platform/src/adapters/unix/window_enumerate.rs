@@ -14,3 +14,10 @@ pub(crate) fn enumerate_top_level() -> Result<Vec<WindowInfo>, WindowEnumerateEr
         reason: "window-enum not wired on unix".into(),
     })
 }
+
+pub(crate) fn list_screens()
+-> Result<Vec<crate::contract::window_enumerate::ScreenInfo>, WindowEnumerateError> {
+    Err(WindowEnumerateError::Unsupported {
+        reason: "window-enum not wired on unix".into(),
+    })
+}

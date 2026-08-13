@@ -33,6 +33,14 @@ pub(crate) fn set_topmost(_handle: isize, _topmost: bool) -> Result<(), WindowOp
     })
 }
 
+pub(crate) fn window_rect(
+    _handle: isize,
+) -> Result<crate::contract::window_enumerate::WindowBounds, WindowOpError> {
+    Err(WindowOpError::Unsupported {
+        reason: "window-op not wired on unix".into(),
+    })
+}
+
 pub(crate) fn close(_handle: isize) -> Result<(), WindowOpError> {
     Err(WindowOpError::Unsupported {
         reason: "window-op not wired on unix".into(),

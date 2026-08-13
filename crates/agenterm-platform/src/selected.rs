@@ -439,6 +439,13 @@ pub mod ipc;
 #[path = "adapters/windows/input.rs"]
 pub(crate) mod input;
 
+#[cfg(all(
+    any(feature = "window-enum", feature = "window-op"),
+    target_os = "macos"
+))]
+#[path = "adapters/macos/foreign_windows.rs"]
+pub(crate) mod macos_foreign_windows;
+
 #[cfg(all(feature = "window-enum", windows))]
 #[path = "adapters/windows/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
@@ -455,7 +462,14 @@ pub(crate) mod accessibility_tree;
 #[path = "adapters/linux/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
 
-#[cfg(all(feature = "window-enum", not(any(windows, target_os = "linux"))))]
+#[cfg(all(feature = "window-enum", target_os = "macos"))]
+#[path = "adapters/macos/window_enumerate.rs"]
+pub(crate) mod window_enumerate;
+
+#[cfg(all(
+    feature = "window-enum",
+    not(any(windows, target_os = "linux", target_os = "macos"))
+))]
 #[path = "adapters/unix/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
 
@@ -463,7 +477,18 @@ pub(crate) mod window_enumerate;
 #[path = "adapters/windows/window_op.rs"]
 pub(crate) mod window_op;
 
-#[cfg(all(feature = "window-op", not(windows)))]
+#[cfg(all(feature = "window-op", target_os = "macos"))]
+#[path = "adapters/macos/window_op.rs"]
+pub(crate) mod window_op;
+
+#[cfg(all(feature = "window-op", target_os = "linux"))]
+#[path = "adapters/linux/window_op.rs"]
+pub(crate) mod window_op;
+
+#[cfg(all(
+    feature = "window-op",
+    not(any(windows, target_os = "macos", target_os = "linux"))
+))]
 #[path = "adapters/unix/window_op.rs"]
 pub(crate) mod window_op;
 

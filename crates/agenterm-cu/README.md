@@ -17,9 +17,10 @@ loop until goal:
 
 `cu` is capability, not judgment: no planner, model, or agent loop ships here.
 
-Named window placement (`window-place`, Spectacle action catalog) is accepted
-product scope under [`prd/PRD_02_32_cu_window_placement.md`](../../prd/PRD_02_32_cu_window_placement.md).
-Implementation **starts in v0.1.19**; it is not in the current command enum.
+Named window placement (`window-place`) is in the command enum. Geometry
+follows the Spectacle catalog
+([PRD 32](../../prd/PRD_02_32_cu_window_placement.md)). Apply uses
+`agenterm-platform` `move_window`. Requires `--grant actuate`.
 
 ## Native accessibility mapping (按图索骥)
 
@@ -125,6 +126,9 @@ cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
 # (or visible) node, and a timeout is a typed `ok:false` / `error.code=timeout`.
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --node-name-contains Reload --node-role button
+
+# Place the focused window (Spectacle catalog)
+cu --target current --grant actuate window-place --action left-half
 
 # Refused without actuate grant
 cu --target current --grant observe send-text hello

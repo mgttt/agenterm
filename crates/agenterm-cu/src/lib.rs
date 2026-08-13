@@ -8,6 +8,7 @@ pub mod auth;
 pub mod command;
 pub mod executor;
 pub mod mechanism;
+pub mod place;
 pub mod reply;
 pub mod target;
 
