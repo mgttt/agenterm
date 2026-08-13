@@ -28,7 +28,7 @@ Implementation **starts in v0.1.19**; it is not in the current command enum.
 | Window list | Win32 `EnumWindows` | X11 `_NET_CLIENT_LIST` | `AXUIElement` application windows |
 | Control tree | **UIA** (`IUIAutomation`) | **AT-SPI2** (`org.a11y.atspi.*` on D-Bus) | **AX** (`NSAccessibility`) |
 | Node identity | automation id + runtime id + bounds | path id (`/0/2/5`) + role + name + bounds | AX path + role + title + bounds |
-| Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action::do_action("click")` / `Component::grab_focus` | `AXPress` / `AXRaise` |
+| Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action` (`click`/`press`, else default `DoAction(0)`) / `Component::grab_focus` | `AXPress` / `AXRaise` |
 | Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (future) / `input-inject` | AX value + events |
 | Screenshot | GDI native capture | typed `unsupported` (no OCR substitute) | typed `unsupported` (planned) |
 
@@ -45,7 +45,7 @@ audited separately from AT-SPI actuation.
 |---------|---------|
 | `windows` | X11 window enumeration (`agenterm-platform`) |
 | `tree` | AT-SPI2 flattened control tree with role, name, states, bounds, actions |
-| `click --node <path>` | AT-SPI2 `Action` (`click` / `press`) |
+| `click --node <path>` | AT-SPI2 `Action` (`click` / `press`, else default `DoAction(0)` when the node exposes actions) |
 | `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection |

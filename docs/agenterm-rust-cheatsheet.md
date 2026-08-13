@@ -996,6 +996,22 @@ and missing values. Keep live service discovery best-effort in the adapter and
 prove actual desktop integration only in a matching-host smoke environment that
 explicitly owns that service.
 
+## AT-SPI action names are not required for a node click
+
+Linux `GetActions` returns localized names. Chrome with
+`--force-renderer-accessibility` commonly exposes `NActions >= 1` (often two
+entries) whose names are empty strings, so a tree snapshot shows
+`"actions":["",""]`. Structured `click --node` must still invoke AT-SPI:
+prefer a named `click`/`press`, otherwise `DoAction(0)` (the spec default
+action). Do not refuse with `a11y_action_unavailable` merely because names are
+blank, and do not require the caller to pass `--coords` / `--degraded`. Focus
+stays named-`focus` then `Component::grab_focus`; it must not fall through to
+the default click action. Unit-test the index choice with synthetic name
+lists; prove actuation on a live toolkit only in the owning smoke. When
+reading those empty names through libagenterm's two-stage string ABI, a
+`cap==0` probe that reports `required==0` is the empty payload — do not call
+again with `cap==0`, or `buffer_too_small` will fail the whole tree.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must

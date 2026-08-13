@@ -97,7 +97,11 @@ Canonical host mapping (approved product vocabulary):
   from each application root (for example `/3/0/0/1/0`).
 - [~] `click --node <path>` and `focus --node <path>` invoke AT-SPI `Action`
   / `Component::grab_focus` for the resolved node via `agt_a11y_node_perform`.
-  Invalid paths return typed `a11y_node_not_found`.
+  A node-addressed click uses a named `click`/`press` when present, otherwise
+  the AT-SPI default action (index 0) when the node exposes any actions —
+  including Chrome controls whose `GetActions` names are empty. It does not
+  require `--coords` / `--degraded`. Invalid paths return typed
+  `a11y_node_not_found`.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.
