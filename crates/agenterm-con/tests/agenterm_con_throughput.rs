@@ -123,15 +123,7 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
     let mut host = Command::new(exe);
     host.arg("--no-activate").arg("--control").arg(&endpoint);
     if cfg!(windows) {
-        host.args([
-            "-e",
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-NoExit",
-            "-Command",
-            "[Console]::Out.WriteLine('THROUGHPUT_READY')",
-        ]);
+        host.args(["-e", "powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"]);
     } else {
         host.args(["-e", "/bin/bash", "--norc", "--noprofile"]);
     }
@@ -140,18 +132,21 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
 
     let listed = wait_until_ready(exe, &endpoint, Duration::from_secs(15));
     let producer = tab_id(&listed["tabs"][0]["id"]).to_owned();
-    if !cfg!(windows) {
-        cli_json(
-            exe,
-            &endpoint,
-            &[
-                "send-text",
-                "--target",
-                &producer,
-                "echo THROUGHPUT_READY\r",
-            ],
-        );
-    }
+    // The control endpoint becoming ready proves only that the GUI can accept
+    // commands; it does not prove that the child shell has finished startup.
+    // Inject the marker through the public interface after control readiness
+    // on every host, so buffered terminal input becomes the shell-readiness
+    // rendezvous instead of racing output from the process launch arguments.
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-text",
+            "--target",
+            &producer,
+            "echo THROUGHPUT_READY\r",
+        ],
+    );
     cli_json(
         exe,
         &endpoint,
@@ -160,7 +155,7 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
             "--target",
             &producer,
             "--timeout-ms",
-            "10000",
+            "15000",
             "THROUGHPUT_READY",
         ],
     );

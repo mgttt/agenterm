@@ -1125,3 +1125,12 @@ required count, with a small fixed attempt bound; all other failures remain
 immediate errors. Requiring the first fetch to succeed turns normal host churn
 into flaky ABI evidence, while an unbounded retry can hide a nonconvergent or
 malicious provider.
+
+## GUI control readiness is not child-process readiness
+
+A black-box GUI test that can reach the control endpoint has proved only that
+the host accepts commands. The initial PTY child may still be starting. Do not
+race a marker emitted from process-launch arguments against control discovery.
+After the control endpoint is ready, inject a marker through the public input
+interface and wait for that marker through the public observation interface;
+buffered PTY input then provides the rendezvous with actual child readiness.
