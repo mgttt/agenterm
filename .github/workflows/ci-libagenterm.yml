@@ -97,14 +97,33 @@ jobs:
       - name: Symbol surface (nm)
         run: |
           set -eu
+          # 缺陷 1:ELF 共享库的导出符号在 dynamic symbol table,必须用 nm -D
+          # (nm -g 读静态符号表,release 构建的 .so 那张表基本为空);
+          # Mach-O 的 nm -gU 已验证有效。
+          # 缺陷 2:归档的 nm 输出带成员头(空行 + archive(member.o):),
+          # 旧 awk '{print $NF}' 会把非符号行混进统计;NF>=3 过滤掉
+          # 成员头(NF=1)与空行(NF=0),符号行(地址 类型 符号)取 $NF。
+          # 统计前打印原始输出前 5 行,便于下一轮据实校准取符号名方式。
+          if [ "$(uname -s)" = "Darwin" ]; then
+            NM_DYN="nm -gU"
+            NM_STA="nm -gU"
+          else
+            NM_DYN="nm -D --defined-only"
+            NM_STA="nm -g --defined-only"
+          fi
           DYN=$(ls target/abi-release/libagenterm.so target/abi-release/libagenterm.dylib 2>/dev/null | head -1)
           echo "dynamic: $DYN"
-          nm -g --defined-only "$DYN" 2>/dev/null | awk '{print $NF}' > /tmp/dyn.txt || true
-          [ -s /tmp/dyn.txt ] || nm -gU "$DYN" | awk '{print $NF}' > /tmp/dyn.txt || true
+          echo "--- raw: $NM_DYN $DYN | head -5 ---"
+          $NM_DYN "$DYN" 2>/dev/null | head -5 || true
+          echo "---"
+          $NM_DYN "$DYN" 2>/dev/null | awk 'NF>=3 {print $NF}' > /tmp/dyn.txt || true
           echo "  total=$(wc -l < /tmp/dyn.txt) agt=$(grep -c '^_\?agt_' /tmp/dyn.txt || true)"
+          echo "  non-agt (first 10): $(grep -v '^_\?agt_' /tmp/dyn.txt | head -10 | tr '\n' ' ' || true)"
           echo "static: target/abi-release/libagenterm.a"
-          nm -g --defined-only target/abi-release/libagenterm.a 2>/dev/null | awk '{print $NF}' > /tmp/sta.txt || true
-          [ -s /tmp/sta.txt ] || nm -gU target/abi-release/libagenterm.a | awk '{print $NF}' > /tmp/sta.txt || true
+          echo "--- raw: $NM_STA target/abi-release/libagenterm.a | head -5 ---"
+          $NM_STA target/abi-release/libagenterm.a 2>/dev/null | head -5 || true
+          echo "---"
+          $NM_STA target/abi-release/libagenterm.a 2>/dev/null | awk 'NF>=3 {print $NF}' > /tmp/sta.txt || true
           echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -c '^_\?agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
@@ -147,14 +166,33 @@ jobs:
       - name: Symbol surface (nm)
         run: |
           set -eu
+          # 缺陷 1:ELF 共享库的导出符号在 dynamic symbol table,必须用 nm -D
+          # (nm -g 读静态符号表,release 构建的 .so 那张表基本为空);
+          # Mach-O 的 nm -gU 已验证有效。
+          # 缺陷 2:归档的 nm 输出带成员头(空行 + archive(member.o):),
+          # 旧 awk '{print $NF}' 会把非符号行混进统计;NF>=3 过滤掉
+          # 成员头(NF=1)与空行(NF=0),符号行(地址 类型 符号)取 $NF。
+          # 统计前打印原始输出前 5 行,便于下一轮据实校准取符号名方式。
+          if [ "$(uname -s)" = "Darwin" ]; then
+            NM_DYN="nm -gU"
+            NM_STA="nm -gU"
+          else
+            NM_DYN="nm -D --defined-only"
+            NM_STA="nm -g --defined-only"
+          fi
           DYN=$(ls target/abi-release/libagenterm.so target/abi-release/libagenterm.dylib 2>/dev/null | head -1)
           echo "dynamic: $DYN"
-          nm -g --defined-only "$DYN" 2>/dev/null | awk '{print $NF}' > /tmp/dyn.txt || true
-          [ -s /tmp/dyn.txt ] || nm -gU "$DYN" | awk '{print $NF}' > /tmp/dyn.txt || true
+          echo "--- raw: $NM_DYN $DYN | head -5 ---"
+          $NM_DYN "$DYN" 2>/dev/null | head -5 || true
+          echo "---"
+          $NM_DYN "$DYN" 2>/dev/null | awk 'NF>=3 {print $NF}' > /tmp/dyn.txt || true
           echo "  total=$(wc -l < /tmp/dyn.txt) agt=$(grep -c '^_\?agt_' /tmp/dyn.txt || true)"
+          echo "  non-agt (first 10): $(grep -v '^_\?agt_' /tmp/dyn.txt | head -10 | tr '\n' ' ' || true)"
           echo "static: target/abi-release/libagenterm.a"
-          nm -g --defined-only target/abi-release/libagenterm.a 2>/dev/null | awk '{print $NF}' > /tmp/sta.txt || true
-          [ -s /tmp/sta.txt ] || nm -gU target/abi-release/libagenterm.a | awk '{print $NF}' > /tmp/sta.txt || true
+          echo "--- raw: $NM_STA target/abi-release/libagenterm.a | head -5 ---"
+          $NM_STA target/abi-release/libagenterm.a 2>/dev/null | head -5 || true
+          echo "---"
+          $NM_STA target/abi-release/libagenterm.a 2>/dev/null | awk 'NF>=3 {print $NF}' > /tmp/sta.txt || true
           echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -c '^_\?agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
