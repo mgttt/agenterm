@@ -117,14 +117,15 @@ jobs:
           $NM_DYN "$DYN" 2>/dev/null | head -5 || true
           echo "---"
           $NM_DYN "$DYN" 2>/dev/null | awk 'NF>=3 {print $NF}' > /tmp/dyn.txt || true
-          echo "  total=$(wc -l < /tmp/dyn.txt) agt=$(grep -c '^_\?agt_' /tmp/dyn.txt || true)"
+          echo "  total=$(wc -l < /tmp/dyn.txt) agt=$(grep -cE '(^|_)agt_' /tmp/dyn.txt || true)"
           echo "  non-agt (first 10): $(grep -v '^_\?agt_' /tmp/dyn.txt | head -10 | tr '\n' ' ' || true)"
           echo "static: target/abi-release/libagenterm.a"
           echo "--- raw: $NM_STA target/abi-release/libagenterm.a | head -5 ---"
           $NM_STA target/abi-release/libagenterm.a 2>/dev/null | head -5 || true
           echo "---"
           $NM_STA target/abi-release/libagenterm.a 2>/dev/null | awk 'NF>=3 {print $NF}' > /tmp/sta.txt || true
-          echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -c '^_\?agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
+          echo "  agt sample: $(grep -E 'agt_' /tmp/sta.txt | head -3 | tr '\n' ' ' || true)"
+          echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -cE '(^|_)agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
