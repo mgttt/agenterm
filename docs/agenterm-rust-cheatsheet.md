@@ -988,3 +988,13 @@ into bounded pure helpers and test synthetic byte fixtures, including malformed
 and missing values. Keep live service discovery best-effort in the adapter and
 prove actual desktop integration only in a matching-host smoke environment that
 explicitly owns that service.
+
+## File existence is not writer completion
+
+For a synchronous writer running on a test driver thread, another thread must
+join that driver (and inspect its typed result) before decoding the output.
+Polling `Path::exists()` races the interval after file creation but before the
+encoder has completed and can surface valid in-progress output as
+`UnexpectedEof`. Atomic product publication may use complete-file visibility as
+its contract; a direct native test helper without that publication boundary may
+not borrow the same assumption.

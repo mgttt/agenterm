@@ -1154,9 +1154,21 @@ fn controlled_terminal_click_keeps_native_pixels_stable_outside_local_feedback()
     );
     let args = interactive_shell_args(&script);
     let mut session = ConSession::spawn(&dir, &args);
-    session.wait_for(Duration::from_secs(10), |_| {
-        before_path.exists() && after_path.exists()
-    });
+    session
+        .driver
+        .take()
+        .expect("native screenshot journey driver")
+        .join()
+        .expect("native screenshot journey thread");
+    if let Some(error) = session
+        .driver_error
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+    {
+        panic!("native screenshot journey failed: {error}");
+    }
+    assert!(before_path.is_file() && after_path.is_file());
 
     fn decode(path: &Path) -> (usize, usize, Vec<u8>, png::ColorType) {
         let decoder = png::Decoder::new(std::fs::File::open(path).expect("open native screenshot"));
