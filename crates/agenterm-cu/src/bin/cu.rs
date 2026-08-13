@@ -129,9 +129,15 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 WaitCondition::WindowTitleContains { pattern }
             } else if let Some(handle) = flag_isize(&mut args, "--focused-handle") {
                 WaitCondition::FocusedHandle { handle }
+            } else if let Some(pattern) = flag_value(&mut args, "--node-name-contains") {
+                WaitCondition::NodeNameContains {
+                    pattern,
+                    role: flag_value(&mut args, "--node-role"),
+                    window: flag_isize(&mut args, "--window"),
+                }
             } else {
                 return usage_err(
-                    "wait requires one of --window-count-gte, --window-title-contains, or --focused-handle",
+                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, or --node-name-contains",
                 );
             };
             Command::Wait {
@@ -248,7 +254,10 @@ Commands:
   focus [--window HANDLE] --node ID
   send-text <text...>
   send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
-  wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE)
+  wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
+                        | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])
+                              node conditions poll the accessibility tree and fail typed
+                              ("timeout") instead of returning met:false
 
 All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"error":..}}
 "#

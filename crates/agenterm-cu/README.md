@@ -50,7 +50,7 @@ audited separately from AT-SPI actuation.
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection |
 | `screenshot` | typed `unsupported` on Linux native capture |
-| `wait` | polls window state |
+| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` |
 
 ### Tree JSON shape (UIA-like)
 
@@ -113,6 +113,12 @@ cu --target current --grant actuate focus --node /3/0/0/1/0
 
 # Wait for at least one window, 3s max
 cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
+
+# Wait for a control to appear in one window's accessibility tree (no screenshot).
+# The handle is the decimal `handle` from `cu windows`; a match needs a showing
+# (or visible) node, and a timeout is a typed `ok:false` / `error.code=timeout`.
+cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
+  --node-name-contains Reload --node-role button
 
 # Refused without actuate grant
 cu --target current --grant observe send-text hello
