@@ -15,8 +15,9 @@ export AGENTERM_CU_AUDIT_PATH="${AUDIT_DIR}/audit.jsonl"
 mkdir -p "$(dirname "$AGENTERM_CU_AUDIT_PATH")"
 
 echo "Building cu..."
-cargo build -p agenterm-cu --bin cu
-CU="$ROOT/target/debug/cu"
+# libagenterm requires panic=unwind; the workspace dev/release profiles abort.
+cargo build -p agenterm-cu --bin cu --profile abi-dev
+CU="$ROOT/target/abi-dev/cu"
 
 json_field() {
   python3 - "$1" "$2" <<'PY'
@@ -87,9 +88,32 @@ echo "== structured at-spi click when node exists =="
 OUT="$(run_json --target current --grant observe tree)"
 NODE_ID="$(python3 - "$OUT" <<'PY'
 import json, sys
+
+def showing(node):
+    bounds = node.get("bounds") or {}
+    return bounds.get("width", 0) > 0 and bounds.get("height", 0) > 0
+
+def named_click(node):
+    return any(str(action).lower() in ("click", "press") for action in node.get("actions", []))
+
+def actionable_control(node):
+    role = str(node.get("role") or "").lower()
+    name = str(node.get("name") or "").lower()
+    if name in ("minimize", "maximize", "close", "close this view"):
+        return False
+    return showing(node) and (
+        named_click(node)
+        or role in ("button", "push button", "toggle button", "link")
+        or "button" in role
+    )
+
 nodes = json.loads(sys.argv[1])["data"]["nodes"]
 for node in nodes:
-    if any(action.lower() == "click" for action in node.get("actions", [])):
+    if named_click(node) and showing(node):
+        print(node["id"])
+        raise SystemExit
+for node in nodes:
+    if actionable_control(node):
         print(node["id"])
         break
 PY
@@ -101,9 +125,10 @@ if [[ -n "${NODE_ID:-}" ]]; then
 import json, sys
 data = json.loads(sys.argv[1])["data"]
 assert data["addressing"] == "accessibility-tree"
+assert data.get("addressing") != "degraded-coordinates"
 PY
 else
-  echo "SKIP: no AT-SPI node with click action in current desktop tree"
+  echo "SKIP: no showing AT-SPI button/link or named click action in current desktop tree"
 fi
 
 echo "PASS: cu-linux-smoke"

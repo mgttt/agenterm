@@ -201,6 +201,11 @@ fn read_two_stage(
     if status != agt_status::AGT_FAILED {
         return Err(last_mechanism_error("two_stage_probe"));
     }
+    // libagenterm treats cap==0 as a size probe even when the payload is empty.
+    // A second call with cap==0 would repeat buffer_too_small, so stop here.
+    if required == 0 {
+        return Ok(Vec::new());
+    }
     let mut buf = vec![0u8; required];
     let status = probe(buf.as_mut_ptr(), required, &mut required);
     map_status("two_stage_read", status)?;
@@ -260,5 +265,26 @@ impl CStringOrStack {
 
     fn as_ptr(&self) -> *const std::ffi::c_char {
         self.0.as_ptr()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_stage_empty_payload_does_not_reprobe_with_cap_zero() {
+        let mut calls = 0usize;
+        let bytes = read_two_stage(|_buf, cap, out_len| {
+            calls += 1;
+            unsafe {
+                *out_len = 0;
+            }
+            assert_eq!(cap, 0, "empty payload must not make a second cap=0 read");
+            agt_status::AGT_FAILED
+        })
+        .expect("empty two-stage probe should succeed");
+        assert!(bytes.is_empty());
+        assert_eq!(calls, 1);
     }
 }

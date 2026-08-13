@@ -149,7 +149,7 @@ async fn perform_node_action_async(
     let object_ref = resolve_path(&conn, &selected, &indices).await?;
     let proxy = open_accessible(&conn, &object_ref).await?;
     match action {
-        AccessibilityNodeAction::Click => invoke_named_action(&proxy, &["click", "press"]).await,
+        AccessibilityNodeAction::Click => invoke_click_action(&proxy).await,
         AccessibilityNodeAction::Focus => {
             if invoke_named_action(&proxy, &["focus"]).await.is_ok() {
                 return Ok(());
@@ -473,6 +473,82 @@ async fn text_from_proxy(proxy: &AccessibleProxy<'_>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// AT-SPI `GetActions` returns localized names. Toolkits such as Chrome often
+/// leave those strings empty while still exposing a default action at index 0.
+fn named_action_index(names: &[String], preferred_names: &[&str]) -> Option<usize> {
+    let preferred = preferred_names
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    names.iter().position(|name| {
+        let lowered = name.to_ascii_lowercase();
+        !lowered.is_empty() && preferred.iter().any(|wanted| wanted == &lowered)
+    })
+}
+
+/// Structured click prefers a named `click`/`press`, then the AT-SPI default
+/// action (index 0) when the node exposes any Action entries.
+fn click_action_index(names: &[String]) -> Option<usize> {
+    named_action_index(names, &["click", "press"]).or((!names.is_empty()).then_some(0))
+}
+
+fn format_available_actions(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| {
+            if name.is_empty() {
+                "<unnamed>"
+            } else {
+                name.as_str()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+async fn action_names(
+    action_proxy: &atspi::proxy::action::ActionProxy<'_>,
+) -> Result<Vec<String>, AccessibilityTreeError> {
+    let actions = action_proxy.get_actions().await.map_err(map_atspi_err)?;
+    if !actions.is_empty() {
+        return Ok(actions.into_iter().map(|action| action.name).collect());
+    }
+    let n_actions = action_proxy.n_actions().await.unwrap_or(0).max(0);
+    Ok(vec![String::new(); n_actions as usize])
+}
+
+async fn do_action_at(
+    action_proxy: &atspi::proxy::action::ActionProxy<'_>,
+    index: usize,
+) -> Result<(), AccessibilityTreeError> {
+    action_proxy
+        .do_action(index as i32)
+        .await
+        .map_err(map_atspi_err)
+        .map(|_| ())
+}
+
+async fn invoke_click_action(proxy: &AccessibleProxy<'_>) -> Result<(), AccessibilityTreeError> {
+    let proxies = proxy.proxies().await.map_err(map_atspi_err)?;
+    let action_proxy = proxies.action().await.map_err(|_| {
+        AccessibilityTreeError::failed(
+            "a11y_action_unavailable",
+            "node does not expose the AT-SPI Action interface",
+        )
+    })?;
+    let names = action_names(&action_proxy).await?;
+    let action_index = click_action_index(&names).ok_or_else(|| {
+        AccessibilityTreeError::failed(
+            "a11y_action_unavailable",
+            format!(
+                "node exposes no AT-SPI actions to invoke; available: {}",
+                format_available_actions(&names)
+            ),
+        )
+    })?;
+    do_action_at(&action_proxy, action_index).await
+}
+
 async fn invoke_named_action(
     proxy: &AccessibleProxy<'_>,
     preferred_names: &[&str],
@@ -484,32 +560,17 @@ async fn invoke_named_action(
             "node does not expose the AT-SPI Action interface",
         )
     })?;
-    let actions = action_proxy.get_actions().await.map_err(map_atspi_err)?;
-    let preferred = preferred_names
-        .iter()
-        .map(|name| name.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    let action_index = actions
-        .iter()
-        .position(|action| preferred.contains(&action.name.to_ascii_lowercase()))
-        .ok_or_else(|| {
-            AccessibilityTreeError::failed(
-                "a11y_action_unavailable",
-                format!(
-                    "node exposes no requested AT-SPI actions; available: {}",
-                    actions
-                        .iter()
-                        .map(|action| action.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            )
-        })?;
-    action_proxy
-        .do_action(action_index as i32)
-        .await
-        .map_err(map_atspi_err)
-        .map(|_| ())
+    let names = action_names(&action_proxy).await?;
+    let action_index = named_action_index(&names, preferred_names).ok_or_else(|| {
+        AccessibilityTreeError::failed(
+            "a11y_action_unavailable",
+            format!(
+                "node exposes no requested AT-SPI actions; available: {}",
+                format_available_actions(&names)
+            ),
+        )
+    })?;
+    do_action_at(&action_proxy, action_index).await
 }
 
 async fn object_ref_pid(dbus: Option<&DBusProxy<'_>>, object_ref: &ObjectRefOwned) -> Option<u32> {
@@ -609,6 +670,42 @@ mod tests {
             dbus_address_from_environ(b"NOT_DBUS_SESSION_BUS_ADDRESS=value\0\xff\0"),
             None
         );
+    }
+
+    #[test]
+    fn named_action_match_is_case_insensitive_and_ignores_empty_names() {
+        assert_eq!(
+            named_action_index(&["Focus".into(), "Click".into()], &["click", "press"]),
+            Some(1)
+        );
+        assert_eq!(
+            named_action_index(&[String::new(), String::new()], &["click", "press"]),
+            None
+        );
+        assert_eq!(
+            named_action_index(&["focus".into()], &["click", "press"]),
+            None
+        );
+    }
+
+    #[test]
+    fn click_uses_named_action_then_atspi_default_index() {
+        assert_eq!(click_action_index(&["press".into()]), Some(0));
+        assert_eq!(
+            click_action_index(&["focus".into(), "Click".into()]),
+            Some(1)
+        );
+        assert_eq!(click_action_index(&[String::new(), String::new()]), Some(0));
+        assert_eq!(click_action_index(&[]), None);
+    }
+
+    #[test]
+    fn available_action_list_marks_empty_names() {
+        assert_eq!(
+            format_available_actions(&[String::new(), String::new()]),
+            "<unnamed>, <unnamed>"
+        );
+        assert_eq!(format_available_actions(&["click".into()]), "click");
     }
 
     #[test]
