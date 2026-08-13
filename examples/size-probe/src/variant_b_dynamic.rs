@@ -1,12 +1,19 @@
 //! Size probe — variant B (dynamic).
 //!
-//! Milestone 15: the same six probes as variant A, but the mechanism code is
+//! Milestone 15 + 23: the same probes as variant A, but the mechanism code is
 //! NOT statically linked. This binary depends only on `libloading` (plus
 //! std); every capability comes from the `libagenterm` cdylib's C exports,
 //! loaded at run time. If the mechanism code were statically linked too,
 //! variant B's artifact would be much larger than it is.
+//!
+//! Milestone 23 adds the two biggest mechanisms: `agt_window_open` and
+//! `agt_pty_open`/`wait`/`close` (spawn `cmd.exe /c exit` / `/bin/sh -c exit`
+//! and reap it immediately). Both may report AGT_UNSUPPORTED or AGT_FAILED on
+//! headless hosts; the point is that the calls route through the dylib and
+//! nothing statically enters this artifact.
 
 use libloading::{Library, Symbol};
+use std::ffi::{c_char, CStr};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -40,6 +47,31 @@ impl Default for agt_process_info {
     }
 }
 
+/// C-compatible window creation parameters (mirror of `agt_window_spec`).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct agt_window_spec {
+    title: *const c_char,
+    width: u32,
+    height: u32,
+    no_activate: i32,
+    ime_allowed: i32,
+}
+
+/// C-compatible PTY spawn parameters (mirror of `agt_pty_spawn`).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct agt_pty_spawn {
+    program: *const c_char,
+    argv: *const *const c_char,
+    argc: usize,
+    cwd: *const c_char,
+    envp: *const *const c_char,
+    envc: usize,
+    cols: u16,
+    rows: u16,
+}
+
 type AbiVersion = unsafe extern "C" fn() -> u32;
 /// Both two-stage UTF-8 exports (`agt_runtime_user_config_dir` and
 /// `agt_runtime_default_shell`) share this exact FFI signature.
@@ -47,6 +79,36 @@ type RuntimeTwoStageUtf8 = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i
 type ClipboardHasText = unsafe extern "C" fn() -> i32;
 type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize) -> i32;
 type ParentConsoleWriteStdout = unsafe extern "C" fn(*const u8, usize) -> i32;
+type WindowOpen = unsafe extern "C" fn(*const agt_window_spec, *mut *mut u8) -> i32;
+type WindowClose = unsafe extern "C" fn(*mut u8) -> i32;
+type PtyOpen = unsafe extern "C" fn(*const agt_pty_spawn, *mut *mut u8) -> i32;
+type PtyWait = unsafe extern "C" fn(*mut u8, u32, *mut i32) -> i32;
+type PtyClose = unsafe extern "C" fn(*mut u8) -> i32;
+type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
+
+/// C-compatible last-error record (mirror of `agt_error`); only `code` is
+/// read by this probe, for diagnostics.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct agt_error {
+    operation: *const c_char,
+    code: *const c_char,
+    message: *const c_char,
+}
+
+/// Last recorded failure code, or `None` when `agt_last_error` itself fails.
+fn last_error_code(lib: &Library) -> Option<String> {
+    let f: Symbol<LastError> = sym(lib, b"agt_last_error").ok()?;
+    let mut e = agt_error {
+        operation: std::ptr::null(),
+        code: std::ptr::null(),
+        message: std::ptr::null(),
+    };
+    if unsafe { f(&mut e) } != AGT_OK || e.code.is_null() {
+        return None;
+    }
+    Some(unsafe { CStr::from_ptr(e.code) }.to_string_lossy().into_owned())
+}
 
 const CDYLIB_NAMES: [&str; 3] = [
     "agenterm.dll",      // Windows
@@ -101,7 +163,17 @@ fn run() -> Result<(), String> {
         _ => "failed",
     };
 
-    // 6. ABI version from the dylib export
+    // 6. window: open-then-close probe (milestone 23). AGT_UNSUPPORTED or
+    //    AGT_FAILED is acceptable on headless hosts; on a real desktop the
+    //    window opens without activation and is closed immediately.
+    let window_open = window_probe(&lib)?;
+
+    // 7. pty: spawn the shortest-lived child, wait for it, close (milestone
+    //    23). Failure is acceptable too; the exports must merely be resolved
+    //    and routed through the dylib.
+    let pty_open = pty_probe(&lib)?;
+
+    // 8. ABI version from the dylib export
     let abi_version: Symbol<AbiVersion> = sym(&lib, b"agt_abi_version")?;
     let abi_version = unsafe { abi_version() };
 
@@ -110,8 +182,79 @@ fn run() -> Result<(), String> {
     println!("clipboard_has_text={clipboard_has_text}");
     println!("process_count={process_count}");
     println!("parent_console_write_stdout={parent_console}");
+    println!("window_open={window_open}");
+    println!("pty_open={pty_open}");
     println!("abi_version={abi_version}");
     Ok(())
+}
+
+/// `agt_window_open` with a no-activate title, then `agt_window_close` when
+/// it succeeds. Returns a short status string (never the window contents).
+fn window_probe(lib: &Library) -> Result<String, String> {
+    let window_open: Symbol<WindowOpen> = sym(lib, b"agt_window_open")?;
+    let title: &CStr = c"size-probe";
+    let spec = agt_window_spec {
+        title: title.as_ptr(),
+        width: 320,
+        height: 200,
+        no_activate: 1,
+        ime_allowed: 0,
+    };
+    let mut window: *mut u8 = std::ptr::null_mut();
+    match unsafe { window_open(&spec, &mut window) } {
+        AGT_OK => {
+            let window_close: Symbol<WindowClose> = sym(lib, b"agt_window_close")?;
+            unsafe { window_close(window) };
+            Ok("ok".to_string())
+        }
+        AGT_UNSUPPORTED => Ok("unsupported".to_string()),
+        other => Ok(format!("failed(status={other})")),
+    }
+}
+
+/// `agt_pty_open` (`cmd.exe /c exit` on Windows, `/bin/sh -c exit` on Unix),
+/// then `agt_pty_wait` and `agt_pty_close`. Returns a short status string
+/// with the wait outcome when the spawn succeeded.
+fn pty_probe(lib: &Library) -> Result<String, String> {
+    let pty_open: Symbol<PtyOpen> = sym(lib, b"agt_pty_open")?;
+    let program: &CStr = if cfg!(windows) { c"cmd.exe" } else { c"/bin/sh" };
+    let arg0: &CStr = if cfg!(windows) { c"/c" } else { c"-c" };
+    let arg1: &CStr = c"exit";
+    // ABI convention: argv[0] is the program name and is not re-passed as an
+    // argument; the library uses argv[1..argc] (same as the dylib acceptance
+    // tests). argc == 3 → args = ["/c", "exit"].
+    let argv: [*const c_char; 3] = [program.as_ptr(), arg0.as_ptr(), arg1.as_ptr()];
+    let spawn = agt_pty_spawn {
+        program: program.as_ptr(),
+        argv: argv.as_ptr(),
+        argc: 3,
+        cwd: std::ptr::null(),
+        envp: std::ptr::null(),
+        envc: 0,
+        cols: 80,
+        rows: 24,
+    };
+    let mut pty: *mut u8 = std::ptr::null_mut();
+    match unsafe { pty_open(&spawn, &mut pty) } {
+        AGT_OK => {
+            let pty_wait: Symbol<PtyWait> = sym(lib, b"agt_pty_wait")?;
+            let mut exit_code: i32 = -1;
+            let wait_status = unsafe { pty_wait(pty, 5000, &mut exit_code) };
+            let wait_note = if wait_status == AGT_OK {
+                format!("exit_code={exit_code}")
+            } else {
+                match last_error_code(lib) {
+                    Some(code) => format!("wait_status={wait_status}, error_code={code}"),
+                    None => format!("wait_status={wait_status}"),
+                }
+            };
+            let pty_close: Symbol<PtyClose> = sym(lib, b"agt_pty_close")?;
+            unsafe { pty_close(pty) };
+            Ok(format!("ok({wait_note})"))
+        }
+        AGT_UNSUPPORTED => Ok("unsupported".to_string()),
+        other => Ok(format!("failed(status={other})")),
+    }
 }
 
 /// Fetch a symbol by name.
