@@ -188,3 +188,25 @@ macOS 上 `Libs.private` 以 `-framework` **参数对**展开（`-framework` 与
 上面的输出是对生成的 `.pc` 的确定性展开；真实 pkg-config 输出由 CI 的
 `pkgconfig_consume` 端到端测试在 Linux/macOS 上逐字验证，若与上表
 `Libs.private` 实测值有任何出入，测试当场红。
+
+## 安装身份：`DT_SONAME` 与 `@rpath`（里程碑 56）
+
+库被安装（`libagenterm.so` / `libagenterm.dylib` 落到 `$libdir`）之后，
+消费者在**运行时**靠什么找到它，由库自己的"安装身份"决定——
+`crates/agenterm-abi/build.rs`（里程碑 56）设置，`tests/install_identity.rs`
+实测并门控：
+
+- **Linux**：构建时写入 ELF `DT_SONAME = libagenterm.so.1`（`1` 是 ABI
+  **主**版本，见 `src/lib.rs` 的 `abi_version!(1, 6)`，不跟 crate 版本
+  0.1.16）。消费者链接时记下这个 SONAME，安装后动态加载器按它定位；
+  soname 不变时升级补丁版本无需重链接。
+- **macOS**：构建时写入 `LC_ID_DYLIB` 的 install name
+  `@rpath/libagenterm.dylib`（而不是 cargo 默认的构建树绝对路径）。
+  消费者记录 `@rpath/libagenterm.dylib`，**运行时由消费者自己的 rpath
+  设置**（例如 `-Wl,-rpath,@loader_path` 或指向 `$libdir` 的 rpath）解析。
+
+`.pc` 的 `Libs` 目前**不带** `-Wl,-rpath`：静态消费者不受影响（rpath 只
+对动态加载有意义），动态消费者需要自己给出 rpath 或在 `$libdir` 安装
+（`ldconfig` / dyld 的默认搜索路径可覆盖）。若 CI 证明某条动态消费链因此
+缺库，先把证据贴出来再讨论是否给 `.pc` 补 rpath——那是对外合同
+（`libagenterm.pc.in`），不经证据不改。
