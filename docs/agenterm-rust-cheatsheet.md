@@ -146,6 +146,22 @@ Unix checklist:
 Use official OS documentation for exact flags and ownership semantics. Record
 the stable conclusion in code comments or this manual, not a copied article.
 
+**Never take a `#[repr(C)]` enum by value on the C boundary** (proven at
+milestone 53). The C side can pass any `int`, and constructing a Rust enum
+from an out-of-range integer is *immediate* UB — it happens at function entry,
+before the `match` runs — so a `_ =>` wildcard arm only catches
+legal-but-unhandled variants; against garbage input it is false comfort.
+Machine-code-identical fix that does not move the ABI: take an integer
+(`u32` / `c_int`; a `repr(C)` enum is passed as `int`), keep the C header
+declaring the enum, `match` on the integer, and map unknown values explicitly.
+Derive the discriminants as `Enum::Variant as u32` constants inside the
+function (or a macro), never copy the magic numbers — then a rename/reorder/
+revalue of the enum follows through at compile time. When the same numbering
+is duplicated across several sources (Rust enum, C header, test-side
+constants), gate it with a test that parses every source and compares name
+sequence AND values in declaration order; comparing only the name *sets*
+misses an insert/swap that shifts every later value.
+
 ---
 
 ## 4. `unsafe` discipline
