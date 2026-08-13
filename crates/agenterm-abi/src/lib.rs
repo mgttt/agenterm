@@ -26,7 +26,9 @@
 //! Milestone 6 ships structured accessibility-tree observe and node actuation:
 //! `agt_a11y_tree_snapshot` captures a flattened tree, variable-length node fields
 //! are fetched with `agt_a11y_node_string` / `agt_a11y_node_action_name`, and
-//! `agt_a11y_node_perform` invokes click/focus by child-index path. Backends are
+//! `agt_a11y_node_perform` invokes click/focus by child-index path, and
+//! `agt_a11y_node_set_text` writes through the host text interface (Linux:
+//! AT-SPI EditableText). Backends are
 //! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
 //! `agenterm-platform`; the C header names mechanisms only.
 //! Milestone 8 ships the clipboard mechanism: `agt_clipboard_set_text`
@@ -61,7 +63,8 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, perform_node_action, tree_for_window,
+    AccessibilityNodeAction, AccessibilityTreeError, perform_node_action, set_node_text,
+    tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
@@ -226,7 +229,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 1);
+abi_version!(1, 2);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -2742,6 +2745,8 @@ fn map_a11y_error(operation: &'static CStr, error: AccessibilityTreeError) -> ag
                 "a11y_tree_empty" => c"a11y_tree_empty",
                 "a11y_node_not_found" => c"a11y_node_not_found",
                 "a11y_action_unavailable" => c"a11y_action_unavailable",
+                "a11y_text_unavailable" => c"a11y_text_unavailable",
+                "a11y_text_timeout" => c"a11y_text_timeout",
                 "a11y_backend_failed" => c"a11y_backend_failed",
                 "a11y_invalid_node_id" => c"a11y_invalid_node_id",
                 other => {
@@ -3128,6 +3133,90 @@ pub extern "C" fn agt_a11y_node_perform(
                 c"agt_a11y_node_perform",
                 c"panic",
                 "panic in agt_a11y_node_perform",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Write UTF-8 text through the host accessibility text interface
+/// (Linux: AT-SPI `EditableText` `SetTextContents` / `InsertText`).
+/// `node_id` is a NUL-terminated UTF-8 child-index path. `text == NULL`
+/// with `len > 0`, or a slice that is not valid UTF-8, →
+/// `AGT_FAILED{code="bad_pointer"}` / `bad_encoding`. A node that does
+/// not expose a writeable text interface → `a11y_text_unavailable`.
+/// Never injects keystrokes.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_set_text(
+    window_handle: isize,
+    node_id: *const c_char,
+    text: *const u8,
+    len: usize,
+) -> agt_status {
+    fn inner(
+        window_handle: isize,
+        node_id: *const c_char,
+        text: *const u8,
+        len: usize,
+    ) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(c"agt_a11y_node_set_text", c"bad_pointer", "node_id is null");
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_set_text",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        if text.is_null() && len > 0 {
+            record_error(c"agt_a11y_node_set_text", c"bad_pointer", "text is null");
+            return agt_status::AGT_FAILED;
+        }
+        let bytes = if text.is_null() {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(text, len) }
+        };
+        let text = match std::str::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_set_text",
+                    c"bad_encoding",
+                    "text is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match set_node_text(filter, node_id, text) {
+            Ok(()) => agt_status::AGT_OK,
+            Err(e) => map_a11y_error(c"agt_a11y_node_set_text", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, text, len)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_set_text",
+                c"panic",
+                "panic in agt_a11y_node_set_text",
             );
             agt_status::AGT_FAILED
         }

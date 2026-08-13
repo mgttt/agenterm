@@ -4,9 +4,9 @@
 //! `agenterm-platform` until their ABI milestones ship.
 
 use agenterm::{
-    agt_a11y_node, agt_a11y_node_action_name, agt_a11y_node_perform, agt_a11y_node_string,
-    agt_a11y_tree_meta_string, agt_a11y_tree_node, agt_a11y_tree_snapshot, agt_capability,
-    agt_capability_query, agt_last_error, agt_status,
+    agt_a11y_node, agt_a11y_node_action_name, agt_a11y_node_perform, agt_a11y_node_set_text,
+    agt_a11y_node_string, agt_a11y_tree_meta_string, agt_a11y_tree_node, agt_a11y_tree_snapshot,
+    agt_capability, agt_capability_query, agt_last_error, agt_status,
 };
 
 const AGT_A11Y_META_BACKEND: i32 = 0;
@@ -91,6 +91,18 @@ pub fn perform_node_action(
     let node_c = CStringOrStack::new(node_id)?;
     let status = agt_a11y_node_perform(handle, node_c.as_ptr(), action_kind);
     map_status("agt_a11y_node_perform", status)?;
+    Ok(())
+}
+
+pub fn set_node_text(
+    window: Option<isize>,
+    node_id: &str,
+    text: &str,
+) -> Result<(), MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let status = agt_a11y_node_set_text(handle, node_c.as_ptr(), text.as_ptr(), text.len());
+    map_status("agt_a11y_node_set_text", status)?;
     Ok(())
 }
 

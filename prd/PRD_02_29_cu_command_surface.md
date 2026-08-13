@@ -80,12 +80,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   or fall through to `--coords`. A showing named node with no Action
   still uses the AT-SPI Component path and reports
   `addressing=accessibility-tree`.
-- [~] `send-text` accepts the same name addressing (`--window` + `--name` +
-  optional `--role`, with `--` ending flag parsing). It focuses the matched
-  node through the node-path path, then types; without `--name` it stays the
-  plain "type into whatever is focused" verb. A miss or an ambiguous name
-  types nothing and fails typed, so a loop-until caller never sprays text
-  at the wrong control.
+- [x] `send-text` accepts the same name addressing (`--window` + `--name` +
+  optional `--role`, with `--` ending flag parsing). Named write goes
+  through native AT-SPI `EditableText` (`SetTextContents` / `InsertText`)
+  and reports `addressing=accessibility-tree`. A named showing node with
+  no writeable text interface typed-fails (`a11y_text_unavailable`) and
+  never falls through to XTest / `input_inject::type_text`. Without
+  `--name` it stays the plain "type into whatever is focused" verb. A miss
+  or an ambiguous name writes nothing and fails typed, so a loop-until
+  caller never sprays text at the wrong control.
 - [~] `send-keys` accepts that same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). It focuses the matched
   node first, then sends the chord; without `--name` it stays the plain

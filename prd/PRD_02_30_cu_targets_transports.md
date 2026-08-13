@@ -70,7 +70,7 @@ Canonical host mapping (approved product vocabulary):
 |------|---------------------------|--------------------------|----------------------|
 | Windows | native API + **UIA** | `IUIAutomation` control tree | UIA patterns / legacy accessible (`Invoke`, `LegacyIAccessible`) |
 | macOS | **AX** (`NSAccessibility`) | accessibility element tree | `AXPress`, `AXRaise`, editable value |
-| Linux | **AT-SPI2** (`at-spi2-core` / `org.a11y.atspi.*`) | AT-SPI accessible hierarchy | AT-SPI `Action` / `Component` |
+| Linux | **AT-SPI2** (`at-spi2-core` / `org.a11y.atspi.*`) | AT-SPI accessible hierarchy | AT-SPI `Action` / `Component` / `EditableText` |
 
 ### Requirements by stack
 
@@ -131,9 +131,16 @@ Canonical host mapping (approved product vocabulary):
   `a11y_node_not_found`. Two or more showing matches are typed
   `a11y_node_ambiguous` with the match count; the command does not pick
   the first. There is no screenshot or degraded-coordinate substitute.
-- [~] `send-text --window HANDLE --name PAT [--role ROLE] [--] <text...>` and
-  `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
-  resolve and focus through that same path, then inject text / the chord with
+- [x] `send-text --window HANDLE --name PAT [--role ROLE] [--] <text...>`
+  resolves through that same path, then writes via AT-SPI `EditableText`
+  (`SetTextContents` / `InsertText`, `agt_a11y_node_set_text`). A named
+  showing node with no writeable text interface typed-fails
+  (`a11y_text_unavailable`) and never silently uses XTest /
+  `input_inject::type_text`. Resolution failure (miss or ambiguous name)
+  aborts before any write. Without `--name`, `send-text` still injects
+  into whatever is focused.
+- [~] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
+  resolve and focus through that same path, then inject the chord with
   the existing XTest keyboard path. Resolution failure (miss or ambiguous
   name) aborts before any keystroke. After a successful named `send-keys`,
   the same window's AT-SPI tree must still be there for a second named

@@ -1045,12 +1045,18 @@ with the match count — never silently pick the first. The same uniqueness
 rule applies to `wait --node-name-contains`. Never satisfy a name click
 with a screenshot or degraded coordinates.
 
-`cu send-text --name` and `cu send-keys --name` are the same rule plus one
-ordering constraint: resolve and focus the node BEFORE injecting any
-keystroke, so a miss types nothing instead of spraying text or a chord into
-whatever happened to be focused. Their payload argument is positional, so
-parse `--` as the end of flags — otherwise text (or a chord) that starts with
-a dash is eaten as a flag.
+`cu send-keys --name` is the same rule plus one ordering constraint: resolve
+and focus the node BEFORE injecting any keystroke, so a miss types nothing
+instead of spraying a chord into whatever happened to be focused.
+
+`cu send-text --name` resolves the same unique showing node, then writes
+through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`).
+A named showing node that does not expose a writeable text interface
+typed-fails (`a11y_text_unavailable`). That path never falls through to
+XTest / `input_inject::type_text`. Explicit `--coords` or no `--name` may
+still inject. Their payload argument is positional, so parse `--` as the
+end of flags — otherwise text (or a chord) that starts with a dash is eaten
+as a flag.
 
 ## Do not drop the AT-SPI bus between resolve and keys
 

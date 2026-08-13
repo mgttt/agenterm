@@ -23,6 +23,17 @@ pub fn perform_node_action(
     crate::selected::accessibility_tree::perform_node_action(window_handle, node_id, action)
 }
 
+/// Write `text` through the host accessibility text interface (Linux:
+/// AT-SPI `EditableText` `SetTextContents` / `InsertText`). Never injects
+/// keystrokes. A node without a writeable text interface fails typed.
+pub fn set_node_text(
+    window_handle: Option<isize>,
+    node_id: &str,
+    text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    crate::selected::accessibility_tree::set_node_text(window_handle, node_id, text)
+}
+
 pub fn drain_bus() {
     crate::selected::accessibility_tree::drain_bus()
 }
