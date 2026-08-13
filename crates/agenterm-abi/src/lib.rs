@@ -28,8 +28,9 @@
 //! are fetched with `agt_a11y_node_string` / `agt_a11y_node_action_name`, and
 //! `agt_a11y_node_perform` invokes click/focus by child-index path,
 //! `agt_a11y_node_set_text` writes through the host text interface (Linux:
-//! AT-SPI EditableText), and `agt_a11y_node_send_keys` delivers Device/key
-//! events (Linux: AT-SPI DeviceEventListener). Backends are
+//! AT-SPI EditableText), `agt_a11y_node_get_text` reads AT-SPI `Text.GetText`
+//! independently of a tree snapshot, and `agt_a11y_node_send_keys` delivers
+//! Device/key events (Linux: AT-SPI DeviceEventListener). Backends are
 //! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
 //! `agenterm-platform`; the C header names mechanisms only.
 //! Milestone 8 ships the clipboard mechanism: `agt_clipboard_set_text`
@@ -80,7 +81,7 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, last_text_write_via,
+    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_text, last_text_write_via,
     perform_node_action, send_node_keys, set_node_text, tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
@@ -256,7 +257,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 5);
+abi_version!(1, 6);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -3272,6 +3273,78 @@ pub extern "C" fn agt_a11y_node_set_text(
                 c"agt_a11y_node_set_text",
                 c"panic",
                 "panic in agt_a11y_node_set_text",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Read UTF-8 accessible text through the host Text interface (Linux:
+/// AT-SPI `Text.GetText`). Independent of a tree snapshot and of the last
+/// `set_text` confirmation. Two-stage buffer protocol identical to
+/// `agt_a11y_last_text_write_via`. Empty text is a successful zero-length
+/// payload. A node that does not expose Text →
+/// `AGT_FAILED{code="a11y_text_unavailable"}`. NULL `node_id` →
+/// `bad_pointer`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_get_text(
+    window_handle: isize,
+    node_id: *const c_char,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(
+        window_handle: isize,
+        node_id: *const c_char,
+        buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(c"agt_a11y_node_get_text", c"bad_pointer", "node_id is null");
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_get_text",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match get_node_text(filter, node_id) {
+            Ok(text) => copy_bytes_two_stage(
+                c"agt_a11y_node_get_text",
+                text.as_bytes(),
+                buf,
+                cap,
+                out_len,
+            ),
+            Err(e) => map_a11y_error(c"agt_a11y_node_get_text", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, buf, cap, out_len)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_get_text",
+                c"panic",
+                "panic in agt_a11y_node_get_text",
             );
             agt_status::AGT_FAILED
         }

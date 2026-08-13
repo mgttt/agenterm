@@ -46,7 +46,7 @@ cargo fmt --all -- --check
 
 三者均位于 `target/<profile>/`（profile 为 `abi-dev` 或 `abi-release`）。
 
-**静态库与动态库导出同一批 52 个 `agt_*` 符号**（`exports.txt` 为准，
+**静态库与动态库导出同一批 `agt_*` 符号**（`exports.txt` 为准，
 `tests/exports_set.rs` 与 `tests/artifacts.rs` 分别闸住符号集与产物存在性）。
 
 **静态链接时 panic 围栏同样要求 `panic = "unwind"`**：静态库仍必须用
@@ -235,10 +235,12 @@ profile 下构建出的库没有任何 `catch_unwind` 保护，**只允许**这�
 - **minor**：**新增导出**时递增（新增机制、纯增量），老消费者不受影响，
   无需重新编译。
 
-当前为 `0x00010003`（major=1, minor=3）：里程碑 2–10 陆续新增了
+当前 minor 以 `src/lib.rs` 的 `ABI_MINOR` 与 `include/agenterm.h` 的
+`AGT_ABI_MINOR` 为准：里程碑 2–10 陆续新增了
 PTY / window / frame / input / screenshot / process / clipboard /
 parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面增长
-（含 `agt_a11y_node_set_text` / `agt_a11y_node_send_keys`）。
+（含 `agt_a11y_node_set_text` / `agt_a11y_node_get_text` /
+`agt_a11y_node_send_keys`）。
 
 `agt_build_id()` 返回 `<crate 版本>+abi.<major>.<minor>`
 （例如 `0.1.16+abi.1.1`），在**编译期**由 `CARGO_PKG_VERSION` 与

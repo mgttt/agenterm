@@ -42,7 +42,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 5
+#define AGT_ABI_MINOR 6
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -425,6 +425,19 @@ agt_status agt_a11y_node_perform(intptr_t window_handle, const char* node_id,
  * AGT_FAILED{code="a11y_text_unavailable"}. Never injects keystrokes. */
 agt_status agt_a11y_node_set_text(intptr_t window_handle, const char* node_id,
                                   const uint8_t* text, size_t len);
+
+/* Read UTF-8 accessible text through the host Text interface
+ * (Linux: AT-SPI Text.GetText). Independent of a tree snapshot and of
+ * the last set_text confirmation. Two-stage buffer protocol:
+ *   cap sufficient   -> AGT_OK, *out_len = bytes written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
+ *                       *out_len = required bytes
+ *   empty text       -> AGT_OK with *out_len = 0 (after a sized buffer)
+ * NULL node_id / NULL out_len (or NULL buf with cap > 0) ->
+ * AGT_FAILED{code="bad_pointer"}. A node with no Text interface ->
+ * AGT_FAILED{code="a11y_text_unavailable"}. */
+agt_status agt_a11y_node_get_text(intptr_t window_handle, const char* node_id,
+                                  uint8_t* buf, size_t cap, size_t* out_len);
 
 /* Deliver a chord through the host accessibility Device/key interface
  * (Linux: AT-SPI DeviceEventListener NotifyEvent). `node_id` is a

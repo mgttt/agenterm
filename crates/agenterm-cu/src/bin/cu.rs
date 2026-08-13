@@ -178,8 +178,39 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             }
         }
         "wait" => {
+            // `--` ends flag parsing so --text-equals may start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
             let timeout_ms = flag_u64(&mut args, "--timeout-ms").unwrap_or(5_000);
-            let condition = if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
+            let text_equals_present = args
+                .iter()
+                .any(|arg| arg == "--text-equals" || arg == "--node-text-equals");
+            let condition = if text_equals_present {
+                let expected = flag_value(&mut args, "--text-equals")
+                    .or_else(|| flag_value(&mut args, "--node-text-equals"))
+                    .filter(|value| value != "--")
+                    .or(literal_text);
+                let Some(expected) = expected else {
+                    return usage_err(
+                        "wait --text-equals / --node-text-equals requires the expected text",
+                    );
+                };
+                let name = flag_value(&mut args, "--name")
+                    .or_else(|| flag_value(&mut args, "--node-name-contains"))
+                    .filter(|value| !value.is_empty());
+                let Some(name) = name else {
+                    return usage_err("wait --text-equals requires --name <pattern>");
+                };
+                WaitCondition::NodeTextEquals {
+                    expected,
+                    name,
+                    role: flag_value(&mut args, "--role")
+                        .or_else(|| flag_value(&mut args, "--node-role")),
+                    window: flag_isize(&mut args, "--window"),
+                }
+            } else if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
                 WaitCondition::WindowCountGte { count }
             } else if let Some(pattern) = flag_value(&mut args, "--window-title-contains") {
                 WaitCondition::WindowTitleContains { pattern }
@@ -193,7 +224,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 }
             } else {
                 return usage_err(
-                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, or --node-name-contains",
+                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, --node-name-contains, or --text-equals",
                 );
             };
             Command::Wait {
@@ -324,9 +355,13 @@ Commands:
                               key interface typed-fails (never XTest). `--`
                               ends flag parsing. e.g. ctrl+c / enter / k
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
-                        | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])
-                              node conditions poll the accessibility tree and fail typed
-                              ("timeout") instead of returning met:false
+                        | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
+                        | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE)
+                              --text-equals / --node-text-equals polls AT-SPI Text.GetText
+                              on the unique showing named node until that independent
+                              text equals TEXT. send-text matched.text is not this
+                              condition. Timeout is typed ("timeout"). Never
+                              screenshot / XTest / --coords. `--` ends flag parsing.
   window-place --action <id> [--window HANDLE]
       ids: center|fullscreen|left-half|right-half|top-half|bottom-half
            upper-left|lower-left|upper-right|lower-right

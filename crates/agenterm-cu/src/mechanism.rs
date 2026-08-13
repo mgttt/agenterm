@@ -561,6 +561,57 @@ pub fn set_node_text(
     Ok(())
 }
 
+/// Independent AT-SPI `Text.GetText` for a resolved child-index path.
+/// Distinguishes a real mechanism failure from the two-stage empty-payload
+/// probe (`buffer_too_small` + required == 0).
+pub fn get_node_text(window: Option<isize>, node_id: &str) -> Result<String, MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeGetText>(b"agt_a11y_node_get_text")?;
+    let mut required = 0usize;
+    let status = unsafe {
+        f(
+            handle,
+            node_c.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            &mut required,
+        )
+    };
+    if status == dynlib::AGT_UNSUPPORTED {
+        return Err(MechanismError::Unsupported {
+            reason: "agt_a11y_node_get_text: mechanism unavailable on this host".to_owned(),
+        });
+    }
+    if status != dynlib::AGT_FAILED {
+        return Err(last_mechanism_error("agt_a11y_node_get_text"));
+    }
+    let probe = last_mechanism_error("agt_a11y_node_get_text");
+    match &probe {
+        MechanismError::Failed { code, .. } if code == "buffer_too_small" => {}
+        other => return Err(other.clone()),
+    }
+    if required == 0 {
+        return Ok(String::new());
+    }
+    let mut buf = vec![0u8; required];
+    let status = unsafe {
+        f(
+            handle,
+            node_c.as_ptr(),
+            buf.as_mut_ptr(),
+            required,
+            &mut required,
+        )
+    };
+    map_status("agt_a11y_node_get_text", status)?;
+    buf.truncate(required);
+    String::from_utf8(buf).map_err(|_| MechanismError::Failed {
+        code: "bad_encoding".into(),
+        message: "node text is not UTF-8".into(),
+    })
+}
+
 pub fn send_node_keys(
     window: Option<isize>,
     node_id: &str,
@@ -799,6 +850,8 @@ type NodeString = unsafe extern "C" fn(usize, i32, *mut u8, usize, *mut usize) -
 type NodeActionName = unsafe extern "C" fn(usize, usize, *mut u8, usize, *mut usize) -> i32;
 type NodePerform = unsafe extern "C" fn(isize, *const std::ffi::c_char, i32) -> i32;
 type NodeSetText = unsafe extern "C" fn(isize, *const std::ffi::c_char, *const u8, usize) -> i32;
+type NodeGetText =
+    unsafe extern "C" fn(isize, *const std::ffi::c_char, *mut u8, usize, *mut usize) -> i32;
 type NodeSendKeys = unsafe extern "C" fn(isize, *const std::ffi::c_char, *const u8, usize) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
 

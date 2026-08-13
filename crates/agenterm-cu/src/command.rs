@@ -128,6 +128,18 @@ pub enum WaitCondition {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
     },
+    /// Polls AT-SPI `Text.GetText` on the unique showing node addressed by
+    /// `--name` until that independent text equals `expected`. Snapshot
+    /// `node.text` and `send-text` `matched.text` are not this condition.
+    /// Timeout is typed. Never screenshot / XTest / `--coords`.
+    NodeTextEquals {
+        expected: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+    },
 }
 
 fn default_clicks() -> u32 {

@@ -204,6 +204,27 @@ pub(crate) fn set_node_text(
     })
 }
 
+/// Independent AT-SPI `Text.GetText` for a resolved child-index path.
+/// Does not walk a snapshot and does not reuse write-confirmation state.
+pub(crate) fn get_node_text(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<String, AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            get_node_text_async(window_handle, node_id),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_text_timeout",
+                "AT-SPI Text.GetText exceeded its deadline",
+            )
+        })?
+    })
+}
+
 /// Deliver a chord through AT-SPI Device/key events (`DeviceEventListener`
 /// `NotifyEvent`). A named showing node with no key interface fails typed —
 /// never XTest / `input_inject::send_keys`.
@@ -341,6 +362,31 @@ async fn perform_node_action_async(
             Ok(())
         }
     }
+}
+
+async fn get_node_text_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<String, AccessibilityTreeError> {
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            format!("node path {node_id} has no AT-SPI text interface"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    read_text_contents(&proxy).await.ok_or_else(|| {
+        AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            format!("node path {node_id} does not expose AT-SPI Text.GetText"),
+        )
+    })
 }
 
 async fn set_node_text_async(
