@@ -51,8 +51,9 @@ impl ActionInbox {
             queue.dropped = queue.dropped.saturating_add(1);
             return false;
         }
+        let should_wake = queue.requests.is_empty();
         queue.requests.push_back(request);
-        true
+        should_wake
     }
 
     pub fn pop_batch(&self, limit: usize) -> (Vec<Request>, bool) {
@@ -261,10 +262,11 @@ mod tests {
     fn action_inbox_is_fifo_bounded_and_budgeted() {
         let inbox = ActionInbox::default();
         for node in 0..ACTION_QUEUE_CAPACITY {
-            assert!(inbox.push(Request {
+            let should_wake = inbox.push(Request {
                 node: node as u32,
                 action: PublishedAction::Focus,
-            }));
+            });
+            assert_eq!(should_wake, node == 0);
         }
         assert!(!inbox.push(Request {
             node: u32::MAX,

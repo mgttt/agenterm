@@ -1210,9 +1210,11 @@ fallback cannot unwind into GUI or FFI dispatch.
 
 Accessibility and automation callbacks are external event producers even when
 they run in-process. Cross into the GUI through a fixed-capacity FIFO, drain a
-fixed per-turn budget, self-wake for backlog, and expose pending/drop counters;
-an unbounded `Mutex<Vec<_>>` turns a bus flood into both memory growth and an
-unbounded event-loop callback.
+fixed per-turn budget, wake producers only on the empty-to-nonempty transition,
+self-wake for backlog, and expose pending/drop counters. An unbounded
+`Mutex<Vec<_>>` turns a bus flood into both memory growth and an unbounded
+event-loop callback; waking for every rejected item preserves a CPU flood even
+after memory is bounded.
 
 ## Saturate native geometry before narrowing coordinates
 

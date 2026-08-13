@@ -60,8 +60,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `addressing=accessibility-tree`. Windows/macOS publishers are not claimed.
 - [x] AT-SPI actions cross into the GUI through a 64-entry FIFO and a 32-action
   per-turn drain budget. Saturation drops only new actions, records a monotonic
-  counter, and self-wakes while backlog remains; `ui-snapshot` exposes pending
-  and dropped counts so an accessibility flood cannot hide unbounded GUI work.
+  counter, coalesces producer wakes on the empty-to-nonempty transition, and
+  self-wakes while backlog remains; `ui-snapshot` exposes pending and dropped
+  counts so an accessibility flood cannot hide unbounded GUI work.
 - [x] the default 15 logical-pixel terminal font corresponds to roughly 11.25 pt
   at 96 DPI and is no smaller than the tree labels.
 - [x] the host chrome defaults to high-contrast black/white/gray and the
