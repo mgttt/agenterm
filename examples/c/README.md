@@ -95,3 +95,67 @@ requires the main thread.
 The final `last_error` line shows the two-stage probe's `buffer_too_small`
 record — that is the documented negotiation signal, not a failure. The probe
 program exits 0.
+
+# Window / frame rendezvous probe
+
+`examples/c/agenterm_window.c` is the C consumer's drive of the **rendezvous
+model** (milestone 31) — the most delicate part of the ABI: the platform is a
+blocking callback loop that the library hosts on a library-private thread, and
+control comes back to the caller through `agt_frame_begin` /
+`agt_frame_commit`. It opens a 320x200 `no_activate` window, renders three
+frames (each `begin` → fill pixels → `commit`, printing
+width/height/stride_px and the wall-clock cost), polls one event with a 0 ms
+timeout, reads `agt_window_metrics`, and closes.
+
+Two rules every C consumer must follow, demonstrated here:
+
+- **stride**: pixels are row-major by `stride_px`, which may be **larger than
+  `width`** — never index as if the buffer were tightly packed (the row base
+  must come from the stride, not from the width);
+- **pointer lifetime**: the frame's `pixels` pointer is valid **only** between
+  a successful `agt_frame_begin` and the matching `agt_frame_commit`; after
+  commit it must never be stored or dereferenced.
+
+Because the platform renders on demand, each frame except the last is
+followed by `agt_window_request_redraw` to schedule the next one.
+
+On a headless host or macOS `agt_window_open` returns `AGT_UNSUPPORTED`
+(permanent — AppKit needs the main thread); the probe prints the reason and
+exits 0 as an explicit skip. Every other failure exits 1. It is compiled,
+linked and run (dynamically) by `crates/agenterm-abi/tests/c_window.rs` on
+every `cargo test`.
+
+Build and run (same prerequisite as above: a built cdylib in `target/abi-dev/`):
+
+```
+cl /nologo /W4 /WX /Iinclude examples/c/agenterm_window.c target/abi-dev/agenterm.dll.lib /Fe:window.exe   (Windows/MSVC)
+copy target\abi-dev\agenterm.dll window.exe
+window.exe
+
+cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_window.c -o window -Ltarget/abi-dev -lagenterm   (Linux)
+LD_LIBRARY_PATH=target/abi-dev ./window
+
+cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_window.c -o window -Ltarget/abi-dev -lagenterm   (macOS)
+DYLD_LIBRARY_PATH=target/abi-dev ./window
+```
+
+Expected output on a host that can open a window:
+
+```
+window opened (320x200 logical, no_activate)
+frame[0] <w>x<h> stride_px=<s> fill=0x00112233 in <t> ms
+frame[1] <w>x<h> stride_px=<s> fill=0x00445566 in <t> ms
+frame[2] <w>x<h> stride_px=<s> fill=0x00778899 in <t> ms
+poll_event: kind=<k> generation=<g>
+metrics: <w>x<h> scale=<s>
+window closed
+```
+
+Or, on a headless host / macOS:
+
+```
+SKIP: agt_window_open unsupported: <code>: <message>
+```
+
+Either way the program exits 0; only a real `AGT_FAILED` on the rendezvous
+path exits 1.
