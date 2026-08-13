@@ -13,12 +13,38 @@ marked `[x]` or `[~]` without the evidence its owning child module names.
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
+## Subtree map
+
+`agenterm-cu` is organized as four sibling branches under this root. Platform
+accessibility backends are an explicit branch under targets/transports — not a
+footnote inside a table.
+
+```text
+agenterm-cu (28)
+├── command surface (29)
+├── targets / transports (30)
+│   ├── current / ssh / rdp / vnc
+│   └── platform a11y backends (agenterm-platform)
+│       ├── Windows: native API + UIA
+│       ├── macOS: AX (NSAccessibility)
+│       └── Linux: AT-SPI2
+└── authorization, safety and audit (31)
+```
+
+Structured `tree` observation and `click` / `focus` by node identity are
+provided by these native accessibility stacks (see
+[30 § Platform accessibility backends](PRD_02_30_cu_targets_transports.md#platform-accessibility-backends)).
+Screenshot and coordinate actuation are **degraded fallbacks** with typed
+markers in the command result; they are never silent substitutes for a missing
+control tree. `cu` consumes `agenterm-platform`; it does not open raw OS APIs or
+fork a fifth screenshot stack.
+
 ## Subtree index
 
 | # | 子模块 | 一句话 |
 |---|--------|--------|
 | 29 | [Command surface and layering](PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树与确定性等待 |
-| 30 | [Targets and transports](PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport 抽象、平台后端 |
+| 30 | [Targets and transports](PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport 抽象、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2） |
 | 31 | [Authorization, safety and audit](PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义与证据 |
 
 ## Product outcome
@@ -110,8 +136,13 @@ independent implementation.
 
 ## Promotion gates
 
-- [ ] this subtree stays entirely `[ ]` until the `current` tier proves the
-  command set end to end on one platform with public black-box evidence.
+- [ ] this subtree stays entirely `[ ]` at the root until the `current` tier
+  proves the command set end to end on one platform with public black-box
+  evidence. Individual child leaves may record `[~]` / `[x]` when their own
+  evidence arrives; a partial platform slice does not promote the subtree root.
+- [~] Linux `current` has first black-box evidence for AT-SPI2 `tree` and
+  structured `click` / `focus` by node path (`scripts/cu-linux-smoke.sh` against
+  the real `cu` binary). Windows UIA and macOS AX are not claimed in this slice.
 - [ ] no version is assigned. Roadmap ownership is
   [18 Focused product roadmap](PRD_02_18_roadmap.md); presence in the product
   tree does not promise a release.

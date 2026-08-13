@@ -271,6 +271,7 @@ window = [
 ]
 input = ["window"]
 window-enum = [
+    "dep:x11rb",
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_UI_WindowsAndMessaging",
@@ -283,10 +284,18 @@ window-op = [
     "windows-sys/Win32_UI_WindowsAndMessaging",
 ]
 input-inject = [
+    "dep:x11rb",
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_UI_Input_KeyboardAndMouse",
     "windows-sys/Win32_UI_WindowsAndMessaging",
+]
+a11y-tree = [
+    "dep:atspi",
+    "dep:tokio",
+    "dep:zbus",
+    "dep:x11rb",
+    "dep:libc",
 ]
 ime = [
     "input",
@@ -358,6 +367,9 @@ softbuffer = { version = "0.4", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13.2", optional = true, default-features = false, features = ["xtest"] }
+atspi = { version = "0.30", optional = true, default-features = false, features = ["connection", "proxies", "tokio", "zbus"] }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "macros", "time"] }
+zbus = { version = "5", optional = true, default-features = false, features = ["tokio"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.2.2", optional = true, features = ["NSApplication", "NSEvent", "NSResponder", "NSView", "NSWindow"] }

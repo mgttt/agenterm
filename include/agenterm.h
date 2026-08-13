@@ -1,0 +1,257 @@
+/*
+ * agenterm.h — C header for libagenterm (crates/agenterm-abi).
+ *
+ * This is the *mechanism* boundary between embedding consumers and the OS.
+ * It deliberately contains no product concepts. Every symbol is prefixed
+ * `agt_`. Milestone 1 shipped version / error / capability exports; milestone 2
+ * adds the PTY mechanism. Window / screenshot mechanisms arrive later.
+ */
+#ifndef AGENTERM_AGENT_ABI_H
+#define AGENTERM_AGENT_ABI_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* --- version & build ------------------------------------------------ */
+
+/* (major << 16) | minor. Consumers must reject mismatched major. */
+uint32_t    agt_abi_version(void);
+/* Human-readable build identity; NUL-terminated, static, permanently valid. */
+const char* agt_build_id(void);
+
+/* --- status & error ------------------------------------------------- */
+
+typedef enum {
+    AGT_OK = 0,
+    AGT_UNSUPPORTED = 1, /* capability/mechanism absent on this build */
+    AGT_FAILED = 2       /* the call itself failed */
+} agt_status;
+
+/* AGT_UNSUPPORTED and AGT_FAILED are intentionally distinct and never merged:
+ * callers must be able to tell "platform does not have it" from "it did not
+ * work this time". */
+typedef struct {
+    const char* operation; /* static, permanently valid, NUL-terminated */
+    const char* code;      /* static, permanently valid, NUL-terminated */
+    const char* message;   /* thread-local, valid until next call on this thread */
+} agt_error;
+
+/* Fill *out with the last error recorded on this thread, or a "no error"
+ * record. Returns AGT_OK on success. */
+agt_status agt_last_error(agt_error* out);
+
+/* --- capability negotiation ----------------------------------------- */
+
+typedef enum {
+    AGT_CAP_PTY = 1,
+    AGT_CAP_PROCESS_SPAWN,
+    AGT_CAP_PROCESS_OBSERVE,
+    AGT_CAP_WINDOW_HOST,
+    AGT_CAP_WINDOW_ENUMERATE,
+    AGT_CAP_WINDOW_OP,
+    AGT_CAP_SCREENSHOT,
+    AGT_CAP_CLIPBOARD,
+    AGT_CAP_IME,
+    AGT_CAP_INPUT_INJECT,
+    AGT_CAP_IPC,
+    AGT_CAP_FONT_RASTER,
+    AGT_CAP_FILESYSTEM_PUBLISH,
+    AGT_CAP_SHARED_MEMORY,
+    AGT_CAP_PARENT_CONSOLE
+} agt_capability;
+
+/* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
+ * milestone 3a, AGT_CAP_PTY and AGT_CAP_WINDOW_HOST both report AGT_OK. */
+agt_status agt_capability_query(agt_capability cap);
+
+/* --- pty ------------------------------------------------------------ */
+
+/* Opaque, library-owned PTY handle. Cross-thread safe: any thread may call
+ * the agt_pty_* functions on the same handle, and close may run while another
+ * thread is blocked in read (the blocked read is unblocked). The handle is
+ * released by agt_pty_close, which must be called exactly once. */
+typedef struct agt_pty* agt_pty_t;
+
+typedef struct {
+    const char* program;        /* required, NUL-terminated, UTF-8 */
+    /* argv[0] is the program name by POSIX convention and is not re-passed
+     * as an argument; arguments are argv[1..argc]. NULL/0 = no arguments. */
+    const char* const* argv;
+    size_t argc;
+    const char* cwd;            /* NULL = inherit the caller's directory */
+    /* "K=V" entries; NULL or envc == 0 = inherit the parent environment. */
+    const char* const* envp;
+    size_t envc;
+    uint16_t cols, rows;        /* terminal size, each >= 1 */
+} agt_pty_spawn;
+
+/* Spawn program in a new PTY; *out receives an opaque library-owned handle.
+ * On failure returns AGT_FAILED (never AGT_UNSUPPORTED); the reason is
+ * available via agt_last_error. */
+agt_status agt_pty_open  (const agt_pty_spawn*, agt_pty_t* out);
+
+/* Block until data is available or the PTY is closed. Caller-allocated buffer:
+ * the library never takes memory ownership. EOF is AGT_OK with *out_len == 0.
+ * cap == 0 fails with code "buffer_too_small" and *out_len = required length. */
+agt_status agt_pty_read  (agt_pty_t, uint8_t* buf, size_t cap, size_t* out_len);
+
+/* Write len bytes to the PTY master; on success *written == len. */
+agt_status agt_pty_write (agt_pty_t, const uint8_t*, size_t, size_t* written);
+
+/* Resize the PTY to cols x rows (each >= 1). */
+agt_status agt_pty_resize(agt_pty_t, uint16_t cols, uint16_t rows);
+
+/* Wait up to timeout_ms for the process to exit; on exit *exit_code is filled
+ * and AGT_OK is returned. On timeout returns AGT_FAILED with code "timeout"
+ * (never AGT_UNSUPPORTED). The underlying blocking wait runs on a
+ * library-private thread. */
+agt_status agt_pty_wait  (agt_pty_t, uint32_t timeout_ms, int32_t* exit_code);
+
+/* Release the handle; must be called exactly once. Unblocks any thread
+ * currently blocked in agt_pty_read on the same handle. */
+void       agt_pty_close (agt_pty_t);
+
+/* --- window & frame (milestones 3a / 3b) ------------------------------ */
+
+typedef struct agt_window* agt_window_t;
+
+/* Window events. Milestone 3a translated close / geometry / focus / render;
+ * milestone 3b adds KEY / POINTER / WHEEL / IME. Platform events without a
+ * translation are dropped by the library (never an error). */
+typedef enum {
+    AGT_EV_NONE = 0,
+    AGT_EV_CLOSE_REQUEST = 1, /* the native window requested close */
+    AGT_EV_GEOMETRY      = 2, /* width/height/scale valid */
+    AGT_EV_FOCUS         = 3, /* focused valid */
+    AGT_EV_RENDER_DUE    = 4, /* render() has stopped at the rendezvous */
+    AGT_EV_KEY           = 5, /* keyboard event */
+    AGT_EV_POINTER       = 6, /* pointer move / button / leave / capture */
+    AGT_EV_WHEEL         = 7, /* mouse wheel */
+    AGT_EV_IME           = 8  /* IME enabled / preedit / commit / disabled */
+} agt_event_kind;
+
+/* `modifiers` bitmask (valid for KEY / POINTER; 0 when not applicable). */
+#define AGT_MOD_CONTROL 1u
+#define AGT_MOD_SHIFT   2u
+#define AGT_MOD_ALT     4u
+#define AGT_MOD_META    8u
+
+typedef struct {
+    uint32_t kind;
+    uint64_t generation;
+    uint32_t width, height; /* only valid for AGT_EV_GEOMETRY */
+    double   scale;         /* only valid for AGT_EV_GEOMETRY */
+    int32_t  focused;       /* only valid for AGT_EV_FOCUS */
+
+    uint32_t modifiers;     /* AGT_MOD_* bitmask; KEY / POINTER */
+
+    /* KEY (AGT_EV_KEY) */
+    uint8_t  key_state;          /* 0=released, 1=pressed */
+    uint8_t  key_repeat;         /* 0/1 */
+    uint8_t  key_named;          /* NamedKey code table; 0=unnamed, 255=unknown */
+    uint8_t  key_physical;       /* 0=other,1=letter,2=digit,3=backspace,
+                                    4=enter,5=space,6=tab */
+    uint32_t key_physical_value; /* letter codepoint / digit value / 0 */
+    uint8_t  text[16];           /* NormalizedKeyEvent::text, UTF-8 */
+    uint8_t  text_len;           /* bytes used in text[16] */
+    uint8_t  text_truncated;     /* 1 when text was truncated to fit */
+
+    /* POINTER (AGT_EV_POINTER) and WHEEL position */
+    double   pointer_x, pointer_y; /* logical position; valid when has_position */
+    uint8_t  pointer_button;       /* 0=none/move,1=left,2=right,3=middle,4=other */
+    uint8_t  pointer_state;        /* 0=released,1=pressed,2=moved,3=left,4=capture_lost */
+    uint8_t  has_position;         /* 0/1 */
+
+    /* WHEEL (AGT_EV_WHEEL) */
+    double   wheel_x, wheel_y; /* scroll delta */
+    uint8_t  wheel_unit;       /* 0=lines, 1=logical_pixels */
+
+    /* IME (AGT_EV_IME) */
+    uint8_t  ime_kind;        /* 0=enabled,1=preedit,2=commit,3=disabled */
+    uint8_t  has_ime_cursor;  /* 0/1 */
+    size_t   ime_cursor_begin; /* valid when has_ime_cursor */
+    size_t   ime_cursor_end;
+    size_t   ime_text_len;    /* text bytes; fetch via agt_window_event_text */
+} agt_event;
+
+typedef struct {
+    const char* title;       /* required, NUL-terminated, UTF-8 */
+    uint32_t width, height;  /* initial logical size, each >= 1 */
+    int32_t no_activate;     /* non-zero: do not take foreground focus */
+    int32_t ime_allowed;     /* non-zero: allow IME input */
+} agt_window_spec;
+
+/* Frame descriptor filled by agt_frame_begin. The `pixels` pointer is valid
+ * ONLY between a successful agt_frame_begin and the matching
+ * agt_frame_commit; it must never be stored or dereferenced past that
+ * window. XRGB buffers are tightly packed (stride_px == width). */
+typedef struct {
+    uint32_t* pixels;
+    uint32_t width, height;
+    uint32_t stride_px;
+} agt_frame_desc;
+
+/* Open a native pixel window. The window event loop runs on a
+ * library-private thread; events and frames rendezvous back through
+ * agt_window_poll_event / agt_frame_begin. The returned handle belongs to
+ * the calling thread (the loop thread never touches it). On a host without
+ * the pixel-window mechanism this returns AGT_UNSUPPORTED; any other
+ * failure is AGT_FAILED. */
+agt_status agt_window_open           (const agt_window_spec*, agt_window_t* out);
+
+/* Pop the next event into *out, waiting up to timeout_ms. Timeout returns
+ * AGT_FAILED with code "timeout"; a closed window with an empty queue
+ * returns AGT_FAILED with code "closed". */
+agt_status agt_window_poll_event     (agt_window_t, agt_event* out, uint32_t timeout_ms);
+
+/* Fetch the text carried by the most recently polled event (IME
+ * preedit/commit; never truncated into the POD record). Two-stage: call with
+ * cap == 0 to learn the required byte count (*out_len), then allocate and
+ * call again. With no pending text returns AGT_OK and *out_len == 0. On
+ * insufficient capacity returns AGT_FAILED with code "buffer_too_small" and
+ * writes the required byte count into *out_len. */
+agt_status agt_window_event_text     (agt_window_t, uint8_t* buf, size_t cap, size_t* out_len);
+
+/* Ask the loop thread to schedule a redraw. The next render() publishes a
+ * fresh frame for agt_frame_begin. */
+agt_status agt_window_request_redraw (agt_window_t);
+
+/* Rendezvous half of the frame protocol: wait (up to timeout_ms) for the
+ * loop thread's render() to publish a frame, then fill *out. Timeout
+ * returns AGT_FAILED with code "timeout" (never AGT_UNSUPPORTED); calling
+ * again while a previous frame is un-committed returns AGT_FAILED with code
+ * "frame_pending". */
+agt_status agt_frame_begin           (agt_window_t, agt_frame_desc* out, uint32_t timeout_ms);
+
+/* Release the pending frame exactly once per frame: wake the loop thread so
+ * it presents the pixels the caller wrote. Without a pending frame returns
+ * AGT_FAILED with code "no_frame". */
+agt_status agt_frame_commit          (agt_window_t);
+
+/* Last known window geometry (physical pixels + scale factor). Before the
+ * first geometry event / render this returns AGT_FAILED with code
+ * "no_geometry". */
+agt_status agt_window_metrics        (agt_window_t, uint32_t* w, uint32_t* h, double* scale);
+
+/* Close the window and release the handle; must be called exactly once.
+ * Wakes any caller blocked in agt_frame_begin / agt_window_poll_event and
+ * lets the loop thread escape its rendezvous wait even if a taken frame was
+ * never committed, so close never hangs. */
+void       agt_window_close         (agt_window_t);
+
+/* --- known platform limitation -------------------------------------- */
+
+/* The library-private window-loop thread model is validated on Windows only
+ * (the message pump belongs to the creating thread). macOS requires the
+ * window/event loop on the main thread; a main-thread host for macOS is left
+ * for a later milestone. */
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif /* AGENTERM_AGENT_ABI_H */

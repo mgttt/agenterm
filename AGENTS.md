@@ -624,7 +624,31 @@ invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery us
 本机 Reasonix 可用于派单开工与经验检索(与 agenterm 自身 tooling 无关,供跨 agent 协作):
 
 - **CLI**: `E:\app\Reasonix-windows-amd64\reasonix-cli.exe`(v1.24.1;用户 PATH 已含该目录,`reasonix` 命令可用)。
-- **派单**: `reasonix run --auto --dir "<desktop 项目>" -p "<任务>" --output-format json`(headless 一次性会话;**必须带 `--dir` 指向 desktop 已打开的项目,否则会话不落盘、桌面看不到**;`--auto` 必需,否则 `[permissions] mode=ask` 下卡工具审批)。快捷入口:`D:\skillseasonix-dispatch\dispatch.cmd "<任务>" [项目路径] [模型]`(自动落盘会话 + 写回执到 `D:\skillseasonix-dispatcheceipts\`)。
+- **派单**: `reasonix run --permission-mode bypassPermissions --dir "<desktop 项目>" -p "<任务>" --output-format json`(headless 一次性会话;**必须带 `--dir` 指向 desktop 已打开的项目,否则会话不落盘、桌面看不到**)。
+  **`--auto` 不足以让它写文件**(2026-08-13 实测):`--auto` = `--permission-mode auto`,
+  配 `--preset delivery` 时会话会落到 `constraint=no-mutation`,`read_file` 可用但
+  `write_file`/`edit_file`/`bash` 全被拒,报
+  `blocked: the current task policy forbids workspace modifications (user constraint or plan mode)`。
+  症状是"洋洋洒洒写完补丁却零文件落盘",容易误判成执行方能力问题。
+  **根因是长 brief 被内联进 `-p`**(2026-08-13 用排除法定位):
+  同一份 brief 内联派单 4/4 全部锁死,而**同一份 brief 改成按文件引用派单立刻正常落盘**。
+  已排除的错误猜想:权限 flag(全程 `bypassPermissions`)、
+  `--preset delivery` 的 planner(`--ablate planner` 照样锁)、
+  "会话随机"(同一 brief 4/4 必现)、环境/时段(同期一条短 prompt 探针写入成功)、
+  某个具体措辞(改写后照样锁)。
+  **正确做法:brief 落到 `.reasonix-dispatch/*.brief.md`,`-p` 只传一句"读 <路径> 并按其执行"**,
+  让执行方自己去读。短任务直接内联无妨。
+  判断依据:轨迹里出现 `constraint=no-mutation` 即中招(它在第一个 reasoning token 就在了,
+  说明是建会话时按 prompt 定的,不是执行中变的)。
+  **派单后立刻数轨迹里 `blocked: ` 的条数并分辨类型**:
+  - `delivery-first mode requires acceptance criteria...` —— **良性**,执行方写完
+    `todo_write` 验收标准即自动放行。
+  - `the current task policy forbids workspace modifications` —— **致命**,该会话再也写不了,
+    还会连带 `skipped because an earlier modification in this tool batch failed`。
+    立刻 kill 重派(新会话通常正常),不要等它自愈——它只会反复试探 `use_capability` 烧完预算。
+  被 block 但已在回答里产出完整补丁的会话,可 `--resume "<session.jsonl>"` 复用,不必重跑。
+  另:PATH 里是 `reasonix.cmd` shim,**Git Bash 解析不了**(`command not found`),
+  请从 PowerShell 用全路径调用;`cmd > out; echo EXIT=$?` 会把失败掩盖成成功。快捷入口:`D:\skillseasonix-dispatch\dispatch.cmd "<任务>" [项目路径] [模型]`(自动落盘会话 + 写回执到 `D:\skillseasonix-dispatcheceipts\`)。
 - **常驻**: `reasonix serve --addr 127.0.0.1:8787`(默认 auth none,仅回环;`--auth token` 可收紧)。
 
 本地技能库 `D:\skills\`(reasonix 已注册为 skill 根,`[skills].paths = ["D:/skills"]`):

@@ -66,6 +66,7 @@ pub enum Capability {
     WindowEnumerate,
     WindowOp,
     InputInject,
+    AccessibilityTree,
     Input,
     Ime,
     Activation,
@@ -136,6 +137,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::WindowEnumerate => (cfg!(feature = "window-enum"), true),
         Capability::WindowOp => (cfg!(feature = "window-op"), true),
         Capability::InputInject => (cfg!(feature = "input-inject"), true),
+        Capability::AccessibilityTree => (cfg!(feature = "a11y-tree"), true),
         Capability::Input => (cfg!(feature = "input"), true),
         Capability::Ime => (cfg!(feature = "ime"), true),
         Capability::Activation => (cfg!(feature = "activation"), true),
@@ -248,6 +250,9 @@ pub mod ipc;
 
 #[cfg(feature = "input")]
 pub mod input;
+
+#[cfg(feature = "a11y-tree")]
+pub mod accessibility_tree;
 
 #[cfg(feature = "window-enum")]
 pub mod window_enumerate;

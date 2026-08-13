@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgenTerm WebExt — Options</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <h1>AgenTerm WebExt</h1>
+    <p class="subtitle">AgenTerm browser extension — usage monitoring is the first module.</p>
+
+    <section>
+      <h2>Alerts</h2>
+      <label>
+        Email destination
+        <input type="email" id="emailDestination" />
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="notificationsEnabled" />
+        Chrome notifications (recommended)
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="mailtoEnabled" />
+        Open mailto draft on alert (manual send)
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="webhookEnabled" />
+        Webhook / email API URL (Mailgun, Resend, custom)
+      </label>
+      <label>
+        Webhook URL
+        <input type="url" id="webhookUrl" placeholder="https://api.resend.com/emails or your relay" />
+      </label>
+      <p class="hint">
+        Gmail REST from the extension is unreliable. Use notifications + optional webhook,
+        or send via host MCP (Grok Bot / Gmail) later.
+      </p>
+    </section>
+
+    <section>
+      <h2>Polling</h2>
+      <label>
+        Poll interval (minutes)
+        <input type="number" id="pollIntervalMinutes" min="5" max="1440" />
+      </label>
+    </section>
+
+    <section>
+      <h2>Providers</h2>
+      <p class="hint">Default threshold: alert when remaining usage ≤ this % (or limit-reached banner).</p>
+      <div id="providerList"></div>
+    </section>
+
+    <div class="actions">
+      <button type="button" id="saveBtn">Save</button>
+      <button type="button" id="pollNowBtn">Poll now</button>
+      <span id="status"></span>
+    </div>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

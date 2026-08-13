@@ -344,3 +344,13 @@ not a byte-exact protocol contract. Encode the bounded request explicitly with
 `[Text.Encoding]::UTF8.GetBytes(...)` and write those bytes directly to the
 stream. Keep the shell-out migration marker and replace it with Rh
 `TcpStream` once native emission exists.
+
+## Wait for product readiness, not transport readiness
+
+A successful CLI response proves only that the endpoint is accepting requests.
+Asynchronous product state in that response may still be incomplete, such as an
+initial tab whose PTY process ID is zero. GUI journeys must poll the public
+atomic snapshot until the required stable ID and readiness fields agree, retain
+an explicit deadline and early-owner-exit failure, and only then index the
+matching object. Never index with a sentinel such as `-1` before the readiness
+condition has been established.

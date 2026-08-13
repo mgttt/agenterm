@@ -620,6 +620,7 @@ Rh 负责 Build/CI，Rust/Base 负责权威状态与原生机制。
 | 2026-08-10 | QJS App ABI 采用最小 surface，不复制 Rh 全 catalog；Gate 失败不自动回退到目标相关的 Rh AOT App。 |
 | 2026-08-12 | **v0.1.17 归档**，其未完成叶整树 upsert 至本文件 §11；本文件成为唯一在制版本计划。原"待 v0.1.17 收口再开工"的外部前置改为本版内部依赖（§0.3），轨 A 仍受其约束，轨 B/C/D 不受阻。 |
 | 2026-08-12 | `agenterm-con` 从"尾账"升为**独立产品轨**（§12），有自己的 GC1–GC3 Gate。其绿状态与工作台互不替代；PE 字节归 PRD 27/24，结构债归 ARCHITECTURE §4 C1–C3。 |
+| 2026-08-13 | **轨 E 规格修订（§14.3.5）**：初版假设 platform 提供拉取式事件与可跨调用存活的帧指针，实测不成立——`window_host` 只暴露阻塞回调循环 `run_pixel_window(Box<dyn PixelWindowApplication>)`，且 `render()` 的 `XrgbPixelFrame<'_>` 借用被回调作用域锁死。在"不改 platform"约束下按初版规格实现**不可能**；两次外部 agent 派单各烧约 5,000 行轨迹零产出，根因是任务不可完成，非执行方能力问题。**采纳方案 (a)**：库内私有线程跑循环 + begin/commit 会合把控制权交回调用方，零拷贝得以保留。**暂不采纳方案 (b)**（platform 长出 pump/step API）——那是机制层新契约，归 `PRD_02_20`，不该由薄导出壳私自决定；留作 Phase 0 后议题。 |
 | 2026-08-12 | **决策项 P4 拍板**：`agenterm-cu` 立项，归 PRD 28–31 专属子树，首发 `current` 档，工作名 `agenterm-remote.exe` 作废。本版只做设计与 `current` 原型（§13），任何 tier 在授权/审计通过前不得标 shipped，含 `current` 档在内不豁免。 |
 
 ---
@@ -987,8 +988,10 @@ typedef struct agt_frame*   agt_frame_t;
 
 不透明，库拥有，显式 `_close`。**亲和性必须写进头文件**：
 
-- `agt_window_t` / `agt_frame_t` / 字形 raster —— **创建线程专属**
-  （Win32 消息泵与 `CreateCompatibleDC(NULL)` 的 HDC/HFONT 线程所有权）
+- `agt_window_t` / `agt_frame_t` —— **创建线程专属**（即调用 `agt_window_open`
+  的那个线程）。注意这**不是**平台事件循环线程：循环由库自己起的私有线程承载，
+  见 §3.5 的控制反转会合。
+- 字形 raster —— 创建线程专属（`CreateCompatibleDC(NULL)` 的 HDC/HFONT 规则）
 - `agt_pty_t` / `agt_process_t` —— 跨线程安全
 
 #### 3.4 缓冲区：调用方分配，两段式
@@ -1000,40 +1003,77 @@ agt_status agt_pty_read(agt_pty_t, uint8_t* buf, size_t cap, size_t* out_len);
 
 库**从不**把内存所有权交给调用方。彻底消灭"谁 free"。
 
-#### 3.5 事件：轮询，不回调
+#### 3.5 事件与帧：控制反转会合（修订 2026-08-13）
+
+> **为什么改**：初版规格假设 platform 提供拉取式事件与可跨调用存活的帧指针。
+> 实测不成立——`agenterm-platform::window_host` 只暴露
+> `run_pixel_window(options, Box<dyn PixelWindowApplication>)`，是**阻塞式回调
+> 循环**，且 `PixelWindowApplication::render(&mut self, _, frame: &mut
+> XrgbPixelFrame<'_>)` 的帧借用被 `render()` 作用域锁死。按初版规格实现，在不改
+> platform 的前提下**不可能**。两次外部 agent 派单各烧掉约 5,000 行轨迹零产出，
+> 根因就是这条不可完成的要求，不是执行方能力问题。
+
+**采纳方案 (a)：库内起私有线程跑事件循环，用会合把控制权交回调用方。**
+不改 `agenterm-platform`（方案 (b) 让 platform 长出 pump/step API 更干净，但那是
+机制层新契约，归 `PRD_02_20`，不该由"薄导出壳"私自决定；留作 Phase 0 后议题）。
+
+模型：
+
+```text
+调用方线程                          库私有循环线程
+-----------                        ----------------
+agt_window_open  ──起线程──▶        run_pixel_window(...)
+                                     ├─ event()  → 事件入有界队列
+agt_window_poll_event ◀──队列──┘     └─ render() → 停在此处等会合
+agt_frame_begin  ──会合──▶            （借用移交，回调保持不返回）
+  写 pixels（静态 ui-core）
+agt_frame_commit ──放行──▶            回调带 directive 返回
+```
 
 ```c
 typedef enum { AGT_EV_NONE=0, AGT_EV_GEOMETRY, AGT_EV_POINTER, AGT_EV_WHEEL,
                AGT_EV_KEY, AGT_EV_IME, AGT_EV_FOCUS, AGT_EV_EXPOSE,
-               AGT_EV_CLOSE_REQUEST } agt_event_kind;
+               AGT_EV_RENDER_DUE, AGT_EV_CLOSE_REQUEST } agt_event_kind;
 
 typedef struct { uint32_t kind; uint64_t generation; union { /* POD */ } data; } agt_event;
 
+/* 事件来自库内有界队列，由循环线程的 event() 回调填入。队列满按既有有界策略
+   fail-closed，不得无界增长。 */
 agt_status agt_window_poll_event(agt_window_t, agt_event* out, uint32_t timeout_ms);
-```
 
-回调穿 ABI 会把**重入**和 **unwind** 叠加，还把重入策略泄漏给调用方。
-轮询把重入完全关在库内。
-
-#### 3.6 帧：借出裸指针，保住零拷贝
-
-```c
 typedef struct {
-  uint32_t* pixels;  /* 借出，仅在 frame 存活期有效 */
+  uint32_t* pixels;  /* 借出，仅在 begin↔commit 之间有效 */
   uint32_t  width, height, stride_px;
   uint64_t  generation;
   uint32_t  retention;   /* retained | transient */
 } agt_frame_info;
 
-agt_status agt_frame_begin  (agt_window_t, agt_frame_t* out, agt_frame_info*);
+/* 阻塞直到循环线程进入 render()；超时返回 FAILED + code="render_not_due"。
+   收到 AGT_EV_RENDER_DUE 后调用可立即成功。 */
+agt_status agt_frame_begin  (agt_window_t, agt_frame_t* out, agt_frame_info*,
+                             uint32_t timeout_ms);
 agt_status agt_frame_commit (agt_frame_t, const agt_pixel_rect* damage, size_t n);
 agt_status agt_frame_abandon(agt_frame_t);
 ```
 
-`n==0` → Full，`n>0` → bounded partial，`abandon` → None，与现有合同一一对应。
-调用方用**静态链接的 ui-core** 直接写 `pixels`。
-**不变量**：`commit`/`abandon` 后指针立即失效；debug 构建须毒化并在二次使用时
-fail-closed，不靠文档约定。
+`n==0` → Full，`n>0` → bounded partial，`abandon` → None，与现有 platform 合同
+一一对应。调用方用**静态链接的 ui-core** 直接写 `pixels`——零拷贝因此保住。
+
+**会合不变量（全部可测）**：
+
+- `pixels` 仅在 `begin` 成功返回后至 `commit`/`abandon` 之间有效；之后立即失效，
+  debug 构建须毒化并在二次使用时 fail-closed。
+- 同一 `agt_window_t` 同时只允许一个未 commit 的帧；重入 `begin` 返回
+  `FAILED + code="frame_in_flight"`。
+- 调用方在 `begin` 与 `commit` 之间**不得**调用任何其他 `agt_window_*`——循环线程
+  正停在回调里，会死锁；库须检出并返回 `FAILED + code="reentrant_during_frame"`。
+- 调用方未 commit 就 `agt_window_close`：库必须 `abandon` 该帧、放行回调、有界回收
+  线程，不得让循环线程永久阻塞。
+- 回调仍在库内 `catch_unwind`；panic 不得穿越 FFI，也不得让会合方永久等待。
+
+**代价要记账**：多一条线程 + 一个有界事件队列 + 每帧一次会合往返。
+Phase 0 判据里的渲染四项（frames / full-candidate / dirty-pixel / native-present）
+就是用来量这个代价的；`host_copy_frames` 必须仍为 0，否则零拷贝已被吃掉。
 
 #### 3.7 PTY（其余模块同构）
 
@@ -1053,6 +1093,19 @@ void       agt_pty_close (agt_pty_t);
 
 每个导出函数 `catch_unwind` 兜底，转 `AGT_FAILED{code="panic"}`。
 库必须以 `panic = "unwind"` 构建——与 con 的 `con-*` profile 同源理由。
+
+**实现约束（2026-08-13 里程碑 1 实测）**：Cargo 不允许在 package 级 profile 覆盖
+`panic`，故本库沿用 con 的做法新增 `abi-dev` / `abi-release` 两条 unwind profile。
+后果必须写进头文件与门禁：**默认 `cargo build/test -p agenterm-abi` 继承 abort
+profile，此时 `catch_unwind` 不生效**；panic 围栏只在 `--profile abi-dev|abi-release`
+下成立。交付与门禁一律用后者，不得拿默认 profile 的绿色冒充围栏已验证——con 早期
+正是在这里破坏过合同（见 [27](../prd/PRD_02_27_con_delivery.md)）。
+
+**边界闸补强（同日实测）**：里程碑 1 的导出测试解析 `src/lib.rs` 源码文本，
+不是查产物，达不到 §14.5 第 1 条"实际导出符号集 == 清单"的要求。独立复验用
+`llvm-nm --defined-only target/<profile>/agenterm_abi.dll.lib` 并过滤 MSVC 的
+`__imp_` 导入 thunk，结果与 `exports.txt` 一致。**该产物级比对必须固化进测试**，
+否则边界闸对 `#[export_name]`、依赖再导出等旁路是瞎的。
 
 ---
 

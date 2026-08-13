@@ -58,6 +58,8 @@ pub mod storage;
 pub mod terminal_input;
 #[cfg(feature = "screenshot")]
 pub mod ui_screenshot;
+#[cfg(feature = "a11y-tree")]
+pub mod accessibility_tree;
 #[cfg(feature = "webview")]
 pub mod webview;
 #[cfg(feature = "window-enum")]
