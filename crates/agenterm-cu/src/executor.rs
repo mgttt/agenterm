@@ -58,13 +58,7 @@ impl Executor {
 
     fn audit_before(&self, command: &Command) -> Result<(), CuError> {
         let audit = AuditLog::open()?;
-        audit.record_actuation(
-            command.target(),
-            command,
-            Grant::Actuate,
-            "attempt",
-            None,
-        )
+        audit.record_actuation(command.target(), command, Grant::Actuate, "attempt", None)
     }
 
     fn audit_after(&self, command: &Command, reply: &CuReply) -> Result<(), CuError> {
@@ -76,10 +70,9 @@ impl Executor {
             Grant::Actuate,
             outcome,
             reply.data.clone().or_else(|| {
-                reply
-                    .error
-                    .as_ref()
-                    .map(|error| serde_json::json!({ "code": error.code, "message": error.message }))
+                reply.error.as_ref().map(
+                    |error| serde_json::json!({ "code": error.code, "message": error.message }),
+                )
             }),
         )
     }
@@ -110,7 +103,14 @@ impl Executor {
                 clicks,
                 button,
                 ..
-            } => click(*window, node.as_deref(), *coords, *degraded, *clicks, *button),
+            } => click(
+                *window,
+                node.as_deref(),
+                *coords,
+                *degraded,
+                *clicks,
+                *button,
+            ),
             Command::Focus { window, node, .. } => focus(*window, node),
             Command::SendText { text, .. } => {
                 agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
@@ -167,7 +167,9 @@ fn screenshot(path: &str, window: Option<isize>) -> Result<serde_json::Value, Cu
     }
     let raw = window.unwrap_or(0) as isize;
     let handle = unsafe { agenterm_platform::screenshot::ScreenshotWindowHandle::from_raw(raw) }
-        .ok_or_else(|| CuError::new("invalid_input", "screenshot window handle must be non-zero"))?;
+        .ok_or_else(|| {
+            CuError::new("invalid_input", "screenshot window handle must be non-zero")
+        })?;
     let result = agenterm_platform::screenshot::capture_native_window_png(
         handle,
         std::path::Path::new(path),
@@ -262,8 +264,8 @@ fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value,
     let mut last_observation = serde_json::json!({ "windows": [] });
 
     while Instant::now() < deadline {
-        let windows = agenterm_platform::window_enumerate::enumerate_top_level()
-            .map_err(map_enum_err)?;
+        let windows =
+            agenterm_platform::window_enumerate::enumerate_top_level().map_err(map_enum_err)?;
         last_observation = serde_json::json!({ "window_count": windows.len(), "windows": windows });
         if condition_met(condition, &windows) {
             return Ok(serde_json::json!({
@@ -320,9 +322,7 @@ fn map_inject_err(error: agenterm_platform::input_inject::InputInjectError) -> C
     }
 }
 
-fn map_a11y_err(
-    error: agenterm_platform::accessibility_tree::AccessibilityTreeError,
-) -> CuError {
+fn map_a11y_err(error: agenterm_platform::accessibility_tree::AccessibilityTreeError) -> CuError {
     match error {
         agenterm_platform::accessibility_tree::AccessibilityTreeError::Unsupported { reason } => {
             CuError::new("unsupported", reason.to_string())
@@ -389,7 +389,10 @@ mod tests {
         assert!(!reply.ok);
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }

@@ -83,9 +83,11 @@ fn connect() -> Result<Context, InputInjectError> {
 fn require_xtest(context: &Context) -> Result<(), InputInjectError> {
     match context.connection.extension_information(X11_EXTENSION_NAME) {
         Ok(Some(_)) => Ok(()),
-        Ok(None) | Err(ConnectionError::UnsupportedExtension) => Err(InputInjectError::Unsupported {
-            reason: "X11 server does not provide the XTest extension".into(),
-        }),
+        Ok(None) | Err(ConnectionError::UnsupportedExtension) => {
+            Err(InputInjectError::Unsupported {
+                reason: "X11 server does not provide the XTest extension".into(),
+            })
+        }
         Err(error) => Err(failed(format!("XTest extension query failed: {error}"))),
     }
 }
@@ -189,7 +191,11 @@ fn keycode(context: &Context, requested: u32) -> Result<u8, InputInjectError> {
         .position(|symbols| symbols.contains(&requested))
         .and_then(|offset| u8::try_from(offset).ok())
         .and_then(|offset| first.checked_add(offset))
-        .ok_or_else(|| failed(format!("requested key has no X11 keycode for keysym {requested:#x}")))
+        .ok_or_else(|| {
+            failed(format!(
+                "requested key has no X11 keycode for keysym {requested:#x}"
+            ))
+        })
 }
 
 fn press_key(context: &Context, keycode: u8) -> Result<(), InputInjectError> {
@@ -259,13 +265,19 @@ pub(crate) fn send_keys(shortcut: &str) -> Result<(), InputInjectError> {
     }
     let mut modifier_codes = Vec::new();
     for part in &parts[..parts.len() - 1] {
-        let keysym = modifier_keysym(part)
-            .ok_or_else(|| failed(format!("unknown modifier '{part}' in shortcut '{shortcut}'")))?;
+        let keysym = modifier_keysym(part).ok_or_else(|| {
+            failed(format!(
+                "unknown modifier '{part}' in shortcut '{shortcut}'"
+            ))
+        })?;
         modifier_codes.push(keycode(&context, keysym)?);
     }
     let final_token = parts[parts.len() - 1];
-    let final_keysym = keysym_for_token(final_token)
-        .ok_or_else(|| failed(format!("unknown key '{final_token}' in shortcut '{shortcut}'")))?;
+    let final_keysym = keysym_for_token(final_token).ok_or_else(|| {
+        failed(format!(
+            "unknown key '{final_token}' in shortcut '{shortcut}'"
+        ))
+    })?;
     let final_code = keycode(&context, final_keysym)?;
     for code in &modifier_codes {
         press_key(&context, *code)?;

@@ -226,10 +226,7 @@ fn active_window(context: &Context) -> Result<Window, WindowEnumerateError> {
         .unwrap_or(NONE))
 }
 
-fn geometry(
-    context: &Context,
-    window: Window,
-) -> Result<WindowBounds, WindowEnumerateError> {
+fn geometry(context: &Context, window: Window) -> Result<WindowBounds, WindowEnumerateError> {
     let geometry = context
         .connection
         .get_geometry(window)

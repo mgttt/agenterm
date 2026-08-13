@@ -36,7 +36,10 @@ impl AuditLog {
             std::fs::create_dir_all(parent).map_err(|error| {
                 CuError::new(
                     "audit_unavailable",
-                    format!("could not create audit directory {}: {error}", parent.display()),
+                    format!(
+                        "could not create audit directory {}: {error}",
+                        parent.display()
+                    ),
                 )
             })?;
         }
@@ -66,7 +69,10 @@ impl AuditLog {
             detail,
         };
         let line = serde_json::to_string(&record).map_err(|error| {
-            CuError::new("audit_unavailable", format!("audit serialization failed: {error}"))
+            CuError::new(
+                "audit_unavailable",
+                format!("audit serialization failed: {error}"),
+            )
         })?;
         let mut file = OpenOptions::new()
             .create(true)
@@ -81,7 +87,10 @@ impl AuditLog {
         writeln!(file, "{line}").map_err(|error| {
             CuError::new(
                 "audit_unavailable",
-                format!("could not append audit log {}: {error}", self.path.display()),
+                format!(
+                    "could not append audit log {}: {error}",
+                    self.path.display()
+                ),
             )
         })?;
         file.flush().map_err(|error| {

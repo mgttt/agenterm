@@ -73,15 +73,9 @@ pub enum Command {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "wait", rename_all = "kebab-case")]
 pub enum WaitCondition {
-    WindowCountGte {
-        count: usize,
-    },
-    WindowTitleContains {
-        pattern: String,
-    },
-    FocusedHandle {
-        handle: isize,
-    },
+    WindowCountGte { count: usize },
+    WindowTitleContains { pattern: String },
+    FocusedHandle { handle: isize },
 }
 
 fn default_clicks() -> u32 {
@@ -119,9 +113,10 @@ impl Command {
 
     pub fn required_grant(&self) -> crate::auth::Grant {
         match self {
-            Self::Click { .. } | Self::Focus { .. } | Self::SendText { .. } | Self::SendKeys { .. } => {
-                crate::auth::Grant::Actuate
-            }
+            Self::Click { .. }
+            | Self::Focus { .. }
+            | Self::SendText { .. }
+            | Self::SendKeys { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }
     }

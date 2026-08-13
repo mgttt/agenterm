@@ -2,9 +2,7 @@
 //!
 //! Machine-readable JSON on stdout; human usage on stderr.
 
-use agenterm_cu::{
-    Authorization, Command, Executor, PointerButton, TargetRef, WaitCondition,
-};
+use agenterm_cu::{Authorization, Command, Executor, PointerButton, TargetRef, WaitCondition};
 
 fn main() {
     let reply = dispatch(std::env::args().skip(1).collect());

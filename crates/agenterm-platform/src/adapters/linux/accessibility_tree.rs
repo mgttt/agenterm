@@ -7,7 +7,7 @@ use atspi::connection::AccessibilityConnection;
 use atspi::proxy::accessible::{AccessibleProxy, ObjectRefExt};
 use atspi::proxy::proxy_ext::ProxyExt;
 use atspi::{CoordType, ObjectRefOwned, StateSet};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
 
@@ -35,11 +35,12 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 pub(crate) fn capability_status() -> CapabilityStatus {
     match runtime().block_on(connect()) {
         Ok(_) => CapabilityStatus::Available,
-        Err(AccessibilityTreeError::Unsupported { reason }) => CapabilityStatus::Unsupported { reason },
-        Err(AccessibilityTreeError::Failed { code, message }) => CapabilityStatus::Failed {
-            code,
-            message,
-        },
+        Err(AccessibilityTreeError::Unsupported { reason }) => {
+            CapabilityStatus::Unsupported { reason }
+        }
+        Err(AccessibilityTreeError::Failed { code, message }) => {
+            CapabilityStatus::Failed { code, message }
+        }
     }
 }
 
@@ -297,12 +298,15 @@ async fn resolve_path(
     let mut current = object_ref;
     for &child_index in rest {
         let proxy = open_accessible(conn, &current).await?;
-        let child = proxy.get_child_at_index(child_index as i32).await.map_err(|error| {
-            AccessibilityTreeError::failed(
-                "a11y_node_not_found",
-                format!("child index {child_index} is unavailable: {error}"),
-            )
-        })?;
+        let child = proxy
+            .get_child_at_index(child_index as i32)
+            .await
+            .map_err(|error| {
+                AccessibilityTreeError::failed(
+                    "a11y_node_not_found",
+                    format!("child index {child_index} is unavailable: {error}"),
+                )
+            })?;
         current = child;
     }
     Ok(current)
@@ -341,12 +345,14 @@ async fn read_node(
     let role = role_name(proxy).await;
     let name = proxy.name().await.unwrap_or_default();
     let states = states_from_proxy(proxy).await;
-    let bounds = bounds_from_proxy(proxy).await.unwrap_or(AccessibilityBounds {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    });
+    let bounds = bounds_from_proxy(proxy)
+        .await
+        .unwrap_or(AccessibilityBounds {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        });
     let actions = actions_from_proxy(proxy).await;
     let text = text_from_proxy(proxy).await;
     AccessibilityNode {
@@ -439,17 +445,13 @@ async fn invoke_named_action(
     preferred_names: &[&str],
 ) -> Result<(), AccessibilityTreeError> {
     let proxies = proxy.proxies().await.map_err(map_atspi_err)?;
-    let action_proxy = proxies
-        .action()
-        .await
-        .map_err(|_| AccessibilityTreeError::failed(
+    let action_proxy = proxies.action().await.map_err(|_| {
+        AccessibilityTreeError::failed(
             "a11y_action_unavailable",
             "node does not expose the AT-SPI Action interface",
-        ))?;
-    let actions = action_proxy
-        .get_actions()
-        .await
-        .map_err(map_atspi_err)?;
+        )
+    })?;
+    let actions = action_proxy.get_actions().await.map_err(map_atspi_err)?;
     let preferred = preferred_names
         .iter()
         .map(|name| name.to_ascii_lowercase())
@@ -523,14 +525,7 @@ fn window_pid(window_handle: isize) -> Option<u32> {
         .ok()?
         .atom;
     let reply = connection
-        .get_property(
-            false,
-            window_handle as u32,
-            atom,
-            AtomEnum::CARDINAL,
-            0,
-            1,
-        )
+        .get_property(false, window_handle as u32, atom, AtomEnum::CARDINAL, 0, 1)
         .ok()?
         .reply()
         .ok()?;
