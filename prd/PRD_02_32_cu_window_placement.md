@@ -134,7 +134,11 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
 - [x] daily-driver host is `cu hotkeys` (menu-bar extra + Spectacle-default
   global shortcuts). Accessibility is checked only when the menu opens; the
   first item shows status and opens Settings. No popup, no background TCC
-  poll, no `Shortcuts.json` editor.
+  poll, no `Shortcuts.json` editor. Host trust is the launchd process’s
+  `AXIsProcessTrusted` against the **current** code signature — not the
+  Settings label alone, and not a Terminal-spawned CLI place. Install story
+  and evidence: `scripts/install-cu-hotkeys.sh`,
+  `docs/agenterm-rust-cheatsheet.md` (macOS Accessibility trust).
 - [ ] no drag-to-snap, no tile occupancy grid, no batch layout of
   non-addressed windows.
 - [ ] no Rectangle-only features (gaps, almost-maximize, custom regions)

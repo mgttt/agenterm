@@ -31,7 +31,7 @@ follows the Spectacle catalog
 | Control tree | **UIA** (`IUIAutomation`) | **AT-SPI2** (`org.a11y.atspi.*` on D-Bus) | **AX** (`NSAccessibility`) |
 | Node identity | automation id + runtime id + bounds | path id (`/0/2/5`) + role + name + bounds | AX path + role + title + bounds |
 | Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action` (`click`/`press`, else default `DoAction(0)`); no Action → Component `GetExtents` + `GenerateMouseEvent`; focus is `focus` / `Component::grab_focus` | `AXPress` / `AXRaise` |
-| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (`SetTextContents` / `InsertText`) for `--name`; `input-inject` only without `--name` | AX value + events |
+| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (future) / `input-inject` | AX value + events |
 | Screenshot | GDI native capture | typed `unsupported` (no OCR substitute) | typed `unsupported` (planned) |
 
 Linux `tree` and structured `click` / `focus` use **AT-SPI2 only**. If the
@@ -44,9 +44,8 @@ Start Reasonix with `scripts/reasonix-desktop-a11y.sh` so WebKit keeps an
 AT-SPI subtree (`WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`); otherwise the
 web process aborts and `cu tree` is only unnamed GTK fillers.
 `agenterm-con` registers as an AT-SPI toolkit and publishes inner chrome
-(`Command`, `SEND`, `Tabs`, `Session`). `Command` exposes native
-`EditableText` / `Text` so `send-text --name Command` writes through the
-bus; do not treat the one-node X11 title frame as its success path.
+(`Command`, `SEND`, `Tabs`, `Session`); do not treat the one-node X11 title
+frame as its success path.
 
 Coordinate clicks remain available only with explicit `--degraded` and are
 audited separately from AT-SPI actuation.
@@ -62,9 +61,8 @@ audited separately from AT-SPI actuation.
 | `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
 | `focus --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
-| `send-text` / `send-keys` | XTest keyboard injection (no `--name`) |
-| `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + renderer AX set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
-| `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
+| `send-text` / `send-keys` | XTest keyboard injection |
+| `send-text` / `send-keys` `--window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path, then that keyboard injection |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`) |
 
@@ -132,7 +130,7 @@ cu --target current --grant observe,act focus --window 25165828 --name Reload --
 # Structured focus
 cu --target current --grant actuate focus --node /3/0/0/1/0
 
-# Write into a control by accessible name — AT-SPI EditableText, not XTest.
+# Type into a control by accessible name — focuses that node first, then types.
 # `--` ends flag parsing so the text may start with a dash.
 cu --target current --grant observe,act send-text --window 25165828 \
   --name "Address and search bar" -- hello
@@ -153,10 +151,6 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
 # Place the focused window (Spectacle catalog)
 cu --target current --grant actuate window-place --action left-half
 
-# Replace Spectacle: same default shortcuts, launchd-hosted
-# ./scripts/install-cu-hotkeys.sh
-cu hotkeys
-
 # Refused without actuate grant
 cu --target current --grant observe send-text hello
 
@@ -166,6 +160,46 @@ cu --target current --grant actuate click --coords 100,200 --degraded
 # JSON command envelope
 cu exec --grant observe,actuate --json '{"verb":"windows","target":"current"}'
 ```
+
+## macOS hotkeys host (`AgentermCu`)
+
+Replace Spectacle with `./scripts/install-cu-hotkeys.sh` (macOS). That installs
+`~/Applications/AgentermCu.app`, a LaunchAgent (`com.agenterm.cu.hotkeys`), a
+menu-bar extra, and Spectacle-default global shortcuts. Geometry still goes
+through `window-place` + platform AX set-rect.
+
+### Accessibility is signature + process
+
+- System Settings showing **AgentermCu** ON is not enough. Runtime trust is
+  `AXIsProcessTrusted()` for the **launchd** process against the **current**
+  code signature (ad-hoc installs use a cdhash requirement).
+- Reinstall re-signs. `install-cu-hotkeys.sh` runs
+  `tccutil reset Accessibility com.agenterm.cu` so a stale ON cannot outlive
+  a new signature. Enable **AgentermCu** once after each reinstall. Prefer that
+  row over a legacy path entry named `agenterm-cu`.
+- A successful `cu window-place` from Terminal does **not** prove hotkeys work:
+  the CLI may borrow Terminal’s Accessibility grant. Check the host:
+
+```bash
+cat ~/.local/share/agenterm/ax-status   # expect trusted=1 after grant
+grep ax_trusted ~/.local/share/agenterm/cu-hotkeys.log
+# optional: codesign -d -r- ~/Applications/AgentermCu.app
+```
+
+### UX rules
+
+- No popup card and no background TCC poll.
+- Menu first item is Accessibility status; it is refreshed when the menu opens
+  and opens Settings when clicked.
+
+```bash
+./scripts/install-cu-hotkeys.sh
+# then enable AgentermCu in Accessibility once; try ⌥⌘←
+```
+
+Engineering detail:
+[`docs/agenterm-rust-cheatsheet.md`](../../docs/agenterm-rust-cheatsheet.md)
+(section *macOS Accessibility trust is signature + process*).
 
 ## Black-box evidence
 
