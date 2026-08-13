@@ -2,12 +2,15 @@
 //! Adapter-private native mechanism selected only by platform::selected.
 //! (contract revision 1).
 //!
-//! Uses process helpers (`wl-clipboard` / `xclip` / `xsel`). Failures are typed
-//! [`CapabilityStatus::Failed`] / [`Unsupported`] — never a silent Available.
+//! X11 `DISPLAY` uses a native CLIPBOARD selection (`SetSelectionOwner` /
+//! `ConvertSelection`). Process helpers (`wl-clipboard` / `xclip` / `xsel`)
+//! remain a fallback. Failures are typed [`CapabilityStatus::Failed`] /
+//! [`Unsupported`] — never a silent Available.
 //! Shared contract already declares [`CapabilityKind::Clipboard`]; no new
 //! shared fields are introduced in this slice.
 //!
 //! Hardening:
+//! - X11 `DISPLAY` is Available via native CLIPBOARD, not via `xclip`
 //! - read and write each require their matching helper (no `wl-copy || wl-paste`)
 //! - Wayland helpers only count on Wayland; X11 helpers only on X11
 //! - every helper call has an explicit wall timeout and must not block the GUI
@@ -21,6 +24,9 @@ use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[path = "x11_clipboard.rs"]
+mod x11_clipboard;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum CapabilityStatus {
@@ -172,14 +178,24 @@ fn can_write(display: DisplayBackendFacts, backends: ClipboardBackendFacts) -> b
     if display.headless {
         return false;
     }
-    (display.wayland && backends.wayland_write()) || (display.x11 && backends.x11_pair())
+    (display.wayland && backends.wayland_write()) || display.x11
 }
 
 fn can_read(display: DisplayBackendFacts, backends: ClipboardBackendFacts) -> bool {
     if display.headless {
         return false;
     }
-    (display.wayland && backends.wayland_read()) || (display.x11 && backends.x11_pair())
+    (display.wayland && backends.wayland_read()) || display.x11
+}
+
+fn can_write_helper(display: DisplayBackendFacts, backends: ClipboardBackendFacts) -> bool {
+    !display.headless
+        && ((display.wayland && backends.wayland_write()) || (display.x11 && backends.x11_pair()))
+}
+
+fn can_read_helper(display: DisplayBackendFacts, backends: ClipboardBackendFacts) -> bool {
+    !display.headless
+        && ((display.wayland && backends.wayland_read()) || (display.x11 && backends.x11_pair()))
 }
 
 fn unavailable_detail(display: DisplayBackendFacts, backends: ClipboardBackendFacts) -> String {
@@ -192,8 +208,8 @@ fn unavailable_detail(display: DisplayBackendFacts, backends: ClipboardBackendFa
         }
         return "no Wayland clipboard helpers (need both wl-copy and wl-paste)".to_string();
     }
-    if display.x11 && !backends.x11_pair() && !display.wayland {
-        return "no X11 clipboard helpers (need xclip or xsel)".to_string();
+    if display.x11 && !display.wayland {
+        return "native X11 CLIPBOARD is unavailable".to_string();
     }
     if display.wayland && backends.wl_copy != backends.wl_paste && !backends.x11_pair() {
         return "incomplete wl-clipboard pair and no usable X11 helper".to_string();
@@ -222,11 +238,22 @@ pub(crate) fn set_text(text: &str, timeout: std::time::Duration) -> Result<(), C
     let backends = ClipboardBackendFacts::probe();
     if !can_write(display, backends) {
         return Err(ClipboardError::Unavailable {
-            message: "no display-matched clipboard write helper".to_string(),
+            message: "no display-matched clipboard write path".to_string(),
         });
     }
 
     let mut errors = Vec::new();
+    if display.x11 {
+        match x11_clipboard::set_text(text, timeout) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                if !can_write_helper(display, backends) {
+                    return Err(error);
+                }
+                errors.push(format!("native-x11: {}", error.message()));
+            }
+        }
+    }
     for (argv, label) in write_attempts(display, backends) {
         let remaining = remaining_budget(deadline, timeout)?;
         match write_via_command(argv, text, remaining) {
@@ -249,11 +276,25 @@ pub(crate) fn get_text(
     let backends = ClipboardBackendFacts::probe();
     if !can_read(display, backends) {
         return Err(ClipboardError::Unavailable {
-            message: "no display-matched clipboard read helper".to_string(),
+            message: "no display-matched clipboard read path".to_string(),
         });
     }
 
     let mut errors = Vec::new();
+    if display.x11 {
+        match x11_clipboard::get_text(max_read_bytes, timeout) {
+            Ok(text) => return Ok(text),
+            Err(error) => {
+                if matches!(error, ClipboardError::TooLarge { .. }) {
+                    return Err(error);
+                }
+                if !can_read_helper(display, backends) {
+                    return Err(error);
+                }
+                errors.push(format!("native-x11: {}", error.message()));
+            }
+        }
+    }
     for (argv, label) in read_attempts(display, backends) {
         let remaining = remaining_budget(deadline, timeout)?;
         match read_via_command(argv, max_read_bytes, remaining) {
@@ -302,6 +343,9 @@ pub(crate) fn has_unicode_text() -> bool {
         return false;
     }
     if display.wayland && backends.wl_paste && probe_wl_clipboard_has_text() {
+        return true;
+    }
+    if display.x11 && x11_clipboard::has_unicode_text() {
         return true;
     }
     if display.x11 {
@@ -720,15 +764,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_helpers_are_failed_not_available() {
+    fn x11_without_helpers_is_available_via_native_clipboard() {
         let status = clipboard_capability_status(x11_display(), ClipboardBackendFacts::default());
-        assert!(matches!(
-            status,
-            CapabilityStatus::Failed {
-                code: "clipboard_unavailable",
-                ..
-            }
-        ));
+        assert_eq!(status, CapabilityStatus::Available);
     }
 
     #[test]
@@ -808,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn wayland_helpers_do_not_count_on_x11_only_display() {
+    fn wayland_helpers_do_not_replace_x11_native_clipboard() {
         let status = clipboard_capability_status(
             x11_display(),
             ClipboardBackendFacts {
@@ -818,13 +856,7 @@ mod tests {
                 xsel: false,
             },
         );
-        assert!(matches!(
-            status,
-            CapabilityStatus::Failed {
-                code: "clipboard_unavailable",
-                ..
-            }
-        ));
+        assert_eq!(status, CapabilityStatus::Available);
     }
 
     #[test]
@@ -992,6 +1024,25 @@ mod tests {
             elapsed < Duration::from_secs(2),
             "timeout path took too long: {elapsed:?}"
         );
+    }
+
+    #[test]
+    fn native_x11_clipboard_round_trip_when_display_is_set() {
+        if std::env::var_os("DISPLAY").is_none() {
+            return;
+        }
+        let marker = format!(
+            "agenterm-linux-x11-clip-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        );
+        x11_clipboard::set_text(&marker, HELPER_TIMEOUT).expect("native X11 clipboard set_text");
+        let got = x11_clipboard::get_text(marker.len(), HELPER_TIMEOUT)
+            .expect("native X11 clipboard get_text");
+        assert_eq!(got, marker);
+        assert!(x11_clipboard::has_unicode_text());
     }
 
     #[test]

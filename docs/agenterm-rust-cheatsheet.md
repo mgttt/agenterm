@@ -1168,7 +1168,13 @@ write through the same AT-SPI `EditableText` / `Text` path. `--name` is
 required. Do not implement paste as Ctrl+V, XTest, `--coords`, or a
 screenshot. A named showing node with no writeable text interface
 typed-fails (`a11y_text_unavailable`). `matched.text` is still the
-resolve-time snapshot.
+resolve-time snapshot. Linux X11 seed is a native CLIPBOARD
+`SetSelectionOwner` in `adapters/linux/x11_clipboard.rs`, not `xclip` /
+`xsel`. A missing helper is not `clipboard-unavailable` when `DISPLAY`
+is set. Do not drop a one-off `/tmp/xclip` binary to unblock
+`paste --text`. WebKit/Reasonix still uses the eval-helper set-value
+path; `wait --text-equals` must see `GetText ==` the clipboard/typed
+string.
 
 `cu wait --text-equals` / `--node-text-equals` with `--name` is the
 independent AT-SPI close-the-circuit after named `send-text` / `paste`.

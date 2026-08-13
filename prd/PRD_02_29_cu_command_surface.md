@@ -97,11 +97,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   native AT-SPI `EditableText` / `Text` path (`agt_a11y_node_set_text`)
   and reports `addressing=accessibility-tree`. `--text` only seeds the
   clipboard (`agt_clipboard_set_text`); the field write always reads
-  `agt_clipboard_get_text`. `--name` is required. A named showing node
-  with no writeable text interface typed-fails (`a11y_text_unavailable`)
-  and never falls through to XTest / `--coords` / screenshot. A miss or
-  an ambiguous name writes nothing. Close the circuit with
-  `wait --text-equals`; `paste` `matched.text` does not count.
+  `agt_clipboard_get_text`. On Linux X11, `--text` seeds CLIPBOARD
+  through the native selection owner (not `xclip`). `--name` is required.
+  A named showing node with no writeable text interface typed-fails
+  (`a11y_text_unavailable`) and never falls through to XTest / `--coords`
+  / screenshot. A miss or an ambiguous name writes nothing. Close the
+  circuit with `wait --text-equals`; `paste` `matched.text` does not
+  count. Live Reasonix composer (`Message Reasonix…`) uses the same
+  WebKit eval-helper set-value path as named `send-text`.
 - [x] `send-keys` accepts that same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). Named chords go through
   native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`) and

@@ -324,9 +324,12 @@ Available, Unsupported, and Failed without reading source or assuming parity.
   - [x] contract-revision-1 toolbar and keyboard hot paths, plus IME and
     clipboard slice-2 bridges, consume `platform::linux` with explicit
     headless/backend failures
-  - [x] Linux clipboard helpers: read/write probed separately, display-matched
-    X11/Wayland selection, wall-clock timeouts, live stdout byte budget, typed
-    `clipboard_timeout` / `clipboard_too_large` / `clipboard_unavailable`
+  - [x] Linux clipboard: X11 `DISPLAY` seeds and reads the CLIPBOARD
+    selection natively (`SetSelectionOwner` / `ConvertSelection`, no
+    `xclip` / `xsel` required). Helpers remain a fallback. Read/write
+    probed separately, display-matched X11/Wayland selection, wall-clock
+    timeouts, live stdout byte budget, typed `clipboard_timeout` /
+    `clipboard_too_large` / `clipboard_unavailable`
   - [x] Linux screenshot encode and activation/no-activate (`with_active`)
     consume `platform::linux`; dimensions/pixels/path, strict clip bounds, and
     headless failures are typed; X11/Wayland softbuffer paths Available,

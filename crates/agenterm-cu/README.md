@@ -152,9 +152,10 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --node-name-contains Reload --node-role button
 
 # Paste clipboard text into a named field via AT-SPI EditableText / Text.
-# --text seeds the clipboard; the field write always reads the clipboard.
-# Never XTest / --coords. Close the circuit with wait --text-equals GetText;
-# paste matched.text does not count.
+# --text seeds the clipboard (Linux X11: native CLIPBOARD owner, not xclip);
+# the field write always reads the clipboard. Never XTest / --coords.
+# Close the circuit with wait --text-equals GetText; paste matched.text
+# does not count. Reasonix composer name contains "Message Reasonix".
 cu --target current --grant observe,act paste --window 25165828 \
   --name FixtureField --text hello
 
