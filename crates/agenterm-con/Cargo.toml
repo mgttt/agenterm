@@ -29,6 +29,10 @@ path = "tests/agenterm_con_alignment.rs"
 name = "agenterm_con_throughput"
 path = "tests/agenterm_con_throughput.rs"
 
+[[test]]
+name = "agenterm_con_accessibility_linux"
+path = "tests/agenterm_con_accessibility_linux.rs"
+
 [dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "filesystem-publish", "filesystem-read", "font", "ime", "ipc", "parent-console", "pty", "runtime", "screenshot", "window"] }
 agenterm-ui-core = { path = "../agenterm-ui-core", features = ["terminal-selection"] }
@@ -39,6 +43,9 @@ vt100 = "0.16"
 [dev-dependencies]
 png = "0.17"
 serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["a11y-tree"] }
 
 [target.'cfg(windows)'.dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["native-pixel-window"] }
