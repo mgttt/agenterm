@@ -112,6 +112,13 @@ impl Executor {
                 role,
                 ..
             } => send_text(text, *window, name.as_deref(), role.as_deref()),
+            Command::Paste {
+                text,
+                window,
+                name,
+                role,
+                ..
+            } => paste(text.as_deref(), *window, name.as_deref(), role.as_deref()),
             Command::SendKeys {
                 keys,
                 window,
@@ -312,6 +319,56 @@ fn send_text(
         "action": "send-text",
         "typed": text,
         "via": via,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `paste --name` writes clipboard text into the unique showing named
+/// field through the same native AT-SPI `EditableText` / `Text` path as
+/// named `send-text`. `--text` only seeds the clipboard; the field write
+/// always reads `agt_clipboard_get_text` first. A named showing node with
+/// no writeable text interface typed-fails (`a11y_text_unavailable`) and
+/// never falls through to XTest / `--coords` / screenshot. `--name` is
+/// required: there is no "paste into whatever is focused" verb. A miss or
+/// an ambiguous name writes nothing. `matched.text` is the resolve-time
+/// snapshot; `wait --text-equals` must poll `Text.GetText` independently.
+fn paste(
+    seed: Option<&str>,
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "paste requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved =
+        resolve_actuation_node(window, None, Some(name), role, "paste")?.ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "paste requires --window <handle> --name <pattern>",
+            )
+        })?;
+    if let Some(seed) = seed {
+        mechanism::clipboard::set_text(seed).map_err(map_mechanism_err)?;
+    }
+    let pasted = mechanism::clipboard::get_text().map_err(map_mechanism_err)?;
+    mechanism::set_node_text(window, &resolved.node_id, &pasted).map_err(map_mechanism_err)?;
+    let _ = mechanism::accessibility_tree::drain_bus();
+    let via = mechanism::accessibility_tree::last_text_write_via().unwrap_or_default();
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "paste",
+        "typed": pasted,
+        "via": via,
+        "clipboard": true,
+        "seeded": seed.is_some(),
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -656,10 +713,10 @@ fn wait_node(
 
 /// Polls AT-SPI `Text.GetText` (`agt_a11y_node_get_text`) on the unique
 /// showing node addressed by `name` until that independent text equals
-/// `expected`. The tree snapshot `node.text`, a prior `send-text`
-/// `matched.text`, `last_text_write_via`, and the WebKit eval helper's
-/// queued-job `OK` (Reasonix composer) are not this predicate. Timeout
-/// is typed so loop-until callers break on `ok:false`.
+/// `expected`. The tree snapshot `node.text`, a prior `send-text` or
+/// `paste` `matched.text`, `last_text_write_via`, and the WebKit eval
+/// helper's queued-job `OK` (Reasonix composer) are not this predicate.
+/// Timeout is typed so loop-until callers break on `ok:false`.
 fn wait_node_text(
     timeout_ms: u64,
     expected: &str,
@@ -734,7 +791,7 @@ fn wait_node_text(
 
 /// Success payload for `--text-equals`. `gettext` is the only text
 /// authority: snapshot `node.text` is overwritten so a sidecar tree
-/// walk or `send-text` `matched.text` cannot be mistaken for the hit.
+/// walk or `send-text` / `paste` `matched.text` cannot be mistaken for the hit.
 fn text_equals_success(
     backend: &str,
     window: Option<isize>,
@@ -1239,6 +1296,71 @@ mod tests {
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_paste_requires_name() {
+        let command = Command::Paste {
+            target: TargetRef::Current,
+            text: Some("hello".into()),
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_paste_requires_window() {
+        let command = Command::Paste {
+            target: TargetRef::Current,
+            text: Some("hello".into()),
+            window: None,
+            name: Some("FixtureField".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_paste_missing_node_is_typed_and_writes_nothing() {
+        let command = Command::Paste {
+            target: TargetRef::Current,
+            text: Some("hello".into()),
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(
+            !reply.ok,
+            "missing name must not paste into the wrong place"
+        );
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn paste_without_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth);
+        let command = Command::Paste {
+            target: TargetRef::Current,
+            text: Some("hello".into()),
+            window: Some(1),
+            name: Some("FixtureField".into()),
+            role: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
     }
 
     #[test]

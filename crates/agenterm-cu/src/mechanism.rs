@@ -614,6 +614,54 @@ pub fn get_node_text(window: Option<isize>, node_id: &str) -> Result<String, Mec
     })
 }
 
+/// Clipboard through libagenterm (`agt_clipboard_*`). Named `paste` seeds
+/// and reads here; it never injects Ctrl+V or XTest.
+pub mod clipboard {
+    use super::{MechanismError, call_sym, last_mechanism_error, map_status};
+    use crate::dynlib;
+
+    pub fn set_text(text: &str) -> Result<(), MechanismError> {
+        let f = call_sym::<super::ClipboardSetText>(b"agt_clipboard_set_text")?;
+        let status = unsafe { f(text.as_ptr(), text.len()) };
+        map_status("agt_clipboard_set_text", status)
+    }
+
+    /// Two-stage `agt_clipboard_get_text`. No Unicode text is an empty
+    /// success (`AGT_OK`, `out_len == 0`), not `buffer_too_small`.
+    pub fn get_text() -> Result<String, MechanismError> {
+        let f = call_sym::<super::ClipboardGetText>(b"agt_clipboard_get_text")?;
+        let mut required = 0usize;
+        let status = unsafe { f(std::ptr::null_mut(), 0, &mut required) };
+        if status == dynlib::AGT_UNSUPPORTED {
+            return Err(MechanismError::Unsupported {
+                reason: "agt_clipboard_get_text: mechanism unavailable on this host".to_owned(),
+            });
+        }
+        if status == dynlib::AGT_OK {
+            return Ok(String::new());
+        }
+        if status != dynlib::AGT_FAILED {
+            return Err(last_mechanism_error("agt_clipboard_get_text"));
+        }
+        let probe = last_mechanism_error("agt_clipboard_get_text");
+        match &probe {
+            MechanismError::Failed { code, .. } if code == "buffer_too_small" => {}
+            other => return Err(other.clone()),
+        }
+        if required == 0 {
+            return Ok(String::new());
+        }
+        let mut buf = vec![0u8; required];
+        let status = unsafe { f(buf.as_mut_ptr(), required, &mut required) };
+        map_status("agt_clipboard_get_text", status)?;
+        buf.truncate(required);
+        String::from_utf8(buf).map_err(|_| MechanismError::Failed {
+            code: "bad_encoding".into(),
+            message: "clipboard text is not UTF-8".into(),
+        })
+    }
+}
+
 pub fn send_node_keys(
     window: Option<isize>,
     node_id: &str,
@@ -855,6 +903,8 @@ type NodeSetText = unsafe extern "C" fn(isize, *const std::ffi::c_char, *const u
 type NodeGetText =
     unsafe extern "C" fn(isize, *const std::ffi::c_char, *mut u8, usize, *mut usize) -> i32;
 type NodeSendKeys = unsafe extern "C" fn(isize, *const std::ffi::c_char, *const u8, usize) -> i32;
+type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
+type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
 
 #[cfg(test)]

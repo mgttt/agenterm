@@ -146,6 +146,27 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
+        "paste" => {
+            // `--` ends flag parsing so --text may itself start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            let text = flag_value(&mut args, "--text").or(literal_text);
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("paste requires --window <handle> --name <pattern>");
+            }
+            Command::Paste {
+                target,
+                text,
+                window,
+                name,
+                role,
+            }
+        }
         "send-keys" => {
             // `--` ends flag parsing so a chord may itself start with a dash.
             let literal_keys = match args.iter().position(|arg| arg == "--") {
@@ -349,6 +370,15 @@ Commands:
                               AT-SPI id + eval helper); a node with no
                               writeable text interface typed-fails (never XTest).
                               `--` ends flag parsing
+  paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]
+                              writes clipboard text into the unique showing named
+                              field via native AT-SPI EditableText / Text
+                              (addressing=accessibility-tree). --text only seeds
+                              the clipboard; the field write always reads the
+                              clipboard. A node with no writeable text interface
+                              typed-fails (never XTest / --coords / screenshot).
+                              Close the circuit with wait --text-equals; paste
+                              matched.text does not count. `--` ends flag parsing
   send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
                               --name delivers AT-SPI Device/key events
                               (DeviceEventListener NotifyEvent); a node with no
@@ -359,7 +389,7 @@ Commands:
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE)
                               --text-equals / --node-text-equals polls AT-SPI Text.GetText
                               on the unique showing named node until that independent
-                              text equals TEXT. send-text matched.text, last_text_write_via,
+                              text equals TEXT. send-text / paste matched.text, last_text_write_via,
                               and the WebKit eval helper's queued-job OK are not this
                               condition. Timeout is typed ("timeout"). Never
                               screenshot / XTest / --coords. `--` ends flag parsing.

@@ -79,6 +79,20 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// Write clipboard text into the unique showing named field via native
+    /// AT-SPI `EditableText` / `Text`. `--text` only seeds the clipboard;
+    /// the field write always reads the clipboard. Never XTest / `--coords`.
+    Paste {
+        target: TargetRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
     SendKeys {
         target: TargetRef,
         keys: String,
@@ -130,8 +144,8 @@ pub enum WaitCondition {
     },
     /// Polls AT-SPI `Text.GetText` on the unique showing node addressed by
     /// `--name` until that independent text equals `expected`. Snapshot
-    /// `node.text`, `send-text` `matched.text`, `last_text_write_via`, and
-    /// the WebKit eval helper's queued-job `OK` are not this condition.
+    /// `node.text`, `send-text` / `paste` `matched.text`, `last_text_write_via`,
+    /// and the WebKit eval helper's queued-job `OK` are not this condition.
     /// Timeout is typed. Never screenshot / XTest / `--coords`.
     NodeTextEquals {
         expected: String,
@@ -157,6 +171,7 @@ impl Command {
             Self::Click { .. } => "click".into(),
             Self::Focus { .. } => "focus".into(),
             Self::SendText { .. } => "send-text".into(),
+            Self::Paste { .. } => "paste".into(),
             Self::SendKeys { .. } => "send-keys".into(),
             Self::Wait { .. } => "wait".into(),
             Self::WindowPlace { .. } => "window-place".into(),
@@ -172,6 +187,7 @@ impl Command {
             | Self::Click { target, .. }
             | Self::Focus { target, .. }
             | Self::SendText { target, .. }
+            | Self::Paste { target, .. }
             | Self::SendKeys { target, .. }
             | Self::Wait { target, .. }
             | Self::WindowPlace { target, .. } => *target,
@@ -183,6 +199,7 @@ impl Command {
             Self::Click { .. }
             | Self::Focus { .. }
             | Self::SendText { .. }
+            | Self::Paste { .. }
             | Self::SendKeys { .. }
             | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,

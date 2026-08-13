@@ -92,6 +92,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   the plain "type into whatever is focused" verb. A miss or an ambiguous
   name writes nothing and fails typed, so a loop-until caller never
   sprays text at the wrong control.
+- [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]` writes
+  the clipboard into the unique showing named field through that same
+  native AT-SPI `EditableText` / `Text` path (`agt_a11y_node_set_text`)
+  and reports `addressing=accessibility-tree`. `--text` only seeds the
+  clipboard (`agt_clipboard_set_text`); the field write always reads
+  `agt_clipboard_get_text`. `--name` is required. A named showing node
+  with no writeable text interface typed-fails (`a11y_text_unavailable`)
+  and never falls through to XTest / `--coords` / screenshot. A miss or
+  an ambiguous name writes nothing. Close the circuit with
+  `wait --text-equals`; `paste` `matched.text` does not count.
 - [x] `send-keys` accepts that same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). Named chords go through
   native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`) and
@@ -103,9 +113,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls AT-SPI `Text.GetText` on the unique
   showing named node until that independent text equals `TEXT`. Timeout is
-  typed `timeout` and reports the last GetText. `send-text` `matched.text`,
-  a sidecar `tree` walk of snapshot `text` fields, `last_text_write_via`,
-  and the WebKit eval helper's queued-job `OK` are not this condition.
+  typed `timeout` and reports the last GetText. `send-text` / `paste`
+  `matched.text`, a sidecar `tree` walk of snapshot `text` fields,
+  `last_text_write_via`, and the WebKit eval helper's queued-job `OK` are
+  not this condition.
   Never screenshot, XTest, or `--coords`. Live evidence includes Chrome
   `FixtureField` and the Reasonix composer (`Message Reasonix…`).
 - [ ] screenshot, control tree and action results are causally identifiable
@@ -120,7 +131,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [~] every state transition a caller must observe is waitable with a bounded
   typed timeout. No documented workflow depends on a fixed sleep. Named
-  `send-text` is waitable with `--text-equals` / `--node-text-equals`.
+  `send-text` / `paste` is waitable with `--text-equals` / `--node-text-equals`.
 - [ ] a wait failure reports what was observed at the deadline, not only that
   the deadline passed.
 - [ ] requests, responses, enumerations and transfers are size and time bounded.
