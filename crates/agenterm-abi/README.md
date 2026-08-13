@@ -115,6 +115,19 @@ cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/li
 **静态 vs 动态取舍**：静态省去随行 dll（自包含、部署简单），但产物更大、
 且升级库要重新链接；动态则运行时加载、升级只需替换库文件。
 
+**实测体积（本机 Windows x86_64 + MSVC，`abi-dev` profile，探针即
+`examples/c/agenterm_probe.c` 链接产物）**：
+
+| 形态 | 探针产物体积 | 说明 |
+|------|--------------|------|
+| 动态链接（需随行 dll/so/dylib） | 139,776 B | 另需随行动态库：本机 `abi-dev` 实测 `agenterm.dll` = 878,080 B（`abi-release` 基线 400,896 B 见 `plan/phase0-baseline-measurements.md`） |
+| 静态链接（自包含） | 310,784 B | 无需随行库 |
+| 静态库归档本身 | 31,581,304 B | 链接器只取用到的部分——归档虽大，最终自包含二进制只有 310 KB 量级 |
+
+数字来自 `c_static_link.rs` / `c_consumer.rs` 的打印（链接后 `fs::metadata`
+实测，无体积断言）。**Linux/macOS 数字可从 CI 日志读取**——这两个测试
+在 CI 上同样会打印对应平台的体积。
+
 ## `allow-abort-profile` feature（逃生舱，默认关闭）
 
 该 feature 是给**没有 C 边界的 Rust 原生 rlib 消费者**（如 `agenterm-cu`

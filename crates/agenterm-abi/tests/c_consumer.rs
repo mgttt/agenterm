@@ -326,6 +326,11 @@ fn c_consumer_compiles_links_and_runs() {
     }
     run_or_panic("C compile/link", &mut cc);
 
+    // ---- report size (print only, no assertion: it varies too much across
+    // platforms/toolchains to pin a number) --------------------------------
+    let probe_size = std::fs::metadata(&exe).map(|m| m.len()).unwrap_or(0);
+    eprintln!("c_consumer: dynamically linked probe = {probe_size} bytes");
+
     // ---- run ------------------------------------------------------------
     if cfg!(windows) {
         // Windows loads the DLL from the executable's own directory.

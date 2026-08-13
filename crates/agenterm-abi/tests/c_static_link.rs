@@ -416,6 +416,23 @@ fn c_consumer_static_links_and_runs() {
     }
     run_or_panic("C static compile/link", &mut cc);
 
+    // ---- report sizes (print only, no assertion: they vary too much
+    // across platforms/toolchains to pin a number) -------------------------
+    // The staticlib's own size is printed next to the final binary so the
+    // "archive vs linked output" gap is visible at a glance — archives are
+    // usually much larger because the linker keeps only the members that
+    // are actually referenced.
+    let probe_size = std::fs::metadata(&exe).map(|m| m.len()).unwrap_or(0);
+    let lib_size = std::fs::metadata(&staticlib).map(|m| m.len()).unwrap_or(0);
+    let lib_name = staticlib
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("?");
+    eprintln!(
+        "c_static_link: statically linked probe = {probe_size} bytes \
+         ({lib_name} = {lib_size} bytes)"
+    );
+
     // ---- run (no DLL, no LD_LIBRARY_PATH: the probe is self-contained) ---
     // The static link is only proven by the probe running with NO
     // agenterm.dll / libagenterm.so next to it and no loader env pointing at
