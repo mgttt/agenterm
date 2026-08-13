@@ -165,6 +165,13 @@ Three consequences that cost real debugging time:
    the cascade is usually obvious. A count in the thousands means a polling loop
    is asserting on a path that cannot appear — bound such loops by wall clock,
    not by attempt count.
+
+   A parent task that invokes another task must not reduce every child failure
+   to a generic tag such as `build_stage`. Use bounded `Command.output()`, replay
+   the child's stdout/stderr, and include that evidence in the parent's first
+   failure. Preserve every explicit environment override from the old status
+   helper when converting it to `Command`; otherwise better diagnostics can
+   silently change build identity or incremental behavior.
 2. **`require` inside a helper does not stop the caller.** The helper returns a
    typed default (`""`, `0`, `Value::Null`, `Vec::new()`, ...) and the caller
    keeps running with that default. If a leg must abort the whole task, put the

@@ -808,24 +808,52 @@ fn entry() {
         return 0;
     }
 
-    let stage_code = std::process::command_status(
-        worker,
-        [
-            "rh", "task", "run", "stage-build",
-            "--manifest", task_manifest,
-            "--", repo, profile_directory, dist, profile
-        ],
-        30000,
-        #{
-            current_dir: repo,
-            env: environment,
-        }
-    );
+    let stage_command = std::process::command(worker);
+    stage_command.args([
+        "rh", "task", "run", "stage-build",
+        "--manifest", task_manifest,
+        "--", repo, profile_directory, dist, profile
+    ]);
+    stage_command.current_dir(repo);
+    stage_command.timeout(std::time::Duration::from_millis(30000));
+    stage_command.capture_limit(262144);
+    if environment_text.contains("\"AGENTERM_BUILD_IDENTITY_VERSION\":") != 0 {
+        stage_command.env("AGENTERM_BUILD_IDENTITY_VERSION", "" + environment.AGENTERM_BUILD_IDENTITY_VERSION);
+        stage_command.env("AGENTERM_BUILD_GIT_COMMIT", "" + environment.AGENTERM_BUILD_GIT_COMMIT);
+        stage_command.env("AGENTERM_BUILD_GIT_DIRTY", "" + environment.AGENTERM_BUILD_GIT_DIRTY);
+        stage_command.env("AGENTERM_BUILD_CARGO_LOCK_SHA256", "" + environment.AGENTERM_BUILD_CARGO_LOCK_SHA256);
+        stage_command.env("AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256", "" + environment.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256);
+        stage_command.env("AGENTERM_BUILD_PROFILE", "" + environment.AGENTERM_BUILD_PROFILE);
+    }
+    if environment_text.contains("\"CARGO_TARGET_DIR\":") != 0 {
+        stage_command.env("CARGO_TARGET_DIR", "" + environment.CARGO_TARGET_DIR);
+    }
+    if environment_text.contains("\"RUSTC_WRAPPER\":") != 0 {
+        stage_command.env("RUSTC_WRAPPER", "" + environment.RUSTC_WRAPPER);
+        stage_command.env("AGENTERM_INTERNAL_RUSTC_WRAPPER", "" + environment.AGENTERM_INTERNAL_RUSTC_WRAPPER);
+        stage_command.env("AGENTERM_INCREMENTAL_INVOCATION_ID", "" + environment.AGENTERM_INCREMENTAL_INVOCATION_ID);
+        stage_command.env("AGENTERM_INCREMENTAL_TARGET", "" + environment.AGENTERM_INCREMENTAL_TARGET);
+        stage_command.env("AGENTERM_INCREMENTAL_ROOT", "" + environment.AGENTERM_INCREMENTAL_ROOT);
+        stage_command.env("AGENTERM_INCREMENTAL_STATE", "" + environment.AGENTERM_INCREMENTAL_STATE);
+    }
+    let stage_result = stage_command.output();
+    let stage_code = stage_result.exit_code;
+    let stage_stdout = stage_result.stdout_text();
+    let stage_stderr = stage_result.stderr_text();
+    if stage_stdout != "" {
+        print(stage_stdout);
+    }
+    if stage_stderr != "" {
+        print(stage_stderr);
+    }
     if stage_code != 0 {
         if incremental_producer != 0 {
             cleanup_incremental_state(incremental_state);
         }
-        require(stage_code == 0, "build_stage");
+        require(
+            stage_code == 0,
+            "build_stage:" + stage_stdout + stage_stderr
+        );
     }
 
     if profile == "dev" && external_target == 0 {
