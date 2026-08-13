@@ -298,6 +298,13 @@ a11y-tree = [
     "dep:x11rb",
     "dep:libc",
 ]
+a11y-publish = [
+    "dep:atspi",
+    "dep:tokio",
+    "dep:zbus",
+    "dep:x11rb",
+    "dep:libc",
+]
 ime = [
     "input",
     "windows-sys/Win32_Globalization",

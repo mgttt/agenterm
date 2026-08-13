@@ -254,6 +254,11 @@ pub mod input;
 #[cfg(feature = "a11y-tree")]
 pub mod accessibility_tree;
 
+// Unconditional: hosts without a publisher get the no-op backend, so product
+// code publishes a widget tree without knowing which OS it runs on. The
+// `a11y-publish` feature only selects whether the real AT-SPI server is built.
+pub mod accessibility_publish;
+
 #[cfg(feature = "window-enum")]
 pub mod window_enumerate;
 

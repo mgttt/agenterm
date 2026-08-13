@@ -63,6 +63,7 @@ pub enum AccessibilityTreeError {
 }
 
 impl AccessibilityTreeError {
+    #[cfg_attr(not(feature = "a11y-tree"), allow(dead_code))]
     pub(crate) fn failed(code: &'static str, message: impl ToString) -> Self {
         Self::Failed {
             code: code.into(),

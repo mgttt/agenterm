@@ -1070,20 +1070,47 @@ only deserializes unique names (`:1.47`), so `GetChildAtIndex` /
 stops at the GTK frame. Read children as raw `(String, ObjectPath)`,
 resolve well-known names with `GetNameOwner`, and keep walking.
 
+Do not open that tree through `AccessibilityConnection::new()`. atspi
+0.30's default P2P path (`GetApplicationBusAddress` plus a unix-socket
+handshake per registry child) hangs on WebKit/Wails sockets, so `cu tree`
+dies with `a11y_tree_timeout` and never reaches named document widgets.
+Connect to the a11y bus only. Skip dests with no owner (a dead web
+process leaves a filler stub). WebKit `GetRoleName` is often empty —
+use `GetRole` (43 = button). Snapshot only Accessible name/role/state;
+`GetActions` / `proxies()` introspect hang per node and blow the 10s
+deadline. Named `click` invokes AT-SPI `DoAction(0)`.
+
 Match a window to application roots by, in order: the window's
 `_NET_WM_PID`, descendant PIDs (`/proc/*/status` PPid), then exact
 normalized equality of the X11 title / `WM_CLASS` / `comm` against the
 application or frame name. Do not substring-match titles (that pulls
 Chrome into an unrelated window).
 
-A toolkit that never registered with AT-SPI (`agenterm-con`, stock
-`xfce4-terminal` without atk-bridge) still has to answer
-`tree --window`. Emit a single showing `frame` whose name/bounds come
-from the X11 window and whose `focus`/`click` raise it via
-`_NET_ACTIVE_WINDOW`. That is window identity, not a second a11y stack
-and not a screenshot. Unit-test the PID walk, WM_CLASS parse, and
-well-known-name keep/drop rules with synthetic fixtures; prove named
-`wait` / `focus` / `send-keys` on a live non-Chrome window.
+A custom-raster toolkit (winit/softbuffer `agenterm-con`) is not GTK and
+does not load `atk-bridge`, so the AT-SPI registry never sees it as an
+application. `cu tree --window` then used to emit only a one-node X11
+title `frame`. That fallback is window identity, not a widget tree: named
+`click`/`focus`/`send-text` cannot address the composer, SEND button, or
+session. Linux `agenterm-con` now publishes those children through the
+platform `a11y-publish` AT-SPI server (Accessible + Component + Action,
+registered with `Socket.Embed`). The one-node X11 frame remains only for
+toolkits that still do not register (`xfce4-terminal` without
+atk-bridge). Unit-test the published chrome snapshot without a bus;
+prove `tree --window` `n>=5` and named actuation on a live `DISPLAY`
+host. Do not treat the one-node frame as the success path for con.
+
+A single-host capability still may not reach product code as
+`#[cfg(target_os = ...)]`. The boundary suite scans `crates/agenterm-con/src`
+too, and the subsystem-entrypoint exemption covers only the windows-subsystem
+attribute, so an OS `cfg` in `main.rs` reddens the quality lane. Publish the
+facade unconditionally, let `selected.rs` pick a no-op backend off the host, and
+keep the heavyweight dependency edge in `[target.'cfg(...)'.dependencies]` --
+Cargo manifests are outside the scan and are the supported place to buy the real
+implementation on one target only. Give the facade a capability predicate
+(`is_publishing()`) so callers skip snapshot work without asking which OS they
+are on. This also removes the second failure mode of the `cfg` pair: the
+`#[cfg(not(...))]` stub method has no caller on that host, and `-D warnings`
+turns `dead_code` into a build error only on that one target cell.
 
 ## File existence is not writer completion
 
@@ -1134,3 +1161,15 @@ race a marker emitted from process-launch arguments against control discovery.
 After the control endpoint is ready, inject a marker through the public input
 interface and wait for that marker through the public observation interface;
 buffered PTY input then provides the rendezvous with actual child readiness.
+
+## A TCC card must not steal the Settings click
+
+macOS Accessibility onboarding (`AXIsProcessTrusted` / Settings
+`Privacy_Accessibility`) fails if the helper activates itself on a timer.
+`activateIgnoringOtherApps` or `makeKeyAndOrderFront` every poll makes System
+Settings lose key status, so the user cannot flip **AgentermCu**. Detect trust
+loss on a short poll, but: open the pane at most once per cooldown unless
+trust was revoked; skip reopen while Settings is frontmost; `orderFrontRegardless`
+the instruction card without becoming key; put the exact bundle name on a
+highlighted field. Prove the reopen policy with a clock + flags unit test, not
+a live Settings session.

@@ -17,6 +17,7 @@
 // keeping the child handle alive for the session lifetime.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod a11y;
 mod agent_interface;
 mod composer;
 mod control;
@@ -742,6 +743,12 @@ struct ConApp {
     frame_width: u32,
     frame_height: u32,
     frame_scale: f64,
+    // `None` on hosts whose accessibility backend discards snapshots, so the
+    // publish path costs nothing there. The platform crate owns that choice.
+    a11y: Option<agenterm_platform::accessibility_publish::AccessibilityPublisher>,
+    a11y_inbox: Arc<std::sync::Mutex<Vec<a11y::Request>>>,
+    a11y_dirty: bool,
+    current_window_title: String,
 }
 
 impl Drop for ConApp {
@@ -798,6 +805,10 @@ impl ConApp {
             frame_width: 0,
             frame_height: 0,
             frame_scale: 1.0,
+            a11y: None,
+            a11y_inbox: Arc::new(std::sync::Mutex::new(Vec::new())),
+            a11y_dirty: false,
+            current_window_title: String::from("agenterm-con"),
         }
     }
 
@@ -825,12 +836,15 @@ impl ConApp {
         })
     }
 
-    fn refresh_title(&self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+    fn refresh_title(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         let session = self.active_session()?;
         let id = self.workspace.active().ok_or_else(|| {
             PixelWindowError::failed("con_session_missing", "no active terminal session")
         })?;
-        window.set_title(&format!("{} [@{}]", session.current_title, id.get()));
+        let title = format!("{} [@{}]", session.current_title, id.get());
+        window.set_title(&title);
+        self.current_window_title = title;
+        self.mark_a11y_dirty();
         Ok(())
     }
 
@@ -880,8 +894,77 @@ impl ConApp {
         ui::Layout::with_sidebar_width(width, height, scale, self.sidebar_width_logical)
     }
 
+    fn mark_a11y_dirty(&mut self) {
+        self.a11y_dirty = true;
+    }
+
+    fn publish_a11y(&mut self, window: &PixelWindow) {
+        let Some(publisher) = self.a11y.as_ref() else {
+            return;
+        };
+        publisher.set_window_handle(window.native_identity());
+        if let Ok(metrics) = window.metrics()
+            && metrics.is_drawable()
+        {
+            self.frame_width = metrics.physical_width;
+            self.frame_height = metrics.physical_height;
+            self.frame_scale = metrics.scale_factor;
+        }
+        let width = self.frame_width.max(1);
+        let height = self.frame_height.max(1);
+        let layout = self.layout(width, height, self.frame_scale.max(1.0));
+        publisher.publish(a11y::tree(
+            "agenterm-con",
+            &self.current_window_title,
+            layout,
+            width,
+            height,
+            self.composer.focused,
+        ));
+        self.a11y_dirty = false;
+    }
+
+    fn drain_a11y_actions(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
+        let requests = {
+            let Ok(mut inbox) = self.a11y_inbox.lock() else {
+                return Ok(());
+            };
+            std::mem::take(&mut *inbox)
+        };
+        for request in requests {
+            match (request.node, request.action) {
+                (agenterm_platform::accessibility_publish::NODE_COMMAND, _) => {
+                    self.composer.focused = true;
+                    let _ = self.update_composer_ime_anchor(window);
+                    self.mark_composer_dirty();
+                }
+                (
+                    agenterm_platform::accessibility_publish::NODE_SEND,
+                    agenterm_platform::accessibility_publish::PublishedAction::Click,
+                ) => {
+                    self.submit_composer();
+                }
+                (
+                    agenterm_platform::accessibility_publish::NODE_SEND,
+                    agenterm_platform::accessibility_publish::PublishedAction::Focus,
+                )
+                | (agenterm_platform::accessibility_publish::NODE_SESSION, _) => {
+                    self.composer.focused = false;
+                    self.mark_composer_dirty();
+                }
+                (agenterm_platform::accessibility_publish::NODE_FRAME, _) => {
+                    window.focus();
+                }
+                _ => {}
+            }
+            self.mark_a11y_dirty();
+        }
+        Ok(())
+    }
+
     fn mark_chrome_full(&mut self) {
         self.chrome_dirty.mark_full();
+        self.mark_a11y_dirty();
     }
 
     fn mark_chrome_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
@@ -908,6 +991,7 @@ impl ConApp {
     }
 
     fn mark_composer_dirty(&mut self) {
+        self.mark_a11y_dirty();
         if self.frame_width == 0 || self.frame_height == 0 {
             self.mark_chrome_full();
             return;
@@ -3716,6 +3800,32 @@ impl PixelWindowApplication for ConApp {
             );
         }
         self.refresh_title(window)?;
+        match agenterm_platform::accessibility_publish::start(
+            "agenterm-con",
+            window.native_identity(),
+        ) {
+            // A backend that discards snapshots is dropped here, so the chrome
+            // tree is never built on hosts that cannot serve it.
+            Ok(publisher) if publisher.is_publishing() => {
+                let inbox = Arc::clone(&self.a11y_inbox);
+                let waker = window.waker();
+                publisher.set_handler(Arc::new(move |node, action| {
+                    if let Ok(mut queue) = inbox.lock() {
+                        queue.push(a11y::Request { node, action });
+                    }
+                    let _ = waker.wake();
+                }));
+                self.a11y = Some(publisher);
+                self.a11y_dirty = true;
+                self.publish_a11y(window);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = agenterm_platform::parent_console::write_stderr(&format!(
+                    "agenterm-con a11y: {error}\n"
+                ));
+            }
+        }
         Ok(directive)
     }
 
@@ -3728,6 +3838,7 @@ impl PixelWindowApplication for ConApp {
             return Ok(PixelWindowDirective::Exit);
         }
         if matches!(event, PixelWindowEvent::Wake) {
+            self.drain_a11y_actions(window)?;
             // PTY readers and the control server share the native wake path.
             // A flooded PTY continuously reposts Wake while bounded output
             // remains, so waiting until about_to_wait would starve control
@@ -4185,6 +4296,9 @@ impl PixelWindowApplication for ConApp {
         }
         if self.pending_control.has_pending_screenshot() {
             window.request_redraw();
+        }
+        if self.a11y_dirty {
+            self.publish_a11y(window);
         }
         let directive = self.active_session_mut()?.about_to_wait(window, now)?;
         Ok(match (directive, control_deadline) {

@@ -100,11 +100,20 @@ Canonical host mapping (approved product vocabulary):
   exact title / `WM_CLASS` / `comm` equality — not PID equality alone.
   Child walks read raw `(bus name, path)` pairs so well-known embed
   destinations (WebKit `org.webkit.app-*.Sandboxed.WebProcess-*`) are
-  not dropped by unique-name-only `ObjectRef` parsing. A toolkit that
-  never registered with AT-SPI still returns a one-node showing `frame`
-  from the X11 window title and bounds so named `wait` / `focus` /
-  `send-keys` can address that window; `focus`/`click` on that node
-  raise it. This is not a screenshot or coordinate substitute.
+  not dropped by unique-name-only `ObjectRef` parsing. The walker talks
+  to the a11y bus only (no atspi P2P handshake — that hangs WebKit/Wails
+  sockets), skips dests with no owner, maps empty WebKit `GetRoleName`
+  via `GetRole`, and snapshots Accessible name/role/state so a Reasonix
+  / MiniBrowser document tree exposes named inner widgets (buttons,
+  text, tabs). `agenterm-con` on
+  Linux registers as an AT-SPI toolkit (`a11y-publish`) and exposes the
+  painted chrome as children (tabs, session, Command input, SEND). A
+  toolkit that still never registered (stock `xfce4-terminal` without
+  atk-bridge) returns a one-node showing `frame` from the X11 window
+  title and bounds so named `wait` / `focus` / `send-keys` can address
+  that window; `focus`/`click` on that node raise it. The one-node frame
+  is not the success path for `agenterm-con` and is not a screenshot or
+  coordinate substitute.
 - [~] `click --node <path>` and `focus --node <path>` invoke AT-SPI `Action`
   / `Component::grab_focus` for the resolved node via `agt_a11y_node_perform`.
   A node-addressed click uses a named `click`/`press` when present, otherwise
