@@ -40,6 +40,9 @@ return typed `unsupported` / `failed` — never a silent coordinate fallback.
 
 On this Linux box, start Chrome with `scripts/box-chrome-a11y.sh` so
 `--force-renderer-accessibility` is always on (AT-SPI renderer subtree).
+`agenterm-con` registers as an AT-SPI toolkit and publishes inner chrome
+(`Command`, `SEND`, `Tabs`, `Session`); do not treat the one-node X11 title
+frame as its success path.
 
 Coordinate clicks remain available only with explicit `--degraded` and are
 audited separately from AT-SPI actuation.

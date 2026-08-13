@@ -21,6 +21,7 @@ use winit::{
     dpi::{LogicalPosition, LogicalSize as NativeLogicalSize},
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{CursorIcon, Window, WindowAttributes, WindowId},
 };
 
@@ -239,6 +240,21 @@ impl PixelWindowBackend for NativeWindowBackend {
             NativeLogicalSize::new(area.size.width, area.size.height),
         );
         Ok(())
+    }
+
+    fn native_identity(&self) -> Option<i64> {
+        native_pixel_window_identity(&self.window)
+    }
+}
+
+fn native_pixel_window_identity(window: &Window) -> Option<i64> {
+    let handle = window.window_handle().ok()?;
+    match handle.as_raw() {
+        RawWindowHandle::Xlib(handle) => i64::try_from(handle.window).ok(),
+        RawWindowHandle::Xcb(handle) => Some(i64::from(handle.window.get())),
+        RawWindowHandle::Wayland(handle) => Some(handle.surface.as_ptr() as isize as i64),
+        RawWindowHandle::AppKit(handle) => Some(handle.ns_view.as_ptr() as isize as i64),
+        _ => None,
     }
 }
 

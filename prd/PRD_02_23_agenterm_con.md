@@ -44,6 +44,8 @@ failure, resize storms, process exit, and interaction races.
   scrollbar, font zoom, IME, keyboard, mouse, wheel, resize, and DPI behavior.
 - A persistent external input area whose editing keys remain local while it is
   focused and whose explicit send action writes to the active terminal.
+- On Linux, a real AT-SPI child tree for that chrome (not only the X11
+  window-title frame) so `agenterm-cu` can address inner controls by name.
 - `agenterm-con cli` for tab listing/lifecycle, content capture, screenshots,
   text/paste/key/mouse/wheel input, deterministic waits, resize, performance
   evidence, and bounded shutdown.

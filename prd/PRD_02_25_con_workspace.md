@@ -41,6 +41,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] the local chrome owns a vertically scrollable left tree with row-level
   close targets and top `z`/`Z` font controls, plus a distinct bottom composer
   input and send action.
+- [~] Linux `agenterm-con` publishes that chrome as a real AT-SPI child tree
+  (`Tabs`, `Session`, `Command`, `SEND`) so `cu tree --window` is not the
+  one-node X11 title frame. winit/softbuffer has no atk-bridge; the process
+  registers itself. Inner `cu focus`/`click --name Command` (or `SEND`) uses
+  `addressing=accessibility-tree`. Windows/macOS publishers are not claimed.
 - [x] the default 15 logical-pixel terminal font corresponds to roughly 11.25 pt
   at 96 DPI and is no smaller than the tree labels.
 - [x] the host chrome defaults to high-contrast black/white/gray and the
