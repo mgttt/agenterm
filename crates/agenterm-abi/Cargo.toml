@@ -27,3 +27,6 @@ agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-
 # The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built
 # cdylib to prove the FFI contract (NUL-terminated C strings, §3.8 fence).
 libloading = "0.8"
+# c_consumer.rs uses cc::windows_registry::find_tool to locate the MSVC
+# toolchain without requiring vcvarsall to have been sourced into PATH.
+cc = "1.4"
