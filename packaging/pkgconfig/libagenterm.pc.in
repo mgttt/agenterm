@@ -1,0 +1,28 @@
+# libagenterm pkg-config template (milestone 42).
+#
+# Placeholders are substituted by the packaging script at install time (or
+# by hand — see packaging/pkgconfig/README.md):
+#   @PREFIX@      install prefix (e.g. /usr/local or a ~/.local prefix)
+#   @LIBDIR@      directory containing libagenterm.{a,so,dylib}
+#   @INCLUDEDIR@  directory containing agenterm.h
+#   @VERSION@     library version (the agenterm-abi crate version)
+#   @SYSTEM_LIBS@ per-platform system libraries a STATIC consumer must also
+#                 link; the measured per-platform values and their sources
+#                 are recorded in packaging/pkgconfig/README.md. The
+#                 anti-drift gate crates/agenterm-abi/tests/pkgconfig_libs.rs
+#                 asserts those values stay in sync with the lists the
+#                 c_static_link.rs link test actually uses.
+#
+# Standard pkg-config variables so ${prefix}/... composition works for
+# consumers that read libdir/includedir.
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: libagenterm
+Description: agenterm mechanism ABI (C boundary to OS terminal/window/process mechanisms)
+Version: @VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -lagenterm
+Libs.private: @SYSTEM_LIBS@

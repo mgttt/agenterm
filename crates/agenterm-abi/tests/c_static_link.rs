@@ -28,6 +28,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Shared per-platform system-library lists (single source of truth, also
+/// consumed by the milestone 42 pkg-config anti-drift gate). Integration
+/// tests are independent crates, so the module lives in `tests/common/`.
+mod common;
+
 /// Unique temp-dir suffix so parallel test processes never collide.
 static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -292,90 +297,43 @@ fn locate_staticlib() -> PathBuf {
 }
 
 /// The Rust runtime's system-library dependencies that a C program must
-/// supply when linking the staticlib. **Windows list is measured** (milestone
-/// 18): linked with no system libs, the MSVC linker reported exactly the
-/// symbols these six libraries resolve (ws2_32: Winsock2; ntdll: Nt* /
-/// RtlGetVersion; ole32: COM + drag-drop; user32: touch input; uxtheme:
-/// SetWindowTheme; dwmapi: DWM). kernel32 needs no explicit entry — MSVC
-/// links it by default. Linux list is measured by CI. **macOS list is
-/// CI-calibrated (milestones 21b + 21c)**: the first macOS CI run failed
-/// with unresolved `_CF*` / CG / NS symbols pulled in via winit / core-*, so
-/// the C side must add the Apple frameworks (`-framework` flags, see the
-/// branch below) on top of the Unix `-ldl -lpthread -lm`. Round two (21c)
-/// added Carbon for the last three winit `get_modifierless_char` Text Input
-/// Services symbols. It is deliberately *not* verified locally — it awaits
-/// the next CI run to confirm, and further unresolved symbols get added the
-/// same way.
-fn system_libs(msvc: bool) -> Vec<&'static str> {
+/// supply when linking the staticlib. The per-platform lists are the shared
+/// `common::system_libs` constants — the single source of truth also
+/// consumed by the milestone 42 pkg-config anti-drift gate
+/// (`pkgconfig_libs.rs` compares the README record against exactly these),
+/// so the documented set can never silently drift from the linked set.
+/// **Windows list is measured** (milestone 18): linked with no system libs,
+/// the MSVC linker reported exactly the symbols these six libraries resolve
+/// (ws2_32: Winsock2; ntdll: Nt* / RtlGetVersion; ole32: COM + drag-drop;
+/// user32: touch input; uxtheme: SetWindowTheme; dwmapi: DWM). kernel32
+/// needs no explicit entry — MSVC links it by default. Linux list is
+/// measured by CI. **macOS list is CI-calibrated (milestones 21b + 21c)** —
+/// the detailed symbol record lives next to the constants in
+/// `tests/common/mod.rs`. It is deliberately *not* verified locally — it
+/// awaits the next CI run to confirm, and further unresolved symbols get
+/// added the same way.
+fn system_libs(msvc: bool) -> Vec<String> {
     if msvc {
-        vec![
-            "ws2_32.lib",
-            "ntdll.lib",
-            "ole32.lib",
-            "user32.lib",
-            "uxtheme.lib",
-            "dwmapi.lib",
-        ]
+        // MSVC link args resolve system libs by file name against the LIB
+        // search path; pkg-config form stores bare names, so append `.lib`.
+        common::system_libs::MSVC
+            .iter()
+            .map(|name| format!("{name}.lib"))
+            .collect()
     } else {
         #[cfg(target_os = "linux")]
         {
-            vec!["-ldl", "-lpthread", "-lm"]
+            common::system_libs::LINUX
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
         }
         #[cfg(target_os = "macos")]
         {
-            // macOS: first-CI-calibrated initial set (milestone 21b). Rust
-            // staticlib statically linked into a C program pulls in the
-            // Apple frameworks through winit / core-*; the first macOS CI
-            // run's linker errors named these symbols:
-            //   CoreFoundation: _CF* 一族 —— _CFAbsoluteTimeGetCurrent
-            //     (winit EventLoopWaker::start_at), _CFArrayGetCount /
-            //     _CFArrayGetValueAtIndex (agenterm_platform search_windows,
-            //     winit MonitorHandle::video_modes, core_graphics
-            //     CFArray::len), _CFAttributedStringCreateMutable
-            //     (core_foundation), _CFBundleCopyBundleURL /
-            //     _CFBundleCopyExecutableURL /
-            //     _CFBundleCopyPrivateFrameworksURL /
-            //     _CFBundleCopyResourcesDirectoryURL;
-            //   CoreGraphics: the core_graphics adapter (CG* display /
-            //     window geometry symbols);
-            //   AppKit + Foundation: winit platform_impl::macos (NS*
-            //     application / run-loop symbols);
-            //   QuartzCore + Metal + IOKit: winit's macOS backend commonly
-            //     pulls these in too — extra frameworks never fail the link,
-            //     missing ones do, so they are listed preemptively.
-            //   Carbon (round two, milestone 21c): the second macOS CI run
-            //     was down to exactly three unresolved symbols, all from
-            //     winit::platform_impl::macos::event::get_modifierless_char:
-            //     _LMGetKbdType (HIToolbox legacy Menu Manager compat) and
-            //     _TISCopyCurrentKeyboardLayoutInputSource /
-            //     _TISGetInputSourceProperty (Text Input Sources) — all
-            //     provided by the Carbon framework.
-            // `-framework X` is TWO separate arguments (`-framework`, then
-            // the name) — never `-framework=X`. The Unix `-ldl -lpthread
-            // -lm` are harmless on macOS and kept for the shared runtime
-            // deps. Still a CI-calibrated set: if the next CI run reports
-            // more unresolved symbols, add exactly those frameworks.
-            vec![
-                "-framework",
-                "CoreFoundation",
-                "-framework",
-                "CoreGraphics",
-                "-framework",
-                "AppKit",
-                "-framework",
-                "Foundation",
-                "-framework",
-                "QuartzCore",
-                "-framework",
-                "Metal",
-                "-framework",
-                "IOKit",
-                "-framework",
-                "Carbon",
-                "-ldl",
-                "-lpthread",
-                "-lm",
-            ]
+            common::system_libs::MACOS
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
         }
         // Non-MSVC Windows (mingw gcc/clang) cannot link an MSVC-target
         // staticlib anyway (incompatible COFF/object format), so no list is
@@ -383,7 +341,7 @@ fn system_libs(msvc: bool) -> Vec<&'static str> {
         // result for a mismatched toolchain.
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
-            vec![]
+            Vec::new()
         }
     }
 }
