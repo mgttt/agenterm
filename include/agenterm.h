@@ -64,7 +64,8 @@ typedef enum {
     AGT_CAP_PARENT_CONSOLE
 } agt_capability;
 
-/* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). */
+/* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
+ * milestone 3a, AGT_CAP_PTY and AGT_CAP_WINDOW_HOST both report AGT_OK. */
 agt_status agt_capability_query(agt_capability cap);
 
 /* --- pty ------------------------------------------------------------ */
@@ -113,6 +114,93 @@ agt_status agt_pty_wait  (agt_pty_t, uint32_t timeout_ms, int32_t* exit_code);
 /* Release the handle; must be called exactly once. Unblocks any thread
  * currently blocked in agt_pty_read on the same handle. */
 void       agt_pty_close (agt_pty_t);
+
+/* --- window & frame (milestone 3a) ---------------------------------- */
+
+typedef struct agt_window* agt_window_t;
+
+/* Window events. Milestone 3a translates exactly these four; every other
+ * platform event (keyboard / pointer / wheel / IME) is deliberately dropped
+ * and arrives in milestone 3b. */
+typedef enum {
+    AGT_EV_NONE = 0,
+    AGT_EV_CLOSE_REQUEST = 1, /* the native window requested close */
+    AGT_EV_GEOMETRY      = 2, /* width/height/scale valid */
+    AGT_EV_FOCUS         = 3, /* focused valid */
+    AGT_EV_RENDER_DUE    = 4  /* render() has stopped at the rendezvous */
+} agt_event_kind;
+
+typedef struct {
+    uint32_t kind;
+    uint64_t generation;
+    uint32_t width, height; /* only valid for AGT_EV_GEOMETRY */
+    double   scale;         /* only valid for AGT_EV_GEOMETRY */
+    int32_t  focused;       /* only valid for AGT_EV_FOCUS */
+} agt_event;
+
+typedef struct {
+    const char* title;       /* required, NUL-terminated, UTF-8 */
+    uint32_t width, height;  /* initial logical size, each >= 1 */
+    int32_t no_activate;     /* non-zero: do not take foreground focus */
+    int32_t ime_allowed;     /* non-zero: allow IME input */
+} agt_window_spec;
+
+/* Frame descriptor filled by agt_frame_begin. The `pixels` pointer is valid
+ * ONLY between a successful agt_frame_begin and the matching
+ * agt_frame_commit; it must never be stored or dereferenced past that
+ * window. XRGB buffers are tightly packed (stride_px == width). */
+typedef struct {
+    uint32_t* pixels;
+    uint32_t width, height;
+    uint32_t stride_px;
+} agt_frame_desc;
+
+/* Open a native pixel window. The window event loop runs on a
+ * library-private thread; events and frames rendezvous back through
+ * agt_window_poll_event / agt_frame_begin. The returned handle belongs to
+ * the calling thread (the loop thread never touches it). On a host without
+ * the pixel-window mechanism this returns AGT_UNSUPPORTED; any other
+ * failure is AGT_FAILED. */
+agt_status agt_window_open           (const agt_window_spec*, agt_window_t* out);
+
+/* Pop the next event into *out, waiting up to timeout_ms. Timeout returns
+ * AGT_FAILED with code "timeout"; a closed window with an empty queue
+ * returns AGT_FAILED with code "closed". */
+agt_status agt_window_poll_event     (agt_window_t, agt_event* out, uint32_t timeout_ms);
+
+/* Ask the loop thread to schedule a redraw. The next render() publishes a
+ * fresh frame for agt_frame_begin. */
+agt_status agt_window_request_redraw (agt_window_t);
+
+/* Rendezvous half of the frame protocol: wait (up to timeout_ms) for the
+ * loop thread's render() to publish a frame, then fill *out. Timeout
+ * returns AGT_FAILED with code "timeout" (never AGT_UNSUPPORTED); calling
+ * again while a previous frame is un-committed returns AGT_FAILED with code
+ * "frame_pending". */
+agt_status agt_frame_begin           (agt_window_t, agt_frame_desc* out, uint32_t timeout_ms);
+
+/* Release the pending frame exactly once per frame: wake the loop thread so
+ * it presents the pixels the caller wrote. Without a pending frame returns
+ * AGT_FAILED with code "no_frame". */
+agt_status agt_frame_commit          (agt_window_t);
+
+/* Last known window geometry (physical pixels + scale factor). Before the
+ * first geometry event / render this returns AGT_FAILED with code
+ * "no_geometry". */
+agt_status agt_window_metrics        (agt_window_t, uint32_t* w, uint32_t* h, double* scale);
+
+/* Close the window and release the handle; must be called exactly once.
+ * Wakes any caller blocked in agt_frame_begin / agt_window_poll_event and
+ * lets the loop thread escape its rendezvous wait even if a taken frame was
+ * never committed, so close never hangs. */
+void       agt_window_close         (agt_window_t);
+
+/* --- known platform limitation -------------------------------------- */
+
+/* The library-private window-loop thread model is validated on Windows only
+ * (the message pump belongs to the creating thread). macOS requires the
+ * window/event loop on the main thread; a main-thread host for macOS is left
+ * for a later milestone. */
 
 #ifdef __cplusplus
 } /* extern "C" */

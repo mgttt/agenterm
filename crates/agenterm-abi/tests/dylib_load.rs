@@ -40,7 +40,9 @@ const AGT_OK: i32 = 0;
 const AGT_UNSUPPORTED: i32 = 1;
 const AGT_FAILED: i32 = 2;
 const AGT_CAP_PTY: i32 = 1;
+const AGT_CAP_WINDOW_HOST: i32 = 4;
 const AGT_CAP_SCREENSHOT: i32 = 7;
+const AGT_EV_RENDER_DUE: u32 = 4;
 const EXPECTED_BUILD_ID: &str = "0.1.16+abi.1";
 const PROBE: &[u8] = b"agenterm-abi-probe";
 
@@ -191,6 +193,8 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     let f: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
     // Milestone 2 ships the PTY mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_PTY) }, AGT_OK);
+    // Milestone 3a ships the window host mechanism → AGT_OK.
+    assert_eq!(unsafe { f(AGT_CAP_WINDOW_HOST) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
     assert_eq!(unsafe { f(AGT_CAP_SCREENSHOT) }, AGT_UNSUPPORTED);
 }
@@ -359,4 +363,404 @@ fn pty_close_unblocks_a_reader_on_another_thread() {
         AGT_FAILED => { /* io_read_failed is an acceptable unblock path */ }
         other => panic!("unexpected status {other}"),
     }
+}
+
+// --- milestone 3a: window lifecycle + frame rendezvous ------------------
+
+/// C-compatible mirror of include/agenterm.h `agt_window_spec`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+struct agt_window_spec {
+    title: *const c_char,
+    width: u32,
+    height: u32,
+    no_activate: i32,
+    ime_allowed: i32,
+}
+
+/// C-compatible mirror of include/agenterm.h `agt_frame_desc`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+struct agt_frame_desc {
+    pixels: *mut u32,
+    width: u32,
+    height: u32,
+    stride_px: u32,
+}
+
+/// C-compatible mirror of include/agenterm.h `agt_event`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+struct agt_event {
+    kind: u32,
+    generation: u64,
+    width: u32,
+    height: u32,
+    scale: f64,
+    focused: i32,
+}
+
+type WindowOpen = unsafe extern "C" fn(*const agt_window_spec, *mut *mut std::ffi::c_void) -> i32;
+type WindowPoll = unsafe extern "C" fn(*mut std::ffi::c_void, *mut agt_event, u32) -> i32;
+type WindowRedraw = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
+type FrameBegin = unsafe extern "C" fn(*mut std::ffi::c_void, *mut agt_frame_desc, u32) -> i32;
+type FrameCommit = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
+type WindowMetrics =
+    unsafe extern "C" fn(*mut std::ffi::c_void, *mut u32, *mut u32, *mut f64) -> i32;
+type WindowClose = unsafe extern "C" fn(*mut std::ffi::c_void);
+
+/// Open a probe window (320x200, no_activate, ime off). On a headless host
+/// where the window host is unavailable the library returns AGT_UNSUPPORTED:
+/// that is an explicit allowed skip (printed) — every other failure must go
+/// red.
+fn try_open_window(lib: &Library, open: &Symbol<WindowOpen>) -> Option<*mut std::ffi::c_void> {
+    let title = CString::new("agenterm-abi-window-probe").expect("title has no NUL");
+    let spec = agt_window_spec {
+        title: title.as_ptr(),
+        width: 320,
+        height: 200,
+        no_activate: 1,
+        ime_allowed: 0,
+    };
+    let mut window: *mut std::ffi::c_void = std::ptr::null_mut();
+    let st = unsafe { open(&spec, &mut window) };
+    match st {
+        AGT_OK => {
+            assert!(!window.is_null(), "agt_window_open returned a null handle");
+            Some(window)
+        }
+        AGT_UNSUPPORTED => {
+            eprintln!(
+                "SKIP (headless host): agt_window_open unsupported: {}",
+                last_error_message(lib)
+            );
+            None
+        }
+        other => panic!(
+            "agt_window_open failed with {other}: {}",
+            last_error_message(lib)
+        ),
+    }
+}
+
+/// Evidence 1: open → frame_begin returns a non-null pixel buffer with
+/// width*height > 0 → write a known color → frame_commit → close cleanly.
+#[test]
+fn window_frame_roundtrip_begin_write_commit_close() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
+    let metrics: Symbol<WindowMetrics> = unsafe { sym(&lib, b"agt_window_metrics") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    let mut desc = agt_frame_desc {
+        pixels: std::ptr::null_mut(),
+        width: 0,
+        height: 0,
+        stride_px: 0,
+    };
+    let st = unsafe { begin(window, &mut desc, 10_000) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_frame_begin failed: {}",
+        last_error_message(&lib)
+    );
+    assert!(!desc.pixels.is_null(), "frame pixel pointer is null");
+    assert!(
+        desc.width > 0 && desc.height > 0,
+        "expected non-empty frame, got {}x{}",
+        desc.width,
+        desc.height
+    );
+
+    // Write a known color into the whole visible area (row-major by stride).
+    const COLOR: u32 = 0x0012_3456;
+    for row in 0..desc.height {
+        let base = (row as usize) * (desc.stride_px as usize);
+        for col in 0..desc.width {
+            unsafe {
+                *desc.pixels.add(base + col as usize) = COLOR;
+            }
+        }
+    }
+    let st = unsafe { commit(window) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_frame_commit failed: {}",
+        last_error_message(&lib)
+    );
+
+    // After open the loop thread has recorded geometry: metrics must work.
+    let mut w = 0u32;
+    let mut h = 0u32;
+    let mut scale = 0.0f64;
+    let st = unsafe { metrics(window, &mut w, &mut h, &mut scale) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_window_metrics failed: {}",
+        last_error_message(&lib)
+    );
+    assert!(
+        w > 0 && h > 0 && scale > 0.0,
+        "bad metrics {w}x{h} scale={scale}"
+    );
+
+    unsafe { close(window) };
+}
+
+/// Evidence 2: committing with no pending frame returns
+/// AGT_FAILED { code = "no_frame" }.
+#[test]
+fn frame_commit_without_pending_frame_returns_no_frame() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    // Never called agt_frame_begin → no pending (held) frame.
+    let st = unsafe { commit(window) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "expected AGT_FAILED for commit without a pending frame, got {st}"
+    );
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("no_frame"),
+        "expected code \"no_frame\" in error, got: {msg}"
+    );
+
+    unsafe { close(window) };
+}
+
+/// Evidence 3: `agt_frame_begin` with a tiny timeout and no frame returns
+/// AGT_FAILED { code = "timeout" } without hanging. The window's first frame
+/// may already be published (opened() schedules a redraw), so consume up to a
+/// few such frames first; with no further redraw requests and stable geometry
+/// the platform stops rendering and begin must time out.
+#[test]
+fn frame_begin_times_out_when_no_frame_is_available() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    for _ in 0..3 {
+        let mut desc = agt_frame_desc {
+            pixels: std::ptr::null_mut(),
+            width: 0,
+            height: 0,
+            stride_px: 0,
+        };
+        match unsafe { begin(window, &mut desc, 0) } {
+            AGT_OK => {
+                // A frame was available (opening render / geometry render):
+                // release it and try again — the next begin must time out.
+                assert_eq!(
+                    unsafe { commit(window) },
+                    AGT_OK,
+                    "agt_frame_commit failed: {}",
+                    last_error_message(&lib)
+                );
+            }
+            st => {
+                assert_eq!(
+                    st, AGT_FAILED,
+                    "expected AGT_FAILED from a frameless begin, got {st}"
+                );
+                let msg = last_error_message(&lib);
+                assert!(
+                    msg.contains("timeout"),
+                    "expected code \"timeout\" in error, got: {msg}"
+                );
+                unsafe { close(window) };
+                return;
+            }
+        }
+    }
+    panic!(
+        "platform kept rendering without redraw requests; cannot construct \
+         the no-frame timeout scenario"
+    );
+}
+
+/// Evidence 4 (design rule 6 regression): taking a frame and never committing
+/// it must still allow `agt_window_close` to finish cleanly — the loop thread
+/// escapes its rendezvous wait and the process does not hang.
+#[test]
+fn close_without_committing_taken_frame_does_not_hang() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    // Take a frame (waiting long enough for the first published frame) and
+    // deliberately never commit it — the caller breaches the protocol.
+    let mut desc = agt_frame_desc {
+        pixels: std::ptr::null_mut(),
+        width: 0,
+        height: 0,
+        stride_px: 0,
+    };
+    let st = unsafe { begin(window, &mut desc, 10_000) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_frame_begin failed: {}",
+        last_error_message(&lib)
+    );
+    assert!(!desc.pixels.is_null());
+
+    // Close must still be able to finish: wake the rendezvous, let the loop
+    // thread exit. If close blocked, this assertion would trip.
+    let started = Instant::now();
+    unsafe { close(window) };
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "agt_window_close blocked on an un-committed frame"
+    );
+    // Give the detached loop thread a moment to actually tear down.
+    std::thread::sleep(Duration::from_millis(200));
+}
+
+/// Design rule 6 (close must wake a caller blocked in agt_frame_begin): a
+/// waiter on another thread is unblocked with AGT_FAILED { code = "closed" }
+/// when agt_window_close runs. Uses a second window state (first frame
+/// consumed, no further redraws) so the waiter genuinely blocks.
+#[test]
+fn close_wakes_a_caller_blocked_in_frame_begin() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    // Consume the first published frame and commit it. No redraw request
+    // follows, so the platform will not render again: the waiter below blocks.
+    let mut desc = agt_frame_desc {
+        pixels: std::ptr::null_mut(),
+        width: 0,
+        height: 0,
+        stride_px: 0,
+    };
+    let st = unsafe { begin(window, &mut desc, 10_000) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_frame_begin failed: {}",
+        last_error_message(&lib)
+    );
+    let st = unsafe { commit(window) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_frame_commit failed: {}",
+        last_error_message(&lib)
+    );
+
+    // Waiter thread blocks in agt_frame_begin(10 s). `*mut c_void` is not
+    // Send, so carry the opaque handle as usize and cast it back inside.
+    let (tx, rx) = mpsc::channel::<(i32, String)>();
+    let waiter_window = window as usize;
+    let waiter = std::thread::spawn(move || {
+        let window = waiter_window as *mut std::ffi::c_void;
+        let lib = load();
+        let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
+        let mut desc = agt_frame_desc {
+            pixels: std::ptr::null_mut(),
+            width: 0,
+            height: 0,
+            stride_px: 0,
+        };
+        let st = unsafe { begin(window, &mut desc, 10_000) };
+        let msg = last_error_message(&lib);
+        let _ = tx.send((st, msg));
+    });
+
+    // Give the waiter time to enter the blocking begin, then close from here.
+    std::thread::sleep(Duration::from_millis(300));
+    unsafe { close(window) };
+
+    let (st, msg) = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("frame_begin waiter was NOT woken by agt_window_close");
+    waiter.join().expect("waiter thread panicked");
+    assert_eq!(
+        st, AGT_FAILED,
+        "expected the blocked agt_frame_begin to fail, got {st}"
+    );
+    assert!(
+        msg.contains("closed"),
+        "expected code \"closed\" in error, got: {msg}"
+    );
+}
+
+/// `agt_window_request_redraw` + `agt_window_poll_event` round trip: after a
+/// redraw request the loop publishes a frame and a RENDER_DUE event arrives
+/// (opened() already scheduled the first redraw, so the first RENDER_DUE is
+/// already in the queue; the explicit request is belt-and-braces).
+#[test]
+fn request_redraw_produces_a_render_due_event() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let redraw: Symbol<WindowRedraw> = unsafe { sym(&lib, b"agt_window_request_redraw") };
+    let poll: Symbol<WindowPoll> = unsafe { sym(&lib, b"agt_window_poll_event") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    let st = unsafe { redraw(window) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_window_request_redraw failed: {}",
+        last_error_message(&lib)
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(Instant::now() < deadline, "no RENDER_DUE event within 10 s");
+        let mut ev = agt_event {
+            kind: 0,
+            generation: 0,
+            width: 0,
+            height: 0,
+            scale: 0.0,
+            focused: 0,
+        };
+        let st = unsafe { poll(window, &mut ev, 5000) };
+        assert_eq!(
+            st,
+            AGT_OK,
+            "agt_window_poll_event failed: {}",
+            last_error_message(&lib)
+        );
+        if ev.kind == AGT_EV_RENDER_DUE {
+            break;
+        }
+    }
+    unsafe { close(window) };
 }

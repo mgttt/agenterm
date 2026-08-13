@@ -14,8 +14,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # The PTY mechanism (milestone 2). `pty` is a real feature: without it the
-# whole `agenterm_platform::pty` module does not exist.
-agenterm-platform = { path = "../agenterm-platform", features = ["pty"] }
+# whole `agenterm_platform::pty` module does not exist. `native-pixel-window`
+# (milestone 3a) gates the `window_host` blocking callback loop, which in
+# turn requires the `input` + `ime` features (its contract re-exports their
+# types).
+agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "input", "ime"] }
 
 [dev-dependencies]
 # The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built

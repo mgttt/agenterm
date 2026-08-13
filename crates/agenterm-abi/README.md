@@ -3,6 +3,11 @@
 C ABI 导出壳：嵌入方（agenterm / agenterm-con / agenterm-cu）与 OS 之间的
 **机制**边界。仅导出 `exports.txt` 中的 `agt_*` 符号，不含产品概念。
 
+里程碑：1 = 版本/错误/能力；2 = PTY（`agt_pty_*`）；3a = 窗口生命周期与
+帧会合（`agt_window_open/poll_event/request_redraw/metrics/close` +
+`agt_frame_begin/commit`）。事件翻译在 3a 只做 4 种（close / geometry /
+focus / render_due），键盘/指针/滚轮/IME 留给 3b。
+
 ## 构建（必须用 unwind profile）
 
 规格 §3.8：panic 不得穿过 FFI 边界——每个导出都包了 `catch_unwind`，
@@ -31,3 +36,9 @@ cargo fmt --all -- --check
 - `tests/dylib_load.rs`：用 `libloading` 加载真实 cdylib，调用 4 个导出并断言
   返回的 `const char*` 均为合法 NUL 结尾 C 字符串（缺陷回归闸）。找不到
   cdylib 时该测试直接失败（先执行上面的 build 命令）。
+
+## 已知平台限制
+
+窗口循环线程模型（库内私有线程跑 `run_pixel_window`）目前只在 **Windows**
+验证（消息泵归创建线程）。**macOS** 的 AppKit 要求窗口/事件循环在主线程，
+需主线程宿主，留待后续里程碑。`include/agenterm.h` 亦写明此限制。

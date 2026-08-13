@@ -8,3 +8,10 @@ agt_pty_write
 agt_pty_resize
 agt_pty_wait
 agt_pty_close
+agt_window_open
+agt_window_poll_event
+agt_window_request_redraw
+agt_frame_begin
+agt_frame_commit
+agt_window_metrics
+agt_window_close
