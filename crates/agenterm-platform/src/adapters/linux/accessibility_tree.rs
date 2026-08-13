@@ -234,6 +234,43 @@ fn dbus_address_from_process(process_name: &str) -> Option<String> {
     None
 }
 
+fn is_usable_object_ref(object_ref: &ObjectRefOwned) -> bool {
+    !object_ref.is_null()
+}
+
+async fn child_at_index_skip_null(
+    proxy: &AccessibleProxy<'_>,
+    index: i32,
+) -> Result<Option<ObjectRefOwned>, AccessibilityTreeError> {
+    match proxy.get_child_at_index(index).await {
+        Ok(child) if child.is_null() => Ok(None),
+        Ok(child) => Ok(Some(child)),
+        Err(_) => Ok(None),
+    }
+}
+
+async fn child_at_logical_index(
+    proxy: &AccessibleProxy<'_>,
+    logical_index: usize,
+) -> Result<ObjectRefOwned, AccessibilityTreeError> {
+    let child_count = proxy.child_count().await.map_err(map_atspi_err)?;
+    let count = usize::try_from(child_count).unwrap_or(0);
+    let mut seen = 0usize;
+    for index in 0..count {
+        let Some(child) = child_at_index_skip_null(proxy, index as i32).await? else {
+            continue;
+        };
+        if seen == logical_index {
+            return Ok(child);
+        }
+        seen += 1;
+    }
+    Err(AccessibilityTreeError::failed(
+        "a11y_node_not_found",
+        format!("child index {logical_index} is unavailable"),
+    ))
+}
+
 async fn registry_children(
     conn: &AccessibilityConnection,
 ) -> Result<Vec<ObjectRefOwned>, AccessibilityTreeError> {
@@ -245,7 +282,7 @@ async fn registry_children(
     let limit = usize::try_from(child_count).unwrap_or(0).min(256);
     let mut children = Vec::new();
     for index in 0..limit {
-        if let Ok(child) = root.get_child_at_index(index as i32).await {
+        if let Ok(Some(child)) = child_at_index_skip_null(&root, index as i32).await {
             children.push(child);
         }
     }
@@ -298,16 +335,7 @@ async fn resolve_path(
     let mut current = object_ref;
     for &child_index in rest {
         let proxy = open_accessible(conn, &current).await?;
-        let child = proxy
-            .get_child_at_index(child_index as i32)
-            .await
-            .map_err(|error| {
-                AccessibilityTreeError::failed(
-                    "a11y_node_not_found",
-                    format!("child index {child_index} is unavailable: {error}"),
-                )
-            })?;
-        current = child;
+        current = child_at_logical_index(&proxy, child_index).await?;
     }
     Ok(current)
 }
@@ -327,10 +355,13 @@ async fn children_up_to(
     limit: usize,
 ) -> Result<Vec<ObjectRefOwned>, AccessibilityTreeError> {
     let child_count = proxy.child_count().await.map_err(map_atspi_err)?;
-    let count = usize::try_from(child_count).unwrap_or(0).min(limit);
+    let count = usize::try_from(child_count).unwrap_or(0);
     let mut children = Vec::new();
     for index in 0..count {
-        if let Ok(child) = proxy.get_child_at_index(index as i32).await {
+        if children.len() >= limit {
+            break;
+        }
+        if let Some(child) = child_at_index_skip_null(proxy, index as i32).await? {
             children.push(child);
         }
     }
@@ -549,6 +580,15 @@ mod tests {
         assert_eq!(parse_node_path("/0").unwrap(), vec![0]);
         assert_eq!(parse_node_path("/0/2/5").unwrap(), vec![0, 2, 5]);
         assert!(parse_node_path("0/2").is_err());
+    }
+
+    #[test]
+    fn null_atspi_object_refs_are_not_usable() {
+        assert!(!is_usable_object_ref(&ObjectRefOwned::default()));
+        assert!(is_usable_object_ref(&ObjectRefOwned::from_static_str_unchecked(
+            ":1.1",
+            "/org/a11y/atspi/accessible/1"
+        )));
     }
 
     #[test]
