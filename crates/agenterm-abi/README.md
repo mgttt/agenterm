@@ -156,23 +156,48 @@ CI 与本机并列处均已标注，两者差异属 MSVC 版本不同，如实�
 `agenterm.dll` = 878,080 B；`abi-release` 基线 400,896 B 见
 `plan/phase0-baseline-measurements.md`）。
 
-**静态库的符号面远大于动态库（里程碑 36 实测）**：选静态还是动态，除了体积
-（上表）还应看符号面——这是**只有静态链接才有的风险**，不试看不出来。Windows
-`abi-release` 实测（`dumpbin /EXPORTS` 与 `dumpbin /SYMBOLS`）：
+**静态库的符号面远大于动态库（里程碑 36 实测，里程碑 39 三平台实测）**：
+选静态还是动态，除了体积（上表）还应看符号面——这是**只有静态链接才有的
+风险**，不试看不出来。修好测量仪器后的三平台实测（CI run 31692909368，
+三平台全绿；数字照实测，未重算）：
 
-| 形态 | 符号面 |
-|------|--------|
-| 动态库 `agenterm.dll` | 导出符号 **41** 个——全部是 `agt_*`，零泄漏 |
-| 静态库 `agenterm.lib` | 外部符号 **7,247** 个：`agt_*` 41 / Rust mangled（`_R*`）5,329 / 其余（std/core/运行时/编译器内建）约 1,877 |
+| 平台 | 动态库导出 | 其中 `agt_*` | 静态归档外部符号 | 其中 `agt_*` | Rust mangled |
+|------|-----------|-------------|-----------------|-------------|--------------|
+| Windows (`dumpbin`) | **41** | 41 | **7,247** | 41 | 5,329 |
+| Linux (`nm -D`) | **41** | 41 | **44,377** | 41 | 43,964 |
+| macOS (`nm -gU`) | **45** | 41 | **5,897** | 统计口径待修（见下） | 5,568 |
 
-动态库只暴露 41 个 ABI 符号；静态库把整个 Rust std/core/platform 符号面
-（7,247 个）暴露给链接它的人。后果与缓解：
+**结论一句话**：动态库在 Windows/Linux 上导出的**就是那 41 个 ABI 符号**，
+macOS 多 4 个 ObjC 类注册符号（结构性必需）；**静态归档三平台都暴露上千到
+四万多个符号**。
+
+macOS 动态库多出的 4 个符号（已查明，不是泄漏）：
+
+```
+___CLASS_SoftbufferObserver
+___DROP_FLAG_OFFSET_SoftbufferObserver
+___IVAR_OFFSET_SoftbufferObserver
+___REGISTER_CLASS_SoftbufferObserver
+```
+
+这是 **`softbuffer` crate 在 macOS 上注册 Objective-C 类**所需的运行时符号
+（ObjC 运行时要靠它们注册类），**属于结构性必需，不是泄漏**。
+
+> **macOS 归档统计口径待修（如实写，不要掩盖）**：那格 `agt_*` 数成 **0**——
+> 同样的 grep 在 dylib 上能数出 41，说明是 `nm -gU` 对**归档**的输出格式
+> 问题，不是真的没有符号。**非零但未准确计数**，不要当 0 引用。
+
+动态库只暴露 41 个 ABI 符号（macOS 45 个，多出的 4 个是上述结构性 ObjC 类
+注册符号）；静态库把整个 Rust std/core/platform 符号面暴露给链接它的人。
+后果与缓解：
 
 - 消费者若**同时链接另一个 Rust staticlib**（另一个 Rust 写的库），两个归档
   会各带一份 std/core 符号 → **重复符号冲突**；
+- **Linux 归档 44,377 个符号是 Windows 的 6 倍**，在 Linux 上与其它 Rust
+  静态库共存的风险相应更高；
 - Rust 的 mangled 名带 crate 哈希（如 `Cs4ADFETM7JMv_8agenterm`）能降低但
   **不能消除**冲突——同一 rustc 版本编出的 std 符号是一样的；
-- 动态库完全没有这个问题（只导出 41 个）。
+- 动态库完全没有这个问题（Windows/Linux 只导出 41 个）。
 
 **建议（陈述事实与选项）**：
 
@@ -180,8 +205,9 @@ CI 与本机并列处均已标注，两者差异属 MSVC 版本不同，如实�
   （`c_static_link.rs`）就是这种情形，实测通过；
 - 需要与其它 Rust 库共存时，**动态库是更安全的形态**。
 
-> **测量口径**：`dumpbin /EXPORTS` 与 `dumpbin /SYMBOLS`，Windows
-> `abi-release`；**Unix 的 `nm` 数字本轮未测**，不要引用。
+> **测量口径与来源**：Windows 本机 `dumpbin`（`/EXPORTS` 与 `/SYMBOLS`），
+> Linux `nm -D`，macOS `nm -gU`；Linux/macOS 为 CI run 31692909368 实测
+> （三平台全绿），Windows 为本机实测。
 
 ## `allow-abort-profile` feature（逃生舱，默认关闭）
 
