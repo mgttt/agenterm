@@ -87,7 +87,11 @@ typedef enum {
  * milestone 9, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT,
  * AGT_CAP_PROCESS_OBSERVE, AGT_CAP_CLIPBOARD and AGT_CAP_PARENT_CONSOLE all
  * report AGT_OK; AGT_CAP_ACCESSIBILITY_TREE reports AGT_OK when the host
- * accessibility stack is wired. */
+ * accessibility stack is wired. Platform exception (milestone 22):
+ * AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED on macOS, mirroring
+ * agt_window_open - AppKit requires the window event loop on the main
+ * thread, and this ABI hosts it on a library-private thread, so the window
+ * host mechanism does not exist on macOS. */
 agt_status agt_capability_query(agt_capability cap);
 
 /* --- pty ------------------------------------------------------------ */
@@ -222,7 +226,14 @@ typedef struct {
  * agt_window_poll_event / agt_frame_begin. The returned handle belongs to
  * the calling thread (the loop thread never touches it). On a host without
  * the pixel-window mechanism this returns AGT_UNSUPPORTED; any other
- * failure is AGT_FAILED. */
+ * failure is AGT_FAILED.
+ *
+ * Contract (milestone 22): on macOS this always returns AGT_UNSUPPORTED
+ * with code "unsupported_platform" - AppKit requires the window/event loop
+ * on the main thread, while this ABI hosts it on a library-private thread.
+ * No thread is started and no retry can ever succeed, so treat the status
+ * as permanent, not transient. AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED
+ * on macOS for the same reason. */
 agt_status agt_window_open           (const agt_window_spec*, agt_window_t* out);
 
 /* Pop the next event into *out, waiting up to timeout_ms. Timeout returns
@@ -463,12 +474,15 @@ agt_status agt_runtime_arg_count(size_t* out_count);
  * AGT_FAILED{code="runtime_failed"}. */
 agt_status agt_runtime_arg(size_t index, uint8_t* buf, size_t cap, size_t* out_len);
 
-/* --- known platform limitation -------------------------------------- */
+/* --- platform contract: macOS window host ----------------------------- */
 
 /* The library-private window-loop thread model is validated on Windows only
- * (the message pump belongs to the creating thread). macOS requires the
- * window/event loop on the main thread; a main-thread host for macOS is left
- * for a later milestone. */
+ * (the message pump belongs to the creating thread). macOS is a hard
+ * contract, not a limitation: AppKit requires the window/event loop on the
+ * main thread, and this ABI hosts it on a library-private thread, so on
+ * macOS agt_window_open always returns AGT_UNSUPPORTED (code
+ * "unsupported_platform") and AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED.
+ * A main-thread host for macOS is left for a later milestone. */
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -305,17 +305,31 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 /// `AGT_CAP_SCREENSHOT`, `AGT_CAP_PROCESS_OBSERVE`, `AGT_CAP_CLIPBOARD` and
 /// `AGT_CAP_CLIPBOARD` and `AGT_CAP_PARENT_CONSOLE` report `AGT_OK`;
 /// `AGT_CAP_ACCESSIBILITY_TREE` reports `AGT_OK` when the host accessibility
-/// stack is wired in this build. Mechanisms that have not shipped yet report
-/// `AGT_UNSUPPORTED` (a product gap, never a permission statement).
+/// stack is wired in this build. One platform exception: `AGT_CAP_WINDOW_HOST`
+/// reports `AGT_UNSUPPORTED` on macOS, because AppKit requires the window
+/// event loop on the main thread while this ABI hosts it on a library-private
+/// thread (so `agt_window_open` can never work there). Mechanisms that have
+/// not shipped yet report `AGT_UNSUPPORTED` (a product gap, never a
+/// permission statement).
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
     match cap {
         agt_capability::AGT_CAP_PTY
-        | agt_capability::AGT_CAP_WINDOW_HOST
         | agt_capability::AGT_CAP_SCREENSHOT
         | agt_capability::AGT_CAP_PROCESS_OBSERVE
         | agt_capability::AGT_CAP_CLIPBOARD
         | agt_capability::AGT_CAP_PARENT_CONSOLE => agt_status::AGT_OK,
+        // AppKit requires the window event loop on the main thread; this ABI
+        // hosts it on a library-private thread, so the window host mechanism
+        // does not exist on macOS (`agt_window_open` returns AGT_UNSUPPORTED
+        // there, and a retry can never succeed).
+        agt_capability::AGT_CAP_WINDOW_HOST => {
+            if cfg!(target_os = "macos") {
+                agt_status::AGT_UNSUPPORTED
+            } else {
+                agt_status::AGT_OK
+            }
+        }
         agt_capability::AGT_CAP_ACCESSIBILITY_TREE => {
             if a11y_mechanism_available() {
                 agt_status::AGT_OK
@@ -1736,7 +1750,12 @@ impl PixelWindowApplication for WindowApp {
 /// through `agt_frame_begin` / `agt_window_poll_event`.
 ///
 /// Headless hosts where the window host reports `AGT_UNSUPPORTED` return
-/// `AGT_UNSUPPORTED` here; every other failure is `AGT_FAILED`.
+/// `AGT_UNSUPPORTED` here; every other failure is `AGT_FAILED`. macOS is one
+/// such host by contract: AppKit requires the event loop on the main thread,
+/// this ABI hosts it on a library-private thread, so `AGT_UNSUPPORTED`
+/// (`code = "unsupported_platform"`) is returned without starting any thread
+/// or touching the window stack (a retry can never succeed and would hit
+/// poisoned winit global state).
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_window_open(
@@ -1772,6 +1791,21 @@ pub extern "C" fn agt_window_open(
                 "width and height must be >= 1",
             );
             return agt_status::AGT_FAILED;
+        }
+        // macOS has no window host in this ABI: AppKit requires the event
+        // loop on the main thread, while this ABI runs it on a
+        // library-private thread. Report the platform contract as
+        // AGT_UNSUPPORTED up front — never start the loop thread, never call
+        // run_pixel_window (winit would panic and poison global state for the
+        // whole process). AGT_FAILED would be wrong here: retries cannot
+        // succeed.
+        if cfg!(target_os = "macos") {
+            record_error(
+                c"agt_window_open",
+                c"unsupported_platform",
+                "macOS requires the event loop on the main thread; this ABI hosts it on a library-private thread",
+            );
+            return agt_status::AGT_UNSUPPORTED;
         }
 
         let shared = Arc::new(WindowShared::new());

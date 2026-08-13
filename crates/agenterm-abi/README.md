@@ -154,11 +154,21 @@ parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面
   返回的 `const char*` 均为合法 NUL 结尾 C 字符串（缺陷回归闸）。找不到
   cdylib 时该测试直接失败（先执行上面的 build 命令）。
 
-## 已知平台限制
+## 平台契约：macOS 窗口宿主（里程碑 22 定为契约）
 
 窗口循环线程模型（库内私有线程跑 `run_pixel_window`）目前只在 **Windows**
-验证（消息泵归创建线程）。**macOS** 的 AppKit 要求窗口/事件循环在主线程，
-需主线程宿主，留待后续里程碑。`include/agenterm.h` 亦写明此限制。
+验证（消息泵归创建线程）。**macOS 是硬契约而非待办限制**：AppKit 要求窗口/
+事件循环在主线程，而本 ABI 把它放在库内私有线程，因此在 macOS 上：
+
+- `agt_window_open` **恒返回 `AGT_UNSUPPORTED`**（`code="unsupported_platform"`，
+  message 说明 "macOS requires the event loop on the main thread; this ABI
+  hosts it on a library-private thread"），不创建私有循环线程、不调用
+  `run_pixel_window`（winit 会 panic 且污染全局状态，重试永远不可能成功，
+  所以这不是 `AGT_FAILED`）；
+- `agt_capability_query(AGT_CAP_WINDOW_HOST)` 同步返回 `AGT_UNSUPPORTED`，
+  与 `agt_window_open` 行为一致（Windows/Linux 维持 `AGT_OK`）。
+
+主线程宿主留待后续里程碑。`include/agenterm.h` 亦写明此契约（纯 ASCII）。
 
 `agenterm-cu` 的 `tree` / 结构化 `click` / `focus` 在 Linux `current` 上经
 本 crate 的 `agt_a11y_*` 机制消费；`windows` / `screenshot` / 坐标降级输入仍
