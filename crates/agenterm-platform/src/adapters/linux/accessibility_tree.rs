@@ -6,7 +6,8 @@ use std::sync::{Mutex, OnceLock};
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
 use atspi::proxy::component::ComponentProxy;
-use atspi::proxy::device_event_controller::DeviceEventControllerProxy;
+use atspi::proxy::device_event_controller::{DeviceEvent, DeviceEventControllerProxy, EventType};
+use atspi::proxy::device_event_listener::DeviceEventListenerProxy;
 use atspi::proxy::editable_text::EditableTextProxy;
 use atspi::proxy::proxy_ext::ProxyExt;
 use atspi::proxy::text::TextProxy;
@@ -182,6 +183,29 @@ pub(crate) fn set_node_text(
     })
 }
 
+/// Deliver a chord through AT-SPI Device/key events (`DeviceEventListener`
+/// `NotifyEvent`). A named showing node with no key interface fails typed —
+/// never XTest / `input_inject::send_keys`.
+pub(crate) fn send_node_keys(
+    window_handle: Option<isize>,
+    node_id: &str,
+    keys: &str,
+) -> Result<(), AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            send_node_keys_async(window_handle, node_id, keys),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_key_timeout",
+                "AT-SPI Device/key event exceeded its deadline",
+            )
+        })?
+    })
+}
+
 async fn tree_for_window_async(
     window_handle: Option<isize>,
     max_nodes: usize,
@@ -319,6 +343,28 @@ async fn set_node_text_async(
     invoke_editable_text(&proxy, text).await
 }
 
+async fn send_node_keys_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+    keys: &str,
+) -> Result<(), AccessibilityTreeError> {
+    let synth = parse_send_keys(keys)?;
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_key_unavailable",
+            format!("node path {node_id} has no AT-SPI Device/key interface"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_device_keys(&proxy, &synth).await
+}
+
 fn activate_window_node(
     window_handle: Option<isize>,
     node_id: &str,
@@ -347,11 +393,11 @@ fn activate_window_node(
 /// with `a11y_tree_timeout` before it can walk the document embed. Talk to
 /// the a11y bus only.
 ///
-/// `send-keys --name` snapshots the tree, focuses the node, then injects
-/// XTest. Opening a fresh connection for each of those steps (and dropping
-/// it before the key event) tears Chrome's renderer tree down, so the next
-/// named command sees `a11y_node_not_found`. Clone the shared connection
-/// instead of dropping the a11y bus.
+/// `send-keys --name` snapshots the tree then delivers Device/key events on
+/// the same bus. Opening a fresh connection for each of those steps (and
+/// dropping it before the event) tears Chrome's renderer tree down, so the
+/// next named command sees `a11y_node_not_found`. Clone the shared
+/// connection instead of dropping the a11y bus.
 async fn connect() -> Result<zbus::Connection, AccessibilityTreeError> {
     hydrate_session_bus_env();
     if let Some(conn) = cached_connection() {
@@ -1239,6 +1285,21 @@ async fn editable_text_proxy_for<'a>(
         .map_err(map_atspi_err)
 }
 
+async fn device_listener_proxy_for<'a>(
+    proxy: &AccessibleProxy<'a>,
+) -> Result<DeviceEventListenerProxy<'a>, AccessibilityTreeError> {
+    let inner = proxy.inner();
+    DeviceEventListenerProxy::builder(inner.connection())
+        .destination(inner.destination().to_owned())
+        .map_err(map_atspi_err)?
+        .path(inner.path().to_owned())
+        .map_err(map_atspi_err)?
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .map_err(map_atspi_err)
+}
+
 async fn text_proxy_for<'a>(
     proxy: &AccessibleProxy<'a>,
 ) -> Result<TextProxy<'a>, AccessibilityTreeError> {
@@ -1291,6 +1352,205 @@ async fn node_exposes_editable_text(proxy: &AccessibleProxy<'_>) -> Option<bool>
         Ok(Ok(ifaces)) => Some(ifaces.contains(Interface::EditableText)),
         _ => None,
     }
+}
+
+/// How a resolved node receives keys. `has_listener` is `GetInterfaces` for
+/// `org.a11y.atspi.DeviceEventListener`. `None` means the probe timed out —
+/// still try `NotifyEvent` (same WebKit `GetInterfaces` hang as text write).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeyRoute {
+    DeviceListener,
+    Unavailable,
+}
+
+fn key_route(has_listener: Option<bool>) -> KeyRoute {
+    match has_listener {
+        Some(false) => KeyRoute::Unavailable,
+        _ => KeyRoute::DeviceListener,
+    }
+}
+
+fn is_missing_key_interface(error: &AccessibilityTreeError) -> bool {
+    let AccessibilityTreeError::Failed { code, message } = error else {
+        return false;
+    };
+    code == "a11y_key_unavailable"
+        || message.contains("UnknownInterface")
+        || message.contains("UnknownMethod")
+        || message.contains("does not exist")
+}
+
+async fn node_exposes_device_listener(proxy: &AccessibleProxy<'_>) -> Option<bool> {
+    match timeout(ACTION_TIMEOUT, proxy.get_interfaces()).await {
+        Ok(Ok(ifaces)) => Some(ifaces.contains(Interface::DeviceEventListener)),
+        _ => None,
+    }
+}
+
+struct SynthKey {
+    keysym: i32,
+    event_string: String,
+    is_text: bool,
+    modifiers: i32,
+}
+
+const ATSPI_MOD_SHIFT: i32 = 1 << 0;
+const ATSPI_MOD_CONTROL: i32 = 1 << 2;
+const ATSPI_MOD_ALT: i32 = 1 << 3;
+const ATSPI_MOD_META: i32 = 1 << 4;
+
+fn parse_send_keys(keys: &str) -> Result<SynthKey, AccessibilityTreeError> {
+    let parts: Vec<&str> = keys.split('+').map(str::trim).collect();
+    if parts.is_empty() || parts.iter().any(|part| part.is_empty()) {
+        return Err(AccessibilityTreeError::failed(
+            "invalid_input",
+            format!("cannot parse shortcut '{keys}'"),
+        ));
+    }
+    let mut modifiers = 0i32;
+    for part in &parts[..parts.len() - 1] {
+        let mask = modifier_mask(part).ok_or_else(|| {
+            AccessibilityTreeError::failed(
+                "invalid_input",
+                format!("unknown modifier '{part}' in shortcut '{keys}'"),
+            )
+        })?;
+        modifiers |= mask;
+    }
+    let token = parts[parts.len() - 1];
+    let (keysym, event_string, mut is_text) = key_token(token).ok_or_else(|| {
+        AccessibilityTreeError::failed(
+            "invalid_input",
+            format!("unknown key '{token}' in shortcut '{keys}'"),
+        )
+    })?;
+    if modifiers & (ATSPI_MOD_CONTROL | ATSPI_MOD_ALT | ATSPI_MOD_META) != 0 {
+        is_text = false;
+    }
+    Ok(SynthKey {
+        keysym,
+        event_string,
+        is_text,
+        modifiers,
+    })
+}
+
+fn modifier_mask(token: &str) -> Option<i32> {
+    match token.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Some(ATSPI_MOD_CONTROL),
+        "shift" => Some(ATSPI_MOD_SHIFT),
+        "alt" => Some(ATSPI_MOD_ALT),
+        "meta" | "super" | "win" => Some(ATSPI_MOD_META),
+        _ => None,
+    }
+}
+
+fn key_token(token: &str) -> Option<(i32, String, bool)> {
+    match token.to_ascii_lowercase().as_str() {
+        "backspace" => Some((0xff08, "BackSpace".into(), false)),
+        "tab" => Some((0xff09, "Tab".into(), false)),
+        "enter" | "return" => Some((0xff0d, "Return".into(), false)),
+        "escape" | "esc" => Some((0xff1b, "Escape".into(), false)),
+        "space" => Some((0x0020, " ".into(), true)),
+        "home" => Some((0xff50, "Home".into(), false)),
+        "left" => Some((0xff51, "Left".into(), false)),
+        "up" => Some((0xff52, "Up".into(), false)),
+        "right" => Some((0xff53, "Right".into(), false)),
+        "down" => Some((0xff54, "Down".into(), false)),
+        "delete" | "del" => Some((0xffff, "Delete".into(), false)),
+        "f1" => Some((0xffbe, "F1".into(), false)),
+        "f2" => Some((0xffbf, "F2".into(), false)),
+        "f3" => Some((0xffc0, "F3".into(), false)),
+        "f4" => Some((0xffc1, "F4".into(), false)),
+        "f5" => Some((0xffc2, "F5".into(), false)),
+        "f6" => Some((0xffc3, "F6".into(), false)),
+        "f7" => Some((0xffc4, "F7".into(), false)),
+        "f8" => Some((0xffc5, "F8".into(), false)),
+        "f9" => Some((0xffc6, "F9".into(), false)),
+        "f10" => Some((0xffc7, "F10".into(), false)),
+        "f11" => Some((0xffc8, "F11".into(), false)),
+        "f12" => Some((0xffc9, "F12".into(), false)),
+        other => {
+            let mut chars = other.chars();
+            let ch = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            let keysym = i32::try_from(u32::from(ch)).ok()?;
+            Some((keysym, ch.to_string(), !ch.is_control()))
+        }
+    }
+}
+
+/// Native AT-SPI Device/key: `DeviceEventListener.NotifyEvent` press+release.
+/// Never falls through to XTest / `DeviceEventController.GenerateKeyboardEvent`.
+async fn invoke_device_keys(
+    proxy: &AccessibleProxy<'_>,
+    synth: &SynthKey,
+) -> Result<(), AccessibilityTreeError> {
+    let has_listener = node_exposes_device_listener(proxy).await;
+    match key_route(has_listener) {
+        KeyRoute::Unavailable => Err(AccessibilityTreeError::failed(
+            "a11y_key_unavailable",
+            "node does not expose the AT-SPI DeviceEventListener interface",
+        )),
+        KeyRoute::DeviceListener => match notify_device_keys(proxy, synth).await {
+            Ok(()) => Ok(()),
+            Err(send_err) if has_listener != Some(true) && is_missing_key_interface(&send_err) => {
+                Err(AccessibilityTreeError::failed(
+                    "a11y_key_unavailable",
+                    "node does not expose the AT-SPI DeviceEventListener interface",
+                ))
+            }
+            Err(send_err) => Err(send_err),
+        },
+    }
+}
+
+async fn notify_device_keys(
+    proxy: &AccessibleProxy<'_>,
+    synth: &SynthKey,
+) -> Result<(), AccessibilityTreeError> {
+    let listener = device_listener_proxy_for(proxy).await?;
+    let pressed = DeviceEvent {
+        event_type: EventType::KeyPressed,
+        id: synth.keysym,
+        hw_code: 0,
+        modifiers: synth.modifiers,
+        timestamp: 0,
+        event_string: synth.event_string.as_str(),
+        is_text: synth.is_text,
+    };
+    let accepted = timeout(NODE_TIMEOUT, listener.notify_event(&pressed))
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_key_timeout",
+                "AT-SPI DeviceEventListener NotifyEvent exceeded its deadline",
+            )
+        })?
+        .map_err(map_atspi_err)?;
+    if !accepted {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_key_unavailable",
+            "AT-SPI DeviceEventListener NotifyEvent returned false",
+        ));
+    }
+    let released = DeviceEvent {
+        event_type: EventType::KeyReleased,
+        ..pressed
+    };
+    match timeout(NODE_TIMEOUT, listener.notify_event(&released)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if !is_missing_key_interface(&mapped) {
+                return Err(mapped);
+            }
+        }
+        Err(_) => {}
+    }
+    Ok(())
 }
 
 async fn text_from_text_proxy(proxy: &AccessibleProxy<'_>) -> Option<String> {
@@ -1851,6 +2111,45 @@ mod tests {
     }
 
     #[test]
+    fn key_route_unavailable_when_device_listener_absent() {
+        assert_eq!(key_route(Some(false)), KeyRoute::Unavailable);
+        assert_eq!(key_route(Some(true)), KeyRoute::DeviceListener);
+        assert_eq!(key_route(None), KeyRoute::DeviceListener);
+    }
+
+    #[test]
+    fn send_keys_tokens_map_to_device_events() {
+        let enter = parse_send_keys("enter").expect("enter");
+        assert_eq!(enter.keysym, 0xff0d);
+        assert_eq!(enter.event_string, "Return");
+        assert!(!enter.is_text);
+        let letter = parse_send_keys("k").expect("k");
+        assert_eq!(letter.keysym, i32::from(b'k'));
+        assert!(letter.is_text);
+        let chord = parse_send_keys("ctrl+a").expect("ctrl+a");
+        assert_eq!(chord.modifiers, ATSPI_MOD_CONTROL);
+        assert!(!chord.is_text);
+        assert!(parse_send_keys("ctrl+").is_err());
+        assert!(parse_send_keys("hello").is_err());
+    }
+
+    #[test]
+    fn missing_key_interface_is_typed() {
+        assert!(is_missing_key_interface(&AccessibilityTreeError::failed(
+            "a11y_key_unavailable",
+            "node does not expose the AT-SPI DeviceEventListener interface",
+        )));
+        assert!(is_missing_key_interface(&AccessibilityTreeError::failed(
+            "a11y_backend_failed",
+            "org.freedesktop.DBus.Error.UnknownInterface: Interface does not exist",
+        )));
+        assert!(!is_missing_key_interface(&AccessibilityTreeError::failed(
+            "a11y_key_timeout",
+            "AT-SPI DeviceEventListener NotifyEvent exceeded its deadline"
+        )));
+    }
+
+    #[test]
     fn missing_text_interface_is_typed() {
         assert!(is_missing_text_interface(&AccessibilityTreeError::failed(
             "a11y_text_unavailable",
@@ -2002,7 +2301,6 @@ mod tests {
         assert_eq!(parse_status_ppid("Name:\tinit\n"), None);
     }
 
-    #[test]
     #[test]
     fn known_dest_pid_is_authoritative() {
         assert_eq!(dest_pid_verdict(Some(10), true), Some(true));

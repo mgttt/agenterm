@@ -32,12 +32,12 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 2
+#define AGT_ABI_MINOR 3
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
 /* Human-readable build identity: "<crate version>+abi.<major>.<minor>"
- * (e.g. "0.1.16+abi.1.2"), derived at compile time from the crate version
+ * (e.g. "0.1.16+abi.1.3"), derived at compile time from the crate version
  * and the ABI constants above. NUL-terminated, static, permanently valid. */
 const char* agt_build_id(void);
 
@@ -411,6 +411,15 @@ agt_status agt_a11y_node_perform(intptr_t window_handle, const char* node_id,
  * AGT_FAILED{code="a11y_text_unavailable"}. Never injects keystrokes. */
 agt_status agt_a11y_node_set_text(intptr_t window_handle, const char* node_id,
                                   const uint8_t* text, size_t len);
+
+/* Deliver a chord through the host accessibility Device/key interface
+ * (Linux: AT-SPI DeviceEventListener NotifyEvent). `node_id` is a
+ * NUL-terminated UTF-8 child-index path. `keys == NULL` with
+ * `len > 0` -> AGT_FAILED{code="bad_pointer"}; non-UTF-8 -> "bad_encoding".
+ * A node that does not expose a Device/key interface ->
+ * AGT_FAILED{code="a11y_key_unavailable"}. Never injects XTest. */
+agt_status agt_a11y_node_send_keys(intptr_t window_handle, const char* node_id,
+                                   const uint8_t* keys, size_t len);
 
 /* --- clipboard (milestone 8) ---------------------------------------- */
 

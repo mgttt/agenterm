@@ -3,8 +3,9 @@
 //! winit/softbuffer never loads GTK's atk-bridge, so a process that only
 //! paints pixels is invisible on the a11y bus. This adapter registers the
 //! process as an AT-SPI application and serves Accessible/Component/Action
-//! children, plus Text/EditableText on editable nodes. `cu` then walks those
-//! children the same way it walks GTK/Chrome.
+//! children, plus Text/EditableText on editable nodes and DeviceEventListener
+//! for native AT-SPI Device/key events. `cu` then walks those children the
+//! same way it walks GTK/Chrome.
 
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -18,8 +19,9 @@ use zbus::interface;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
 use crate::accessibility_publish::{
-    AccessibilityPublishError, AccessibilityPublisher, PublishedAction, PublishedActionHandler,
-    PublishedNode, PublishedRole, PublishedTree,
+    AccessibilityPublishError, AccessibilityPublisher, KeyEffect, PublishedAction,
+    PublishedActionHandler, PublishedKey, PublishedNode, PublishedRole, PublishedTree,
+    published_key_effect,
 };
 use crate::contract::accessibility_tree::AccessibilityBounds;
 
@@ -80,6 +82,7 @@ struct ComponentNode(Ctx);
 struct ActionNode(Ctx);
 struct TextNode(Ctx);
 struct EditableTextNode(Ctx);
+struct DeviceEventListenerNode(Ctx);
 struct ApplicationRoot(Ctx);
 
 fn lock_store(store: &Mutex<Store>) -> std::sync::MutexGuard<'_, Store> {
@@ -186,6 +189,7 @@ fn interfaces_for(node: &PublishedNode) -> Vec<String> {
     if node.editable {
         names.push("org.a11y.atspi.Text".to_owned());
         names.push("org.a11y.atspi.EditableText".to_owned());
+        names.push("org.a11y.atspi.DeviceEventListener".to_owned());
     }
     names
 }
@@ -271,6 +275,42 @@ fn replace_node_text(store: &Mutex<Store>, id: u32, text: String) -> bool {
     };
     if let Some(handler) = handler {
         handler(id, PublishedAction::SetText(text));
+    }
+    true
+}
+
+/// Apply one AT-SPI Device/key event to a published node. Updates stored
+/// text immediately so `GetText` reflects the key before the product loop
+/// paints. A node that does not accept keys returns false.
+fn apply_node_key(store: &Mutex<Store>, id: u32, key: PublishedKey) -> bool {
+    let handler = {
+        let mut store = lock_store(store);
+        let effect = {
+            let Some(node) = store.tree.nodes.iter().find(|node| node.id == id) else {
+                return false;
+            };
+            if !node.editable {
+                return false;
+            }
+            published_key_effect(&key)
+        };
+        store.focused = Some(id);
+        if let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) {
+            match effect {
+                KeyEffect::Insert(piece) => node.text.push_str(&piece),
+                KeyEffect::Backspace => {
+                    let _ = node.text.pop();
+                }
+                KeyEffect::SelectAll
+                | KeyEffect::Submit
+                | KeyEffect::Cancel
+                | KeyEffect::Ignore => {}
+            }
+        }
+        store.handler.clone()
+    };
+    if let Some(handler) = handler {
+        handler(id, PublishedAction::Key(key));
     }
     true
 }
@@ -677,6 +717,28 @@ impl EditableTextNode {
     }
 }
 
+const ATSPI_KEY_PRESSED: u32 = 0;
+
+/// AT-SPI DeviceEvent is `(u32, i32, i32, i32, i32, s, b)`:
+/// type, id, hw_code, modifiers, timestamp, event_string, is_text.
+#[interface(name = "org.a11y.atspi.DeviceEventListener")]
+impl DeviceEventListenerNode {
+    fn notify_event(&self, event: (u32, i32, i32, i32, i32, String, bool)) -> bool {
+        let (event_type, id, _hw_code, modifiers, _timestamp, event_string, is_text) = event;
+        apply_node_key(
+            &self.0.store,
+            self.0.id,
+            PublishedKey {
+                keysym: id,
+                event_string,
+                is_text,
+                modifiers,
+                pressed: event_type == ATSPI_KEY_PRESSED,
+            },
+        )
+    }
+}
+
 #[interface(name = "org.a11y.atspi.Application")]
 impl ApplicationRoot {
     fn get_locale(&self, _lctype: u32) -> String {
@@ -790,6 +852,10 @@ async fn register_node(
         .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
     conn.object_server()
         .at(path.as_str(), EditableTextNode(ctx.clone()))
+        .await
+        .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
+    conn.object_server()
+        .at(path.as_str(), DeviceEventListenerNode(ctx.clone()))
         .await
         .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
     if id == 0 {
@@ -994,6 +1060,11 @@ mod tests {
                 .iter()
                 .any(|name| name == "org.a11y.atspi.EditableText")
         );
+        assert!(
+            ifaces
+                .iter()
+                .any(|name| name == "org.a11y.atspi.DeviceEventListener")
+        );
     }
 
     #[test]
@@ -1022,6 +1093,11 @@ mod tests {
                 .any(|name| name == "org.a11y.atspi.EditableText")
         );
         assert!(!ifaces.iter().any(|name| name == "org.a11y.atspi.Text"));
+        assert!(
+            !ifaces
+                .iter()
+                .any(|name| name == "org.a11y.atspi.DeviceEventListener")
+        );
     }
 
     #[test]

@@ -315,8 +315,10 @@ fn send_text(
     Ok(payload)
 }
 
-/// `send-keys` with `--name` focuses the matched node first (same matcher as
-/// `focus`/`send-text`), then reuses the existing chord-injection path. Without
+/// `send-keys` with `--name` delivers the chord through native AT-SPI
+/// Device/key events (`DeviceEventListener.NotifyEvent`). A named showing
+/// node with no key interface typed-fails (`a11y_key_unavailable`) and
+/// never falls through to XTest / `input_inject::send_keys`. Without
 /// `--name` it stays the plain "send to whatever is focused" verb.
 fn send_keys(
     keys: &str,
@@ -328,9 +330,7 @@ fn send_keys(
         agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
         return Ok(serde_json::json!({ "keys": keys }));
     };
-    mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
-        .map_err(map_mechanism_err)?;
-    agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
+    mechanism::send_node_keys(window, &resolved.node_id, keys).map_err(map_mechanism_err)?;
     agenterm_platform::accessibility_tree::drain_bus();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
@@ -339,6 +339,7 @@ fn send_keys(
         "window": window,
         "action": "send-keys",
         "keys": keys,
+        "via": "device-event",
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)

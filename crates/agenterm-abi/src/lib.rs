@@ -26,9 +26,10 @@
 //! Milestone 6 ships structured accessibility-tree observe and node actuation:
 //! `agt_a11y_tree_snapshot` captures a flattened tree, variable-length node fields
 //! are fetched with `agt_a11y_node_string` / `agt_a11y_node_action_name`, and
-//! `agt_a11y_node_perform` invokes click/focus by child-index path, and
+//! `agt_a11y_node_perform` invokes click/focus by child-index path,
 //! `agt_a11y_node_set_text` writes through the host text interface (Linux:
-//! AT-SPI EditableText). Backends are
+//! AT-SPI EditableText), and `agt_a11y_node_send_keys` delivers Device/key
+//! events (Linux: AT-SPI DeviceEventListener). Backends are
 //! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
 //! `agenterm-platform`; the C header names mechanisms only.
 //! Milestone 8 ships the clipboard mechanism: `agt_clipboard_set_text`
@@ -63,8 +64,8 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, perform_node_action, set_node_text,
-    tree_for_window,
+    AccessibilityNodeAction, AccessibilityTreeError, perform_node_action, send_node_keys,
+    set_node_text, tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
@@ -229,7 +230,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 2);
+abi_version!(1, 3);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -2747,6 +2748,9 @@ fn map_a11y_error(operation: &'static CStr, error: AccessibilityTreeError) -> ag
                 "a11y_action_unavailable" => c"a11y_action_unavailable",
                 "a11y_text_unavailable" => c"a11y_text_unavailable",
                 "a11y_text_timeout" => c"a11y_text_timeout",
+                "a11y_key_unavailable" => c"a11y_key_unavailable",
+                "a11y_key_timeout" => c"a11y_key_timeout",
+                "invalid_input" => c"invalid_input",
                 "a11y_backend_failed" => c"a11y_backend_failed",
                 "a11y_invalid_node_id" => c"a11y_invalid_node_id",
                 other => {
@@ -3217,6 +3221,93 @@ pub extern "C" fn agt_a11y_node_set_text(
                 c"agt_a11y_node_set_text",
                 c"panic",
                 "panic in agt_a11y_node_set_text",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Deliver a chord through the host accessibility Device/key interface
+/// (Linux: AT-SPI `DeviceEventListener` `NotifyEvent`). `node_id` is a
+/// NUL-terminated UTF-8 child-index path. `keys == NULL` with `len > 0`,
+/// or a slice that is not valid UTF-8, → `AGT_FAILED{code="bad_pointer"}`
+/// / `bad_encoding`. A node that does not expose a Device/key interface
+/// → `a11y_key_unavailable`. Never injects XTest.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_send_keys(
+    window_handle: isize,
+    node_id: *const c_char,
+    keys: *const u8,
+    len: usize,
+) -> agt_status {
+    fn inner(
+        window_handle: isize,
+        node_id: *const c_char,
+        keys: *const u8,
+        len: usize,
+    ) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(
+                c"agt_a11y_node_send_keys",
+                c"bad_pointer",
+                "node_id is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_send_keys",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        if keys.is_null() && len > 0 {
+            record_error(c"agt_a11y_node_send_keys", c"bad_pointer", "keys is null");
+            return agt_status::AGT_FAILED;
+        }
+        let bytes = if keys.is_null() {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(keys, len) }
+        };
+        let keys = match std::str::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_send_keys",
+                    c"bad_encoding",
+                    "keys is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match send_node_keys(filter, node_id, keys) {
+            Ok(()) => agt_status::AGT_OK,
+            Err(e) => map_a11y_error(c"agt_a11y_node_send_keys", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, keys, len)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_send_keys",
+                c"panic",
+                "panic in agt_a11y_node_send_keys",
             );
             agt_status::AGT_FAILED
         }

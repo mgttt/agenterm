@@ -64,7 +64,7 @@ audited separately from AT-SPI actuation.
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection (no `--name`) |
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); no text interface → typed `a11y_text_unavailable` (never XTest) |
-| `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path, then that keyboard injection |
+| `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`) |
 

@@ -34,6 +34,17 @@ pub fn set_node_text(
     crate::selected::accessibility_tree::set_node_text(window_handle, node_id, text)
 }
 
+/// Deliver `keys` through the host accessibility Device/key interface
+/// (Linux: AT-SPI `DeviceEventListener` `NotifyEvent`). Never injects
+/// XTest. A node without that interface fails typed.
+pub fn send_node_keys(
+    window_handle: Option<isize>,
+    node_id: &str,
+    keys: &str,
+) -> Result<(), AccessibilityTreeError> {
+    crate::selected::accessibility_tree::send_node_keys(window_handle, node_id, keys)
+}
+
 pub fn drain_bus() {
     crate::selected::accessibility_tree::drain_bus()
 }

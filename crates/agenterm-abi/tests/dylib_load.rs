@@ -134,6 +134,7 @@ type A11yTreeNode = unsafe extern "C" fn(usize, *mut agt_a11y_node) -> i32;
 type A11yNodeString = unsafe extern "C" fn(usize, i32, *mut u8, usize, *mut usize) -> i32;
 type A11yNodePerform = unsafe extern "C" fn(isize, *const c_char, i32) -> i32;
 type A11yNodeSetText = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
+type A11yNodeSendKeys = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type ClipboardHasText = unsafe extern "C" fn() -> i32;
@@ -1355,6 +1356,28 @@ fn a11y_node_set_text_rejects_null_node_id() {
     let cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
     let set_text: Symbol<A11yNodeSetText> = unsafe { sym(lib, b"agt_a11y_node_set_text") };
     let st = unsafe { set_text(0, std::ptr::null(), b"x".as_ptr(), 1) };
+    if cap == AGT_UNSUPPORTED {
+        eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
+        assert_eq!(st, AGT_UNSUPPORTED, "expected AGT_UNSUPPORTED, got {st}");
+        return;
+    }
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Named AT-SPI Device/key: NULL node_id → AGT_FAILED{code="bad_pointer"}
+/// when the a11y stack is wired; otherwise AGT_UNSUPPORTED.
+#[test]
+fn a11y_node_send_keys_rejects_null_node_id() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    let cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
+    let send_keys: Symbol<A11yNodeSendKeys> = unsafe { sym(lib, b"agt_a11y_node_send_keys") };
+    let st = unsafe { send_keys(0, std::ptr::null(), b"k".as_ptr(), 1) };
     if cap == AGT_UNSUPPORTED {
         eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
         assert_eq!(st, AGT_UNSUPPORTED, "expected AGT_UNSUPPORTED, got {st}");
