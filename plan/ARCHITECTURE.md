@@ -78,11 +78,12 @@ src/platform/adapters/       主机实现（物理目录）
 
 crates/agenterm-con/         第二产品 package：Cargo.toml + build.rs + 自有源码/测试
                              autobins=false；无跨回工作台树的 [[bin]]/[[test]] 路径
-  src/main.rs                宿主主体约 5,942 行（见 §4 C1 债务）
+  src/main.rs                宿主主体约 5.8k 行（见 §4 C1 债务）
                              ConApp / ConTerminal / SessionStore /
                              Surface / impl PixelWindowApplication
   src/                       con 私有叶（不被主程序 mod 引用）
   control.rs                 ATC1 固定控制语法（1,687 行，con 最大叶）
+  control_pending.rs         wait/screenshot 容量、deadline、取消与 reply 所有权
   json.rs                    固定 schema 有界 JSON 编解码（825 行）
   agent_interface.rs         机器可读自省 / ui-snapshot 组装
   ui.rs                      纯 geometry + 命中；孵化层，见下方提升规则
@@ -155,8 +156,9 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | Win 主机 | `src/platform/adapters/windows/{frontend,remote_frontend}.rs` | remote 客户端；`remote_frontend` 巨石见 L2 |
 | Unix 主机 | `src/platform/adapters/unix/frontend/` | embedded 状态机；`mod`/`render` 巨石见 L2 |
 | 机制 crate | `crates/agenterm-platform/src/{selected,window,numeric,input,ipc,pty,process,shared_memory}.rs` | 无产品名；`numeric` 固化 native geometry 的 IEEE-754 取整叶 |
-| con 宿主 | `crates/agenterm-con/src/main.rs` | 约 5,942 行巨石；VT 回调/终端状态机/应用状态/待决请求/Surface 仍同居，见 §4 C1 |
+| con 宿主 | `crates/agenterm-con/src/main.rs` | 约 5.8k 行巨石；VT 回调/终端状态机/应用状态/Surface 仍同居，见 §4 C1 |
 | con 自动化 | `crates/agenterm-con/src/{control,json,agent_interface}.rs` | ATC1 语法 + 有界 JSON + 自省；公开面契约归 `prd/PRD_02_26_con_control_cli.md` |
+| con 待决控制 | `crates/agenterm-con/src/control_pending.rs` | bounded wait/screenshot、deadline、tab/window 取消、reply exactly-once；session/frame 探针仍由宿主提供 |
 | con 性能观测 | `crates/agenterm-con/src/perf.rs` | 计数、platform-present 基线、稳定 JSON 投影与 owning 单测；不拥有渲染/PTY/control policy |
 | con 纯规则叶 | `crates/agenterm-con/src/{ui,workspace,composer}.rs` | 孵化层：无 window/PTY 依赖；证据稳定后按下方提升顺序迁入 `src/frontend/*` |
 | 边界闸 | `src/platform/boundary_tests.rs` | 规则见 §8.2；**不**解析本文全文 |
@@ -175,7 +177,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | L3 | `platform/mod.rs` 策略过肥（input/paths/control_center/runtime/test_fixtures/workspace 已拆 `policy/`；FrontendHost 与 facade 是剩余薄层）+ `allow(dead_code)` | `policy/*` 全拆收口；禁新顶层 `is_windows_host` 蔓延；半迁移 facade 二选一（全接线或删） |
 | L4 | **结构 SSOT 未机读双向**（本文 prose + 局部 `boundary_tests`；目录树/分层文案漂移靠人） | 见 §8.4；版本 plan **S 组**执行；本文只定契约 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
-| C1 | **进行中**：`PerfStats`、platform-present 基线、稳定 JSON 投影及 owning 单测已迁入 `perf.rs`，精确 unwind profile 的 95 单测、23 GUI 黑盒、控制与吞吐门保持全绿；`main.rs` 仍约 5,942 行，VT 回调、终端状态机、`ConApp` 待决控制请求、像素 `Surface` 与 `PixelWindowApplication` 仍同居 | 下一叶切 `ConApp` 的待决 wait/screenshot 状态与取消生命周期，再按 PRD 24/25/26 边界切终端/渲染、工作区/输入；每步保持公开 CLI/JSON 字节不变 |
+| C1 | **进行中**：`perf.rs` 已拥有性能计数/基线/JSON；`control_pending.rs` 已拥有最多 32 个 wait、单 screenshot、deadline、tab/window 取消与 reply exactly-once，并以拒绝不消费 sender 的回归证据修复 typed busy 曾退化为 timeout 的问题。精确 unwind profile 为 99 单测、23 GUI 黑盒、控制与吞吐门全绿；`main.rs` 仍约 5.8k 行，VT 回调、终端状态机、应用状态、像素 `Surface` 与 `PixelWindowApplication` 仍同居 | 下一叶按 PRD 24/25/26 边界切终端/渲染，再切工作区/输入；每步保持公开 CLI/JSON 字节不变 |
 | C2 | **已收**：源码与测试均在 `crates/agenterm-con/` 内，manifest 无 `../../` 回指；根包边界测试继续扫描 con 源码 | 保持 package 物理所有权与 Cargo 所有权一致；迁移不得形成 native API 审计盲区 |
 | C3 | con 的 PE 体积史/证据计数在本文（§体积与复用）与 `prd/PRD_02_2{4,7}` 两处平行记录，且本文一度领先 PRD 两代增量 | 单主：PE 字节、perf 探针、证据计数归 PRD 27/24；本文只留结构规则与提升顺序。新增量禁止双写 |
 

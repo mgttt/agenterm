@@ -20,6 +20,7 @@
 mod agent_interface;
 mod composer;
 mod control;
+mod control_pending;
 mod font;
 mod json;
 mod palette;
@@ -51,6 +52,7 @@ use agenterm_ui_core::{
     scrollback_for_thumb_top, scrollbar_hit_test,
 };
 
+use control_pending::{PendingControl, WaitKind, WaitProbe};
 use palette::Rgb;
 use perf::PerfStats;
 
@@ -780,9 +782,7 @@ struct ConApp {
     exit: bool,
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
-    control_waits: Vec<PendingControlWait>,
-    pending_control_screenshot: Option<PendingControlScreenshot>,
-    inflight_control_screenshot: Option<InflightControlScreenshot>,
+    pending_control: PendingControl,
     perf_stats: PerfStats,
     chrome_dirty: DirtyRegion,
     retained: RetainedXrgbFrame,
@@ -793,35 +793,9 @@ struct ConApp {
 
 impl Drop for ConApp {
     fn drop(&mut self) {
-        self.cancel_all_control_requests(
-            "terminal window closed while control request was pending",
-        );
+        self.pending_control
+            .cancel_all("terminal window closed while control request was pending");
     }
-}
-
-struct PendingControlWait {
-    target: workspace::TabId,
-    kind: PendingControlWaitKind,
-    deadline: Instant,
-    reply: control::ReplySender,
-}
-
-struct PendingControlScreenshot {
-    target: workspace::TabId,
-    path: PathBuf,
-    reply: control::ReplySender,
-    restore_active: Option<workspace::TabId>,
-}
-
-struct InflightControlScreenshot {
-    target: workspace::TabId,
-    reply: Arc<std::sync::Mutex<Option<control::ReplySender>>>,
-    done: Arc<AtomicBool>,
-}
-
-enum PendingControlWaitKind {
-    Text(String),
-    TabExit,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -867,9 +841,7 @@ impl ConApp {
             exit: false,
             control_endpoint,
             control_server: None,
-            control_waits: Vec::new(),
-            pending_control_screenshot: None,
-            inflight_control_screenshot: None,
+            pending_control: PendingControl::default(),
             perf_stats: PerfStats::default(),
             chrome_dirty: DirtyRegion::full(),
             retained: RetainedXrgbFrame::new(),
@@ -1389,64 +1361,15 @@ impl ConApp {
     }
 
     fn cancel_control_for_tab(&mut self, id: workspace::TabId, reason: &str) {
-        let mut retained = Vec::with_capacity(self.control_waits.len());
-        for wait in std::mem::take(&mut self.control_waits) {
-            if wait.target == id {
-                let _ = wait.reply.send(Err(reason.to_owned()));
-            } else {
-                retained.push(wait);
-            }
-        }
-        self.control_waits = retained;
-        if self
-            .pending_control_screenshot
-            .as_ref()
-            .is_some_and(|screenshot| screenshot.target == id)
-            && let Some(screenshot) = self.pending_control_screenshot.take()
-        {
-            let _ = screenshot.reply.send(Err(reason.to_owned()));
-        }
-        if self
-            .inflight_control_screenshot
-            .as_ref()
-            .is_some_and(|screenshot| screenshot.target == id)
-            && let Some(screenshot) = self.inflight_control_screenshot.take()
-            && let Some(reply) = screenshot
-                .reply
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take()
-        {
-            let _ = reply.send(Err(reason.to_owned()));
-        }
+        self.pending_control.cancel_for_tab(id, reason);
     }
 
     fn cancel_all_control_requests(&mut self, reason: &str) {
-        for wait in std::mem::take(&mut self.control_waits) {
-            let _ = wait.reply.send(Err(reason.to_owned()));
-        }
-        if let Some(screenshot) = self.pending_control_screenshot.take() {
-            let _ = screenshot.reply.send(Err(reason.to_owned()));
-        }
-        if let Some(screenshot) = self.inflight_control_screenshot.take()
-            && let Some(reply) = screenshot
-                .reply
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take()
-        {
-            let _ = reply.send(Err(reason.to_owned()));
-        }
+        self.pending_control.cancel_all(reason);
     }
 
     fn reap_finished_control_screenshot(&mut self) {
-        if self
-            .inflight_control_screenshot
-            .as_ref()
-            .is_some_and(|screenshot| screenshot.done.load(Ordering::Acquire))
-        {
-            self.inflight_control_screenshot = None;
-        }
+        self.pending_control.reap_finished_screenshot();
     }
 
     fn validate_control_cell(session: &ConTerminal, row: u16, column: u16) -> Result<(), String> {
@@ -1522,12 +1445,13 @@ impl ConApp {
                             ("composer_focused", self.composer_focused.into()),
                             ("composer_text", self.composer.as_str().into()),
                             ("composer_preedit", self.composer_preedit.as_str().into()),
-                            ("pending_control_waits", self.control_waits.len().into()),
+                            (
+                                "pending_control_waits",
+                                self.pending_control.wait_count().into(),
+                            ),
                             (
                                 "pending_control_screenshots",
-                                (usize::from(self.pending_control_screenshot.is_some())
-                                    + usize::from(self.inflight_control_screenshot.is_some()))
-                                .into(),
+                                self.pending_control.screenshot_count().into(),
                             ),
                             (
                                 "composer_input",
@@ -1684,17 +1608,11 @@ impl ConApp {
                 self.control_target(target).and_then(|id| {
                     agent_interface::initialize_png_worker()
                         .map_err(|error| format!("initialize PNG worker: {error}"))?;
-                    if self.pending_control_screenshot.is_some()
-                        || self.inflight_control_screenshot.is_some()
-                    {
-                        return Err("a screenshot is already pending".to_owned());
-                    }
-                    self.pending_control_screenshot = Some(PendingControlScreenshot {
-                        target: id,
-                        path: PathBuf::from(output),
-                        reply: reply.take().expect("control reply available"),
-                        restore_active: None,
-                    });
+                    self.pending_control.enqueue_screenshot(
+                        id,
+                        PathBuf::from(output),
+                        &mut reply,
+                    )?;
                     window.request_redraw();
                     Ok(json::JsonValue::Null)
                 })
@@ -1704,9 +1622,6 @@ impl ConApp {
                 text,
                 timeout_ms,
             } => self.control_target(target).and_then(|id| {
-                if self.control_waits.len() >= 32 {
-                    return Err("too many pending wait-text requests".to_owned());
-                }
                 if self
                     .sessions
                     .get(&id)
@@ -1714,30 +1629,29 @@ impl ConApp {
                 {
                     return Ok(single_field_json("matched", true.into()));
                 }
-                self.control_waits.push(PendingControlWait {
-                    target: id,
-                    kind: PendingControlWaitKind::Text(text),
-                    deadline: Instant::now() + Duration::from_millis(timeout_ms),
-                    reply: reply.take().expect("control reply available"),
-                });
+                self.pending_control.enqueue_wait(
+                    id,
+                    WaitKind::Text(text),
+                    timeout_ms,
+                    &mut reply,
+                    "too many pending wait-text requests",
+                )?;
                 Ok(json::JsonValue::Null)
             }),
             CliCommand::WaitTabExit { target, timeout_ms } => {
                 self.control_target(Some(target)).and_then(|id| {
-                    if self.control_waits.len() >= 32 {
-                        return Err("too many pending control wait requests".to_owned());
-                    }
                     if let Some(session) = self.sessions.get(&id)
                         && session.child_gone
                     {
                         return Ok(tab_exit_json(id, session.child_exit_code));
                     }
-                    self.control_waits.push(PendingControlWait {
-                        target: id,
-                        kind: PendingControlWaitKind::TabExit,
-                        deadline: Instant::now() + Duration::from_millis(timeout_ms),
-                        reply: reply.take().expect("control reply available"),
-                    });
+                    self.pending_control.enqueue_wait(
+                        id,
+                        WaitKind::TabExit,
+                        timeout_ms,
+                        &mut reply,
+                        "too many pending control wait requests",
+                    )?;
                     Ok(json::JsonValue::Null)
                 })
             }
@@ -1763,44 +1677,24 @@ impl ConApp {
                 self.perf_stats.control_budget_yields.saturating_add(1);
             let _ = window.waker().wake();
         }
-        let mut pending = Vec::new();
-        let mut next = None;
-        for wait in std::mem::take(&mut self.control_waits) {
-            let Some(session) = self.sessions.get(&wait.target) else {
-                let _ = wait.reply.send(Err(format!(
+        let sessions = &self.sessions;
+        self.pending_control.poll_waits(now, |target, kind| {
+            let Some(session) = sessions.get(&target) else {
+                return WaitProbe::Missing(format!(
                     "terminal @{} disappeared while control request was pending",
-                    wait.target.get()
-                )));
-                continue;
+                    target.get()
+                ));
             };
-            let completed = match &wait.kind {
-                PendingControlWaitKind::Text(text) => session
-                    .screen_contains(text)
-                    .then(|| single_field_json("matched", true.into())),
-                PendingControlWaitKind::TabExit => session
-                    .child_gone
-                    .then(|| tab_exit_json(wait.target, session.child_exit_code)),
-            };
-            if let Some(response) = completed {
-                let _ = wait.reply.send(Ok(response));
-            } else if now >= wait.deadline {
-                let error = match &wait.kind {
-                    PendingControlWaitKind::Text(text) => {
-                        format!("wait-text timed out waiting for {text:?}")
-                    }
-                    PendingControlWaitKind::TabExit => {
-                        format!("wait-tab-exit timed out waiting for @{}", wait.target.get())
-                    }
-                };
-                let _ = wait.reply.send(Err(error));
-            } else {
-                next =
-                    Some(next.map_or(wait.deadline, |current: Instant| current.min(wait.deadline)));
-                pending.push(wait);
+            match kind {
+                WaitKind::Text(text) if session.screen_contains(text) => {
+                    WaitProbe::Completed(single_field_json("matched", true.into()))
+                }
+                WaitKind::TabExit if session.child_gone => {
+                    WaitProbe::Completed(tab_exit_json(target, session.child_exit_code))
+                }
+                _ => WaitProbe::Pending,
             }
-        }
-        self.control_waits = pending;
-        next
+        })
     }
 
     fn handle_sidebar_resize(
@@ -4097,14 +3991,11 @@ impl PixelWindowApplication for ConApp {
             return Ok(PixelWindowDirective::Exit);
         }
         self.perf_stats.sync_present_stats(window.present_stats());
-        if let Some(screenshot) = self.pending_control_screenshot.as_mut() {
-            let active = self.workspace.active();
-            screenshot.restore_active = if active == Some(screenshot.target) {
-                None
-            } else {
-                active
-            };
-            self.workspace.set_active(screenshot.target);
+        if let Some(target) = self
+            .pending_control
+            .prepare_screenshot(self.workspace.active())
+        {
+            self.workspace.set_active(target);
         }
         let width = frame.width();
         let height = frame.height();
@@ -4262,8 +4153,8 @@ impl PixelWindowApplication for ConApp {
             directive
         };
         let mut discard_capture_frame = false;
-        if let Some(screenshot) = self.pending_control_screenshot.take() {
-            let PendingControlScreenshot {
+        if let Some(screenshot) = self.pending_control.take_screenshot() {
+            let control_pending::ScreenshotWork {
                 target,
                 path,
                 reply,
@@ -4277,11 +4168,11 @@ impl PixelWindowApplication for ConApp {
             let response_path = path.to_string_lossy().into_owned();
             let shared_reply = Arc::new(std::sync::Mutex::new(Some(reply)));
             let done = Arc::new(AtomicBool::new(false));
-            self.inflight_control_screenshot = Some(InflightControlScreenshot {
+            self.pending_control.start_screenshot(
                 target,
-                reply: Arc::clone(&shared_reply),
-                done: Arc::clone(&done),
-            });
+                Arc::clone(&shared_reply),
+                Arc::clone(&done),
+            );
             let waker = window.waker();
             agent_interface::submit_png_atomic(
                 path,
@@ -4390,7 +4281,7 @@ impl PixelWindowApplication for ConApp {
         if self.exit {
             return Ok(PixelWindowDirective::Exit);
         }
-        if self.pending_control_screenshot.is_some() {
+        if self.pending_control.has_pending_screenshot() {
             window.request_redraw();
         }
         let directive = self.active_session_mut()?.about_to_wait(window, now)?;

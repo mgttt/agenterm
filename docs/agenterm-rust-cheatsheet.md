@@ -412,6 +412,14 @@ for black-box sequencing, and keep Drop cancellation as a fallback rather than
 the only path, because dropping the sender otherwise collapses a typed close
 into a misleading generic timeout.
 
+An enqueue API that may reject work must not take an owned reply sender before
+capacity/busy validation succeeds. Borrow `&mut Option<ReplySender>` (or return
+the sender with the error), and transfer it only on acceptance. Otherwise the
+caller loses the only typed-error path, sender drop wakes the receiver without
+a value, and a deterministic busy rejection is observed as a generic timeout.
+Cover both sides: acceptance consumes the sender; rejection preserves it for
+the caller to answer exactly once.
+
 Closing a bounded PTY output queue only releases a producer blocked on that
 queue; it does not by itself release an OS read or process wait. Teardown must
 close product backpressure synchronously, then transfer master/child ownership
