@@ -13,6 +13,7 @@ use crate::json::JsonValue;
 use crate::workspace::TabId;
 
 const MAX_WAITS: usize = 32;
+const MAX_WAIT_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 
 pub(super) enum WaitKind {
     Text(String),
@@ -76,10 +77,16 @@ impl PendingControl {
         if self.waits.len() >= MAX_WAITS {
             return Err(capacity_error.to_owned());
         }
+        if timeout_ms > MAX_WAIT_TIMEOUT_MS {
+            return Err(format!(
+                "wait timeout exceeds the {MAX_WAIT_TIMEOUT_MS} ms limit"
+            ));
+        }
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         self.waits.push(PendingWait {
             target,
             kind,
-            deadline: Instant::now() + Duration::from_millis(timeout_ms),
+            deadline,
             reply: reply.take().expect("control reply available"),
         });
         Ok(())
@@ -267,6 +274,27 @@ mod tests {
             Err("capacity".to_owned())
         );
         assert!(sender.is_some());
+    }
+
+    #[test]
+    fn oversized_wait_timeout_fails_without_stealing_the_reply() {
+        let mut pending = PendingControl::default();
+        let (sender, _receiver) = reply();
+        let mut sender = Some(sender);
+        assert_eq!(
+            pending.enqueue_wait(
+                TabId::new(1),
+                WaitKind::Text("ready".to_owned()),
+                u64::MAX,
+                &mut sender,
+                "capacity",
+            ),
+            Err(format!(
+                "wait timeout exceeds the {MAX_WAIT_TIMEOUT_MS} ms limit"
+            ))
+        );
+        assert!(sender.is_some());
+        assert_eq!(pending.wait_count(), 0);
     }
 
     #[test]

@@ -1183,6 +1183,15 @@ After the control endpoint is ready, inject a marker through the public input
 interface and wait for that marker through the public observation interface;
 buffered PTY input then provides the rendezvous with actual child readiness.
 
+## Bound both queue cardinality and ownership duration
+
+A fixed-capacity pending-request queue is not operationally bounded when each
+caller can choose an effectively infinite timeout. Validate a product maximum
+before transferring the reply or resource owner into the queue. Rejection must
+leave ownership with the normal dispatch error path and register no latent
+entry, so a small number of hostile or mistaken requests cannot exhaust the
+control surface indefinitely.
+
 ## Raw-handle field widths can vary by compilation target
 
 A variant in a cross-platform raw-handle enum can expose a different integer

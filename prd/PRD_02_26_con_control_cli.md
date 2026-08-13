@@ -100,6 +100,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   screenshot reply with a typed target-close error. `ui-snapshot` exposes
   pending counts, so a black-box journey proves registration, cancellation,
   worker release and clean final-host exit without timing guesses.
+- [x] pending text/exit deadlines have a fixed ten-minute upper bound. A larger
+  syntactically valid `u64` timeout fails only that request, preserves its reply
+  owner for the normal dispatch error path, and registers no latent wait instead
+  of occupying one of the 32 bounded slots for an effectively unbounded period.
 - [x] the GUI handoff preserves concurrent request workers without linking two
   generic channel instances: a mutex-owned FIFO carries requests and a one-shot
   Condvar slot carries each reply. Closing the GUI atomically rejects new queue
