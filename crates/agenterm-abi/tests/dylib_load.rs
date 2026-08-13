@@ -10,6 +10,7 @@
 use libloading::{Library, Symbol};
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -67,6 +68,7 @@ const AGT_CAP_PROCESS_SPAWN: i32 = 2;
 const AGT_CAP_PROCESS_OBSERVE: i32 = 3;
 const AGT_CAP_WINDOW_HOST: i32 = 4;
 const AGT_CAP_SCREENSHOT: i32 = 7;
+const AGT_CAP_CLIPBOARD: i32 = 8;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
 const EXPECTED_BUILD_ID: &str = "0.1.16+abi.1";
@@ -86,6 +88,9 @@ type ScreenshotCaptureWindow =
 type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize) -> i32;
 type ProcessKill = unsafe extern "C" fn(u32) -> i32;
 type ProcessSelf = unsafe extern "C" fn() -> u32;
+type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
+type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
+type ClipboardHasText = unsafe extern "C" fn() -> i32;
 
 /// Locate the cdylib built under the active profile. The test binary lives in
 /// `target/<profile>/deps/`, the cdylib in `target/<profile>/`.
@@ -240,6 +245,8 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     assert_eq!(unsafe { f(AGT_CAP_SCREENSHOT) }, AGT_OK);
     // Milestone 5 ships process observation → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_OBSERVE) }, AGT_OK);
+    // Milestone 8 ships the clipboard mechanism → AGT_OK.
+    assert_eq!(unsafe { f(AGT_CAP_CLIPBOARD) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_SPAWN) }, AGT_UNSUPPORTED);
 }
@@ -1171,5 +1178,291 @@ fn process_kill_rejects_pid_zero() {
     assert!(
         msg.contains("bad_pid"),
         "expected code \"bad_pid\" in error, got: {msg}"
+    );
+}
+
+// --- clipboard (milestone 8) --------------------------------------------
+
+/// Process-wide lock serializing every test that touches the real clipboard.
+/// The OS clipboard is a global singleton outside this process while cargo
+/// runs tests on many threads by default: two clipboard tests racing each
+/// other interleave (one test's restore clobbers the other's probe), which
+/// made the full suite fail while each test passed alone. Poison is
+/// tolerated — a panic in one clipboard test must not cascade into the rest.
+static CLIPBOARD_LOCK: Mutex<()> = Mutex::new(());
+
+/// Take the clipboard serial lock. Every clipboard test calls this first so
+/// at most one test touches the OS clipboard at a time.
+fn clipboard_lock() -> std::sync::MutexGuard<'static, ()> {
+    CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// RAII restore for the user's real clipboard. `original` holds the content
+/// that was on the clipboard when the guard was created (empty = no text).
+/// `restore()` writes it back; `Drop` calls `restore()`, so a panicking
+/// assertion still attempts to restore the user's clipboard.
+struct ClipboardGuard {
+    set: Symbol<'static, ClipboardSetText>,
+    original: Vec<u8>,
+    dirty: bool,
+    restored: bool,
+}
+
+impl ClipboardGuard {
+    /// Restore the original content. Returns `true` when the restore
+    /// succeeded (or was a no-op); `false` when non-empty original content
+    /// could not be written back — the user's data is genuinely at risk and
+    /// the caller must surface that as a test failure. Restoring an *empty*
+    /// original that fails only prints a warning: there was no user data to
+    /// lose.
+    fn restore(&mut self) -> bool {
+        if self.restored {
+            return true;
+        }
+        self.restored = true;
+        // Only touch the clipboard when we actually changed it, or when the
+        // original was non-empty (a failed probe write may still have emptied
+        // it mid-way; restore the user's text in that case too). An empty
+        // original with no probe write means "no text, untouched" — writing
+        // then would be an unnecessary mutation.
+        if !self.dirty && self.original.is_empty() {
+            return true;
+        }
+        let status = unsafe { (self.set)(self.original.as_ptr(), self.original.len()) };
+        if status != AGT_OK {
+            if self.original.is_empty() {
+                eprintln!("WARNING: failed to clear the user's clipboard (status {status})");
+            } else {
+                eprintln!(
+                    "ERROR: failed to restore the user's clipboard (status {status}); \
+                     {} bytes of original content may be lost",
+                    self.original.len()
+                );
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        // A panic inside `Drop` while another panic is unwinding would abort
+        // the whole test process and hide every other failure, so the Drop
+        // path only reports. Every test that mutates the clipboard also calls
+        // `restore()` explicitly and asserts its result, which is what makes
+        // a lost non-empty original fail the test.
+        self.restore();
+    }
+}
+
+/// Read the full clipboard text through the ABI. Returns `None` when the
+/// clipboard is unavailable in this session (no GUI / window station) or a
+/// platform failure occurred — the caller must not touch the clipboard then.
+fn clipboard_read_all(get: Symbol<'static, ClipboardGetText>) -> Option<Vec<u8>> {
+    let mut required = 0usize;
+    let st = unsafe { get(std::ptr::null_mut(), 0, &mut required) };
+    if st == AGT_OK {
+        // No Unicode text: an empty original is the true state.
+        return Some(Vec::new());
+    }
+    if st != AGT_FAILED || required == 0 {
+        eprintln!("clipboard probe returned unexpected status {st}");
+        return None;
+    }
+    let mut buf = vec![0u8; required];
+    let mut got = 0usize;
+    let st = unsafe { get(buf.as_mut_ptr(), required, &mut got) };
+    if st != AGT_OK {
+        eprintln!("clipboard read failed (status {st}); treating clipboard as unavailable");
+        return None;
+    }
+    buf.truncate(got);
+    Some(buf)
+}
+
+/// Save the original clipboard content, then install a unique UTF-8 probe
+/// (multi-byte characters included) on the clipboard. The probe is padded to
+/// at least `min_len` bytes so callers that need a known-long payload (e.g.
+/// the too-small-cap test) never depend on what the clipboard happened to
+/// hold. Returns the guard plus the probe bytes, or `None` when the clipboard
+/// is unavailable in this session (the reason is printed; nothing was
+/// modified then). "Unavailable" is judged solely by the probe write failing,
+/// so within one process all clipboard tests reach the same verdict.
+fn write_clipboard_probe(
+    lib: &'static Library,
+    min_len: usize,
+) -> Option<(ClipboardGuard, Vec<u8>)> {
+    let get: Symbol<ClipboardGetText> = unsafe { sym(lib, b"agt_clipboard_get_text") };
+    let set: Symbol<ClipboardSetText> = unsafe { sym(lib, b"agt_clipboard_set_text") };
+    let original = clipboard_read_all(get)?;
+    let mut guard = ClipboardGuard {
+        set,
+        original,
+        dirty: false,
+        restored: false,
+    };
+    let mut probe = format!(
+        "agenterm-m8-clipboard-探针-{}-{:?}",
+        std::process::id(),
+        std::time::Instant::now()
+    );
+    while probe.len() < min_len {
+        probe.push('x');
+    }
+    let status = unsafe { (guard.set)(probe.as_bytes().as_ptr(), probe.len()) };
+    if status != AGT_OK {
+        eprintln!(
+            "clipboard unavailable in this session: probe write failed \
+             ({})",
+            last_error_message(lib)
+        );
+        return None; // guard drops: the original is restored.
+    }
+    guard.dirty = true;
+    Some((guard, probe.into_bytes()))
+}
+
+/// Milestone 8 evidence 1: full round trip with the user's real clipboard
+/// protected. Save the original content, write a probe, read it back and
+/// assert equality, then restore the original and verify the restore took
+/// effect.
+#[test]
+fn clipboard_roundtrip_preserves_user_clipboard() {
+    let lib = load();
+    let _serial = clipboard_lock();
+    let Some((mut guard, probe)) = write_clipboard_probe(lib, 0) else {
+        eprintln!("SKIP: clipboard unavailable in this session; round trip cannot run");
+        return;
+    };
+    eprintln!(
+        "round trip ran for real: {}-byte probe written to the clipboard",
+        probe.len()
+    );
+    let get: Symbol<ClipboardGetText> = unsafe { sym(lib, b"agt_clipboard_get_text") };
+    let read_back = clipboard_read_all(get.clone())
+        .expect("probe text must be readable immediately after a successful write");
+    assert_eq!(read_back, probe, "clipboard round trip mismatch");
+    // The has-text export must report 1 while the probe is installed.
+    let has: Symbol<ClipboardHasText> = unsafe { sym(lib, b"agt_clipboard_has_text") };
+    assert_eq!(
+        unsafe { has() },
+        1,
+        "has_text must report 1 while probe text is present"
+    );
+    // Restore the original and verify the restore actually took effect. A
+    // failed restore of non-empty content means the user's data is gone: that
+    // must fail the test, not just print a warning.
+    assert!(
+        guard.restore(),
+        "user clipboard restore FAILED: {} bytes of original content may be lost",
+        guard.original.len()
+    );
+    let restored =
+        clipboard_read_all(get.clone()).expect("clipboard must be readable after restore");
+    assert_eq!(restored, guard.original, "user clipboard was not restored");
+}
+
+/// Milestone 8 evidence 2: a deliberately too-small cap (1) returns
+/// AGT_FAILED{code="buffer_too_small"} and *out_len reports the required
+/// (larger) byte count. The test first installs its own known probe padded to
+/// at least 64 bytes, so it never depends on what the clipboard happened to
+/// hold. Requires the clipboard to be writable; skips with a printed reason
+/// when it is not.
+#[test]
+fn clipboard_get_text_small_cap_reports_required_bytes() {
+    let lib = load();
+    let _serial = clipboard_lock();
+    let Some((mut guard, probe)) = write_clipboard_probe(lib, 64) else {
+        eprintln!("SKIP: clipboard unavailable in this session; too-small-cap cannot run");
+        return;
+    };
+    eprintln!(
+        "too-small-cap ran for real: {}-byte probe installed",
+        probe.len()
+    );
+    let get: Symbol<ClipboardGetText> = unsafe { sym(lib, b"agt_clipboard_get_text") };
+    let mut out_len = 0usize;
+    let mut one = [0u8; 1];
+    let st = unsafe { get(one.as_mut_ptr(), 1, &mut out_len) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        out_len > 1,
+        "out_len must report required bytes > 1, got {out_len}"
+    );
+    assert_eq!(
+        out_len,
+        probe.len(),
+        "required bytes must equal the installed probe length"
+    );
+    assert!(
+        probe.len() >= 64,
+        "probe must be padded to at least 64 bytes, got {}",
+        probe.len()
+    );
+    assert!(
+        guard.restore(),
+        "user clipboard restore FAILED: {} bytes of original content may be lost",
+        guard.original.len()
+    );
+}
+
+/// Milestone 8 evidence 3: NULL out_len -> AGT_FAILED{code="bad_pointer"}.
+/// Does not depend on the real clipboard, so it always runs (the lock still
+/// serializes it with the other clipboard tests for verdict consistency).
+#[test]
+fn clipboard_get_text_rejects_null_out_len() {
+    let lib = load();
+    let _serial = clipboard_lock();
+    let get: Symbol<ClipboardGetText> = unsafe { sym(lib, b"agt_clipboard_get_text") };
+    let mut buf = [0u8; 16];
+    let st = unsafe { get(buf.as_mut_ptr(), buf.len(), std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 8 evidence 4: `agt_clipboard_set_text(NULL, 5)` ->
+/// AGT_FAILED{code="bad_text"}. Does not depend on the real clipboard (the
+/// NULL check and the UTF-8 validation both happen before any clipboard
+/// access), so it always runs (the lock still serializes it with the other
+/// clipboard tests for verdict consistency).
+#[test]
+fn clipboard_set_text_rejects_null_and_non_utf8() {
+    let lib = load();
+    let _serial = clipboard_lock();
+    let set: Symbol<ClipboardSetText> = unsafe { sym(lib, b"agt_clipboard_set_text") };
+    // NULL text with a nonzero length -> bad_text.
+    let st = unsafe { set(std::ptr::null(), 5) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
+    );
+    // NULL text with length 0 is also rejected (NULL is always invalid).
+    let st = unsafe { set(std::ptr::null(), 0) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
+    );
+    // Non-UTF-8 bytes -> bad_text (validated before any clipboard access).
+    let invalid = [0xffu8, 0xfe];
+    let st = unsafe { set(invalid.as_ptr(), invalid.len()) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
     );
 }

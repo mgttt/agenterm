@@ -23,6 +23,10 @@
 //! live processes (two-stage, §3.4), `agt_process_kill` terminates by pid, and
 //! `agt_process_self` reports the calling process pid. `AGT_CAP_PROCESS_OBSERVE`
 //! now reports `AGT_OK`; spawn stays `AGT_UNSUPPORTED` (not built this round).
+//! Milestone 8 ships the clipboard mechanism: `agt_clipboard_set_text`
+//! publishes UTF-8 text, `agt_clipboard_get_text` reads it back two-stage, and
+//! `agt_clipboard_has_text` probes for Unicode text. `AGT_CAP_CLIPBOARD` now
+//! reports `AGT_OK`.
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -39,6 +43,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
@@ -230,10 +235,10 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 }
 
 /// Capability negotiation. §3.2/§14.2 rule two: compile-time feature → runtime
-/// capability query. The `pty`, `native-pixel-window`, `screenshot` and
-/// `process` features are compiled into this build, so `AGT_CAP_PTY`,
-/// `AGT_CAP_WINDOW_HOST`, `AGT_CAP_SCREENSHOT` and
-/// `AGT_CAP_PROCESS_OBSERVE` report `AGT_OK`;
+/// capability query. The `pty`, `native-pixel-window`, `screenshot`,
+/// `process` and `clipboard` features are compiled into this build, so
+/// `AGT_CAP_PTY`, `AGT_CAP_WINDOW_HOST`, `AGT_CAP_SCREENSHOT`,
+/// `AGT_CAP_PROCESS_OBSERVE` and `AGT_CAP_CLIPBOARD` report `AGT_OK`;
 /// mechanisms that have not shipped yet report `AGT_UNSUPPORTED`
 /// (a product gap, never a permission statement).
 #[unsafe(no_mangle)]
@@ -242,7 +247,8 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
         agt_capability::AGT_CAP_PTY
         | agt_capability::AGT_CAP_WINDOW_HOST
         | agt_capability::AGT_CAP_SCREENSHOT
-        | agt_capability::AGT_CAP_PROCESS_OBSERVE => agt_status::AGT_OK,
+        | agt_capability::AGT_CAP_PROCESS_OBSERVE
+        | agt_capability::AGT_CAP_CLIPBOARD => agt_status::AGT_OK,
         _ => agt_status::AGT_UNSUPPORTED,
     }
     // Pure match — no panic surface; the fence is kept for uniformity.
@@ -2535,6 +2541,161 @@ pub extern "C" fn agt_process_kill(pid: u32) -> agt_status {
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_process_self() -> u32 {
     catch_unwind(std::process::id).unwrap_or(0)
+}
+
+// --- clipboard (milestone 8) -------------------------------------------
+
+/// Internal read ceiling for `agt_clipboard_get_text`: the library never
+/// retains more than this many UTF-8 bytes of clipboard payload. The platform
+/// reader treats the bound as a hard limit and *fails* (never splits) beyond
+/// it, so a payload that exceeds the ceiling is reported as
+/// `clipboard_failed` — the caller never receives a torn multi-byte code
+/// point (a UTF-8 string is either delivered whole or not at all).
+const MAX_CLIPBOARD_READ_BYTES: usize = 1024 * 1024;
+
+/// Publish UTF-8 text. `text == NULL`, or a slice that is not valid UTF-8 →
+/// `AGT_FAILED{code="bad_text"}`; a platform failure (e.g. no clipboard in
+/// this session) → `AGT_FAILED{code="clipboard_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_clipboard_set_text(text: *const u8, len: usize) -> agt_status {
+    fn inner(text: *const u8, len: usize) -> agt_status {
+        if text.is_null() {
+            record_error(
+                c"agt_clipboard_set_text",
+                c"bad_text",
+                "text pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        // SAFETY: the pointer/length pair is a C ABI contract (see
+        // include/agenterm.h); the caller guarantees `len` readable bytes.
+        let slice = unsafe { std::slice::from_raw_parts(text, len) };
+        let text = match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_clipboard_set_text",
+                    c"bad_text",
+                    "text is not valid UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        match set_text(text) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_clipboard_set_text",
+                    c"clipboard_failed",
+                    format!("{e}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(text, len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_clipboard_set_text",
+                c"panic",
+                "panic in agt_clipboard_set_text",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Read UTF-8 clipboard text (two-stage, §3.4):
+/// - `cap` sufficient → `AGT_OK`, `*out_len` = bytes written.
+/// - `cap` insufficient → `AGT_FAILED{code="buffer_too_small"}`, `*out_len`
+///   = required bytes.
+/// - no Unicode text on the clipboard → `AGT_OK` with `*out_len` = 0.
+///
+/// `out_len == NULL` (or `buf == NULL` with `cap > 0`) →
+/// `AGT_FAILED{code="bad_pointer"}`; a platform failure →
+/// `AGT_FAILED{code="clipboard_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_clipboard_get_text(
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        if out_len.is_null() {
+            record_error(
+                c"agt_clipboard_get_text",
+                c"bad_pointer",
+                "out_len pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if cap > 0 && buf.is_null() {
+            record_error(c"agt_clipboard_get_text", c"bad_pointer", "buf is null");
+            return agt_status::AGT_FAILED;
+        }
+        // No Unicode text at all is not a failure: report an empty read.
+        if !has_unicode_text() {
+            unsafe { *out_len = 0 };
+            return agt_status::AGT_OK;
+        }
+        let text = match get_text(MAX_CLIPBOARD_READ_BYTES) {
+            Ok(s) => s,
+            Err(e) => {
+                // The probe said text was available but the read failed: the
+                // payload may exceed the read ceiling, another process may
+                // have emptied the clipboard in between, or the platform
+                // adapter failed. Re-probe so "no text" stays a clean empty
+                // read instead of a spurious failure.
+                if !has_unicode_text() {
+                    unsafe { *out_len = 0 };
+                    return agt_status::AGT_OK;
+                }
+                record_error(
+                    c"agt_clipboard_get_text",
+                    c"clipboard_failed",
+                    format!("{e}"),
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let required = text.len();
+        if cap < required {
+            unsafe { *out_len = required };
+            record_error(
+                c"agt_clipboard_get_text",
+                c"buffer_too_small",
+                "cap is smaller than the clipboard text; allocate the required size and call again",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(text.as_ptr(), buf, required);
+            *out_len = required;
+        }
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_clipboard_get_text",
+                c"panic",
+                "panic in agt_clipboard_get_text",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// 1 when the clipboard currently holds Unicode text, 0 otherwise. Never
+/// fails; a panic inside the fence (not expected) is contained and reported
+/// as 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_clipboard_has_text() -> i32 {
+    catch_unwind(|| if has_unicode_text() { 1 } else { 0 }).unwrap_or(0)
 }
 
 // --- milestone 3b unit tests (pure translation functions) ---------------

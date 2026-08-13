@@ -7,6 +7,7 @@
  * adds the PTY mechanism; milestones 3a/3b add the window + frame mechanisms;
  * milestone 4 adds screenshot export (framebuffer -> PNG, native window -> PNG);
  * milestone 5 adds the process group (enumerate / kill / self pid).
+ * milestone 8 adds the clipboard group (set / get / has-text).
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -67,8 +68,8 @@ typedef enum {
 } agt_capability;
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
- * milestone 5, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT and
- * AGT_CAP_PROCESS_OBSERVE all report AGT_OK. */
+ * milestone 8, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT,
+ * AGT_CAP_PROCESS_OBSERVE and AGT_CAP_CLIPBOARD all report AGT_OK. */
 agt_status agt_capability_query(agt_capability cap);
 
 /* --- pty ------------------------------------------------------------ */
@@ -299,6 +300,30 @@ agt_status agt_process_kill(uint32_t pid);
 
 /* pid of the current process. Never fails. */
 uint32_t   agt_process_self(void);
+
+/* --- clipboard (milestone 8) ---------------------------------------- */
+
+/* Publish UTF-8 text. `text == NULL`, or a slice that is not valid UTF-8,
+ * returns AGT_FAILED with code "bad_text". A platform failure (for example
+ * no clipboard in this session) returns AGT_FAILED with code
+ * "clipboard_failed". */
+agt_status agt_clipboard_set_text(const uint8_t* text, size_t len);
+
+/* Read UTF-8 clipboard text (two-stage, spec 3.4):
+ *   cap sufficient   -> AGT_OK, *out_len = bytes written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
+ *                       *out_len = required bytes
+ *   no Unicode text  -> AGT_OK with *out_len = 0
+ * NULL out_len (or NULL buf with cap > 0) ->
+ * AGT_FAILED{code="bad_pointer"}; platform failure ->
+ * AGT_FAILED{code="clipboard_failed"}. Reads are internally capped (1 MiB
+ * ceiling); a payload that exceeds the ceiling is reported as
+ * "clipboard_failed" rather than delivered torn mid-character. */
+agt_status agt_clipboard_get_text(uint8_t* buf, size_t cap, size_t* out_len);
+
+/* 1 when the clipboard currently holds Unicode text, 0 otherwise. Never
+ * fails. */
+int32_t    agt_clipboard_has_text(void);
 
 /* --- known platform limitation -------------------------------------- */
 

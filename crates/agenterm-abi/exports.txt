@@ -21,3 +21,6 @@ agt_screenshot_capture_window
 agt_process_list
 agt_process_kill
 agt_process_self
+agt_clipboard_set_text
+agt_clipboard_get_text
+agt_clipboard_has_text

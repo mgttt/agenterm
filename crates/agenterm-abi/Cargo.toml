@@ -20,8 +20,10 @@ crate-type = ["cdylib"]
 # types). `screenshot` (milestone 4) gates the whole
 # `agenterm_platform::screenshot` module: without it the exports below cannot
 # compile. `process` (milestone 5) gates the whole
-# `agenterm_platform::process` module.
-agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "input", "ime", "screenshot", "process"] }
+# `agenterm_platform::process` module. `clipboard` (milestone 8) gates the
+# whole `agenterm_platform::clipboard` module: without it the exports below
+# cannot compile.
+agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "input", "ime", "screenshot", "process", "clipboard"] }
 
 [dev-dependencies]
 # The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built
