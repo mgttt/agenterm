@@ -16,7 +16,7 @@ pub const SEND_NAME: &str = "SEND";
 pub const TABS_NAME: &str = "Tabs";
 pub const SESSION_NAME: &str = "Session";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
     pub node: u32,
     pub action: PublishedAction,
@@ -29,6 +29,7 @@ pub fn tree(
     frame_width: u32,
     frame_height: u32,
     composer_focused: bool,
+    command_text: &str,
 ) -> PublishedTree {
     let frame = Rect {
         x: 0,
@@ -44,6 +45,7 @@ pub fn tree(
                 None,
                 PublishedRole::Application,
                 app_name,
+                "",
                 frame,
                 Flags::CONTAINER,
             ),
@@ -52,6 +54,7 @@ pub fn tree(
                 Some(NODE_APPLICATION),
                 PublishedRole::Frame,
                 frame_title,
+                "",
                 frame,
                 Flags::FOCUSABLE.with_click(),
             ),
@@ -60,6 +63,7 @@ pub fn tree(
                 Some(NODE_FRAME),
                 PublishedRole::Panel,
                 TABS_NAME,
+                "",
                 layout.sidebar,
                 Flags::FOCUSABLE,
             ),
@@ -68,6 +72,7 @@ pub fn tree(
                 Some(NODE_FRAME),
                 PublishedRole::Terminal,
                 SESSION_NAME,
+                "",
                 session_rect(layout, frame_width, frame_height),
                 Flags {
                     focusable: true,
@@ -81,6 +86,7 @@ pub fn tree(
                 Some(NODE_FRAME),
                 PublishedRole::Text,
                 COMMAND_NAME,
+                command_text,
                 layout.composer_input,
                 Flags {
                     focusable: true,
@@ -94,6 +100,7 @@ pub fn tree(
                 Some(NODE_FRAME),
                 PublishedRole::Button,
                 SEND_NAME,
+                "",
                 layout.composer_send,
                 Flags::FOCUSABLE.with_click(),
             ),
@@ -147,6 +154,7 @@ fn published(
     parent: Option<u32>,
     role: PublishedRole,
     name: &str,
+    text: &str,
     rect: Rect,
     flags: Flags,
 ) -> PublishedNode {
@@ -155,6 +163,7 @@ fn published(
         parent,
         role,
         name: name.to_owned(),
+        text: text.to_owned(),
         bounds: AccessibilityBounds {
             x: i32::try_from(rect.x).unwrap_or(0),
             y: i32::try_from(rect.y).unwrap_or(0),
@@ -175,11 +184,20 @@ mod tests {
     #[test]
     fn snapshot_has_inner_named_controls() {
         let layout = Layout::new(960, 600, 1.0);
-        let tree = tree("agenterm-con", "Inspect [@1]", layout, 960, 600, true);
+        let tree = tree(
+            "agenterm-con",
+            "Inspect [@1]",
+            layout,
+            960,
+            600,
+            true,
+            "probe-text",
+        );
         assert!(tree.nodes.len() >= 5);
         let command = tree.node(NODE_COMMAND).expect("command input is published");
         assert_eq!(command.name, COMMAND_NAME);
         assert_eq!(command.role, PublishedRole::Text);
+        assert_eq!(command.text, "probe-text");
         assert!(command.focused);
         assert!(command.editable);
         let send = tree.node(NODE_SEND).expect("send button is published");

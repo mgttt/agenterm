@@ -50,10 +50,11 @@ impl PublishedRole {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PublishedAction {
     Click,
     Focus,
+    SetText(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,6 +63,7 @@ pub struct PublishedNode {
     pub parent: Option<u32>,
     pub role: PublishedRole,
     pub name: String,
+    pub text: String,
     pub bounds: AccessibilityBounds,
     pub focusable: bool,
     pub focused: bool,
@@ -112,6 +114,7 @@ mod tests {
                     parent: None,
                     role: PublishedRole::Application,
                     name: "agenterm-con".into(),
+                    text: String::new(),
                     bounds: AccessibilityBounds {
                         x: 0,
                         y: 0,
@@ -128,6 +131,7 @@ mod tests {
                     parent: Some(NODE_APPLICATION),
                     role: PublishedRole::Frame,
                     name: "title".into(),
+                    text: String::new(),
                     bounds: AccessibilityBounds {
                         x: 0,
                         y: 0,
@@ -144,6 +148,7 @@ mod tests {
                     parent: Some(NODE_FRAME),
                     role: PublishedRole::Text,
                     name: "Command".into(),
+                    text: "probe".into(),
                     bounds: AccessibilityBounds {
                         x: 1,
                         y: 1,
@@ -162,6 +167,10 @@ mod tests {
         assert_eq!(
             tree.node(NODE_COMMAND).map(|node| node.name.as_str()),
             Some("Command")
+        );
+        assert_eq!(
+            tree.node(NODE_COMMAND).map(|node| node.text.as_str()),
+            Some("probe")
         );
     }
 }

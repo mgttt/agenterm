@@ -73,6 +73,14 @@ pub fn paste(buffer: &mut String, selected: &mut bool, text: &str) {
     }
 }
 
+/// Replace the buffer with AT-SPI `SetTextContents` / computed `InsertText`
+/// result. Keeps the composer single-line so a bus write cannot inject
+/// newlines into the painted input.
+pub fn replace_text(buffer: &mut String, selected: &mut bool, text: &str) {
+    *selected = false;
+    *buffer = normalize_single_line(text);
+}
+
 fn prepare_edit(buffer: &mut String, selected: &mut bool) -> bool {
     if *selected {
         buffer.clear();
@@ -145,6 +153,15 @@ mod tests {
         let mut selected = true;
         paste(&mut buffer, &mut selected, "a\r\nb\t\u{1b}c");
         assert_eq!(buffer, "a b c");
+        assert!(!selected);
+    }
+
+    #[test]
+    fn replace_text_is_single_line_and_clears_selection() {
+        let mut buffer = "old".to_owned();
+        let mut selected = true;
+        replace_text(&mut buffer, &mut selected, "cu33o\nmarker");
+        assert_eq!(buffer, "cu33o marker");
         assert!(!selected);
     }
 

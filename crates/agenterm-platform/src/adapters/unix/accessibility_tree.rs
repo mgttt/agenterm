@@ -30,3 +30,13 @@ pub(crate) fn perform_node_action(
         reason: "accessibility-tree not wired on this unix host".into(),
     })
 }
+
+pub(crate) fn set_node_text(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+    _text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "accessibility-tree not wired on this unix host".into(),
+    })
+}
