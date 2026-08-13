@@ -8,10 +8,12 @@
 //!
 //! Milestone 1 shipped the four capability/version/error exports; milestone 2
 //! added the PTY mechanism (`agt_pty_open/read/write/resize/wait/close`);
-//! milestone 3a adds the window lifecycle / pixel-frame rendezvous
+//! milestone 3a added the window lifecycle / pixel-frame rendezvous
 //! (`agt_window_open/poll_event/request_redraw/metrics/close` plus
-//! `agt_frame_begin/commit`). Keyboard/pointer/wheel/IME event translation
-//! is deliberately out of scope until milestone 3b.
+//! `agt_frame_begin/commit`); milestone 3b wires the events 3a deliberately
+//! dropped — keyboard / pointer / wheel / IME — into the queue, and adds
+//! `agt_window_event_text` for out-of-band IME text (preedit/commit can be
+//! long, so it is never truncated into the fixed-size POD record).
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -28,15 +30,20 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use agenterm_platform::ime::ImeEvent;
+use agenterm_platform::input::{
+    KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
+};
 use agenterm_platform::pty::{
     ChildCommand, PtyChild, PtyMaster, TerminalSize, initialize_shutdown_reaper,
     shutdown_session_detached,
 };
 use agenterm_platform::threading::spawn_named_detached;
 use agenterm_platform::window_host::{
-    LogicalSize, PixelFrameWrite, PixelWindow, PixelWindowApplication, PixelWindowDirective,
-    PixelWindowError, PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, WindowWaker,
-    XrgbPixelFrame, run_pixel_window,
+    LogicalPoint, LogicalSize, PixelFrameWrite, PixelWindow, PixelWindowApplication,
+    PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowMetrics,
+    PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, WindowWaker, XrgbPixelFrame,
+    run_pixel_window,
 };
 
 // §3.8 panic fence: building this crate under an abort profile would neuter
@@ -764,16 +771,34 @@ pub extern "C" fn agt_pty_close(pty: agt_pty_t) {
 
 // --- window & frame (milestone 3a) ------------------------------------
 
-/// Event kinds carried by `agt_event` (the only four events this milestone
-/// translates; everything else from the platform's rich event enum is
-/// deliberately dropped — keyboard/pointer/wheel/IME arrive in 3b).
+/// Event kinds carried by `agt_event`. Milestone 3a translated the first five;
+/// milestone 3b adds KEY / POINTER / WHEEL / IME. Unknown platform event
+/// variants are dropped (no queue entry, no error) per the ABI contract.
 pub const AGT_EV_NONE: u32 = 0;
 pub const AGT_EV_CLOSE_REQUEST: u32 = 1;
 pub const AGT_EV_GEOMETRY: u32 = 2;
 pub const AGT_EV_FOCUS: u32 = 3;
 pub const AGT_EV_RENDER_DUE: u32 = 4;
+pub const AGT_EV_KEY: u32 = 5;
+pub const AGT_EV_POINTER: u32 = 6;
+pub const AGT_EV_WHEEL: u32 = 7;
+pub const AGT_EV_IME: u32 = 8;
 
-/// C-compatible window event record.
+/// `modifiers` bitmask (shared by KEY / POINTER; 0 when not applicable).
+pub const AGT_MOD_CONTROL: u32 = 1;
+pub const AGT_MOD_SHIFT: u32 = 2;
+pub const AGT_MOD_ALT: u32 = 4;
+pub const AGT_MOD_META: u32 = 8;
+
+/// `key_named` codes — ABI-owned numbering, **not** the platform enum order.
+/// 0 = unnamed (Character / Unidentified); 255 = unrecognized named key
+/// (the `_` fallback arm for new platform variants).
+const AGT_KEY_NAMED_OTHER: u8 = 0;
+const AGT_KEY_NAMED_UNKNOWN: u8 = 255;
+
+/// C-compatible window event record. All fields are POD; the IME text itself
+/// never rides in this struct — it is fetched with `agt_window_event_text`
+/// (preedit/commit can be long and must not be truncated).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct agt_event {
@@ -787,6 +812,82 @@ pub struct agt_event {
     pub scale: f64,
     /// Valid only when `kind == AGT_EV_FOCUS`.
     pub focused: i32,
+    /// `AGT_MOD_*` bitmask; valid for KEY / POINTER, 0 otherwise.
+    pub modifiers: u32,
+    /// KEY: 0 = released, 1 = pressed.
+    pub key_state: u8,
+    /// KEY: 0/1.
+    pub key_repeat: u8,
+    /// KEY: `key_named` code table (0 = unnamed, 255 = unrecognized).
+    pub key_named: u8,
+    /// KEY: 0 = other, 1 = letter, 2 = digit, 3 = backspace, 4 = enter,
+    /// 5 = space, 6 = tab.
+    pub key_physical: u8,
+    /// KEY: letter's Unicode codepoint / digit's value / 0 otherwise.
+    pub key_physical_value: u32,
+    /// KEY: `NormalizedKeyEvent::text`, UTF-8, `text_len` bytes used.
+    pub text: [u8; 16],
+    pub text_len: u8,
+    /// KEY: 1 when `text` was truncated to fit `text[16]`.
+    pub text_truncated: u8,
+    /// POINTER / WHEEL: logical position; valid only when `has_position != 0`.
+    pub pointer_x: f64,
+    pub pointer_y: f64,
+    /// POINTER: 0 = none/move, 1 = left, 2 = right, 3 = middle, 4 = other.
+    pub pointer_button: u8,
+    /// POINTER: 0 = released, 1 = pressed, 2 = moved, 3 = left, 4 = capture_lost.
+    pub pointer_state: u8,
+    /// POINTER / WHEEL: 0/1 — whether `pointer_x`/`pointer_y` are valid.
+    pub has_position: u8,
+    /// WHEEL: scroll delta.
+    pub wheel_x: f64,
+    pub wheel_y: f64,
+    /// WHEEL: 0 = lines, 1 = logical_pixels.
+    pub wheel_unit: u8,
+    /// IME: 0 = enabled, 1 = preedit, 2 = commit, 3 = disabled.
+    pub ime_kind: u8,
+    /// IME: 0/1 — whether `ime_cursor_begin`/`ime_cursor_end` are valid.
+    pub has_ime_cursor: u8,
+    /// IME: valid when `has_ime_cursor != 0`.
+    pub ime_cursor_begin: usize,
+    pub ime_cursor_end: usize,
+    /// IME: text bytes; fetch the text with `agt_window_event_text`.
+    pub ime_text_len: usize,
+}
+
+impl Default for agt_event {
+    fn default() -> Self {
+        Self {
+            kind: AGT_EV_NONE,
+            generation: 0,
+            width: 0,
+            height: 0,
+            scale: 0.0,
+            focused: 0,
+            modifiers: 0,
+            key_state: 0,
+            key_repeat: 0,
+            key_named: 0,
+            key_physical: 0,
+            key_physical_value: 0,
+            text: [0u8; 16],
+            text_len: 0,
+            text_truncated: 0,
+            pointer_x: 0.0,
+            pointer_y: 0.0,
+            pointer_button: 0,
+            pointer_state: 0,
+            has_position: 0,
+            wheel_x: 0.0,
+            wheel_y: 0.0,
+            wheel_unit: 0,
+            ime_kind: 0,
+            has_ime_cursor: 0,
+            ime_cursor_begin: 0,
+            ime_cursor_end: 0,
+            ime_text_len: 0,
+        }
+    }
 }
 
 /// C-compatible window creation parameters.
@@ -865,13 +966,29 @@ struct FrameSlot {
     phase: FramePhase,
 }
 
+/// One queued event: the C-visible POD record plus an optional out-of-band
+/// text buffer (IME preedit/commit, which must never be truncated). On poll
+/// the text is moved into the window's text buffer and served by
+/// `agt_window_event_text`; the next poll replaces it.
 struct EventRecord {
-    kind: u32,
-    generation: u64,
-    width: u32,
-    height: u32,
-    scale: f64,
-    focused: i32,
+    ev: agt_event,
+    event_text: Option<Vec<u8>>,
+}
+
+impl EventRecord {
+    fn new(ev: agt_event) -> Self {
+        Self {
+            ev,
+            event_text: None,
+        }
+    }
+
+    fn with_text(ev: agt_event, text: Vec<u8>) -> Self {
+        Self {
+            ev,
+            event_text: Some(text),
+        }
+    }
 }
 
 /// Why the window loop exited before `opened()` (or after it, on close).
@@ -894,6 +1011,9 @@ struct WindowState {
     /// `render()`'s `frame.commit(Full)` failed after the caller released the
     /// rendezvous; reported on the caller's next `agt_frame_begin`.
     commit_failed: Option<String>,
+    /// Text of the most recently polled event (IME preedit/commit), served by
+    /// `agt_window_event_text`; replaced by the next poll.
+    event_text: Vec<u8>,
 }
 
 /// All state shared between the ABI caller thread and the library-private
@@ -919,6 +1039,7 @@ impl WindowShared {
                 waker: None,
                 next_generation: 0,
                 commit_failed: None,
+                event_text: Vec::new(),
             }),
             cond: Condvar::new(),
         }
@@ -955,14 +1076,11 @@ impl WindowShared {
         let generation = slot.generation;
         let mut guard = lock(&self.state);
         guard.pending_frame = Some(slot);
-        guard.events.push_back(EventRecord {
+        guard.events.push_back(EventRecord::new(agt_event {
             kind: AGT_EV_RENDER_DUE,
             generation,
-            width: 0,
-            height: 0,
-            scale: 0.0,
-            focused: 0,
-        });
+            ..agt_event::default()
+        }));
         if guard.events.len() > EVENT_QUEUE_CAP {
             guard.events.pop_front();
         }
@@ -1088,6 +1206,252 @@ fn geometry_of(window: &PixelWindow, metrics: PixelWindowMetrics) -> (u32, u32, 
     (width, height, scale)
 }
 
+// --- milestone 3b: input event translation ------------------------------
+//
+// All `#[non_exhaustive]` enums must keep a `_` fallback arm; unknown variants
+// are dropped (never panic, never error). The mapping functions are pure and
+// unit-tested below.
+
+/// `NamedKey` → ABI code table (ABI-owned numbering, not the platform enum
+/// order). `_` = 255 (unrecognized named key).
+fn named_key_code(key: NamedKey) -> u8 {
+    match key {
+        NamedKey::ArrowDown => 1,
+        NamedKey::ArrowLeft => 2,
+        NamedKey::ArrowRight => 3,
+        NamedKey::ArrowUp => 4,
+        NamedKey::Backspace => 5,
+        NamedKey::Delete => 6,
+        NamedKey::End => 7,
+        NamedKey::Enter => 8,
+        NamedKey::Escape => 9,
+        NamedKey::F1 => 10,
+        NamedKey::F2 => 11,
+        NamedKey::F3 => 12,
+        NamedKey::F4 => 13,
+        NamedKey::F5 => 14,
+        NamedKey::F6 => 15,
+        NamedKey::F7 => 16,
+        NamedKey::F8 => 17,
+        NamedKey::F9 => 18,
+        NamedKey::F10 => 19,
+        NamedKey::F11 => 20,
+        NamedKey::F12 => 21,
+        NamedKey::Home => 22,
+        NamedKey::Insert => 23,
+        NamedKey::PageDown => 24,
+        NamedKey::PageUp => 25,
+        NamedKey::Space => 26,
+        NamedKey::Tab => 27,
+        _ => AGT_KEY_NAMED_UNKNOWN,
+    }
+}
+
+/// `PhysicalKeyCode` → (code, value): 0=other, 1=letter, 2=digit, 3=backspace,
+/// 4=enter, 5=space, 6=tab; value = letter codepoint / digit value / 0.
+fn physical_key_code(code: PhysicalKeyCode) -> (u8, u32) {
+    match code {
+        PhysicalKeyCode::Letter(c) => (1, c as u32),
+        PhysicalKeyCode::Digit(d) => (2, d as u32),
+        PhysicalKeyCode::Backspace => (3, 0),
+        PhysicalKeyCode::Enter => (4, 0),
+        PhysicalKeyCode::Space => (5, 0),
+        PhysicalKeyCode::Tab => (6, 0),
+        _ => (0, 0),
+    }
+}
+
+/// `ModifierState` → `AGT_MOD_*` bitmask.
+fn modifier_bits(m: ModifierState) -> u32 {
+    let mut bits = 0u32;
+    if m.control {
+        bits |= AGT_MOD_CONTROL;
+    }
+    if m.shift {
+        bits |= AGT_MOD_SHIFT;
+    }
+    if m.alt {
+        bits |= AGT_MOD_ALT;
+    }
+    if m.meta {
+        bits |= AGT_MOD_META;
+    }
+    bits
+}
+
+/// `PointerButton` → ABI code: 0=none/move, 1=left, 2=right, 3=middle, 4=other.
+fn pointer_button_code(button: PointerButton) -> u8 {
+    match button {
+        PointerButton::Left => 1,
+        PointerButton::Right => 2,
+        PointerButton::Middle => 3,
+        PointerButton::Other(_) => 4,
+        _ => 4,
+    }
+}
+
+/// `WheelDelta` → (x, y, unit): unit 0 = lines, 1 = logical_pixels.
+fn wheel_delta(delta: WheelDelta) -> (f64, f64, u8) {
+    match delta {
+        WheelDelta::Lines { x, y } => (x as f64, y as f64, 0),
+        WheelDelta::LogicalPixels { x, y } => (x, y, 1),
+        _ => (0.0, 0.0, 0),
+    }
+}
+
+/// Translate a normalized keyboard event into a queue record.
+fn key_event_to_record(event: NormalizedKeyEvent, generation: u64) -> EventRecord {
+    let mut ev = agt_event {
+        kind: AGT_EV_KEY,
+        generation,
+        ..agt_event::default()
+    };
+    ev.modifiers = modifier_bits(event.modifiers);
+    ev.key_state = match event.state {
+        KeyPressState::Pressed => 1,
+        KeyPressState::Released => 0,
+        _ => 0,
+    };
+    ev.key_repeat = u8::from(event.repeat);
+    match &event.logical {
+        // Character text rides in the inline `text` buffer; Named/Unidentified
+        // keys carry their `key_named` code and `NormalizedKeyEvent::text`.
+        LogicalKey::Named(k) => ev.key_named = named_key_code(*k),
+        LogicalKey::Character(_) | LogicalKey::Unidentified => ev.key_named = AGT_KEY_NAMED_OTHER,
+        _ => ev.key_named = AGT_KEY_NAMED_UNKNOWN,
+    }
+    let (physical, physical_value) = physical_key_code(event.physical);
+    ev.key_physical = physical;
+    ev.key_physical_value = physical_value;
+    if let Some(t) = event.text.as_deref() {
+        let bytes = t.as_bytes();
+        let n = bytes.len().min(ev.text.len());
+        ev.text[..n].copy_from_slice(&bytes[..n]);
+        ev.text_len = n as u8;
+        ev.text_truncated = u8::from(bytes.len() > ev.text.len());
+    }
+    EventRecord::new(ev)
+}
+
+/// Translate a pointer move into a queue record (button = none/move).
+fn pointer_moved_to_record(
+    position: LogicalPoint,
+    modifiers: ModifierState,
+    generation: u64,
+) -> EventRecord {
+    let mut ev = agt_event {
+        kind: AGT_EV_POINTER,
+        generation,
+        ..agt_event::default()
+    };
+    ev.modifiers = modifier_bits(modifiers);
+    ev.pointer_x = position.x;
+    ev.pointer_y = position.y;
+    ev.pointer_state = 2; // moved
+    ev.has_position = 1;
+    EventRecord::new(ev)
+}
+
+/// Translate `PointerLeft` / `PointerCaptureLost` into a queue record.
+fn pointer_exit_to_record(capture_lost: bool, generation: u64) -> EventRecord {
+    let mut ev = agt_event {
+        kind: AGT_EV_POINTER,
+        generation,
+        ..agt_event::default()
+    };
+    ev.pointer_state = if capture_lost { 4 } else { 3 }; // capture_lost / left
+    EventRecord::new(ev)
+}
+
+/// Translate a pointer button press/release into a queue record.
+fn pointer_button_to_record(
+    button: PointerButton,
+    state: PointerButtonState,
+    position: Option<LogicalPoint>,
+    modifiers: ModifierState,
+    generation: u64,
+) -> EventRecord {
+    let mut ev = agt_event {
+        kind: AGT_EV_POINTER,
+        generation,
+        ..agt_event::default()
+    };
+    ev.modifiers = modifier_bits(modifiers);
+    ev.pointer_button = pointer_button_code(button);
+    ev.pointer_state = match state {
+        PointerButtonState::Pressed => 1,
+        PointerButtonState::Released => 0,
+        _ => 0,
+    };
+    if let Some(p) = position {
+        ev.pointer_x = p.x;
+        ev.pointer_y = p.y;
+        ev.has_position = 1;
+    }
+    EventRecord::new(ev)
+}
+
+/// Translate a mouse wheel event into a queue record. Position rides in the
+/// shared `pointer_x`/`pointer_y`/`has_position` fields.
+fn wheel_to_record(
+    delta: WheelDelta,
+    position: Option<LogicalPoint>,
+    modifiers: ModifierState,
+    generation: u64,
+) -> EventRecord {
+    let mut ev = agt_event {
+        kind: AGT_EV_WHEEL,
+        generation,
+        ..agt_event::default()
+    };
+    ev.modifiers = modifier_bits(modifiers);
+    let (x, y, unit) = wheel_delta(delta);
+    ev.wheel_x = x;
+    ev.wheel_y = y;
+    ev.wheel_unit = unit;
+    if let Some(p) = position {
+        ev.pointer_x = p.x;
+        ev.pointer_y = p.y;
+        ev.has_position = 1;
+    }
+    EventRecord::new(ev)
+}
+
+/// Translate an IME event into a queue record. Preedit/commit text goes
+/// out-of-band (`event_text`) and is served by `agt_window_event_text`.
+fn ime_event_to_record(event: ImeEvent, generation: u64) -> EventRecord {
+    let mut ev = agt_event {
+        kind: AGT_EV_IME,
+        generation,
+        ..agt_event::default()
+    };
+    let mut text: Option<Vec<u8>> = None;
+    match event {
+        ImeEvent::Enabled => ev.ime_kind = 0,
+        ImeEvent::Preedit { text: t, cursor } => {
+            ev.ime_kind = 1;
+            if let Some((begin, end)) = cursor {
+                ev.has_ime_cursor = 1;
+                ev.ime_cursor_begin = begin;
+                ev.ime_cursor_end = end;
+            }
+            ev.ime_text_len = t.len();
+            text = Some(t.into_bytes());
+        }
+        ImeEvent::Commit(t) => {
+            ev.ime_kind = 2;
+            ev.ime_text_len = t.len();
+            text = Some(t.into_bytes());
+        }
+        ImeEvent::Disabled => ev.ime_kind = 3,
+        _ => {}
+    }
+    match text {
+        Some(t) => EventRecord::with_text(ev, t),
+        None => EventRecord::new(ev),
+    }
+}
+
 impl PixelWindowApplication for WindowApp {
     fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
         // Record the waker (close/redraw need it), try to record geometry so
@@ -1115,18 +1479,16 @@ impl PixelWindowApplication for WindowApp {
         event: PixelWindowEvent,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
         match event {
-            // Only these three events are translated in 3a; every other
+            // Milestone 3a events: close / geometry / focus. Milestone 3b
+            // adds keyboard / IME / pointer / wheel below; every other
             // variant is deliberately dropped (no queue entry, no error).
             PixelWindowEvent::CloseRequested => {
                 let generation = lock(&self.shared.state).next_generation;
-                self.shared.enqueue(EventRecord {
+                self.shared.enqueue(EventRecord::new(agt_event {
                     kind: AGT_EV_CLOSE_REQUEST,
                     generation,
-                    width: 0,
-                    height: 0,
-                    scale: 0.0,
-                    focused: 0,
-                });
+                    ..agt_event::default()
+                }));
                 // Do not auto-exit: the caller decides (via agt_window_close).
                 Ok(PixelWindowDirective::Continue)
             }
@@ -1134,26 +1496,78 @@ impl PixelWindowApplication for WindowApp {
                 let (width, height, scale) = geometry_of(window, metrics);
                 self.shared.set_geometry(width, height, scale);
                 let generation = lock(&self.shared.state).next_generation;
-                self.shared.enqueue(EventRecord {
+                self.shared.enqueue(EventRecord::new(agt_event {
                     kind: AGT_EV_GEOMETRY,
                     generation,
                     width,
                     height,
                     scale,
-                    focused: 0,
-                });
+                    ..agt_event::default()
+                }));
                 Ok(PixelWindowDirective::Continue)
             }
             PixelWindowEvent::FocusChanged(focused) => {
                 let generation = lock(&self.shared.state).next_generation;
-                self.shared.enqueue(EventRecord {
+                self.shared.enqueue(EventRecord::new(agt_event {
                     kind: AGT_EV_FOCUS,
                     generation,
-                    width: 0,
-                    height: 0,
-                    scale: 0.0,
                     focused: focused as i32,
-                });
+                    ..agt_event::default()
+                }));
+                Ok(PixelWindowDirective::Continue)
+            }
+            // --- milestone 3b: keyboard / pointer / wheel / IME ----------
+            PixelWindowEvent::Keyboard(event) => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared.enqueue(key_event_to_record(event, generation));
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::Ime(event) => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared.enqueue(ime_event_to_record(event, generation));
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerMoved {
+                position,
+                modifiers,
+            } => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared
+                    .enqueue(pointer_moved_to_record(position, modifiers, generation));
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerLeft => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared
+                    .enqueue(pointer_exit_to_record(false, generation));
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerCaptureLost => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared
+                    .enqueue(pointer_exit_to_record(true, generation));
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::PointerButton {
+                button,
+                state,
+                position,
+                modifiers,
+            } => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared.enqueue(pointer_button_to_record(
+                    button, state, position, modifiers, generation,
+                ));
+                Ok(PixelWindowDirective::Continue)
+            }
+            PixelWindowEvent::MouseWheel {
+                delta,
+                position,
+                modifiers,
+            } => {
+                let generation = lock(&self.shared.state).next_generation;
+                self.shared
+                    .enqueue(wheel_to_record(delta, position, modifiers, generation));
                 Ok(PixelWindowDirective::Continue)
             }
             _ => Ok(PixelWindowDirective::Continue),
@@ -1381,16 +1795,13 @@ pub extern "C" fn agt_window_poll_event(
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
         let mut guard = lock(&shared.state);
         loop {
-            if let Some(ev) = guard.events.pop_front() {
+            if let Some(record) = guard.events.pop_front() {
+                // The out-of-band text (IME preedit/commit) belongs to this
+                // polled event: stage it for agt_window_event_text. The next
+                // poll replaces it.
+                guard.event_text = record.event_text.unwrap_or_default();
                 unsafe {
-                    *out = agt_event {
-                        kind: ev.kind,
-                        generation: ev.generation,
-                        width: ev.width,
-                        height: ev.height,
-                        scale: ev.scale,
-                        focused: ev.focused,
-                    };
+                    *out = record.ev;
                 }
                 return agt_status::AGT_OK;
             }
@@ -1421,6 +1832,81 @@ pub extern "C" fn agt_window_poll_event(
                 c"agt_window_poll_event",
                 c"panic",
                 "panic in agt_window_poll_event",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Fetch the text carried by the most recently polled event (IME preedit /
+/// commit may be long, so it is never truncated into the fixed POD record).
+/// Two-stage contract (§3.4): the caller allocates a buffer.
+///
+/// - No pending text: returns `AGT_OK` with `*out_len == 0`.
+/// - `cap` too small (including `cap == 0`): returns
+///   `AGT_FAILED { code = "buffer_too_small" }` and writes the required byte
+///   count into `*out_len`.
+/// - Otherwise (`cap >= required`): copies the text bytes and sets `*out_len`
+///   to the number copied (equal to the text length).
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_window_event_text(
+    window: agt_window_t,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(window: agt_window_t, buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        if window.is_null() {
+            record_error(c"agt_window_event_text", c"bad_pointer", "window is null");
+            return agt_status::AGT_FAILED;
+        }
+        if out_len.is_null() {
+            record_error(c"agt_window_event_text", c"bad_pointer", "out_len is null");
+            return agt_status::AGT_FAILED;
+        }
+        unsafe { *out_len = 0 };
+        let shared = unsafe { &*(window as *const WindowHandle) }.shared.clone();
+        let guard = lock(&shared.state);
+        let text = guard.event_text.as_slice();
+        let required = text.len();
+        if cap == 0 {
+            // Probing with cap == 0 is the canonical first half of the
+            // two-stage call; buf may legitimately be null here.
+            unsafe { *out_len = required };
+            record_error(
+                c"agt_window_event_text",
+                c"buffer_too_small",
+                "cap is 0; allocate the required byte count and call again",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if buf.is_null() {
+            record_error(c"agt_window_event_text", c"bad_pointer", "buf is null");
+            return agt_status::AGT_FAILED;
+        }
+        if cap < required {
+            unsafe { *out_len = required };
+            record_error(
+                c"agt_window_event_text",
+                c"buffer_too_small",
+                "cap is smaller than the text; allocate the required byte count and call again",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(text.as_ptr(), buf, required);
+            *out_len = required;
+        }
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(window, buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_window_event_text",
+                c"panic",
+                "panic in agt_window_event_text",
             );
             agt_status::AGT_FAILED
         }
@@ -1672,4 +2158,328 @@ pub extern "C" fn agt_window_close(window: agt_window_t) {
         handle.shared.request_close();
         drop(handle);
     }));
+}
+
+// --- milestone 3b unit tests (pure translation functions) ---------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Evidence 3: every one of the 27 `NamedKey` variants maps to its ABI
+    /// code; the table is complete, unique, and never collides with the `_`
+    /// fallback (255). The fallback arm itself is exercised by the
+    /// `#[non_exhaustive]` requirement — any future platform variant hits it.
+    #[test]
+    fn named_key_codes_cover_all_27_variants() {
+        let cases = [
+            (NamedKey::ArrowDown, 1u8),
+            (NamedKey::ArrowLeft, 2),
+            (NamedKey::ArrowRight, 3),
+            (NamedKey::ArrowUp, 4),
+            (NamedKey::Backspace, 5),
+            (NamedKey::Delete, 6),
+            (NamedKey::End, 7),
+            (NamedKey::Enter, 8),
+            (NamedKey::Escape, 9),
+            (NamedKey::F1, 10),
+            (NamedKey::F2, 11),
+            (NamedKey::F3, 12),
+            (NamedKey::F4, 13),
+            (NamedKey::F5, 14),
+            (NamedKey::F6, 15),
+            (NamedKey::F7, 16),
+            (NamedKey::F8, 17),
+            (NamedKey::F9, 18),
+            (NamedKey::F10, 19),
+            (NamedKey::F11, 20),
+            (NamedKey::F12, 21),
+            (NamedKey::Home, 22),
+            (NamedKey::Insert, 23),
+            (NamedKey::PageDown, 24),
+            (NamedKey::PageUp, 25),
+            (NamedKey::Space, 26),
+            (NamedKey::Tab, 27),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for (key, expected) in cases {
+            let code = named_key_code(key);
+            assert_eq!(code, expected, "unexpected code {code}");
+            assert!(seen.insert(code), "duplicate code {code}");
+        }
+        assert_eq!(seen.len(), 27, "table must cover exactly 27 variants");
+        assert_eq!(*seen.first().unwrap(), 1, "codes must start at 1");
+        assert_eq!(*seen.last().unwrap(), 27, "codes must end at 27");
+        // The `_` fallback is reserved for future platform variants.
+        assert_eq!(AGT_KEY_NAMED_UNKNOWN, 255);
+        assert!(
+            !seen.contains(&AGT_KEY_NAMED_UNKNOWN),
+            "no known variant may map to the unknown fallback"
+        );
+    }
+
+    #[test]
+    fn physical_key_codes_match_the_table() {
+        assert_eq!(
+            physical_key_code(PhysicalKeyCode::Letter('A')),
+            (1, 'A' as u32)
+        );
+        assert_eq!(
+            physical_key_code(PhysicalKeyCode::Letter('中')),
+            (1, '中' as u32)
+        );
+        assert_eq!(physical_key_code(PhysicalKeyCode::Digit(7)), (2, 7));
+        assert_eq!(physical_key_code(PhysicalKeyCode::Backspace), (3, 0));
+        assert_eq!(physical_key_code(PhysicalKeyCode::Enter), (4, 0));
+        assert_eq!(physical_key_code(PhysicalKeyCode::Space), (5, 0));
+        assert_eq!(physical_key_code(PhysicalKeyCode::Tab), (6, 0));
+        assert_eq!(physical_key_code(PhysicalKeyCode::Other), (0, 0));
+    }
+
+    #[test]
+    fn modifier_bits_map_each_modifier() {
+        let control_alt = ModifierState {
+            control: true,
+            shift: false,
+            alt: true,
+            meta: false,
+        };
+        assert_eq!(modifier_bits(control_alt), AGT_MOD_CONTROL | AGT_MOD_ALT);
+        let all = ModifierState {
+            control: true,
+            shift: true,
+            alt: true,
+            meta: true,
+        };
+        assert_eq!(
+            modifier_bits(all),
+            AGT_MOD_CONTROL | AGT_MOD_SHIFT | AGT_MOD_ALT | AGT_MOD_META
+        );
+        let none = ModifierState {
+            control: false,
+            shift: false,
+            alt: false,
+            meta: false,
+        };
+        assert_eq!(modifier_bits(none), 0);
+    }
+
+    #[test]
+    fn pointer_button_codes_match_the_table() {
+        assert_eq!(pointer_button_code(PointerButton::Left), 1);
+        assert_eq!(pointer_button_code(PointerButton::Right), 2);
+        assert_eq!(pointer_button_code(PointerButton::Middle), 3);
+        assert_eq!(pointer_button_code(PointerButton::Other(9)), 4);
+    }
+
+    #[test]
+    fn wheel_deltas_carry_unit_and_value() {
+        assert_eq!(
+            wheel_delta(WheelDelta::Lines { x: 1.0, y: -2.0 }),
+            (1.0, -2.0, 0)
+        );
+        assert_eq!(
+            wheel_delta(WheelDelta::LogicalPixels { x: 3.5, y: 4.5 }),
+            (3.5, 4.5, 1)
+        );
+    }
+
+    fn no_mods() -> ModifierState {
+        ModifierState {
+            control: false,
+            shift: false,
+            alt: false,
+            meta: false,
+        }
+    }
+
+    #[test]
+    fn key_event_character_text_and_named_codes() {
+        let rec = key_event_to_record(
+            NormalizedKeyEvent {
+                logical: LogicalKey::Character("你".into()),
+                physical: PhysicalKeyCode::Letter('你'),
+                text: Some("你".into()),
+                state: KeyPressState::Pressed,
+                repeat: false,
+                modifiers: ModifierState {
+                    control: true,
+                    shift: false,
+                    alt: false,
+                    meta: false,
+                },
+            },
+            7,
+        );
+        assert_eq!(rec.ev.kind, AGT_EV_KEY);
+        assert_eq!(rec.ev.generation, 7);
+        assert_eq!(rec.ev.key_state, 1);
+        assert_eq!(rec.ev.key_repeat, 0);
+        assert_eq!(rec.ev.key_named, AGT_KEY_NAMED_OTHER);
+        assert_eq!(rec.ev.key_physical, 1);
+        assert_eq!(rec.ev.key_physical_value, '你' as u32);
+        assert_eq!(rec.ev.modifiers, AGT_MOD_CONTROL);
+        // "你" is exactly 3 UTF-8 bytes.
+        assert_eq!(rec.ev.text_len, 3);
+        assert_eq!(&rec.ev.text[..3], "你".as_bytes());
+        assert_eq!(rec.ev.text_truncated, 0);
+        assert!(rec.event_text.is_none(), "KEY text rides in the POD");
+    }
+
+    #[test]
+    fn key_text_is_truncated_at_16_bytes() {
+        let long = "a".repeat(32);
+        let rec = key_event_to_record(
+            NormalizedKeyEvent {
+                logical: LogicalKey::Character(long.clone()),
+                physical: PhysicalKeyCode::Other,
+                text: Some(long),
+                state: KeyPressState::Released,
+                repeat: true,
+                modifiers: no_mods(),
+            },
+            0,
+        );
+        assert_eq!(rec.ev.text_len, 16);
+        assert_eq!(rec.ev.text_truncated, 1);
+        assert_eq!(rec.ev.key_state, 0);
+        assert_eq!(rec.ev.key_repeat, 1);
+    }
+
+    #[test]
+    fn key_event_named_keys_report_code_and_no_text() {
+        let rec = key_event_to_record(
+            NormalizedKeyEvent {
+                logical: LogicalKey::Named(NamedKey::ArrowUp),
+                physical: PhysicalKeyCode::Other,
+                text: None,
+                state: KeyPressState::Pressed,
+                repeat: false,
+                modifiers: no_mods(),
+            },
+            0,
+        );
+        assert_eq!(rec.ev.key_named, 4);
+        assert_eq!(rec.ev.text_len, 0);
+        assert_eq!(rec.ev.key_physical, 0);
+    }
+
+    #[test]
+    fn pointer_events_map_state_button_and_position() {
+        let moved = pointer_moved_to_record(LogicalPoint { x: 10.0, y: 20.0 }, no_mods(), 1);
+        assert_eq!(moved.ev.kind, AGT_EV_POINTER);
+        assert_eq!(moved.ev.pointer_state, 2);
+        assert_eq!(moved.ev.pointer_button, 0);
+        assert_eq!(moved.ev.has_position, 1);
+        assert_eq!(moved.ev.pointer_x, 10.0);
+        assert_eq!(moved.ev.pointer_y, 20.0);
+
+        let left = pointer_exit_to_record(false, 2);
+        assert_eq!(left.ev.pointer_state, 3);
+        assert_eq!(left.ev.has_position, 0);
+
+        let lost = pointer_exit_to_record(true, 3);
+        assert_eq!(lost.ev.pointer_state, 4);
+
+        let pressed = pointer_button_to_record(
+            PointerButton::Right,
+            PointerButtonState::Pressed,
+            Some(LogicalPoint { x: 1.0, y: 2.0 }),
+            ModifierState {
+                control: false,
+                shift: true,
+                alt: false,
+                meta: false,
+            },
+            4,
+        );
+        assert_eq!(pressed.ev.pointer_button, 2);
+        assert_eq!(pressed.ev.pointer_state, 1);
+        assert_eq!(pressed.ev.has_position, 1);
+        assert_eq!(pressed.ev.modifiers, AGT_MOD_SHIFT);
+
+        let released_none = pointer_button_to_record(
+            PointerButton::Middle,
+            PointerButtonState::Released,
+            None,
+            no_mods(),
+            5,
+        );
+        assert_eq!(released_none.ev.pointer_button, 3);
+        assert_eq!(released_none.ev.pointer_state, 0);
+        assert_eq!(released_none.ev.has_position, 0);
+    }
+
+    #[test]
+    fn wheel_events_map_delta_and_position() {
+        let rec = wheel_to_record(
+            WheelDelta::Lines { x: 0.0, y: 3.0 },
+            Some(LogicalPoint { x: 5.0, y: 6.0 }),
+            no_mods(),
+            6,
+        );
+        assert_eq!(rec.ev.kind, AGT_EV_WHEEL);
+        assert_eq!(rec.ev.wheel_x, 0.0);
+        assert_eq!(rec.ev.wheel_y, 3.0);
+        assert_eq!(rec.ev.wheel_unit, 0);
+        assert_eq!(rec.ev.has_position, 1);
+        assert_eq!(rec.ev.pointer_x, 5.0);
+        assert_eq!(rec.ev.pointer_y, 6.0);
+
+        let px = wheel_to_record(
+            WheelDelta::LogicalPixels { x: 1.5, y: -2.5 },
+            None,
+            no_mods(),
+            7,
+        );
+        assert_eq!(px.ev.wheel_unit, 1);
+        assert_eq!(px.ev.has_position, 0);
+    }
+
+    #[test]
+    fn ime_events_carry_kind_cursor_and_out_of_band_text() {
+        let preedit = ime_event_to_record(
+            ImeEvent::Preedit {
+                text: "你好".into(),
+                cursor: Some((1, 3)),
+            },
+            8,
+        );
+        assert_eq!(preedit.ev.kind, AGT_EV_IME);
+        assert_eq!(preedit.ev.ime_kind, 1);
+        assert_eq!(preedit.ev.has_ime_cursor, 1);
+        assert_eq!(preedit.ev.ime_cursor_begin, 1);
+        assert_eq!(preedit.ev.ime_cursor_end, 3);
+        assert_eq!(preedit.ev.ime_text_len, "你好".len());
+        assert_eq!(preedit.event_text.as_deref(), Some("你好".as_bytes()));
+
+        let commit = ime_event_to_record(ImeEvent::Commit("commit".into()), 9);
+        assert_eq!(commit.ev.ime_kind, 2);
+        assert_eq!(commit.ev.has_ime_cursor, 0);
+        assert_eq!(commit.ev.ime_text_len, 6);
+        assert_eq!(commit.event_text.as_deref(), Some(b"commit".as_slice()));
+
+        let enabled = ime_event_to_record(ImeEvent::Enabled, 10);
+        assert_eq!(enabled.ev.ime_kind, 0);
+        assert!(enabled.event_text.is_none());
+
+        let disabled = ime_event_to_record(ImeEvent::Disabled, 11);
+        assert_eq!(disabled.ev.ime_kind, 3);
+        assert!(disabled.event_text.is_none());
+    }
+
+    #[test]
+    fn ime_preedit_without_cursor_reports_no_cursor() {
+        let rec = ime_event_to_record(
+            ImeEvent::Preedit {
+                text: "x".into(),
+                cursor: None,
+            },
+            12,
+        );
+        assert_eq!(rec.ev.ime_kind, 1);
+        assert_eq!(rec.ev.has_ime_cursor, 0);
+        assert_eq!(rec.ev.ime_cursor_begin, 0);
+        assert_eq!(rec.event_text.as_deref(), Some(b"x".as_slice()));
+    }
 }

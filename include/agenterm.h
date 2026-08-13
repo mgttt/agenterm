@@ -115,20 +115,30 @@ agt_status agt_pty_wait  (agt_pty_t, uint32_t timeout_ms, int32_t* exit_code);
  * currently blocked in agt_pty_read on the same handle. */
 void       agt_pty_close (agt_pty_t);
 
-/* --- window & frame (milestone 3a) ---------------------------------- */
+/* --- window & frame (milestones 3a / 3b) ------------------------------ */
 
 typedef struct agt_window* agt_window_t;
 
-/* Window events. Milestone 3a translates exactly these four; every other
- * platform event (keyboard / pointer / wheel / IME) is deliberately dropped
- * and arrives in milestone 3b. */
+/* Window events. Milestone 3a translated close / geometry / focus / render;
+ * milestone 3b adds KEY / POINTER / WHEEL / IME. Platform events without a
+ * translation are dropped by the library (never an error). */
 typedef enum {
     AGT_EV_NONE = 0,
     AGT_EV_CLOSE_REQUEST = 1, /* the native window requested close */
     AGT_EV_GEOMETRY      = 2, /* width/height/scale valid */
     AGT_EV_FOCUS         = 3, /* focused valid */
-    AGT_EV_RENDER_DUE    = 4  /* render() has stopped at the rendezvous */
+    AGT_EV_RENDER_DUE    = 4, /* render() has stopped at the rendezvous */
+    AGT_EV_KEY           = 5, /* keyboard event */
+    AGT_EV_POINTER       = 6, /* pointer move / button / leave / capture */
+    AGT_EV_WHEEL         = 7, /* mouse wheel */
+    AGT_EV_IME           = 8  /* IME enabled / preedit / commit / disabled */
 } agt_event_kind;
+
+/* `modifiers` bitmask (valid for KEY / POINTER; 0 when not applicable). */
+#define AGT_MOD_CONTROL 1u
+#define AGT_MOD_SHIFT   2u
+#define AGT_MOD_ALT     4u
+#define AGT_MOD_META    8u
 
 typedef struct {
     uint32_t kind;
@@ -136,6 +146,36 @@ typedef struct {
     uint32_t width, height; /* only valid for AGT_EV_GEOMETRY */
     double   scale;         /* only valid for AGT_EV_GEOMETRY */
     int32_t  focused;       /* only valid for AGT_EV_FOCUS */
+
+    uint32_t modifiers;     /* AGT_MOD_* bitmask; KEY / POINTER */
+
+    /* KEY (AGT_EV_KEY) */
+    uint8_t  key_state;          /* 0=released, 1=pressed */
+    uint8_t  key_repeat;         /* 0/1 */
+    uint8_t  key_named;          /* NamedKey code table; 0=unnamed, 255=unknown */
+    uint8_t  key_physical;       /* 0=other,1=letter,2=digit,3=backspace,
+                                    4=enter,5=space,6=tab */
+    uint32_t key_physical_value; /* letter codepoint / digit value / 0 */
+    uint8_t  text[16];           /* NormalizedKeyEvent::text, UTF-8 */
+    uint8_t  text_len;           /* bytes used in text[16] */
+    uint8_t  text_truncated;     /* 1 when text was truncated to fit */
+
+    /* POINTER (AGT_EV_POINTER) and WHEEL position */
+    double   pointer_x, pointer_y; /* logical position; valid when has_position */
+    uint8_t  pointer_button;       /* 0=none/move,1=left,2=right,3=middle,4=other */
+    uint8_t  pointer_state;        /* 0=released,1=pressed,2=moved,3=left,4=capture_lost */
+    uint8_t  has_position;         /* 0/1 */
+
+    /* WHEEL (AGT_EV_WHEEL) */
+    double   wheel_x, wheel_y; /* scroll delta */
+    uint8_t  wheel_unit;       /* 0=lines, 1=logical_pixels */
+
+    /* IME (AGT_EV_IME) */
+    uint8_t  ime_kind;        /* 0=enabled,1=preedit,2=commit,3=disabled */
+    uint8_t  has_ime_cursor;  /* 0/1 */
+    size_t   ime_cursor_begin; /* valid when has_ime_cursor */
+    size_t   ime_cursor_end;
+    size_t   ime_text_len;    /* text bytes; fetch via agt_window_event_text */
 } agt_event;
 
 typedef struct {
@@ -167,6 +207,14 @@ agt_status agt_window_open           (const agt_window_spec*, agt_window_t* out)
  * AGT_FAILED with code "timeout"; a closed window with an empty queue
  * returns AGT_FAILED with code "closed". */
 agt_status agt_window_poll_event     (agt_window_t, agt_event* out, uint32_t timeout_ms);
+
+/* Fetch the text carried by the most recently polled event (IME
+ * preedit/commit; never truncated into the POD record). Two-stage: call with
+ * cap == 0 to learn the required byte count (*out_len), then allocate and
+ * call again. With no pending text returns AGT_OK and *out_len == 0. On
+ * insufficient capacity returns AGT_FAILED with code "buffer_too_small" and
+ * writes the required byte count into *out_len. */
+agt_status agt_window_event_text     (agt_window_t, uint8_t* buf, size_t cap, size_t* out_len);
 
 /* Ask the loop thread to schedule a redraw. The next render() publishes a
  * fresh frame for agt_frame_begin. */

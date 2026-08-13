@@ -42,6 +42,7 @@ const AGT_FAILED: i32 = 2;
 const AGT_CAP_PTY: i32 = 1;
 const AGT_CAP_WINDOW_HOST: i32 = 4;
 const AGT_CAP_SCREENSHOT: i32 = 7;
+const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
 const EXPECTED_BUILD_ID: &str = "0.1.16+abi.1";
 const PROBE: &[u8] = b"agenterm-abi-probe";
@@ -390,7 +391,9 @@ struct agt_frame_desc {
     stride_px: u32,
 }
 
-/// C-compatible mirror of include/agenterm.h `agt_event`.
+/// C-compatible mirror of include/agenterm.h `agt_event` (milestone 3b field
+/// set — must match the Rust `#[repr(C)]` layout exactly, otherwise the
+/// library writes past the caller's buffer).
 #[repr(C)]
 #[derive(Clone, Copy)]
 #[allow(non_camel_case_types)]
@@ -401,6 +404,63 @@ struct agt_event {
     height: u32,
     scale: f64,
     focused: i32,
+    modifiers: u32,
+    key_state: u8,
+    key_repeat: u8,
+    key_named: u8,
+    key_physical: u8,
+    key_physical_value: u32,
+    text: [u8; 16],
+    text_len: u8,
+    text_truncated: u8,
+    pointer_x: f64,
+    pointer_y: f64,
+    pointer_button: u8,
+    pointer_state: u8,
+    has_position: u8,
+    wheel_x: f64,
+    wheel_y: f64,
+    wheel_unit: u8,
+    ime_kind: u8,
+    has_ime_cursor: u8,
+    ime_cursor_begin: usize,
+    ime_cursor_end: usize,
+    ime_text_len: usize,
+}
+
+impl agt_event {
+    fn empty() -> Self {
+        Self {
+            kind: 0,
+            generation: 0,
+            width: 0,
+            height: 0,
+            scale: 0.0,
+            focused: 0,
+            modifiers: 0,
+            key_state: 0,
+            key_repeat: 0,
+            key_named: 0,
+            key_physical: 0,
+            key_physical_value: 0,
+            text: [0u8; 16],
+            text_len: 0,
+            text_truncated: 0,
+            pointer_x: 0.0,
+            pointer_y: 0.0,
+            pointer_button: 0,
+            pointer_state: 0,
+            has_position: 0,
+            wheel_x: 0.0,
+            wheel_y: 0.0,
+            wheel_unit: 0,
+            ime_kind: 0,
+            has_ime_cursor: 0,
+            ime_cursor_begin: 0,
+            ime_cursor_end: 0,
+            ime_text_len: 0,
+        }
+    }
 }
 
 type WindowOpen = unsafe extern "C" fn(*const agt_window_spec, *mut *mut std::ffi::c_void) -> i32;
@@ -743,14 +803,7 @@ fn request_redraw_produces_a_render_due_event() {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         assert!(Instant::now() < deadline, "no RENDER_DUE event within 10 s");
-        let mut ev = agt_event {
-            kind: 0,
-            generation: 0,
-            width: 0,
-            height: 0,
-            scale: 0.0,
-            focused: 0,
-        };
+        let mut ev = agt_event::empty();
         let st = unsafe { poll(window, &mut ev, 5000) };
         assert_eq!(
             st,
@@ -762,5 +815,79 @@ fn request_redraw_produces_a_render_due_event() {
             break;
         }
     }
+    unsafe { close(window) };
+}
+
+// --- milestone 3b: agt_window_event_text --------------------------------
+
+type WindowEventText =
+    unsafe extern "C" fn(*mut std::ffi::c_void, *mut u8, usize, *mut usize) -> i32;
+
+/// Evidence 1/2: `agt_window_event_text` two-stage contract on a live window.
+/// With no pending text a normal read returns AGT_OK and *out_len == 0; a
+/// cap == 0 probe returns AGT_FAILED { code = "buffer_too_small" } with the
+/// required byte count (0 here) written into *out_len. Skips on headless
+/// hosts (same policy as the other window tests).
+#[test]
+fn window_event_text_two_stage_contract() {
+    let lib = load();
+    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
+    let poll: Symbol<WindowPoll> = unsafe { sym(&lib, b"agt_window_poll_event") };
+    let text_fn: Symbol<WindowEventText> = unsafe { sym(&lib, b"agt_window_event_text") };
+    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
+    let Some(window) = try_open_window(&lib, &open) else {
+        return;
+    };
+
+    // 1) Before any poll: no pending text → AGT_OK with *out_len == 0.
+    let mut buf = [0u8; 32];
+    let mut len = usize::MAX;
+    let st = unsafe { text_fn(window, buf.as_mut_ptr(), buf.len(), &mut len) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_window_event_text (no text) failed: {}",
+        last_error_message(&lib)
+    );
+    assert_eq!(len, 0, "expected no pending text, got len={len}");
+
+    // 2) Poll one event (open schedules the first render → RENDER_DUE etc.;
+    //    none of these carry text, so the staged buffer stays empty). This
+    //    also proves the poll path resets the text buffer.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut ev = agt_event::empty();
+    loop {
+        assert!(Instant::now() < deadline, "no event within 10 s");
+        let st = unsafe { poll(window, &mut ev, 5000) };
+        assert_eq!(
+            st,
+            AGT_OK,
+            "agt_window_poll_event failed: {}",
+            last_error_message(&lib)
+        );
+        if ev.kind != AGT_EV_NONE {
+            break;
+        }
+    }
+
+    // 3) cap == 0 probe (null buf is legitimate for the first stage) →
+    //    AGT_FAILED { code = "buffer_too_small" }, required byte count
+    //    written into *out_len (0 while no text is staged).
+    let mut probe = usize::MAX;
+    let st = unsafe { text_fn(window, std::ptr::null_mut(), 0, &mut probe) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED for cap == 0, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert_eq!(probe, 0, "expected required length 0, got {probe}");
+
+    // 4) cap == 0 with a non-null buf behaves identically.
+    let mut probe2 = usize::MAX;
+    let st = unsafe { text_fn(window, buf.as_mut_ptr(), 0, &mut probe2) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED for cap == 0, got {st}");
+    assert_eq!(probe2, 0, "expected required length 0, got {probe2}");
+
     unsafe { close(window) };
 }
