@@ -587,10 +587,9 @@ mod tests {
     #[test]
     fn null_atspi_object_refs_are_not_usable() {
         assert!(!is_usable_object_ref(&ObjectRefOwned::default()));
-        assert!(is_usable_object_ref(&ObjectRefOwned::from_static_str_unchecked(
-            ":1.1",
-            "/org/a11y/atspi/accessible/1"
-        )));
+        assert!(is_usable_object_ref(
+            &ObjectRefOwned::from_static_str_unchecked(":1.1", "/org/a11y/atspi/accessible/1")
+        ));
     }
 
     #[test]
