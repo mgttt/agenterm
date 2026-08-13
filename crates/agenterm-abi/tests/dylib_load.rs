@@ -2220,6 +2220,26 @@ fn window_enumerate_unsupported_probe(lib: &Library, probe_st: i32, what: &str) 
     }
 }
 
+/// Milestone 50: capability present != list non-empty. On a headless host the
+/// mechanism may be available while zero top-level windows (or screens) exist;
+/// the cap=0 probe must then answer `AGT_OK` with `*out_count == 0` — cap=0 is
+/// enough for an empty list, and that is the correct two-stage (§3.4) contract,
+/// never `AGT_FAILED`. Returns true and prints the skip when the list is empty
+/// (still asserting the probe status — never a bare `return`); false keeps the
+/// caller on the non-empty `AGT_FAILED` (buffer_too_small) path.
+fn empty_list_probe_ok(probe_st: i32, required: usize, what: &str) -> bool {
+    if required == 0 {
+        assert_eq!(
+            probe_st, AGT_OK,
+            "{what}: empty list with cap=0 must be AGT_OK, got {probe_st}"
+        );
+        eprintln!("SKIP (no {what} in this environment): enumeration returned 0");
+        true
+    } else {
+        false
+    }
+}
+
 /// Milestone 43: two-stage `agt_window_enumerate` round trip. Probes with
 /// cap=0/buf=NULL (the legal "how big?" probe), allocates the required count,
 /// calls again and asserts AGT_OK with at least one record carrying a
@@ -2234,6 +2254,9 @@ fn window_enumerate_roundtrip_returns_window_with_title() {
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
     if window_enumerate_unsupported_probe(lib, st, "agt_window_enumerate roundtrip") {
+        return;
+    }
+    if empty_list_probe_ok(st, required, "windows") {
         return;
     }
     assert_eq!(
@@ -2306,7 +2329,17 @@ fn window_enumerate_small_cap_reports_required_count() {
     if window_enumerate_unsupported_probe(lib, st, "agt_window_enumerate small_cap") {
         return;
     }
+    if empty_list_probe_ok(st, required, "windows") {
+        return;
+    }
     assert_eq!(st, AGT_FAILED);
+    if required == 1 {
+        // A single-window host cannot demonstrate the small-cap path with
+        // cap=1 (cap=1 is enough for one window and returns AGT_OK); the
+        // cap=0 probe above already covered the buffer_too_small contract.
+        eprintln!("SKIP (only 1 window in this environment): small_cap needs n >= 2");
+        return;
+    }
     assert!(
         required > 1,
         "the desktop must expose more than one top-level window, got {required}"
@@ -2356,6 +2389,9 @@ fn screen_list_roundtrip_reports_valid_screens() {
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
     if window_enumerate_unsupported_probe(lib, st, "agt_screen_list roundtrip") {
+        return;
+    }
+    if empty_list_probe_ok(st, required, "screens") {
         return;
     }
     assert_eq!(
@@ -2413,6 +2449,9 @@ fn screen_list_small_cap_reports_required_count() {
     if window_enumerate_unsupported_probe(lib, st, "agt_screen_list small_cap") {
         return;
     }
+    if empty_list_probe_ok(st, required, "screens") {
+        return;
+    }
     assert_eq!(st, AGT_FAILED, "cap=0 probe must fail, got {st}");
     assert!(
         required >= 1,
@@ -2422,6 +2461,7 @@ fn screen_list_small_cap_reports_required_count() {
         // A single-screen host cannot demonstrate the small-cap path with
         // cap=1; the cap=0 probe above already covers the buffer_too_small
         // contract.
+        eprintln!("SKIP (only 1 screen in this environment): small_cap needs n >= 2");
         return;
     }
     let mut one = [agt_screen_info::default(); 1];
@@ -2545,11 +2585,10 @@ fn native_window_show_rejects_bad_state() {
     if window_enumerate_unsupported_probe(lib, st, "agt_native_window_show bad_state") {
         return;
     }
+    if empty_list_probe_ok(st, required, "windows") {
+        return;
+    }
     assert_eq!(st, AGT_FAILED, "cap=0 probe must fail, got {st}");
-    assert!(
-        required > 0,
-        "desktop must have at least one window, got {required}"
-    );
 
     // The window set can change between the two calls, so re-allocate and
     // retry on a larger fresh count (same pattern as agt_process_list).
