@@ -573,7 +573,14 @@ fn gui_control_surface_isolated_multitab_black_box() {
         ],
     );
     assert_eq!(held_pointer["route"], "selection");
+    let held_snapshot = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(held_snapshot["control_pointer_owner"], child_id);
     cli_json(exe, &endpoint, &["select-tab", "--target", &root]);
+    let switched_snapshot = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(
+        switched_snapshot["control_pointer_owner"],
+        serde_json::Value::Null
+    );
     let stale_release = invoke(
         exe,
         &endpoint,

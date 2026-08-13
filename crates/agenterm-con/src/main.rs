@@ -1610,6 +1610,10 @@ impl ConApp {
                         );
                         json::object(vec![
                             ("active", tab_id_json(self.workspace.active())),
+                            (
+                                "control_pointer_owner",
+                                tab_id_json(self.control_pointer_owner),
+                            ),
                             ("composer_focused", self.composer.focused.into()),
                             ("composer_text", self.composer.text.as_str().into()),
                             ("composer_preedit", self.composer.preedit.as_str().into()),
