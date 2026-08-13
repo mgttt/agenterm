@@ -562,8 +562,10 @@ pub fn set_node_text(
 }
 
 /// Independent AT-SPI `Text.GetText` for a resolved child-index path.
-/// Distinguishes a real mechanism failure from the two-stage empty-payload
-/// probe (`buffer_too_small` + required == 0).
+/// Does not reuse `set_node_text` confirmation, `last_text_write_via`, or
+/// a tree snapshot `text` field. Distinguishes a real mechanism failure
+/// from the two-stage empty-payload probe (`buffer_too_small` + required
+/// == 0).
 pub fn get_node_text(window: Option<isize>, node_id: &str) -> Result<String, MechanismError> {
     let handle = window.unwrap_or(0);
     let node_c = CStringOrStack::new(node_id)?;

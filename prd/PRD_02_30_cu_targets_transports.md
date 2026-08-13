@@ -154,9 +154,10 @@ Canonical host mapping (approved product vocabulary):
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls `agt_a11y_node_get_text` (`Text.GetText`)
   on that unique showing node until the independent text equals `TEXT`.
-  Timeout is typed `timeout`. This is not `send-text` `matched.text` and
-  is not a sidecar walk of `cu tree` snapshot `text` fields. Never
-  screenshot, XTest, or `--coords`.
+  Timeout is typed `timeout`. This is not `send-text` `matched.text`, not
+  a sidecar walk of `cu tree` snapshot `text` fields, and not the WebKit
+  eval helper's queued-job `OK` (Reasonix composer `Message Reasonix…`).
+  Never screenshot, XTest, or `--coords`.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.
