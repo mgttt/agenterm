@@ -4,6 +4,8 @@
 //! persistence, and any background authority remain outside this type: the
 //! standalone console host must stay one GUI process with bounded local state.
 
+pub const MAX_TABS: usize = 256;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TabId(u64);
 
@@ -73,14 +75,14 @@ impl Workspace {
         true
     }
 
-    pub fn add_root(&mut self, title: String) -> TabId {
+    pub fn add_root(&mut self, title: String) -> Option<TabId> {
         self.add(None, title, 0)
     }
 
     pub fn add_child(&mut self, parent: TabId, title: String) -> Option<TabId> {
         let parent_index = self.nodes.iter().position(|node| node.id == parent)?;
         let depth = self.depths[parent_index].saturating_add(1);
-        Some(self.add(Some(parent), title, depth))
+        self.add(Some(parent), title, depth)
     }
 
     pub fn close(&mut self, id: TabId) -> Option<TabNode> {
@@ -107,13 +109,16 @@ impl Workspace {
         Some(removed)
     }
 
-    fn add(&mut self, parent: Option<TabId>, title: String, depth: u32) -> TabId {
+    fn add(&mut self, parent: Option<TabId>, title: String, depth: u32) -> Option<TabId> {
+        if self.nodes.len() >= MAX_TABS || self.next_id == u64::MAX {
+            return None;
+        }
         let id = TabId(self.next_id);
-        self.next_id = self.next_id.saturating_add(1);
+        self.next_id = self.next_id.checked_add(1)?;
         self.nodes.push(TabNode { id, parent, title });
         self.depths.push(depth);
         self.active = Some(id);
-        id
+        Some(id)
     }
 }
 
@@ -124,7 +129,7 @@ mod tests {
     #[test]
     fn closing_parent_promotes_direct_children_and_keeps_them_live() {
         let mut workspace = Workspace::default();
-        let root = workspace.add_root("root".into());
+        let root = workspace.add_root("root".into()).unwrap();
         let parent = workspace.add_child(root, "parent".into()).unwrap();
         let child = workspace.add_child(parent, "child".into()).unwrap();
         let grandchild = workspace.add_child(child, "grandchild".into()).unwrap();
@@ -139,9 +144,29 @@ mod tests {
     #[test]
     fn closing_active_tab_selects_a_remaining_neighbor() {
         let mut workspace = Workspace::default();
-        let first = workspace.add_root("first".into());
-        let second = workspace.add_root("second".into());
+        let first = workspace.add_root("first".into()).unwrap();
+        let second = workspace.add_root("second".into()).unwrap();
         workspace.close(second);
         assert_eq!(workspace.active(), Some(first));
+    }
+
+    #[test]
+    fn creation_limits_fail_without_mutating_tree_or_active_tab() {
+        let mut workspace = Workspace::default();
+        for index in 0..MAX_TABS {
+            assert!(workspace.add_root(format!("tab {index}")).is_some());
+        }
+        let active = workspace.active();
+        assert_eq!(workspace.add_root("overflow".into()), None);
+        assert_eq!(workspace.nodes().len(), MAX_TABS);
+        assert_eq!(workspace.active(), active);
+
+        workspace.close(active.unwrap());
+        let node_count = workspace.nodes().len();
+        let active = workspace.active();
+        workspace.next_id = u64::MAX;
+        assert_eq!(workspace.add_root("exhausted".into()), None);
+        assert_eq!(workspace.nodes().len(), node_count);
+        assert_eq!(workspace.active(), active);
     }
 }

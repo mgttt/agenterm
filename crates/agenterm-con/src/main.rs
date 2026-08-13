@@ -785,9 +785,16 @@ fn tab_exit_json(id: workspace::TabId, exit_code: Option<i32>) -> json::JsonValu
 impl ConApp {
     fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
         let mut workspace = workspace::Workspace::default();
-        let initial = workspace.add_root("terminal".to_owned());
+        let initial = workspace
+            .add_root("terminal".to_owned())
+            .expect("an empty workspace accepts its initial tab");
         let mut sessions = SessionStore::default();
-        sessions.insert(initial, ConTerminal::new(working_dir));
+        assert!(
+            sessions
+                .insert(initial, ConTerminal::new(working_dir))
+                .is_ok(),
+            "an empty session store accepts its initial tab"
+        );
         Self {
             workspace,
             sessions,
@@ -1131,7 +1138,7 @@ impl ConApp {
         let parent = self.workspace.active();
         let id = match (child, parent) {
             (true, Some(parent)) => self.workspace.add_child(parent, "terminal".to_owned()),
-            _ => Some(self.workspace.add_root("terminal".to_owned())),
+            _ => self.workspace.add_root("terminal".to_owned()),
         }
         .ok_or_else(|| {
             PixelWindowError::failed("con_tab_create", "active parent is unavailable")
@@ -1151,7 +1158,13 @@ impl ConApp {
             self.workspace.close(id);
             return Err(error);
         }
-        self.sessions.insert(id, session);
+        if self.sessions.insert(id, session).is_err() {
+            self.workspace.close(id);
+            return Err(PixelWindowError::failed(
+                "con_tab_create",
+                "stable tab id is already in use",
+            ));
+        }
         self.mark_chrome_full();
         self.reveal_active_tree_row(window)?;
         self.refresh_title(window)

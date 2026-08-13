@@ -14,6 +14,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `Workspace` is the sole authority for tree order, parentage and stable tab
   identity. Closing a parent promotes its direct children instead of terminating
   them; a parent cycle is rejected.
+- [x] local creation is capped at 256 live tabs. Capacity or stable-id
+  exhaustion rejects the new tab before mutating tree order, parentage or active
+  selection, and the release-build session store rejects duplicate ids rather
+  than silently splitting tree and PTY ownership.
 - [x] session ownership is a product-specific compact store rather than a
   general-purpose ordered map: it performs linear id routing over the small
   interactive tab set and may swap entries on removal because its physical order

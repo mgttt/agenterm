@@ -1197,6 +1197,11 @@ read boundary. Repeated individually bounded clipboard, IPC, keyboard, or IME
 payloads can otherwise grow one buffer without limit. Byte ceilings for UTF-8
 text must truncate at a character boundary.
 
+Stable-id allocators must use checked progression before mutating related
+collections. Capacity, id exhaustion, or duplicate insertion must leave tree,
+active-selection, and owned-resource stores aligned; a `debug_assert!` is not a
+release-build uniqueness contract.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as
