@@ -55,13 +55,12 @@
 ```text
 Mobile  接入端 + 去中心化链接端
 │
-├─ M-P. PWA 宿主（产品在 PRD 33；本仓 docs/）——整图并发，不是 P1→P4 示范梯
-│  ├─ [ ] 首页 Mobile App 入口 + /app 壳 + Web App Manifest（同批）
-│  ├─ [ ] 桌面 QR 邀请协议 + 设备绑定 UX（与壳并行设计）
-│  ├─ [ ] LAN observe 投影（依赖绑定，不是「下一期 MVP」）
-│  └─ [ ] Composer grant（依赖绑定 + 06/07，同一棵树）
-│     商店 App 因审核慢停在占位，不是等 PWA 示范。
-│     非目标：第二个网站；不塞进 0.1.18/0.1.19
+├─ M-P. PWA 第一宿主（产品在 PRD 33；本仓 docs/）
+│  ├─ [ ] P1 docs/ 首页增加 Mobile App 入口，打开 /app
+│  ├─ [ ] P2 Web App Manifest + 可安装独立显示
+│  ├─ [ ] P3 诚实占位 UI（未绑定设备列表 / 「等桌面出示二维码」）
+│  └─ [ ] P4 以后：扫码绑定（LAN、observe）再谈 live 投影
+│     非目标：不把 PWA 做成第二个网站；不进 0.1.18/0.1.19
 │
 ├─ M-A. crates/agenterm-protocol —— 抽取线协议（原生壳仍需要；PWA 可后接）
 │  ├─ [ ] A1 从 src/ui_bridge.rs 抽出传输无关 DTO 层

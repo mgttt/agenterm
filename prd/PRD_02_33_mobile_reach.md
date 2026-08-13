@@ -87,10 +87,10 @@ plan does not own product status.
   installable on iOS Safari and Android Chrome as a standalone display.
   Offline: the chrome and last honest pairing state may cache; live
   fleet data must not pretend to be current when the desktop is gone.
-- [ ] **Shell and pairing are one product.** The `/app` chrome states
-  what it is (connector to desktop AgenTerm), lists devices, and hosts
-  the scan path. An empty device list is a truthful state, not a shipped
-  MVP that postpones QR design.
+- [ ] **First visible slice (no pairing yet):** identity of the product,
+  “this talks to your desktop AgenTerm”, a disabled or empty paired-
+  devices list, and a documented “scan QR when the desktop shows one”
+  placeholder. Comfortable to open every day even before bind works.
 - [ ] **No store wrapper.** The PWA is not a fake App Store binary and
   does not wait on Apple/Google review.
 - [ ] **No extra JS product stack in the desktop binary.** The PWA lives
@@ -154,16 +154,17 @@ this module when they get evidence. They stay `[ ]` until then.
 ## Version gate
 
 - [ ] **no version is assigned.** Roadmap ownership is
-  [18](PRD_02_18_roadmap.md).
-- [ ] the accepted PWA product is one tree, implemented concurrently:
-  homepage entry, `/app` shell, manifest/installability, pairing protocol
-  (desktop QR + device bind), and observe-level grant UX. Composer grant
-  is the same tree once bind exists (typed dependency), not a later MVP.
-- [ ] iOS/Android store apps stay out because **review latency is an
-  external blocker**, not because we are waiting on a PWA demo.
-- [ ] no PoC homepage-only release that postpones `/app` or pairing
-  design. Advance by test-and-adjust against the real origin (or a
-  documented preview host) and a real desktop. Design text is not evidence.
+  [18](PRD_02_18_roadmap.md). Implementation is slow and incremental.
+- [ ] suggested order, each its own later execution leaf:
+  1. `docs/` nav + `/app` static shell (honest placeholder UI);
+  2. Web App Manifest / installability;
+  3. desktop QR invite + PWA bind (LAN, observe-only);
+  4. observe live tree / bounded summaries;
+  5. Composer grant;
+  6. store apps, only after a human decision.
+- [ ] a slice ships only with public black-box evidence against the real
+  origin (or a documented preview host) and a real desktop. Design text
+  is not evidence.
 
 ## Boundary
 

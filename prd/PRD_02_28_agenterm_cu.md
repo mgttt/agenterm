@@ -149,10 +149,9 @@ independent implementation.
   structured `click` / `focus` by node path (`scripts/cu-linux-smoke.sh` against
   the real `cu` binary). Windows UIA and macOS AX are not claimed in this slice.
 - [ ] the subtree root still has no shipped version. Roadmap ownership is
-  [18 Focused product roadmap](PRD_02_18_roadmap.md). **v0.1.19 owns**
-  window placement ([32](PRD_02_32_cu_window_placement.md)) as a concurrent
-  cu tree (not a PoC increment); that assignment does not promote this
-  root or any other child.
+  [18 Focused product roadmap](PRD_02_18_roadmap.md). **v0.1.19 starts**
+  window placement ([32](PRD_02_32_cu_window_placement.md)) as a cu increment;
+  that assignment does not promote this root or any other child.
 - [ ] no capability may be marked shipped on design documents, reference
   assets, or a passing unit test alone. The evidence standard is the same as the
   rest of the tree: a public black-box journey against the real executable.
