@@ -75,6 +75,7 @@ const AGT_EV_RENDER_DUE: u32 = 4;
 const EXPECTED_BUILD_ID: &str = "0.1.16+abi.2";
 const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
 const PROBE: &[u8] = b"agenterm-abi-probe";
+
 /// PNG signature: `89 50 4E 47 0D 0A 1A 0A`.
 const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -136,6 +137,11 @@ type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type ClipboardHasText = unsafe extern "C" fn() -> i32;
 type ParentConsoleWrite = unsafe extern "C" fn(*const u8, usize) -> i32;
+type RuntimeUserConfigDir = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
+type RuntimeDefaultShell = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
+type RuntimeEnvPresent = unsafe extern "C" fn(*const u8, usize) -> i32;
+type RuntimeArgCount = unsafe extern "C" fn(*mut usize) -> i32;
+type RuntimeArg = unsafe extern "C" fn(usize, *mut u8, usize, *mut usize) -> i32;
 
 /// Locate the cdylib built under the active profile. The test binary lives in
 /// `target/<profile>/deps/`, the cdylib in `target/<profile>/`.
@@ -1722,5 +1728,268 @@ fn parent_console_write_accepts_empty_text() {
     assert_ne!(
         st, AGT_FAILED,
         "len == 0 must never be AGT_FAILED, got {st}"
+    );
+}
+
+/// Milestone 10 evidence 1: `agt_runtime_user_config_dir` two-stage contract.
+/// PRIVACY RULE: the value is a real user-home path, so the test asserts only
+/// length properties (probed length > 0, written == probed, valid UTF-8) and
+/// never prints the path bytes or embeds them in a panic message.
+#[test]
+fn runtime_user_config_dir_two_stage_contract() {
+    let lib = load();
+    let dir: Symbol<RuntimeUserConfigDir> = unsafe { sym(&lib, b"agt_runtime_user_config_dir") };
+
+    // Stage 1: the legal "how big?" probe (cap == 0, buf == NULL).
+    let mut needed = 0usize;
+    let st = unsafe { dir(std::ptr::null_mut(), 0, &mut needed) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must fail with buffer_too_small, got {st}"
+    );
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        needed > 0,
+        "user config dir must be non-empty, got length {needed}"
+    );
+
+    // Stage 2: allocate exactly the probed size and fetch.
+    let mut buf = vec![0u8; needed];
+    let mut got = 0usize;
+    let st = unsafe { dir(buf.as_mut_ptr(), needed, &mut got) };
+    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(&lib));
+    assert_eq!(
+        got, needed,
+        "written length {got} must equal the probed length {needed}"
+    );
+    assert!(
+        std::str::from_utf8(&buf).is_ok(),
+        "user config dir must be valid UTF-8"
+    );
+}
+
+/// Milestone 10 evidence 2: `agt_runtime_default_shell` two-stage contract.
+/// Same length-only assertions as the config-dir test; the shell path is
+/// never printed.
+#[test]
+fn runtime_default_shell_two_stage_contract() {
+    let lib = load();
+    let shell: Symbol<RuntimeDefaultShell> = unsafe { sym(&lib, b"agt_runtime_default_shell") };
+
+    let mut needed = 0usize;
+    let st = unsafe { shell(std::ptr::null_mut(), 0, &mut needed) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must fail with buffer_too_small, got {st}"
+    );
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        needed > 0,
+        "default shell must be non-empty, got length {needed}"
+    );
+
+    let mut buf = vec![0u8; needed];
+    let mut got = 0usize;
+    let st = unsafe { shell(buf.as_mut_ptr(), needed, &mut got) };
+    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(&lib));
+    assert_eq!(
+        got, needed,
+        "written length {got} must equal the probed length {needed}"
+    );
+    assert!(
+        std::str::from_utf8(&buf).is_ok(),
+        "default shell must be valid UTF-8"
+    );
+}
+
+/// Milestone 10 evidence 4: `agt_runtime_env_present` probes the real
+/// environment. `PATH` always exists in the test environment; the sentinel
+/// never does. NULL / empty / non-UTF-8 names are queries that report 0.
+#[test]
+fn runtime_env_present_probes_real_environment() {
+    let lib = load();
+    let present: Symbol<RuntimeEnvPresent> = unsafe { sym(&lib, b"agt_runtime_env_present") };
+
+    let path = b"PATH";
+    assert_eq!(
+        unsafe { present(path.as_ptr(), path.len()) },
+        1,
+        "PATH must exist in the test environment"
+    );
+    let absent = b"AGENTERM_ABI_NO_SUCH_VAR_XYZ";
+    assert_eq!(
+        unsafe { present(absent.as_ptr(), absent.len()) },
+        0,
+        "the sentinel variable must not exist"
+    );
+
+    assert_eq!(unsafe { present(std::ptr::null(), 0) }, 0, "NULL name is 0");
+    assert_eq!(unsafe { present(absent.as_ptr(), 0) }, 0, "empty name is 0");
+    let bad_utf8 = [0xffu8, 0xfe, 0x80];
+    assert_eq!(
+        unsafe { present(bad_utf8.as_ptr(), bad_utf8.len()) },
+        0,
+        "non-UTF-8 name is 0"
+    );
+}
+
+/// Child-process probe for `agt_runtime_arg*`. This test only asserts inside
+/// a subprocess spawned by `runtime_arg_count_reports_real_arguments`, whose
+/// extra arguments guarantee a non-empty argument list — the export is
+/// exercised against real data. When the test binary runs directly under
+/// `cargo test` the argument list is empty by design, so the probe returns
+/// without asserting. It panics (failing the parent) if any assertion fails.
+/// Argument bytes are known harness input, not user data, but they are still
+/// never printed.
+#[test]
+fn runtime_arg_child_probe() {
+    // Guard: only the child process (spawned with the marker argument) runs
+    // the assertions; a bare `cargo test` run must not fail here.
+    if !std::env::args().any(|a| a == "--agenterm-abi-child-arg") {
+        return;
+    }
+    let lib = load();
+    let count: Symbol<RuntimeArgCount> = unsafe { sym(&lib, b"agt_runtime_arg_count") };
+    let arg: Symbol<RuntimeArg> = unsafe { sym(&lib, b"agt_runtime_arg") };
+
+    let mut n = 0usize;
+    let st = unsafe { count(&mut n) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_runtime_arg_count failed: {}",
+        last_error_message(&lib)
+    );
+    assert!(
+        n >= 1,
+        "child process must carry at least one argument, got {n}"
+    );
+
+    // Two-stage fetch of argument 0.
+    let mut needed = 0usize;
+    let st = unsafe { arg(0, std::ptr::null_mut(), 0, &mut needed) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must fail with buffer_too_small, got {st}"
+    );
+    assert!(
+        needed > 0,
+        "argument 0 must be non-empty, got length {needed}"
+    );
+    let mut buf = vec![0u8; needed];
+    let mut got = 0usize;
+    let st = unsafe { arg(0, buf.as_mut_ptr(), needed, &mut got) };
+    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(&lib));
+    assert_eq!(
+        got, needed,
+        "written length {got} must equal the probed length {needed}"
+    );
+    assert!(
+        std::str::from_utf8(&buf).is_ok(),
+        "argument 0 must be valid UTF-8"
+    );
+}
+
+/// Milestone 10 evidence 3: `cargo test` runs the test binary with no extra
+/// arguments (only the image name), so the argument list would be empty. This
+/// parent test spawns the same binary as a child with known extra arguments,
+/// running only `runtime_arg_child_probe` (libtest filter); the child's
+/// assertions prove `arg_count >= 1` and a real two-stage `arg(0)` fetch.
+#[test]
+fn runtime_arg_count_reports_real_arguments() {
+    let exe = std::env::current_exe().expect("current_exe()");
+    let out = std::process::Command::new(&exe)
+        .args(["runtime_arg_child_probe", "--", "--agenterm-abi-child-arg"])
+        .output()
+        .expect("spawn the child probe");
+    assert!(
+        out.status.success(),
+        "child probe failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Milestone 10 evidence 3/5: out-of-range index is `bad_index`; invalid out
+/// pointers are `bad_pointer` — the pointer check runs before the index
+/// range check, so this is verifiable even from an argument-less process.
+#[test]
+fn runtime_arg_bad_index_and_bad_pointer() {
+    let lib = load();
+    let count: Symbol<RuntimeArgCount> = unsafe { sym(&lib, b"agt_runtime_arg_count") };
+    let arg: Symbol<RuntimeArg> = unsafe { sym(&lib, b"agt_runtime_arg") };
+
+    let mut scratch = [0u8; 64];
+    let mut out = 0usize;
+
+    // Valid pointers but out-of-range index -> bad_index.
+    let st = unsafe { arg(9999, scratch.as_mut_ptr(), 64, &mut out) };
+    assert_eq!(st, AGT_FAILED, "out-of-range index must fail, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_index"),
+        "expected code \"bad_index\" in error, got: {msg}"
+    );
+
+    // NULL out_count -> bad_pointer.
+    let st = unsafe { count(std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "NULL out_count must fail, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+
+    // NULL out_len -> bad_pointer (checked before the index range).
+    let st = unsafe { arg(9999, scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "NULL out_len must fail, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 10 evidence 5: every two-stage export reports
+/// `AGT_FAILED{code="bad_pointer"}` for a NULL `out_len` (and, for
+/// `agt_runtime_arg_count`, a NULL `out_count`).
+#[test]
+fn runtime_two_stage_rejects_null_out_len() {
+    let lib = load();
+    let dir: Symbol<RuntimeUserConfigDir> = unsafe { sym(&lib, b"agt_runtime_user_config_dir") };
+    let shell: Symbol<RuntimeDefaultShell> = unsafe { sym(&lib, b"agt_runtime_default_shell") };
+    let arg: Symbol<RuntimeArg> = unsafe { sym(&lib, b"agt_runtime_arg") };
+
+    let mut scratch = [0u8; 64];
+
+    let st = unsafe { dir(scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "dir: NULL out_len must fail, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "dir: expected code \"bad_pointer\" in error, got: {msg}"
+    );
+
+    let st = unsafe { shell(scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "shell: NULL out_len must fail, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "shell: expected code \"bad_pointer\" in error, got: {msg}"
+    );
+
+    let st = unsafe { arg(0, scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "arg: NULL out_len must fail, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "arg: expected code \"bad_pointer\" in error, got: {msg}"
     );
 }

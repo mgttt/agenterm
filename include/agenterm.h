@@ -9,6 +9,8 @@
  * milestone 5 adds the process group (enumerate / kill / self pid).
  * milestone 8 adds the clipboard group (set / get / has-text).
  * milestone 9 adds the parent-console group (write stdout / write stderr).
+ * milestone 10 adds the runtime-environment group (user config dir, default
+ * terminal shell, environment probe, argument list).
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -415,6 +417,39 @@ int32_t    agt_clipboard_has_text(void);
  * is mapped as above. */
 agt_status agt_parent_console_write_stdout(const uint8_t* text, size_t len);
 agt_status agt_parent_console_write_stderr(const uint8_t* text, size_t len);
+
+/* --- runtime environment (milestone 10) ------------------------------ */
+
+/* User config directory (UTF-8), two-stage (spec 3.4):
+ *   cap sufficient   -> AGT_OK, *out_len = bytes written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
+ *                       *out_len = required bytes
+ * NULL out_len (or NULL buf with cap > 0) ->
+ * AGT_FAILED{code="bad_pointer"}; platform failure ->
+ * AGT_FAILED{code="runtime_failed"}; a path that is not valid UTF-8 ->
+ * AGT_FAILED{code="bad_encoding"} (never lossy-replaced). */
+agt_status agt_runtime_user_config_dir(uint8_t* buf, size_t cap, size_t* out_len);
+
+/* Default terminal shell (UTF-8), two-stage (spec 3.4). Same status mapping
+ * as agt_runtime_user_config_dir; never fails on a built library (the
+ * platform always has a fallback shell). */
+agt_status agt_runtime_default_shell(uint8_t* buf, size_t cap, size_t* out_len);
+
+/* 1 when the process environment contains the ASCII variable `name`, 0
+ * otherwise. `name == NULL` or a non-UTF-8 slice returns 0; this is a
+ * query, not a fallible operation, so it never sets the error record. */
+int32_t    agt_runtime_env_present(const uint8_t* name, size_t len);
+
+/* Number of command-line arguments (excluding the image name). NULL
+ * out_count -> AGT_FAILED{code="bad_pointer"}; platform failure ->
+ * AGT_FAILED{code="runtime_failed"}. */
+agt_status agt_runtime_arg_count(size_t* out_count);
+
+/* Command-line argument `index` (UTF-8, excluding the image name),
+ * two-stage (spec 3.4). index out of range ->
+ * AGT_FAILED{code="bad_index"}; platform failure ->
+ * AGT_FAILED{code="runtime_failed"}. */
+agt_status agt_runtime_arg(size_t index, uint8_t* buf, size_t cap, size_t* out_len);
 
 /* --- known platform limitation -------------------------------------- */
 

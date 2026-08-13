@@ -38,6 +38,11 @@
 //! forward one UTF-8 line to the parent console. "No writable parent console"
 //! maps to `AGT_UNSUPPORTED` (the environment lacks the mechanism), never
 //! `AGT_FAILED`; `AGT_CAP_PARENT_CONSOLE` now reports `AGT_OK`.
+//! Milestone 10 ships the runtime-environment group: user config directory
+//! and default terminal shell (both two-stage, §3.4), an ASCII environment
+//! variable probe, and the process argument list (`agt_runtime_arg_count` /
+//! `agt_runtime_arg`). Runtime exports have no capability entry — they are
+//! always available on a built library, so the capability enum is untouched.
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -68,6 +73,10 @@ use agenterm_platform::process::{kill, list};
 use agenterm_platform::pty::{
     ChildCommand, PtyChild, PtyMaster, TerminalSize, initialize_shutdown_reaper,
     shutdown_session_detached,
+};
+use agenterm_platform::runtime::{
+    application_arguments, ascii_environment_variable_present, default_terminal_shell,
+    user_config_directory,
 };
 use agenterm_platform::screenshot::{
     MAX_FRAME_PIXELS, MAX_FRAME_SIDE, NativeCaptureArea, ScreenshotWindowHandle, XrgbFrame,
@@ -3312,6 +3321,243 @@ pub extern "C" fn agt_parent_console_write_stderr(text: *const u8, len: usize) -
                 c"panic",
                 "panic in agt_parent_console_write_stderr",
             );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+// --- runtime environment (milestone 10) -------------------------------
+
+/// Validate the two-stage pointer contract: `out_len` must be non-NULL and
+/// `buf` non-NULL whenever `cap > 0`. Returns `None` when valid, otherwise
+/// records the error and returns the status to surface.
+fn two_stage_pointer_error(
+    operation: &'static CStr,
+    buf: *const u8,
+    cap: usize,
+    out_len: *const usize,
+) -> Option<agt_status> {
+    if out_len.is_null() {
+        record_error(operation, c"bad_pointer", "out_len pointer is null");
+        return Some(agt_status::AGT_FAILED);
+    }
+    if cap > 0 && buf.is_null() {
+        record_error(operation, c"bad_pointer", "buf is null");
+        return Some(agt_status::AGT_FAILED);
+    }
+    None
+}
+
+/// Shared two-stage UTF-8 write (§3.4): copy `bytes` into `buf` when `cap`
+/// is sufficient; otherwise report `AGT_FAILED{code="buffer_too_small"}` with
+/// the required length in `*out_len`. `out_len == NULL` (or `buf == NULL`
+/// with `cap > 0`) is `AGT_FAILED{code="bad_pointer"}`. On success `*out_len`
+/// is the number of bytes written.
+fn two_stage_utf8_write(
+    operation: &'static CStr,
+    bytes: &[u8],
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    if let Some(status) = two_stage_pointer_error(operation, buf, cap, out_len) {
+        return status;
+    }
+    let required = bytes.len();
+    if cap < required {
+        unsafe { *out_len = required };
+        record_error(
+            operation,
+            c"buffer_too_small",
+            "cap is smaller than the required size; allocate the required size and call again",
+        );
+        return agt_status::AGT_FAILED;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, required);
+        *out_len = required;
+    }
+    agt_status::AGT_OK
+}
+
+/// User config directory (UTF-8), two-stage (§3.4). A platform failure →
+/// `AGT_FAILED{code="runtime_failed"}`; a path that is not valid UTF-8 →
+/// `AGT_FAILED{code="bad_encoding"}` (never lossy-replaced — callers need
+/// determinism).
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_runtime_user_config_dir(
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        let path = match user_config_directory() {
+            Ok(p) => p,
+            Err(e) => {
+                record_error(
+                    c"agt_runtime_user_config_dir",
+                    c"runtime_failed",
+                    format!("{e}"),
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let bytes = match path.into_os_string().into_string() {
+            Ok(s) => s.into_bytes(),
+            Err(_) => {
+                record_error(
+                    c"agt_runtime_user_config_dir",
+                    c"bad_encoding",
+                    "user config directory is not valid UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        two_stage_utf8_write(c"agt_runtime_user_config_dir", &bytes, buf, cap, out_len)
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_runtime_user_config_dir",
+                c"panic",
+                "panic in agt_runtime_user_config_dir",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Default terminal shell (UTF-8), two-stage (§3.4). Never fails on a built
+/// library: the platform adapter always has a fallback shell, so an empty
+/// result is impossible and the two-stage probe always yields a length > 0.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_runtime_default_shell(
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        let shell = default_terminal_shell();
+        two_stage_utf8_write(
+            c"agt_runtime_default_shell",
+            shell.as_bytes(),
+            buf,
+            cap,
+            out_len,
+        )
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_runtime_default_shell",
+                c"panic",
+                "panic in agt_runtime_default_shell",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// 1 when the process environment contains the ASCII variable `name`, 0
+/// otherwise. `name == NULL` or a non-UTF-8 slice returns 0 — this is a
+/// query, not a fallible operation, so it never sets the error record.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_runtime_env_present(name: *const u8, len: usize) -> i32 {
+    fn inner(name: *const u8, len: usize) -> i32 {
+        if name.is_null() || len == 0 {
+            return 0;
+        }
+        // SAFETY: the pointer/length pair is a C ABI contract (see
+        // include/agenterm.h); the caller guarantees `len` readable bytes.
+        let slice = unsafe { std::slice::from_raw_parts(name, len) };
+        match std::str::from_utf8(slice) {
+            Ok(s) => ascii_environment_variable_present(s) as i32,
+            Err(_) => 0,
+        }
+    }
+    catch_unwind(AssertUnwindSafe(|| inner(name, len))).unwrap_or(0)
+}
+
+/// Number of command-line arguments (excluding the image name) of this
+/// process. `out_count == NULL` → `AGT_FAILED{code="bad_pointer"}`; a
+/// platform failure → `AGT_FAILED{code="runtime_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_runtime_arg_count(out_count: *mut usize) -> agt_status {
+    fn inner(out_count: *mut usize) -> agt_status {
+        if out_count.is_null() {
+            record_error(
+                c"agt_runtime_arg_count",
+                c"bad_pointer",
+                "out_count is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        match application_arguments() {
+            Ok(args) => {
+                unsafe { *out_count = args.len() };
+                agt_status::AGT_OK
+            }
+            Err(e) => {
+                record_error(c"agt_runtime_arg_count", c"runtime_failed", format!("{e}"));
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(out_count))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_runtime_arg_count",
+                c"panic",
+                "panic in agt_runtime_arg_count",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Command-line argument `index` (UTF-8, excluding the image name),
+/// two-stage (§3.4). `index` out of range →
+/// `AGT_FAILED{code="bad_index"}`; a platform failure →
+/// `AGT_FAILED{code="runtime_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_runtime_arg(
+    index: usize,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(index: usize, buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        // Pointer validity is checked before the index range (same ordering
+        // as `agt_process_list` / `agt_clipboard_get_text`): an invalid
+        // out pointer is `bad_pointer` even when the index is out of range.
+        if let Some(status) = two_stage_pointer_error(c"agt_runtime_arg", buf, cap, out_len) {
+            return status;
+        }
+        let args = match application_arguments() {
+            Ok(a) => a,
+            Err(e) => {
+                record_error(c"agt_runtime_arg", c"runtime_failed", format!("{e}"));
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let Some(arg) = args.get(index) else {
+            record_error(c"agt_runtime_arg", c"bad_index", "index is out of range");
+            return agt_status::AGT_FAILED;
+        };
+        two_stage_utf8_write(c"agt_runtime_arg", arg.as_bytes(), buf, cap, out_len)
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(index, buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(c"agt_runtime_arg", c"panic", "panic in agt_runtime_arg");
             agt_status::AGT_FAILED
         }
     }

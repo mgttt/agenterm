@@ -32,3 +32,8 @@ agt_clipboard_get_text
 agt_clipboard_has_text
 agt_parent_console_write_stdout
 agt_parent_console_write_stderr
+agt_runtime_user_config_dir
+agt_runtime_default_shell
+agt_runtime_env_present
+agt_runtime_arg_count
+agt_runtime_arg
