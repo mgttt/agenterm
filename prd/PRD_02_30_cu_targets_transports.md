@@ -142,6 +142,14 @@ Canonical host mapping (approved product vocabulary):
   `input_inject::type_text`. Resolution failure (miss or ambiguous name)
   aborts before any write. Without `--name`, `send-text` still injects
   into whatever is focused.
+- [x] `copy --window HANDLE --name PAT [--role ROLE]` resolves through
+  that same path, then publishes AT-SPI `Text.GetText`
+  (`agt_a11y_node_get_text`) onto the native clipboard
+  (`agt_clipboard_set_text`). On Linux X11 the seed is a native CLIPBOARD
+  selection owner, not `xclip`. `--name` is required. A named showing node
+  with no Text interface typed-fails (`a11y_text_unavailable`) and never
+  silently uses XTest / `--coords` / screenshot. Resolution failure (miss
+  or ambiguous name) aborts before any clipboard write.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]`
   resolves through that same path, then writes the clipboard via the same
   AT-SPI `EditableText` / `Text` + toolkit set-value path as named
@@ -153,7 +161,8 @@ Canonical host mapping (approved product vocabulary):
   and never silently uses XTest / `--coords` / screenshot. Resolution
   failure (miss or ambiguous name) aborts before any write or clipboard
   seed. Reasonix composer (`Message Reasonix…`) writes through the same
-  WebKit eval-helper set-value path as named `send-text`.
+  WebKit eval-helper set-value path as named `send-text`. A prior
+  `copy --name` may seed the clipboard instead of `--text`.
 - [x] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
   resolves through that same path, then delivers the chord via AT-SPI
   `DeviceEventListener` (`NotifyEvent`, `agt_a11y_node_send_keys`). A named
@@ -166,7 +175,7 @@ Canonical host mapping (approved product vocabulary):
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls `agt_a11y_node_get_text` (`Text.GetText`)
   on that unique showing node until the independent text equals `TEXT`.
-  Timeout is typed `timeout`. This is not `send-text` / `paste`
+  Timeout is typed `timeout`. This is not `send-text` / `paste` / `copy`
   `matched.text`, not a sidecar walk of `cu tree` snapshot `text` fields,
   and not the WebKit eval helper's queued-job `OK` (Reasonix composer
   `Message Reasonix…`).

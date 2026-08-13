@@ -615,15 +615,114 @@ pub fn get_node_text(window: Option<isize>, node_id: &str) -> Result<String, Mec
 }
 
 /// Clipboard through libagenterm (`agt_clipboard_*`). Named `paste` seeds
-/// and reads here; it never injects Ctrl+V or XTest.
+/// and reads here; named `copy` publishes GetText here. Neither injects
+/// Ctrl+V or XTest.
 pub mod clipboard {
     use super::{MechanismError, call_sym, last_mechanism_error, map_status};
     use crate::dynlib;
+
+    /// Hidden `cu` argv that owns CLIPBOARD after `SetSelectionOwner` so a
+    /// later process can `ConvertSelection`. Not a public command.
+    pub const X11_CLIPBOARD_OWNER_ARG: &str = "__agenterm-internal-x11-clipboard-own";
+
+    /// Env the owner process sets so `agt_clipboard_set_text` stays in the
+    /// X11 selection event loop instead of returning and dropping the owner.
+    pub const X11_CLIPBOARD_SERVE_ENV: &str = "AGENTERM_X11_CLIPBOARD_SERVE";
 
     pub fn set_text(text: &str) -> Result<(), MechanismError> {
         let f = call_sym::<super::ClipboardSetText>(b"agt_clipboard_set_text")?;
         let status = unsafe { f(text.as_ptr(), text.len()) };
         map_status("agt_clipboard_set_text", status)
+    }
+
+    /// Publish UTF-8 so a later `cu` process can read it. On Linux X11 the
+    /// CLIPBOARD owner must outlive this caller; a detached `cu` owner
+    /// answers `SelectionRequest`. Other hosts use in-process `set_text`.
+    pub fn publish_text(text: &str) -> Result<(), MechanismError> {
+        #[cfg(target_os = "linux")]
+        {
+            if std::env::var_os("DISPLAY").is_some() {
+                return publish_x11_clipboard(text);
+            }
+        }
+        set_text(text)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn publish_x11_clipboard(text: &str) -> Result<(), MechanismError> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let exe = std::env::current_exe().map_err(|error| MechanismError::Failed {
+            code: "clipboard_failed".into(),
+            message: format!("could not locate cu to persist CLIPBOARD: {error}"),
+        })?;
+        let exe_name = exe.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        if exe_name != "cu" && exe_name != "cu.exe" {
+            return set_text(text);
+        }
+        let mut child = Command::new(&exe);
+        child
+            .arg(X11_CLIPBOARD_OWNER_ARG)
+            .env(X11_CLIPBOARD_SERVE_ENV, "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            child.process_group(0);
+        }
+        let mut child = child.spawn().map_err(|error| MechanismError::Failed {
+            code: "clipboard_failed".into(),
+            message: format!("could not start CLIPBOARD owner: {error}"),
+        })?;
+        match child.stdin.take() {
+            Some(mut stdin) => stdin.write_all(text.as_bytes()).map_err(|error| {
+                let _ = child.kill();
+                MechanismError::Failed {
+                    code: "clipboard_failed".into(),
+                    message: format!("could not send CLIPBOARD payload: {error}"),
+                }
+            })?,
+            None => {
+                let _ = child.kill();
+                return Err(MechanismError::Failed {
+                    code: "clipboard_failed".into(),
+                    message: "CLIPBOARD owner stdin is missing".into(),
+                });
+            }
+        }
+        let deadline = Instant::now() + Duration::from_millis(2_000);
+        loop {
+            match get_text() {
+                Ok(got) if got == text => return Ok(()),
+                Ok(_) | Err(_) => {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        return Err(MechanismError::Failed {
+                            code: "clipboard_failed".into(),
+                            message: format!("CLIPBOARD owner exited before serving ({status})"),
+                        });
+                    }
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        return Err(MechanismError::Failed {
+                            code: "clipboard_failed".into(),
+                            message: "CLIPBOARD owner did not become readable in time".into(),
+                        });
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+    }
+
+    /// Owner-process entry: publish `text` and (on X11 with the serve env)
+    /// block in the selection loop until replaced.
+    pub fn own_text(text: &str) -> Result<(), MechanismError> {
+        set_text(text)
     }
 
     /// Two-stage `agt_clipboard_get_text`. No Unicode text is an empty

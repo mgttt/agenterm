@@ -3,6 +3,12 @@
 //! `SetSelectionOwner` seeds CLIPBOARD; a later `get_text` in the same
 //! process returns that owned UTF-8 payload. Foreign owners are read with
 //! `ConvertSelection`. No helper binary.
+//!
+//! A CLI process that exits after `SetSelectionOwner` leaves CLIPBOARD
+//! unowned. When `AGENTERM_X11_CLIPBOARD_SERVE` is set, `set_text` stays in
+//! the X11 event loop and answers `SelectionRequest` until `SelectionClear`
+//! (another owner). That is how `cu copy` keeps the native selection alive
+//! for a later `cu paste` process.
 
 use std::sync::Mutex;
 use std::thread;
@@ -208,6 +214,24 @@ impl NativeClipboard {
                 "X11 SetSelectionOwner did not leave this connection as CLIPBOARD owner",
             ));
         }
+        if serve_owned_selection() {
+            self.serve_until_replaced()?;
+        }
+        Ok(())
+    }
+
+    /// Answer CLIPBOARD `SelectionRequest` until another client takes the
+    /// selection. Returns when `owned` is cleared (`SelectionClear`).
+    fn serve_until_replaced(&mut self) -> Result<(), ClipboardError> {
+        while self.owned.is_some() {
+            match self.conn.wait_for_event() {
+                Ok(event) => self.handle_event(event)?,
+                Err(error) => {
+                    return Err(backend(format!("X11 wait_for_event failed: {error}")));
+                }
+            }
+            self.pump()?;
+        }
         Ok(())
     }
 
@@ -335,6 +359,13 @@ fn with_state<T>(
     f(guard.as_mut().expect("native clipboard state just opened"))
 }
 
+fn serve_owned_selection() -> bool {
+    match std::env::var("AGENTERM_X11_CLIPBOARD_SERVE") {
+        Ok(value) => !value.is_empty() && value != "0",
+        Err(_) => false,
+    }
+}
+
 pub(super) fn set_text(text: &str, _timeout: Duration) -> Result<(), ClipboardError> {
     with_state(|state| state.set_text(text))
 }
@@ -343,16 +374,22 @@ pub(super) fn get_text(max_read_bytes: usize, timeout: Duration) -> Result<Strin
     with_state(|state| state.get_text(max_read_bytes, timeout))
 }
 
+/// A 1-byte `get_text` probe of a longer payload is `TooLarge`, not absence.
+fn probe_indicates_unicode_text(result: Result<String, ClipboardError>) -> bool {
+    match result {
+        Ok(text) => !text.is_empty(),
+        Err(ClipboardError::TooLarge { .. }) => true,
+        Err(_) => false,
+    }
+}
+
 pub(super) fn has_unicode_text() -> bool {
     match with_state(|state| {
         state.pump()?;
         Ok(state.owned.as_ref().is_some_and(|bytes| !bytes.is_empty()))
     }) {
         Ok(true) => true,
-        Ok(false) => match get_text(1, Duration::from_millis(200)) {
-            Ok(text) => !text.is_empty(),
-            Err(_) => false,
-        },
+        Ok(false) => probe_indicates_unicode_text(get_text(1, Duration::from_millis(200))),
         Err(_) => false,
     }
 }
@@ -371,6 +408,20 @@ mod tests {
                 "PLATFORM_CLIPBOARD"
             ]
         );
+    }
+
+    #[test]
+    fn one_byte_probe_too_large_still_means_unicode_text() {
+        assert!(super::probe_indicates_unicode_text(Ok("x".into())));
+        assert!(!super::probe_indicates_unicode_text(Ok(String::new())));
+        assert!(super::probe_indicates_unicode_text(Err(
+            super::ClipboardError::TooLarge { limit: 1 }
+        )));
+        assert!(!super::probe_indicates_unicode_text(Err(
+            super::ClipboardError::Timeout {
+                message: "clipboard_timeout".into(),
+            }
+        )));
     }
 
     fn intern_atoms_names() -> [&'static str; 5] {

@@ -64,10 +64,11 @@ audited separately from AT-SPI actuation.
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection (no `--name`) |
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
+| `copy --window --name PAT [--role ROLE]` | same unique-name matcher, then AT-SPI `Text.GetText` published onto the native clipboard (`agt_clipboard_set_text`; Linux X11 `SetSelectionOwner`, not xclip); `--name` required; no Text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `paste --window --name PAT [--role ROLE] [--text TEXT]` | same unique-name matcher, then clipboard (`agt_clipboard_get_text`, optional `--text` seed) written through that same AT-SPI `EditableText` / `Text` path; `--name` required; no writeable text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
 | `screenshot` | typed `unsupported` on Linux native capture |
-| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` (not `send-text` / `paste` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
+| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` (not `send-text` / `paste` / `copy` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 
 ### Tree JSON shape (UIA-like)
 
@@ -150,6 +151,12 @@ cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
 # (or visible) node, and a timeout is a typed `ok:false` / `error.code=timeout`.
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --node-name-contains Reload --node-role button
+
+# Copy a named field's AT-SPI GetText onto the native clipboard.
+# Linux X11 uses SetSelectionOwner (not xclip). Never XTest / --coords.
+# Close the circuit with paste --name (no --text) then wait --text-equals.
+cu --target current --grant observe,act copy --window 25165828 \
+  --name FixtureSource
 
 # Paste clipboard text into a named field via AT-SPI EditableText / Text.
 # --text seeds the clipboard (Linux X11: native CLIPBOARD owner, not xclip);

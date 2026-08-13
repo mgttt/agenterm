@@ -1176,8 +1176,26 @@ is set. Do not drop a one-off `/tmp/xclip` binary to unblock
 path; `wait --text-equals` must see `GetText ==` the clipboard/typed
 string.
 
+`cu copy --name` is the inverse read. Resolve the unique showing node,
+read AT-SPI `Text.GetText` (`agt_a11y_node_get_text`), and publish that
+UTF-8 through `agt_clipboard_set_text`. `--name` is required. A named
+showing node with no Text interface typed-fails
+(`a11y_text_unavailable`). Never XTest, `--coords`, or screenshot.
+`matched.text` is the resolve-time snapshot and does not count; the
+copied payload is independent GetText. A later `paste --name` with no
+`--text` must be able to `ConvertSelection` that CLIPBOARD. A CLI
+process that `SetSelectionOwner` and then exits leaves CLIPBOARD
+unowned — `copy` therefore keeps a detached `cu` owner in the X11
+selection loop (`AGENTERM_X11_CLIPBOARD_SERVE`) until another owner
+takes it. Do not persist via `xclip` / `xsel`. A later process must
+not treat a 1-byte `get_text` probe `TooLarge` as "no clipboard
+text": `agt_clipboard_has_text` would then lie and
+`agt_clipboard_get_text` would return empty, so `paste --name`
+without `--text` writes nothing.
+
 `cu wait --text-equals` / `--node-text-equals` with `--name` is the
-independent AT-SPI close-the-circuit after named `send-text` / `paste`.
+independent AT-SPI close-the-circuit after named `send-text` / `paste` /
+`copy`.
 Resolve the unique showing node, then call `Text.GetText`
 (`agt_a11y_node_get_text`). Success is `ok:true` only when that GetText
 equals the typed string. The `send-text` / `paste` reply's `matched.text`

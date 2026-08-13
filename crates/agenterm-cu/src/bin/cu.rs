@@ -9,6 +9,11 @@ fn main() {
     if args.first().map(String::as_str) == Some("hotkeys") {
         std::process::exit(agenterm_cu::hotkeys::run());
     }
+    if args.first().map(String::as_str)
+        == Some(agenterm_cu::mechanism::clipboard::X11_CLIPBOARD_OWNER_ARG)
+    {
+        std::process::exit(run_x11_clipboard_owner());
+    }
     let reply = dispatch(args);
     let json = serde_json::to_string(&reply).unwrap_or_else(|_| {
         r#"{"ok":false,"target":"","command":"","error":{"code":"serialize","message":"reply serialization failed"}}"#
@@ -141,6 +146,20 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             Command::SendText {
                 target,
                 text: literal_text.unwrap_or_else(|| args.join(" ")),
+                window,
+                name,
+                role,
+            }
+        }
+        "copy" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("copy requires --window <handle> --name <pattern>");
+            }
+            Command::Copy {
+                target,
                 window,
                 name,
                 role,
@@ -344,6 +363,18 @@ fn help_reply(ok: bool) -> agenterm_cu::CuReply {
     }
 }
 
+fn run_x11_clipboard_owner() -> i32 {
+    use std::io::Read;
+    let mut text = String::new();
+    if std::io::stdin().read_to_string(&mut text).is_err() {
+        return 1;
+    }
+    match agenterm_cu::mechanism::clipboard::own_text(&text) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
 fn eprint_usage() {
     eprintln!(
         r#"usage: cu --target <current> [--grant observe,actuate] <command> [args...]
@@ -370,6 +401,15 @@ Commands:
                               AT-SPI id + eval helper); a node with no
                               writeable text interface typed-fails (never XTest).
                               `--` ends flag parsing
+  copy --window HANDLE --name PAT [--role ROLE]
+                              copies AT-SPI Text.GetText from the unique showing
+                              named node onto the native clipboard (Linux X11:
+                              SetSelectionOwner, not xclip). addressing=
+                              accessibility-tree. A node with no Text interface
+                              typed-fails (never XTest / --coords / screenshot).
+                              Close the circuit with paste --name (no --text)
+                              then wait --text-equals; copy matched.text does
+                              not count
   paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]
                               writes clipboard text into the unique showing named
                               field via native AT-SPI EditableText / Text
@@ -389,7 +429,7 @@ Commands:
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE)
                               --text-equals / --node-text-equals polls AT-SPI Text.GetText
                               on the unique showing named node until that independent
-                              text equals TEXT. send-text / paste matched.text, last_text_write_via,
+                              text equals TEXT. send-text / paste / copy matched.text, last_text_write_via,
                               and the WebKit eval helper's queued-job OK are not this
                               condition. Timeout is typed ("timeout"). Never
                               screenshot / XTest / --coords. `--` ends flag parsing.

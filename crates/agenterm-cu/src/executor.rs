@@ -112,6 +112,9 @@ impl Executor {
                 role,
                 ..
             } => send_text(text, *window, name.as_deref(), role.as_deref()),
+            Command::Copy {
+                window, name, role, ..
+            } => copy(*window, name.as_deref(), role.as_deref()),
             Command::Paste {
                 text,
                 window,
@@ -319,6 +322,49 @@ fn send_text(
         "action": "send-text",
         "typed": text,
         "via": via,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `copy --name` reads AT-SPI `Text.GetText` (`agt_a11y_node_get_text`)
+/// from the unique showing named node and publishes that UTF-8 onto the
+/// native clipboard (`agt_clipboard_set_text`). On Linux X11 the owner
+/// process stays in the `SetSelectionOwner` event loop so a later
+/// `paste --name` (no `--text`) can `ConvertSelection`. A named showing
+/// node with no Text interface typed-fails (`a11y_text_unavailable`) and
+/// never falls through to XTest / `--coords` / screenshot. `--name` is
+/// required. `matched.text` is the resolve-time snapshot; the copied
+/// payload is independent GetText.
+fn copy(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "copy requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved =
+        resolve_actuation_node(window, None, Some(name), role, "copy")?.ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "copy requires --window <handle> --name <pattern>",
+            )
+        })?;
+    let text = mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    mechanism::clipboard::publish_text(&text).map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "copy",
+        "text": text,
+        "via": "gettext",
+        "clipboard": true,
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -1296,6 +1342,64 @@ mod tests {
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_copy_requires_name() {
+        let command = Command::Copy {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_copy_requires_window() {
+        let command = Command::Copy {
+            target: TargetRef::Current,
+            window: None,
+            name: Some("FixtureSource".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_copy_missing_node_is_typed_and_copies_nothing() {
+        let command = Command::Copy {
+            target: TargetRef::Current,
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not seed the clipboard");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn copy_without_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth);
+        let command = Command::Copy {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("FixtureSource".into()),
+            role: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
     }
 
     #[test]
