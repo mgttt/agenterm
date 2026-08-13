@@ -100,7 +100,12 @@ Canonical host mapping (approved product vocabulary):
   exact title / `WM_CLASS` / `comm` equality — not PID equality alone.
   Child walks read raw `(bus name, path)` pairs so well-known embed
   destinations (WebKit `org.webkit.app-*.Sandboxed.WebProcess-*`) are
-  not dropped by unique-name-only `ObjectRef` parsing. `agenterm-con` on
+  not dropped by unique-name-only `ObjectRef` parsing. The walker talks
+  to the a11y bus only (no atspi P2P handshake — that hangs WebKit/Wails
+  sockets), skips dests with no owner, maps empty WebKit `GetRoleName`
+  via `GetRole`, and snapshots Accessible name/role/state so a Reasonix
+  / MiniBrowser document tree exposes named inner widgets (buttons,
+  text, tabs). `agenterm-con` on
   Linux registers as an AT-SPI toolkit (`a11y-publish`) and exposes the
   painted chrome as children (tabs, session, Command input, SEND). A
   toolkit that still never registered (stock `xfce4-terminal` without

@@ -1070,6 +1070,16 @@ only deserializes unique names (`:1.47`), so `GetChildAtIndex` /
 stops at the GTK frame. Read children as raw `(String, ObjectPath)`,
 resolve well-known names with `GetNameOwner`, and keep walking.
 
+Do not open that tree through `AccessibilityConnection::new()`. atspi
+0.30's default P2P path (`GetApplicationBusAddress` plus a unix-socket
+handshake per registry child) hangs on WebKit/Wails sockets, so `cu tree`
+dies with `a11y_tree_timeout` and never reaches named document widgets.
+Connect to the a11y bus only. Skip dests with no owner (a dead web
+process leaves a filler stub). WebKit `GetRoleName` is often empty —
+use `GetRole` (43 = button). Snapshot only Accessible name/role/state;
+`GetActions` / `proxies()` introspect hang per node and blow the 10s
+deadline. Named `click` invokes AT-SPI `DoAction(0)`.
+
 Match a window to application roots by, in order: the window's
 `_NET_WM_PID`, descendant PIDs (`/proc/*/status` PPid), then exact
 normalized equality of the X11 title / `WM_CLASS` / `comm` against the
