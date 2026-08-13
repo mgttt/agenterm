@@ -87,19 +87,24 @@ drag-drop、`user32` = 触摸输入、`uxtheme` = SetWindowTheme、`dwmapi` = DW
 cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/libagenterm.a -o probe -ldl -lpthread -lm
 ```
 
-**gcc / clang（macOS）**——首轮 CI 校准所得（里程碑 21b）：macOS 上
-`libagenterm.a` 静态进 C 程序时，winit / core-graphics / core-foundation
-会拉入 `_CF*`（如 `_CFAbsoluteTimeGetCurrent`、`_CFArrayGetCount`、
-`_CFBundleCopyExecutableURL`）、CG、NS 等符号，**C 侧必须显式补齐 Apple
-frameworks**。`-framework X` 是两个独立参数（先 `-framework` 再写名字），
-多给 framework 不会导致链接失败，缺了才会；`-ldl -lpthread -lm` 在 macOS
-上无害并保留：
+**gcc / clang（macOS）**——两轮 CI 校准所得（里程碑 21b 首轮 + 21c 第二轮）：
+macOS 上 `libagenterm.a` 静态进 C 程序时，winit / core-graphics /
+core-foundation 会拉入 `_CF*`（如 `_CFAbsoluteTimeGetCurrent`、
+`_CFArrayGetCount`、`_CFBundleCopyExecutableURL`）、CG、NS 等符号，
+**C 侧必须显式补齐 Apple frameworks**。`-framework X` 是两个独立参数
+（先 `-framework` 再写名字），多给 framework 不会导致链接失败，缺了才会；
+`-ldl -lpthread -lm` 在 macOS 上无害并保留。第二轮（21c）补的 **Carbon**
+是给 winit `platform_impl::macos::event::get_modifierless_char` 的三个
+Text Input Services / HIToolbox 符号：`_LMGetKbdType`（HIToolbox 的
+Legacy Menu Manager 兼容层）、`_TISCopyCurrentKeyboardLayoutInputSource` /
+`_TISGetInputSourceProperty`（Text Input Sources）：
 
 ```
-cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/libagenterm.a -o probe -framework CoreFoundation -framework CoreGraphics -framework AppKit -framework Foundation -framework QuartzCore -framework Metal -framework IOKit -ldl -lpthread -lm
+cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/libagenterm.a -o probe -framework CoreFoundation -framework CoreGraphics -framework AppKit -framework Foundation -framework QuartzCore -framework Metal -framework IOKit -framework Carbon -ldl -lpthread -lm
 ```
 
-> macOS 清单为**首轮 CI 校准所得**，本机（Windows）无法验证 macOS 链接；
+> macOS 清单为**两轮 CI 校准所得**（21b 首轮补 `_CF*` / CG / NS 等，21c
+> 第二轮补 Carbon 的 3 个键盘符号），本机（Windows）无法验证 macOS 链接；
 > 若下一轮 CI 仍报缺符号，按链接器输出逐个补 framework 并回填本表。
 
 **panic 围栏同样适用于静态库**：静态链接**不消除 C 边界**，所以静态库

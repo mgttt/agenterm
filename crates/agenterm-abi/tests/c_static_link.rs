@@ -214,13 +214,15 @@ fn locate_staticlib() -> PathBuf {
 /// symbols these six libraries resolve (ws2_32: Winsock2; ntdll: Nt* /
 /// RtlGetVersion; ole32: COM + drag-drop; user32: touch input; uxtheme:
 /// SetWindowTheme; dwmapi: DWM). kernel32 needs no explicit entry — MSVC
-/// links it by default. Linux list is measured by CI. **macOS list is the
-/// first-CI-calibrated initial set (milestone 21b)**: the first macOS CI run
-/// failed with unresolved `_CF*` / CG / NS symbols pulled in via winit /
-/// core-*, so the C side must add the Apple frameworks (`-framework` flags,
-/// see the branch below) on top of the Unix `-ldl -lpthread -lm`. It is
-/// deliberately *not* verified locally — it awaits the next CI run to
-/// confirm, and further unresolved symbols get added the same way.
+/// links it by default. Linux list is measured by CI. **macOS list is
+/// CI-calibrated (milestones 21b + 21c)**: the first macOS CI run failed
+/// with unresolved `_CF*` / CG / NS symbols pulled in via winit / core-*, so
+/// the C side must add the Apple frameworks (`-framework` flags, see the
+/// branch below) on top of the Unix `-ldl -lpthread -lm`. Round two (21c)
+/// added Carbon for the last three winit `get_modifierless_char` Text Input
+/// Services symbols. It is deliberately *not* verified locally — it awaits
+/// the next CI run to confirm, and further unresolved symbols get added the
+/// same way.
 fn system_libs(msvc: bool) -> Vec<&'static str> {
     if msvc {
         vec![
@@ -258,11 +260,18 @@ fn system_libs(msvc: bool) -> Vec<&'static str> {
             //   QuartzCore + Metal + IOKit: winit's macOS backend commonly
             //     pulls these in too — extra frameworks never fail the link,
             //     missing ones do, so they are listed preemptively.
+            //   Carbon (round two, milestone 21c): the second macOS CI run
+            //     was down to exactly three unresolved symbols, all from
+            //     winit::platform_impl::macos::event::get_modifierless_char:
+            //     _LMGetKbdType (HIToolbox legacy Menu Manager compat) and
+            //     _TISCopyCurrentKeyboardLayoutInputSource /
+            //     _TISGetInputSourceProperty (Text Input Sources) — all
+            //     provided by the Carbon framework.
             // `-framework X` is TWO separate arguments (`-framework`, then
             // the name) — never `-framework=X`. The Unix `-ldl -lpthread
             // -lm` are harmless on macOS and kept for the shared runtime
-            // deps. Still an initial CI-calibrated set: if the next CI run
-            // reports more unresolved symbols, add exactly those frameworks.
+            // deps. Still a CI-calibrated set: if the next CI run reports
+            // more unresolved symbols, add exactly those frameworks.
             vec![
                 "-framework",
                 "CoreFoundation",
@@ -278,6 +287,8 @@ fn system_libs(msvc: bool) -> Vec<&'static str> {
                 "Metal",
                 "-framework",
                 "IOKit",
+                "-framework",
+                "Carbon",
                 "-ldl",
                 "-lpthread",
                 "-lm",
