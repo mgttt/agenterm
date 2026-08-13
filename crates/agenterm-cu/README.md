@@ -38,6 +38,9 @@ Linux `tree` and structured `click` / `focus` use **AT-SPI2 only**. If the
 accessibility bus is unavailable (no session bus, headless without a11y), commands
 return typed `unsupported` / `failed` — never a silent coordinate fallback.
 
+On this Linux box, start Chrome with `scripts/box-chrome-a11y.sh` so
+`--force-renderer-accessibility` is always on (AT-SPI renderer subtree).
+
 Coordinate clicks remain available only with explicit `--degraded` and are
 audited separately from AT-SPI actuation.
 
