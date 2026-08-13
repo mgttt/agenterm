@@ -35,6 +35,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod common;
 
 /// Unique temp-dir suffix so parallel test processes never collide.
 static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -386,6 +387,9 @@ fn c_window_probe_compiles_links_and_runs() {
         std::fs::copy(&cdylib, scratch.join(cdylib.file_name().unwrap()))
             .expect("copy cdylib next to the window probe executable");
     }
+    // See c_consumer: a soname'd library is only runnable once its versioned
+    // filename exists next to it.
+    common::toolchain::ensure_soname_alias(&cdylib);
     let mut run = Command::new(&exe);
     if cfg!(target_os = "macos") {
         run.env("DYLD_LIBRARY_PATH", cdylib.parent().unwrap());

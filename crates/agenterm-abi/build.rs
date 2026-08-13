@@ -84,7 +84,17 @@ fn main() {
                  build.rs pins the ELF soname to libagenterm.so.1. Update the SONAME here to \
                  match the new ABI major in src/lib.rs"
             );
-            println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libagenterm.so.1");
+            const SONAME: &str = "libagenterm.so.1";
+            println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,{SONAME}");
+            // Record it for the tests. A soname makes the consumer's
+            // DT_NEEDED say `libagenterm.so.1` while cargo only writes
+            // `libagenterm.so`, so anything that runs a dynamically linked
+            // probe has to stage the versioned name first — exactly what a
+            // real install does. Reading it back from here keeps that staging
+            // from spelling the ABI major a second time.
+            let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is set by Cargo"));
+            std::fs::write(out_dir.join("soname.txt"), SONAME)
+                .expect("record the soname for tests/common::toolchain::ensure_soname_alias");
         }
         // Windows (and any other target): PE has no SONAME / LC_ID_DYLIB
         // concept — deliberately NOTHING, no link-arg, no file.

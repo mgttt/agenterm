@@ -503,6 +503,47 @@ pub mod toolchain {
         }
         out
     }
+
+    /// Milestone 56 follow-up: make a dynamically linked probe RUNNABLE next
+    /// to the build tree.
+    ///
+    /// Once the cdylib carries a `DT_SONAME`, the linker records that name in
+    /// the consumer's `DT_NEEDED` instead of the filename it was handed, so
+    /// the loader looks for `libagenterm.so.1` and cargo only ever writes
+    /// `libagenterm.so`. That is not a defect in the soname — it is what a
+    /// real install does, shipping the versioned file with the bare name as a
+    /// link-time symlink — but the build tree is not an install, so the tests
+    /// have to model one.
+    ///
+    /// The versioned name comes from `<OUT_DIR>/soname.txt`, which the same
+    /// `build.rs` that passes `-soname` writes. Cargo sets `OUT_DIR` for every
+    /// target of a package that has a build script, integration tests
+    /// included, so the two can never spell the ABI major differently.
+    #[cfg(target_os = "linux")]
+    #[allow(dead_code)]
+    pub fn ensure_soname_alias(cdylib: &std::path::Path) {
+        let recorded = std::path::Path::new(env!("OUT_DIR")).join("soname.txt");
+        let Ok(soname) = std::fs::read_to_string(&recorded) else {
+            panic!(
+                "missing {} — build.rs must record the soname it passes to the linker",
+                recorded.display()
+            );
+        };
+        let soname = soname.trim();
+        assert!(!soname.is_empty(), "{} is empty", recorded.display());
+        let alias = cdylib.with_file_name(soname);
+        if alias != cdylib && !alias.exists() {
+            // A copy rather than a symlink, so the alias behaves the same no
+            // matter how the runner mounts the workspace.
+            std::fs::copy(cdylib, &alias)
+                .unwrap_or_else(|e| panic!("stage {} next to {}: {e}", soname, cdylib.display()));
+        }
+    }
+
+    /// No soname concept on this target, so nothing to model.
+    #[cfg(not(target_os = "linux"))]
+    #[allow(dead_code)]
+    pub fn ensure_soname_alias(_cdylib: &std::path::Path) {}
 }
 
 /// Milestone 53: the AGT_CAP_* discriminant numbers used by the black-box

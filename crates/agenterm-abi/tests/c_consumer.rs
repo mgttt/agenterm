@@ -21,6 +21,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod common;
 
 /// Unique temp-dir suffix so parallel test processes never collide.
 static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -425,6 +426,9 @@ fn c_consumer_compiles_links_and_runs() {
         std::fs::copy(&cdylib, scratch.join(cdylib.file_name().unwrap()))
             .expect("copy cdylib next to the probe executable");
     }
+    // With a DT_SONAME set the probe's DT_NEEDED names libagenterm.so.1,
+    // which only an install provides; stage it beside the artifact first.
+    common::toolchain::ensure_soname_alias(&cdylib);
     let mut run = Command::new(&exe);
     if cfg!(target_os = "macos") {
         run.env("DYLD_LIBRARY_PATH", cdylib.parent().unwrap());
