@@ -94,6 +94,18 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: Symbol surface (nm)
+        run: |
+          set -eu
+          DYN=$(ls target/abi-release/libagenterm.so target/abi-release/libagenterm.dylib 2>/dev/null | head -1)
+          echo "dynamic: $DYN"
+          nm -g --defined-only "$DYN" 2>/dev/null | awk '{print $NF}' > /tmp/dyn.txt || true
+          [ -s /tmp/dyn.txt ] || nm -gU "$DYN" | awk '{print $NF}' > /tmp/dyn.txt || true
+          echo "  total=$(wc -l < /tmp/dyn.txt) agt=$(grep -c '^_\?agt_' /tmp/dyn.txt || true)"
+          echo "static: target/abi-release/libagenterm.a"
+          nm -g --defined-only target/abi-release/libagenterm.a 2>/dev/null | awk '{print $NF}' > /tmp/sta.txt || true
+          [ -s /tmp/sta.txt ] || nm -gU target/abi-release/libagenterm.a | awk '{print $NF}' > /tmp/sta.txt || true
+          echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -c '^_\?agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
@@ -132,5 +144,17 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: Symbol surface (nm)
+        run: |
+          set -eu
+          DYN=$(ls target/abi-release/libagenterm.so target/abi-release/libagenterm.dylib 2>/dev/null | head -1)
+          echo "dynamic: $DYN"
+          nm -g --defined-only "$DYN" 2>/dev/null | awk '{print $NF}' > /tmp/dyn.txt || true
+          [ -s /tmp/dyn.txt ] || nm -gU "$DYN" | awk '{print $NF}' > /tmp/dyn.txt || true
+          echo "  total=$(wc -l < /tmp/dyn.txt) agt=$(grep -c '^_\?agt_' /tmp/dyn.txt || true)"
+          echo "static: target/abi-release/libagenterm.a"
+          nm -g --defined-only target/abi-release/libagenterm.a 2>/dev/null | awk '{print $NF}' > /tmp/sta.txt || true
+          [ -s /tmp/sta.txt ] || nm -gU target/abi-release/libagenterm.a | awk '{print $NF}' > /tmp/sta.txt || true
+          echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -c '^_\?agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
