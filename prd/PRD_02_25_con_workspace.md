@@ -145,6 +145,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   transfers ownership, and the final UTF-16 NUL is explicit.
 - [x] `send-paste` reaches the same bracketed-paste-aware path as clipboard
   input, so scripted and human paste share one contract.
+- [x] terminal clipboard reads never block the GUI thread. One bounded platform
+  worker owns the native read and wakes the event loop on every completion;
+  frontend delivery requires the original stable tab to remain active and the
+  composer to remain unfocused. Tab/window close safely drops pending ownership,
+  while typed failure remains visible in chrome and `ui-snapshot`. The Windows
+  public journey drives `send-ui-keys Ctrl+Shift+V` against the real clipboard
+  and proves PTY delivery plus final idle state.
 
 ## Configuration
 

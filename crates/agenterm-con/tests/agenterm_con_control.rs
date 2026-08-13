@@ -22,6 +22,16 @@ impl Drop for OwnedGui {
     }
 }
 
+#[cfg(windows)]
+struct ClipboardRestore(Option<String>);
+
+#[cfg(windows)]
+impl Drop for ClipboardRestore {
+    fn drop(&mut self) {
+        let _ = agenterm_platform::clipboard::set_text(self.0.as_deref().unwrap_or_default());
+    }
+}
+
 fn unique_suffix() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -237,6 +247,36 @@ fn gui_control_surface_isolated_multitab_black_box() {
         &endpoint,
         &["wait-text", "--target", &root, "ROOT_ONLY"],
     );
+
+    #[cfg(windows)]
+    {
+        let _restore = ClipboardRestore(agenterm_platform::clipboard::get_text(1024 * 1024).ok());
+        agenterm_platform::clipboard::set_text("echo ASYNC_CLIPBOARD_OK\r")
+            .expect("test clipboard text must be published");
+        cli_json(exe, &endpoint, &["send-ui-keys", "Ctrl+Shift+V"]);
+        cli_json(
+            exe,
+            &endpoint,
+            &[
+                "wait-text",
+                "--target",
+                &root,
+                "--timeout-ms",
+                "10000",
+                "ASYNC_CLIPBOARD_OK",
+            ],
+        );
+        let snapshot = cli_json(exe, &endpoint, &["ui-snapshot"]);
+        assert_eq!(snapshot["terminal_clipboard_paste"]["state"], "idle");
+        assert_eq!(
+            snapshot["terminal_clipboard_paste"]["target"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            snapshot["terminal_clipboard_paste"]["error"],
+            serde_json::Value::Null
+        );
+    }
 
     let created = cli_json(exe, &endpoint, &["new-tab", "--parent", &root]);
     let child_id = tab_id(&created["id"]).to_owned();

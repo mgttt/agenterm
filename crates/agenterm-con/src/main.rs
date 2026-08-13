@@ -680,6 +680,7 @@ struct ConTerminal {
     /// Button code of the in-flight application gesture, so the release
     /// reports the same button that was pressed.
     active_button: Option<u8>,
+    clipboard_paste_requested: bool,
 
     /// Whether the cursor is in its "on" phase of the blink cycle. Ignored
     /// entirely when `screen.cursor_blinking()` is false (a steady cursor).
@@ -737,6 +738,8 @@ struct ConApp {
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
     pending_control: PendingControl,
+    pending_clipboard_paste: Option<PendingClipboardPaste>,
+    terminal_clipboard_error: Option<String>,
     control_pointer_owner: Option<workspace::TabId>,
     perf_stats: PerfStats,
     chrome_dirty: DirtyRegion,
@@ -791,6 +794,11 @@ struct MouseReportOutcome {
     wrote: bool,
 }
 
+struct PendingClipboardPaste {
+    target: workspace::TabId,
+    read: agenterm_platform::clipboard::ClipboardTextRead,
+}
+
 fn mouse_outcome_json(outcome: MouseOutcome) -> json::JsonValue {
     json::object(vec![
         ("delivered", true.into()),
@@ -818,6 +826,14 @@ fn tab_exit_json(id: workspace::TabId, exit_code: Option<i32>) -> json::JsonValu
     ])
 }
 
+fn terminal_clipboard_target_is_current(
+    target: workspace::TabId,
+    active: Option<workspace::TabId>,
+    composer_focused: bool,
+) -> bool {
+    active == Some(target) && !composer_focused
+}
+
 impl ConApp {
     fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
         let mut workspace = workspace::Workspace::default();
@@ -842,6 +858,8 @@ impl ConApp {
             control_endpoint,
             control_server: None,
             pending_control: PendingControl::default(),
+            pending_clipboard_paste: None,
+            terminal_clipboard_error: None,
             control_pointer_owner: None,
             perf_stats: PerfStats::default(),
             chrome_dirty: DirtyRegion::full(),
@@ -1547,10 +1565,92 @@ impl ConApp {
 
     fn cancel_control_for_tab(&mut self, id: workspace::TabId, reason: &str) {
         self.pending_control.cancel_for_tab(id, reason);
+        if self
+            .pending_clipboard_paste
+            .as_ref()
+            .is_some_and(|pending| pending.target == id)
+        {
+            self.pending_clipboard_paste = None;
+            self.terminal_clipboard_error = Some(reason.to_owned());
+        }
     }
 
     fn cancel_all_control_requests(&mut self, reason: &str) {
         self.pending_control.cancel_all(reason);
+        if self.pending_clipboard_paste.take().is_some() {
+            self.terminal_clipboard_error = Some(reason.to_owned());
+        }
+    }
+
+    fn request_terminal_clipboard_paste(
+        &mut self,
+        window: &PixelWindow,
+        target: workspace::TabId,
+    ) -> Result<(), String> {
+        if self.pending_clipboard_paste.is_some() {
+            return Err("a terminal clipboard paste is already pending".to_owned());
+        }
+        if !terminal_clipboard_target_is_current(
+            target,
+            self.workspace.active(),
+            self.composer.focused,
+        ) {
+            return Err("terminal clipboard paste requires the active terminal".to_owned());
+        }
+        self.sessions
+            .get(&target)
+            .ok_or_else(|| format!("terminal @{} is unavailable", target.get()))?
+            .ensure_pty_input_open()?;
+        let waker = window.waker();
+        let read = agenterm_platform::clipboard::read_text_async(
+            terminal_input::TERMINAL_PASTE_LIMIT_BYTES,
+            move || {
+                let _ = waker.wake();
+            },
+        )
+        .map_err(|error| format!("clipboard read failed: {error}"))?;
+        self.pending_clipboard_paste = Some(PendingClipboardPaste { target, read });
+        self.terminal_clipboard_error = None;
+        window.request_redraw();
+        Ok(())
+    }
+
+    fn drain_terminal_clipboard_paste(&mut self, window: &PixelWindow) {
+        let poll = match self.pending_clipboard_paste.as_ref() {
+            Some(pending) => pending.read.try_poll(),
+            None => return,
+        };
+        let agenterm_platform::clipboard::ClipboardTextReadPoll::Ready(result) = poll else {
+            return;
+        };
+        let pending = self
+            .pending_clipboard_paste
+            .take()
+            .expect("ready clipboard read remains owned until completion");
+        let result = result
+            .map_err(|error| format!("clipboard read failed: {error}"))
+            .and_then(|text| {
+                if !terminal_clipboard_target_is_current(
+                    pending.target,
+                    self.workspace.active(),
+                    self.composer.focused,
+                ) {
+                    return Err(
+                        "clipboard paste was cancelled because the active input changed".to_owned(),
+                    );
+                }
+                let session = self
+                    .sessions
+                    .get_mut(&pending.target)
+                    .ok_or_else(|| format!("terminal @{} is unavailable", pending.target.get()))?;
+                session.ensure_pty_input_open()?;
+                session
+                    .paste_text(&text)
+                    .map_err(|error| format!("terminal input failed: {error}"))
+            });
+        self.terminal_clipboard_error = result.err();
+        self.mark_chrome_full();
+        window.request_redraw();
     }
 
     fn reap_finished_control_screenshot(&mut self) {
@@ -1631,6 +1731,34 @@ impl ConApp {
                             (
                                 "control_pointer_owner",
                                 tab_id_json(self.control_pointer_owner),
+                            ),
+                            (
+                                "terminal_clipboard_paste",
+                                json::object(vec![
+                                    (
+                                        "state",
+                                        if self.pending_clipboard_paste.is_some() {
+                                            "pending"
+                                        } else {
+                                            "idle"
+                                        }
+                                        .into(),
+                                    ),
+                                    (
+                                        "target",
+                                        tab_id_json(
+                                            self.pending_clipboard_paste
+                                                .as_ref()
+                                                .map(|pending| pending.target),
+                                        ),
+                                    ),
+                                    (
+                                        "error",
+                                        self.terminal_clipboard_error
+                                            .as_deref()
+                                            .map_or(json::JsonValue::Null, Into::into),
+                                    ),
+                                ]),
                             ),
                             ("composer_focused", self.composer.focused.into()),
                             ("composer_text", self.composer.text.as_str().into()),
@@ -1748,8 +1876,13 @@ impl ConApp {
                     Ok(single_field_json("sent_bytes", text.len().into()))
                 })
             }
-            CliCommand::SendKeys { target, keys } => {
-                self.control_session_mut(target).and_then(|session| {
+            CliCommand::SendKeys { target, keys } => (|| {
+                let id = self.control_target(target)?;
+                let requested = {
+                    let session = self
+                        .sessions
+                        .get_mut(&id)
+                        .ok_or_else(|| format!("terminal @{} is unavailable", id.get()))?;
                     session.ensure_pty_input_open()?;
                     for key in &keys {
                         let (key, ctrl, alt, shift) = parse_control_key(key)?;
@@ -1757,9 +1890,13 @@ impl ConApp {
                             .inject_key(key, ctrl, alt, shift)
                             .map_err(|error| format!("terminal input failed: {error}"))?;
                     }
-                    Ok(single_field_json("sent_keys", keys.len().into()))
-                })
-            }
+                    session.take_clipboard_paste_request()
+                };
+                if requested {
+                    self.request_terminal_clipboard_paste(window, id)?;
+                }
+                Ok(single_field_json("sent_keys", keys.len().into()))
+            })(),
             CliCommand::SendUiKeys { keys } => (|| {
                 for key in &keys {
                     let (key, ctrl, alt, shift) = parse_control_key(key)?;
@@ -1774,13 +1911,24 @@ impl ConApp {
                         self.handle_composer_key(window, &event);
                         self.mark_composer_dirty();
                     } else {
-                        let session = self
-                            .active_session_mut()
-                            .map_err(|error| error.to_string())?;
-                        session.ensure_pty_input_open()?;
-                        session
-                            .forward_key_checked(&event)
-                            .map_err(|error| format!("terminal input failed: {error}"))?;
+                        let id = self
+                            .workspace
+                            .active()
+                            .ok_or_else(|| "no active terminal session".to_owned())?;
+                        let requested = {
+                            let session = self
+                                .sessions
+                                .get_mut(&id)
+                                .ok_or_else(|| format!("terminal @{} is unavailable", id.get()))?;
+                            session.ensure_pty_input_open()?;
+                            session
+                                .forward_key_checked(&event)
+                                .map_err(|error| format!("terminal input failed: {error}"))?;
+                            session.take_clipboard_paste_request()
+                        };
+                        if requested {
+                            self.request_terminal_clipboard_paste(window, id)?;
+                        }
                     }
                 }
                 self.request_dirty_redraw(window);
@@ -1852,6 +2000,13 @@ impl ConApp {
                 let outcome = outcome.map_err(|error| format!("terminal input failed: {error}"))?;
                 if action == control::MouseAction::Press {
                     self.control_pointer_owner = Some(id);
+                }
+                let requested = self
+                    .sessions
+                    .get_mut(&id)
+                    .is_some_and(ConTerminal::take_clipboard_paste_request);
+                if requested {
+                    self.request_terminal_clipboard_paste(window, id)?;
                 }
                 Ok(mouse_outcome_json(outcome))
             })(),
@@ -2089,8 +2244,16 @@ impl ConApp {
             &mut surface,
             14,
             9,
-            "TERMINALS",
-            muted,
+            if self.terminal_clipboard_error.is_some() {
+                "PASTE FAILED"
+            } else {
+                "TERMINALS"
+            },
+            if self.terminal_clipboard_error.is_some() {
+                error_accent
+            } else {
+                muted
+            },
             12,
             tree_width.saturating_sub(28),
         );
@@ -2297,6 +2460,7 @@ impl ConTerminal {
             mouse_dragging: false,
             last_reported_cell: None,
             active_button: None,
+            clipboard_paste_requested: false,
             blink_visible: true,
             last_blink_at: Instant::now(),
             ime_preedit: String::new(),
@@ -2931,7 +3095,7 @@ impl ConTerminal {
                     return Ok(());
                 }
                 if text.eq_ignore_ascii_case("v") {
-                    self.paste_clipboard();
+                    self.request_clipboard_paste();
                     return Ok(());
                 }
             }
@@ -3217,17 +3381,16 @@ impl ConTerminal {
         }
     }
 
-    fn paste_clipboard(&mut self) {
-        let Ok(text) =
-            agenterm_platform::clipboard::get_text(terminal_input::TERMINAL_PASTE_LIMIT_BYTES)
-        else {
-            return;
-        };
-        let _ = self.paste_text(&text);
+    fn request_clipboard_paste(&mut self) {
+        self.clipboard_paste_requested = true;
+    }
+
+    fn take_clipboard_paste_request(&mut self) -> bool {
+        std::mem::take(&mut self.clipboard_paste_requested)
     }
 
     /// The paste path proper, independent of where the text came from — the
-    /// OS clipboard (`paste_clipboard`) or a control `send-paste` command. Both
+    /// OS clipboard or a control `send-paste` command. Both
     /// must go through the same normalization and bracketing, which is the
     /// point of factoring this out: a scripted test exercises the exact
     /// logic a real Ctrl+V does, not a lookalike.
@@ -3739,7 +3902,7 @@ impl ConTerminal {
                     self.copy_selection();
                     self.selection = None;
                 } else {
-                    self.paste_clipboard();
+                    self.request_clipboard_paste();
                 }
             }
             _ => {}
@@ -4252,6 +4415,7 @@ impl PixelWindowApplication for ConApp {
         }
         if matches!(event, PixelWindowEvent::Wake) {
             self.drain_a11y_actions(window)?;
+            self.drain_terminal_clipboard_paste(window);
             // PTY readers and the control server share the native wake path.
             // A flooded PTY continuously reposts Wake while bounded output
             // remains, so waiting until about_to_wait would starve control
@@ -4405,7 +4569,20 @@ impl PixelWindowApplication for ConApp {
                 _ => {}
             }
         }
-        self.active_session_mut()?.event(window, event)
+        let active = self.workspace.active().ok_or_else(|| {
+            PixelWindowError::failed("con_session_missing", "no active terminal session")
+        })?;
+        let directive = self.active_session_mut()?.event(window, event)?;
+        let requested = self
+            .sessions
+            .get_mut(&active)
+            .is_some_and(ConTerminal::take_clipboard_paste_request);
+        if requested && let Err(error) = self.request_terminal_clipboard_paste(window, active) {
+            self.terminal_clipboard_error = Some(error);
+            self.mark_chrome_full();
+            window.request_redraw();
+        }
+        Ok(directive)
     }
 
     fn render(
@@ -4964,6 +5141,32 @@ fn paint_chrome_text_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_clipboard_completion_requires_same_active_terminal() {
+        let target = workspace::TabId::new(7);
+        assert!(terminal_clipboard_target_is_current(
+            target,
+            Some(target),
+            false
+        ));
+        assert!(!terminal_clipboard_target_is_current(
+            target,
+            Some(workspace::TabId::new(8)),
+            false
+        ));
+        assert!(!terminal_clipboard_target_is_current(target, None, false));
+    }
+
+    #[test]
+    fn terminal_clipboard_completion_rejects_composer_focus() {
+        let target = workspace::TabId::new(7);
+        assert!(!terminal_clipboard_target_is_current(
+            target,
+            Some(target),
+            true
+        ));
+    }
     use agenterm_platform::input::ModifierState;
 
     #[test]

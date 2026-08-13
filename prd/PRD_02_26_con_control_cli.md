@@ -44,10 +44,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   profiling. The counter semantics belong to
   [24](PRD_02_24_con_terminal.md).
 - [x] `ui-snapshot` publishes structured UI state — including composer bounds,
-  text/focus/submission error, scrollback extent, pending-wait counts, and the
-  nullable window-scoped control pointer owner — so black-box journeys assert
-  state instead of guessing timing or inferring cleanup only from a later
-  failure.
+  text/focus/submission error, scrollback extent, pending-wait counts, terminal
+  clipboard-paste state/target/error, and the nullable window-scoped control
+  pointer owner — so black-box journeys assert state instead of guessing timing
+  or inferring cleanup only from a later failure.
 - [x] `send-wheel` reports the route actually taken (`zoom`, application mouse,
   alternate-screen cursor keys, or local scrollback), the notch count actually
   applied after bounds/clamps, and whether observable state or terminal input
@@ -134,6 +134,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   to the live viewport only after that write succeeds. A closed PTY preserves
   the caller's scrollback position instead of presenting a failed paste as a
   delivered input-side state change.
+- [x] `send-paste` remains deterministic direct-payload injection, while
+  terminal-routed `send-keys` or `send-ui-keys` with `Ctrl+Shift+V` queues the
+  same bounded asynchronous OS clipboard read as physical input. A second read
+  fails explicitly while one is pending, and completion cannot retarget itself
+  after tab or focus changes.
 - [x] the control endpoint uses a fixed worker pool with bounded connection and
   request queues. Its multi-tab journey floods one PTY with oversized CSI
   parameters while issuing concurrent `capture-pane`, `list-tabs` and

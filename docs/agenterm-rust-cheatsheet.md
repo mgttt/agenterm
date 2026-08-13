@@ -115,6 +115,11 @@ Windows checklist:
   can still terminate a failed suspended launch.
 - Distinguish GUI-thread-only APIs from worker-safe I/O. Do not block the event
   thread on clipboard reads, PTY waits, filesystem retries, or IPC round trips.
+- Model native clipboard reads as bounded one-shot work: the platform worker
+  owns native retry/blocking mechanics and wakes on success, typed failure,
+  panic, and disconnect. The product retains stable target identity and
+  revalidates target plus focus before committing text; dropping the receiver
+  on tab/window close must never strand or block the worker.
 - Retry only documented transient errors, with a strict attempt/deadline bound.
 - A process-global native resource needs one lock and one RAII owner across every
   adapter path. In particular, Windows console attach/detach cannot be split
