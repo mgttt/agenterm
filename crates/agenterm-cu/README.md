@@ -12,7 +12,7 @@ Orchestrator agents (not humans staring at pixels) should run:
 loop until goal:
   observe structured state (windows, control tree, typed capabilities)
   act by structured identity (window + node path, or window + accessible name)
-    click / focus / send-text all take --name, so no step parses node ids
+    click / focus / send-text / send-keys all take --name, so no step parses node ids
   wait on observable conditions with bounded timeouts — never sleep
 ```
 
@@ -53,7 +53,7 @@ audited separately from AT-SPI actuation.
 | `focus --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection |
-| `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path, then that keyboard injection |
+| `send-text` / `send-keys` `--window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path, then that keyboard injection |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`) |
 
@@ -125,6 +125,10 @@ cu --target current --grant actuate focus --node /3/0/0/1/0
 # `--` ends flag parsing so the text may start with a dash.
 cu --target current --grant observe,act send-text --window 25165828 \
   --name "Address and search bar" -- hello
+
+# Send a chord to a control by accessible name — same matcher, focus, then keys.
+cu --target current --grant observe,act send-keys --window 25165828 \
+  --name "Address and search bar" -- enter
 
 # Wait for at least one window, 3s max
 cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1

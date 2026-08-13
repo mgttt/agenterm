@@ -1032,11 +1032,12 @@ with the match count — never silently pick the first. The same uniqueness
 rule applies to `wait --node-name-contains`. Never satisfy a name click
 with a screenshot or degraded coordinates.
 
-`cu send-text --name` is the same rule plus one ordering constraint: resolve
-and focus the node BEFORE injecting any keystroke, so a miss types nothing
-instead of spraying text into whatever happened to be focused. Its text
-argument is positional, so parse `--` as the end of flags — otherwise text
-that starts with a dash is eaten as a flag.
+`cu send-text --name` and `cu send-keys --name` are the same rule plus one
+ordering constraint: resolve and focus the node BEFORE injecting any
+keystroke, so a miss types nothing instead of spraying text or a chord into
+whatever happened to be focused. Their payload argument is positional, so
+parse `--` as the end of flags — otherwise text (or a chord) that starts with
+a dash is eaten as a flag.
 
 ## File existence is not writer completion
 

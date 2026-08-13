@@ -116,10 +116,26 @@ import json, sys
 err = json.loads(sys.argv[1])["error"]
 assert err["code"] in ("a11y_node_not_found", "unsupported")
 PY
+  OUT="$(run_json --target current --grant actuate send-keys --window "$HANDLE" --name agenterm-no-such-control -- enter)"
+  test "$(json_field "$OUT" ok)" = "False"
+  python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] in ("a11y_node_not_found", "unsupported")
+PY
 fi
 
 echo "== name-addressed send-text requires --window =="
 OUT="$(run_json --target current --grant actuate send-text --name Reload -- hello)"
+test "$(json_field "$OUT" ok)" = "False"
+python3 - "$OUT" <<'PY'
+import json, sys
+err = json.loads(sys.argv[1])["error"]
+assert err["code"] == "invalid_input"
+PY
+
+echo "== name-addressed send-keys requires --window =="
+OUT="$(run_json --target current --grant actuate send-keys --name Reload -- enter)"
 test "$(json_field "$OUT" ok)" = "False"
 python3 - "$OUT" <<'PY'
 import json, sys

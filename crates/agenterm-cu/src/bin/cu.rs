@@ -142,10 +142,23 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
-        "send-keys" => Command::SendKeys {
-            target,
-            keys: args.join("+"),
-        },
+        "send-keys" => {
+            // `--` ends flag parsing so a chord may itself start with a dash.
+            let literal_keys = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join("+")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            Command::SendKeys {
+                target,
+                keys: literal_keys.unwrap_or_else(|| args.join("+")),
+                window,
+                name,
+                role,
+            }
+        }
         "window-place" => {
             let action = flag_value(&mut args, "--action")
                 .or_else(|| args.first().cloned())
@@ -296,7 +309,9 @@ Commands:
   send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
                               --name focuses that node first (same matcher as click/focus),
                               then types; `--` ends flag parsing
-  send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
+  send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
+                              e.g. ctrl+c / alt+f4 / enter; --name focuses that node first
+                              (same matcher as click/focus/send-text), then sends
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])
                               node conditions poll the accessibility tree and fail typed
