@@ -614,6 +614,12 @@ pub(crate) trait PixelWindowBackend {
     fn set_pointer_cursor(&self, cursor: PixelPointerCursor) -> Result<(), PixelWindowError>;
     fn set_ime_allowed(&self, allowed: bool);
     fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError>;
+
+    /// Host window identity used to join this pixel window to OS trees
+    /// (X11 XID, HWND). None when the backend has no native handle yet.
+    fn native_identity(&self) -> Option<i64> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -719,6 +725,10 @@ impl PixelWindow {
 
     pub fn set_ime_cursor_area(&self, area: LogicalRect) -> Result<(), PixelWindowError> {
         self.backend.set_ime_cursor_area(area)
+    }
+
+    pub fn native_identity(&self) -> Option<i64> {
+        self.backend.native_identity()
     }
 }
 

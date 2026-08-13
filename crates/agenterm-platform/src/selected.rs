@@ -458,6 +458,14 @@ pub(crate) mod accessibility_tree;
 #[path = "adapters/unix/accessibility_tree.rs"]
 pub(crate) mod accessibility_tree;
 
+#[cfg(all(feature = "a11y-publish", target_os = "linux"))]
+#[path = "adapters/linux/accessibility_publish.rs"]
+pub(crate) mod accessibility_publish;
+
+#[cfg(all(feature = "a11y-publish", not(target_os = "linux")))]
+#[path = "adapters/unix/accessibility_publish.rs"]
+pub(crate) mod accessibility_publish;
+
 #[cfg(all(feature = "window-enum", target_os = "linux"))]
 #[path = "adapters/linux/window_enumerate.rs"]
 pub(crate) mod window_enumerate;

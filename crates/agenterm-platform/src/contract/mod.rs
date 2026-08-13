@@ -1,4 +1,6 @@
-#[cfg(feature = "a11y-tree")]
+#[cfg(feature = "a11y-publish")]
+pub mod accessibility_publish;
+#[cfg(any(feature = "a11y-tree", feature = "a11y-publish"))]
 pub mod accessibility_tree;
 #[cfg(feature = "activation")]
 pub mod activation;

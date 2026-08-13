@@ -254,6 +254,9 @@ pub mod input;
 #[cfg(feature = "a11y-tree")]
 pub mod accessibility_tree;
 
+#[cfg(feature = "a11y-publish")]
+pub mod accessibility_publish;
+
 #[cfg(feature = "window-enum")]
 pub mod window_enumerate;
 
