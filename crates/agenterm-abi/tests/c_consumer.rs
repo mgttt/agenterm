@@ -12,6 +12,7 @@
 //! the system temp directory and are cleaned up; nothing is written into the
 //! repository tree.
 
+use agenterm_abi::{ABI_MAJOR, ABI_MINOR};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -267,8 +268,13 @@ fn c_consumer_compiles_links_and_runs() {
     print!("{stdout}");
     eprint!("{stderr}");
 
+    // Anti-drift gate: expect the line the C probe must print for the ABI
+    // version, computed from the crate's own constants — never a hard-coded
+    // literal that would go stale on the next ABI bump.
+    let abi_version = ((ABI_MAJOR as u32) << 16) | ABI_MINOR as u32;
+    let expected_line = format!("abi_version=0x{abi_version:08x}");
     assert!(
-        stdout.contains("abi_version=0x00010000"),
-        "probe stdout must contain abi_version=0x00010000, got:\n{stdout}"
+        stdout.contains(&expected_line),
+        "probe stdout must contain {expected_line}, got:\n{stdout}"
     );
 }

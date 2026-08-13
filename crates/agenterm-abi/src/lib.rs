@@ -201,19 +201,54 @@ pub enum agt_capability {
     AGT_CAP_ACCESSIBILITY_TREE,
 }
 
-const ABI_MAJOR: u16 = 1;
-const ABI_MINOR: u16 = 0;
+/// ABI versioning: the numeric constants and the build-identity string are
+/// all derived from the two literals in this single invocation, so they can
+/// never drift apart.
+///
+/// - **major**: bump only on breaking changes (signature change, symbol
+///   removal, or semantic change). Consumers must reject a mismatched major.
+/// - **minor**: bump on every additive export addition (a new mechanism).
+///   Old consumers are unaffected.
+macro_rules! abi_version {
+    ($major:literal, $minor:literal) => {
+        /// ABI major: breaking changes only (see `abi_version!` docs).
+        pub const ABI_MAJOR: u16 = $major;
+        /// ABI minor: grows with every additive export addition.
+        pub const ABI_MINOR: u16 = $minor;
+        /// Build identity: `<crate version>+abi.<major>.<minor>`, NUL-terminated.
+        const ABI_BUILD_ID: &str = concat!(
+            env!("CARGO_PKG_VERSION"),
+            "+abi.",
+            stringify!($major),
+            ".",
+            stringify!($minor),
+            "\0",
+        );
+    };
+}
+abi_version!(1, 1);
 
-/// First milestone ABI version: `(major << 16) | minor = 0x00010000`.
+/// ABI version: `(major << 16) | minor`. `minor` grows with every additive
+/// export; `major` only moves on breaking changes (consumers must reject a
+/// mismatched major).
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_abi_version() -> u32 {
     catch_unwind(|| ((ABI_MAJOR as u32) << 16) | (ABI_MINOR as u32)).unwrap_or(0)
 }
 
-/// Human-readable build identity. Static, permanently valid.
+/// Human-readable build identity: `<crate version>+abi.<major>.<minor>`
+/// (e.g. `0.1.16+abi.1.1`), assembled at compile time from
+/// `CARGO_PKG_VERSION` and the `ABI_MAJOR` / `ABI_MINOR` constants — never a
+/// hand-written literal. NUL-terminated, static, permanently valid.
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_build_id() -> *const c_char {
-    catch_unwind(|| cstr_static(c"0.1.16+abi.2")).unwrap_or(std::ptr::null())
+    catch_unwind(|| {
+        cstr_static(
+            CStr::from_bytes_with_nul(ABI_BUILD_ID.as_bytes())
+                .expect("ABI_BUILD_ID is NUL-terminated by construction"),
+        )
+    })
+    .unwrap_or(std::ptr::null())
 }
 
 /// Fill `out` with the last error recorded on this thread, or a "no error"

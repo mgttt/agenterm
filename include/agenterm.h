@@ -24,9 +24,21 @@ extern "C" {
 
 /* --- version & build ------------------------------------------------ */
 
-/* (major << 16) | minor. Consumers must reject mismatched major. */
+/* ABI versioning contract (see crates/agenterm-abi/README.md):
+ *   major: breaking change (signature change / symbol removal / semantic
+ *          change). Consumers must reject a mismatched major.
+ *   minor: additive export additions (a new mechanism); old consumers are
+ *          unaffected.
+ * agt_abi_version() returns (major << 16) | minor. Compare against the
+ * AGT_ABI_* macros below instead of hard-coded literals. */
+#define AGT_ABI_MAJOR 1
+#define AGT_ABI_MINOR 1
+#define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
-/* Human-readable build identity; NUL-terminated, static, permanently valid. */
+
+/* Human-readable build identity: "<crate version>+abi.<major>.<minor>"
+ * (e.g. "0.1.16+abi.1.1"), derived at compile time from the crate version
+ * and the ABI constants above. NUL-terminated, static, permanently valid. */
 const char* agt_build_id(void);
 
 /* --- status & error ------------------------------------------------- */

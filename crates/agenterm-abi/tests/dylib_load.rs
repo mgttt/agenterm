@@ -7,6 +7,7 @@
 //! If the cdylib cannot be located the test FAILS on purpose — silently
 //! skipping would leave the defects unproven.
 
+use agenterm_abi::{ABI_MAJOR, ABI_MINOR};
 use libloading::{Library, Symbol};
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
@@ -72,7 +73,6 @@ const AGT_CAP_CLIPBOARD: i32 = 8;
 const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
-const EXPECTED_BUILD_ID: &str = "0.1.16+abi.2";
 const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
 const PROBE: &[u8] = b"agenterm-abi-probe";
 
@@ -267,21 +267,58 @@ fn open_pty(
 }
 
 #[test]
-fn abi_version_is_0x00010000() {
+fn abi_version_encodes_major_and_minor() {
     let lib = load();
     let f: Symbol<unsafe extern "C" fn() -> u32> = unsafe { sym(&lib, b"agt_abi_version") };
-    assert_eq!(unsafe { f() }, 0x0001_0000);
+    let v = unsafe { f() };
+    // Anti-drift gate: the encoded value must match the crate's own ABI
+    // constants, so a bump in `abi_version!` cannot leave a stale literal
+    // behind in the test.
+    assert_eq!(
+        v >> 16,
+        ABI_MAJOR as u32,
+        "high 16 bits must equal ABI_MAJOR ({ABI_MAJOR})"
+    );
+    assert_eq!(
+        v & 0xffff,
+        ABI_MINOR as u32,
+        "low 16 bits must equal ABI_MINOR ({ABI_MINOR})"
+    );
 }
 
 #[test]
-fn build_id_is_a_valid_nul_terminated_c_string() {
+fn build_id_is_a_valid_nul_terminated_utf8_c_string() {
     let lib = load();
     let f: Symbol<unsafe extern "C" fn() -> *const c_char> = unsafe { sym(&lib, b"agt_build_id") };
     let p = unsafe { f() };
     assert!(!p.is_null(), "agt_build_id returned NULL");
-    // Defect-1 regression gate: the pointer must be readable as a C string.
+    // Defect-1 regression gate: the pointer must be readable as a C string
+    // (CStr::from_ptr proves the trailing NUL), and must be valid UTF-8.
     let s = unsafe { CStr::from_ptr(p) };
-    assert_eq!(s.to_bytes(), EXPECTED_BUILD_ID.as_bytes());
+    assert!(
+        std::str::from_utf8(s.to_bytes()).is_ok(),
+        "agt_build_id must be valid UTF-8, got bytes {:?}",
+        s.to_bytes()
+    );
+    // Anti-drift gate 1: the id must start with the crate version (derived
+    // from CARGO_PKG_VERSION at compile time, so a version bump never leaves
+    // a stale hand-written literal behind).
+    let text = s.to_str().expect("build id is UTF-8");
+    assert!(
+        text.starts_with(env!("CARGO_PKG_VERSION")),
+        "agt_build_id must start with CARGO_PKG_VERSION ({}), got: {text:?}",
+        env!("CARGO_PKG_VERSION")
+    );
+    // Anti-drift gate 2: the `+abi.<major>.<minor>` suffix must match the
+    // exported ABI constants.
+    let expected_suffix = format!("+abi.{ABI_MAJOR}.{ABI_MINOR}");
+    let suffix = text
+        .strip_prefix(env!("CARGO_PKG_VERSION"))
+        .unwrap_or_default();
+    assert_eq!(
+        suffix, expected_suffix,
+        "agt_build_id suffix must match ABI_MAJOR/ABI_MINOR, got: {text:?}"
+    );
 }
 
 #[test]

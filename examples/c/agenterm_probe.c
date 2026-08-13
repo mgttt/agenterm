@@ -47,8 +47,8 @@ int main(void) {
     /* version & build id; %s requires a valid NUL-terminated C string */
     uint32_t version = agt_abi_version();
     printf("abi_version=0x%08x\n", (unsigned)version);
-    if (version != 0x00010000u) {
-        return fail("agt_abi_version", "expected 0x00010000");
+    if (version != AGT_ABI_VERSION) {
+        return fail("agt_abi_version", "expected AGT_ABI_VERSION");
     }
 
     const char* build_id = agt_build_id();

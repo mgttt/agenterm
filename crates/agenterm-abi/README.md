@@ -46,6 +46,26 @@ profile 下构建出的库没有任何 `catch_unwind` 保护，**只允许**这�
 必须被 `catch_unwind` 拦成 `AGT_FAILED { code = "panic" }`，因此交付构建
 必须继续走 `--profile abi-release` / `abi-dev`（unwind）。
 
+## ABI 版本
+
+`agt_abi_version()` 返回 `(major << 16) | minor`（见 `include/agenterm.h`
+的 `AGT_ABI_MAJOR` / `AGT_ABI_MINOR` / `AGT_ABI_VERSION` 宏）。规则：
+
+- **major**：只在**破坏性变更**时递增——改签名、删符号、改语义。
+  消费者必须拒绝不匹配的 major（`v >> 16 != AGT_ABI_MAJOR` 即视为不兼容）。
+- **minor**：**新增导出**时递增（新增机制、纯增量），老消费者不受影响，
+  无需重新编译。
+
+当前为 `0x00010001`（major=1, minor=1）：里程碑 2–10 陆续新增了
+PTY / window / frame / input / screenshot / process / clipboard /
+parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面增长
+从 0 递增到 1。
+
+`agt_build_id()` 返回 `<crate 版本>+abi.<major>.<minor>`
+（例如 `0.1.16+abi.1.1`），在**编译期**由 `CARGO_PKG_VERSION` 与
+`ABI_MAJOR` / `ABI_MINOR` 常量拼接而成——不手写字面量，crate 版本或 ABI
+常量一改，build id 自动跟随，不会过期。字符串以 NUL 结尾、静态、永久有效。
+
 ## 测试
 
 - `tests/exports_set.rs`：导出符号集与 `exports.txt` 完全一致（编译期不改 ABI）。
