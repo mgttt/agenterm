@@ -91,7 +91,6 @@ mod macos {
             actual_size: *mut u32,
             data: *mut c_void,
         ) -> i32;
-        fn CFRunLoopRun();
         fn AXIsProcessTrustedWithOptions(options: *const c_void) -> u8;
     }
 
@@ -204,6 +203,10 @@ mod macos {
     }
 
     pub fn run() -> i32 {
+        if bootstrap_nsapp().is_err() {
+            eprintln!("cu hotkeys: failed to start NSApplication");
+            return 1;
+        }
         prompt_ax();
         let auth = Authorization::new([Grant::Observe, Grant::Actuate].into_iter().collect());
         let mut host = Host {
@@ -251,10 +254,31 @@ mod macos {
             }
         }
         eprintln!("cu hotkeys: listening with Spectacle defaults (Accessibility required)");
-        unsafe {
-            CFRunLoopRun();
-        }
+        run_nsapp();
         0
+    }
+
+    fn bootstrap_nsapp() -> Result<(), ()> {
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+        use objc2_foundation::MainThreadMarker;
+        let mtm = MainThreadMarker::new().ok_or(())?;
+        let app = NSApplication::sharedApplication(mtm);
+        let _ = app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+        unsafe {
+            app.finishLaunching();
+        }
+        Ok(())
+    }
+
+    fn run_nsapp() {
+        use objc2_app_kit::NSApplication;
+        use objc2_foundation::MainThreadMarker;
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        unsafe {
+            NSApplication::sharedApplication(mtm).run();
+        }
     }
 
     fn prompt_ax() {
