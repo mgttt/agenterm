@@ -8,6 +8,10 @@ use crate::command::Command;
 pub struct CuError {
     pub code: String,
     pub message: String,
+    /// Present on `a11y_node_ambiguous` so callers can see how many showing
+    /// nodes matched without parsing the message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<usize>,
 }
 
 impl CuError {
@@ -15,7 +19,13 @@ impl CuError {
         Self {
             code: code.into(),
             message: message.into(),
+            count: None,
         }
+    }
+
+    pub fn with_count(mut self, count: usize) -> Self {
+        self.count = Some(count);
+        self
     }
 }
 
