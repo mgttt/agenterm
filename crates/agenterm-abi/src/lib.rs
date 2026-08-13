@@ -19,6 +19,10 @@
 //! `agt_screenshot_capture_window` captures a native window (or its strict
 //! client-area rectangle) to PNG. Cropping is not offered this round (the
 //! platform `XrgbClip` type is not nameable from this crate).
+//! Milestone 5 closes the Phase 0 process group: `agt_process_list` enumerates
+//! live processes (two-stage, §3.4), `agt_process_kill` terminates by pid, and
+//! `agt_process_self` reports the calling process pid. `AGT_CAP_PROCESS_OBSERVE`
+//! now reports `AGT_OK`; spawn stays `AGT_UNSUPPORTED` (not built this round).
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -39,6 +43,7 @@ use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
+use agenterm_platform::process::{kill, list};
 use agenterm_platform::pty::{
     ChildCommand, PtyChild, PtyMaster, TerminalSize, initialize_shutdown_reaper,
     shutdown_session_detached,
@@ -225,9 +230,10 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 }
 
 /// Capability negotiation. §3.2/§14.2 rule two: compile-time feature → runtime
-/// capability query. The `pty`, `native-pixel-window` and `screenshot`
-/// features are compiled into this build, so `AGT_CAP_PTY`,
-/// `AGT_CAP_WINDOW_HOST` and `AGT_CAP_SCREENSHOT` report `AGT_OK`;
+/// capability query. The `pty`, `native-pixel-window`, `screenshot` and
+/// `process` features are compiled into this build, so `AGT_CAP_PTY`,
+/// `AGT_CAP_WINDOW_HOST`, `AGT_CAP_SCREENSHOT` and
+/// `AGT_CAP_PROCESS_OBSERVE` report `AGT_OK`;
 /// mechanisms that have not shipped yet report `AGT_UNSUPPORTED`
 /// (a product gap, never a permission statement).
 #[unsafe(no_mangle)]
@@ -235,7 +241,8 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
     match cap {
         agt_capability::AGT_CAP_PTY
         | agt_capability::AGT_CAP_WINDOW_HOST
-        | agt_capability::AGT_CAP_SCREENSHOT => agt_status::AGT_OK,
+        | agt_capability::AGT_CAP_SCREENSHOT
+        | agt_capability::AGT_CAP_PROCESS_OBSERVE => agt_status::AGT_OK,
         _ => agt_status::AGT_UNSUPPORTED,
     }
     // Pure match — no panic surface; the fence is kept for uniformity.
@@ -2374,6 +2381,162 @@ pub extern "C" fn agt_screenshot_capture_window(
     }
 }
 
+// --- process (milestone 5) -------------------------------------------
+
+/// C-compatible single process record. `name` is UTF-8 and is **not**
+/// NUL-terminated by the library; use `name_len` for its length. When the
+/// original executable name exceeds 64 bytes it is truncated at a UTF-8
+/// character boundary (a multi-byte character is never split) and
+/// `name_truncated` is set to 1.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub struct agt_process_info {
+    pub id: u32,
+    pub parent_id: u32,
+    pub name: [u8; 64],
+    /// Bytes actually written into `name` (<= 64).
+    pub name_len: u32,
+    /// 1 when the original name exceeded 64 bytes.
+    pub name_truncated: u32,
+}
+
+impl Default for agt_process_info {
+    fn default() -> Self {
+        agt_process_info {
+            id: 0,
+            parent_id: 0,
+            name: [0u8; 64],
+            name_len: 0,
+            name_truncated: 0,
+        }
+    }
+}
+
+/// Truncate `s` at a UTF-8 character boundary so at most `max` bytes are
+/// kept. Returns `(kept_len, truncated)`; `truncated` is 1 when the original
+/// string exceeded `max` bytes (even if the character-boundary cut landed
+/// below `max`).
+fn truncate_name(s: &str, max: usize) -> (usize, bool) {
+    if s.len() <= max {
+        (s.len(), false)
+    } else {
+        (s.floor_char_boundary(max), true)
+    }
+}
+
+/// Translate one platform process record into the C-compatible record,
+/// truncating `executable_name` at a UTF-8 character boundary. The platform
+/// `ProcessInfo` type is not nameable from this crate, so it is passed by
+/// field (all public).
+fn process_info_to_record(id: u32, parent_id: u32, executable_name: &str) -> agt_process_info {
+    let (kept, truncated) = truncate_name(executable_name, 64);
+    let mut name = [0u8; 64];
+    name[..kept].copy_from_slice(&executable_name.as_bytes()[..kept]);
+    agt_process_info {
+        id,
+        parent_id,
+        name,
+        name_len: kept as u32,
+        name_truncated: u32::from(truncated),
+    }
+}
+
+/// Enumerate live processes into a caller-allocated array (two-stage, §3.4).
+///
+/// - `cap` sufficient → `AGT_OK`, `*out_count` = records actually written.
+/// - `cap` insufficient (including `cap == 0` with `buf == NULL`, the legal
+///   "how big?" probe) → `AGT_FAILED { code = "buffer_too_small" }`,
+///   `*out_count` = required count.
+/// - NULL `out_count` (or NULL `buf` with `cap > 0`) →
+///   `AGT_FAILED { code = "bad_pointer" }`.
+/// - Platform failure → `AGT_FAILED { code = "process_failed" }`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_process_list(
+    buf: *mut agt_process_info,
+    cap: usize,
+    out_count: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut agt_process_info, cap: usize, out_count: *mut usize) -> agt_status {
+        if out_count.is_null() {
+            record_error(c"agt_process_list", c"bad_pointer", "out_count is null");
+            return agt_status::AGT_FAILED;
+        }
+        if cap > 0 && buf.is_null() {
+            record_error(c"agt_process_list", c"bad_pointer", "buf is null");
+            return agt_status::AGT_FAILED;
+        }
+        let processes = match list() {
+            Ok(v) => v,
+            Err(e) => {
+                record_error(c"agt_process_list", c"process_failed", format!("{e}"));
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let required = processes.len();
+        if cap < required {
+            unsafe { *out_count = required };
+            record_error(
+                c"agt_process_list",
+                c"buffer_too_small",
+                "cap is smaller than the process count; allocate the required count and call again",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe { *out_count = required };
+        for (i, p) in processes.iter().enumerate() {
+            unsafe { *buf.add(i) = process_info_to_record(p.id, p.parent_id, &p.executable_name) };
+        }
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_count))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(c"agt_process_list", c"panic", "panic in agt_process_list");
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Terminate the given process by pid. `pid == 0` →
+/// `AGT_FAILED { code = "bad_pid" }`; a platform failure →
+/// `AGT_FAILED { code = "process_failed" }`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_process_kill(pid: u32) -> agt_status {
+    fn inner(pid: u32) -> agt_status {
+        if pid == 0 {
+            record_error(
+                c"agt_process_kill",
+                c"bad_pid",
+                "pid 0 is not a killable process",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        match kill(pid) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(c"agt_process_kill", c"process_failed", format!("{e}"));
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(pid))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(c"agt_process_kill", c"panic", "panic in agt_process_kill");
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// pid of the current process. Never fails; a panic inside the fence (not
+/// expected) is contained and reported as 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_process_self() -> u32 {
+    catch_unwind(std::process::id).unwrap_or(0)
+}
+
 // --- milestone 3b unit tests (pure translation functions) ---------------
 
 #[cfg(test)]
@@ -2695,5 +2858,47 @@ mod tests {
         assert_eq!(rec.ev.has_ime_cursor, 0);
         assert_eq!(rec.ev.ime_cursor_begin, 0);
         assert_eq!(rec.event_text.as_deref(), Some(b"x".as_slice()));
+    }
+
+    #[test]
+    fn process_name_truncation_respects_utf8_boundaries() {
+        // Short ASCII: unchanged, not truncated.
+        let (n, t) = truncate_name("agenterm.exe", 64);
+        assert_eq!(n, 12);
+        assert!(!t);
+        // Exactly 64 ASCII bytes: no truncation.
+        let exact = "a".repeat(64);
+        let (n, t) = truncate_name(&exact, 64);
+        assert_eq!(n, 64);
+        assert!(!t);
+        // 65 ASCII bytes: truncated to 64, flagged.
+        let long = "a".repeat(65);
+        let (n, t) = truncate_name(&long, 64);
+        assert_eq!(n, 64);
+        assert!(t);
+        // A 3-byte char crossing the 64-byte cut must be dropped whole:
+        // 62 ASCII + "€" = 65 bytes; the cut at 64 splits "€".
+        let s = format!("{}€", "a".repeat(62));
+        let (n, t) = truncate_name(&s, 64);
+        assert_eq!(n, 62);
+        assert!(t);
+        assert_eq!(&s[..n], "a".repeat(62));
+        // A 4-byte emoji likewise never splits: 63 ASCII + "😀" = 67 bytes.
+        let s2 = format!("{}😀", "a".repeat(63));
+        let (n, t) = truncate_name(&s2, 64);
+        assert_eq!(n, 63);
+        assert!(t);
+        // The record translation wires the flag through.
+        let rec = process_info_to_record(7, 1, &s2);
+        assert_eq!(rec.id, 7);
+        assert_eq!(rec.parent_id, 1);
+        assert_eq!(rec.name_len, 63);
+        assert_eq!(rec.name_truncated, 1);
+        assert_eq!(&rec.name[..63], &s2.as_bytes()[..63]);
+        // Un-truncated names keep their full bytes and flag 0.
+        let rec = process_info_to_record(8, 2, "agenterm.exe");
+        assert_eq!(rec.name_len, 12);
+        assert_eq!(rec.name_truncated, 0);
+        assert_eq!(&rec.name[..12], b"agenterm.exe");
     }
 }

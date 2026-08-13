@@ -36,11 +36,35 @@ struct agt_pty_spawn {
     rows: u16,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+struct agt_process_info {
+    id: u32,
+    parent_id: u32,
+    name: [u8; 64],
+    name_len: u32,
+    name_truncated: u32,
+}
+
+impl Default for agt_process_info {
+    fn default() -> Self {
+        agt_process_info {
+            id: 0,
+            parent_id: 0,
+            name: [0u8; 64],
+            name_len: 0,
+            name_truncated: 0,
+        }
+    }
+}
+
 const AGT_OK: i32 = 0;
 const AGT_UNSUPPORTED: i32 = 1;
 const AGT_FAILED: i32 = 2;
 const AGT_CAP_PTY: i32 = 1;
 const AGT_CAP_PROCESS_SPAWN: i32 = 2;
+const AGT_CAP_PROCESS_OBSERVE: i32 = 3;
 const AGT_CAP_WINDOW_HOST: i32 = 4;
 const AGT_CAP_SCREENSHOT: i32 = 7;
 const AGT_EV_NONE: u32 = 0;
@@ -59,6 +83,9 @@ type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
 type ScreenshotWritePng = unsafe extern "C" fn(*const c_char, *const u32, usize, u32, u32) -> i32;
 type ScreenshotCaptureWindow =
     unsafe extern "C" fn(isize, *const c_char, i32, i32, i32, i32, i32) -> i32;
+type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize) -> i32;
+type ProcessKill = unsafe extern "C" fn(u32) -> i32;
+type ProcessSelf = unsafe extern "C" fn() -> u32;
 
 /// Locate the cdylib built under the active profile. The test binary lives in
 /// `target/<profile>/deps/`, the cdylib in `target/<profile>/`.
@@ -87,10 +114,17 @@ fn cdylib_path() -> PathBuf {
     );
 }
 
-fn load() -> Library {
+/// Load the cdylib and leak the `Library` handle: the DLL's private threads
+/// (PTY reaper, window-loop thread) may still be winding down when a test
+/// function returns, so dropping the handle here would `FreeLibrary` the
+/// module out from under them and crash the process at exit
+/// (0xc000041d). Leaking keeps the module resident for the whole test
+/// process lifetime — the OS reclaims it at process teardown.
+fn load() -> &'static Library {
     let path = cdylib_path();
-    unsafe { Library::new(&path) }
-        .unwrap_or_else(|e| panic!("dlopen/LoadLibrary({path:?}) failed: {e}"))
+    let lib = unsafe { Library::new(&path) }
+        .unwrap_or_else(|e| panic!("dlopen/LoadLibrary({path:?}) failed: {e}"));
+    Box::leak(Box::new(lib))
 }
 
 unsafe fn sym<'l, T>(lib: &'l Library, name: &[u8]) -> Symbol<'l, T> {
@@ -204,6 +238,8 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     assert_eq!(unsafe { f(AGT_CAP_WINDOW_HOST) }, AGT_OK);
     // Milestone 4 ships the screenshot mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_SCREENSHOT) }, AGT_OK);
+    // Milestone 5 ships process observation → AGT_OK.
+    assert_eq!(unsafe { f(AGT_CAP_PROCESS_OBSERVE) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_SPAWN) }, AGT_UNSUPPORTED);
 }
@@ -1001,5 +1037,139 @@ fn screenshot_capture_window_rejects_zero_handle() {
     assert!(
         msg.contains("bad_handle"),
         "expected code \"bad_handle\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 5 evidence 1: real two-stage round trip. Probe with
+/// cap=0/buf=NULL to learn the required count (assert > 0), allocate that
+/// many records, call again and expect AGT_OK. The returned set must contain
+/// one record with `id == agt_process_self()` and a non-empty name — this
+/// proves both the two-stage contract and the data's truthfulness.
+#[test]
+fn process_list_roundtrip_contains_self() {
+    let lib = load();
+    let list: Symbol<ProcessList> = unsafe { sym(&lib, b"agt_process_list") };
+    let self_pid: Symbol<ProcessSelf> = unsafe { sym(&lib, b"agt_process_self") };
+    let pid = unsafe { self_pid() };
+    assert!(pid > 0, "agt_process_self must return a real pid, got 0");
+
+    // First half: cap == 0 with buf == NULL is the legal "how big?" probe.
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
+    );
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(required > 0, "required count must be > 0, got {required}");
+
+    // Second half: allocate and fill. The process table can change between
+    // the two calls on a concurrent system, so if the fresh call reports a
+    // larger required count, re-allocate with that count and retry.
+    let mut capacity = required + 64;
+    let self_rec = loop {
+        assert!(
+            capacity < 1_000_000,
+            "process count exploded far beyond the probe result"
+        );
+        let mut recs = vec![agt_process_info::default(); capacity];
+        let mut got = 0usize;
+        let st = unsafe { list(recs.as_mut_ptr(), capacity, &mut got) };
+        if st == AGT_OK {
+            assert!(
+                got <= capacity,
+                "out_count {got} exceeds capacity {capacity}"
+            );
+            break recs;
+        }
+        assert_eq!(
+            st,
+            AGT_FAILED,
+            "agt_process_list failed: {}",
+            last_error_message(&lib)
+        );
+        let msg = last_error_message(&lib);
+        assert!(
+            msg.contains("buffer_too_small"),
+            "expected code \"buffer_too_small\" in error, got: {msg}"
+        );
+        assert!(
+            got > capacity,
+            "out_count must report a required count > capacity, got {got} <= {capacity}"
+        );
+        capacity = got + 64;
+    };
+    let self_rec = self_rec
+        .iter()
+        .find(|r| r.id == pid)
+        .unwrap_or_else(|| panic!("process list must contain the calling process (pid {pid})"));
+    assert!(
+        self_rec.name_len > 0,
+        "self record must have a non-empty name"
+    );
+}
+
+/// Milestone 5 evidence 2: a deliberately too-small cap returns
+/// AGT_FAILED{code="buffer_too_small"} and *out_count reports the required
+/// (larger) count.
+#[test]
+fn process_list_small_cap_reports_required_count() {
+    let lib = load();
+    let list: Symbol<ProcessList> = unsafe { sym(&lib, b"agt_process_list") };
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(st, AGT_FAILED);
+    assert!(
+        required > 1,
+        "the test machine must have more than one process, got {required}"
+    );
+
+    let mut one = [agt_process_info::default(); 1];
+    let mut got = 0usize;
+    let st = unsafe { list(one.as_mut_ptr(), 1, &mut got) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        got > 1,
+        "out_count must report the required count > 1, got {got}"
+    );
+}
+
+/// Milestone 5 evidence 3: NULL out_count → AGT_FAILED{code="bad_pointer"}.
+#[test]
+fn process_list_rejects_null_out_count() {
+    let lib = load();
+    let list: Symbol<ProcessList> = unsafe { sym(&lib, b"agt_process_list") };
+    let mut one = [agt_process_info::default(); 1];
+    let st = unsafe { list(one.as_mut_ptr(), 1, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 5 evidence 4: `agt_process_kill(0)` → AGT_FAILED{code="bad_pid"}.
+/// Only the pid-0 rejection path is exercised — no real process is ever
+/// killed by these tests.
+#[test]
+fn process_kill_rejects_pid_zero() {
+    let lib = load();
+    let kill: Symbol<ProcessKill> = unsafe { sym(&lib, b"agt_process_kill") };
+    let st = unsafe { kill(0) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pid"),
+        "expected code \"bad_pid\" in error, got: {msg}"
     );
 }

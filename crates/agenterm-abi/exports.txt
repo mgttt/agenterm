@@ -18,3 +18,6 @@ agt_window_metrics
 agt_window_close
 agt_screenshot_write_png
 agt_screenshot_capture_window
+agt_process_list
+agt_process_kill
+agt_process_self
