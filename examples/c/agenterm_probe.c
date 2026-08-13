@@ -84,15 +84,35 @@ int main(void) {
     }
     printf("process_list probe: need=%zu\n", need);
 
-    agt_process_info* buf = (agt_process_info*)calloc(need, sizeof(agt_process_info));
-    if (buf == NULL) {
-        return fail("calloc", "out of memory");
-    }
+    agt_process_info* buf = NULL;
     size_t got = 0;
-    st = agt_process_list(buf, need, &got);
+    size_t attempt;
+    for (attempt = 0; attempt < 4; attempt++) {
+        free(buf);
+        buf = (agt_process_info*)calloc(need, sizeof(agt_process_info));
+        if (buf == NULL) {
+            return fail("calloc", "out of memory");
+        }
+        got = 0;
+        st = agt_process_list(buf, need, &got);
+        if (st == AGT_OK) {
+            break;
+        }
+        /* The process table may grow between probe and fetch. A failed fetch
+         * is retryable only when it reports a strictly larger required count;
+         * every other failure remains an ABI/test failure. */
+        if (st != AGT_FAILED || got <= need) {
+            free(buf);
+            return fail("agt_process_list fetch",
+                        "failed without a larger required count");
+        }
+        printf("process_list retry: capacity=%zu need=%zu\n", need, got);
+        need = got;
+    }
     if (st != AGT_OK || got == 0) {
         free(buf);
-        return fail("agt_process_list fetch", "expected AGT_OK + got > 0");
+        return fail("agt_process_list fetch",
+                    "did not stabilize within four bounded attempts");
     }
 
     size_t shown = got < 3 ? got : 3;

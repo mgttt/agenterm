@@ -1114,3 +1114,14 @@ the reader may observe EOF or a typed I/O failure only after consuming them.
 Use a deadline to prove close cannot leave the read blocked, accept buffered
 success within the buffer bound, and test eventual termination separately when
 that stronger behavior is part of the public contract.
+
+## Two-stage native enumeration must tolerate bounded growth
+
+For process, window, environment, or other live-table FFI enumeration, a
+successful size probe does not freeze the collection. Between probe and fetch,
+the required count may grow. Consumer tests must retry only when the fetch
+returns the documented insufficient-capacity status and a strictly larger
+required count, with a small fixed attempt bound; all other failures remain
+immediate errors. Requiring the first fetch to succeed turns normal host churn
+into flaky ABI evidence, while an unbounded retry can hide a nonconvergent or
+malicious provider.
