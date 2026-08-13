@@ -56,7 +56,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] the local chrome owns a vertically scrollable left tree with row-level
   close targets and top `z`/`Z` font controls, plus a distinct bottom composer
   input and send action.
-- [~] Linux `agenterm-con` publishes that chrome as a real AT-SPI child tree
+- [x] Linux `agenterm-con` publishes that chrome as a real AT-SPI child tree
   (`Tabs`, `Session`, `Command`, `SEND`) so `cu tree --window` is not the
   one-node X11 title frame. winit/softbuffer has no atk-bridge; the process
   registers itself. Inner `cu focus`/`click --name Command` (or `SEND`) uses
@@ -64,6 +64,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   The `lnx-x86_64` con CI cell owns a real Xvfb + session-D-Bus journey that
   discovers all four named children through AT-SPI, writes `Command`, activates
   `SEND`, proves terminal output through the public con CLI, and reaps the host.
+  Run `31692109556` at `007f36498502747a645e9ca5d44ddcd32870a314`
+  supplies that native runtime evidence.
 - [x] AT-SPI actions cross into the GUI through a 64-entry FIFO and a 32-action
   per-turn drain budget, with a 64 KiB per-action and 256 KiB aggregate payload
   ceiling. Saturation drops only new actions, records a monotonic counter,

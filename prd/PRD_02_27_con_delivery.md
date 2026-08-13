@@ -61,12 +61,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Every released `agenterm-con` artifact must be strictly below 1 MiB
   (`release_budget_bytes = 1,048,575`), not merely an observed development size, and every
   size statement must name its profile. At the icon reduction the LTO
-  `con-release` PE measured 8,704 bytes below budget, while the no-LTO
-  `con-release-fast` PE was separately 543,744 bytes and is not release-size
-  evidence. The exact custom-std unwind/trace-only `con-release-fast` artifact
-  is currently **9,216 bytes over** the budget after the resize/close automation
-  and live-resize fast path. The target must be recovered without reverting to
-  abort and without trading away backpressure, durability or clean shutdown.
+  `con-release` PE measured 8,704 bytes below the historical 512 KiB target,
+  while the no-LTO `con-release-fast` PE was separately 543,744 bytes and is not
+  release-size evidence. After the product ceiling changed to a strict 1 MiB,
+  the official custom-std unwind/trace-only `con-release` PE measured 561,152
+  bytes, 487,424 bytes below that current ceiling. This recovered budget does
+  not permit reverting to abort or trading away backpressure, durability or
+  clean shutdown.
 - [x] size claims require linked-symbol, disassembly or target-specific cold
   build evidence. An incremental 484,352-byte artifact that did not reproduce
   from the same HEAD after an explicit Windows-target package clean is recorded
