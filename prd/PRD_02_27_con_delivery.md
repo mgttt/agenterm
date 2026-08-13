@@ -28,6 +28,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   public/alignment/throughput tests live under `crates/agenterm-con/tests`.
   The package has no `../../` source or test path back into the workbench tree,
   so Cargo ownership and physical ownership now agree.
+- [x] official staging removes the obsolete experimental
+  `agenterm-con-native.exe` alias both before and after publication, alongside
+  earlier retired executable names. `dist/agenterm-con.exe` is the sole Windows
+  con artifact users can accidentally select after a successful build.
 
 ## Unwind profiles and panic containment
 

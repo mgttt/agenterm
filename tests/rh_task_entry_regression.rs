@@ -318,6 +318,11 @@ fn prepare_target_clean_uses_native_bundled_execution() {
 fn stage_build_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/stage-build.rh");
     assert!(source.contains("fn entry("));
+    assert_eq!(
+        source.matches("agenterm-con-native.exe").count(),
+        2,
+        "obsolete con native alias must be removed both before and after staging"
+    );
     assert_eq!(output.execution_mode.as_str(), "native");
     assert!(output.rust.contains("__stage("), "{}", output.rust);
     assert!(output.rust.contains("__write("), "{}", output.rust);

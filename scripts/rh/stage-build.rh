@@ -58,16 +58,17 @@ fn entry() {
         destination_directory,
         artifact_manifest_path
     );
-    let _obsolete0 =
-        artifact_files::remove_obsolete(destination_directory, "agentermctl.exe");
-    let _obsolete1 = artifact_files::remove_obsolete(
-        destination_directory,
-        "agenterm-script.exe"
-    );
-    let _obsolete2 =
-        artifact_files::remove_obsolete(destination_directory, "agenterm-script");
-    let _obsolete3 =
-        artifact_files::remove_obsolete(destination_directory, "agenterm-cli.exe");
+    let obsolete_names = [
+        "agentermctl.exe",
+        "agenterm-script.exe",
+        "agenterm-script",
+        "agenterm-cli.exe",
+        "agenterm-con-native.exe"
+    ];
+    for obsolete in obsolete_names {
+        let _removed =
+            artifact_files::remove_obsolete(destination_directory, obsolete);
+    }
 
     for artifact in manifest.executables {
         let _staged = artifact_files::stage(
@@ -133,16 +134,17 @@ fn entry() {
         destination_directory,
         artifact_manifest_path
     );
-    let _obsolete0_again =
-        artifact_files::remove_obsolete(destination_directory, "agentermctl.exe");
-    let _obsolete1_again = artifact_files::remove_obsolete(
-        destination_directory,
-        "agenterm-script.exe"
-    );
-    let _obsolete2_again =
-        artifact_files::remove_obsolete(destination_directory, "agenterm-script");
-    let _obsolete3_again =
-        artifact_files::remove_obsolete(destination_directory, "agenterm-cli.exe");
+    let obsolete_names_again = [
+        "agentermctl.exe",
+        "agenterm-script.exe",
+        "agenterm-script",
+        "agenterm-cli.exe",
+        "agenterm-con-native.exe"
+    ];
+    for obsolete in obsolete_names_again {
+        let _removed_again =
+            artifact_files::remove_obsolete(destination_directory, obsolete);
+    }
 
     print(
         "PASS: staged build artifacts and metadata in " + destination_directory

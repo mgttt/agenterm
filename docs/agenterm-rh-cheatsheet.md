@@ -137,6 +137,11 @@ let options = #{ current_dir: repo, env: environment };
 calls. Map values are typed by inference — see §7 trap 3 for how a wrong
 inference corrupts a serialized field.
 
+Bind an array literal before iterating it. `for name in ["a", "b"]` passes the
+surface parser but native transpilation rejects the literal iterable; use
+`let names = ["a", "b"]; for name in names { ... }` and confirm with
+`mode_probe`.
+
 ## 5. Errors — three different mechanisms, do not mix them up
 
 | Form | Lowers to | Effect |
@@ -341,6 +346,13 @@ qualification can require and read `TEMP`; although `rh::runtime::temp_dir()`
 is catalogued, the native pack transpiler does not currently lower that call.
 Copying a file from `target/release-fast/` into `target/qualification/` does not
 preserve it: both source and destination belong to the later Cargo cleanup.
+
+Staging cleanup owns two races: stale files present before publication and old
+or newly unlocked aliases present after publication. Keep the same explicit
+obsolete-name list on both sides of staging, preferably as matching data loops,
+and make native-entry regression evidence assert both occurrences. A generic
+locked-artifact sweep only knows manifest-derived `*.locked-*` names; it cannot
+infer that a historical executable alias is obsolete.
 
 ## Byte-exact raw protocol fixtures
 
