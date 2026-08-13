@@ -3,13 +3,14 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
-use atspi::connection::AccessibilityConnection;
 use atspi::proxy::accessible::AccessibleProxy;
+use atspi::proxy::action::ActionProxy;
 use atspi::proxy::proxy_ext::ProxyExt;
-use atspi::{CoordType, ObjectRefOwned, StateSet};
+use atspi::{CoordType, Role, StateSet};
 use tokio::time::{Duration, timeout};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
+use zbus::proxy::CacheProperties;
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::CapabilityStatus;
@@ -21,8 +22,14 @@ use crate::contract::accessibility_tree::{
 const MAX_NODES: usize = 1_000;
 const MAX_DEPTH: u32 = 32;
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
+const NODE_TIMEOUT: Duration = Duration::from_millis(1500);
+const ACTION_TIMEOUT: Duration = Duration::from_millis(250);
 const NULL_OBJECT_PATH: &str = "/org/a11y/atspi/null";
 const APPLICATION_ROOT_PATH: &str = "/org/a11y/atspi/accessible/root";
+const REGISTRY_DEST: &str = "org.a11y.atspi.Registry";
+const A11Y_BUS_DEST: &str = "org.a11y.Bus";
+const A11Y_BUS_PATH: &str = "/org/a11y/bus";
+const A11Y_BUS_IFACE: &str = "org.a11y.Bus";
 
 /// AT-SPI object on the a11y bus. Destination may be a unique name (`:1.47`)
 /// or a well-known name (WebKit's `org.webkit.app-*.Sandboxed.WebProcess-*`).
@@ -46,7 +53,7 @@ struct WindowIdentity {
 }
 
 static RUNTIME: OnceLock<&'static tokio::runtime::Runtime> = OnceLock::new();
-static SHARED_CONNECTION: OnceLock<Mutex<Option<AccessibilityConnection>>> = OnceLock::new();
+static SHARED_CONNECTION: OnceLock<Mutex<Option<zbus::Connection>>> = OnceLock::new();
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
@@ -61,18 +68,18 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-fn shared_connection_slot() -> &'static Mutex<Option<AccessibilityConnection>> {
+fn shared_connection_slot() -> &'static Mutex<Option<zbus::Connection>> {
     SHARED_CONNECTION.get_or_init(|| Mutex::new(None))
 }
 
-fn cached_connection() -> Option<AccessibilityConnection> {
+fn cached_connection() -> Option<zbus::Connection> {
     shared_connection_slot()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone()
 }
 
-fn remember_connection(conn: AccessibilityConnection) -> AccessibilityConnection {
+fn remember_connection(conn: zbus::Connection) -> zbus::Connection {
     let mut slot = shared_connection_slot()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -81,7 +88,7 @@ fn remember_connection(conn: AccessibilityConnection) -> AccessibilityConnection
     }
     // Leak one owner so process teardown cannot Drop the zbus connection
     // (that Drop talks to the a11y bus while the runtime is dying).
-    let leaked: &'static AccessibilityConnection = Box::leak(Box::new(conn.clone()));
+    let leaked: &'static zbus::Connection = Box::leak(Box::new(conn.clone()));
     *slot = Some(leaked.clone());
     conn
 }
@@ -167,6 +174,7 @@ async fn tree_for_window_async(
         ));
     }
 
+    let dbus = DBusProxy::new(&conn).await.ok();
     let mut nodes = Vec::new();
     let mut queue: VecDeque<(BusObject, String, Option<String>, u32)> = VecDeque::new();
     for (index, object) in selected.into_iter().enumerate() {
@@ -177,13 +185,25 @@ async fn tree_for_window_async(
         if nodes.len() >= max_nodes {
             break;
         }
-        let Ok(proxy) = open_bus_object(&conn, &object).await else {
+        let object = match resolve_walk_object(&conn, dbus.as_ref(), identity.as_ref(), object).await
+        {
+            Some(object) => object,
+            None => continue,
+        };
+        let Ok(Ok(proxy)) = timeout(NODE_TIMEOUT, open_bus_object(&conn, &object)).await else {
             continue;
         };
+        // Read name/role even if Action/Text hang (WebKitGTK GetActions).
+        // Never drop the node before enqueueing children — that is how the
+        // document embed used to disappear into role=unknown / n=6 fillers.
         let node = read_node(&proxy, id.clone(), parent_id.clone()).await;
         let child_budget = max_nodes.saturating_sub(nodes.len() + queue.len());
         let child_refs = if depth < max_depth && child_budget > 0 {
-            raw_children(&proxy, child_budget).await.unwrap_or_default()
+            timeout(NODE_TIMEOUT, raw_children(&proxy, child_budget))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -270,23 +290,54 @@ fn activate_window_node(
     activate_x11_window(handle)
 }
 
-/// One AT-SPI bus connection per process.
+/// One a11y-bus connection per process.
+///
+/// Do **not** go through `atspi::AccessibilityConnection::new()`. That
+/// constructor enables atspi's optional P2P peer table
+/// (`GetApplicationBusAddress` plus a unix-socket handshake per registry
+/// child). WebKitGTK/Wails sockets hang that handshake, so `cu tree` dies
+/// with `a11y_tree_timeout` before it can walk the document embed. Talk to
+/// the a11y bus only.
 ///
 /// `send-keys --name` snapshots the tree, focuses the node, then injects
-/// XTest. Opening a fresh `AccessibilityConnection` for each of those steps
-/// (and dropping it before the key event) tears Chrome's renderer tree down
-/// and can crash the browser, so the next named command sees
-/// `a11y_node_not_found` / `accessibility-tree mechanism unavailable`.
-/// Clone the shared connection instead of dropping the a11y bus.
-async fn connect() -> Result<AccessibilityConnection, AccessibilityTreeError> {
+/// XTest. Opening a fresh connection for each of those steps (and dropping
+/// it before the key event) tears Chrome's renderer tree down, so the next
+/// named command sees `a11y_node_not_found`. Clone the shared connection
+/// instead of dropping the a11y bus.
+async fn connect() -> Result<zbus::Connection, AccessibilityTreeError> {
     hydrate_session_bus_env();
     if let Some(conn) = cached_connection() {
         return Ok(conn);
     }
-    let conn = AccessibilityConnection::new().await.map_err(|error| {
-        AccessibilityTreeError::failed("a11y_connect_failed", error.to_string())
-    })?;
+    let conn = open_a11y_bus().await?;
     Ok(remember_connection(conn))
+}
+
+async fn open_a11y_bus() -> Result<zbus::Connection, AccessibilityTreeError> {
+    let session = zbus::Connection::session().await.map_err(map_atspi_err)?;
+    let address = a11y_bus_address(&session).await?;
+    zbus::connection::Builder::address(address.as_str())
+        .map_err(map_atspi_err)?
+        .build()
+        .await
+        .map_err(map_atspi_err)
+}
+
+async fn a11y_bus_address(
+    session: &zbus::Connection,
+) -> Result<String, AccessibilityTreeError> {
+    if let Ok(value) = std::env::var("AT_SPI_BUS_ADDRESS")
+        && !value.is_empty()
+    {
+        return Ok(value);
+    }
+    let proxy = zbus::Proxy::new(session, A11Y_BUS_DEST, A11Y_BUS_PATH, A11Y_BUS_IFACE)
+        .await
+        .map_err(map_atspi_err)?;
+    proxy
+        .call("GetAddress", &())
+        .await
+        .map_err(map_atspi_err)
 }
 
 fn hydrate_session_bus_env() {
@@ -342,19 +393,8 @@ fn dbus_address_from_process(process_name: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-fn is_usable_object_ref(object_ref: &ObjectRefOwned) -> bool {
+fn is_usable_object_ref(object_ref: &atspi::ObjectRefOwned) -> bool {
     !object_ref.is_null()
-}
-
-async fn child_at_index_skip_null(
-    proxy: &AccessibleProxy<'_>,
-    index: i32,
-) -> Result<Option<ObjectRefOwned>, AccessibilityTreeError> {
-    match proxy.get_child_at_index(index).await {
-        Ok(child) if child.is_null() => Ok(None),
-        Ok(child) => Ok(Some(child)),
-        Err(_) => Ok(None),
-    }
 }
 
 async fn child_at_logical_index(
@@ -379,46 +419,50 @@ fn dbus_address_from_environ(environ: &[u8]) -> Option<String> {
     })
 }
 
-async fn registry_children(
-    conn: &AccessibilityConnection,
-) -> Result<Vec<ObjectRefOwned>, AccessibilityTreeError> {
-    let root = conn
-        .root_accessible_on_registry()
+async fn registry_root(
+    conn: &zbus::Connection,
+) -> Result<AccessibleProxy<'_>, AccessibilityTreeError> {
+    AccessibleProxy::builder(conn)
+        .destination(REGISTRY_DEST)
+        .map_err(map_atspi_err)?
+        .path(APPLICATION_ROOT_PATH)
+        .map_err(map_atspi_err)?
+        .cache_properties(CacheProperties::No)
+        .build()
         .await
-        .map_err(map_atspi_err)?;
-    let child_count = root.child_count().await.map_err(map_atspi_err)?;
-    let limit = usize::try_from(child_count).unwrap_or(0).min(256);
-    let mut children = Vec::new();
-    for index in 0..limit {
-        if let Ok(Some(child)) = child_at_index_skip_null(&root, index as i32).await {
-            children.push(child);
+        .map_err(map_atspi_err)
+}
+
+async fn registry_children(
+    conn: &zbus::Connection,
+) -> Result<Vec<BusObject>, AccessibilityTreeError> {
+    let root = registry_root(conn).await?;
+    let children = raw_children(&root, 256).await?;
+    if children.is_empty() {
+        let child_count = root.child_count().await.unwrap_or(0);
+        if child_count > 0 {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_registry_read_failed",
+                "AT-SPI registry reported children but none could be read",
+            ));
         }
-    }
-    if children.is_empty() && child_count > 0 {
-        return Err(AccessibilityTreeError::failed(
-            "a11y_registry_read_failed",
-            "AT-SPI registry reported children but none could be read",
-        ));
     }
     Ok(children)
 }
 
 async fn select_roots(
-    conn: &AccessibilityConnection,
-    roots: Vec<ObjectRefOwned>,
+    conn: &zbus::Connection,
+    roots: Vec<BusObject>,
     identity: Option<&WindowIdentity>,
 ) -> Result<Vec<BusObject>, AccessibilityTreeError> {
     let mut selected = Vec::new();
-    let dbus = DBusProxy::new(conn.connection()).await.ok();
-    for object_ref in roots {
-        let Some(object) = bus_object_from_ref(&object_ref) else {
-            continue;
-        };
+    let dbus = DBusProxy::new(conn).await.ok();
+    for object in roots {
         let Some(identity) = identity else {
             selected.push(object);
             continue;
         };
-        if root_matches_window(conn, dbus.as_ref(), &object_ref, &object, identity).await {
+        if root_matches_window(conn, dbus.as_ref(), &object, identity).await {
             selected.push(object);
         }
     }
@@ -430,13 +474,12 @@ async fn select_roots(
 }
 
 async fn root_matches_window(
-    conn: &AccessibilityConnection,
+    conn: &zbus::Connection,
     dbus: Option<&DBusProxy<'_>>,
-    object_ref: &ObjectRefOwned,
     object: &BusObject,
     identity: &WindowIdentity,
 ) -> bool {
-    if let Some(pid) = object_ref_pid(dbus, object_ref).await
+    if let Some(pid) = dest_pid(dbus, &object.dest).await
         && identity.owns_pid(pid)
     {
         return true;
@@ -467,7 +510,7 @@ async fn root_matches_window(
 }
 
 async fn extra_roots_for_window(
-    conn: &AccessibilityConnection,
+    conn: &zbus::Connection,
     dbus: &DBusProxy<'_>,
     identity: &WindowIdentity,
     already: &[BusObject],
@@ -509,7 +552,7 @@ async fn extra_roots_for_window(
 }
 
 async fn resolve_path(
-    conn: &AccessibilityConnection,
+    conn: &zbus::Connection,
     roots: &[BusObject],
     indices: &[usize],
 ) -> Result<BusObject, AccessibilityTreeError> {
@@ -603,29 +646,128 @@ fn bus_object_from_pair(dest: String, path: &str) -> Option<BusObject> {
     })
 }
 
-fn bus_object_from_ref(object_ref: &ObjectRefOwned) -> Option<BusObject> {
-    bus_object_from_pair(
-        object_ref.name_as_str()?.to_owned(),
-        object_ref.path_as_str(),
-    )
-}
-
 async fn open_bus_object<'a>(
-    conn: &'a AccessibilityConnection,
+    conn: &'a zbus::Connection,
     object: &BusObject,
 ) -> Result<AccessibleProxy<'a>, AccessibilityTreeError> {
-    let dbus = DBusProxy::new(conn.connection()).await.ok();
+    let dbus = DBusProxy::new(conn).await.ok();
+    if !dest_is_owned(dbus.as_ref(), &object.dest).await {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_node_not_found",
+            format!("AT-SPI destination {} has no owner", object.dest),
+        ));
+    }
     let dest = resolve_dest(dbus.as_ref(), &object.dest).await;
     let path = object.path.clone();
-    AccessibleProxy::builder(conn.connection())
+    AccessibleProxy::builder(conn)
         .destination(dest)
         .map_err(map_atspi_err)?
         .path(path)
         .map_err(map_atspi_err)?
-        .cache_properties(zbus::proxy::CacheProperties::No)
+        .cache_properties(CacheProperties::No)
         .build()
         .await
         .map_err(map_atspi_err)
+}
+
+/// WebKitGTK embeds the document tree under a well-known dest
+/// (`org.webkit.app-*.Sandboxed.WebProcess-*`). GetChildren still names that
+/// dest after the web process dies or restarts under a new UUID. Skip the
+/// unowned stub (it becomes role=unknown) and, when possible, retarget to a
+/// live WebKit dest owned by the same window.
+async fn resolve_walk_object(
+    conn: &zbus::Connection,
+    dbus: Option<&DBusProxy<'_>>,
+    identity: Option<&WindowIdentity>,
+    object: BusObject,
+) -> Option<BusObject> {
+    if dest_is_owned(dbus, &object.dest).await {
+        return Some(object);
+    }
+    if !is_webkit_embed_dest(&object.dest) {
+        return None;
+    }
+    recover_webkit_embed(conn, dbus?, identity, &object).await
+}
+
+fn is_webkit_embed_dest(dest: &str) -> bool {
+    dest.contains("Sandboxed.WebProcess-") || dest.starts_with("org.webkit.")
+}
+
+async fn recover_webkit_embed(
+    conn: &zbus::Connection,
+    dbus: &DBusProxy<'_>,
+    identity: Option<&WindowIdentity>,
+    original: &BusObject,
+) -> Option<BusObject> {
+    let names = dbus.list_names().await.ok()?;
+    let mut owned_by_window = Vec::new();
+    let mut other_webkit = Vec::new();
+    for name in names {
+        let dest = name.as_str();
+        if dest == original.dest || !is_webkit_embed_dest(dest) {
+            continue;
+        }
+        let Ok(bus_name) = BusName::try_from(dest.to_owned()) else {
+            continue;
+        };
+        let Ok(pid) = dbus.get_connection_unix_process_id(bus_name).await else {
+            continue;
+        };
+        let candidate = BusObject {
+            dest: dest.to_owned(),
+            path: original.path.clone(),
+        };
+        if identity.is_some_and(|identity| identity.owns_pid(pid)) {
+            owned_by_window.push(candidate);
+        } else if identity.is_none() {
+            other_webkit.push(candidate);
+        }
+    }
+    for candidate in owned_by_window.into_iter().chain(other_webkit) {
+        if timeout(NODE_TIMEOUT, open_bus_object(conn, &candidate))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .is_some()
+        {
+            return Some(candidate);
+        }
+        // The live dest may not serve the stale embed path. Try the WebKit
+        // application root used when the process registered on the host bus.
+        let at_root = BusObject {
+            dest: candidate.dest.clone(),
+            path: APPLICATION_ROOT_PATH.to_owned(),
+        };
+        if timeout(NODE_TIMEOUT, open_bus_object(conn, &at_root))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .is_some()
+        {
+            return Some(at_root);
+        }
+    }
+    None
+}
+
+async fn dest_is_owned(dbus: Option<&DBusProxy<'_>>, dest: &str) -> bool {
+    if dest.is_empty() {
+        return false;
+    }
+    let Some(dbus) = dbus else {
+        return true;
+    };
+    let Ok(bus_name) = BusName::try_from(dest.to_owned()) else {
+        return false;
+    };
+    dbus.get_name_owner(bus_name).await.is_ok()
+}
+
+async fn dest_pid(dbus: Option<&DBusProxy<'_>>, dest: &str) -> Option<u32> {
+    let dbus = dbus?;
+    let bus_name = BusName::try_from(dest.to_string()).ok()?;
+    dbus.get_connection_unix_process_id(bus_name).await.ok()
 }
 
 async fn resolve_dest(dbus: Option<&DBusProxy<'_>>, dest: &str) -> String {
@@ -652,25 +794,24 @@ async fn read_node(
     let role = role_name(proxy).await;
     let name = proxy.name().await.unwrap_or_default();
     let states = states_from_proxy(proxy).await;
-    let bounds = bounds_from_proxy(proxy)
-        .await
-        .unwrap_or(AccessibilityBounds {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-        });
-    let actions = actions_from_proxy(proxy).await;
-    let text = text_from_proxy(proxy).await;
+    // Stay on the Accessible interface during snapshot. WebKitGTK's
+    // Component/Action/Text methods (and `proxies()` introspect) routinely
+    // hang past 250ms; doing that per node blows the 10s tree deadline
+    // before named document widgets are reached. Click uses DoAction(0).
     AccessibilityNode {
         id,
         parent_id,
         role,
         name,
         states,
-        bounds,
-        actions,
-        text,
+        bounds: AccessibilityBounds {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        },
+        actions: Vec::new(),
+        text: None,
     }
 }
 
@@ -680,11 +821,59 @@ async fn role_name(proxy: &AccessibleProxy<'_>) -> String {
     {
         return role;
     }
-    proxy
-        .get_role()
-        .await
-        .map(|role| format!("{role:?}"))
-        .unwrap_or_else(|_| "unknown".to_string())
+    match proxy.get_role().await {
+        Ok(role) => atspi_role_label(role),
+        Err(_) => "unknown".to_string(),
+    }
+}
+
+/// WebKitGTK leaves `GetRoleName` empty and only answers `GetRole` (e.g. 43 =
+/// push button). Map the common ATSPI roles to the same labels GTK publishes
+/// so `--name` / `--role` matchers stay toolkit-neutral.
+fn atspi_role_label(role: Role) -> String {
+    match role {
+        Role::Button => "button".to_owned(),
+        Role::ToggleButton => "toggle button".to_owned(),
+        Role::Entry | Role::PasswordText => "text".to_owned(),
+        Role::Text => "text".to_owned(),
+        Role::Heading => "heading".to_owned(),
+        Role::PageTab => "page tab".to_owned(),
+        Role::PageTabList => "page tab list".to_owned(),
+        Role::Link => "link".to_owned(),
+        Role::CheckBox => "check box".to_owned(),
+        Role::RadioButton => "radio button".to_owned(),
+        Role::ComboBox => "combo box".to_owned(),
+        Role::MenuItem => "menu item".to_owned(),
+        Role::Menu => "menu".to_owned(),
+        Role::MenuBar => "menu bar".to_owned(),
+        Role::ToolBar => "tool bar".to_owned(),
+        Role::ScrollBar => "scroll bar".to_owned(),
+        Role::Slider => "slider".to_owned(),
+        Role::SpinButton => "spin button".to_owned(),
+        Role::Image => "image".to_owned(),
+        Role::List => "list".to_owned(),
+        Role::ListItem => "list item".to_owned(),
+        Role::Table => "table".to_owned(),
+        Role::TableCell => "table cell".to_owned(),
+        Role::DocumentWeb | Role::DocumentFrame => "document web".to_owned(),
+        Role::Panel => "panel".to_owned(),
+        Role::Filler => "filler".to_owned(),
+        Role::Frame => "frame".to_owned(),
+        Role::Window => "window".to_owned(),
+        Role::Application => "application".to_owned(),
+        Role::Section => "section".to_owned(),
+        Role::Paragraph => "paragraph".to_owned(),
+        Role::Label => "label".to_owned(),
+        Role::Static => "static".to_owned(),
+        other => {
+            let debug = format!("{other:?}");
+            if debug.is_empty() {
+                "unknown".to_owned()
+            } else {
+                debug
+            }
+        }
+    }
 }
 
 async fn states_from_proxy(proxy: &AccessibleProxy<'_>) -> Vec<String> {
@@ -719,6 +908,7 @@ fn state_labels(state: StateSet) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 async fn bounds_from_proxy(proxy: &AccessibleProxy<'_>) -> Option<AccessibilityBounds> {
     let proxies = proxy.proxies().await.ok()?;
     let component = proxies.component().await.ok()?;
@@ -734,6 +924,7 @@ async fn bounds_from_proxy(proxy: &AccessibleProxy<'_>) -> Option<AccessibilityB
     })
 }
 
+#[allow(dead_code)]
 async fn actions_from_proxy(proxy: &AccessibleProxy<'_>) -> Vec<String> {
     let Ok(proxies) = proxy.proxies().await else {
         return Vec::new();
@@ -750,6 +941,7 @@ async fn actions_from_proxy(proxy: &AccessibleProxy<'_>) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 async fn text_from_proxy(proxy: &AccessibleProxy<'_>) -> Option<String> {
     let proxies = proxy.proxies().await.ok()?;
     let text = proxies.text().await.ok()?;
@@ -819,24 +1011,38 @@ async fn do_action_at(
 }
 
 async fn invoke_click_action(proxy: &AccessibleProxy<'_>) -> Result<(), AccessibilityTreeError> {
-    let proxies = proxy.proxies().await.map_err(map_atspi_err)?;
-    let action_proxy = proxies.action().await.map_err(|_| {
-        AccessibilityTreeError::failed(
-            "a11y_action_unavailable",
-            "node does not expose the AT-SPI Action interface",
-        )
-    })?;
-    let names = action_names(&action_proxy).await?;
-    let action_index = click_action_index(&names).ok_or_else(|| {
-        AccessibilityTreeError::failed(
-            "a11y_action_unavailable",
-            format!(
-                "node exposes no AT-SPI actions to invoke; available: {}",
-                format_available_actions(&names)
-            ),
-        )
-    })?;
-    do_action_at(&action_proxy, action_index).await
+    let action_proxy = action_proxy_for(proxy).await?;
+    // WebKitGTK advertises Action but `GetActions` often hangs. Prefer a
+    // named click when the list arrives quickly; otherwise invoke the
+    // AT-SPI default action at index 0.
+    let names = match timeout(ACTION_TIMEOUT, action_names(&action_proxy)).await {
+        Ok(Ok(names)) => names,
+        _ => Vec::new(),
+    };
+    let action_index = click_action_index(&names).unwrap_or(0);
+    timeout(NODE_TIMEOUT, do_action_at(&action_proxy, action_index))
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_action_timeout",
+                "AT-SPI DoAction exceeded its deadline",
+            )
+        })?
+}
+
+async fn action_proxy_for<'a>(
+    proxy: &AccessibleProxy<'a>,
+) -> Result<ActionProxy<'a>, AccessibilityTreeError> {
+    let inner = proxy.inner();
+    ActionProxy::builder(inner.connection())
+        .destination(inner.destination().to_owned())
+        .map_err(map_atspi_err)?
+        .path(inner.path().to_owned())
+        .map_err(map_atspi_err)?
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .map_err(map_atspi_err)
 }
 
 async fn invoke_named_action(
@@ -863,11 +1069,7 @@ async fn invoke_named_action(
     do_action_at(&action_proxy, action_index).await
 }
 
-async fn object_ref_pid(dbus: Option<&DBusProxy<'_>>, object_ref: &ObjectRefOwned) -> Option<u32> {
-    let dbus = dbus?;
-    let bus_name = BusName::try_from(object_ref.name_as_str()?.to_string()).ok()?;
-    dbus.get_connection_unix_process_id(bus_name).await.ok()
-}
+
 
 fn parse_node_path(node_id: &str) -> Result<Vec<usize>, AccessibilityTreeError> {
     if !node_id.starts_with('/') {
@@ -1208,9 +1410,12 @@ mod tests {
 
     #[test]
     fn null_atspi_object_refs_are_not_usable() {
-        assert!(!is_usable_object_ref(&ObjectRefOwned::default()));
+        assert!(!is_usable_object_ref(&atspi::ObjectRefOwned::default()));
         assert!(is_usable_object_ref(
-            &ObjectRefOwned::from_static_str_unchecked(":1.1", "/org/a11y/atspi/accessible/1")
+            &atspi::ObjectRefOwned::from_static_str_unchecked(
+                ":1.1",
+                "/org/a11y/atspi/accessible/1"
+            )
         ));
     }
 
@@ -1309,6 +1514,34 @@ mod tests {
         );
         assert!(bus_object_from_pair(":1.1".into(), NULL_OBJECT_PATH).is_none());
         assert!(bus_object_from_pair(String::new(), "/org/a11y/atspi/accessible/1").is_none());
+    }
+
+    #[test]
+    fn webkit_embed_dests_are_recognized() {
+        assert!(is_webkit_embed_dest(
+            "org.webkit.app-deadbeef.Sandboxed.WebProcess-uuid"
+        ));
+        assert!(is_webkit_embed_dest(
+            "org.webkitgtk.MiniBrowser.Sandboxed.WebProcess-9448d95f-7bc7-471a-b248-4ff12dd835dd"
+        ));
+        assert!(is_webkit_embed_dest("org.webkit.Something"));
+        assert!(!is_webkit_embed_dest(":1.47"));
+        assert!(!is_webkit_embed_dest("org.a11y.atspi.Registry"));
+    }
+
+    #[test]
+    fn webkit_numeric_roles_map_to_gtk_labels() {
+        assert_eq!(atspi_role_label(Role::Button), "button");
+        assert_eq!(atspi_role_label(Role::Entry), "text");
+        assert_eq!(atspi_role_label(Role::PageTab), "page tab");
+        assert_eq!(atspi_role_label(Role::Heading), "heading");
+        assert_eq!(atspi_role_label(Role::Filler), "filler");
+    }
+
+    #[test]
+    fn click_falls_back_to_default_index_when_action_names_time_out() {
+        // WebKit GetActions hang: empty name list still has a default action.
+        assert_eq!(click_action_index(&[]).unwrap_or(0), 0);
     }
 
     #[test]
