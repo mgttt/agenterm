@@ -4,7 +4,8 @@
  * This is the *mechanism* boundary between embedding consumers and the OS.
  * It deliberately contains no product concepts. Every symbol is prefixed
  * `agt_`. Milestone 1 shipped version / error / capability exports; milestone 2
- * adds the PTY mechanism. Window / screenshot mechanisms arrive later.
+ * adds the PTY mechanism; milestones 3a/3b add the window + frame mechanisms;
+ * milestone 4 adds screenshot export (framebuffer → PNG, native window → PNG).
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -65,7 +66,8 @@ typedef enum {
 } agt_capability;
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
- * milestone 3a, AGT_CAP_PTY and AGT_CAP_WINDOW_HOST both report AGT_OK. */
+ * milestone 4, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST and AGT_CAP_SCREENSHOT all
+ * report AGT_OK. */
 agt_status agt_capability_query(agt_capability cap);
 
 /* --- pty ------------------------------------------------------------ */
@@ -242,6 +244,29 @@ agt_status agt_window_metrics        (agt_window_t, uint32_t* w, uint32_t* h, do
  * lets the loop thread escape its rendezvous wait even if a taken frame was
  * never committed, so close never hangs. */
 void       agt_window_close         (agt_window_t);
+
+/* --- screenshot (milestone 4) --------------------------------------- */
+
+/* Encode a caller-owned little-endian 0x00RRGGBB framebuffer as a PNG at
+ * `path`. `pixel_count` must equal width*height, and both dimensions must be
+ * >= 1, or AGT_FAILED with code "bad_dimensions" is returned. Other failures:
+ * NULL/non-UTF-8 `path` → "bad_path", NULL `pixels` → "bad_pointer", side
+ * > 16384 or pixel count > 64 Mi → "frame_too_large", platform error →
+ * "screenshot_failed". Cropping is not supported in this version (the whole
+ * buffer is always encoded). */
+agt_status agt_screenshot_write_png(const char* path, const uint32_t* pixels,
+                                    size_t pixel_count, uint32_t width,
+                                    uint32_t height);
+
+/* Capture a native window (or its strict client-area rectangle) to a PNG at
+ * `path`. `native_window` is the platform window handle as intptr_t;
+ * 0 → AGT_FAILED with code "bad_handle". `area_kind` 0 = whole window,
+ * 1 = client rectangle given by left/top/width/height; anything else →
+ * "bad_area". Platform failure → "screenshot_failed". */
+agt_status agt_screenshot_capture_window(intptr_t native_window, const char* path,
+                                         int32_t area_kind, int32_t left,
+                                         int32_t top, int32_t width,
+                                         int32_t height);
 
 /* --- known platform limitation -------------------------------------- */
 

@@ -16,3 +16,5 @@ agt_frame_begin
 agt_frame_commit
 agt_window_metrics
 agt_window_close
+agt_screenshot_write_png
+agt_screenshot_capture_window

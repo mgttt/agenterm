@@ -40,12 +40,15 @@ const AGT_OK: i32 = 0;
 const AGT_UNSUPPORTED: i32 = 1;
 const AGT_FAILED: i32 = 2;
 const AGT_CAP_PTY: i32 = 1;
+const AGT_CAP_PROCESS_SPAWN: i32 = 2;
 const AGT_CAP_WINDOW_HOST: i32 = 4;
 const AGT_CAP_SCREENSHOT: i32 = 7;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
 const EXPECTED_BUILD_ID: &str = "0.1.16+abi.1";
 const PROBE: &[u8] = b"agenterm-abi-probe";
+/// PNG signature: `89 50 4E 47 0D 0A 1A 0A`.
+const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
 type PtyOpen = unsafe extern "C" fn(*const agt_pty_spawn, *mut *mut std::ffi::c_void) -> i32;
 type PtyRead = unsafe extern "C" fn(*mut std::ffi::c_void, *mut u8, usize, *mut usize) -> i32;
@@ -53,6 +56,9 @@ type PtyWait = unsafe extern "C" fn(*mut std::ffi::c_void, u32, *mut i32) -> i32
 type PtyClose = unsafe extern "C" fn(*mut std::ffi::c_void);
 type CapabilityQuery = unsafe extern "C" fn(i32) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
+type ScreenshotWritePng = unsafe extern "C" fn(*const c_char, *const u32, usize, u32, u32) -> i32;
+type ScreenshotCaptureWindow =
+    unsafe extern "C" fn(isize, *const c_char, i32, i32, i32, i32, i32) -> i32;
 
 /// Locate the cdylib built under the active profile. The test binary lives in
 /// `target/<profile>/deps/`, the cdylib in `target/<profile>/`.
@@ -196,8 +202,10 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     assert_eq!(unsafe { f(AGT_CAP_PTY) }, AGT_OK);
     // Milestone 3a ships the window host mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_WINDOW_HOST) }, AGT_OK);
+    // Milestone 4 ships the screenshot mechanism → AGT_OK.
+    assert_eq!(unsafe { f(AGT_CAP_SCREENSHOT) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
-    assert_eq!(unsafe { f(AGT_CAP_SCREENSHOT) }, AGT_UNSUPPORTED);
+    assert_eq!(unsafe { f(AGT_CAP_PROCESS_SPAWN) }, AGT_UNSUPPORTED);
 }
 
 #[test]
@@ -890,4 +898,108 @@ fn window_event_text_two_stage_contract() {
     assert_eq!(probe2, 0, "expected required length 0, got {probe2}");
 
     unsafe { close(window) };
+}
+
+/// A unique PNG path under the system temp dir (never the repo tree).
+fn temp_png_path(tag: &str) -> (std::path::PathBuf, CString) {
+    let path = std::env::temp_dir().join(format!("agenterm-abi-{tag}-{}.png", std::process::id()));
+    let path_c =
+        CString::new(path.to_string_lossy().as_bytes()).expect("temp path must be NUL-free");
+    (path, path_c)
+}
+
+/// Milestone 4 evidence 1 (real round trip): encode a known 4x4 XRGB buffer
+/// to a temp-dir PNG, assert AGT_OK plus a non-empty file with the PNG magic,
+/// then delete the file.
+#[test]
+fn screenshot_write_png_roundtrip() {
+    let lib = load();
+    let f: Symbol<ScreenshotWritePng> = unsafe { sym(&lib, b"agt_screenshot_write_png") };
+    let pixels: Vec<u32> = vec![0x00FF0000u32; 16]; // 4x4 red (XRGB little-endian)
+    let (path, path_c) = temp_png_path("roundtrip");
+    let st = unsafe { f(path_c.as_ptr(), pixels.as_ptr(), pixels.len(), 4, 4) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "agt_screenshot_write_png failed: {}",
+        last_error_message(&lib)
+    );
+    let data = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("PNG not readable at {}: {e}", path.display()));
+    assert!(!data.is_empty(), "PNG file must be non-empty");
+    assert_eq!(
+        &data[..PNG_MAGIC.len()],
+        &PNG_MAGIC,
+        "PNG magic missing in first 8 bytes"
+    );
+    let _ = std::fs::remove_file(&path);
+    assert!(!path.exists(), "temp PNG must be cleaned up");
+}
+
+/// Milestone 4 evidence 2: `pixel_count` != width*height must fail with code
+/// "bad_dimensions" (validated before any platform call, so no file is
+/// written).
+#[test]
+fn screenshot_write_png_rejects_mismatched_pixel_count() {
+    let lib = load();
+    let f: Symbol<ScreenshotWritePng> = unsafe { sym(&lib, b"agt_screenshot_write_png") };
+    let pixels = [0u32; 4];
+    let (_, path_c) = temp_png_path("dim-mismatch");
+    let st = unsafe { f(path_c.as_ptr(), pixels.as_ptr(), 3, 2, 2) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_dimensions"),
+        "expected code \"bad_dimensions\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 4 evidence 3: NULL `path` → "bad_path"; NULL `pixels` →
+/// "bad_pointer".
+#[test]
+fn screenshot_write_png_rejects_null_pointers() {
+    let lib = load();
+    let f: Symbol<ScreenshotWritePng> = unsafe { sym(&lib, b"agt_screenshot_write_png") };
+    let pixels = [0x00FFFFFFu32; 4];
+    let (_, path_c) = temp_png_path("null-pointers");
+
+    // NULL path (pixels valid, dimensions valid) → bad_path.
+    let st = unsafe { f(std::ptr::null(), pixels.as_ptr(), pixels.len(), 2, 2) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "expected AGT_FAILED for NULL path, got {st}"
+    );
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_path"),
+        "expected code \"bad_path\" in error, got: {msg}"
+    );
+
+    // NULL pixels (path valid, dimensions valid) → bad_pointer.
+    let st = unsafe { f(path_c.as_ptr(), std::ptr::null(), pixels.len(), 2, 2) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "expected AGT_FAILED for NULL pixels, got {st}"
+    );
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 4 evidence 4: `agt_screenshot_capture_window` with
+/// `native_window == 0` → code "bad_handle".
+#[test]
+fn screenshot_capture_window_rejects_zero_handle() {
+    let lib = load();
+    let f: Symbol<ScreenshotCaptureWindow> = unsafe { sym(&lib, b"agt_screenshot_capture_window") };
+    let (_, path_c) = temp_png_path("zero-handle");
+    let st = unsafe { f(0, path_c.as_ptr(), 0, 0, 0, 0, 0) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_handle"),
+        "expected code \"bad_handle\" in error, got: {msg}"
+    );
 }

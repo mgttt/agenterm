@@ -14,6 +14,11 @@
 //! dropped — keyboard / pointer / wheel / IME — into the queue, and adds
 //! `agt_window_event_text` for out-of-band IME text (preedit/commit can be
 //! long, so it is never truncated into the fixed-size POD record).
+//! Milestone 4 ships the screenshot mechanism: `agt_screenshot_write_png`
+//! encodes a caller-owned XRGB framebuffer to PNG, and
+//! `agt_screenshot_capture_window` captures a native window (or its strict
+//! client-area rectangle) to PNG. Cropping is not offered this round (the
+//! platform `XrgbClip` type is not nameable from this crate).
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -37,6 +42,10 @@ use agenterm_platform::input::{
 use agenterm_platform::pty::{
     ChildCommand, PtyChild, PtyMaster, TerminalSize, initialize_shutdown_reaper,
     shutdown_session_detached,
+};
+use agenterm_platform::screenshot::{
+    MAX_FRAME_PIXELS, MAX_FRAME_SIDE, NativeCaptureArea, ScreenshotWindowHandle, XrgbFrame,
+    capture_native_window_png, write_xrgb_png,
 };
 use agenterm_platform::threading::spawn_named_detached;
 use agenterm_platform::window_host::{
@@ -216,14 +225,17 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 }
 
 /// Capability negotiation. §3.2/§14.2 rule two: compile-time feature → runtime
-/// capability query. The `pty` and `native-pixel-window` features are compiled
-/// into this build, so `AGT_CAP_PTY` and `AGT_CAP_WINDOW_HOST` report
-/// `AGT_OK`; mechanisms that have not shipped yet report `AGT_UNSUPPORTED`
+/// capability query. The `pty`, `native-pixel-window` and `screenshot`
+/// features are compiled into this build, so `AGT_CAP_PTY`,
+/// `AGT_CAP_WINDOW_HOST` and `AGT_CAP_SCREENSHOT` report `AGT_OK`;
+/// mechanisms that have not shipped yet report `AGT_UNSUPPORTED`
 /// (a product gap, never a permission statement).
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
     match cap {
-        agt_capability::AGT_CAP_PTY | agt_capability::AGT_CAP_WINDOW_HOST => agt_status::AGT_OK,
+        agt_capability::AGT_CAP_PTY
+        | agt_capability::AGT_CAP_WINDOW_HOST
+        | agt_capability::AGT_CAP_SCREENSHOT => agt_status::AGT_OK,
         _ => agt_status::AGT_UNSUPPORTED,
     }
     // Pure match — no panic surface; the fence is kept for uniformity.
@@ -2158,6 +2170,208 @@ pub extern "C" fn agt_window_close(window: agt_window_t) {
         handle.shared.request_close();
         drop(handle);
     }));
+}
+
+// --- screenshot (milestone 4) ----------------------------------------
+
+/// Encode a caller-owned little-endian `0x00RRGGBB` framebuffer as a PNG at
+/// `path`. `pixel_count` must equal `width * height` (both >= 1). Validated
+/// before any platform call so bad arguments produce a precise `code` instead
+/// of a bare platform error. Cropping is not supported this round (the
+/// platform `XrgbClip` type is not nameable from this crate), so the full
+/// buffer is always encoded.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_screenshot_write_png(
+    path: *const c_char,
+    pixels: *const u32,
+    pixel_count: usize,
+    width: u32,
+    height: u32,
+) -> agt_status {
+    fn inner(
+        path: *const c_char,
+        pixels: *const u32,
+        pixel_count: usize,
+        width: u32,
+        height: u32,
+    ) -> agt_status {
+        if path.is_null() {
+            record_error(c"agt_screenshot_write_png", c"bad_path", "path is null");
+            return agt_status::AGT_FAILED;
+        }
+        let path = match unsafe { CStr::from_ptr(path) }.to_str() {
+            Ok(s) => std::path::Path::new(s),
+            Err(_) => {
+                record_error(
+                    c"agt_screenshot_write_png",
+                    c"bad_path",
+                    "path is not valid UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        if pixels.is_null() {
+            record_error(
+                c"agt_screenshot_write_png",
+                c"bad_pointer",
+                "pixels is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        // u64 arithmetic: width/height are caller-supplied u32, so the product
+        // can never overflow even on 32-bit hosts.
+        let expected = width as u64 * height as u64;
+        if width == 0 || height == 0 || pixel_count as u64 != expected {
+            record_error(
+                c"agt_screenshot_write_png",
+                c"bad_dimensions",
+                "pixel_count must equal width * height and both must be >= 1",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if width > MAX_FRAME_SIDE || height > MAX_FRAME_SIDE || expected > MAX_FRAME_PIXELS as u64 {
+            record_error(
+                c"agt_screenshot_write_png",
+                c"frame_too_large",
+                "frame side exceeds 16384 or pixel count exceeds 64 Mi",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        // All validation passed: only now may the raw pointer be turned into
+        // a slice (brief rule 6).
+        let pixels = unsafe { std::slice::from_raw_parts(pixels, pixel_count) };
+        let frame = XrgbFrame::new(path, width, height, pixels);
+        match write_xrgb_png(frame) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_screenshot_write_png",
+                    c"screenshot_failed",
+                    format!("{e}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(path, pixels, pixel_count, width, height)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_screenshot_write_png",
+                c"panic",
+                "panic in agt_screenshot_write_png",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Capture a native window (or its strict client-area rectangle) to a PNG at
+/// `path`. `native_window` is the platform window handle as `intptr_t`;
+/// `area_kind` 0 = whole window, 1 = client rectangle given by
+/// `left/top/width/height`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_screenshot_capture_window(
+    native_window: isize,
+    path: *const c_char,
+    area_kind: i32,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> agt_status {
+    fn inner(
+        native_window: isize,
+        path: *const c_char,
+        area_kind: i32,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+    ) -> agt_status {
+        if native_window == 0 {
+            record_error(
+                c"agt_screenshot_capture_window",
+                c"bad_handle",
+                "native_window is 0",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let window = match unsafe { ScreenshotWindowHandle::from_raw(native_window) } {
+            Some(w) => w,
+            None => {
+                record_error(
+                    c"agt_screenshot_capture_window",
+                    c"bad_handle",
+                    "native_window is not a valid handle",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        if path.is_null() {
+            record_error(
+                c"agt_screenshot_capture_window",
+                c"bad_path",
+                "path is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let path = match unsafe { CStr::from_ptr(path) }.to_str() {
+            Ok(s) => std::path::Path::new(s),
+            Err(_) => {
+                record_error(
+                    c"agt_screenshot_capture_window",
+                    c"bad_path",
+                    "path is not valid UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let area = match area_kind {
+            0 => NativeCaptureArea::Window,
+            1 => NativeCaptureArea::Client {
+                left,
+                top,
+                width,
+                height,
+            },
+            _ => {
+                record_error(
+                    c"agt_screenshot_capture_window",
+                    c"bad_area",
+                    "area_kind must be 0 (whole window) or 1 (client rectangle)",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        match capture_native_window_png(window, path, area) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_screenshot_capture_window",
+                    c"screenshot_failed",
+                    format!("{e}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(native_window, path, area_kind, left, top, width, height)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_screenshot_capture_window",
+                c"panic",
+                "panic in agt_screenshot_capture_window",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
 }
 
 // --- milestone 3b unit tests (pure translation functions) ---------------
