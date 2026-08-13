@@ -739,8 +739,12 @@ struct ConApp {
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
     pending_control: PendingControl,
+    pending_resize_requests: Vec<control::IncomingRequest>,
+    pending_resize_deadline: Option<Instant>,
     pending_clipboard_paste: Option<PendingClipboardPaste>,
     terminal_clipboard_error: Option<String>,
+    ime_status: Option<agenterm_platform::ime::ImeStatus>,
+    ime_status_label: String,
     control_pointer_owner: Option<workspace::TabId>,
     perf_stats: PerfStats,
     chrome_dirty: DirtyRegion,
@@ -758,6 +762,11 @@ struct ConApp {
 
 impl Drop for ConApp {
     fn drop(&mut self) {
+        for request in self.pending_resize_requests.drain(..) {
+            let _ = request.reply.send(Err(
+                "terminal window closed while resize request was pending".to_owned(),
+            ));
+        }
         self.pending_control
             .cancel_all("terminal window closed while control request was pending");
     }
@@ -835,6 +844,32 @@ fn terminal_clipboard_target_is_current(
     active == Some(target) && !composer_focused
 }
 
+fn ime_status_json(status: Option<&agenterm_platform::ime::ImeStatus>) -> json::JsonValue {
+    let (known, name, available, open, native_mode, full_shape, label) = status.map_or_else(
+        || (false, "", false, false, false, false, "IME: ?".to_owned()),
+        |status| {
+            (
+                true,
+                status.name.as_str(),
+                status.available,
+                status.open,
+                status.native_mode,
+                status.full_shape,
+                status.label(),
+            )
+        },
+    );
+    json::object(vec![
+        ("known", known.into()),
+        ("name", name.into()),
+        ("available", available.into()),
+        ("open", open.into()),
+        ("native_mode", native_mode.into()),
+        ("full_shape", full_shape.into()),
+        ("label", label.into()),
+    ])
+}
+
 impl ConApp {
     fn new(working_dir: Option<String>, control_endpoint: Option<String>) -> Self {
         let mut workspace = workspace::Workspace::default();
@@ -859,8 +894,12 @@ impl ConApp {
             control_endpoint,
             control_server: None,
             pending_control: PendingControl::default(),
+            pending_resize_requests: Vec::new(),
+            pending_resize_deadline: None,
             pending_clipboard_paste: None,
             terminal_clipboard_error: None,
+            ime_status: None,
+            ime_status_label: "IME: ?".to_owned(),
             control_pointer_owner: None,
             perf_stats: PerfStats::default(),
             chrome_dirty: DirtyRegion::full(),
@@ -885,6 +924,20 @@ impl ConApp {
                 format!("active terminal session @{} is unavailable", id.get()),
             )
         })
+    }
+
+    fn refresh_ime_status(&mut self) -> bool {
+        let next = agenterm_platform::ime::status();
+        if next == self.ime_status {
+            return false;
+        }
+        self.ime_status_label = next.as_ref().map_or_else(
+            || "IME: ?".to_owned(),
+            agenterm_platform::ime::ImeStatus::label,
+        );
+        self.ime_status = next;
+        self.mark_composer_dirty();
+        true
     }
 
     fn active_session(&self) -> Result<&ConTerminal, PixelWindowError> {
@@ -1577,6 +1630,10 @@ impl ConApp {
     }
 
     fn cancel_all_control_requests(&mut self, reason: &str) {
+        self.pending_resize_deadline = None;
+        for request in self.pending_resize_requests.drain(..) {
+            let _ = request.reply.send(Err(reason.to_owned()));
+        }
         self.pending_control.cancel_all(reason);
         if self.pending_clipboard_paste.take().is_some() {
             self.terminal_clipboard_error = Some(reason.to_owned());
@@ -1679,6 +1736,9 @@ impl ConApp {
 
         use control::CliCommand;
         self.perf_stats.sync_present_stats(window.present_stats());
+        if matches!(&request.command, CliCommand::UiSnapshot) && self.refresh_ime_status() {
+            self.request_dirty_redraw(window);
+        }
         let mut reply = Some(request.reply);
         let result = match request.command {
             CliCommand::ListTabs => {
@@ -1772,6 +1832,7 @@ impl ConApp {
                                     .map_or("", |session| session.ime_preedit.as_str())
                                     .into(),
                             ),
+                            ("ime_status", ime_status_json(self.ime_status.as_ref())),
                             (
                                 "composer_submit_error",
                                 self.composer
@@ -2123,18 +2184,24 @@ impl ConApp {
         let mut requests: std::collections::VecDeque<_> = requests.into();
         while let Some(request) = requests.pop_front() {
             if matches!(&request.command, control::CliCommand::ResizeWindow { .. }) {
-                let mut resize_run = vec![request];
-                while requests.front().is_some_and(|request| {
-                    matches!(&request.command, control::CliCommand::ResizeWindow { .. })
-                }) {
-                    resize_run.push(requests.pop_front().expect("front resize remains queued"));
-                }
-                self.dispatch_resize_run(window, resize_run);
+                self.pending_resize_requests.push(request);
+                self.pending_resize_deadline
+                    .get_or_insert(now + std::time::Duration::from_millis(4));
             } else {
+                // A non-resize command is an ordering barrier. Screenshots and
+                // snapshots must observe every resize accepted before them,
+                // while resize-only bursts may share one bounded native call.
+                self.flush_pending_resize(window);
                 self.perf_stats.control_requests =
                     self.perf_stats.control_requests.saturating_add(1);
                 self.dispatch_control(window, request);
             }
+        }
+        if self
+            .pending_resize_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.flush_pending_resize(window);
         }
         if backlog {
             self.perf_stats.control_budget_yields =
@@ -2142,7 +2209,7 @@ impl ConApp {
             let _ = window.waker().wake();
         }
         let sessions = &self.sessions;
-        self.pending_control.poll_waits(now, |target, kind| {
+        let wait_deadline = self.pending_control.poll_waits(now, |target, kind| {
             let Some(session) = sessions.get(&target) else {
                 return WaitProbe::Missing(format!(
                     "terminal @{} disappeared while control request was pending",
@@ -2158,7 +2225,19 @@ impl ConApp {
                 }
                 _ => WaitProbe::Pending,
             }
-        })
+        });
+        match (wait_deadline, self.pending_resize_deadline) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (left, right) => left.or(right),
+        }
+    }
+
+    fn flush_pending_resize(&mut self, window: &PixelWindow) {
+        self.pending_resize_deadline = None;
+        if !self.pending_resize_requests.is_empty() {
+            let requests = std::mem::take(&mut self.pending_resize_requests);
+            self.dispatch_resize_run(window, requests);
+        }
     }
 
     fn dispatch_resize_run(
@@ -2409,10 +2488,16 @@ impl ConApp {
 
         let active_id = self.workspace.active().map(|id| id.get()).unwrap_or(0);
         let input_y = layout.composer.y;
+        let header_x = tree_width.saturating_add(12);
+        let ime_width = (layout.composer.width / 2).min(260);
+        let ime_x = layout
+            .composer_send
+            .x
+            .saturating_sub(ime_width.saturating_add(8));
         let mut active_id_text = itoa::Buffer::new();
         paint_chrome_text_parts(
             &mut surface,
-            tree_width + 12,
+            header_x,
             input_y + 7,
             &["SEND TO @", active_id_text.format(active_id)],
             if self.composer.submit_error.is_some() {
@@ -2423,7 +2508,20 @@ impl ConApp {
                 muted
             },
             11,
-            layout.composer.width.saturating_sub(24),
+            ime_x.saturating_sub(header_x.saturating_add(8)),
+        );
+        paint_chrome_text(
+            &mut surface,
+            ime_x,
+            input_y + 7,
+            &self.ime_status_label,
+            if self.ime_status.as_ref().is_some_and(|status| status.open) {
+                accent
+            } else {
+                muted
+            },
+            11,
+            ime_width,
         );
         surface.fill_rect(
             layout.composer_input.x,
@@ -4455,6 +4553,7 @@ impl PixelWindowApplication for ConApp {
             sidebar_width,
         );
         let directive = self.active_session_mut()?.opened(window)?;
+        let _ = self.refresh_ime_status();
         if let Some(endpoint) = self.control_endpoint.clone() {
             let waker = window.waker();
             self.control_server = Some(
@@ -4548,6 +4647,15 @@ impl PixelWindowApplication for ConApp {
         if matches!(event, PixelWindowEvent::PointerCaptureLost) {
             self.cancel_pointer_gestures_for_activation(window);
             return Ok(PixelWindowDirective::Continue);
+        }
+        if matches!(
+            &event,
+            PixelWindowEvent::FocusChanged(_)
+                | PixelWindowEvent::Keyboard(_)
+                | PixelWindowEvent::Ime(_)
+        ) && self.refresh_ime_status()
+        {
+            self.request_dirty_redraw(window);
         }
         if self.handle_sidebar_resize(window, &event)? {
             self.mark_chrome_full();
@@ -5231,6 +5339,40 @@ fn paint_chrome_text_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ime_status_snapshot_keeps_fixed_types_when_known_or_unknown() {
+        assert_eq!(
+            ime_status_json(None),
+            json::object(vec![
+                ("known", false.into()),
+                ("name", "".into()),
+                ("available", false.into()),
+                ("open", false.into()),
+                ("native_mode", false.into()),
+                ("full_shape", false.into()),
+                ("label", "IME: ?".into()),
+            ])
+        );
+        let mut status = agenterm_platform::ime::ImeStatus::default();
+        status.name = "Pinyin".to_owned();
+        status.available = true;
+        status.open = true;
+        status.native_mode = true;
+        status.full_shape = true;
+        assert_eq!(
+            ime_status_json(Some(&status)),
+            json::object(vec![
+                ("known", true.into()),
+                ("name", "Pinyin".into()),
+                ("available", true.into()),
+                ("open", true.into()),
+                ("native_mode", true.into()),
+                ("full_shape", true.into()),
+                ("label", "IME: Pinyin · native · full-width".into()),
+            ])
+        );
+    }
 
     #[test]
     fn terminal_clipboard_completion_requires_same_active_terminal() {

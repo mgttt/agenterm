@@ -195,10 +195,12 @@ frame and pixel counts.
   failures and zero host copies. After the size-move interaction contract the
   same journey needs only 3-5 product frames and 1-2 full candidates, with 11-13
   successful platform presents, no failures or copies, and at least a 10x
-  dirty-pixel reduction in the best observed run. The bounded control queue now
-  absorbs only a contiguous all-resize tail and the frontend submits its final
-  geometry once; the exact-profile regression moved a previously stable 8-9
-  frame run back to the six-frame ceiling while acknowledging all 18 requests.
+  dirty-pixel reduction in the best observed run. The frontend now aggregates
+  resize-only arrivals for a fixed 4 ms window from the first request and
+  submits the final geometry once; any following non-resize command is an order
+  barrier, and every caller still receives its own result. Three repeated
+  exact-profile journeys stayed within the six-frame ceiling while acknowledging
+  all 18 requests.
 - [x] a paired Windows release probe measured seven idle partial frames at
   895 us average before direct backing versus eight at 360 us after it
   (59.8% lower); a 50-step send/wait journey measured 244 frames at 1,310 us

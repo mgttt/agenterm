@@ -418,6 +418,12 @@ older unsupported state; otherwise the implementation can work while public
 discovery still forces callers to degrade. Keep human acceptance as a separate
 product-evidence status rather than misreporting the mechanism capability.
 
+Native IME status is event-driven observation, not a render-loop query. Cache
+the typed status on open, focus, keyboard/IME transitions and explicit
+structured observation; invalidate only the owning chrome when it changes.
+Publish stable typed defaults for unknown state, because background/no-activate
+windows legitimately lack a thread-local focused input context.
+
 Feature-gate an adapter facade on both its contract prerequisites and at least
 one concrete provider feature. `input + ime` can expose IME facts without
 selecting a pixel host; compiling `run_pixel_window` in that graph leaves its
@@ -503,11 +509,13 @@ evaluation outside that dispatch budget so timeout progress is never deferred
 by load.
 
 Latest-only command coalescing must preserve both queue order and reply
-ownership. Extend a normal bounded GUI batch only when every item already taken
-and each immediately following item has the same cheap supersedable meaning
-(for example programmatic window size); stop before the first different
-command, submit the last value once, and answer every absorbed caller. Never use
-this exception to drain input, screenshots, waits, or arbitrary heavy work.
+ownership. Concurrent IPC workers may not have enqueued a logical burst when
+the GUI drains its first bounded batch, so inspecting only the current queue
+tail is timing-sensitive. Use a short fixed deadline measured from the first
+supersedable request, make every other command an ordering barrier, submit the
+last value once, and complete every absorbed reply. Never reset the deadline on
+later arrivals or leave those replies owned only by the normal pending-wait
+registry; window teardown must fail them explicitly.
 
 Deferred frame operations need one global owner when they change active-session
 state. A per-tab pending screenshot slot is insufficient: draining several

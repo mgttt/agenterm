@@ -44,11 +44,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   profiling. The counter semantics belong to
   [24](PRD_02_24_con_terminal.md).
 - [x] `ui-snapshot` publishes structured UI state — including composer bounds,
-  text/focus/submission error, active-terminal IME preedit, scrollback extent,
-  pending-wait counts, terminal clipboard-paste state/target/error, and the
-  nullable window-scoped control pointer owner — so black-box journeys assert
-  state instead of guessing timing or inferring cleanup only from a later
-  failure.
+  text/focus/submission error, active-terminal IME preedit, typed native IME
+  status/name/mode, scrollback extent, pending-wait counts, terminal
+  clipboard-paste state/target/error, and the nullable window-scoped control
+  pointer owner — so black-box journeys assert state instead of guessing timing
+  or inferring cleanup only from a later failure. Unknown native state keeps the
+  same field types and uses `known=false` plus `IME: ?`.
 - [x] `send-ui-ime enabled|disabled|preedit|commit` injects one bounded
   platform-neutral IME event through the current UI focus owner. Preedit text is
   capped at 64 KiB, its optional character cursor is range-checked, and terminal
@@ -153,10 +154,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   callback and reposts Wake while backlog remains; public request/yield counters
   expose field evidence, while a deterministic queue test proves wake coalescing,
   the fixed batch limit and backlog reporting without scheduler timing assumptions.
-  One exception remains bounded and order-preserving: when the ordinary batch
-  contains only `resize-window`, it absorbs the immediately contiguous resize
-  tail and submits the last geometry once while replying to every caller. It
-  never crosses input, screenshot, wait, or other command work.
+  One exception remains bounded and order-preserving: `resize-window` arrivals
+  share a fixed 4 ms window measured from the first request and submit the last
+  geometry once while replying to every caller. Input, screenshot, wait, close,
+  and every other command are barriers that flush preceding resize work first.
   Saturation reports `control server is busy`, while a closed GUI reports
   `terminal window is closing`; both paths drop the rejected reply owner
   immediately instead of consuming the GUI response timeout.

@@ -259,6 +259,18 @@ fn gui_control_surface_isolated_multitab_black_box() {
     let terminal_preedit = cli_json(exe, &endpoint, &["ui-snapshot"]);
     assert_eq!(terminal_preedit["terminal_ime_preedit"], "nihao");
     assert_eq!(terminal_preedit["composer_preedit"], "");
+    let ime_status = &terminal_preedit["ime_status"];
+    assert!(ime_status["known"].is_boolean());
+    assert!(ime_status["name"].is_string());
+    assert!(ime_status["available"].is_boolean());
+    assert!(ime_status["open"].is_boolean());
+    assert!(ime_status["native_mode"].is_boolean());
+    assert!(ime_status["full_shape"].is_boolean());
+    assert!(
+        ime_status["label"]
+            .as_str()
+            .is_some_and(|label| label.starts_with("IME:"))
+    );
     let terminal_commit = cli_json(
         exe,
         &endpoint,

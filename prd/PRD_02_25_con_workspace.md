@@ -184,3 +184,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   capability now truthfully reports this shipped native mechanism as available
   on a displayed Windows host; that mechanism fact does not substitute for the
   remaining human keyboard acceptance.
+- [x] con caches the focused surface's platform `ImeStatus` on open,
+  focus/keyboard/IME events and explicit snapshot observation. The external
+  input header renders its bounded label (`off`, input-method name plus
+  native/latin and full-width mode, or unknown), while `ui-snapshot` publishes
+  fixed typed `known/name/available/open/native_mode/full_shape/label` fields.
+  Status changes invalidate only composer chrome rather than polling IMM32 on
+  every render.
