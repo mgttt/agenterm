@@ -1,0 +1,61 @@
+* { box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  margin: 0;
+  padding: 24px;
+  background: #0f1419;
+  color: #e7ecf3;
+  line-height: 1.5;
+}
+main { max-width: 640px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin: 0 0 4px; }
+.subtitle { color: #8b9cb3; margin: 0 0 24px; }
+section {
+  background: #1a2332;
+  border: 1px solid #2a3548;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+h2 { font-size: 1rem; margin: 0 0 12px; }
+label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 0.875rem;
+}
+label.checkbox { display: flex; align-items: center; gap: 8px; }
+input[type="email"],
+input[type="url"],
+input[type="number"] {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid #3d4f66;
+  border-radius: 6px;
+  background: #0f1419;
+  color: #e7ecf3;
+}
+.provider-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #2a3548;
+}
+.provider-row:last-child { border-bottom: none; }
+.provider-name { font-weight: 500; }
+.provider-name small { color: #8b9cb3; font-weight: normal; }
+.hint { font-size: 0.8rem; color: #8b9cb3; margin: 8px 0 0; }
+.actions { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #3b82f6;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+button:hover { background: #2563eb; }
+#status { font-size: 0.875rem; color: #6ee7b7; }
