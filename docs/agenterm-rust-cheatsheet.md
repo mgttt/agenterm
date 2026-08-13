@@ -1039,6 +1039,26 @@ whatever happened to be focused. Their payload argument is positional, so
 parse `--` as the end of flags — otherwise text (or a chord) that starts with
 a dash is eaten as a flag.
 
+## Do not drop the AT-SPI bus between resolve and keys
+
+Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`
+process that opens one connection for the tree snapshot, drops it, opens
+another for `grab_focus`, drops that, then injects XTest `Home` into
+Chrome's omnibox leaves the renderer accessibility tree empty (and can
+crash Chrome). The next `send-keys --name` then returns
+`a11y_node_not_found` or `accessibility-tree mechanism unavailable`.
+Keep one process-wide connection, clone it for each AT-SPI call, and do
+not shut down at-spi-bus-launcher / registryd. Do not let the tokio
+runtime or the last zbus connection Drop during process teardown — that
+abort path crashes Chrome's renderer tree. Leak both and let the OS
+close the socket. After named `send-keys` / `send-text`, keep that
+connection pumping for a short bounded drain so Chrome can emit caret
+events before the process exits; exiting immediately after XTest `Home`
+closes the socket under those events and the next named command sees
+`a11y_node_not_found`. Prove two named `send-keys` ~1s apart plus
+`tree --window` still reporting 100+ Chrome nodes on a live `DISPLAY`
+host; unit tests must not require that bus.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must

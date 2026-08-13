@@ -113,7 +113,9 @@ Canonical host mapping (approved product vocabulary):
   `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
   resolve and focus through that same path, then inject text / the chord with
   the existing XTest keyboard path. Resolution failure (miss or ambiguous
-  name) aborts before any keystroke.
+  name) aborts before any keystroke. After a successful named `send-keys`,
+  the same window's AT-SPI tree must still be there for a second named
+  command (one process-wide a11y-bus connection; do not drop the bus).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.
