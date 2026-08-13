@@ -84,6 +84,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   plain "type into whatever is focused" verb. A miss or an ambiguous name
   types nothing and fails typed, so a loop-until caller never sprays text
   at the wrong control.
+- [~] `send-keys` accepts that same name addressing (`--window` + `--name` +
+  optional `--role`, with `--` ending flag parsing). It focuses the matched
+  node first, then sends the chord; without `--name` it stays the plain
+  "send to whatever is focused" verb. A miss or an ambiguous name sends no
+  chord at all.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

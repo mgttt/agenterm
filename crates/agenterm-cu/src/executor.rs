@@ -111,10 +111,13 @@ impl Executor {
                 role,
                 ..
             } => send_text(text, *window, name.as_deref(), role.as_deref()),
-            Command::SendKeys { keys, .. } => {
-                agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
-                Ok(serde_json::json!({ "keys": keys }))
-            }
+            Command::SendKeys {
+                keys,
+                window,
+                name,
+                role,
+                ..
+            } => send_keys(keys, *window, name.as_deref(), role.as_deref()),
             Command::Wait {
                 timeout_ms,
                 condition,
@@ -305,6 +308,34 @@ fn send_text(
         "window": window,
         "action": "send-text",
         "typed": text,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `send-keys` with `--name` focuses the matched node first (same matcher as
+/// `focus`/`send-text`), then reuses the existing chord-injection path. Without
+/// `--name` it stays the plain "send to whatever is focused" verb.
+fn send_keys(
+    keys: &str,
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-keys")? else {
+        agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
+        return Ok(serde_json::json!({ "keys": keys }));
+    };
+    mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
+        .map_err(map_mechanism_err)?;
+    agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "send-keys",
+        "keys": keys,
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -1053,5 +1084,50 @@ mod tests {
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_send_keys_requires_window() {
+        let command = Command::SendKeys {
+            target: TargetRef::Current,
+            keys: "enter".into(),
+            window: None,
+            name: Some("Address and search bar".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_send_keys_missing_node_is_typed_and_sends_nothing() {
+        let command = Command::SendKeys {
+            target: TargetRef::Current,
+            keys: "enter".into(),
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not send keys somewhere else");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn name_send_keys_two_showing_matches_are_ambiguous() {
+        // `send-keys --name` resolves through this exact matcher, so two
+        // showing hits must abort before any chord reaches the display.
+        let nodes = vec![
+            node_at("/0/1", "Address and search bar", "entry", &["showing"]),
+            node_at("/0/2", "Address and search bar", "entry", &["visible"]),
+        ];
+        let err = require_unique_showing_node(&nodes, "Address and search bar", None).unwrap_err();
+        assert_eq!(err.code, "a11y_node_ambiguous");
+        assert_eq!(err.count, Some(2));
     }
 }

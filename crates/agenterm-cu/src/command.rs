@@ -82,6 +82,14 @@ pub enum Command {
     SendKeys {
         target: TargetRef,
         keys: String,
+        /// Optional accessible-name addressing: focus the matched node first,
+        /// resolved with the same matcher as `Focus`, then send the chord.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
     },
     Wait {
         target: TargetRef,
