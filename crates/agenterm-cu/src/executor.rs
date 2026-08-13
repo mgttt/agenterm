@@ -286,9 +286,12 @@ fn focus(
 }
 
 /// `send-text` with `--name` writes through native AT-SPI
-/// `EditableText` (`SetTextContents` / `InsertText`). A named showing
-/// node with no text interface typed-fails (`a11y_text_unavailable`)
-/// and never falls through to XTest / `input_inject::type_text`.
+/// `EditableText` (`SetTextContents` / `InsertText`) or, when the named
+/// showing node exposes `Text` + `editable` but not `EditableText`
+/// (Chrome 151), through AT-SPI `Text` plus the toolkit AX set-value.
+/// Success is confirmed by `Text.GetText`. A named showing node with no
+/// writeable text interface typed-fails (`a11y_text_unavailable`) and
+/// never falls through to XTest / `input_inject::type_text`.
 /// Without `--name` it stays the plain "type into whatever is focused" verb.
 fn send_text(
     text: &str,
@@ -302,6 +305,7 @@ fn send_text(
     };
     mechanism::set_node_text(window, &resolved.node_id, text).map_err(map_mechanism_err)?;
     agenterm_platform::accessibility_tree::drain_bus();
+    let via = agenterm_platform::accessibility_tree::last_text_write_via();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
@@ -309,7 +313,7 @@ fn send_text(
         "window": window,
         "action": "send-text",
         "typed": text,
-        "via": "editable-text",
+        "via": via,
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)

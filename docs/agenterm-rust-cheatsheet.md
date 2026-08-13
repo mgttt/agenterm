@@ -1052,13 +1052,15 @@ interface typed-fails (`a11y_key_unavailable`). That path never falls
 through to XTest / `input_inject::send_keys`. A miss types nothing.
 
 `cu send-text --name` resolves the same unique showing node, then writes
-through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`).
-A named showing node that does not expose a writeable text interface
-typed-fails (`a11y_text_unavailable`). That path never falls through to
-XTest / `input_inject::type_text`. Explicit `--coords` or no `--name` may
-still inject. Their payload argument is positional, so parse `--` as the
-end of flags — otherwise text (or a chord) that starts with a dash is eaten
-as a flag.
+through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`)
+when present. Chrome named fields expose `Text` (read) but not
+`EditableText`; those write through AT-SPI `Text` plus the renderer AX
+set-value and are confirmed by `GetText`. A named showing node that does
+not expose a writeable text interface typed-fails (`a11y_text_unavailable`).
+That path never falls through to XTest / `input_inject::type_text`. Explicit
+`--coords` or no `--name` may still inject. Their payload argument is
+positional, so parse `--` as the end of flags — otherwise text (or a chord)
+that starts with a dash is eaten as a flag.
 
 ## Do not drop the AT-SPI bus between resolve and keys
 

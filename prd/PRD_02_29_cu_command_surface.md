@@ -83,12 +83,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `send-text` accepts the same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). Named write goes
   through native AT-SPI `EditableText` (`SetTextContents` / `InsertText`)
-  and reports `addressing=accessibility-tree`. A named showing node with
-  no writeable text interface typed-fails (`a11y_text_unavailable`) and
-  never falls through to XTest / `input_inject::type_text`. Without
-  `--name` it stays the plain "type into whatever is focused" verb. A miss
-  or an ambiguous name writes nothing and fails typed, so a loop-until
-  caller never sprays text at the wrong control.
+  when that interface exists, otherwise through AT-SPI `Text` plus the
+  toolkit accessibility set-value (Chrome 151 implements `Text` but not
+  `EditableText`). Success is confirmed by `Text.GetText` and reports
+  `addressing=accessibility-tree`. A named showing node with no writeable
+  text interface typed-fails (`a11y_text_unavailable`) and never falls
+  through to XTest / `input_inject::type_text`. Without `--name` it stays
+  the plain "type into whatever is focused" verb. A miss or an ambiguous
+  name writes nothing and fails typed, so a loop-until caller never
+  sprays text at the wrong control.
 - [x] `send-keys` accepts that same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). Named chords go through
   native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`) and

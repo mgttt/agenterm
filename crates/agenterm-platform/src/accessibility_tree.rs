@@ -24,7 +24,8 @@ pub fn perform_node_action(
 }
 
 /// Write `text` through the host accessibility text interface (Linux:
-/// AT-SPI `EditableText` `SetTextContents` / `InsertText`). Never injects
+/// AT-SPI `EditableText` `SetTextContents` / `InsertText`, or AT-SPI `Text`
+/// plus the toolkit set-value when EditableText is absent). Never injects
 /// keystrokes. A node without a writeable text interface fails typed.
 pub fn set_node_text(
     window_handle: Option<isize>,
@@ -32,6 +33,19 @@ pub fn set_node_text(
     text: &str,
 ) -> Result<(), AccessibilityTreeError> {
     crate::selected::accessibility_tree::set_node_text(window_handle, node_id, text)
+}
+
+/// Route of the last successful `set_node_text` on this thread.
+/// Linux: `"editable-text"` or `"text"`. Other hosts: `"editable-text"`.
+pub fn last_text_write_via() -> &'static str {
+    #[cfg(all(feature = "a11y-tree", target_os = "linux"))]
+    {
+        crate::selected::accessibility_tree::last_text_write_via()
+    }
+    #[cfg(not(all(feature = "a11y-tree", target_os = "linux")))]
+    {
+        "editable-text"
+    }
 }
 
 /// Deliver `keys` through the host accessibility Device/key interface
