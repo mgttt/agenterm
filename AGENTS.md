@@ -630,9 +630,16 @@ invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery us
   `write_file`/`edit_file`/`bash` 全被拒,报
   `blocked: the current task policy forbids workspace modifications (user constraint or plan mode)`。
   症状是"洋洋洒洒写完补丁却零文件落盘",容易误判成执行方能力问题。
-  **但这是不确定的,不是 flag 决定的**:同一组
-  `--permission-mode bypassPermissions --preset delivery` 在 2026-08-13 当天成功 3 次、
-  失败 2 次。**不要相信任何"这个组合一定能写"的结论**,靠监控重试,不要靠调 flag。
+  **根因是长 brief 被内联进 `-p`**(2026-08-13 用排除法定位):
+  同一份 brief 内联派单 4/4 全部锁死,而**同一份 brief 改成按文件引用派单立刻正常落盘**。
+  已排除的错误猜想:权限 flag(全程 `bypassPermissions`)、
+  `--preset delivery` 的 planner(`--ablate planner` 照样锁)、
+  "会话随机"(同一 brief 4/4 必现)、环境/时段(同期一条短 prompt 探针写入成功)、
+  某个具体措辞(改写后照样锁)。
+  **正确做法:brief 落到 `.reasonix-dispatch/*.brief.md`,`-p` 只传一句"读 <路径> 并按其执行"**,
+  让执行方自己去读。短任务直接内联无妨。
+  判断依据:轨迹里出现 `constraint=no-mutation` 即中招(它在第一个 reasoning token 就在了,
+  说明是建会话时按 prompt 定的,不是执行中变的)。
   **派单后立刻数轨迹里 `blocked: ` 的条数并分辨类型**:
   - `delivery-first mode requires acceptance criteria...` —— **良性**,执行方写完
     `todo_write` 验收标准即自动放行。
