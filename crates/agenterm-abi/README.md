@@ -115,34 +115,45 @@ cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c target/abi-dev/li
 **静态 vs 动态取舍**：静态省去随行 dll（自包含、部署简单），但产物更大、
 且升级库要重新链接；动态则运行时加载、升级只需替换库文件。
 
-> **限定**：里程碑 25 的 commit 曾断言"单消费者静态链接总字节更小
-> （310,784 vs 540,672）"，**该对比仅限 Windows/abi-dev 口径**——Windows
-> 的调试信息在独立 `.pdb`，静态探针因此显得"小"。Unix 上 debug 静态产物
-> 远大于动态（见下表），发布形态的对比需另测
-> （`--profile abi-release` + Unix `strip`）。
+**给嵌入方的一句话结论（发布形态实测）**：静态链接的自包含产物大约是
+**Windows 262 KB / macOS 2.5 MB（strip 后）/ Linux 11.6 MB（strip 后）**；
+动态形态探针很小，但**必须随行**对应的 `.dll` / `.so` / `.dylib`——缺少
+它们，动态链接的可执行文件无法运行。
 
-**实测体积（探针即 `examples/c/agenterm_probe.c` 链接产物，`abi-dev`
-profile）**：
+**实测体积（探针即 `examples/c/agenterm_probe.c` 链接产物；`abi-dev` /
+`abi-release` profile）**：
 
-| 平台 | 动态链接产物 | 静态链接产物 | 静态库归档 |
-|------|--------------|--------------|------------|
-| Windows (x86_64 + MSVC) | 142,848 B | 311,808 B | 31,698,888 B |
-| macOS | 34,160 B | 17,431,072 B | 57,723,632 B |
-| Linux | 16,480 B | 133,253,128 B | 281,265,014 B |
+| 平台 | profile | 动态探针 | 静态探针 | 静态 strip 后 | 静态库归档 |
+|------|---------|----------|----------|---------------|------------|
+| Windows (x86_64 + MSVC) | abi-dev | 142,848 B（CI）/ 139,776 B（本机） | 311,808 B（CI）/ 310,784 B（本机） | 不适用（调试信息在 `.pdb`） | 31,581,304 B（本机） |
+| | abi-release | 139,776 B（本机） | 261,632 B（本机） | 不适用（调试信息在 `.pdb`） | 19,893,678 B（本机） |
+| macOS | abi-dev | 34,160 B | 17,431,072 B | 8,855,608 B | 57,723,624 B |
+| | abi-release | 34,160 B | 4,857,872 B | 2,543,240 B | 33,141,424 B |
+| Linux | abi-dev | 16,480 B | 133,516,320 B | 35,256,016 B | 281,754,874 B |
+| | abi-release | 16,480 B | 26,791,488 B | 11,601,544 B | 133,007,220 B |
 
 > ⚠️ **口径说明（必读）**：
-> - 以上是 **`abi-dev`（debug）** profile（未优化 + 带调试信息）的数字，
->   **不是发布形态**；
+> - **`abi-dev` 与 `abi-release` 不可混用**：dev（未优化 + 带调试信息）与
+>   release（优化）产物差异巨大，按目标形态选 profile，不要拿 dev 数字当
+>   发布形态预算；
 > - **Windows 与 Unix 不可直接比较**：MSVC 把调试信息放在独立 `.pdb`，
->   Unix 把 DWARF 直接嵌进二进制——静态列看似差 400 倍（312 KB vs
->   133 MB）正是调试信息存放方式不同所致；
-> - 想要接近发布形态的数字，应当用 `--profile abi-release` 构建并
->   （Unix 上）`strip`，**本表未测该口径**——请勿据此编造发布形态数字。
+>   Unix 把 DWARF 直接嵌进二进制——静态列 dev 下看似差 400 倍
+>   （312 KB vs 17/133 MB）正是调试信息存放方式不同所致；
+> - **strip 只对 Unix 适用**：Unix 行在 `abi-*` 构建后执行 `strip`（静态
+>   strip 后列）；Windows 无 strip 行，调试信息本来就不在二进制里。
+
+> **"单消费者静态更省"只在 Windows 成立**：里程碑 25 曾断言"单消费者静态
+> 链接总字节更小（310,784 vs 540,672）"。按**发布形态**数字重新表述：
+> Windows 上静态 261,632 B vs 动态探针 139,776 B + `agenterm.dll`
+> 400,896 B = **540,672 B**，静态更省；**Linux/macOS 上静态（strip 后
+> 11.6 MB / 2.5 MB）远大于动态探针 + 库**，那条结论在 Unix 不成立。
 
 数字来自 `c_static_link.rs` / `c_consumer.rs` 的打印（链接后 `fs::metadata`
-实测，无体积断言）。Windows 为本机实测，Linux/macOS 为里程碑 26 的 CI 日志
-实测值。动态形态除上表探针外**仍需随行** dll/so/dylib（本机 Windows
-`abi-dev` 实测 `agenterm.dll` = 878,080 B；`abi-release` 基线 400,896 B 见
+实测，无体积断言）。Linux/macOS 为 **CI 实测**（CI run 31681964185，
+三平台全绿；gcc / clang 链，DWARF 嵌入二进制），Windows 为本机实测（MSVC；
+CI 与本机并列处均已标注，两者差异属 MSVC 版本不同，如实并列）。动态形态
+除上表探针外**仍需随行** dll/so/dylib（本机 Windows `abi-dev` 实测
+`agenterm.dll` = 878,080 B；`abi-release` 基线 400,896 B 见
 `plan/phase0-baseline-measurements.md`）。
 
 ## `allow-abort-profile` feature（逃生舱，默认关闭）
