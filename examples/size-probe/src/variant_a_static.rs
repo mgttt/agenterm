@@ -34,8 +34,8 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     // 1. user config dir length (never print its content)
-    let config_dir = user_config_directory()
-        .map_err(|e| format!("user_config_directory failed: {e}"))?;
+    let config_dir =
+        user_config_directory().map_err(|e| format!("user_config_directory failed: {e}"))?;
     let config_dir_len = config_dir.as_os_str().as_encoded_bytes().len();
 
     // 2. default shell length (never print its content)
