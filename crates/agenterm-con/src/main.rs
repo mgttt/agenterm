@@ -771,6 +771,21 @@ fn single_field_json(name: &'static str, value: json::JsonValue) -> json::JsonVa
     json::object(vec![(name, value)])
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WheelOutcome {
+    route: &'static str,
+    delivered_notches: i16,
+    changed: bool,
+}
+
+fn wheel_outcome_json(outcome: WheelOutcome) -> json::JsonValue {
+    json::object(vec![
+        ("delivered_notches", outcome.delivered_notches.into()),
+        ("route", outcome.route.into()),
+        ("changed", outcome.changed.into()),
+    ])
+}
+
 fn tab_exit_json(id: workspace::TabId, exit_code: Option<i32>) -> json::JsonValue {
     json::object(vec![
         ("id", json::JsonValue::TabId(id.get())),
@@ -1713,8 +1728,10 @@ impl ConApp {
                 ctrl,
             } => self.control_session_mut(target).and_then(|session| {
                 Self::validate_control_cell(session, row, column)?;
-                session.inject_wheel(window, row, column, f32::from(notches), ctrl);
-                Ok(single_field_json("delivered_notches", notches.into()))
+                session
+                    .inject_wheel(window, row, column, f32::from(notches), ctrl)
+                    .map(wheel_outcome_json)
+                    .map_err(|error| format!("terminal input failed: {error}"))
             }),
             CliCommand::ScreenshotPane { target, output } => {
                 self.control_target(target).and_then(|id| {
@@ -3145,22 +3162,36 @@ impl ConTerminal {
     /// redraw (real wheel events get that from the `MouseWheel` dispatch
     /// arm that calls it), so this mirrors that call site rather than
     /// leaving a scripted scroll invisible until the next unrelated redraw.
-    fn inject_wheel(&mut self, window: &PixelWindow, row: u16, col: u16, notches: f32, ctrl: bool) {
+    fn inject_wheel(
+        &mut self,
+        window: &PixelWindow,
+        row: u16,
+        col: u16,
+        notches: f32,
+        ctrl: bool,
+    ) -> std::io::Result<WheelOutcome> {
         if ctrl {
             // Mirrors the real event: one `zoom_font` call per whole notch,
             // not one call scaled by magnitude — a real Ctrl+wheel session
             // is a *stream* of individual notch events, and reproducing a
             // crash tied to repeated cumulative resizes means replaying
             // that shape, not collapsing it into a single jump.
+            let before = self.font_size_logical;
             let count = agenterm_platform::numeric::round_f32(notches.abs()).max(1.0) as usize;
             for _ in 0..count.min(64) {
                 self.zoom_font(window, notches > 0.0);
             }
-            return;
+            let applied = (self.font_size_logical - before).abs() as i16;
+            return Ok(WheelOutcome {
+                route: "zoom",
+                delivered_notches: if notches > 0.0 { applied } else { -applied },
+                changed: applied != 0,
+            });
         }
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
-        self.handle_wheel(notches, &ModifierState::default(), Some(position));
+        let outcome = self.handle_wheel(notches, &ModifierState::default(), Some(position))?;
         window.request_redraw();
+        Ok(outcome)
     }
 
     /// Builds the current [`ScreenSnapshot`] for `--emit-snapshot`.
@@ -3247,14 +3278,14 @@ impl ConTerminal {
 
     /// Attempts to deliver a pointer event to the application. Returns true
     /// when the application consumed it, so the caller skips local selection.
-    fn report_mouse(
+    fn report_mouse_checked(
         &mut self,
         button: u8,
         point: TerminalPoint,
         pressed: bool,
         motion: bool,
         modifiers: &agenterm_platform::input::ModifierState,
-    ) -> bool {
+    ) -> std::io::Result<bool> {
         let (mode, encoding) = self.mouse_mode();
         let delivery = terminal_input::mouse_delivery(
             mode,
@@ -3265,21 +3296,36 @@ impl ConTerminal {
             pressed,
         );
         if delivery != terminal_input::MouseDelivery::Application {
-            return false;
+            return Ok(false);
         }
         // Motion reports repeat per pixel; collapse them to one per cell.
         if motion && self.last_reported_cell == Some(point) {
-            return true;
+            return Ok(true);
         }
         let code = terminal_input::mouse_code_with_modifiers(button, motion, *modifiers);
         let Some(bytes) =
             terminal_input::mouse_report_bytes(encoding, code, point.col, point.row, pressed)
         else {
-            return false;
+            return Ok(false);
         };
         self.last_reported_cell = Some(point);
-        let _ = self.write_pty(&bytes);
-        true
+        self.write_pty(&bytes)?;
+        Ok(true)
+    }
+
+    fn report_mouse(
+        &mut self,
+        button: u8,
+        point: TerminalPoint,
+        pressed: bool,
+        motion: bool,
+        modifiers: &agenterm_platform::input::ModifierState,
+    ) -> bool {
+        // Physical input is best-effort across a concurrent child exit, but
+        // application ownership must remain stable so a failed write does not
+        // accidentally begin a local selection gesture.
+        self.report_mouse_checked(button, point, pressed, motion, modifiers)
+            .unwrap_or(true)
     }
 
     /// One Ctrl+wheel notch's worth of font-size zoom: `grow = true` is one
@@ -3331,9 +3377,10 @@ impl ConTerminal {
         notches: f32,
         modifiers: &agenterm_platform::input::ModifierState,
         position: Option<LogicalPoint>,
-    ) {
+    ) -> std::io::Result<WheelOutcome> {
         let up = notches > 0.0;
         let count = (agenterm_platform::numeric::round_f32(notches.abs()) as usize).clamp(1, 32);
+        let signed_count = if up { count as i16 } else { -(count as i16) };
 
         // An application that grabbed the mouse gets buttons 64/65.
         let (mode, _) = self.mouse_mode();
@@ -3346,11 +3393,19 @@ impl ConTerminal {
             } else {
                 terminal_input::MOUSE_WHEEL_DOWN
             };
+            let mut delivered = 0_i16;
             for _ in 0..count {
                 // Wheel is press-only; never emit a matching release.
-                self.report_mouse(button, point, true, false, modifiers);
+                if self.report_mouse_checked(button, point, true, false, modifiers)? {
+                    delivered += 1;
+                }
             }
-            return;
+            let delivered = if up { delivered } else { -delivered };
+            return Ok(WheelOutcome {
+                route: "application",
+                delivered_notches: delivered,
+                changed: delivered != 0,
+            });
         }
 
         // Alternate screen has no local scrollback to move, so translate the
@@ -3364,15 +3419,26 @@ impl ConTerminal {
                 (true, false) => b"\x1b[A",
                 (false, false) => b"\x1b[B",
             };
-            let _ = self.write_pty(&sequence.repeat(count.min(120)));
-            return;
+            self.write_pty(&sequence.repeat(count.min(120)))?;
+            return Ok(WheelOutcome {
+                route: "alternate-screen",
+                delivered_notches: signed_count,
+                changed: true,
+            });
         }
 
+        let before = self.scroll_offset;
         self.scroll_by(if up {
             count as isize
         } else {
             -(count as isize)
         });
+        let delta = self.scroll_offset as isize - before as isize;
+        Ok(WheelOutcome {
+            route: "scrollback",
+            delivered_notches: delta as i16,
+            changed: delta != 0,
+        })
     }
 
     /// Routes a pointer button press/release, preferring the application.
@@ -3653,7 +3719,7 @@ impl ConTerminal {
                     let whole = agenterm_platform::numeric::trunc_f32(self.wheel_accumulator);
                     self.wheel_accumulator -= whole;
                     if whole != 0.0 {
-                        self.handle_wheel(whole, &modifiers, position);
+                        let _ = self.handle_wheel(whole, &modifiers, position);
                         window.request_redraw();
                     }
                 }

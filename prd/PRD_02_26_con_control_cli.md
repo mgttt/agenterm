@@ -46,6 +46,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `ui-snapshot` publishes structured UI state — including composer bounds,
   scrollback extent and pending-wait counts — so black-box journeys assert state
   instead of guessing timing.
+- [x] `send-wheel` reports the route actually taken (`zoom`, application mouse,
+  alternate-screen cursor keys, or local scrollback), the notch count actually
+  applied after bounds/clamps, and whether observable state or terminal input
+  changed. Application and alternate-screen PTY write failures fail the request
+  instead of returning a false-success receipt; physical wheel input remains
+  best-effort across concurrent child exit.
 - [x] public `wait-text` delegates exact per-visible-row UTF-8 containment to one
   allocation-free control kernel. It preserves the existing authority: no row
   joining, newline insertion, cross-row match, hidden-scrollback scan, Unicode

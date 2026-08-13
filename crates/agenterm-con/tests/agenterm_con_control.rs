@@ -392,7 +392,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "1",
         ],
     );
-    cli_json(
+    let wheel_receipt = cli_json(
         exe,
         &endpoint,
         &[
@@ -407,6 +407,9 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "1",
         ],
     );
+    assert_eq!(wheel_receipt["route"], "scrollback");
+    assert_eq!(wheel_receipt["delivered_notches"], 1);
+    assert_eq!(wheel_receipt["changed"], true);
 
     let screenshot_text = gui.screenshot.to_string_lossy().into_owned();
     let screenshot_receipt = cli_json(
