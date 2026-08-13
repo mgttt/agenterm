@@ -8,9 +8,9 @@ license = "MIT OR Apache-2.0"
 autolib = false
 
 [lib]
-# cdylib is the delivery artifact. Tests in this package only parse source /
-# exports.txt and do not link against the crate, so no rlib is required.
-crate-type = ["cdylib"]
+# cdylib is the delivery artifact; rlib lets in-process consumers (agenterm-cu)
+# call the same agt_* exports without dlopen.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # The PTY mechanism (milestone 2). `pty` is a real feature: without it the
@@ -24,8 +24,9 @@ crate-type = ["cdylib"]
 # whole `agenterm_platform::clipboard` module: without it the exports below
 # cannot compile. `parent-console` (milestone 9) gates the whole
 # `agenterm_platform::parent_console` module: without it the exports below
-# cannot compile.
-agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "input", "ime", "screenshot", "process", "clipboard", "parent-console"] }
+# cannot compile. `a11y-tree` (milestone 6) gates accessibility-tree observe
+# and node actuation.
+agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "portable-pixel-window", "input", "ime", "screenshot", "process", "clipboard", "parent-console", "a11y-tree"] }
 
 [dev-dependencies]
 # The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built

@@ -11,6 +11,7 @@ use crate::{
     audit::AuditLog,
     auth::{Authorization, Grant},
     command::{Command, PointerButton, WaitCondition},
+    mechanism,
     reply::{CuError, CuReply},
     target::TargetRef,
 };
@@ -133,28 +134,39 @@ fn capabilities_payload() -> serde_json::Value {
     let status = |capability: agenterm_platform::Capability| {
         format!("{:?}", agenterm_platform::capability_status(capability))
     };
+    let tree_status = if mechanism::accessibility_tree_available() {
+        "Available"
+    } else {
+        "Unsupported"
+    };
     serde_json::json!({
         "target": "current",
+        "mechanism": "libagenterm",
         "capabilities": {
             "windows": status(agenterm_platform::Capability::WindowEnumerate),
-            "tree": status(agenterm_platform::Capability::AccessibilityTree),
+            "tree": tree_status,
             "screenshot": status(agenterm_platform::Capability::Screenshot),
             "input": status(agenterm_platform::Capability::InputInject),
         },
         "mapping": {
             "windows": "Win32 EnumWindows / Linux X11 _NET_CLIENT_LIST / macOS AX (planned)",
-            "tree": "Windows UIA / Linux AT-SPI2 / macOS AX (planned)",
+            "tree": "libagenterm agt_a11y_* → Windows UIA / Linux AT-SPI2 / macOS AX",
+        },
+        "gaps": {
+            "windows": "still agenterm-platform until agt_window_enumerate ships",
+            "screenshot": "still agenterm-platform until unified ABI path",
+            "input_degraded": "still agenterm-platform until agt_input_inject ships",
         }
     })
 }
 
 fn tree_payload(window: Option<isize>) -> Result<serde_json::Value, CuError> {
-    let tree =
-        agenterm_platform::accessibility_tree::tree_for_window(window).map_err(map_a11y_err)?;
+    let tree = mechanism::tree_for_window(window).map_err(map_mechanism_err)?;
     Ok(serde_json::json!({
         "degraded": false,
         "backend": tree.backend,
         "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
         "window": tree.window_handle,
         "root_id": tree.root_id,
         "nodes": tree.nodes,
@@ -195,15 +207,12 @@ fn click(
 ) -> Result<serde_json::Value, CuError> {
     if let Some(node_id) = node {
         for _ in 0..clicks.max(1) {
-            agenterm_platform::accessibility_tree::perform_node_action(
-                window,
-                node_id,
-                agenterm_platform::accessibility_tree::AccessibilityNodeAction::Click,
-            )
-            .map_err(map_a11y_err)?;
+            mechanism::perform_node_action(window, node_id, mechanism::NodeAction::Click)
+                .map_err(map_mechanism_err)?;
         }
         return Ok(serde_json::json!({
             "addressing": "accessibility-tree",
+            "mechanism": "libagenterm",
             "node": node_id,
             "window": window,
             "action": "click",
@@ -244,14 +253,11 @@ fn click(
 }
 
 fn focus(window: Option<isize>, node_id: &str) -> Result<serde_json::Value, CuError> {
-    agenterm_platform::accessibility_tree::perform_node_action(
-        window,
-        node_id,
-        agenterm_platform::accessibility_tree::AccessibilityNodeAction::Focus,
-    )
-    .map_err(map_a11y_err)?;
+    mechanism::perform_node_action(window, node_id, mechanism::NodeAction::Focus)
+        .map_err(map_mechanism_err)?;
     Ok(serde_json::json!({
         "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
         "node": node_id,
         "window": window,
         "action": "focus",
@@ -322,15 +328,12 @@ fn map_inject_err(error: agenterm_platform::input_inject::InputInjectError) -> C
     }
 }
 
-fn map_a11y_err(error: agenterm_platform::accessibility_tree::AccessibilityTreeError) -> CuError {
+fn map_mechanism_err(error: mechanism::MechanismError) -> CuError {
     match error {
-        agenterm_platform::accessibility_tree::AccessibilityTreeError::Unsupported { reason } => {
-            CuError::new("unsupported", reason.to_string())
+        mechanism::MechanismError::Unsupported => {
+            CuError::new("unsupported", "accessibility-tree mechanism unavailable")
         }
-        agenterm_platform::accessibility_tree::AccessibilityTreeError::Failed { code, message } => {
-            CuError::new(code.to_string(), message)
-        }
-        _ => CuError::new("unknown", "unknown accessibility-tree error"),
+        mechanism::MechanismError::Failed { code, message } => CuError::new(code, message),
     }
 }
 

@@ -65,13 +65,15 @@ typedef enum {
     AGT_CAP_FONT_RASTER,
     AGT_CAP_FILESYSTEM_PUBLISH,
     AGT_CAP_SHARED_MEMORY,
-    AGT_CAP_PARENT_CONSOLE
+    AGT_CAP_PARENT_CONSOLE,
+    AGT_CAP_ACCESSIBILITY_TREE
 } agt_capability;
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
  * milestone 9, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT,
  * AGT_CAP_PROCESS_OBSERVE, AGT_CAP_CLIPBOARD and AGT_CAP_PARENT_CONSOLE all
- * report AGT_OK. */
+ * report AGT_OK; AGT_CAP_ACCESSIBILITY_TREE reports AGT_OK when the host
+ * accessibility stack is wired. */
 agt_status agt_capability_query(agt_capability cap);
 
 /* --- pty ------------------------------------------------------------ */
@@ -302,6 +304,79 @@ agt_status agt_process_kill(uint32_t pid);
 
 /* pid of the current process. Never fails. */
 uint32_t   agt_process_self(void);
+
+/* --- accessibility tree (milestone 6) ------------------------------- */
+
+/* Fixed-size node record from the thread-local snapshot produced by
+ * agt_a11y_tree_snapshot. Path ids and parent ids are truncated at a UTF-8
+ * character boundary when longer than 64 bytes; truncated fields set the
+ * matching *_truncated flag. Variable strings (role, name, text, action
+ * names) are fetched with agt_a11y_node_string / agt_a11y_node_action_name. */
+typedef struct {
+    int32_t  bounds_x, bounds_y, bounds_width, bounds_height;
+    uint8_t  id[64];
+    uint32_t id_len;
+    uint32_t id_truncated;
+    uint8_t  parent_id[64];
+    uint32_t parent_id_len;
+    uint32_t parent_id_truncated;
+    uint8_t  has_parent; /* 0/1 */
+    uint32_t actions_count;
+} agt_a11y_node;
+
+typedef enum {
+    AGT_A11Y_META_BACKEND = 0,
+    AGT_A11Y_META_ROOT_ID = 1
+} agt_a11y_meta_field;
+
+typedef enum {
+    AGT_A11Y_STR_ROLE = 0,
+    AGT_A11Y_STR_NAME = 1,
+    AGT_A11Y_STR_TEXT = 2,
+    AGT_A11Y_STR_STATES = 3
+} agt_a11y_string_kind;
+
+typedef enum {
+    AGT_A11Y_ACTION_CLICK = 0,
+    AGT_A11Y_ACTION_FOCUS = 1
+} agt_a11y_action_kind;
+
+/* Capture a flattened accessibility tree for the host OS accessibility stack
+ * (Windows UIA / macOS AX / Linux AT-SPI2 behind the platform adapter).
+ * `window_handle` 0 observes all application roots; a non-zero native window
+ * handle filters to that window's owning process. Replaces any prior snapshot
+ * on this thread. *out_node_count receives the node count. Returns
+ * AGT_UNSUPPORTED when the mechanism is absent on this build/host. */
+agt_status agt_a11y_tree_snapshot(intptr_t window_handle, size_t* out_node_count);
+
+/* Fetch snapshot metadata (backend label or root id). Two-stage buffer
+ * protocol identical to agt_window_event_text. Valid only until the next
+ * agt_a11y_tree_snapshot on this thread. */
+agt_status agt_a11y_tree_meta_string(int32_t field, uint8_t* buf, size_t cap,
+                                     size_t* out_len);
+
+/* Copy the node at `index` (0 .. node_count-1) into *out. Out of range ->
+ * AGT_FAILED{code="bad_index"}. No snapshot -> AGT_FAILED{code="no_snapshot"}. */
+agt_status agt_a11y_tree_node(size_t index, agt_a11y_node* out);
+
+/* Fetch a variable-length string for a node. Two-stage buffer protocol.
+ * AGT_A11Y_STR_TEXT returns AGT_OK with *out_len == 0 when the node has no
+ * text. Invalid field -> AGT_FAILED{code="bad_field"}. */
+agt_status agt_a11y_node_string(size_t node_index, agt_a11y_string_kind kind,
+                                uint8_t* buf, size_t cap, size_t* out_len);
+
+/* Fetch an action name for a node. Two-stage buffer protocol. Out of range ->
+ * AGT_FAILED{code="bad_index"}. */
+agt_status agt_a11y_node_action_name(size_t node_index, size_t action_index,
+                                     uint8_t* buf, size_t cap, size_t* out_len);
+
+/* Perform click or focus on `node_id` (NUL-terminated UTF-8 child-index path,
+ * e.g. "/0/2/5") without requiring a prior snapshot. `window_handle` uses the
+ * same filter as agt_a11y_tree_snapshot. Returns AGT_UNSUPPORTED when the
+ * mechanism is absent; resolution/actuation failures -> AGT_FAILED with typed
+ * codes such as "a11y_node_not_found". */
+agt_status agt_a11y_node_perform(intptr_t window_handle, const char* node_id,
+                                   agt_a11y_action_kind action);
 
 /* --- clipboard (milestone 8) ---------------------------------------- */
 

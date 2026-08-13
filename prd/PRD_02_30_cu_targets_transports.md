@@ -89,13 +89,18 @@ Canonical host mapping (approved product vocabulary):
 
 **Linux — AT-SPI2 (`current` first evidence)**
 
-- [~] `current` on Linux/X11 enumerates a control tree through AT-SPI2 via
-  `agenterm-platform` (`a11y-tree`). Nodes carry role, name, states, screen
-  bounds, and action names; node ids are child-index paths from each
-  application root (for example `/3/0/0/1/0`).
+- [~] `current` on Linux/X11 enumerates a control tree through AT-SPI2:
+  `agenterm-platform` (`a11y-tree`) implements the host stack; `cu` consumes
+  libagenterm milestone 6 (`agt_a11y_tree_snapshot` / `agt_a11y_node_perform`)
+  rather than calling platform accessibility APIs directly. Nodes carry role,
+  name, states, screen bounds, and action names; node ids are child-index paths
+  from each application root (for example `/3/0/0/1/0`).
 - [~] `click --node <path>` and `focus --node <path>` invoke AT-SPI `Action`
-  / `Component::grab_focus` for the resolved node. Invalid paths return typed
-  `a11y_node_not_found`.
+  / `Component::grab_focus` for the resolved node via `agt_a11y_node_perform`.
+  Invalid paths return typed `a11y_node_not_found`.
+- [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
+  use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
+  `agt_input_inject` milestones ship; capability JSON documents the gap.
 - [ ] AT-SPI unavailable at runtime (no session bus, registry absent) → typed
   `Unsupported` / `Failed`; no silent fallback to XTest coordinates.
 - [ ] black-box evidence: `scripts/cu-linux-smoke.sh` against the real `cu`
