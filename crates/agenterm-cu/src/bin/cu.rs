@@ -316,8 +316,10 @@ Commands:
                               InsertText); a node with no text interface typed-fails
                               (never XTest). `--` ends flag parsing
   send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
-                              e.g. ctrl+c / alt+f4 / enter; --name focuses that node first
-                              (same matcher as click/focus/send-text), then sends
+                              --name delivers AT-SPI Device/key events
+                              (DeviceEventListener NotifyEvent); a node with no
+                              key interface typed-fails (never XTest). `--`
+                              ends flag parsing. e.g. ctrl+c / enter / k
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])
                               node conditions poll the accessibility tree and fail typed

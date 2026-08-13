@@ -119,6 +119,7 @@ type A11yNodeString = unsafe extern "C" fn(usize, i32, *mut u8, usize, *mut usiz
 type A11yNodeActionName = unsafe extern "C" fn(usize, usize, *mut u8, usize, *mut usize) -> i32;
 type A11yNodePerform = unsafe extern "C" fn(isize, *const c_char, i32) -> i32;
 type A11yNodeSetText = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
+type A11yNodeSendKeys = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type RuntimeUserConfigDir = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
@@ -572,6 +573,14 @@ fn null_group() -> Vec<SweepCase> {
             kind: Kind::MustFail,
             call: Box::new(|lib| {
                 let f: Symbol<A11yNodeSetText> = unsafe { sym(lib, b"agt_a11y_node_set_text") };
+                unsafe { CallResult::Status(f(0, std::ptr::null(), std::ptr::null(), 1)) }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_send_keys[window_handle=0,node_id=NULL,keys=NULL,len=1]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeSendKeys> = unsafe { sym(lib, b"agt_a11y_node_send_keys") };
                 unsafe { CallResult::Status(f(0, std::ptr::null(), std::ptr::null(), 1)) }
             }),
         },

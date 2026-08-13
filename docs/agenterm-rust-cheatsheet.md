@@ -1045,9 +1045,11 @@ with the match count — never silently pick the first. The same uniqueness
 rule applies to `wait --node-name-contains`. Never satisfy a name click
 with a screenshot or degraded coordinates.
 
-`cu send-keys --name` is the same rule plus one ordering constraint: resolve
-and focus the node BEFORE injecting any keystroke, so a miss types nothing
-instead of spraying a chord into whatever happened to be focused.
+`cu send-keys --name` is the same rule plus a native Device/key delivery:
+resolve the unique showing node, then send the chord through AT-SPI
+`DeviceEventListener.NotifyEvent`. A named showing node with no key
+interface typed-fails (`a11y_key_unavailable`). That path never falls
+through to XTest / `input_inject::send_keys`. A miss types nothing.
 
 `cu send-text --name` resolves the same unique showing node, then writes
 through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`).

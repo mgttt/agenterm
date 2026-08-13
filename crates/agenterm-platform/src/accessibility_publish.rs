@@ -1,8 +1,9 @@
 //! Facade for publishing a product widget tree to the host accessibility stack.
 
 pub use crate::contract::accessibility_publish::{
-    NODE_APPLICATION, NODE_COMMAND, NODE_FRAME, NODE_SEND, NODE_SESSION, NODE_TABS,
-    PublishedAction, PublishedNode, PublishedRole, PublishedTree,
+    KeyEffect, NODE_APPLICATION, NODE_COMMAND, NODE_FRAME, NODE_SEND, NODE_SESSION, NODE_TABS,
+    PublishedAction, PublishedKey, PublishedNode, PublishedRole, PublishedTree,
+    published_key_effect,
 };
 
 pub use crate::contract::accessibility_tree::AccessibilityBounds;

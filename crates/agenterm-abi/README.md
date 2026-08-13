@@ -178,10 +178,10 @@ profile 下构建出的库没有任何 `catch_unwind` 保护，**只允许**这�
 - **minor**：**新增导出**时递增（新增机制、纯增量），老消费者不受影响，
   无需重新编译。
 
-当前为 `0x00010001`（major=1, minor=1）：里程碑 2–10 陆续新增了
+当前为 `0x00010003`（major=1, minor=3）：里程碑 2–10 陆续新增了
 PTY / window / frame / input / screenshot / process / clipboard /
 parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面增长
-从 0 递增到 1。
+（含 `agt_a11y_node_set_text` / `agt_a11y_node_send_keys`）。
 
 `agt_build_id()` 返回 `<crate 版本>+abi.<major>.<minor>`
 （例如 `0.1.16+abi.1.1`），在**编译期**由 `CARGO_PKG_VERSION` 与
