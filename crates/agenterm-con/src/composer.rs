@@ -6,6 +6,38 @@
 
 pub const PASTE_LIMIT_BYTES: usize = 64 * 1024;
 
+/// Complete state of the external single-line input surface.
+///
+/// Host adapters may inspect these fields for rendering and routing, while
+/// transitions that must clear several fields stay atomic here.
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct ComposerState {
+    pub text: String,
+    pub preedit: String,
+    pub focused: bool,
+    pub select_all: bool,
+}
+
+impl ComposerState {
+    pub fn cancel_focus(&mut self) {
+        self.focused = false;
+        self.preedit.clear();
+        self.select_all = false;
+    }
+
+    /// Returns one terminal submission and resets all transient edit state.
+    pub fn take_submission(&mut self) -> Option<String> {
+        let mut submission = (!self.text.is_empty()).then(|| std::mem::take(&mut self.text));
+        if let Some(text) = submission.as_mut() {
+            text.push('\r');
+        }
+        self.text.clear();
+        self.preedit.clear();
+        self.select_all = false;
+        submission
+    }
+}
+
 pub fn select_all(buffer: &str, selected: &mut bool) {
     *selected = !buffer.is_empty();
 }
@@ -114,5 +146,27 @@ mod tests {
         paste(&mut buffer, &mut selected, "a\r\nb\t\u{1b}c");
         assert_eq!(buffer, "a b c");
         assert!(!selected);
+    }
+
+    #[test]
+    fn cancel_and_submit_clear_transient_state_atomically() {
+        let mut state = ComposerState {
+            text: "echo ok".to_owned(),
+            preedit: "中".to_owned(),
+            focused: true,
+            select_all: true,
+        };
+        assert_eq!(state.take_submission().as_deref(), Some("echo ok\r"));
+        assert_eq!(state.text, "");
+        assert_eq!(state.preedit, "");
+        assert!(!state.select_all);
+        assert!(state.focused);
+
+        state.preedit = "文".to_owned();
+        state.select_all = true;
+        state.cancel_focus();
+        assert!(!state.focused);
+        assert_eq!(state.preedit, "");
+        assert!(!state.select_all);
     }
 }

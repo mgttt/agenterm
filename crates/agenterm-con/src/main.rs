@@ -775,10 +775,7 @@ impl SessionStore {
 struct ConApp {
     workspace: workspace::Workspace,
     sessions: SessionStore,
-    composer: String,
-    composer_preedit: String,
-    composer_focused: bool,
-    composer_select_all: bool,
+    composer: composer::ComposerState,
     tree_scroll_offset: usize,
     sidebar_width_logical: f64,
     sidebar_resizing: bool,
@@ -834,10 +831,7 @@ impl ConApp {
         Self {
             workspace,
             sessions,
-            composer: String::new(),
-            composer_preedit: String::new(),
-            composer_focused: false,
-            composer_select_all: false,
+            composer: composer::ComposerState::default(),
             tree_scroll_offset: 0,
             sidebar_width_logical: ui::SIDEBAR_WIDTH_DIP,
             sidebar_resizing: false,
@@ -914,7 +908,7 @@ impl ConApp {
             metrics.physical_height,
             metrics.scale_factor,
         );
-        self.composer_focused = false;
+        self.composer.focused = false;
         self.refresh_title(window)?;
         window.request_redraw();
         Ok(())
@@ -1132,7 +1126,7 @@ impl ConApp {
             return Ok(true);
         }
         if text.eq_ignore_ascii_case("i") {
-            self.composer_focused = true;
+            self.composer.focused = true;
             self.update_composer_ime_anchor(window)?;
             self.mark_composer_dirty();
             self.request_dirty_redraw(window);
@@ -1207,7 +1201,7 @@ impl ConApp {
             metrics.physical_height,
             metrics.scale_factor,
         );
-        self.composer_focused = false;
+        self.composer.focused = false;
         self.refresh_title(window)?;
         window.focus();
         window.request_redraw();
@@ -1243,7 +1237,7 @@ impl ConApp {
         );
         let x = layout.composer_input.x as f64 / scale
             + 10.0
-            + self.composer.chars().count() as f64 * 8.0;
+            + self.composer.text.chars().count() as f64 * 8.0;
         let y = layout.composer_input.y as f64 / scale + 8.0;
         let _ = window.set_ime_cursor_area(agenterm_platform::window_host::LogicalRect::new(
             x, y, 2.0, 20.0,
@@ -1260,15 +1254,16 @@ impl ConApp {
             && let LogicalKey::Character(text) = &key.logical
         {
             if text.eq_ignore_ascii_case("a") {
-                composer::select_all(&self.composer, &mut self.composer_select_all);
+                composer::select_all(&self.composer.text, &mut self.composer.select_all);
             } else if text.eq_ignore_ascii_case("c") {
                 if let Some(text) =
-                    composer::selected_text(&self.composer, &self.composer_select_all)
+                    composer::selected_text(&self.composer.text, &self.composer.select_all)
                 {
                     let _ = agenterm_platform::clipboard::set_text(text);
                 }
             } else if text.eq_ignore_ascii_case("x") {
-                if let Some(text) = composer::cut(&mut self.composer, &mut self.composer_select_all)
+                if let Some(text) =
+                    composer::cut(&mut self.composer.text, &mut self.composer.select_all)
                 {
                     let _ = agenterm_platform::clipboard::set_text(&text);
                 }
@@ -1276,7 +1271,11 @@ impl ConApp {
                 && let Ok(text) =
                     agenterm_platform::clipboard::get_text(composer::PASTE_LIMIT_BYTES)
             {
-                composer::paste(&mut self.composer, &mut self.composer_select_all, &text);
+                composer::paste(
+                    &mut self.composer.text,
+                    &mut self.composer.select_all,
+                    &text,
+                );
             }
             let _ = self.update_composer_ime_anchor(window);
             return true;
@@ -1286,20 +1285,18 @@ impl ConApp {
                 self.submit_composer();
             }
             LogicalKey::Named(NamedKey::Backspace) => {
-                composer::backspace(&mut self.composer, &mut self.composer_select_all);
+                composer::backspace(&mut self.composer.text, &mut self.composer.select_all);
             }
             LogicalKey::Named(NamedKey::Escape) => {
-                self.composer_focused = false;
-                self.composer_preedit.clear();
-                self.composer_select_all = false;
+                self.composer.cancel_focus();
             }
             LogicalKey::Named(NamedKey::Space) if !key.modifiers.control && !key.modifiers.alt => {
-                composer::insert(&mut self.composer, &mut self.composer_select_all, " ");
+                composer::insert(&mut self.composer.text, &mut self.composer.select_all, " ");
             }
             LogicalKey::Character(text)
                 if !key.modifiers.control && !key.modifiers.alt && !text.is_empty() =>
             {
-                composer::insert(&mut self.composer, &mut self.composer_select_all, text);
+                composer::insert(&mut self.composer.text, &mut self.composer.select_all, text);
             }
             _ => {}
         }
@@ -1308,9 +1305,7 @@ impl ConApp {
     }
 
     fn submit_composer(&mut self) {
-        if !self.composer.is_empty() {
-            let mut input = std::mem::take(&mut self.composer);
-            input.push('\r');
+        if let Some(input) = self.composer.take_submission() {
             if let Ok(session) = self.active_session_mut() {
                 // Submission crosses the PTY boundary and can change arbitrary
                 // terminal cells; the composer rectangle alone is not enough.
@@ -1319,9 +1314,6 @@ impl ConApp {
                 session.write_pty(input.as_bytes());
             }
         }
-        self.composer.clear();
-        self.composer_preedit.clear();
-        self.composer_select_all = false;
     }
 
     fn handle_composer_ime(
@@ -1331,14 +1323,18 @@ impl ConApp {
     ) {
         use agenterm_platform::ime::{ImeAction, classify_event};
         match classify_event(event, true) {
-            ImeAction::UpdatePreedit { text, .. } => self.composer_preedit = text,
-            ImeAction::ClearPreedit => self.composer_preedit.clear(),
+            ImeAction::UpdatePreedit { text, .. } => self.composer.preedit = text,
+            ImeAction::ClearPreedit => self.composer.preedit.clear(),
             ImeAction::CommitText(text) => {
-                self.composer_preedit.clear();
-                composer::insert(&mut self.composer, &mut self.composer_select_all, &text);
+                self.composer.preedit.clear();
+                composer::insert(
+                    &mut self.composer.text,
+                    &mut self.composer.select_all,
+                    &text,
+                );
             }
             ImeAction::None => {}
-            _ => self.composer_preedit.clear(),
+            _ => self.composer.preedit.clear(),
         }
         let _ = self.update_composer_ime_anchor(window);
     }
@@ -1445,9 +1441,9 @@ impl ConApp {
                         );
                         json::object(vec![
                             ("active", tab_id_json(self.workspace.active())),
-                            ("composer_focused", self.composer_focused.into()),
-                            ("composer_text", self.composer.as_str().into()),
-                            ("composer_preedit", self.composer_preedit.as_str().into()),
+                            ("composer_focused", self.composer.focused.into()),
+                            ("composer_text", self.composer.text.as_str().into()),
+                            ("composer_preedit", self.composer.preedit.as_str().into()),
                             (
                                 "pending_control_waits",
                                 self.pending_control.wait_count().into(),
@@ -1558,7 +1554,7 @@ impl ConApp {
                     {
                         continue;
                     }
-                    if self.composer_focused {
+                    if self.composer.focused {
                         self.handle_composer_key(window, &event);
                         self.mark_composer_dirty();
                     } else {
@@ -1910,7 +1906,7 @@ impl ConApp {
             tree_width + 12,
             input_y + 7,
             &["SEND TO @", active_id_text.format(active_id)],
-            if self.composer_focused { accent } else { muted },
+            if self.composer.focused { accent } else { muted },
             11,
             layout.composer.width.saturating_sub(24),
         );
@@ -1919,7 +1915,7 @@ impl ConApp {
             layout.composer_input.y,
             layout.composer_input.width,
             layout.composer_input.height,
-            if self.composer_focused {
+            if self.composer.focused {
                 accent
             } else {
                 tree_rule
@@ -1931,7 +1927,7 @@ impl ConApp {
             layout.composer_input.y + 1,
             layout.composer_input.width.saturating_sub(2),
             layout.composer_input.height.saturating_sub(2),
-            if self.composer_select_all {
+            if self.composer.select_all {
                 active_bg
             } else {
                 composer_bg
@@ -1945,7 +1941,7 @@ impl ConApp {
             layout.composer_send.height,
             active_bg.to_xrgb(),
         );
-        let composer_cursor = if self.composer_focused && !self.composer_select_all {
+        let composer_cursor = if self.composer.focused && !self.composer.select_all {
             "|"
         } else {
             ""
@@ -1955,8 +1951,8 @@ impl ConApp {
             layout.composer_input.x + 10,
             layout.composer_input.y + 12,
             &[
-                self.composer.as_str(),
-                self.composer_preedit.as_str(),
+                self.composer.text.as_str(),
+                self.composer.preedit.as_str(),
                 composer_cursor,
             ],
             text,
@@ -3937,8 +3933,8 @@ impl PixelWindowApplication for ConApp {
             }
             match self.composer_hit(window, position)? {
                 ui::ComposerHit::Input => {
-                    self.composer_focused = true;
-                    self.composer_select_all = false;
+                    self.composer.focused = true;
+                    self.composer.select_all = false;
                     self.update_composer_ime_anchor(window)?;
                     self.mark_composer_dirty();
                     // A physical client click has already activated and
@@ -3950,7 +3946,7 @@ impl PixelWindowApplication for ConApp {
                 }
                 ui::ComposerHit::Send => {
                     self.submit_composer();
-                    self.composer_focused = true;
+                    self.composer.focused = true;
                     self.update_composer_ime_anchor(window)?;
                     self.mark_composer_dirty();
                     self.request_dirty_redraw(window);
@@ -3958,11 +3954,11 @@ impl PixelWindowApplication for ConApp {
                 }
                 ui::ComposerHit::Outside => {}
             }
-            self.composer_focused = false;
+            self.composer.focused = false;
             self.mark_composer_dirty();
             self.request_dirty_redraw(window);
         }
-        if self.composer_focused {
+        if self.composer.focused {
             match event {
                 PixelWindowEvent::Keyboard(key) if self.handle_composer_key(window, &key) => {
                     self.mark_composer_dirty();
