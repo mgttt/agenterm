@@ -1059,6 +1059,32 @@ closes the socket under those events and the next named command sees
 `tree --window` still reporting 100+ Chrome nodes on a live `DISPLAY`
 host; unit tests must not require that bus.
 
+## Window matching is more than `_NET_WM_PID`
+
+Linux `tree --window` must not treat D-Bus connection PID equality as the
+only window↔AT-SPI join. WebKitGTK (Wails/Reasonix) embeds its document
+tree under a **well-known** bus name
+(`org.webkit.app-*.Sandboxed.WebProcess-*`). The atspi `ObjectRef` type
+only deserializes unique names (`:1.47`), so `GetChildAtIndex` /
+`GetChildren` typed as `ObjectRef` drop that child and the scoped tree
+stops at the GTK frame. Read children as raw `(String, ObjectPath)`,
+resolve well-known names with `GetNameOwner`, and keep walking.
+
+Match a window to application roots by, in order: the window's
+`_NET_WM_PID`, descendant PIDs (`/proc/*/status` PPid), then exact
+normalized equality of the X11 title / `WM_CLASS` / `comm` against the
+application or frame name. Do not substring-match titles (that pulls
+Chrome into an unrelated window).
+
+A toolkit that never registered with AT-SPI (`agenterm-con`, stock
+`xfce4-terminal` without atk-bridge) still has to answer
+`tree --window`. Emit a single showing `frame` whose name/bounds come
+from the X11 window and whose `focus`/`click` raise it via
+`_NET_ACTIVE_WINDOW`. That is window identity, not a second a11y stack
+and not a screenshot. Unit-test the PID walk, WM_CLASS parse, and
+well-known-name keep/drop rules with synthetic fixtures; prove named
+`wait` / `focus` / `send-keys` on a live non-Chrome window.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must
