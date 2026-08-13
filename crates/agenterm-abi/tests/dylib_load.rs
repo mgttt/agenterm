@@ -498,12 +498,19 @@ fn pty_close_unblocks_a_reader_on_another_thread() {
         .recv_timeout(Duration::from_secs(5))
         .expect("reader was NOT unblocked within 5 s of agt_pty_close");
     reader.join().expect("reader thread panicked");
-    // Unblocked: either clean EOF (AGT_OK, n == 0) or an io failure — the
-    // contract is that close never leaves the reader hanging.
+    // The contract (§3.3) is only that close never leaves the reader hanging —
+    // the recv_timeout above already proved that. Legal unblock outcomes are
+    // clean EOF (AGT_OK, n == 0), buffered data the child emitted before close
+    // took effect (AGT_OK, n > 0), or an io failure (AGT_FAILED). Anything
+    // else is a real violation.
     match st {
-        AGT_OK => assert_eq!(n, 0, "expected EOF (n==0), got n={n}"),
+        AGT_OK => {
+            // Legal either way: clean EOF (n == 0) or pre-close buffered data
+            // (n > 0). The child may well have emitted its prompt/banner
+            // before close terminated it, so n must not be pinned to 0.
+        }
         AGT_FAILED => { /* io_read_failed is an acceptable unblock path */ }
-        other => panic!("unexpected status {other}"),
+        other => panic!("unexpected status {other}, n={n}"),
     }
 }
 

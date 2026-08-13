@@ -60,7 +60,9 @@ use palette::Rgb;
 use perf::PerfStats;
 use raster_surface::{CellRect, Surface};
 use session_store::SessionStore;
-use terminal_paint::{paint_cells, paint_cells_at};
+#[cfg(test)]
+use terminal_paint::paint_cells;
+use terminal_paint::paint_cells_at;
 
 /// VT callback storage for OSC sequences (window title, etc.) and terminal
 /// query replies (see `unhandled_csi` below) that need to be written back
@@ -174,9 +176,6 @@ const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(500);
 /// Cursor blink half-period, matching the Windows default caret blink rate
 /// rather than reading GetCaretBlinkTime, for the same reason as above.
 const BLINK_INTERVAL: Duration = Duration::from_millis(530);
-
-/// Horizontal lean per pixel of height for faux italic (SGR 3), roughly the
-/// 12-degree slant real italic faces use.
 
 /// Scrollback retained by the vt100 model.
 const SCROLLBACK: usize = 4000;
@@ -1259,14 +1258,14 @@ impl ConApp {
     }
 
     fn submit_composer(&mut self) {
-        if let Some(input) = self.composer.take_submission() {
-            if let Ok(session) = self.active_session_mut() {
-                // Submission crosses the PTY boundary and can change arbitrary
-                // terminal cells; the composer rectangle alone is not enough.
-                session.dirty.mark_full();
-                session.scroll_to_bottom();
-                session.write_pty(input.as_bytes());
-            }
+        if let Some(input) = self.composer.take_submission()
+            && let Ok(session) = self.active_session_mut()
+        {
+            // Submission crosses the PTY boundary and can change arbitrary
+            // terminal cells; the composer rectangle alone is not enough.
+            session.dirty.mark_full();
+            session.scroll_to_bottom();
+            session.write_pty(input.as_bytes());
         }
     }
 

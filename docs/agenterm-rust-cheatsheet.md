@@ -1058,3 +1058,13 @@ family from `PATH`. This applies to both dynamic and static consumer probes;
 mixing MinGW with an MSVC Rust library produces misleading unresolved runtime
 and system symbols rather than evidence about the public ABI. Print the chosen
 target environment and compiler in test logs so CI selection is auditable.
+
+## Close may wake a reader with buffered data before EOF
+
+For pipes, PTYs, and stream-like native handles, a cross-thread close contract
+should assert bounded wakeup, not that the first completed read is EOF. Bytes
+written before close may already be buffered and are a legal successful read;
+the reader may observe EOF or a typed I/O failure only after consuming them.
+Use a deadline to prove close cannot leave the read blocked, accept buffered
+success within the buffer bound, and test eventual termination separately when
+that stronger behavior is part of the public contract.
