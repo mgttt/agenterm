@@ -130,6 +130,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   local shortcuts, IME suppression and viewport scrolling remain successful
   without pretending they emitted PTY bytes. Capture, local selection and
   scrollback remain available after exit.
+- [x] terminal paste normalizes and frames before one checked write, then snaps
+  to the live viewport only after that write succeeds. A closed PTY preserves
+  the caller's scrollback position instead of presenting a failed paste as a
+  delivered input-side state change.
 - [x] the control endpoint uses a fixed worker pool with bounded connection and
   request queues. Its multi-tab journey floods one PTY with oversized CSI
   parameters while issuing concurrent `capture-pane`, `list-tabs` and

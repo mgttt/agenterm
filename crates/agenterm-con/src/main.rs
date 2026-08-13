@@ -3239,11 +3239,12 @@ impl ConTerminal {
             return Ok(());
         }
         let bracketed = self.parser.screen().bracketed_paste();
-        self.scroll_to_bottom();
         self.write_pty(&terminal_input::terminal_paste_bytes(
             &normalized,
             bracketed,
-        ))
+        ))?;
+        self.scroll_to_bottom();
+        Ok(())
     }
 
     /// Whether `needle` appears in any rendered row right now. Used by the
@@ -5992,6 +5993,17 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn failed_terminal_paste_does_not_commit_live_view_scroll() {
+        let mut app = ConTerminal::new(None);
+        app.scroll_offset = 7;
+
+        let error = app.paste_text("retry me").unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        assert_eq!(app.scroll_offset, 7);
     }
 
     #[test]
