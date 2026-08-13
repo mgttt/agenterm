@@ -38,6 +38,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Untrusted/extreme dimensions cannot wrap a close target onto another row,
   overflow layout construction, or collapse the sidebar through an unordered
   floating-point comparison.
+- [x] accessibility bounds use the same non-wrapping geometry policy: positive
+  native coordinates and dimensions above `i32::MAX` saturate instead of
+  collapsing to zero and making published controls disappear.
 - [x] terminal selection endpoints are normalized once per raster pass rather
   than once per visible cell, and wide-cell/decoration geometry saturates at
   native numeric limits so malformed resize state cannot panic painting.

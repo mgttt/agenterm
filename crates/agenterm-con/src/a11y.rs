@@ -249,16 +249,20 @@ fn published(
         name: name.to_owned(),
         text: text.to_owned(),
         bounds: AccessibilityBounds {
-            x: i32::try_from(rect.x).unwrap_or(0),
-            y: i32::try_from(rect.y).unwrap_or(0),
-            width: i32::try_from(rect.width).unwrap_or(0),
-            height: i32::try_from(rect.height).unwrap_or(0),
+            x: saturating_i32(rect.x),
+            y: saturating_i32(rect.y),
+            width: saturating_i32(rect.width),
+            height: saturating_i32(rect.height),
         },
         focusable: flags.focusable,
         focused: flags.focused,
         editable: flags.editable,
         clickable: flags.clickable,
     }
+}
+
+fn saturating_i32(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 #[cfg(test)]
@@ -290,6 +294,27 @@ mod tests {
         assert_ne!(send.role.as_str(), "frame");
         assert_ne!(send.role.as_str(), "application");
         assert_eq!(tree.children_of(NODE_FRAME).len(), 4);
+    }
+
+    #[test]
+    fn extreme_frame_bounds_saturate_instead_of_collapsing() {
+        let tree = tree(
+            "agenterm-con",
+            "terminal",
+            Layout::new(u32::MAX, u32::MAX, 1.0),
+            u32::MAX,
+            u32::MAX,
+            false,
+            "",
+        );
+        let application = tree.node(NODE_APPLICATION).unwrap();
+        assert_eq!(application.bounds.width, i32::MAX);
+        assert_eq!(application.bounds.height, i32::MAX);
+        let command = tree.node(NODE_COMMAND).unwrap();
+        assert!(command.bounds.x > 0);
+        assert!(command.bounds.y > 0);
+        assert!(command.bounds.width >= 0);
+        assert!(command.bounds.height >= 0);
     }
 
     #[test]
