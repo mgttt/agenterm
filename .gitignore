@@ -11,3 +11,6 @@
 crates/agenterm-wasmcore/target/
 target-click-regression/
 target-click-release/
+
+# 外部 agent 派单回执（本地证据，不入库）
+.reasonix-dispatch/

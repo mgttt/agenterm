@@ -61,6 +61,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agenterm-abi"
+version = "0.1.16"
+dependencies = [
+ "libloading 0.8.9",
+]
+
+[[package]]
 name = "agenterm-con"
 version = "0.1.16"
 dependencies = [

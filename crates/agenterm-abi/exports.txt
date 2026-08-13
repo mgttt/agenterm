@@ -1,0 +1,4 @@
+agt_abi_version
+agt_build_id
+agt_last_error
+agt_capability_query

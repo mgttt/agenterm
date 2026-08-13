@@ -1,0 +1,18 @@
+[package]
+name = "agenterm-abi"
+version = "0.1.16"
+edition = "2024"
+rust-version = "1.97"
+description = "libagenterm — thin C ABI export shell (mechanism boundary, not product authority)"
+license = "MIT OR Apache-2.0"
+autolib = false
+
+[lib]
+# cdylib is the delivery artifact. Tests in this package only parse source /
+# exports.txt and do not link against the crate, so no rlib is required.
+crate-type = ["cdylib"]
+
+[dev-dependencies]
+# The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built
+# cdylib to prove the FFI contract (NUL-terminated C strings, §3.8 fence).
+libloading = "0.8"

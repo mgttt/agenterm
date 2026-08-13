@@ -624,7 +624,16 @@ invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery us
 本机 Reasonix 可用于派单开工与经验检索(与 agenterm 自身 tooling 无关,供跨 agent 协作):
 
 - **CLI**: `E:\app\Reasonix-windows-amd64\reasonix-cli.exe`(v1.24.1;用户 PATH 已含该目录,`reasonix` 命令可用)。
-- **派单**: `reasonix run --auto --dir "<desktop 项目>" -p "<任务>" --output-format json`(headless 一次性会话;**必须带 `--dir` 指向 desktop 已打开的项目,否则会话不落盘、桌面看不到**;`--auto` 必需,否则 `[permissions] mode=ask` 下卡工具审批)。快捷入口:`D:\skillseasonix-dispatch\dispatch.cmd "<任务>" [项目路径] [模型]`(自动落盘会话 + 写回执到 `D:\skillseasonix-dispatcheceipts\`)。
+- **派单**: `reasonix run --permission-mode bypassPermissions --dir "<desktop 项目>" -p "<任务>" --output-format json`(headless 一次性会话;**必须带 `--dir` 指向 desktop 已打开的项目,否则会话不落盘、桌面看不到**)。
+  **`--auto` 不足以让它写文件**(2026-08-13 实测):`--auto` = `--permission-mode auto`,
+  配 `--preset delivery` 时会话会落到 `constraint=no-mutation`,`read_file` 可用但
+  `write_file`/`edit_file`/`bash` 全被拒,报
+  `blocked: the current task policy forbids workspace modifications (user constraint or plan mode)`。
+  症状是"洋洋洒洒写完补丁却零文件落盘",容易误判成执行方能力问题。
+  **派单后先数轨迹里 `blocked: ` 的条数,非 0 就是权限问题**;被 block 但已产出补丁的会话可
+  `--resume "<session.jsonl>"` 复用,不必重跑。
+  另:PATH 里是 `reasonix.cmd` shim,**Git Bash 解析不了**(`command not found`),
+  请从 PowerShell 用全路径调用;`cmd > out; echo EXIT=$?` 会把失败掩盖成成功。快捷入口:`D:\skillseasonix-dispatch\dispatch.cmd "<任务>" [项目路径] [模型]`(自动落盘会话 + 写回执到 `D:\skillseasonix-dispatcheceipts\`)。
 - **常驻**: `reasonix serve --addr 127.0.0.1:8787`(默认 auth none,仅回环;`--auth token` 可收紧)。
 
 本地技能库 `D:\skills\`(reasonix 已注册为 skill 根,`[skills].paths = ["D:/skills"]`):

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agenterm-con", "crates/agenterm-cu", "crates/agenterm-platform", "crates/agenterm-ui-core", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-wasmcore"]
+members = [".", "crates/agenterm-con", "crates/agenterm-cu", "crates/agenterm-platform", "crates/agenterm-abi", "crates/agenterm-ui-core", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-wasmcore"]
 resolver = "2"
 
 [package]
@@ -106,8 +106,9 @@ incremental = true
 [profile.release-fast.package.agenterm-con]
 codegen-units = 1
 
-# Build the standalone host in its own dependency graph so it may unwind
-# panics without changing the main application's aborting profiles.
+# The standalone host is built with panic = "unwind" so FFI callbacks may unwind.
+# The agenterm-abi cdylib has the same requirement (§3.8 of the libagenterm spec):
+# every exported function is wrapped in catch_unwind, which needs unwind support.
 [profile.con-dev]
 inherits = "dev"
 panic = "unwind"
@@ -120,6 +121,18 @@ panic = "unwind"
 codegen-units = 1
 
 [profile.con-release]
+inherits = "release"
+panic = "unwind"
+
+# agenterm-abi is the libagenterm cdylib: every export is wrapped in
+# catch_unwind (§3.8 of the libagenterm spec), which requires unwind. Mirror
+# the con-* approach with dedicated unwind profiles; per-package panic overrides
+# are not allowed by Cargo.
+[profile.abi-dev]
+inherits = "dev"
+panic = "unwind"
+
+[profile.abi-release]
 inherits = "release"
 panic = "unwind"
 
