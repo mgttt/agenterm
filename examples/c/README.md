@@ -85,6 +85,13 @@ proc[2] id=<pid> parent_id=<pid> name=<name>
 last_error: operation=agt_process_list code=buffer_too_small message=<...>
 ```
 
+Each `capability(...)` line prints the raw status: `0` (`AGT_OK`) or `1`
+(`AGT_UNSUPPORTED`). Both are legitimate per the
+`agt_capability_query` contract; the probe fails only on `AGT_FAILED` or any
+other unexpected value. Platform differences show up here — for example
+`capability(WINDOW_HOST)=1` on macOS, where the AppKit-based window mechanism
+requires the main thread.
+
 The final `last_error` line shows the two-stage probe's `buffer_too_small`
 record — that is the documented negotiation signal, not a failure. The probe
 program exits 0.

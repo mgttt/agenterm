@@ -57,14 +57,19 @@ int main(void) {
         return fail("agt_build_id", "NULL");
     }
 
-    /* capability negotiation: the four milestone mechanisms must be AGT_OK */
+    /* capability negotiation: the contract is "AGT_OK or AGT_UNSUPPORTED
+     * only (never AGT_FAILED)". AGT_UNSUPPORTED is a legitimate result -- a
+     * mechanism absent on this platform/build -- not a failure; e.g.
+     * AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED on macOS because AppKit
+     * requires the main thread. Only AGT_FAILED (or any other unexpected
+     * value) violates the contract and is a hard failure here. */
     const agt_capability caps[4] = {AGT_CAP_PTY, AGT_CAP_WINDOW_HOST,
                                     AGT_CAP_SCREENSHOT, AGT_CAP_PROCESS_OBSERVE};
     size_t i;
     for (i = 0; i < 4; i++) {
         agt_status st = agt_capability_query(caps[i]);
         printf("capability(%s)=%d\n", cap_name(caps[i]), (int)st);
-        if (st != AGT_OK) {
+        if (st != AGT_OK && st != AGT_UNSUPPORTED) {
             return fail("agt_capability_query", cap_name(caps[i]));
         }
     }
