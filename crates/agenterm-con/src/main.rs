@@ -510,6 +510,7 @@ Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   ... send-text [--target TAB] TEXT
   ... send-paste [--target TAB] TEXT
   ... send-keys [--target TAB] KEY...
+  ... send-ui-ime enabled|disabled|preedit TEXT [--cursor N]|commit TEXT
   ... send-ui-keys KEY...
   ... send-mouse [--target TAB] --action press|release|move|click
                  --button none|left|middle|right --column N --row N
@@ -1764,6 +1765,14 @@ impl ConApp {
                             ("composer_text", self.composer.text.as_str().into()),
                             ("composer_preedit", self.composer.preedit.as_str().into()),
                             (
+                                "terminal_ime_preedit",
+                                self.workspace
+                                    .active()
+                                    .and_then(|id| self.sessions.get(&id))
+                                    .map_or("", |session| session.ime_preedit.as_str())
+                                    .into(),
+                            ),
+                            (
                                 "composer_submit_error",
                                 self.composer
                                     .submit_error
@@ -1934,6 +1943,30 @@ impl ConApp {
                 self.request_dirty_redraw(window);
                 Ok(single_field_json("sent_keys", keys.len().into()))
             })(),
+            CliCommand::SendUiIme { event } => (|| {
+                let action = match &event {
+                    agenterm_platform::ime::ImeEvent::Enabled => "enabled",
+                    agenterm_platform::ime::ImeEvent::Preedit { .. } => "preedit",
+                    agenterm_platform::ime::ImeEvent::Commit(_) => "commit",
+                    agenterm_platform::ime::ImeEvent::Disabled => "disabled",
+                    _ => "unknown",
+                };
+                let route = if self.composer.focused {
+                    self.handle_composer_ime(window, event);
+                    self.mark_composer_dirty();
+                    "composer"
+                } else {
+                    self.active_session_mut()
+                        .map_err(|error| error.to_string())?
+                        .handle_ime_checked(window, event)?;
+                    "terminal"
+                };
+                self.request_dirty_redraw(window);
+                Ok(json::object(vec![
+                    ("action", action.into()),
+                    ("route", route.into()),
+                ]))
+            })(),
             CliCommand::SendMouse {
                 target,
                 action,
@@ -2087,9 +2120,21 @@ impl ConApp {
             .as_ref()
             .map(|server| server.recv_batch(CONTROL_DRAIN_BUDGET_REQUESTS))
             .unwrap_or_else(|| (Vec::new(), false));
-        for request in requests {
-            self.perf_stats.control_requests = self.perf_stats.control_requests.saturating_add(1);
-            self.dispatch_control(window, request);
+        let mut requests: std::collections::VecDeque<_> = requests.into();
+        while let Some(request) = requests.pop_front() {
+            if matches!(&request.command, control::CliCommand::ResizeWindow { .. }) {
+                let mut resize_run = vec![request];
+                while requests.front().is_some_and(|request| {
+                    matches!(&request.command, control::CliCommand::ResizeWindow { .. })
+                }) {
+                    resize_run.push(requests.pop_front().expect("front resize remains queued"));
+                }
+                self.dispatch_resize_run(window, resize_run);
+            } else {
+                self.perf_stats.control_requests =
+                    self.perf_stats.control_requests.saturating_add(1);
+                self.dispatch_control(window, request);
+            }
         }
         if backlog {
             self.perf_stats.control_budget_yields =
@@ -2114,6 +2159,41 @@ impl ConApp {
                 _ => WaitProbe::Pending,
             }
         })
+    }
+
+    fn dispatch_resize_run(
+        &mut self,
+        window: &PixelWindow,
+        requests: Vec<control::IncomingRequest>,
+    ) {
+        let Some((last_width, last_height)) =
+            requests.last().and_then(|request| match &request.command {
+                control::CliCommand::ResizeWindow { width, height } => Some((*width, *height)),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        let result = window
+            .request_logical_inner_size(LogicalSize::new(
+                f64::from(last_width),
+                f64::from(last_height),
+            ))
+            .map_err(|error| error.to_string());
+        for request in requests {
+            self.perf_stats.control_requests = self.perf_stats.control_requests.saturating_add(1);
+            let control::CliCommand::ResizeWindow { width, height } = request.command else {
+                continue;
+            };
+            let reply = match &result {
+                Ok(()) => Ok(json::object(vec![
+                    ("width", width.into()),
+                    ("height", height.into()),
+                ])),
+                Err(error) => Err(error.clone()),
+            };
+            let _ = request.reply.send(reply);
+        }
     }
 
     fn handle_sidebar_resize(
@@ -2932,6 +3012,14 @@ impl ConTerminal {
     /// made "IME enabled" look like "keyboard broken" and led to IME being
     /// switched off entirely.
     fn handle_ime(&mut self, window: &PixelWindow, event: agenterm_platform::ime::ImeEvent) {
+        let _ = self.handle_ime_checked(window, event);
+    }
+
+    fn handle_ime_checked(
+        &mut self,
+        window: &PixelWindow,
+        event: agenterm_platform::ime::ImeEvent,
+    ) -> Result<(), String> {
         use agenterm_platform::ime::{ImeAction, classify_event};
 
         // The terminal grid is always a valid composition anchor: we place the
@@ -2955,14 +3043,15 @@ impl ConTerminal {
                 self.mark_ime_bounds();
             }
             ImeAction::CommitText(text) => {
-                // The commit enters the PTY and can cause arbitrary terminal
-                // output on the next drain; do not report it as a local range.
+                self.ensure_pty_input_open()?;
+                self.write_pty(text.as_bytes())
+                    .map_err(|error| format!("terminal input failed: {error}"))?;
+                // Commit local presentation only after the complete PTY write
+                // succeeds. A control-driven acceptance test must not receive
+                // success while an exited child silently loses CJK input.
                 self.dirty.mark_full();
                 self.ime_preedit.clear();
-                if !self.exit && !self.child_gone {
-                    self.scroll_to_bottom();
-                    let _ = self.write_pty(text.as_bytes());
-                }
+                self.scroll_to_bottom();
             }
             // `ImeAction` is non-exhaustive; an unknown future action must not
             // silently drop a composition, so clear rather than guess.
@@ -2973,6 +3062,7 @@ impl ConTerminal {
             }
         }
         self.request_dirty_redraw(window);
+        Ok(())
     }
 
     /// Records a left press and returns the click count (1, 2, or 3).

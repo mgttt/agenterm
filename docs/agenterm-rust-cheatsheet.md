@@ -404,6 +404,14 @@ a keyboard event. For composer black-box evidence, query current physical input
 bounds through `ui-snapshot`, click those native client coordinates, and prove
 both the pre-submit PTY absence and post-submit terminal result.
 
+An IME automation hook must inject the platform-neutral `ImeEvent` after native
+decoding, not manufacture Win32 messages or bypass product focus routing. Keep
+preedit and commit distinct, bound text and cursor indices at CLI plus wire
+decode, expose both composer and active-terminal preedit in structured state,
+and report terminal commit success only after the complete PTY write. Such a
+hook proves product routing and failure transactions; it does not prove a real
+installed IME's IMM32/TSF keyboard behavior.
+
 Process completion and host lifetime are separate states. A terminal waiter
 must publish any exit code before its completion flag with release ordering;
 the GUI consumes the flag and status with acquire ordering, retains the final
@@ -481,6 +489,13 @@ and report whether backlog remains, then repost the native wake when needed.
 Coalesce producer wakes on the empty-to-nonempty transition. Keep wait/deadline
 evaluation outside that dispatch budget so timeout progress is never deferred
 by load.
+
+Latest-only command coalescing must preserve both queue order and reply
+ownership. Extend a normal bounded GUI batch only when every item already taken
+and each immediately following item has the same cheap supersedable meaning
+(for example programmatic window size); stop before the first different
+command, submit the last value once, and answer every absorbed caller. Never use
+this exception to drain input, screenshots, waits, or arbitrary heavy work.
 
 Deferred frame operations need one global owner when they change active-session
 state. A per-tab pending screenshot slot is insufficient: draining several

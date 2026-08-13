@@ -103,6 +103,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   click, routes Space and `Ctrl+A/C/X/V` through `send-ui-keys`, proves the
   terminal is unchanged before Enter, then proves the composed command reaches
   the PTY.
+- [x] `send-ui-ime` follows the current focus owner through the same product
+  `ImeEvent` path as the native host. Its bounded public journey proves terminal
+  preedit visibility, CJK commit delivery to the PTY, composer-only
+  preedit/commit, and an explicit exited-child failure that preserves the
+  uncommitted preedit. This automated route evidence narrows but does not replace
+  the required human Microsoft Pinyin keyboard acceptance.
 - [x] composer submission is transactional: it clears text and snaps the live
   viewport only after the active PTY accepts the complete text plus Enter. An
   exited child or write failure restores the exact bounded text without the

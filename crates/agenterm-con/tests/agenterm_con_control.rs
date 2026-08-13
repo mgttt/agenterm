@@ -248,6 +248,58 @@ fn gui_control_surface_isolated_multitab_black_box() {
         &["wait-text", "--target", &root, "ROOT_ONLY"],
     );
 
+    let enabled_ime = cli_json(exe, &endpoint, &["send-ui-ime", "enabled"]);
+    assert_eq!(enabled_ime["route"], "terminal");
+    assert_eq!(enabled_ime["action"], "enabled");
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-ui-ime", "preedit", "nihao", "--cursor", "5"],
+    );
+    let terminal_preedit = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(terminal_preedit["terminal_ime_preedit"], "nihao");
+    assert_eq!(terminal_preedit["composer_preedit"], "");
+    let terminal_commit = cli_json(
+        exe,
+        &endpoint,
+        &["send-ui-ime", "commit", "echo 你好_IME_OK\r"],
+    );
+    assert_eq!(terminal_commit["route"], "terminal");
+    assert_eq!(terminal_commit["action"], "commit");
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "wait-text",
+            "--target",
+            &root,
+            "--timeout-ms",
+            "10000",
+            "你好_IME_OK",
+        ],
+    );
+    assert_eq!(
+        cli_json(exe, &endpoint, &["ui-snapshot"])["terminal_ime_preedit"],
+        ""
+    );
+    cli_json(exe, &endpoint, &["send-ui-ime", "disabled"]);
+
+    cli_json(exe, &endpoint, &["send-ui-keys", "Ctrl+Shift+I"]);
+    let composer_preedit = cli_json(exe, &endpoint, &["send-ui-ime", "preedit", "zhongwen"]);
+    assert_eq!(composer_preedit["route"], "composer");
+    let focused_preedit = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(focused_preedit["composer_preedit"], "zhongwen");
+    assert_eq!(focused_preedit["terminal_ime_preedit"], "");
+    cli_json(exe, &endpoint, &["send-ui-ime", "commit", "中文"]);
+    let focused_commit = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(focused_commit["composer_text"], "中文");
+    assert_eq!(focused_commit["composer_preedit"], "");
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-ui-keys", "Ctrl+A", "Backspace", "Escape"],
+    );
+
     #[cfg(windows)]
     {
         let _restore = ClipboardRestore(agenterm_platform::clipboard::get_text(1024 * 1024).ok());
@@ -554,6 +606,20 @@ fn gui_control_surface_isolated_multitab_black_box() {
             error_text(&rejected)
         );
     }
+
+    cli_json(exe, &endpoint, &["send-ui-ime", "preedit", "retry-ime"]);
+    let rejected_ime = invoke(exe, &endpoint, &["send-ui-ime", "commit", "unavailable"]);
+    assert!(!rejected_ime.status.success());
+    assert!(
+        error_text(&rejected_ime).contains("terminal process has exited"),
+        "exited terminal IME commit must fail explicitly: {}",
+        error_text(&rejected_ime)
+    );
+    assert_eq!(
+        cli_json(exe, &endpoint, &["ui-snapshot"])["terminal_ime_preedit"],
+        "retry-ime"
+    );
+    cli_json(exe, &endpoint, &["send-ui-ime", "disabled"]);
 
     cli_json(exe, &endpoint, &["send-ui-keys", "Ctrl+Shift+I"]);
     cli_json(

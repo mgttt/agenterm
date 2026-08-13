@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::ipc::{IpcEndpoint, IpcTransportErrorCode, NativeListener, NativeStream};
 
 use super::{
@@ -119,6 +120,49 @@ mod compact_channel_tests {
         assert_eq!(second.len(), 2);
         assert!(!backlog);
     }
+
+    #[test]
+    fn request_queue_extends_only_a_contiguous_resize_run() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let queue = RequestQueue::new(alive);
+        for command in [
+            CliCommand::ResizeWindow {
+                width: 800,
+                height: 500,
+            },
+            CliCommand::ResizeWindow {
+                width: 900,
+                height: 600,
+            },
+            CliCommand::ResizeWindow {
+                width: 1000,
+                height: 700,
+            },
+            CliCommand::ListTabs,
+            CliCommand::ResizeWindow {
+                width: 1100,
+                height: 800,
+            },
+        ] {
+            let (reply, _receiver) = reply_channel();
+            queue.push(IncomingRequest { command, reply }).unwrap();
+        }
+        let (resize_run, backlog) = queue.pop_batch(2);
+        assert_eq!(resize_run.len(), 3);
+        assert!(
+            resize_run
+                .iter()
+                .all(|request| matches!(&request.command, CliCommand::ResizeWindow { .. }))
+        );
+        assert!(backlog);
+        let (remaining, backlog) = queue.pop_batch(2);
+        assert!(matches!(&remaining[0].command, CliCommand::ListTabs));
+        assert!(matches!(
+            &remaining[1].command,
+            CliCommand::ResizeWindow { .. }
+        ));
+        assert!(!backlog);
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -164,6 +208,9 @@ pub enum CliCommand {
     },
     SendUiKeys {
         keys: Vec<String>,
+    },
+    SendUiIme {
+        event: ImeEvent,
     },
     SendMouse {
         target: Option<TabId>,
@@ -364,6 +411,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
             }
             CliCommand::SendUiKeys { keys }
         }
+        "send-ui-ime" => {
+            let event = parse_ime_event(&mut cursor)?;
+            CliCommand::SendUiIme { event }
+        }
         "send-mouse" => {
             let target = cursor.optional_target()?;
             let action = parse_mouse_action(cursor.required_value("--action")?)?;
@@ -441,10 +492,76 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
 }
 
 pub fn usage() -> String {
-    "usage: agenterm-con cli list-commands\n       agenterm-con cli --control ENDPOINT <list-tabs|ui-snapshot|perf-stats|reset-perf-stats|cancel-pointer|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-ui-keys|send-mouse|send-wheel|wait-text|wait-tab-exit> ...".to_owned()
+    "usage: agenterm-con cli list-commands\n       agenterm-con cli --control ENDPOINT <list-tabs|ui-snapshot|perf-stats|reset-perf-stats|cancel-pointer|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-ui-ime|send-ui-keys|send-mouse|send-wheel|wait-text|wait-tab-exit> ...".to_owned()
 }
 
-const CLI_COMMAND_CATALOG: &str = "cancel-pointer\ncapture-pane\nclose-tab\nclose-window\nlist-commands\nlist-tabs\nnew-tab\nperf-stats\nreset-perf-stats\nresize-window\nscreenshot-pane\nselect-tab\nsend-keys\nsend-mouse\nsend-paste\nsend-text\nsend-ui-keys\nsend-wheel\nui-snapshot\nwait-tab-exit\nwait-text\n";
+const CLI_COMMAND_CATALOG: &str = "cancel-pointer\ncapture-pane\nclose-tab\nclose-window\nlist-commands\nlist-tabs\nnew-tab\nperf-stats\nreset-perf-stats\nresize-window\nscreenshot-pane\nselect-tab\nsend-keys\nsend-mouse\nsend-paste\nsend-text\nsend-ui-ime\nsend-ui-keys\nsend-wheel\nui-snapshot\nwait-tab-exit\nwait-text\n";
+
+const MAX_IME_TEXT_BYTES: usize = 64 * 1024;
+
+fn parse_ime_event(cursor: &mut Cursor<'_>) -> Result<ImeEvent, String> {
+    let action = cursor
+        .next()
+        .ok_or_else(|| "send-ui-ime requires enabled, preedit, commit, or disabled".to_owned())?;
+    let event = match action {
+        "enabled" => ImeEvent::Enabled,
+        "disabled" => ImeEvent::Disabled,
+        "preedit" => {
+            let text = cursor
+                .next()
+                .ok_or_else(|| "send-ui-ime preedit requires TEXT".to_owned())?
+                .to_owned();
+            let char_count = text.chars().count();
+            let position = cursor.optional_usize("--cursor")?.unwrap_or(char_count);
+            ImeEvent::Preedit {
+                text,
+                cursor: Some((position, position)),
+            }
+        }
+        "commit" => ImeEvent::Commit(
+            cursor
+                .next()
+                .ok_or_else(|| "send-ui-ime commit requires TEXT".to_owned())?
+                .to_owned(),
+        ),
+        _ => {
+            return Err(format!(
+                "invalid IME action {action:?}; use enabled, preedit, commit, or disabled"
+            ));
+        }
+    };
+    cursor.finish()?;
+    validate_ime_event(&event)?;
+    Ok(event)
+}
+
+fn validate_ime_event(event: &ImeEvent) -> Result<(), String> {
+    let text = match event {
+        ImeEvent::Enabled | ImeEvent::Disabled => return Ok(()),
+        ImeEvent::Preedit { text, cursor } => {
+            if let Some((start, end)) = cursor {
+                let chars = text.chars().count();
+                if start > end || *end > chars {
+                    return Err("IME preedit cursor is outside its text".to_owned());
+                }
+            }
+            text
+        }
+        ImeEvent::Commit(text) => {
+            if text.is_empty() {
+                return Err("IME commit text must not be empty".to_owned());
+            }
+            text
+        }
+        _ => return Err("unsupported IME event".to_owned()),
+    };
+    if text.len() > MAX_IME_TEXT_BYTES {
+        return Err(format!(
+            "IME text exceeds the {MAX_IME_TEXT_BYTES}-byte limit"
+        ));
+    }
+    Ok(())
+}
 
 fn validate_window_size(width: u16, height: u16) -> Result<(), String> {
     if width == 0 || height == 0 || width > MAX_WINDOW_DIMENSION || height > MAX_WINDOW_DIMENSION {
@@ -766,7 +883,26 @@ impl RequestQueue {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let count = limit.min(items.len());
-        let batch = items.drain(..count).collect();
+        let mut batch: Vec<_> = items.drain(..count).collect();
+        // Programmatic resize storms are latest-only geometry intent, not
+        // independent heavy GUI work. Once the ordinary bounded batch consists
+        // entirely of resize requests, absorb only the immediately following
+        // resize run so the frontend can acknowledge every caller while
+        // submitting one final native size. Never cross another command: input,
+        // screenshots and waits retain the strict per-turn budget and order.
+        if !batch.is_empty()
+            && batch
+                .iter()
+                .all(|request| matches!(&request.command, CliCommand::ResizeWindow { .. }))
+        {
+            while batch.len() < REQUEST_QUEUE_CAPACITY
+                && items.front().is_some_and(|request| {
+                    matches!(&request.command, CliCommand::ResizeWindow { .. })
+                })
+            {
+                batch.push(items.pop_front().expect("front resize remains queued"));
+            }
+        }
         (batch, !items.is_empty())
     }
 
@@ -1090,6 +1226,28 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
                 wire.string(&key)?;
             }
         }
+        CliCommand::SendUiIme { event } => {
+            wire.byte(20);
+            validate_ime_event(&event)?;
+            match event {
+                ImeEvent::Enabled => wire.byte(0),
+                ImeEvent::Preedit { text, cursor } => {
+                    wire.byte(1);
+                    wire.string(&text)?;
+                    wire.boolean(cursor.is_some());
+                    if let Some((start, end)) = cursor {
+                        wire.u64(start as u64);
+                        wire.u64(end as u64);
+                    }
+                }
+                ImeEvent::Commit(text) => {
+                    wire.byte(2);
+                    wire.string(&text)?;
+                }
+                ImeEvent::Disabled => wire.byte(3),
+                _ => return Err("unsupported IME event".to_owned()),
+            }
+        }
         CliCommand::SendMouse {
             target,
             action,
@@ -1198,6 +1356,29 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
                 keys.push(wire.string()?);
             }
             CliCommand::SendUiKeys { keys }
+        }
+        20 => {
+            let event = match wire.byte()? {
+                0 => ImeEvent::Enabled,
+                1 => {
+                    let text = wire.string()?;
+                    let cursor = if wire.boolean()? {
+                        let start = usize::try_from(wire.u64()?)
+                            .map_err(|_| "IME preedit cursor is outside usize".to_owned())?;
+                        let end = usize::try_from(wire.u64()?)
+                            .map_err(|_| "IME preedit cursor is outside usize".to_owned())?;
+                        Some((start, end))
+                    } else {
+                        None
+                    };
+                    ImeEvent::Preedit { text, cursor }
+                }
+                2 => ImeEvent::Commit(wire.string()?),
+                3 => ImeEvent::Disabled,
+                _ => return Err("invalid control IME action".to_owned()),
+            };
+            validate_ime_event(&event)?;
+            CliCommand::SendUiIme { event }
         }
         10 => {
             let target = wire.optional_tab()?;
@@ -1657,6 +1838,30 @@ mod tests {
     }
 
     #[test]
+    fn ime_cli_rejects_empty_commit_bad_cursor_and_oversized_text() {
+        let parse = |tail: &[&str]| {
+            let mut args = vec!["cli", "--control", "pipe:test", "send-ui-ime"];
+            args.extend_from_slice(tail);
+            parse_cli(&args.into_iter().map(str::to_owned).collect::<Vec<_>>())
+        };
+        assert_eq!(
+            parse(&["commit", ""]),
+            Err("IME commit text must not be empty".to_owned())
+        );
+        assert_eq!(
+            parse(&["preedit", "你好", "--cursor", "3"]),
+            Err("IME preedit cursor is outside its text".to_owned())
+        );
+        let oversized = "x".repeat(MAX_IME_TEXT_BYTES + 1);
+        assert_eq!(
+            parse(&["preedit", &oversized]),
+            Err(format!(
+                "IME text exceeds the {MAX_IME_TEXT_BYTES}-byte limit"
+            ))
+        );
+    }
+
+    #[test]
     fn every_control_command_survives_wire_round_trip() {
         let commands = [
             CliCommand::ListTabs,
@@ -1700,6 +1905,12 @@ mod tests {
             },
             CliCommand::SendUiKeys {
                 keys: vec!["Space".to_owned(), "Ctrl+A".to_owned()],
+            },
+            CliCommand::SendUiIme {
+                event: ImeEvent::Preedit {
+                    text: "nihao".to_owned(),
+                    cursor: Some((5, 5)),
+                },
             },
             CliCommand::SendMouse {
                 target: None,

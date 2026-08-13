@@ -31,7 +31,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   catalog is `cancel-pointer`, `capture-pane`, `close-tab`, `close-window`, `list-commands`,
   `list-tabs`, `new-tab`, `perf-stats`, `reset-perf-stats`, `resize-window`,
   `screenshot-pane`, `select-tab`, `send-keys`, `send-mouse`, `send-paste`,
-  `send-text`, `send-ui-keys`, `send-wheel`, `ui-snapshot`, `wait-tab-exit` and
+  `send-text`, `send-ui-ime`, `send-ui-keys`, `send-wheel`, `ui-snapshot`, `wait-tab-exit` and
   `wait-text`.
 - [x] the fixed GUI-lifetime local CLI uses stable `@N` tab IDs for `list-tabs`,
   `new-tab`, `select-tab`, `close-tab`, `capture-pane`, `screenshot-pane`,
@@ -44,10 +44,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   profiling. The counter semantics belong to
   [24](PRD_02_24_con_terminal.md).
 - [x] `ui-snapshot` publishes structured UI state — including composer bounds,
-  text/focus/submission error, scrollback extent, pending-wait counts, terminal
-  clipboard-paste state/target/error, and the nullable window-scoped control
-  pointer owner — so black-box journeys assert state instead of guessing timing
-  or inferring cleanup only from a later failure.
+  text/focus/submission error, active-terminal IME preedit, scrollback extent,
+  pending-wait counts, terminal clipboard-paste state/target/error, and the
+  nullable window-scoped control pointer owner — so black-box journeys assert
+  state instead of guessing timing or inferring cleanup only from a later
+  failure.
+- [x] `send-ui-ime enabled|disabled|preedit|commit` injects one bounded
+  platform-neutral IME event through the current UI focus owner. Preedit text is
+  capped at 64 KiB, its optional character cursor is range-checked, and terminal
+  commit success is returned only after the complete PTY write; direct protocol
+  and CLI decoding reject malformed action, cursor and payload state.
 - [x] `send-wheel` reports the route actually taken (`zoom`, application mouse,
   alternate-screen cursor keys, or local scrollback), the notch count actually
   applied after bounds/clamps, and whether observable state or terminal input
@@ -147,6 +153,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   callback and reposts Wake while backlog remains; public request/yield counters
   expose field evidence, while a deterministic queue test proves wake coalescing,
   the fixed batch limit and backlog reporting without scheduler timing assumptions.
+  One exception remains bounded and order-preserving: when the ordinary batch
+  contains only `resize-window`, it absorbs the immediately contiguous resize
+  tail and submits the last geometry once while replying to every caller. It
+  never crosses input, screenshot, wait, or other command work.
   Saturation reports `control server is busy`, while a closed GUI reports
   `terminal window is closing`; both paths drop the rejected reply owner
   immediately instead of consuming the GUI response timeout.
