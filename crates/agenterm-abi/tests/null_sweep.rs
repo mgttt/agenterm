@@ -21,13 +21,13 @@
 //! modified (`agt_clipboard_set_text` only gets NULL); nothing may block, so
 //! every `timeout_ms` is `0`.
 //!
-//! Known finding (reported, not silently fixed, not asserted away):
-//! `agt_runtime_env_present(NULL, len)` returns `0` — numerically equal to
-//! `AGT_OK` — because it is an `i32` environment *query* (NULL name = "not
-//! present", documented and asserted by `tests/dylib_load.rs`), not an
-//! `agt_status` return. Those cases live in the `#[ignore]`d test below so
-//! the strict sweep table never conflates the two semantics; the owner
-//! decides whether to keep or change the query behavior.
+//! Reviewed and kept as designed (milestone 13): `agt_runtime_env_present(NULL, len)`
+//! returns `0` — numerically equal to `AGT_OK` — because it is an `i32`
+//! environment *query* (NULL name = "not present", documented and asserted by
+//! `tests/dylib_load.rs`), not an `agt_status` return. This is the intended
+//! `int32_t` query semantics, not a defect. Those cases live in the
+//! `#[ignore]`d test below so the strict sweep table never conflates the two
+//! semantics.
 
 use libloading::{Library, Symbol};
 use std::ffi::{CStr, c_char};
@@ -920,15 +920,15 @@ fn null_sweep_every_pointer_export() {
     run_sweep(&lib, &cap_group(), "cap>0");
 }
 
-/// Reported finding (not silently fixed, not asserted away): `agt_runtime_env_present`
-/// returns `0` for NULL input — numerically equal to `AGT_OK` — because it is
-/// an `i32` environment *query* (NULL name = "not present"), not an
-/// `agt_status`. `tests/dylib_load.rs::runtime_env_present_probes_real_environment`
-/// already asserts this exact behavior. `#[ignore]`d so the strict sweep above
-/// stays unambiguous; the owner decides whether to keep the query semantics or
-/// turn NULL into a failure.
+/// Reviewed and kept as designed: `agt_runtime_env_present` returns `0` for
+/// NULL input — numerically equal to `AGT_OK` — because it is an `i32`
+/// environment *query* (NULL name = "not present"), not an `agt_status`.
+/// `tests/dylib_load.rs::runtime_env_present_probes_real_environment` already
+/// asserts this exact behavior. `#[ignore]`d so the strict sweep above stays
+/// unambiguous — the `int32_t` query semantics is intentional, not a pending
+/// decision.
 #[test]
-#[ignore = "design quirk: agt_runtime_env_present(NULL) returns 0 == AGT_OK numeric value; reported to owner (milestone 12)"]
+#[ignore = "design quirk: agt_runtime_env_present(NULL) returns 0 == AGT_OK numeric value; reviewed and kept as designed (milestone 13)"]
 fn runtime_env_present_null_returns_zero_design_quirk() {
     let lib = load();
     let present: Symbol<RuntimeEnvPresent> = unsafe { sym(&lib, b"agt_runtime_env_present") };
