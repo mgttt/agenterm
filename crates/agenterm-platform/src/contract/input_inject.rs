@@ -31,6 +31,9 @@ pub enum InputInjectError {
 }
 
 impl InputInjectError {
+    /// Built by the Linux and Windows adapters; the macOS one reports its
+    /// failures another way, so this looks unused when linting that target.
+    #[allow(dead_code)]
     pub(crate) fn failed(code: &'static str, message: impl ToString) -> Self {
         Self::Failed {
             code: code.into(),

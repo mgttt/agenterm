@@ -26,15 +26,6 @@ const K_CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS: u32 = 1 << 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct CgRect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
 struct CgPoint {
     x: f64,
     y: f64,
@@ -47,11 +38,28 @@ struct CgSize {
     height: f64,
 }
 
+/// CoreGraphics `CGRect`, nested the way the framework declares it. A flat
+/// four-double struct has the same layout and worked, but `process_window.rs`
+/// declares `CGDisplayBounds` with the nested shape, and two extern
+/// declarations of one symbol that differ even nominally are what
+/// `clashing_extern_declarations` exists to catch: the day either shape
+/// changes, the other silently reads the wrong offsets.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CgRect {
+    origin: CgPoint,
+    size: CgSize,
+}
+
 const AX_SUCCESS: i32 = 0;
 const AX_API_DISABLED: i32 = -25211;
 const AX_VALUE_CGPOINT: u32 = 1;
 const AX_VALUE_CGSIZE: u32 = 2;
 
+// One `#[link]` per framework is the documented way to attach several of them
+// to a single extern block; clippy reads the repeated attribute name as a
+// copy-paste slip. Same false positive as agenterm-cu's hotkeys.rs.
+#[allow(clippy::duplicated_attributes)]
 #[link(name = "CoreGraphics", kind = "framework")]
 #[link(name = "CoreFoundation", kind = "framework")]
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -339,17 +347,17 @@ pub(crate) fn list_screens() -> Result<Vec<ScreenInfo>, WindowEnumerateError> {
         }
         let main = CGMainDisplayID();
         let main_bounds = CGDisplayBounds(main);
-        let primary_h = main_bounds.height;
+        let primary_h = main_bounds.size.height;
         let mut out = Vec::new();
         for id in ids.into_iter().take(count as usize) {
             let b = CGDisplayBounds(id);
             // CGDisplayBounds is bottom-origin on the main display; convert to top-origin.
-            let top_y = primary_h - (b.y + b.height);
+            let top_y = primary_h - (b.origin.y + b.size.height);
             let bounds = WindowBounds {
-                x: b.x.round() as i32,
+                x: b.origin.x.round() as i32,
                 y: top_y.round() as i32,
-                width: b.width.round().max(1.0) as u32,
-                height: b.height.round().max(1.0) as u32,
+                width: b.size.width.round().max(1.0) as u32,
+                height: b.size.height.round().max(1.0) as u32,
             };
             out.push(ScreenInfo {
                 frame: bounds,
