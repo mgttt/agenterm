@@ -51,25 +51,45 @@ fn expected_exports() -> Vec<String> {
 
 /// Platform allowlist of exports that are NOT part of the promised C ABI.
 ///
-/// Must be EMPTY on ALL THREE platforms: CI measured zero extra symbols
-/// there, so leaving the list empty is what makes a FUTURE leak turn this
-/// gate red instead of silently widening the surface. Names live in the
-/// stripped name space this test compares in (see `exported_names`).
+/// EMPTY on Linux and Windows: CI measures zero extra symbols there, so an
+/// empty list is what makes a FUTURE leak turn this gate red instead of
+/// silently widening the surface. Names live in the stripped name space this
+/// test compares in (see `exported_names`).
 ///
-/// macOS specifics: milestone 55 removed the 4 softbuffer objc2
-/// `declare_class!` registration symbols
-/// (`___CLASS_SoftbufferObserver` / `___DROP_FLAG_OFFSET_SoftbufferObserver`
-/// / `___IVAR_OFFSET_SoftbufferObserver` / `___REGISTER_CLASS_SoftbufferObserver`)
-/// from the dylib export surface with `-unexported_symbols_list` — see
-/// `crates/agenterm-abi/build.rs` (this file DISCOVERS a leak, that file
-/// ELIMINATES these 4; keep the two name lists in sync). The build script
-/// comment explains why `-exported_symbols_list` alone cannot work (ld64
-/// takes the union of multiple lists). With the symbols gone the macOS
-/// allowlist is empty like the others; if CI ever reports macOS `total=59`,
-/// the `-unexported_symbols_list` did not take effect — report it, do NOT
-/// re-add names here.
+/// macOS carries four, and milestone 55 established that they cannot be
+/// removed from the dylib. They come from softbuffer's objc2
+/// `declare_class!`, which emits its class-registration statics with
+/// `#[export_name]`, i.e. `SymbolExportLevel::C`. Both linker routes are
+/// closed:
+///
+/// - a second `-exported_symbols_list` naming only the 55 is inert, because
+///   rustc already passes its own list for a macOS cdylib and ld64 takes the
+///   UNION of every list it is given;
+/// - `-unexported_symbols_list`, which would subtract them, is rejected
+///   outright — ld64 fails the link with "-exported_symbol*,
+///   -unexported_symbol* and -no_exported_symbols cannot be used together",
+///   and rustc's own list is not something the crate can suppress.
+///
+/// So the four stay, and this list is how they stay *accounted for*: a fifth
+/// leak still turns the gate red. Do not re-attempt the linker routes without
+/// new evidence; both were tried and the failure is recorded above.
 fn allowed_non_agt() -> &'static [&'static str] {
-    &[]
+    #[cfg(target_os = "macos")]
+    {
+        // Raw names begin with three underscores (`___CLASS_...`); one is the
+        // Mach-O C-symbol prefix that `exported_names` strips, so these keep
+        // two.
+        &[
+            "__CLASS_SoftbufferObserver",
+            "__DROP_FLAG_OFFSET_SoftbufferObserver",
+            "__IVAR_OFFSET_SoftbufferObserver",
+            "__REGISTER_CLASS_SoftbufferObserver",
+        ]
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        &[]
+    }
 }
 
 /// Parse the exported symbol NAMES of the built cdylib with the `object`

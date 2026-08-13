@@ -74,12 +74,60 @@ enum Class {
     /// are counted separately from the object-member surface below so the
     /// real agenterm symbol set is never diluted by toolchain noise.
     ImportLibrary,
+    /// Bare libm names (`sqrt`, `ceil`, `fabs`, `fmod`, `fmax`, `roundeven`,
+    /// the `f16`/`f128` variants, ...) that compiler-builtins defines so
+    /// float support works without libm. These are the one class here whose
+    /// names a consumer's own C code really can produce — they ARE the libm
+    /// interface — so membership additionally REQUIRES a WEAK binding: the
+    /// consumer's (or the platform libm's) strong definition then wins at
+    /// link time and ours is discarded. A STRONG definition of any of these
+    /// would silently rebind a consumer's `sqrt` to ours, so it stays
+    /// unclassified and turns this gate red. Measured on Linux CI, where all
+    /// of them are weak.
+    LibmWeak,
+}
+
+/// The bare libm names compiler-builtins may define. Measured from the Linux
+/// CI archive (milestone 55, first real run); extend from measured data.
+/// Base names only — the `f`/`f16`/`f128` suffixes are handled by the
+/// matcher, and `fmaximum_num`-style names carry their suffix after `_num`.
+fn is_libm_name(name: &str) -> bool {
+    const LIBM_BASES: &[&str] = &[
+        "cbrt",
+        "ceil",
+        "copysign",
+        "fabs",
+        "fdim",
+        "floor",
+        "fma",
+        "fmax",
+        "fmaximum",
+        "fmaximum_num",
+        "fmin",
+        "fminimum",
+        "fminimum_num",
+        "fmod",
+        "rint",
+        "round",
+        "roundeven",
+        "sqrt",
+        "trunc",
+    ];
+    // libm spells the precision as a suffix: none = f64, `f` = f32,
+    // `f16`/`f128` = the new float types. Longest match first is unnecessary
+    // because we compare the whole name against base+suffix.
+    const SUFFIXES: &[&str] = &["", "f", "f16", "f128"];
+    LIBM_BASES.iter().any(|base| {
+        SUFFIXES.iter().any(|suffix| {
+            name.len() == base.len() + suffix.len() && name == format!("{base}{suffix}")
+        })
+    })
 }
 
 /// Classify a symbol name, or `None` when it belongs to no known class.
 /// Platform-specific rules are split with `#[cfg]`; each platform's
 /// "unclassified" set must still be EMPTY (that is the assertion below).
-fn classify(name: &str) -> Option<Class> {
+fn classify(name: &str, is_weak: bool) -> Option<Class> {
     // Rust-mangled names match on their raw form on every platform (see the
     // `Class::RustMangled` doc). Mach-O prefixes plain C symbols with `_`,
     // so `agt_*` and the other C-space names are matched after stripping
@@ -102,8 +150,20 @@ fn classify(name: &str) -> Option<Class> {
     if n == "rust_eh_personality" || n.starts_with("_Unwind_") {
         return Some(Class::Unwind);
     }
+    // ELF emits a `DW.ref.<personality>` data symbol per object that carries
+    // an LSDA, so the unwinder can find the personality routine.
+    if let Some(referent) = n.strip_prefix("DW.ref.")
+        && (referent == "rust_eh_personality" || referent.starts_with("_Unwind_"))
+    {
+        return Some(Class::Unwind);
+    }
     if is_platform_toolchain(n) {
         return Some(Class::Platform);
+    }
+    // Deliberately last, and deliberately conditional on the binding: a weak
+    // libm definition loses to the consumer's, a strong one would hijack it.
+    if is_weak && is_libm_name(n) {
+        return Some(Class::LibmWeak);
     }
     None
 }
@@ -148,6 +208,23 @@ fn is_compiler_builtin(name: &str) -> bool {
         "__cmp",
         "__ucmp",
         "__aeabi_", // ARM runtime ABI helpers
+        // Soft-float comparison helpers, one per predicate and width:
+        // __eqdf2 __nesf2 __lttf2 __gehf2 __unordtf2 ... (measured on Linux).
+        "__eq",
+        "__ne",
+        "__lt",
+        "__le",
+        "__gt",
+        "__ge",
+        "__unord",
+        // Width conversions: __extendhfsf2, __truncdfhf2, __trunctfdf2, ...
+        "__extend",
+        "__trunc",
+        // Integer powers: __powidf2 / __powisf2 / __powitf2.
+        "__powi",
+        // libgcc-compatible half<->float conversion aliases.
+        "__gnu_f2h_ieee",
+        "__gnu_h2f_ieee",
     ];
     BUILTIN_PREFIXES.iter().any(|p| name.starts_with(p))
 }
@@ -185,10 +262,10 @@ fn is_platform_toolchain(name: &str) -> bool {
     }
     #[cfg(not(target_env = "msvc"))]
     {
-        // Non-MSVC Unix toolchains: LLVM anonymous symbols (`anon.*`) are
-        // handled above; nothing else observed yet. Extended from measured
-        // CI data as the first runs report more.
-        false
+        // Non-MSVC Unix toolchains. `anon.*` is handled above. rustc plants
+        // this one section symbol so a debugger can auto-load the pretty
+        // printers; the `__rustc_` prefix is not a name C source produces.
+        name == "__rustc_debug_gdb_scripts_section__"
     }
 }
 
@@ -201,13 +278,17 @@ fn is_platform_toolchain(name: &str) -> bool {
 /// `object::read::archive::ArchiveFile::parse` consumes the leading metadata
 /// members (symbol table / linker member / names table), so the `members()`
 /// iterator yields exactly the object and import members.
-fn archive_defined_symbols(lib_path: &Path) -> (Vec<String>, Vec<String>) {
+/// Object-member symbols carry their binding: `LibmWeak` membership depends
+/// on it. A name seen both weak and strong is reported as STRONG — the
+/// dangerous reading is the one that must not be classified away.
+fn archive_defined_symbols(lib_path: &Path) -> (Vec<(String, bool)>, Vec<String>) {
     let raw = std::fs::read(lib_path)
         .unwrap_or_else(|e| panic!("failed to read staticlib {}: {e}", lib_path.display()));
     let data: &[u8] = &raw;
     let archive = ArchiveFile::parse(data)
         .unwrap_or_else(|e| panic!("ArchiveFile::parse({}) failed: {e}", lib_path.display()));
-    let mut object_names: Vec<String> = Vec::new();
+    let mut object_names: std::collections::BTreeMap<String, bool> =
+        std::collections::BTreeMap::new();
     let mut import_names: Vec<String> = Vec::new();
     let mut member_count = 0usize;
     let mut unparsed_members: Vec<String> = Vec::new();
@@ -223,17 +304,23 @@ fn archive_defined_symbols(lib_path: &Path) -> (Vec<String>, Vec<String>) {
         let is_import_member = member.name().ends_with(b".dll");
         match File::parse(member_data) {
             Ok(file) => {
-                let target = if is_import_member {
-                    &mut import_names
-                } else {
-                    &mut object_names
-                };
                 for symbol in file.symbols() {
                     if symbol.is_global()
                         && symbol.is_definition()
                         && let Ok(name) = symbol.name()
                     {
-                        target.push(name.to_string());
+                        if is_import_member {
+                            import_names.push(name.to_string());
+                        } else {
+                            // A later strong definition overrides an earlier
+                            // weak reading of the same name; never the other
+                            // way round.
+                            let weak = symbol.is_weak();
+                            object_names
+                                .entry(name.to_string())
+                                .and_modify(|w| *w &= weak)
+                                .or_insert(weak);
+                        }
                     }
                 }
             }
@@ -276,11 +363,9 @@ fn archive_defined_symbols(lib_path: &Path) -> (Vec<String>, Vec<String>) {
             lib_path.display()
         );
     }
-    object_names.sort();
-    object_names.dedup();
     import_names.sort();
     import_names.dedup();
-    (object_names, import_names)
+    (object_names.into_iter().collect(), import_names)
 }
 
 /// The gate itself: classify every global defined symbol of the object
@@ -294,10 +379,16 @@ fn archive_symbol_surface_is_classified() {
     let mut class_counts: std::collections::BTreeMap<Class, usize> =
         std::collections::BTreeMap::new();
     let mut unclassified: Vec<String> = Vec::new();
-    for name in object_symbols {
-        match classify(&name) {
+    for (name, is_weak) in object_symbols {
+        match classify(&name, is_weak) {
             Some(class) => *class_counts.entry(class).or_insert(0) += 1,
-            None => unclassified.push(name),
+            // Binding is part of the report: a bare libm name shows up here
+            // only when it is STRONG, and that distinction is the finding.
+            None => unclassified.push(if is_weak {
+                format!("{name} (weak)")
+            } else {
+                format!("{name} (STRONG)")
+            }),
         }
     }
     // Import-library member symbols go through the gate too: they belong to
@@ -309,13 +400,14 @@ fn archive_symbol_surface_is_classified() {
 
     let count = |class: Class| class_counts.get(&class).copied().unwrap_or(0);
     eprintln!(
-        "archive_surface: agt={} rust={} builtins={} unwind={} platform={} import={} unclassified={:?} total={} ({}, profile={})",
+        "archive_surface: agt={} rust={} builtins={} unwind={} platform={} import={} libm_weak={} unclassified={:?} total={} ({}, profile={})",
         count(Class::Agt),
         count(Class::RustMangled),
         count(Class::Builtins),
         count(Class::Unwind),
         count(Class::Platform),
         count(Class::ImportLibrary),
+        count(Class::LibmWeak),
         unclassified,
         class_counts.values().sum::<usize>() + unclassified.len(),
         lib_path.display(),
