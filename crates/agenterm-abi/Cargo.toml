@@ -12,6 +12,15 @@ autolib = false
 # call the same agt_* exports without dlopen.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Escapes the `panic = "abort"` compile_error! gate for Rust-native rlib
+# consumers that have no C/FFI boundary. Default OFF: the delivered cdylib
+# must always be built with the dedicated unwind profiles (abi-release /
+# abi-dev) so every `catch_unwind` fence stays meaningful. Enabling this
+# feature means the abort-profile build ships NO panic fence — only
+# in-process Rust consumers without a C boundary may use it.
+allow-abort-profile = []
+
 [dependencies]
 # The PTY mechanism (milestone 2). `pty` is a real feature: without it the
 # whole `agenterm_platform::pty` module does not exist. `native-pixel-window`

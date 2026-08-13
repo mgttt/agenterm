@@ -34,6 +34,18 @@ cargo fmt --all -- --check
 任何不带 `--profile abi-*` 的 `cargo build/test -p agenterm-abi` 都会因编译期
 闸失败（默认 profile 是 abort，会静默产出无围栏的库）。
 
+## `allow-abort-profile` feature（逃生舱，默认关闭）
+
+该 feature 是给**没有 C 边界的 Rust 原生 rlib 消费者**（如 `agenterm-cu`
+静态链接本 crate）用的：它们不需要 `catch_unwind` 围栏，panic 在 Rust 内部
+正常传播，`panic=abort` 是合法选择。开它 = **放弃 panic 围栏**——abort
+profile 下构建出的库没有任何 `catch_unwind` 保护，**只允许**这类纯 Rust
+内部消费者使用。
+
+**交付 cdylib 的路径永远不开这个 feature**：C 消费者跨 FFI 边界，panic
+必须被 `catch_unwind` 拦成 `AGT_FAILED { code = "panic" }`，因此交付构建
+必须继续走 `--profile abi-release` / `abi-dev`（unwind）。
+
 ## 测试
 
 - `tests/exports_set.rs`：导出符号集与 `exports.txt` 完全一致（编译期不改 ABI）。

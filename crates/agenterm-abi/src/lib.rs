@@ -92,11 +92,14 @@ use agenterm_platform::window_host::{
 
 // §3.8 panic fence: building this crate under an abort profile would neuter
 // every `catch_unwind` below, so it is a hard compile error with an actionable
-// hint instead of a silent footgun.
-#[cfg(panic = "abort")]
+// hint instead of a silent footgun. Rust-native rlib consumers without a C
+// boundary may opt out via the `allow-abort-profile` feature (panic then
+// aborts instead of unwinding, so there is no fence).
+#[cfg(all(panic = "abort", not(feature = "allow-abort-profile")))]
 compile_error!(
     "libagenterm 必须以 panic=unwind 构建：请用 --profile abi-release（或 abi-dev）。\
-     工作区默认 profile（dev/release）为 panic=abort，会静默产出无 catch_unwind 围栏的库。"
+     工作区默认 profile（dev/release）为 panic=abort，会静默产出无 catch_unwind 围栏的库。\
+     Rust 原生 rlib 消费者（无 C 边界）可开 allow-abort-profile 绕过，但那将放弃 panic 围栏。"
 );
 
 /// Stable error state carried in thread-local storage.
