@@ -1186,3 +1186,9 @@ trust was revoked; skip reopen while Settings is frontmost; `orderFrontRegardles
 the instruction card without becoming key; put the exact bundle name on a
 highlighted field. Prove the reopen policy with a clock + flags unit test, not
 a live Settings session.
+
+`AXIsProcessTrustedWithOptions` must receive a real CF/NSDictionary. A
+function-local `extern static kCFBooleanTrue` plus `CFDictionaryCreate` with
+null callbacks produced `CFGetTypeID` at address `0x8` and SIGSEGV'd the
+launchd host. Build the `{AXTrustedCheckOptionPrompt: true}` dictionary with
+`NSDictionary` / `NSNumber`, and never let onboarding crash the hotkey process.
