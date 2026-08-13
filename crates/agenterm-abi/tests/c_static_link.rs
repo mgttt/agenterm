@@ -84,6 +84,41 @@ fn target_env_name() -> &'static str {
     }
 }
 
+/// Where the toolchain puts debug info — appended to the size printout so CI
+/// log readers do not compare sizes across families: MSVC keeps it in a
+/// separate `.pdb`, Unix embeds DWARF in the binary itself, so a
+/// debug-profile static probe is much smaller on Windows for that reason
+/// alone. MSVC vs everything else is the only split that matters here
+/// (mingw/Unix both embed).
+fn debug_info_note() -> &'static str {
+    if cfg!(target_env = "msvc") {
+        "debug info separate .pdb on MSVC"
+    } else {
+        "DWARF embedded"
+    }
+}
+
+/// Active Cargo profile name for the size printout, derived from the test
+/// binary's own path: it lives in `target/<profile>/deps/` (the same layout
+/// `locate_staticlib` relies on), so the `deps` parent's name is the profile,
+/// e.g. "abi-dev". Avoids the compile-time `env!("PROFILE")`, which current
+/// Cargo no longer provides to rustc, and the run-time `PROFILE` var, which
+/// Cargo does not set in the test process.
+fn profile_name() -> String {
+    let Ok(exe) = std::env::current_exe() else {
+        return "unknown".to_string();
+    };
+    let Some(profile_dir) = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+    else {
+        return "unknown".to_string();
+    };
+    profile_dir.to_string()
+}
+
 /// Locate a C compiler whose ABI matches the Rust target this test was
 /// compiled for. The staticlib ships the Rust target's ABI, so the C
 /// toolchain must agree with it:
@@ -430,7 +465,10 @@ fn c_consumer_static_links_and_runs() {
         .unwrap_or("?");
     eprintln!(
         "c_static_link: statically linked probe = {probe_size} bytes \
-         ({lib_name} = {lib_size} bytes)"
+         (profile={}, {}) \
+         ({lib_name} = {lib_size} bytes)",
+        profile_name(),
+        debug_info_note()
     );
 
     // ---- run (no DLL, no LD_LIBRARY_PATH: the probe is self-contained) ---
