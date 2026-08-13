@@ -28,10 +28,38 @@
 //! `int32_t` query semantics, not a defect. Those cases live in the
 //! `#[ignore]`d test below so the strict sweep table never conflates the two
 //! semantics.
+//!
+//! Milestone 63 closes the coverage gap: the sweep previously claimed to be a
+//! "strict sweep" of the C boundary while silently skipping 18 exports (the
+//! milestone 43/45 computer-use group and a few no-arg queries) and nothing
+//! checked that. Now:
+//!
+//! - `sweep_covers_every_export_in_exports_txt` gates completeness: every
+//!   export listed in `exports.txt` must be covered by the sweep table (the
+//!   covered names are read out of the sweep table's own labels — never a
+//!   parallel hand-written list) or appear in `EXEMPT_EXPORTS` with a
+//!   signature-verified reason.
+//! - The 11 genuinely missing pointer/handle-taking exports are swept with
+//!   necessarily-failing input only (NULL / handle 0 / invalid button) —
+//!   never a call that could succeed (see the safety-boundary notes on
+//!   `null_group`).
+//! - `computer_use_sweep_capability_guards` mirrors the `dylib_load.rs`
+//!   capability-guard pattern: on headless hosts where a mechanism reports
+//!   `AGT_UNSUPPORTED`, the guard asserts the real mechanism-absent behavior
+//!   instead of letting the sweep pass vacuously.
 
 use libloading::{Library, Symbol};
+use std::collections::HashSet;
 use std::ffi::{CStr, c_char};
 use std::path::PathBuf;
+
+/// Test-side AGT_CAP_* discriminants (the single hand-written test copy,
+/// gated against the header and the Rust enum by `capability_enum_gate.rs` —
+/// never re-typed here).
+mod common;
+use common::capabilities::{
+    AGT_CAP_ACCESSIBILITY_TREE, AGT_CAP_INPUT_INJECT, AGT_CAP_WINDOW_ENUMERATE, AGT_CAP_WINDOW_OP,
+};
 
 const AGT_OK: i32 = 0;
 const AGT_UNSUPPORTED: i32 = 1;
@@ -87,6 +115,12 @@ struct agt_process_info;
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct agt_a11y_node;
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct agt_window_info;
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct agt_screen_info;
 
 // --- export fn types -----------------------------------------------------
 
@@ -130,6 +164,18 @@ type RuntimeEnvPresent = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ParentConsoleWrite = unsafe extern "C" fn(*const u8, usize) -> i32;
 type RuntimeArgCount = unsafe extern "C" fn(*mut usize) -> i32;
 type RuntimeArg = unsafe extern "C" fn(usize, *mut u8, usize, *mut usize) -> i32;
+type CapabilityQuery = unsafe extern "C" fn(i32) -> i32;
+type WindowEnumerate = unsafe extern "C" fn(*mut agt_window_info, usize, *mut usize) -> i32;
+type ScreenList = unsafe extern "C" fn(*mut agt_screen_info, usize, *mut usize) -> i32;
+type A11yLastTextWriteVia = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
+type NativeWindowShow = unsafe extern "C" fn(isize, i32) -> i32;
+type NativeWindowMove = unsafe extern "C" fn(isize, i32, i32, u32, u32) -> i32;
+type NativeWindowRect = unsafe extern "C" fn(isize, *mut i32, *mut i32, *mut u32, *mut u32) -> i32;
+type NativeWindowSetTopmost = unsafe extern "C" fn(isize, i32) -> i32;
+type NativeWindowClose = unsafe extern "C" fn(isize) -> i32;
+type InputPointerMove = unsafe extern "C" fn(i32, i32) -> i32;
+type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
+type InputText = unsafe extern "C" fn(*const u8, usize) -> i32;
 
 // --- dylib loading (same pattern as tests/dylib_load.rs) -----------------
 
@@ -303,6 +349,118 @@ fn window_spec_title_null() -> agt_window_spec {
         no_activate: 1,
         ime_allowed: 0,
     }
+}
+
+// --- milestone 43/45 computer-use exports (milestone 63 sweep additions) ---
+//
+// Safety boundary (hard, from the milestone 63 brief): every case below
+// passes ONLY necessarily-failing input — NULL, handle 0, or an invalid
+// button — so no call can ever succeed and really move the pointer / press
+// keys / move-close-topmost a real window. No real window handle is ever
+// enumerated and re-injected (that would be a success-path test, out of
+// scope). The same helpers are reused by
+// `computer_use_sweep_capability_guards`.
+
+fn window_enumerate_bad_args(lib: &Library) -> i32 {
+    let f: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    unsafe { f(std::ptr::null_mut(), 1, std::ptr::null_mut()) }
+}
+
+fn window_enumerate_probe(lib: &Library) -> i32 {
+    let f: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    let mut n = 0usize;
+    unsafe { f(std::ptr::null_mut(), 0, &mut n) }
+}
+
+fn window_enumerate_cap1(lib: &Library) -> i32 {
+    let f: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    let mut n = 0usize;
+    unsafe { f(std::ptr::null_mut(), 1, &mut n) }
+}
+
+fn screen_list_bad_args(lib: &Library) -> i32 {
+    let f: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
+    unsafe { f(std::ptr::null_mut(), 1, std::ptr::null_mut()) }
+}
+
+fn screen_list_probe(lib: &Library) -> i32 {
+    let f: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
+    let mut n = 0usize;
+    unsafe { f(std::ptr::null_mut(), 0, &mut n) }
+}
+
+fn screen_list_cap1(lib: &Library) -> i32 {
+    let f: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
+    let mut n = 0usize;
+    unsafe { f(std::ptr::null_mut(), 1, &mut n) }
+}
+
+fn a11y_last_text_write_via_bad_args(lib: &Library) -> i32 {
+    let f: Symbol<A11yLastTextWriteVia> = unsafe { sym(lib, b"agt_a11y_last_text_write_via") };
+    unsafe { f(std::ptr::null_mut(), 1, std::ptr::null_mut()) }
+}
+
+fn a11y_last_text_write_via_probe(lib: &Library) -> i32 {
+    let f: Symbol<A11yLastTextWriteVia> = unsafe { sym(lib, b"agt_a11y_last_text_write_via") };
+    let mut n = 0usize;
+    unsafe { f(std::ptr::null_mut(), 0, &mut n) }
+}
+
+fn a11y_last_text_write_via_cap1(lib: &Library) -> i32 {
+    let f: Symbol<A11yLastTextWriteVia> = unsafe { sym(lib, b"agt_a11y_last_text_write_via") };
+    let mut n = 0usize;
+    unsafe { f(std::ptr::null_mut(), 1, &mut n) }
+}
+
+fn native_window_show_handle0(lib: &Library) -> i32 {
+    let f: Symbol<NativeWindowShow> = unsafe { sym(lib, b"agt_native_window_show") };
+    unsafe { f(0, 0) }
+}
+
+fn native_window_move_handle0(lib: &Library) -> i32 {
+    let f: Symbol<NativeWindowMove> = unsafe { sym(lib, b"agt_native_window_move") };
+    unsafe { f(0, 0, 0, 0, 0) }
+}
+
+fn native_window_rect_handle0_null_outs(lib: &Library) -> i32 {
+    let f: Symbol<NativeWindowRect> = unsafe { sym(lib, b"agt_native_window_rect") };
+    unsafe {
+        f(
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    }
+}
+
+fn native_window_set_topmost_handle0(lib: &Library) -> i32 {
+    let f: Symbol<NativeWindowSetTopmost> = unsafe { sym(lib, b"agt_native_window_set_topmost") };
+    unsafe { f(0, 0) }
+}
+
+fn native_window_close_handle0(lib: &Library) -> i32 {
+    let f: Symbol<NativeWindowClose> = unsafe { sym(lib, b"agt_native_window_close") };
+    unsafe { f(0) }
+}
+
+/// Invalid `button` value: `agt_input_pointer_click` validates the button
+/// *before any platform call* (documented in `include/agenterm.h`), so an
+/// invalid button can never click.
+fn input_pointer_click_bad_button(lib: &Library) -> i32 {
+    let f: Symbol<InputPointerClick> = unsafe { sym(lib, b"agt_input_pointer_click") };
+    unsafe { f(0, 0, 99, 1) }
+}
+
+fn input_type_text_null(lib: &Library) -> i32 {
+    let f: Symbol<InputText> = unsafe { sym(lib, b"agt_input_type_text") };
+    unsafe { f(std::ptr::null(), 1) }
+}
+
+fn input_send_keys_null(lib: &Library) -> i32 {
+    let f: Symbol<InputText> = unsafe { sym(lib, b"agt_input_send_keys") };
+    unsafe { f(std::ptr::null(), 1) }
 }
 
 /// Group 1 — every pointer-taking export with all pointer parameters NULL.
@@ -652,6 +810,68 @@ fn null_group() -> Vec<SweepCase> {
                 unsafe { CallResult::Status(f(0, std::ptr::null_mut(), 0, std::ptr::null_mut())) }
             }),
         },
+        // --- milestone 43/45 computer-use exports (milestone 63 additions) ---
+        // Every case uses necessarily-failing input only (NULL / handle 0 /
+        // invalid button); see the safety-boundary comment above the helper
+        // fns. Argument validation precedes the mechanism check in all of
+        // these except `agt_a11y_last_text_write_via` (mechanism check
+        // first), so on headless hosts they still return `AGT_FAILED` — the
+        // sweep exercises the real validation path, not a vacuous pass.
+        SweepCase {
+            label: "agt_a11y_last_text_write_via[buf=NULL,cap=1,out_len=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(a11y_last_text_write_via_bad_args(lib))),
+        },
+        SweepCase {
+            label: "agt_window_enumerate[buf=NULL,cap=1,out_count=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(window_enumerate_bad_args(lib))),
+        },
+        SweepCase {
+            label: "agt_screen_list[buf=NULL,cap=1,out_count=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(screen_list_bad_args(lib))),
+        },
+        SweepCase {
+            label: "agt_native_window_show[handle=0,state=0]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(native_window_show_handle0(lib))),
+        },
+        SweepCase {
+            label: "agt_native_window_move[handle=0,x=0,y=0,w=0,h=0]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(native_window_move_handle0(lib))),
+        },
+        SweepCase {
+            label: "agt_native_window_rect[handle=0,x=NULL,y=NULL,w=NULL,h=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(native_window_rect_handle0_null_outs(lib))),
+        },
+        SweepCase {
+            label: "agt_native_window_set_topmost[handle=0,topmost=0]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(native_window_set_topmost_handle0(lib))),
+        },
+        SweepCase {
+            label: "agt_native_window_close[handle=0]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(native_window_close_handle0(lib))),
+        },
+        SweepCase {
+            label: "agt_input_pointer_click[x=0,y=0,button=99,clicks=1]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(input_pointer_click_bad_button(lib))),
+        },
+        SweepCase {
+            label: "agt_input_type_text[text=NULL,len=1]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(input_type_text_null(lib))),
+        },
+        SweepCase {
+            label: "agt_input_send_keys[shortcut=NULL,len=1]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(input_send_keys_null(lib))),
+        },
     ]
 }
 
@@ -802,6 +1022,26 @@ fn probe_group() -> Vec<SweepCase> {
                     unsafe { sym(lib, b"agt_parent_console_write_stderr") };
                 unsafe { CallResult::Status(f(std::ptr::null(), 0)) }
             }),
+        },
+        // Milestone 63 additions: the legal "how big?" probe of the milestone
+        // 43/45 two-stage exports. On a headless host the probe reaches the
+        // mechanism check after passing validation and answers
+        // AGT_UNSUPPORTED; `computer_use_sweep_capability_guards` asserts
+        // that explicitly. Zero side effects in both cases.
+        SweepCase {
+            label: "agt_window_enumerate[buf=NULL,cap=0,out_count=&n]",
+            kind: Kind::Probe,
+            call: Box::new(|lib| CallResult::Status(window_enumerate_probe(lib))),
+        },
+        SweepCase {
+            label: "agt_screen_list[buf=NULL,cap=0,out_count=&n]",
+            kind: Kind::Probe,
+            call: Box::new(|lib| CallResult::Status(screen_list_probe(lib))),
+        },
+        SweepCase {
+            label: "agt_a11y_last_text_write_via[buf=NULL,cap=0,out_len=&n]",
+            kind: Kind::Probe,
+            call: Box::new(|lib| CallResult::Status(a11y_last_text_write_via_probe(lib))),
         },
     ]
 }
@@ -961,17 +1201,398 @@ fn cap_group() -> Vec<SweepCase> {
                 unsafe { CallResult::Status(f(std::ptr::null(), 1)) }
             }),
         },
+        // Milestone 63 additions: illegal `buf == NULL, cap > 0` for the
+        // two-stage milestone 43/45 exports. `buf == NULL, cap == 1` fails
+        // argument validation (bad_pointer) on every host except
+        // `agt_a11y_last_text_write_via`, whose mechanism check runs first
+        // (headless → AGT_UNSUPPORTED); both are covered by `Kind::MustFail`.
+        SweepCase {
+            label: "agt_window_enumerate[buf=NULL,cap=1,out_count=&n]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(window_enumerate_cap1(lib))),
+        },
+        SweepCase {
+            label: "agt_screen_list[buf=NULL,cap=1,out_count=&n]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(screen_list_cap1(lib))),
+        },
+        SweepCase {
+            label: "agt_a11y_last_text_write_via[buf=NULL,cap=1,out_len=&n]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(a11y_last_text_write_via_cap1(lib))),
+        },
     ]
 }
 
-/// Milestone 12 sweep entry point: 33 pointer-taking exports + the
-/// `agt_process_kill(pid=0)` safety boundary, 62 combinations in total.
+/// Milestone 12+63 sweep entry point: 44 pointer/handle-taking exports (the
+/// original 33 + the 11 milestone 43/45 computer-use exports swept since
+/// milestone 63) + the `agt_process_kill(pid=0)` safety boundary, 79
+/// combinations in total.
 #[test]
 fn null_sweep_every_pointer_export() {
     let lib = load();
     run_sweep(lib, &null_group(), "null");
     run_sweep(lib, &probe_group(), "probe(cap=0)");
     run_sweep(lib, &cap_group(), "cap>0");
+}
+
+// --- milestone 63: coverage gate ----------------------------------------
+
+/// Exports with no pointer parameter and no handle to pass invalid input to:
+/// there is nothing to sweep with NULL. Every entry states the REAL signature
+/// from `include/agenterm.h` (verified one by one, not guessed from the name)
+/// that makes it exempt, and `sweep_covers_every_export_in_exports_txt`
+/// re-checks the stated signature — so a pointer-taking export can never hide
+/// behind a "no pointer args" claim (that check is what makes "exempt
+/// everything" impossible). The only second channel is `KnownDesignQuirk`,
+/// which requires an explicit reason naming the covering test.
+#[derive(Clone, Copy)]
+enum ExemptReason {
+    /// The signature takes no pointer parameter and no handle: there is
+    /// nothing to pass NULL / an illegal handle to.
+    NoPointerArgs,
+    /// Reviewed design exception (milestone 13): the export DOES take a
+    /// pointer, but NULL has legal query semantics the strict sweep's "must
+    /// fail" assert would reject. Explicitly listed here — never hidden —
+    /// with the covering test named; the existing `#[ignore]`d
+    /// `agt_runtime_env_present` test is kept as designed.
+    KnownDesignQuirk(&'static str),
+}
+
+const EXEMPT_EXPORTS: &[(&str, &str, ExemptReason)] = &[
+    (
+        "agt_abi_version",
+        "uint32_t agt_abi_version(void)",
+        ExemptReason::NoPointerArgs,
+    ),
+    (
+        "agt_build_id",
+        "const char* agt_build_id(void)",
+        ExemptReason::NoPointerArgs,
+    ),
+    (
+        "agt_process_self",
+        "uint32_t agt_process_self(void)",
+        ExemptReason::NoPointerArgs,
+    ),
+    (
+        "agt_capability_query",
+        "agt_status agt_capability_query(agt_capability cap)",
+        ExemptReason::NoPointerArgs,
+    ),
+    (
+        "agt_clipboard_has_text",
+        "int32_t agt_clipboard_has_text(void)",
+        ExemptReason::NoPointerArgs,
+    ),
+    (
+        "agt_a11y_drain_bus",
+        "agt_status agt_a11y_drain_bus(void)",
+        ExemptReason::NoPointerArgs,
+    ),
+    // Special case, not a signature loophole: `agt_input_pointer_move` takes
+    // only coordinates — there is no NULL/illegal-handle equivalent that
+    // necessarily fails, and on a host with the input-injection mechanism ANY
+    // call really moves the pointer. The milestone 63 safety boundary forbids
+    // constructing a call that could succeed, so the success path is out of
+    // scope (a future round with a self-owned window). Its mechanism-absent
+    // path is asserted by `computer_use_sweep_capability_guards`.
+    (
+        "agt_input_pointer_move",
+        "agt_status agt_input_pointer_move(int32_t x, int32_t y)",
+        ExemptReason::NoPointerArgs,
+    ),
+    // Known design quirk (milestone 13, reviewed and kept as designed): NULL
+    // `name` answers "not present" (0, numerically equal to AGT_OK) — an
+    // `int32_t` environment query, not an `agt_status`. The strict sweep
+    // must-fail assert cannot apply; the behavior is asserted by the
+    // `#[ignore]`d `runtime_env_present_null_returns_zero_design_quirk` test.
+    (
+        "agt_runtime_env_present",
+        "int32_t agt_runtime_env_present(const uint8_t* name, size_t len)",
+        ExemptReason::KnownDesignQuirk(
+            "runtime_env_present_null_returns_zero_design_quirk (milestone 13 review)",
+        ),
+    ),
+];
+
+/// Extract the export symbol from a sweep-case label (`"<symbol>[<combo>]"`).
+/// The coverage gate reads the covered set out of the sweep table's own
+/// labels — never a parallel hand-written list, which is exactly the drift
+/// this gate exists to catch.
+fn label_symbol(label: &str) -> &str {
+    let symbol = label.split('[').next().unwrap_or(label);
+    assert!(
+        symbol.starts_with("agt_"),
+        "sweep label {label:?} must be '<symbol>[<combination>]'"
+    );
+    symbol
+}
+
+/// Milestone 63 coverage gate: every export in `exports.txt` must be covered
+/// by the sweep table or appear in `EXEMPT_EXPORTS` with a signature-verified
+/// reason. Fails by listing the unswept exports; also fails if an exempt
+/// entry's parameter list contains a pointer (the "exempt everything"
+/// backdoor) or if an export is both swept and exempted.
+#[test]
+fn sweep_covers_every_export_in_exports_txt() {
+    let exports_txt = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("exports.txt");
+    let text = std::fs::read_to_string(&exports_txt)
+        .unwrap_or_else(|e| panic!("read {}: {e}", exports_txt.display()));
+    let exports: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert!(
+        exports.len() >= 55,
+        "exports.txt should list the full export set (>= 55); found {}",
+        exports.len()
+    );
+
+    // Covered set comes from the sweep table itself. One export legitimately
+    // appears in several combination cases (e.g. `agt_pty_open` has three);
+    // the gate collects the distinct symbol set.
+    let mut swept: HashSet<&str> = HashSet::new();
+    for case in null_group()
+        .into_iter()
+        .chain(probe_group())
+        .chain(cap_group())
+    {
+        swept.insert(label_symbol(case.label));
+    }
+
+    // Exempt set: each entry must state a signature. `NoPointerArgs` entries
+    // must have NO pointer in the parameter list (return-type pointers such
+    // as agt_build_id's `const char*` are fine — there is still nothing to
+    // pass NULL to); that check is the "exempt everything" backdoor guard.
+    // `KnownDesignQuirk` entries must name the test covering the design
+    // exception.
+    for &(symbol, signature, reason) in EXEMPT_EXPORTS {
+        assert!(
+            !signature.is_empty(),
+            "exempt export {symbol} must state its real signature"
+        );
+        let params = signature
+            .split_once('(')
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .map(|(params, _)| params)
+            .unwrap_or("");
+        match reason {
+            ExemptReason::NoPointerArgs => {
+                assert!(
+                    !params.contains('*'),
+                    "exempt export {symbol} declares signature `{signature}` whose \
+                     parameter list contains a pointer; pointer-taking exports must \
+                     be swept, never exempted"
+                );
+            }
+            ExemptReason::KnownDesignQuirk(covering) => {
+                assert!(
+                    !covering.is_empty(),
+                    "KnownDesignQuirk exemption for {symbol} must name its covering test"
+                );
+                assert!(
+                    params.contains('*'),
+                    "KnownDesignQuirk exemption for {symbol} declares signature \
+                     `{signature}` with no pointer parameter — it belongs in \
+                     NoPointerArgs, not the design-quirk channel"
+                );
+            }
+        }
+    }
+    let exempt: HashSet<&str> = EXEMPT_EXPORTS.iter().map(|(s, _, _)| *s).collect();
+
+    let duplicated: Vec<&str> = swept
+        .iter()
+        .filter(|s| exempt.contains(*s))
+        .copied()
+        .collect();
+    assert!(
+        duplicated.is_empty(),
+        "exports both swept and exempted: {duplicated:?}"
+    );
+
+    let missing: Vec<&str> = exports
+        .iter()
+        .filter(|e| !swept.contains(*e) && !exempt.contains(*e))
+        .copied()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "exports in exports.txt neither swept nor exempted ({}): {missing:?}",
+        missing.len(),
+    );
+
+    assert_eq!(
+        swept.len() + exempt.len(),
+        exports.len(),
+        "swept + exempt must cover exports.txt exactly"
+    );
+    println!(
+        "sweep coverage gate: swept {} + exempt {} = {} exports (exports.txt lists {})",
+        swept.len(),
+        exempt.len(),
+        swept.len() + exempt.len(),
+        exports.len(),
+    );
+}
+
+// --- milestone 63: capability guards (dylib_load.rs pattern) -------------
+
+/// Milestone 63 capability guards for the swept computer-use exports,
+/// mirroring `dylib_load.rs` (query the capability first; when the mechanism
+/// is absent, assert the real mechanism-absent behavior instead of skipping
+/// with a bare `return`).
+///
+/// Check order is verified against `src/lib.rs`, not guessed:
+/// - `agt_window_enumerate` / `agt_screen_list`: the probe form
+///   (`buf == NULL, cap == 0, out_count != NULL`) passes argument validation
+///   and reaches the mechanism check, so a headless host answers
+///   `AGT_UNSUPPORTED`. With the mechanism present the probe is the legal
+///   "how big?" path, already covered by `probe_group` (zero side effects).
+/// - `agt_a11y_last_text_write_via`: the mechanism check runs FIRST in the
+///   implementation, so NULL input answers `AGT_UNSUPPORTED` when the a11y
+///   stack is absent and `AGT_FAILED` (bad_pointer) when present.
+/// - `agt_native_window_*` (handle 0), `agt_input_pointer_click` (invalid
+///   button) and `agt_input_type_text` / `agt_input_send_keys` (NULL text):
+///   argument validation PRECEDES the mechanism check, so they answer
+///   `AGT_FAILED` on every host — the null-sweep cases exercise the real
+///   validation path even headless, never a vacuous pass.
+/// - `agt_input_pointer_move`: coordinates only; with the mechanism absent
+///   the call cannot move anything and must answer `AGT_UNSUPPORTED`; with it
+///   present ANY call moves the pointer, which the safety boundary forbids —
+///   so only the absent path is asserted here.
+#[test]
+fn computer_use_sweep_capability_guards() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+
+    // 1. Enumerate group: probe must report AGT_UNSUPPORTED when absent.
+    let enumerate_cap = unsafe { query(AGT_CAP_WINDOW_ENUMERATE) };
+    assert!(
+        enumerate_cap == AGT_OK || enumerate_cap == AGT_UNSUPPORTED,
+        "AGT_CAP_WINDOW_ENUMERATE must be AGT_OK or AGT_UNSUPPORTED, got {enumerate_cap}"
+    );
+    for (name, probe) in [
+        (
+            "agt_window_enumerate",
+            window_enumerate_probe as fn(&Library) -> i32,
+        ),
+        ("agt_screen_list", screen_list_probe as fn(&Library) -> i32),
+    ] {
+        if enumerate_cap == AGT_UNSUPPORTED {
+            let st = probe(lib);
+            assert_eq!(
+                st, AGT_UNSUPPORTED,
+                "{name}: probe must report AGT_UNSUPPORTED when the mechanism is absent, got {st}"
+            );
+        } else {
+            eprintln!("SKIP: {name} mechanism available; probe behavior covered by probe_group");
+        }
+    }
+
+    // 2. Native-window group: handle 0 fails argument validation BEFORE the
+    //    mechanism check, so it must be AGT_FAILED on every host — no real
+    //    window handle is ever enumerated or touched.
+    let op_cap = unsafe { query(AGT_CAP_WINDOW_OP) };
+    assert!(
+        op_cap == AGT_OK || op_cap == AGT_UNSUPPORTED,
+        "AGT_CAP_WINDOW_OP must be AGT_OK or AGT_UNSUPPORTED, got {op_cap}"
+    );
+    for (name, call) in [
+        (
+            "agt_native_window_show",
+            native_window_show_handle0 as fn(&Library) -> i32,
+        ),
+        (
+            "agt_native_window_move",
+            native_window_move_handle0 as fn(&Library) -> i32,
+        ),
+        (
+            "agt_native_window_rect",
+            native_window_rect_handle0_null_outs as fn(&Library) -> i32,
+        ),
+        (
+            "agt_native_window_set_topmost",
+            native_window_set_topmost_handle0 as fn(&Library) -> i32,
+        ),
+        (
+            "agt_native_window_close",
+            native_window_close_handle0 as fn(&Library) -> i32,
+        ),
+    ] {
+        let st = call(lib);
+        assert_eq!(
+            st, AGT_FAILED,
+            "{name}(handle=0) must return AGT_FAILED (bad_handle precedes the \
+             mechanism check), got {st}"
+        );
+    }
+
+    // 3. Input-injection group.
+    let input_cap = unsafe { query(AGT_CAP_INPUT_INJECT) };
+    assert!(
+        input_cap == AGT_OK || input_cap == AGT_UNSUPPORTED,
+        "AGT_CAP_INPUT_INJECT must be AGT_OK or AGT_UNSUPPORTED, got {input_cap}"
+    );
+    if input_cap == AGT_UNSUPPORTED {
+        // The mechanism is absent, so the call cannot move anything — safe.
+        let f: Symbol<InputPointerMove> = unsafe { sym(lib, b"agt_input_pointer_move") };
+        let st = unsafe { f(0, 0) };
+        assert_eq!(
+            st, AGT_UNSUPPORTED,
+            "agt_input_pointer_move: mechanism absent must answer AGT_UNSUPPORTED, got {st}"
+        );
+    } else {
+        eprintln!(
+            "SKIP: input injection available; agt_input_pointer_move has no \
+             necessarily-failing argument (any call moves the pointer) — success \
+             path is out of scope this round"
+        );
+    }
+    for (name, call) in [
+        (
+            "agt_input_pointer_click",
+            input_pointer_click_bad_button as fn(&Library) -> i32,
+        ),
+        (
+            "agt_input_type_text",
+            input_type_text_null as fn(&Library) -> i32,
+        ),
+        (
+            "agt_input_send_keys",
+            input_send_keys_null as fn(&Library) -> i32,
+        ),
+    ] {
+        let st = call(lib);
+        assert_eq!(
+            st, AGT_FAILED,
+            "{name}: bad argument must return AGT_FAILED (validation precedes \
+             the mechanism check), got {st}"
+        );
+    }
+
+    // 4. a11y diagnostic string: mechanism check runs first.
+    let a11y_cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
+    assert!(
+        a11y_cap == AGT_OK || a11y_cap == AGT_UNSUPPORTED,
+        "AGT_CAP_ACCESSIBILITY_TREE must be AGT_OK or AGT_UNSUPPORTED, got {a11y_cap}"
+    );
+    let st = a11y_last_text_write_via_bad_args(lib);
+    if a11y_cap == AGT_UNSUPPORTED {
+        assert_eq!(
+            st, AGT_UNSUPPORTED,
+            "agt_a11y_last_text_write_via: mechanism absent must answer \
+             AGT_UNSUPPORTED, got {st}"
+        );
+    } else {
+        assert_eq!(
+            st, AGT_FAILED,
+            "agt_a11y_last_text_write_via: NULL out_len must answer AGT_FAILED \
+             (bad_pointer), got {st}"
+        );
+    }
 }
 
 /// Reviewed and kept as designed: `agt_runtime_env_present` returns `0` for
