@@ -1208,6 +1208,12 @@ disconnected-worker branches often invoke the same user callback on the caller
 thread; route every branch through one panic-contained completion helper so a
 fallback cannot unwind into GUI or FFI dispatch.
 
+Accessibility and automation callbacks are external event producers even when
+they run in-process. Cross into the GUI through a fixed-capacity FIFO, drain a
+fixed per-turn budget, self-wake for backlog, and expose pending/drop counters;
+an unbounded `Mutex<Vec<_>>` turns a bus flood into both memory growth and an
+unbounded event-loop callback.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as

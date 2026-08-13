@@ -746,7 +746,7 @@ struct ConApp {
     // `None` on hosts whose accessibility backend discards snapshots, so the
     // publish path costs nothing there. The platform crate owns that choice.
     a11y: Option<agenterm_platform::accessibility_publish::AccessibilityPublisher>,
-    a11y_inbox: Arc<std::sync::Mutex<Vec<a11y::Request>>>,
+    a11y_inbox: Arc<a11y::ActionInbox>,
     a11y_dirty: bool,
     current_window_title: String,
 }
@@ -813,7 +813,7 @@ impl ConApp {
             frame_height: 0,
             frame_scale: 1.0,
             a11y: None,
-            a11y_inbox: Arc::new(std::sync::Mutex::new(Vec::new())),
+            a11y_inbox: Arc::new(a11y::ActionInbox::default()),
             a11y_dirty: false,
             current_window_title: String::from("agenterm-con"),
         }
@@ -933,12 +933,7 @@ impl ConApp {
     }
 
     fn drain_a11y_actions(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
-        let requests = {
-            let Ok(mut inbox) = self.a11y_inbox.lock() else {
-                return Ok(());
-            };
-            std::mem::take(&mut *inbox)
-        };
+        let (requests, backlog) = self.a11y_inbox.pop_batch(a11y::ACTION_DRAIN_BUDGET);
         for request in requests {
             match (request.node, request.action) {
                 (
@@ -1017,6 +1012,9 @@ impl ConApp {
                 _ => {}
             }
             self.mark_a11y_dirty();
+        }
+        if backlog {
+            let _ = window.waker().wake();
         }
         Ok(())
     }
@@ -1532,6 +1530,7 @@ impl ConApp {
                 Ok(single_field_json("tabs", json::JsonValue::Array(tabs)))
             }
             CliCommand::UiSnapshot => {
+                let a11y = self.a11y_inbox.stats();
                 window
                     .metrics()
                     .map_err(|error| error.to_string())
@@ -1554,6 +1553,8 @@ impl ConApp {
                                 "pending_control_screenshots",
                                 self.pending_control.screenshot_count().into(),
                             ),
+                            ("a11y_pending_actions", a11y.pending.into()),
+                            ("a11y_dropped_actions", a11y.dropped.into()),
                             (
                                 "composer_input",
                                 json::object(vec![
@@ -3875,9 +3876,7 @@ impl PixelWindowApplication for ConApp {
                 let inbox = Arc::clone(&self.a11y_inbox);
                 let waker = window.waker();
                 publisher.set_handler(Arc::new(move |node, action| {
-                    if let Ok(mut queue) = inbox.lock() {
-                        queue.push(a11y::Request { node, action });
-                    }
+                    inbox.push(a11y::Request { node, action });
                     let _ = waker.wake();
                 }));
                 self.a11y = Some(publisher);

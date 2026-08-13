@@ -4,6 +4,9 @@
 //! never sees it. This module names the painted chrome as a small widget tree
 //! and lets the Linux AT-SPI publisher register those children.
 
+use std::collections::VecDeque;
+use std::sync::Mutex;
+
 use agenterm_platform::accessibility_publish::{
     AccessibilityBounds, NODE_APPLICATION, NODE_COMMAND, NODE_FRAME, NODE_SEND, NODE_SESSION,
     NODE_TABS, PublishedAction, PublishedNode, PublishedRole, PublishedTree,
@@ -15,11 +18,57 @@ pub const COMMAND_NAME: &str = "Command";
 pub const SEND_NAME: &str = "SEND";
 pub const TABS_NAME: &str = "Tabs";
 pub const SESSION_NAME: &str = "Session";
+const ACTION_QUEUE_CAPACITY: usize = 64;
+pub const ACTION_DRAIN_BUDGET: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
     pub node: u32,
     pub action: PublishedAction,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ActionInboxStats {
+    pub pending: usize,
+    pub dropped: u64,
+}
+
+#[derive(Default)]
+struct ActionQueue {
+    requests: VecDeque<Request>,
+    dropped: u64,
+}
+
+#[derive(Default)]
+pub struct ActionInbox {
+    queue: Mutex<ActionQueue>,
+}
+
+impl ActionInbox {
+    pub fn push(&self, request: Request) -> bool {
+        let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
+        if queue.requests.len() >= ACTION_QUEUE_CAPACITY {
+            queue.dropped = queue.dropped.saturating_add(1);
+            return false;
+        }
+        queue.requests.push_back(request);
+        true
+    }
+
+    pub fn pop_batch(&self, limit: usize) -> (Vec<Request>, bool) {
+        let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
+        let count = limit.min(queue.requests.len());
+        let batch = queue.requests.drain(..count).collect();
+        (batch, !queue.requests.is_empty())
+    }
+
+    pub fn stats(&self) -> ActionInboxStats {
+        let queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
+        ActionInboxStats {
+            pending: queue.requests.len(),
+            dropped: queue.dropped,
+        }
+    }
 }
 
 pub fn tree(
@@ -206,5 +255,40 @@ mod tests {
         assert_ne!(send.role.as_str(), "frame");
         assert_ne!(send.role.as_str(), "application");
         assert_eq!(tree.children_of(NODE_FRAME).len(), 4);
+    }
+
+    #[test]
+    fn action_inbox_is_fifo_bounded_and_budgeted() {
+        let inbox = ActionInbox::default();
+        for node in 0..ACTION_QUEUE_CAPACITY {
+            assert!(inbox.push(Request {
+                node: node as u32,
+                action: PublishedAction::Focus,
+            }));
+        }
+        assert!(!inbox.push(Request {
+            node: u32::MAX,
+            action: PublishedAction::Click,
+        }));
+        assert_eq!(
+            inbox.stats(),
+            ActionInboxStats {
+                pending: ACTION_QUEUE_CAPACITY,
+                dropped: 1,
+            }
+        );
+
+        let (first, backlog) = inbox.pop_batch(ACTION_DRAIN_BUDGET);
+        assert!(backlog);
+        assert_eq!(first.len(), ACTION_DRAIN_BUDGET);
+        assert_eq!(first.first().map(|request| request.node), Some(0));
+        assert_eq!(
+            first.last().map(|request| request.node),
+            Some(ACTION_DRAIN_BUDGET as u32 - 1)
+        );
+        let (second, backlog) = inbox.pop_batch(usize::MAX);
+        assert!(!backlog);
+        assert_eq!(second.len(), ACTION_QUEUE_CAPACITY - ACTION_DRAIN_BUDGET);
+        assert_eq!(inbox.stats().pending, 0);
     }
 }
