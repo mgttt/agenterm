@@ -33,6 +33,12 @@ pub struct ActionInboxStats {
     pub dropped: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ActionPush {
+    pub accepted: bool,
+    pub should_wake: bool,
+}
+
 #[derive(Default)]
 struct ActionQueue {
     requests: VecDeque<Request>,
@@ -45,15 +51,18 @@ pub struct ActionInbox {
 }
 
 impl ActionInbox {
-    pub fn push(&self, request: Request) -> bool {
+    pub fn push(&self, request: Request) -> ActionPush {
         let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
         if queue.requests.len() >= ACTION_QUEUE_CAPACITY {
             queue.dropped = queue.dropped.saturating_add(1);
-            return false;
+            return ActionPush::default();
         }
         let should_wake = queue.requests.is_empty();
         queue.requests.push_back(request);
-        should_wake
+        ActionPush {
+            accepted: true,
+            should_wake,
+        }
     }
 
     pub fn pop_batch(&self, limit: usize) -> (Vec<Request>, bool) {
@@ -262,16 +271,20 @@ mod tests {
     fn action_inbox_is_fifo_bounded_and_budgeted() {
         let inbox = ActionInbox::default();
         for node in 0..ACTION_QUEUE_CAPACITY {
-            let should_wake = inbox.push(Request {
+            let outcome = inbox.push(Request {
                 node: node as u32,
                 action: PublishedAction::Focus,
             });
-            assert_eq!(should_wake, node == 0);
+            assert!(outcome.accepted);
+            assert_eq!(outcome.should_wake, node == 0);
         }
-        assert!(!inbox.push(Request {
-            node: u32::MAX,
-            action: PublishedAction::Click,
-        }));
+        assert_eq!(
+            inbox.push(Request {
+                node: u32::MAX,
+                action: PublishedAction::Click,
+            }),
+            ActionPush::default()
+        );
         assert_eq!(
             inbox.stats(),
             ActionInboxStats {

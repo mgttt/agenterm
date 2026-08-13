@@ -3876,9 +3876,11 @@ impl PixelWindowApplication for ConApp {
                 let inbox = Arc::clone(&self.a11y_inbox);
                 let waker = window.waker();
                 publisher.set_handler(Arc::new(move |node, action| {
-                    if inbox.push(a11y::Request { node, action }) {
+                    let outcome = inbox.push(a11y::Request { node, action });
+                    if outcome.should_wake {
                         let _ = waker.wake();
                     }
+                    outcome.accepted
                 }));
                 self.a11y = Some(publisher);
                 self.a11y_dirty = true;

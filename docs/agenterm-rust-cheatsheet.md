@@ -1216,6 +1216,12 @@ self-wake for backlog, and expose pending/drop counters. An unbounded
 event-loop callback; waking for every rejected item preserves a CPU flood even
 after memory is bounded.
 
+When an OS-facing adapter keeps an optimistic mirror, its callback must return
+whether the product accepted ownership. Commit mirrored text, focus, or action
+state only after acceptance; a fire-and-forget handler plus a bounded product
+queue otherwise reports success and permanently diverges when saturation drops
+the event.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as

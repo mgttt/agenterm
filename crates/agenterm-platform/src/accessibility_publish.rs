@@ -77,4 +77,5 @@ impl AccessibilityPublisher {
     }
 }
 
-pub type PublishedActionHandler = std::sync::Arc<dyn Fn(u32, PublishedAction) + Send + Sync>;
+pub type PublishedActionHandler =
+    std::sync::Arc<dyn Fn(u32, PublishedAction) -> bool + Send + Sync>;

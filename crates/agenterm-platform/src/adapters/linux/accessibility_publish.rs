@@ -262,20 +262,30 @@ fn delete_range(text: &str, start: i32, end: i32) -> String {
 /// the product event loop applies it to the painted composer.
 fn replace_node_text(store: &Mutex<Store>, id: u32, text: String) -> bool {
     let handler = {
-        let mut store = lock_store(store);
-        let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) else {
+        let store = lock_store(store);
+        let Some(node) = store.node(id) else {
             return false;
         };
         if !node.editable {
             return false;
         }
-        node.text = text.clone();
-        store.focused = Some(id);
         store.handler.clone()
     };
-    if let Some(handler) = handler {
-        handler(id, PublishedAction::SetText(text));
+    let Some(handler) = handler else {
+        return false;
+    };
+    if !handler(id, PublishedAction::SetText(text.clone())) {
+        return false;
     }
+    let mut store = lock_store(store);
+    let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) else {
+        return false;
+    };
+    if !node.editable {
+        return false;
+    }
+    node.text = text;
+    store.focused = Some(id);
     true
 }
 
@@ -283,10 +293,10 @@ fn replace_node_text(store: &Mutex<Store>, id: u32, text: String) -> bool {
 /// text immediately so `GetText` reflects the key before the product loop
 /// paints. A node that does not accept keys returns false.
 fn apply_node_key(store: &Mutex<Store>, id: u32, key: PublishedKey) -> bool {
-    let handler = {
-        let mut store = lock_store(store);
+    let (effect, handler) = {
+        let store = lock_store(store);
         let effect = {
-            let Some(node) = store.tree.nodes.iter().find(|node| node.id == id) else {
+            let Some(node) = store.node(id) else {
                 return false;
             };
             if !node.editable {
@@ -294,23 +304,24 @@ fn apply_node_key(store: &Mutex<Store>, id: u32, key: PublishedKey) -> bool {
             }
             published_key_effect(&key)
         };
-        store.focused = Some(id);
-        if let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) {
-            match effect {
-                KeyEffect::Insert(piece) => node.text.push_str(&piece),
-                KeyEffect::Backspace => {
-                    let _ = node.text.pop();
-                }
-                KeyEffect::SelectAll
-                | KeyEffect::Submit
-                | KeyEffect::Cancel
-                | KeyEffect::Ignore => {}
-            }
-        }
-        store.handler.clone()
+        (effect, store.handler.clone())
     };
-    if let Some(handler) = handler {
-        handler(id, PublishedAction::Key(key));
+    let Some(handler) = handler else {
+        return false;
+    };
+    if !handler(id, PublishedAction::Key(key)) {
+        return false;
+    }
+    let mut store = lock_store(store);
+    store.focused = Some(id);
+    if let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) {
+        match effect {
+            KeyEffect::Insert(piece) => node.text.push_str(&piece),
+            KeyEffect::Backspace => {
+                let _ = node.text.pop();
+            }
+            KeyEffect::SelectAll | KeyEffect::Submit | KeyEffect::Cancel | KeyEffect::Ignore => {}
+        }
     }
     true
 }
@@ -515,19 +526,22 @@ impl ComponentNode {
 
     fn grab_focus(&self) -> bool {
         let handler = {
-            let mut store = lock_store(&self.0.store);
+            let store = lock_store(&self.0.store);
             let Some(node) = store.node(self.0.id) else {
                 return false;
             };
             if !node.focusable {
                 return false;
             }
-            store.focused = Some(self.0.id);
             store.handler.clone()
         };
-        if let Some(handler) = handler {
-            handler(self.0.id, PublishedAction::Focus);
+        let Some(handler) = handler else {
+            return false;
+        };
+        if !handler(self.0.id, PublishedAction::Focus) {
+            return false;
         }
+        lock_store(&self.0.store).focused = Some(self.0.id);
         true
     }
 
@@ -574,11 +588,14 @@ impl ActionNode {
             };
             (action, store.handler.clone())
         };
+        let Some(handler) = handler else {
+            return false;
+        };
+        if !handler(self.0.id, action.clone()) {
+            return false;
+        }
         if action == PublishedAction::Focus {
             lock_store(&self.0.store).focused = Some(self.0.id);
-        }
-        if let Some(handler) = handler {
-            handler(self.0.id, action);
         }
         true
     }
@@ -1119,5 +1136,37 @@ mod tests {
     fn delete_text_drops_the_requested_range() {
         assert_eq!(delete_range("héllo", 1, 3), "hlo");
         assert_eq!(delete_range("abc", 0, -1), "");
+    }
+
+    #[test]
+    fn rejected_product_delivery_does_not_mutate_publisher_mirror() {
+        let store = Mutex::new(Store {
+            tree: PublishedTree {
+                app_name: "agenterm-con".into(),
+                nodes: vec![sample_command("original")],
+            },
+            window_handle: None,
+            unique_name: String::new(),
+            app_id: 0,
+            focused: None,
+            handler: Some(Arc::new(|_, _| false)),
+        });
+        assert!(!replace_node_text(&store, 4, "rejected".into()));
+        assert_eq!(lock_store(&store).node(4).unwrap().text, "original");
+
+        assert!(!apply_node_key(
+            &store,
+            4,
+            PublishedKey {
+                keysym: i32::from(b'x'),
+                event_string: "x".into(),
+                is_text: true,
+                modifiers: 0,
+                pressed: true,
+            }
+        ));
+        let store = lock_store(&store);
+        assert_eq!(store.node(4).unwrap().text, "original");
+        assert_eq!(store.focused, None);
     }
 }

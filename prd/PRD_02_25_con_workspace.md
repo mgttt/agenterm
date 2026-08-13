@@ -63,6 +63,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   counter, coalesces producer wakes on the empty-to-nonempty transition, and
   self-wakes while backlog remains; `ui-snapshot` exposes pending and dropped
   counts so an accessibility flood cannot hide unbounded GUI work.
+- [x] publisher actions commit their AT-SPI text/focus mirror only after the
+  product queue accepts ownership. Queue saturation returns `false` to the
+  caller and leaves the mirror unchanged, preventing accessibility state from
+  claiming an edit the composer never received.
 - [x] the default 15 logical-pixel terminal font corresponds to roughly 11.25 pt
   at 96 DPI and is no smaller than the tree labels.
 - [x] the host chrome defaults to high-contrast black/white/gray and the
