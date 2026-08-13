@@ -948,6 +948,43 @@ impl ConApp {
                     let _ = self.update_composer_ime_anchor(window);
                     self.mark_composer_dirty();
                 }
+                (
+                    agenterm_platform::accessibility_publish::NODE_COMMAND,
+                    agenterm_platform::accessibility_publish::PublishedAction::Key(key),
+                ) => {
+                    self.composer.focused = true;
+                    match agenterm_platform::accessibility_publish::published_key_effect(&key) {
+                        agenterm_platform::accessibility_publish::KeyEffect::Insert(text) => {
+                            composer::insert(
+                                &mut self.composer.text,
+                                &mut self.composer.select_all,
+                                &text,
+                            );
+                        }
+                        agenterm_platform::accessibility_publish::KeyEffect::Backspace => {
+                            composer::backspace(
+                                &mut self.composer.text,
+                                &mut self.composer.select_all,
+                            );
+                        }
+                        agenterm_platform::accessibility_publish::KeyEffect::SelectAll => {
+                            composer::select_all(
+                                &self.composer.text,
+                                &mut self.composer.select_all,
+                            );
+                        }
+                        agenterm_platform::accessibility_publish::KeyEffect::Submit => {
+                            self.submit_composer();
+                        }
+                        agenterm_platform::accessibility_publish::KeyEffect::Cancel => {
+                            self.composer.cancel_focus();
+                        }
+                        agenterm_platform::accessibility_publish::KeyEffect::Ignore => {}
+                    }
+                    self.composer.preedit.clear();
+                    let _ = self.update_composer_ime_anchor(window);
+                    self.mark_composer_dirty();
+                }
                 (agenterm_platform::accessibility_publish::NODE_COMMAND, _) => {
                     self.composer.focused = true;
                     let _ = self.update_composer_ime_anchor(window);

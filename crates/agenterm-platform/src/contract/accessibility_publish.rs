@@ -50,11 +50,81 @@ impl PublishedRole {
     }
 }
 
+/// AT-SPI `DeviceEvent.modifiers` bits (`AtspiModifierType`).
+pub const ATSPI_MOD_SHIFT: i32 = 1 << 0;
+pub const ATSPI_MOD_CONTROL: i32 = 1 << 2;
+pub const ATSPI_MOD_ALT: i32 = 1 << 3;
+pub const ATSPI_MOD_META: i32 = 1 << 4;
+
+/// X11 keysyms used as AT-SPI `DeviceEvent.id` for named keys.
+pub const XK_BACKSPACE: i32 = 0xff08;
+pub const XK_TAB: i32 = 0xff09;
+pub const XK_RETURN: i32 = 0xff0d;
+pub const XK_ESCAPE: i32 = 0xff1b;
+pub const XK_SPACE: i32 = 0x0020;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublishedKey {
+    pub keysym: i32,
+    pub event_string: String,
+    pub is_text: bool,
+    pub modifiers: i32,
+    pub pressed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum KeyEffect {
+    Ignore,
+    Insert(String),
+    Backspace,
+    Submit,
+    Cancel,
+    SelectAll,
+}
+
+/// Map one AT-SPI Device/key event onto a published buffer. Release events
+/// and modifier-only chords (except Ctrl+A select-all) are ignored.
+pub fn published_key_effect(key: &PublishedKey) -> KeyEffect {
+    if !key.pressed {
+        return KeyEffect::Ignore;
+    }
+    let control = key.modifiers & ATSPI_MOD_CONTROL != 0;
+    let alt = key.modifiers & ATSPI_MOD_ALT != 0;
+    let meta = key.modifiers & ATSPI_MOD_META != 0;
+    if control && !alt && !meta && key.event_string.eq_ignore_ascii_case("a") {
+        return KeyEffect::SelectAll;
+    }
+    if control || alt || meta {
+        return KeyEffect::Ignore;
+    }
+    let named = key.event_string.as_str();
+    if key.keysym == XK_BACKSPACE || named.eq_ignore_ascii_case("BackSpace") {
+        return KeyEffect::Backspace;
+    }
+    if key.keysym == XK_RETURN
+        || named.eq_ignore_ascii_case("Return")
+        || named.eq_ignore_ascii_case("Enter")
+    {
+        return KeyEffect::Submit;
+    }
+    if key.keysym == XK_ESCAPE || named.eq_ignore_ascii_case("Escape") {
+        return KeyEffect::Cancel;
+    }
+    if key.keysym == XK_SPACE || named.eq_ignore_ascii_case("space") {
+        return KeyEffect::Insert(" ".into());
+    }
+    if key.is_text && !key.event_string.is_empty() {
+        return KeyEffect::Insert(key.event_string.clone());
+    }
+    KeyEffect::Ignore
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PublishedAction {
     Click,
     Focus,
     SetText(String),
+    Key(PublishedKey),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -171,6 +241,58 @@ mod tests {
         assert_eq!(
             tree.node(NODE_COMMAND).map(|node| node.text.as_str()),
             Some("probe")
+        );
+    }
+
+    #[test]
+    fn device_key_effect_inserts_text_and_maps_named_keys() {
+        let letter = PublishedKey {
+            keysym: i32::from(b'k'),
+            event_string: "k".into(),
+            is_text: true,
+            modifiers: 0,
+            pressed: true,
+        };
+        assert_eq!(published_key_effect(&letter), KeyEffect::Insert("k".into()));
+        assert_eq!(
+            published_key_effect(&PublishedKey {
+                keysym: XK_BACKSPACE,
+                event_string: "BackSpace".into(),
+                is_text: false,
+                modifiers: 0,
+                pressed: true,
+            }),
+            KeyEffect::Backspace
+        );
+        assert_eq!(
+            published_key_effect(&PublishedKey {
+                keysym: XK_RETURN,
+                event_string: "Return".into(),
+                is_text: false,
+                modifiers: 0,
+                pressed: true,
+            }),
+            KeyEffect::Submit
+        );
+        assert_eq!(
+            published_key_effect(&PublishedKey {
+                keysym: i32::from(b'a'),
+                event_string: "a".into(),
+                is_text: true,
+                modifiers: ATSPI_MOD_CONTROL,
+                pressed: true,
+            }),
+            KeyEffect::SelectAll
+        );
+        assert_eq!(
+            published_key_effect(&PublishedKey {
+                keysym: i32::from(b'k'),
+                event_string: "k".into(),
+                is_text: true,
+                modifiers: 0,
+                pressed: false,
+            }),
+            KeyEffect::Ignore
         );
     }
 }

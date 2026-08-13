@@ -139,10 +139,13 @@ Canonical host mapping (approved product vocabulary):
   `input_inject::type_text`. Resolution failure (miss or ambiguous name)
   aborts before any write. Without `--name`, `send-text` still injects
   into whatever is focused.
-- [~] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
-  resolve and focus through that same path, then inject the chord with
-  the existing XTest keyboard path. Resolution failure (miss or ambiguous
-  name) aborts before any keystroke. After a successful named `send-keys`,
+- [x] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
+  resolves through that same path, then delivers the chord via AT-SPI
+  `DeviceEventListener` (`NotifyEvent`, `agt_a11y_node_send_keys`). A named
+  showing node with no Device/key interface typed-fails
+  (`a11y_key_unavailable`) and never silently uses XTest /
+  `input_inject::send_keys`. Resolution failure (miss or ambiguous name)
+  aborts before any keystroke. After a successful named `send-keys`,
   the same window's AT-SPI tree must still be there for a second named
   command (one process-wide a11y-bus connection; do not drop the bus).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
