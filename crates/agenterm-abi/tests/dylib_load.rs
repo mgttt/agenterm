@@ -1261,12 +1261,20 @@ fn a11y_tree_node_without_snapshot_fails() {
     );
 }
 
-/// Milestone 6 evidence 3: NULL node_id → AGT_FAILED{code="bad_pointer"}.
+/// Milestone 6 evidence 3: NULL node_id → AGT_FAILED{code="bad_pointer"}
+/// on hosts with a wired a11y stack; hosts without it return AGT_UNSUPPORTED.
 #[test]
 fn a11y_node_perform_rejects_null_node_id() {
     let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
     let perform: Symbol<A11yNodePerform> = unsafe { sym(&lib, b"agt_a11y_node_perform") };
     let st = unsafe { perform(0, std::ptr::null(), 0) };
+    if cap == AGT_UNSUPPORTED {
+        eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
+        assert_eq!(st, AGT_UNSUPPORTED, "expected AGT_UNSUPPORTED, got {st}");
+        return;
+    }
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
     let msg = last_error_message(&lib);
     assert!(
