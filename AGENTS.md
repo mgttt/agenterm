@@ -630,8 +630,16 @@ invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery us
   `write_file`/`edit_file`/`bash` 全被拒,报
   `blocked: the current task policy forbids workspace modifications (user constraint or plan mode)`。
   症状是"洋洋洒洒写完补丁却零文件落盘",容易误判成执行方能力问题。
-  **派单后先数轨迹里 `blocked: ` 的条数,非 0 就是权限问题**;被 block 但已产出补丁的会话可
-  `--resume "<session.jsonl>"` 复用,不必重跑。
+  **但这是不确定的,不是 flag 决定的**:同一组
+  `--permission-mode bypassPermissions --preset delivery` 在 2026-08-13 当天成功 3 次、
+  失败 2 次。**不要相信任何"这个组合一定能写"的结论**,靠监控重试,不要靠调 flag。
+  **派单后立刻数轨迹里 `blocked: ` 的条数并分辨类型**:
+  - `delivery-first mode requires acceptance criteria...` —— **良性**,执行方写完
+    `todo_write` 验收标准即自动放行。
+  - `the current task policy forbids workspace modifications` —— **致命**,该会话再也写不了,
+    还会连带 `skipped because an earlier modification in this tool batch failed`。
+    立刻 kill 重派(新会话通常正常),不要等它自愈——它只会反复试探 `use_capability` 烧完预算。
+  被 block 但已在回答里产出完整补丁的会话,可 `--resume "<session.jsonl>"` 复用,不必重跑。
   另:PATH 里是 `reasonix.cmd` shim,**Git Bash 解析不了**(`command not found`),
   请从 PowerShell 用全路径调用;`cmd > out; echo EXIT=$?` 会把失败掩盖成成功。快捷入口:`D:\skillseasonix-dispatch\dispatch.cmd "<任务>" [项目路径] [模型]`(自动落盘会话 + 写回执到 `D:\skillseasonix-dispatcheceipts\`)。
 - **常驻**: `reasonix serve --addr 127.0.0.1:8787`(默认 auth none,仅回环;`--auth token` 可收紧)。
