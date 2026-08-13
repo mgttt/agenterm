@@ -44,9 +44,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   profiling. The counter semantics belong to
   [24](PRD_02_24_con_terminal.md).
 - [x] `ui-snapshot` publishes structured UI state — including composer bounds,
-  scrollback extent, pending-wait counts, and the nullable window-scoped control
-  pointer owner — so black-box journeys assert state instead of guessing timing
-  or inferring gesture cleanup only from a later failure.
+  text/focus/submission error, scrollback extent, pending-wait counts, and the
+  nullable window-scoped control pointer owner — so black-box journeys assert
+  state instead of guessing timing or inferring cleanup only from a later
+  failure.
 - [x] `send-wheel` reports the route actually taken (`zoom`, application mouse,
   alternate-screen cursor keys, or local scrollback), the notch count actually
   applied after bounds/clamps, and whether observable state or terminal input

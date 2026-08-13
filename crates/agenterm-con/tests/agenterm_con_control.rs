@@ -515,6 +515,23 @@ fn gui_control_surface_isolated_multitab_black_box() {
         );
     }
 
+    cli_json(exe, &endpoint, &["send-ui-keys", "Ctrl+Shift+I"]);
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-ui-keys", "R", "E", "T", "R", "Y", "Enter"],
+    );
+    let failed_composer = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(failed_composer["composer_focused"], true);
+    assert_eq!(failed_composer["composer_text"], "RETRY");
+    assert!(
+        failed_composer["composer_submit_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("terminal process has exited")),
+        "failed composer submit must be observable without losing text: {failed_composer}"
+    );
+    cli_json(exe, &endpoint, &["send-ui-keys", "Escape"]);
+
     let exited_mouse = cli_json(
         exe,
         &endpoint,

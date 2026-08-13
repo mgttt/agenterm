@@ -17,6 +17,7 @@ pub struct ComposerState {
     pub preedit: String,
     pub focused: bool,
     pub select_all: bool,
+    pub submit_error: Option<String>,
 }
 
 impl ComposerState {
@@ -24,6 +25,7 @@ impl ComposerState {
         self.focused = false;
         self.preedit.clear();
         self.select_all = false;
+        self.submit_error = None;
     }
 
     /// Returns one terminal submission and resets all transient edit state.
@@ -35,7 +37,19 @@ impl ComposerState {
         self.text.clear();
         self.preedit.clear();
         self.select_all = false;
+        self.submit_error = None;
         submission
+    }
+
+    pub fn restore_failed_submission(&mut self, mut submission: String, error: String) {
+        if submission.ends_with('\r') {
+            submission.pop();
+        }
+        self.text = submission;
+        self.preedit.clear();
+        self.select_all = false;
+        self.focused = true;
+        self.submit_error = Some(error);
     }
 }
 
@@ -202,11 +216,18 @@ mod tests {
             preedit: "中".to_owned(),
             focused: true,
             select_all: true,
+            submit_error: Some("old failure".to_owned()),
         };
         assert_eq!(state.take_submission().as_deref(), Some("echo ok\r"));
         assert_eq!(state.text, "");
         assert_eq!(state.preedit, "");
         assert!(!state.select_all);
+        assert_eq!(state.submit_error, None);
+        assert!(state.focused);
+
+        state.restore_failed_submission("retry\r".to_owned(), "PTY is closed".to_owned());
+        assert_eq!(state.text, "retry");
+        assert_eq!(state.submit_error.as_deref(), Some("PTY is closed"));
         assert!(state.focused);
 
         state.preedit = "文".to_owned();
@@ -215,5 +236,6 @@ mod tests {
         assert!(!state.focused);
         assert_eq!(state.preedit, "");
         assert!(!state.select_all);
+        assert_eq!(state.submit_error, None);
     }
 }

@@ -103,6 +103,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   click, routes Space and `Ctrl+A/C/X/V` through `send-ui-keys`, proves the
   terminal is unchanged before Enter, then proves the composed command reaches
   the PTY.
+- [x] composer submission is transactional: it clears text and snaps the live
+  viewport only after the active PTY accepts the complete text plus Enter. An
+  exited child or write failure restores the exact bounded text without the
+  transport `\r`, keeps focus for retry, exposes the typed error in
+  `ui-snapshot`, and paints the input/send affordance with a high-contrast error
+  accent. The public multi-tab journey proves `RETRY` survives submission to a
+  retained exited tab instead of disappearing.
 - [x] a physical composer click does not call native focus from inside its
   pointer callback: Win32 has already activated the receiving top-level window,
   and the redundant `SetForegroundWindow`/`SetFocus` chain could reenter dispatch

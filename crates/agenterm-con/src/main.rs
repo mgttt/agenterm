@@ -1008,6 +1008,7 @@ impl ConApp {
                     agenterm_platform::accessibility_publish::PublishedAction::SetText(text),
                 ) => {
                     self.composer.focused = true;
+                    self.composer.submit_error = None;
                     composer::replace_text(
                         &mut self.composer.text,
                         &mut self.composer.select_all,
@@ -1024,6 +1025,7 @@ impl ConApp {
                     self.composer.focused = true;
                     match agenterm_platform::accessibility_publish::published_key_effect(&key) {
                         agenterm_platform::accessibility_publish::KeyEffect::Insert(text) => {
+                            self.composer.submit_error = None;
                             composer::insert(
                                 &mut self.composer.text,
                                 &mut self.composer.select_all,
@@ -1031,6 +1033,7 @@ impl ConApp {
                             );
                         }
                         agenterm_platform::accessibility_publish::KeyEffect::Backspace => {
+                            self.composer.submit_error = None;
                             composer::backspace(
                                 &mut self.composer.text,
                                 &mut self.composer.select_all,
@@ -1417,6 +1420,9 @@ impl ConApp {
         if key.state != KeyPressState::Pressed {
             return true;
         }
+        if !matches!(key.logical, LogicalKey::Named(NamedKey::Enter)) {
+            self.composer.submit_error = None;
+        }
         if key.modifiers.control
             && !key.modifiers.alt
             && let LogicalKey::Character(text) = &key.logical
@@ -1473,14 +1479,25 @@ impl ConApp {
     }
 
     fn submit_composer(&mut self) {
-        if let Some(input) = self.composer.take_submission()
-            && let Ok(session) = self.active_session_mut()
-        {
+        let Some(input) = self.composer.take_submission() else {
+            return;
+        };
+        let result = (|| {
+            let session = self
+                .active_session_mut()
+                .map_err(|error| error.to_string())?;
+            session.ensure_pty_input_open()?;
+            session
+                .write_pty(input.as_bytes())
+                .map_err(|error| format!("terminal input failed: {error}"))?;
             // Submission crosses the PTY boundary and can change arbitrary
-            // terminal cells; the composer rectangle alone is not enough.
+            // terminal cells; commit view state only after delivery succeeds.
             session.dirty.mark_full();
             session.scroll_to_bottom();
-            let _ = session.write_pty(input.as_bytes());
+            Ok::<(), String>(())
+        })();
+        if let Err(error) = result {
+            self.composer.restore_failed_submission(input, error);
         }
     }
 
@@ -1494,6 +1511,7 @@ impl ConApp {
             ImeAction::UpdatePreedit { text, .. } => self.composer.preedit = text,
             ImeAction::ClearPreedit => self.composer.preedit.clear(),
             ImeAction::CommitText(text) => {
+                self.composer.submit_error = None;
                 self.composer.preedit.clear();
                 composer::insert(
                     &mut self.composer.text,
@@ -1617,6 +1635,13 @@ impl ConApp {
                             ("composer_focused", self.composer.focused.into()),
                             ("composer_text", self.composer.text.as_str().into()),
                             ("composer_preedit", self.composer.preedit.as_str().into()),
+                            (
+                                "composer_submit_error",
+                                self.composer
+                                    .submit_error
+                                    .as_deref()
+                                    .map_or(json::JsonValue::Null, Into::into),
+                            ),
                             (
                                 "pending_control_waits",
                                 self.pending_control.wait_count().into(),
@@ -2033,6 +2058,7 @@ impl ConApp {
         let branch = Rgb(0x98, 0x98, 0x98);
         let active_bg = Rgb(0x32, 0x32, 0x32);
         let accent = Rgb(0xFF, 0xFF, 0xFF);
+        let error_accent = Rgb(0xFF, 0x5C, 0x5C);
         let composer_bg = Rgb(0x00, 0x00, 0x00);
         let text = Rgb(0xF5, 0xF5, 0xF5);
         let muted = Rgb(0xC0, 0xC0, 0xC0);
@@ -2146,7 +2172,13 @@ impl ConApp {
             tree_width + 12,
             input_y + 7,
             &["SEND TO @", active_id_text.format(active_id)],
-            if self.composer.focused { accent } else { muted },
+            if self.composer.submit_error.is_some() {
+                error_accent
+            } else if self.composer.focused {
+                accent
+            } else {
+                muted
+            },
             11,
             layout.composer.width.saturating_sub(24),
         );
@@ -2155,7 +2187,9 @@ impl ConApp {
             layout.composer_input.y,
             layout.composer_input.width,
             layout.composer_input.height,
-            if self.composer.focused {
+            if self.composer.submit_error.is_some() {
+                error_accent
+            } else if self.composer.focused {
                 accent
             } else {
                 tree_rule
@@ -2204,7 +2238,11 @@ impl ConApp {
             layout.composer_send.x + 17,
             layout.composer_send.y + 12,
             "SEND",
-            accent,
+            if self.composer.submit_error.is_some() {
+                error_accent
+            } else {
+                accent
+            },
             13,
             layout.composer_send.width.saturating_sub(20),
         );
