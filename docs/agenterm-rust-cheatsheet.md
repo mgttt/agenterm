@@ -1089,6 +1089,19 @@ atk-bridge). Unit-test the published chrome snapshot without a bus;
 prove `tree --window` `n>=5` and named actuation on a live `DISPLAY`
 host. Do not treat the one-node frame as the success path for con.
 
+A single-host capability still may not reach product code as
+`#[cfg(target_os = ...)]`. The boundary suite scans `crates/agenterm-con/src`
+too, and the subsystem-entrypoint exemption covers only the windows-subsystem
+attribute, so an OS `cfg` in `main.rs` reddens the quality lane. Publish the
+facade unconditionally, let `selected.rs` pick a no-op backend off the host, and
+keep the heavyweight dependency edge in `[target.'cfg(...)'.dependencies]` --
+Cargo manifests are outside the scan and are the supported place to buy the real
+implementation on one target only. Give the facade a capability predicate
+(`is_publishing()`) so callers skip snapshot work without asking which OS they
+are on. This also removes the second failure mode of the `cfg` pair: the
+`#[cfg(not(...))]` stub method has no caller on that host, and `-D warnings`
+turns `dead_code` into a build error only on that one target cell.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must

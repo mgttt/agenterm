@@ -12,6 +12,10 @@ impl PublisherInner {
     pub(crate) fn set_handler(&self, _handler: PublishedActionHandler) {}
 
     pub(crate) fn set_window_handle(&self, _window_handle: Option<i64>) {}
+
+    pub(crate) fn is_publishing(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) fn start(

@@ -661,6 +661,10 @@ impl PublisherInner {
     pub(crate) fn set_window_handle(&self, window_handle: Option<i64>) {
         lock_store(&self.store).window_handle = window_handle;
     }
+
+    pub(crate) fn is_publishing(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) fn start(

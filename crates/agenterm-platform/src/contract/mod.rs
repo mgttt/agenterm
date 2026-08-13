@@ -1,6 +1,7 @@
-#[cfg(feature = "a11y-publish")]
+// Both contracts are plain data with no optional dependency behind them, and
+// the publish facade below is unconditional so callers never branch on the
+// host, so neither carries a feature gate.
 pub mod accessibility_publish;
-#[cfg(any(feature = "a11y-tree", feature = "a11y-publish"))]
 pub mod accessibility_tree;
 #[cfg(feature = "activation")]
 pub mod activation;

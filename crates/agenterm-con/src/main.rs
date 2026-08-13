@@ -17,7 +17,6 @@
 // keeping the child handle alive for the session lifetime.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-#[cfg(target_os = "linux")]
 mod a11y;
 mod agent_interface;
 mod composer;
@@ -744,13 +743,11 @@ struct ConApp {
     frame_width: u32,
     frame_height: u32,
     frame_scale: f64,
-    #[cfg(target_os = "linux")]
+    // `None` on hosts whose accessibility backend discards snapshots, so the
+    // publish path costs nothing there. The platform crate owns that choice.
     a11y: Option<agenterm_platform::accessibility_publish::AccessibilityPublisher>,
-    #[cfg(target_os = "linux")]
     a11y_inbox: Arc<std::sync::Mutex<Vec<a11y::Request>>>,
-    #[cfg(target_os = "linux")]
     a11y_dirty: bool,
-    #[cfg(target_os = "linux")]
     current_window_title: String,
 }
 
@@ -808,13 +805,9 @@ impl ConApp {
             frame_width: 0,
             frame_height: 0,
             frame_scale: 1.0,
-            #[cfg(target_os = "linux")]
             a11y: None,
-            #[cfg(target_os = "linux")]
             a11y_inbox: Arc::new(std::sync::Mutex::new(Vec::new())),
-            #[cfg(target_os = "linux")]
             a11y_dirty: false,
-            #[cfg(target_os = "linux")]
             current_window_title: String::from("agenterm-con"),
         }
     }
@@ -850,11 +843,8 @@ impl ConApp {
         })?;
         let title = format!("{} [@{}]", session.current_title, id.get());
         window.set_title(&title);
-        #[cfg(target_os = "linux")]
-        {
-            self.current_window_title = title;
-            self.mark_a11y_dirty();
-        }
+        self.current_window_title = title;
+        self.mark_a11y_dirty();
         Ok(())
     }
 
@@ -904,15 +894,10 @@ impl ConApp {
         ui::Layout::with_sidebar_width(width, height, scale, self.sidebar_width_logical)
     }
 
-    #[cfg(target_os = "linux")]
     fn mark_a11y_dirty(&mut self) {
         self.a11y_dirty = true;
     }
 
-    #[cfg(not(target_os = "linux"))]
-    fn mark_a11y_dirty(&mut self) {}
-
-    #[cfg(target_os = "linux")]
     fn publish_a11y(&mut self, window: &PixelWindow) {
         let Some(publisher) = self.a11y.as_ref() else {
             return;
@@ -939,10 +924,6 @@ impl ConApp {
         self.a11y_dirty = false;
     }
 
-    #[cfg(not(target_os = "linux"))]
-    fn publish_a11y(&mut self, _window: &PixelWindow) {}
-
-    #[cfg(target_os = "linux")]
     fn drain_a11y_actions(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         let requests = {
             let Ok(mut inbox) = self.a11y_inbox.lock() else {
@@ -978,11 +959,6 @@ impl ConApp {
             }
             self.mark_a11y_dirty();
         }
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn drain_a11y_actions(&mut self, _window: &PixelWindow) -> Result<(), PixelWindowError> {
         Ok(())
     }
 
@@ -3824,30 +3800,30 @@ impl PixelWindowApplication for ConApp {
             );
         }
         self.refresh_title(window)?;
-        #[cfg(target_os = "linux")]
-        {
-            match agenterm_platform::accessibility_publish::start(
-                "agenterm-con",
-                window.native_identity(),
-            ) {
-                Ok(publisher) => {
-                    let inbox = Arc::clone(&self.a11y_inbox);
-                    let waker = window.waker();
-                    publisher.set_handler(Arc::new(move |node, action| {
-                        if let Ok(mut queue) = inbox.lock() {
-                            queue.push(a11y::Request { node, action });
-                        }
-                        let _ = waker.wake();
-                    }));
-                    self.a11y = Some(publisher);
-                    self.a11y_dirty = true;
-                    self.publish_a11y(window);
-                }
-                Err(error) => {
-                    let _ = agenterm_platform::parent_console::write_stderr(&format!(
-                        "agenterm-con a11y: {error}\n"
-                    ));
-                }
+        match agenterm_platform::accessibility_publish::start(
+            "agenterm-con",
+            window.native_identity(),
+        ) {
+            // A backend that discards snapshots is dropped here, so the chrome
+            // tree is never built on hosts that cannot serve it.
+            Ok(publisher) if publisher.is_publishing() => {
+                let inbox = Arc::clone(&self.a11y_inbox);
+                let waker = window.waker();
+                publisher.set_handler(Arc::new(move |node, action| {
+                    if let Ok(mut queue) = inbox.lock() {
+                        queue.push(a11y::Request { node, action });
+                    }
+                    let _ = waker.wake();
+                }));
+                self.a11y = Some(publisher);
+                self.a11y_dirty = true;
+                self.publish_a11y(window);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = agenterm_platform::parent_console::write_stderr(&format!(
+                    "agenterm-con a11y: {error}\n"
+                ));
             }
         }
         Ok(directive)
@@ -4321,7 +4297,6 @@ impl PixelWindowApplication for ConApp {
         if self.pending_control.has_pending_screenshot() {
             window.request_redraw();
         }
-        #[cfg(target_os = "linux")]
         if self.a11y_dirty {
             self.publish_a11y(window);
         }

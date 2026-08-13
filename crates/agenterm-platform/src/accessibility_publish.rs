@@ -23,6 +23,9 @@ pub enum AccessibilityPublishError {
 }
 
 impl AccessibilityPublishError {
+    // Only a real publisher can fail to register, so this constructor is dead
+    // in builds that select the no-op backend.
+    #[allow(dead_code)]
     pub(crate) fn failed(code: &'static str, message: impl ToString) -> Self {
         Self::Failed {
             code,
@@ -63,6 +66,13 @@ impl AccessibilityPublisher {
 
     pub fn set_window_handle(&self, window_handle: Option<i64>) {
         self.inner.set_window_handle(window_handle);
+    }
+
+    /// Whether a real host publisher is behind this handle. False on hosts
+    /// whose backend discards snapshots, so callers can skip building them
+    /// instead of testing the OS themselves.
+    pub fn is_publishing(&self) -> bool {
+        self.inner.is_publishing()
     }
 }
 
