@@ -963,6 +963,13 @@ directory, use package-relative `[[test]]` paths when explicit registration is
 needed, and publish repo-relative evidence paths separately. Confirm ownership
 through Cargo metadata, not only by observing one green invocation.
 
+The same ownership rule applies to repository source audits. A scanner rooted
+at the workbench `src/` tree does not follow a package's `[[bin]]` target after
+that source moves under `crates/<package>/src`. When physically separating a
+package, update every boundary, native-API, hygiene, and architecture scanner
+to include the new source root explicitly; otherwise a correct Cargo move can
+silently create an audit blind spot.
+
 ## Canonical paths are not cross-runtime command arguments
 
 Windows `std::fs::canonicalize` can return a `\\?\` verbatim path. That is a

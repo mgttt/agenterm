@@ -27,7 +27,7 @@ const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 12] = [
 // three Rust-runtime entrypoints and separately constrains the size-bounded,
 // no_std CUI trampoline.
 //
-// `agenterm-con/startup.rs` joins them as a loader entry: it defines the
+// `crates/agenterm-con/src/startup.rs` joins them as a loader entry: it defines the
 // linker-visible entry symbol and the `.CRT$X*` initializer arrays of its own
 // binary, plus the per-architecture `global_asm!` thunk that jumps to rustc's
 // generated `main`. All three are properties of the crate being linked, so
@@ -38,9 +38,9 @@ const FORBIDDEN_HOST_BRANCH_MARKERS: [(&str, &str); 12] = [
 const HOST_BRANCH_ENTRYPOINT_EXEMPTIONS: &[&str] = &[
     "src/bin/agenterm.rs",
     "src/bin/agenterm-cc.rs",
-    "src/bin/agenterm-con.rs",
+    "crates/agenterm-con/src/main.rs",
     "src/bin/agenterm-com.rs",
-    "src/bin/agenterm-con/startup.rs",
+    "crates/agenterm-con/src/startup.rs",
 ];
 
 #[test]
@@ -48,6 +48,11 @@ fn non_platform_src_has_no_runtime_host_branching_references() {
     let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect_rs_files(&src_root, &mut files).expect("collect src tree");
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/agenterm-con/src"),
+        &mut files,
+    )
+    .expect("collect agenterm-con src tree");
 
     let mut violations = Vec::new();
     for file in files {

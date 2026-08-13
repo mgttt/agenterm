@@ -24,12 +24,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   rather than relying on con's unrelated `ipc` feature to make `CreateProcessW`,
   pipes and Job APIs visible, so both the minimal capability graph and the full
   con graph are compile-owned.
-- [~] all four public/alignment/throughput tests now live under
-  `crates/agenterm-con/tests`, so the workbench package no longer auto-discovers
-  and reruns con GUI journeys under its aborting profile. The binary source
-  still lives under the workbench `src/bin` tree through an explicit `[[bin]]`
-  path; that final physical relocation remains tracked by
-  [`plan/ARCHITECTURE.md`](../plan/ARCHITECTURE.md).
+- [x] the binary source lives under `crates/agenterm-con/src`, and all four
+  public/alignment/throughput tests live under `crates/agenterm-con/tests`.
+  The package has no `../../` source or test path back into the workbench tree,
+  so Cargo ownership and physical ownership now agree.
 
 ## Unwind profiles and panic containment
 

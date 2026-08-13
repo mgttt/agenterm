@@ -17,24 +17,15 @@
 // keeping the child handle alive for the session lifetime.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-#[path = "agenterm-con/agent_interface.rs"]
 mod agent_interface;
-#[path = "agenterm-con/composer.rs"]
 mod composer;
-#[path = "agenterm-con/control.rs"]
 mod control;
-#[path = "agenterm-con/font.rs"]
 mod font;
-#[path = "agenterm-con/json.rs"]
 mod json;
-#[path = "agenterm-con/palette.rs"]
 mod palette;
 #[cfg(windows)]
-#[path = "agenterm-con/startup.rs"]
 mod startup;
-#[path = "agenterm-con/ui.rs"]
 mod ui;
-#[path = "agenterm-con/workspace.rs"]
 mod workspace;
 
 use std::path::PathBuf;

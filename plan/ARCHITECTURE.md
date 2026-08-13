@@ -76,12 +76,12 @@ src/platform/adapters/       主机实现（物理目录）
   unix/frontend/             embedded 窗口 + 产品状态机
   linux|macos/               契约/manifest 等（非第二套业务策略）
 
-crates/agenterm-con/         第二产品 package：仅 Cargo.toml + build.rs
-                             autobins=false；[[bin]]/[[test]] 路径回指下方源码
-src/bin/agenterm-con.rs      宿主主体 6,238 行（见 §4 C1 债务）
+crates/agenterm-con/         第二产品 package：Cargo.toml + build.rs + 自有源码/测试
+                             autobins=false；无跨回工作台树的 [[bin]]/[[test]] 路径
+  src/main.rs                宿主主体 6,238 行（见 §4 C1 债务）
                              ConApp / ConTerminal / SessionStore / PerfStats /
                              Surface / impl PixelWindowApplication
-src/bin/agenterm-con/        con 私有叶（不被主程序 mod 引用）
+  src/                       con 私有叶（不被主程序 mod 引用）
   control.rs                 ATC1 固定控制语法（1,687 行，con 最大叶）
   json.rs                    固定 schema 有界 JSON 编解码（825 行）
   agent_interface.rs         机器可读自省 / ui-snapshot 组装
@@ -105,7 +105,7 @@ src/bin/agenterm-con/        con 私有叶（不被主程序 mod 引用）
 | `agenterm` | `src/bin/agenterm.rs` | GUI 启动器；`server` = 无窗权威；`cli` = 共享控制平面入口 |
 | `agenterm-com` | `src/bin/agenterm-com.rs` | 极简 Windows Console-subsystem 转发器；交付名 `agenterm.com`，同步等待 `agenterm.exe` |
 | `agenterm-cc` | `src/bin/agenterm-cc.rs` | Control Center 投影 |
-| `agenterm-con` | `crates/agenterm-con/Cargo.toml` + `src/bin/agenterm-con.rs` + `src/bin/agenterm-con/*` | 独立最小依赖 package；conhost 等价物（单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；`startup.rs` 独占 Windows loader/CRT 边界；局部纯 UI 规则与适配状态机分离） |
+| `agenterm-con` | `crates/agenterm-con/Cargo.toml` + `crates/agenterm-con/src/*` | 独立最小依赖 package；conhost 等价物（单 GUI 进程内多 PTY 树，无 server/Fleet/script；平台 pixel-window 直调；`startup.rs` 独占 Windows loader/CRT 边界；局部纯 UI 规则与适配状态机分离） |
 
 `agenterm-con` 的窗口机制仍只能从 `agenterm-platform` 选择。Windows 已有
 `native-pixel-window` host：直接使用 User32 消息泵、GDI XRGB buffer 与
@@ -154,9 +154,9 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | Win 主机 | `src/platform/adapters/windows/{frontend,remote_frontend}.rs` | remote 客户端；`remote_frontend` 巨石见 L2 |
 | Unix 主机 | `src/platform/adapters/unix/frontend/` | embedded 状态机；`mod`/`render` 巨石见 L2 |
 | 机制 crate | `crates/agenterm-platform/src/{selected,window,numeric,input,ipc,pty,process,shared_memory}.rs` | 无产品名；`numeric` 固化 native geometry 的 IEEE-754 取整叶 |
-| con 宿主 | `src/bin/agenterm-con.rs` | 6,238 行巨石；VT 回调/终端状态机/应用状态/perf/待决请求/Surface 同居，见 §4 C1 |
-| con 自动化 | `src/bin/agenterm-con/{control,json,agent_interface}.rs` | ATC1 语法 + 有界 JSON + 自省；公开面契约归 `prd/PRD_02_26_con_control_cli.md` |
-| con 纯规则叶 | `src/bin/agenterm-con/{ui,workspace,composer}.rs` | 孵化层：无 window/PTY 依赖；证据稳定后按下方提升顺序迁入 `src/frontend/*` |
+| con 宿主 | `crates/agenterm-con/src/main.rs` | 6,238 行巨石；VT 回调/终端状态机/应用状态/perf/待决请求/Surface 同居，见 §4 C1 |
+| con 自动化 | `crates/agenterm-con/src/{control,json,agent_interface}.rs` | ATC1 语法 + 有界 JSON + 自省；公开面契约归 `prd/PRD_02_26_con_control_cli.md` |
+| con 纯规则叶 | `crates/agenterm-con/src/{ui,workspace,composer}.rs` | 孵化层：无 window/PTY 依赖；证据稳定后按下方提升顺序迁入 `src/frontend/*` |
 | 边界闸 | `src/platform/boundary_tests.rs` | 规则见 §8.2；**不**解析本文全文 |
 
 ---
@@ -173,8 +173,8 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | L3 | `platform/mod.rs` 策略过肥（input/paths/control_center/runtime/test_fixtures/workspace 已拆 `policy/`；FrontendHost 与 facade 是剩余薄层）+ `allow(dead_code)` | `policy/*` 全拆收口；禁新顶层 `is_windows_host` 蔓延；半迁移 facade 二选一（全接线或删） |
 | L4 | **结构 SSOT 未机读双向**（本文 prose + 局部 `boundary_tests`；目录树/分层文案漂移靠人） | 见 §8.4；版本 plan **S 组**执行；本文只定契约 |
 | D1 | shared_memory 名长 ≤31 | **本机已绿**：unit + `shared_memory_process` 名式 `apm-…` ≤31 |
-| C1 | `src/bin/agenterm-con.rs` 6,238 行 = con 产品源码 60%；VT 回调、终端状态机、`ConApp`、perf 计数、待决控制请求、像素 `Surface` 与 `PixelWindowApplication` 实现同居一文件。其余 10 个叶平均 400 行且注释明写"不拥有什么"，该纪律未施加到主文件 | 按 PRD 24/25/26 的既有边界切分：终端/渲染、工作区/输入、控制/CLI 各自成 mod；**先切 `ConApp` 的待决请求与 perf 状态**（已有 PRD 26 契约兜底），再动渲染路径 |
-| C2 | `crates/agenterm-con/` 只有 manifest + build.rs，源码仍在工作台 `src/bin/`、测试在 `tests/`，靠 `[[bin]]`/`[[test]]` 路径回指；"独立 package"只成立于依赖图，不成立于物理布局 | 源码与测试迁入 crate 内；迁移前 `prd/PRD_02_27` 的物理分离条目须保持 `[~]`，不得因依赖图已独立就宣称布局已分离 |
+| C1 | `crates/agenterm-con/src/main.rs` 6,238 行 = con 产品源码 60%；VT 回调、终端状态机、`ConApp`、perf 计数、待决控制请求、像素 `Surface` 与 `PixelWindowApplication` 实现同居一文件。其余 10 个叶平均 400 行且注释明写"不拥有什么"，该纪律未施加到主文件 | 按 PRD 24/25/26 的既有边界切分：终端/渲染、工作区/输入、控制/CLI 各自成 mod；**先切 `ConApp` 的待决请求与 perf 状态**（已有 PRD 26 契约兜底），再动渲染路径 |
+| C2 | **已收**：源码与测试均在 `crates/agenterm-con/` 内，manifest 无 `../../` 回指；根包边界测试继续扫描 con 源码 | 保持 package 物理所有权与 Cargo 所有权一致；迁移不得形成 native API 审计盲区 |
 | C3 | con 的 PE 体积史/证据计数在本文（§体积与复用）与 `prd/PRD_02_2{4,7}` 两处平行记录，且本文一度领先 PRD 两代增量 | 单主：PE 字节、perf 探针、证据计数归 PRD 27/24；本文只留结构规则与提升顺序。新增量禁止双写 |
 
 已清理：`src/platform/services/frontend.rs` 孤儿 re-export（无人 `mod`）——删除；入口以 `src/frontend/` 为准。
@@ -533,7 +533,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 - 提升顺序固定为：先在 owning 产品以单测和公开黑盒证据证明规则，再抽取无产品
   authority 的最小契约，再让两个产品消费；不得为了“复用”把 server、脚本、Fleet
   或 con 的 GUI-lifetime local-control 策略下沉到 platform。
-- `src/bin/agenterm-con/ui.rs` 当前是局部孵化层，只容纳无窗口后端/PTY 依赖的
+- `crates/agenterm-con/src/ui.rs` 当前是局部孵化层，只容纳无窗口后端/PTY 依赖的
   geometry、命中与视口规则；规则被主程序实际需要且证据稳定后，迁入
   `src/frontend/*` 或 `src/ui_geometry.rs`，不长期复制双份实现。
 - 体积与构建隔离是两个问题：Windows 原生 pixel host、独立

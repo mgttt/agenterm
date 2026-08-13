@@ -54,7 +54,7 @@ const PLATFORM_CRATE: &str = "crates/agenterm-platform";
 const SUBSYSTEM_ENTRYPOINTS: &[&str] = &[
     "src/bin/agenterm.rs",
     "src/bin/agenterm-cc.rs",
-    "src/bin/agenterm-con.rs",
+    "crates/agenterm-con/src/main.rs",
 ];
 const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsystem = \"windows\")]";
 
@@ -63,20 +63,23 @@ const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsyste
 /// It cannot delegate to the platform crate (the crate's runtime would blow
 /// the trampoline's 64KiB staged-size budget), so the whole file is exempt.
 ///
-/// `agenterm-con/startup.rs` is the same category for the same structural
+/// `crates/agenterm-con/src/startup.rs` is the same category for the same structural
 /// reason: it declares the linker-visible entry symbol and the `.CRT$X*`
 /// initializer arrays *of its own binary*. Those must be compiled into the
 /// crate being linked, so relocating them behind the platform crate's API is
 /// not possible even in principle — unlike ordinary native mechanics, which
 /// stay barred from `src/**`.
-const NATIVE_ENTRYPOINT_EXEMPTIONS: &[&str] =
-    &["src/bin/agenterm-com.rs", "src/bin/agenterm-con/startup.rs"];
+const NATIVE_ENTRYPOINT_EXEMPTIONS: &[&str] = &[
+    "src/bin/agenterm-com.rs",
+    "crates/agenterm-con/src/startup.rs",
+];
 
 #[test]
 fn production_sources_use_platform_crate_as_the_only_native_boundary() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut sources = Vec::new();
     collect_rust_sources(&root.join("src"), &mut sources);
+    collect_rust_sources(&root.join("crates/agenterm-con/src"), &mut sources);
     sources.sort();
 
     let mut violations = Vec::new();

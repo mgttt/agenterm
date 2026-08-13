@@ -805,14 +805,15 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
   target-specific cold build，不是增量构建数字。
   安全失败：拿不到可复现证据就保持未完成并如实记录，不改预算定义蒙混过关。
   非目标：回退 unwind、砍掉已验收的 resize/close 语义。
-- [ ] **CON-C1 主体巨石切分** — `src/bin/agenterm-con.rs` 6,238 行占 con 产品源码
+- [ ] **CON-C1 主体巨石切分** — `crates/agenterm-con/src/main.rs` 6,238 行占 con 产品源码
   60%，VT 回调、终端状态机、`ConApp`、perf 计数、待决控制请求与像素 `Surface`
   同居。按 PRD 24/25/26 既有边界切分；**先切 `ConApp` 的待决请求与 perf 状态**
   （已有 PRD 26 契约兜底），再动渲染路径。不变量：切分不得改变任何公开 CLI/JSON
   合同字节；每步由 con 自有黑盒与对齐门证明无行为变化。非目标：借切分改产品语义。
-- [ ] **CON-C2 package 物理分离** — 源码与测试迁入 `crates/agenterm-con/`，消除
-  `[[bin]]`/`[[test]]` 的 `../../` 回指。迁移前 PRD 27 的物理分离条目保持 `[~]`，
-  不得因依赖图已独立就宣称布局已分离。非目标：顺手重排工作台目录。
+- [x] **CON-C2 package 物理分离** — 源码与测试均已迁入
+  `crates/agenterm-con/`，`[[bin]]` 与 `[[test]]` 不再通过 `../../` 回指工作台树；
+  根包边界闸显式扫描新源码目录，物理分离不会形成 native API 审计盲区。
+  非目标：顺手重排工作台目录。
 - [ ] **CON-C3 文档双写止血** — ARCHITECTURE 第 236–562 行的 con 体积史/证据计数
   与 PRD 27/24 平行记录，且曾领先 PRD 两代。按 ARCHITECTURE §4 C3 的单主规则做一次
   去重扫描：结构规则留 ARCHITECTURE，字节与证据归 PRD。证据是两文档对同一增量不再

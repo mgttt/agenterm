@@ -11,7 +11,7 @@ autobins = false
 
 [[bin]]
 name = "agenterm-con"
-path = "../../src/bin/agenterm-con.rs"
+path = "src/main.rs"
 
 [[test]]
 name = "agenterm_con_blackbox"
