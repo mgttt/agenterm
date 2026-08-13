@@ -107,3 +107,29 @@ jobs:
         run: cargo test --locked -p agenterm-abi --profile abi-dev
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+
+  libagenterm-abi-linux:
+    name: libagenterm ABI (linux)
+    # Linux 交付通道:真实构建并验证 libagenterm.so 与 libagenterm.a(c_consumer /
+    # c_static_link 必须真跑,不许 SKIP)。
+    # 故意没有 apt 步骤——实测依据(交叉 cargo check/clippy 通过 + 代码路径分析):
+    # 编译期平台栈在 Linux 上是纯 Rust(winit+wayland-dlopen / x11rb / atspi /
+    # zbus / softbuffer),零系统 -dev 包;运行期 headless runner 上窗口 / 剪贴板 /
+    # a11y 由适配层短路为 AGT_UNSUPPORTED(测试按设计 SKIP,不触碰 xkbcommon 等
+    # dlopen 库),PTY / C probe 只用 ubuntu-latest 自带的 gcc 与 glibc。
+    # 若 CI 首次运行报缺库,按报错补 apt 包,并回填本注释与
+    # crates/agenterm-abi/README.md 的 Unix 系统库列表。
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install Rust ABI toolchain components
+        run: rustup component add clippy
+      - name: Build libagenterm ABI (abi-release)
+        run: cargo build --locked -p agenterm-abi --profile abi-release
+      - name: Test libagenterm ABI (abi-dev)
+        run: cargo test --locked -p agenterm-abi --profile abi-dev
+      - name: Clippy libagenterm ABI (abi-dev)
+        run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
