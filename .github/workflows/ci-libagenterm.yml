@@ -69,6 +69,10 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test export_exactness -- --nocapture
+      - name: Static archive symbol surface (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test archive_surface -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu
@@ -122,6 +126,10 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test export_exactness -- --nocapture
+      - name: Static archive symbol surface (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test archive_surface -- --nocapture
       - name: pkg-config static consumption (end to end)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test pkgconfig_consume -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
@@ -178,6 +186,10 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test export_exactness -- --nocapture
+      - name: Static archive symbol surface (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test archive_surface -- --nocapture
       - name: pkg-config static consumption (end to end)
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test pkgconfig_consume -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)

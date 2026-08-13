@@ -51,31 +51,25 @@ fn expected_exports() -> Vec<String> {
 
 /// Platform allowlist of exports that are NOT part of the promised C ABI.
 ///
-/// Must be EMPTY on Linux and Windows: CI measured zero extra symbols there,
-/// so leaving the list empty is what makes a FUTURE leak turn this gate red
-/// instead of silently widening the surface. Names live in the stripped name
-/// space this test compares in (see `exported_names`).
+/// Must be EMPTY on ALL THREE platforms: CI measured zero extra symbols
+/// there, so leaving the list empty is what makes a FUTURE leak turn this
+/// gate red instead of silently widening the surface. Names live in the
+/// stripped name space this test compares in (see `exported_names`).
+///
+/// macOS specifics: milestone 55 removed the 4 softbuffer objc2
+/// `declare_class!` registration symbols
+/// (`___CLASS_SoftbufferObserver` / `___DROP_FLAG_OFFSET_SoftbufferObserver`
+/// / `___IVAR_OFFSET_SoftbufferObserver` / `___REGISTER_CLASS_SoftbufferObserver`)
+/// from the dylib export surface with `-unexported_symbols_list` — see
+/// `crates/agenterm-abi/build.rs` (this file DISCOVERS a leak, that file
+/// ELIMINATES these 4; keep the two name lists in sync). The build script
+/// comment explains why `-exported_symbols_list` alone cannot work (ld64
+/// takes the union of multiple lists). With the symbols gone the macOS
+/// allowlist is empty like the others; if CI ever reports macOS `total=59`,
+/// the `-unexported_symbols_list` did not take effect — report it, do NOT
+/// re-add names here.
 fn allowed_non_agt() -> &'static [&'static str] {
-    #[cfg(target_os = "macos")]
-    {
-        // macOS only: softbuffer's objc2 `declare_class!` emits these ObjC
-        // class registration symbols into the dylib's export table. They are
-        // not part of the promised C ABI; they are listed here so a FIFTH
-        // leak turns this gate red instead of silently widening the surface.
-        // Raw symbol names begin with three underscores (`___CLASS_...`);
-        // one is the Mach-O C-symbol prefix stripped by `exported_names`, so
-        // the entries below keep two.
-        &[
-            "__CLASS_SoftbufferObserver",
-            "__DROP_FLAG_OFFSET_SoftbufferObserver",
-            "__IVAR_OFFSET_SoftbufferObserver",
-            "__REGISTER_CLASS_SoftbufferObserver",
-        ]
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        &[]
-    }
+    &[]
 }
 
 /// Parse the exported symbol NAMES of the built cdylib with the `object`
