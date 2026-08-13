@@ -71,8 +71,8 @@ impl NativeListener {
                 "this host native IPC adapter accepts only Unix sockets",
             ));
         };
-        let path = PathBuf::from(path);
-        if !path.is_absolute() || path.as_os_str().as_bytes().len() > unix_socket_path_limit() {
+        let requested = PathBuf::from(path);
+        if !requested.is_absolute() {
             return Err(IpcTransportError::new(
                 IpcTransportErrorCode::InvalidEndpoint,
                 endpoint.to_string(),
@@ -82,20 +82,22 @@ impl NativeListener {
                 ),
             ));
         }
-        let parent = path
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .ok_or_else(|| {
-                IpcTransportError::new(
-                    IpcTransportErrorCode::InvalidEndpoint,
-                    endpoint.to_string(),
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Unix socket has no parent directory",
-                    ),
-                )
-            })?;
-        ensure_private_directory(parent, endpoint)?;
+        // Resolve host temp roots that are themselves symlinks (macOS `/tmp` →
+        // `/private/tmp`) before private-directory checks. Bind and connect share
+        // this resolution so endpoint strings stay host-neutral while the on-disk
+        // path is always real and private — matching the "pipe name just works"
+        // Windows experience.
+        let path = resolve_unix_socket_path(&requested, endpoint)?;
+        if path.as_os_str().as_bytes().len() > unix_socket_path_limit() {
+            return Err(IpcTransportError::new(
+                IpcTransportErrorCode::InvalidEndpoint,
+                endpoint.to_string(),
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Unix socket path must be absolute and within the platform length limit",
+                ),
+            ));
+        }
         let mut instance_lease = UnixInstanceLease::acquire(&path, endpoint)?;
 
         match std::fs::symlink_metadata(&path) {
@@ -282,7 +284,8 @@ impl NativeStream {
                 "this host native IPC adapter accepts only Unix sockets",
             ));
         };
-        let stream = connect_bounded(path, timeout, endpoint)?;
+        let path = resolve_unix_socket_path(Path::new(path), endpoint)?;
+        let stream = connect_bounded(path.to_string_lossy().as_ref(), timeout, endpoint)?;
         Self::from_stream(stream, endpoint, timeout)
     }
 
@@ -580,7 +583,41 @@ fn verify_peer_uid(
     Ok(())
 }
 
-fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> TransportResult<()> {
+/// Resolve a requested Unix socket path to a real, private on-disk path.
+///
+/// Existing ancestors that are symlinks (notably macOS `/tmp` → `/private/tmp`)
+/// are canonicalized. Missing leaf directories are created mode `0o700` and
+/// must end owned by the effective UID. The final private directory itself must
+/// not be a symlink.
+fn resolve_unix_socket_path(path: &Path, endpoint: &IpcEndpoint) -> TransportResult<PathBuf> {
+    let file_name = path.file_name().ok_or_else(|| {
+        IpcTransportError::new(
+            IpcTransportErrorCode::InvalidEndpoint,
+            endpoint.to_string(),
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unix socket path has no file name",
+            ),
+        )
+    })?;
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| {
+            IpcTransportError::new(
+                IpcTransportErrorCode::InvalidEndpoint,
+                endpoint.to_string(),
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Unix socket has no parent directory",
+                ),
+            )
+        })?;
+    let real_parent = ensure_private_directory(parent, endpoint)?;
+    Ok(real_parent.join(file_name))
+}
+
+fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> TransportResult<PathBuf> {
     use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
     if !directory.is_absolute() {
         return Err(unsafe_endpoint(
@@ -588,48 +625,105 @@ fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> Transpo
             "Unix runtime directory must be absolute",
         ));
     }
-    let mut ancestry = directory.ancestors().collect::<Vec<_>>();
-    ancestry.reverse();
-    for component in ancestry {
-        match std::fs::symlink_metadata(component) {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+
+    let mut resolved = PathBuf::new();
+    let mut components = directory.components().peekable();
+    while let Some(component) = components.next() {
+        resolved.push(component.as_os_str());
+        match std::fs::symlink_metadata(&resolved) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                // Resolve host-provided roots (e.g. `/tmp`) once, then continue
+                // creating private leaves under the real directory.
+                resolved = std::fs::canonicalize(&resolved)
+                    .map_err(|error| transport_io(endpoint, error))?;
+                let meta = std::fs::symlink_metadata(&resolved)
+                    .map_err(|error| transport_io(endpoint, error))?;
+                if !meta.is_dir() {
                     return Err(unsafe_endpoint(
                         endpoint,
-                        "Unix runtime directory ancestry contains a symlink or non-directory",
+                        "Unix runtime directory ancestry resolves to a non-directory",
                     ));
                 }
             }
+            Ok(metadata) if metadata.is_dir() => {
+                // Prefer the real path for consistency with symlink parents.
+                if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+                    resolved = canonical;
+                }
+            }
+            Ok(_) => {
+                return Err(unsafe_endpoint(
+                    endpoint,
+                    "Unix runtime directory ancestry contains a non-directory",
+                ));
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // Create this component and any remaining missing leaves at 0700.
                 let mut builder = std::fs::DirBuilder::new();
                 builder.mode(0o700);
-                match builder.create(component) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                        let metadata = std::fs::symlink_metadata(component)
-                            .map_err(|error| transport_io(endpoint, error))?;
-                        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                            return Err(unsafe_endpoint(
-                                endpoint,
-                                "Unix runtime directory creation lost an ancestry race",
-                            ));
+                loop {
+                    match builder.create(&resolved) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                            let metadata = std::fs::symlink_metadata(&resolved)
+                                .map_err(|error| transport_io(endpoint, error))?;
+                            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                                return Err(unsafe_endpoint(
+                                    endpoint,
+                                    "Unix runtime directory creation lost an ancestry race",
+                                ));
+                            }
+                            if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+                                resolved = canonical;
+                            }
                         }
+                        Err(error) => return Err(transport_io(endpoint, error)),
                     }
-                    Err(error) => return Err(transport_io(endpoint, error)),
+                    if components.peek().is_none() {
+                        break;
+                    }
+                    if let Some(next) = components.next() {
+                        resolved.push(next.as_os_str());
+                    }
                 }
+                break;
             }
             Err(error) => return Err(transport_io(endpoint, error)),
         }
     }
+
     let metadata =
-        std::fs::symlink_metadata(directory).map_err(|error| transport_io(endpoint, error))?;
-    if !metadata.is_dir() || metadata.uid() != effective_uid() || metadata.mode() & 0o077 != 0 {
+        std::fs::symlink_metadata(&resolved).map_err(|error| transport_io(endpoint, error))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() || metadata.uid() != effective_uid()
+    {
         return Err(unsafe_endpoint(
             endpoint,
             "Unix runtime directory is not private to the effective UID",
         ));
     }
-    Ok(())
+    // Host temp helpers (and `create_dir_all`) often leave 0o755 leaves. When we
+    // already own the directory, tighten it to 0o700 so control sockets match
+    // the Windows named-pipe "private to this user" posture without forcing
+    // every caller to remember Unix modes.
+    if metadata.mode() & 0o077 != 0 {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&resolved, permissions)
+            .map_err(|error| transport_io(endpoint, error))?;
+        let metadata = std::fs::symlink_metadata(&resolved)
+            .map_err(|error| transport_io(endpoint, error))?;
+        if metadata.mode() & 0o077 != 0 {
+            return Err(unsafe_endpoint(
+                endpoint,
+                "Unix runtime directory is not private to the effective UID",
+            ));
+        }
+    }
+    if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+        resolved = canonical;
+    }
+    Ok(resolved)
 }
 
 fn unix_socket_path_limit() -> usize {

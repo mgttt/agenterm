@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output};
@@ -30,10 +28,75 @@ fn unique_suffix() -> String {
         .expect("system clock must follow Unix epoch")
         .as_nanos();
     format!(
-        "{}-{nanos}-{}",
-        std::process::id(),
+        "{}-{}-{}",
+        std::process::id() % 100_000,
+        nanos % 1_000_000_000,
         UNIQUE.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+fn control_endpoint(suffix: &str) -> String {
+    if cfg!(windows) {
+        format!(r"pipe:\\.\pipe\agenterm-con-test-{suffix}")
+    } else {
+        let base = agenterm_platform::ipc::native_runtime_directory();
+        let _ = fs::create_dir_all(&base);
+        let dir = base.join(format!("ct-{suffix}"));
+        let _ = fs::create_dir_all(&dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        }
+        let path = dir.join("c.sock");
+        assert!(
+            path.to_string_lossy().len() <= 103,
+            "Unix control socket path too long: {}",
+            path.display()
+        );
+        format!("unix:{}", path.to_string_lossy())
+    }
+}
+
+fn host_shell_args() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["cmd.exe", "/Q", "/K"]
+    } else {
+        vec!["/bin/bash", "--norc", "--noprofile"]
+    }
+}
+
+fn shell_flood_command(prefix: &str) -> String {
+    if cfg!(windows) {
+        format!("for /L %i in (1,1,1000000) do @echo {prefix}%i\r")
+    } else {
+        format!("for i in $(seq 1 200000); do echo {prefix}$i; done\r")
+    }
+}
+
+fn shell_load_done_command() -> &'static str {
+    if cfg!(windows) {
+        "for /L %i in (1,1,2000) do @echo LOAD_%i & echo LOAD_DONE\r"
+    } else {
+        "for i in $(seq 1 2000); do echo LOAD_$i; done; echo LOAD_DONE\r"
+    }
+}
+
+fn shell_vt_noise_command() -> &'static str {
+    if cfg!(windows) {
+        "for /F \"delims=\" %e in ('echo prompt $E^| cmd') do @set \"ESC=%e\"\r"
+    } else {
+        // Unix path injects CSI noise in one shot below.
+        "true\r"
+    }
+}
+
+fn shell_vt_noise_body() -> &'static str {
+    if cfg!(windows) {
+        "for /L %i in (1,1,1200) do @echo %ESC%[999999999999999999;999999999999999999;999999999999999999mVT_NOISE_%i%ESC%[0m\r"
+    } else {
+        "for i in $(seq 1 1200); do printf '\\033[999mVT_NOISE_%s\\033[0m\\n' \"$i\"; done\r"
+    }
 }
 
 fn invoke(exe: &Path, endpoint: &str, arguments: &[&str]) -> Output {
@@ -124,21 +187,19 @@ fn gui_control_surface_isolated_multitab_black_box() {
     let exe = agenterm_con_binary();
     let exe = exe.as_path();
     let suffix = unique_suffix();
-    let endpoint = format!(r"pipe:\\.\pipe\agenterm-con-test-{suffix}");
-    let screenshot = std::env::temp_dir().join(format!("agenterm-con-{suffix}.png"));
-    let child = Command::new(exe)
-        .args([
-            "--no-activate",
-            "--control",
-            &endpoint,
-            "-e",
-            "cmd.exe",
-            "/Q",
-            "/K",
-            "echo ROOT_READY",
-        ])
-        .spawn()
-        .expect("agenterm-con GUI must start");
+    let endpoint = control_endpoint(&suffix);
+    let screenshot = if cfg!(windows) {
+        std::env::temp_dir().join(format!("agenterm-con-{suffix}.png"))
+    } else {
+        agenterm_platform::ipc::native_runtime_directory().join(format!("shot-{suffix}.png"))
+    };
+    let mut host = Command::new(exe);
+    host.arg("--no-activate").arg("--control").arg(&endpoint).arg("-e");
+    for arg in host_shell_args() {
+        host.arg(arg);
+    }
+    // Launch with an interactive shell; inject ROOT_READY after control is up.
+    let child = host.spawn().expect("agenterm-con GUI must start");
     let mut gui = OwnedGui { child, screenshot };
 
     let listed = wait_until_ready(exe, &endpoint, Duration::from_secs(15));
@@ -146,6 +207,11 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert_eq!(listed["tabs"][0]["active"], true);
     cli_json(exe, &endpoint, &["reset-perf-stats"]);
 
+    cli_json(
+        exe,
+        &endpoint,
+        &["send-text", "--target", &root, "echo ROOT_READY\r"],
+    );
     cli_json(
         exe,
         &endpoint,
@@ -201,7 +267,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "send-text",
             "--target",
             &child_id,
-            "for /L %i in (1,1,2000) do @echo LOAD_%i & echo LOAD_DONE\r",
+            shell_load_done_command(),
         ],
     );
     cli_json(exe, &endpoint, &["select-tab", "--target", &root]);
@@ -224,7 +290,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "send-text",
             "--target",
             &child_id,
-            "for /F \"delims=\" %e in ('echo prompt $E^| cmd') do @set \"ESC=%e\"\r",
+            shell_vt_noise_command(),
         ],
     );
     cli_json(
@@ -234,7 +300,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "send-text",
             "--target",
             &child_id,
-            "for /L %i in (1,1,1200) do @echo %ESC%[999999999999999999;999999999999999999;999999999999999999mVT_NOISE_%i%ESC%[0m\r",
+            shell_vt_noise_body(),
         ],
     );
     thread::scope(|scope| {
@@ -486,7 +552,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
             ],
         );
         let fill = format!("QUEUE_FILL_{index}_");
-        let fill_command = format!("for /L %i in (1,1,1000000) do @echo {fill}%i\r");
+        let fill_command = shell_flood_command(&fill);
         cli_json(
             exe,
             &endpoint,

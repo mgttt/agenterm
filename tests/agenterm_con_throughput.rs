@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,10 +30,30 @@ fn unique_suffix() -> String {
         .expect("system clock must follow Unix epoch")
         .as_nanos();
     format!(
-        "{}-{nanos}-{}",
-        std::process::id(),
+        "{}-{}-{}",
+        std::process::id() % 100_000,
+        nanos % 1_000_000_000,
         UNIQUE.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+fn control_endpoint(suffix: &str) -> String {
+    if cfg!(windows) {
+        format!(r"pipe:\\.\pipe\agenterm-con-throughput-{suffix}")
+    } else {
+        let base = agenterm_platform::ipc::native_runtime_directory();
+        let _ = std::fs::create_dir_all(&base);
+        let dir = base.join(format!("tp-{suffix}"));
+        let _ = std::fs::create_dir_all(&dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        let path = dir.join("c.sock");
+        assert!(path.to_string_lossy().len() <= 103);
+        format!("unix:{}", path.to_string_lossy())
+    }
 }
 
 fn agenterm_con_binary() -> PathBuf {
@@ -101,12 +119,11 @@ fn tab_id(value: &Value) -> &str {
 fn sustained_long_output_keeps_control_and_sibling_responsive() {
     let exe = agenterm_con_binary();
     let exe = exe.as_path();
-    let endpoint = format!(r"pipe:\\.\pipe\agenterm-con-throughput-{}", unique_suffix());
-    let child = Command::new(exe)
-        .args([
-            "--no-activate",
-            "--control",
-            &endpoint,
+    let endpoint = control_endpoint(&unique_suffix());
+    let mut host = Command::new(exe);
+    host.arg("--no-activate").arg("--control").arg(&endpoint);
+    if cfg!(windows) {
+        host.args([
             "-e",
             "powershell.exe",
             "-NoLogo",
@@ -114,13 +131,22 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
             "-NoExit",
             "-Command",
             "[Console]::Out.WriteLine('THROUGHPUT_READY')",
-        ])
-        .spawn()
-        .expect("agenterm-con GUI must start");
+        ]);
+    } else {
+        host.args(["-e", "/bin/bash", "--norc", "--noprofile"]);
+    }
+    let child = host.spawn().expect("agenterm-con GUI must start");
     let mut gui = OwnedGui(child);
 
     let listed = wait_until_ready(exe, &endpoint, Duration::from_secs(15));
     let producer = tab_id(&listed["tabs"][0]["id"]).to_owned();
+    if !cfg!(windows) {
+        cli_json(
+            exe,
+            &endpoint,
+            &["send-text", "--target", &producer, "echo THROUGHPUT_READY\r"],
+        );
+    }
     cli_json(
         exe,
         &endpoint,
@@ -137,12 +163,21 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
     let sibling = tab_id(&created["id"]).to_owned();
     cli_json(exe, &endpoint, &["reset-perf-stats"]);
 
-    let command = format!(
-        "$b=[Text.Encoding]::ASCII.GetBytes(((('0123456789ABCDEF'*255)+\"`r`n\")*{OUTPUT_ITERATIONS}));\
-         $o=[Console]::OpenStandardOutput();\
-         $o.Write($b,0,$b.Length);\
-         [Console]::Out.WriteLine(('THROUGHPUT_'+'DONE_32M'))\r"
-    );
+    let command = if cfg!(windows) {
+        format!(
+            "$b=[Text.Encoding]::ASCII.GetBytes(((('0123456789ABCDEF'*255)+\"`r`n\")*{OUTPUT_ITERATIONS}));\
+             $o=[Console]::OpenStandardOutput();\
+             $o.Write($b,0,$b.Length);\
+             [Console]::Out.WriteLine(('THROUGHPUT_'+'DONE_32M'))\r"
+        )
+    } else {
+        // Same payload shape as the Windows PowerShell generator: 8192 lines of
+        // 16*255 ASCII + CRLF, then a done marker. Python is present on macOS CI
+        // and local dev; keeps the evidence comparable across hosts.
+        format!(
+            "python3 -c \"import sys;b=(b'0123456789ABCDEF'*255+b'\\r\\n')*{OUTPUT_ITERATIONS};sys.stdout.buffer.write(b);print('THROUGHPUT_DONE_32M')\"\r"
+        )
+    };
     let started = Instant::now();
     cli_json(
         exe,
@@ -228,7 +263,14 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
         .as_u64()
         .expect("PTY budget yield receipt must remain numeric");
     assert_eq!(perf["present_failure"], 0);
-    assert_eq!(perf["host_copy_frames"], 0);
+    // Windows native retained path should avoid host-copy frames; portable
+    // macOS/Linux may copy. Only require the counter to be numeric/non-negative.
+    assert!(
+        perf["host_copy_frames"]
+            .as_u64()
+            .is_some_and(|frames| if cfg!(windows) { frames == 0 } else { true }),
+        "host_copy_frames receipt invalid: {perf}"
+    );
 
     eprintln!(
         "AGENTERM_CON_EVIDENCE agenterm_con_throughput::sustained_long_output_keeps_control_and_sibling_responsive {}",

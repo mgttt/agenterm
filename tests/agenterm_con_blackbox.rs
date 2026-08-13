@@ -123,10 +123,20 @@ fn interactive_shell_args(journey: &Path) -> Vec<String> {
         TEST_JOURNEY_ARG.to_owned(),
         journey.to_string_lossy().into_owned(),
         "-e".to_owned(),
-        shell_program(),
     ];
     if cfg!(windows) {
+        // Keep Windows journeys on cmd.exe so KEY_EVENT / cooked-line tests
+        // match the original ConPTY evidence.
+        args.push("cmd.exe".to_owned());
         args.push("/k".to_owned());
+    } else {
+        // Clean bash without rc/profile: macOS login shells inject MOTD and a
+        // multi-segment prompt that shifts rows and confuses geometry-sensitive
+        // journeys (selection rows, cursor-column deltas). Windows cmd starts
+        // empty; match that posture for UX parity of black-box evidence.
+        args.push("/bin/bash".to_owned());
+        args.push("--norc".to_owned());
+        args.push("--noprofile".to_owned());
     }
     args
 }
@@ -182,22 +192,51 @@ fn write_numbered_lines(dir: &Path, prefix: &str, count: usize) -> PathBuf {
     path
 }
 
+/// Compact FNV-1a so Unix control socket paths stay under `sockaddr_un`
+/// limits (macOS sun_path is only ~104 bytes).
+fn short_token(label: &str) -> u32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in label.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
+}
+
 /// A unique scratch directory per test, so parallel `cargo test` runs never
 /// collide on the same script/snapshot file.
+///
+/// Unix places scratch under the platform IPC runtime directory (short real
+/// path such as `/private/tmp/agenterm-platform-<uid>`). macOS process temps
+/// under `/var/folders/...` are too long for Unix control sockets and made
+/// OSX journeys look unstable vs Windows named pipes.
 fn scratch_dir(label: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "agenterm-con-blackbox-{label}-{}-{}",
-        std::process::id(),
-        // A second differentiator beyond pid: multiple tests in the same
-        // process (the normal `cargo test` case) share a pid.
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    #[cfg(unix)]
+    let base = {
+        let base = agenterm_platform::ipc::native_runtime_directory();
+        let _ = std::fs::create_dir_all(&base);
+        base
+    };
+    #[cfg(not(unix))]
+    let base = std::env::temp_dir();
+    let dir = base.join(format!(
+        "cb{:x}-{}-{}",
+        short_token(label),
+        std::process::id() % 100_000,
+        stamp % 1_000_000_000
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    dir
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    std::fs::canonicalize(&dir).unwrap_or(dir)
 }
 
 fn write_journey(dir: &Path, commands_json: &str) -> PathBuf {
@@ -217,7 +256,14 @@ fn unique_control_endpoint(dir: &Path) -> String {
                 .unwrap_or(0)
         );
     }
-    format!("unix:{}", dir.join("control.sock").to_string_lossy())
+    let path = dir.join("c.sock");
+    let path_len = path.to_string_lossy().len();
+    assert!(
+        path_len <= 103,
+        "Unix control socket path length {path_len} exceeds sockaddr_un limit: {}",
+        path.display()
+    );
+    format!("unix:{}", path.to_string_lossy())
 }
 
 fn invoke_control_output(endpoint: &str, args: &[String]) -> Result<String, String> {
@@ -987,25 +1033,27 @@ fn typed_input_echoes_back_well_under_one_blink_cycle() {
 fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
     // Proves the complete wiring: a scripted key event reaches
     // ConTerminal::forward_key (the same path a real OS keyboard event
-    // takes), then the platform adapter attaches to the child console and
-    // writes native KEY_EVENT_RECORD press/release pairs. cmd.exe's cooked
-    // line editor must move exactly two cells; falling back to byte-only VT
-    // injection or splitting console-attachment authority regresses this.
+    // takes). On Windows the platform adapter attaches to the child console
+    // and writes native KEY_EVENT_RECORD press/release pairs; on Unix the
+    // same product path encodes CSI sequences into the PTY. Either host's
+    // cooked line editor must move exactly two cells.
+    let _guard = gui_test_guard();
     let dir = scratch_dir("key-wiring");
     let script = write_journey(
         &dir,
         r#"[
-            {"text": "echo ABCDE"},
-            {"wait_ms": 300},
+            {"text": "ABCDE"},
+            {"wait_ms": 400},
             {"key": "ArrowLeft"},
             {"key": "ArrowLeft"},
-            {"wait_ms": 300}
+            {"wait_ms": 400}
         ]"#,
     );
     let args = interactive_shell_args(&script);
-    let session = ConSession::spawn(&dir, &args);
+    let mut session = ConSession::spawn(&dir, &args);
     let first = session.wait_for(Duration::from_secs(10), |snapshot| {
-        ConSession::screen_text(snapshot).contains("echo ABCDE")
+        ConSession::screen_text(snapshot).contains("ABCDE")
+            && snapshot["cursor"]["col"].as_u64().unwrap_or(0) >= 5
     });
     let col_after_typing = first["cursor"]["col"].as_u64().expect("cursor.col");
 
@@ -1017,6 +1065,7 @@ fn key_command_moves_the_cursor_through_the_real_forward_key_path() {
         Some(col_after_typing - 2),
         "two ArrowLeft presses must move the cursor back exactly two columns"
     );
+    let _ = session.child.kill();
 }
 
 #[test]
@@ -1200,27 +1249,25 @@ fn controlled_press_drag_release_extends_a_local_selection() {
     // selection followed the drag rather than staying pinned to the press
     // point the way a single `click` always does.
     let dir = scratch_dir("drag-selection");
+    // Row 0 is the marker line under a clean interactive shell (cmd / bash
+    // --norc). Hard-coding cmd.exe + a Windows-only row offset made OSX look
+    // like a selection regression when the host was fine.
     let script = write_journey(
         &dir,
         r#"[
             {"text": "echo DRAG_MARKER\r"},
             {"wait_text": "DRAG_MARKER", "timeout_ms": 15000},
             {"wait_ms": 300},
-            {"mouse_down": {"row": 3, "col": 2}},
-            {"mouse_move": {"row": 3, "col": 9}},
-            {"mouse_up": {"row": 3, "col": 9}},
+            {"mouse_down": {"row": 1, "col": 0}},
+            {"mouse_move": {"row": 1, "col": 10}},
+            {"mouse_up": {"row": 1, "col": 10}},
             {"wait_ms": 200}
         ]"#,
     );
+    let args = interactive_shell_args(&script);
     let mut session = ConSession::spawn(
         &dir,
-        &[
-            TEST_JOURNEY_ARG,
-            script.to_str().unwrap(),
-            "-e",
-            "cmd.exe",
-            "/k",
-        ],
+        &args,
     );
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
         snapshot["selection"].is_array()
@@ -1230,14 +1277,14 @@ fn controlled_press_drag_release_extends_a_local_selection() {
     // have followed the drag to the release point — a `click` alone could
     // only ever produce a single-cell selection, so this is real evidence
     // the drag path, not just press/release individually, is wired.
-    assert_eq!(snapshot["selection"][0]["row"], 3, "{snapshot}");
+    assert_eq!(snapshot["selection"][0]["row"], 1, "{snapshot}");
     assert_eq!(
-        snapshot["selection"][0]["col"], 2,
+        snapshot["selection"][0]["col"], 0,
         "anchor must stay at the press point: {snapshot}"
     );
-    assert_eq!(snapshot["selection"][1]["row"], 3, "{snapshot}");
+    assert_eq!(snapshot["selection"][1]["row"], 1, "{snapshot}");
     assert_eq!(
-        snapshot["selection"][1]["col"], 9,
+        snapshot["selection"][1]["col"], 10,
         "moving endpoint must follow the drag: {snapshot}"
     );
     let _ = session.child.kill();
@@ -1705,8 +1752,15 @@ fn zooming_in_while_the_shell_is_actively_producing_output_survives() {
     // concurrent PTY writes racing real resizes, not an idle session
     // between zoom steps.
     let dir = scratch_dir("grow-while-busy");
+    let busy_loop = if cfg!(windows) {
+        r#"for /l %i in (1,1,500) do @echo LINE_%i █▒░ 中文日本語\r"#
+    } else {
+        // bash: continuous CJK/box-drawing output while font zoom races PTY
+        // writes — same stress as the Windows for-loop, without cmd.exe.
+        r#"for i in $(seq 1 500); do echo \"LINE_$i █▒░ 中文日本語\"; done\r"#
+    };
     let mut commands = vec![
-        r#"{"text": "for /l %i in (1,1,500) do @echo LINE_%i █▒░ 中文日本語\r"}"#.to_owned(),
+        format!(r#"{{"text": "{busy_loop}"}}"#),
         r#"{"wait_ms": 200}"#.to_owned(),
     ];
     for _ in 0..30 {
@@ -1716,16 +1770,8 @@ fn zooming_in_while_the_shell_is_actively_producing_output_survives() {
     commands.push(r#"{"wait_ms": 500}"#.to_owned());
     let script = write_journey(&dir, &format!("[{}]", commands.join(",")));
 
-    let mut session = ConSession::spawn(
-        &dir,
-        &[
-            TEST_JOURNEY_ARG,
-            script.to_str().unwrap(),
-            "-e",
-            "cmd.exe",
-            "/k",
-        ],
-    );
+    let args = interactive_shell_args(&script);
+    let mut session = ConSession::spawn(&dir, &args);
     // Doesn't wait to observe LINE_1 specifically: the loop can outrun the
     // first poll (a real, observed race — see the `less` tests' comments
     // on the same class of issue), and the point here is just to confirm

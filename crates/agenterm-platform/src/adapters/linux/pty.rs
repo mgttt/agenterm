@@ -1,9 +1,11 @@
+use std::env;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::sync::Arc;
 use std::time::Duration;
@@ -215,11 +217,84 @@ impl PtyChild {
     }
 }
 
+/// Resolve `command.program` the way a POSIX shell would, failing with
+/// `NotFound` when no executable exists. Absolute paths and paths with a
+/// directory component are not looked up on `PATH`.
+fn resolve_posix_executable(command: &ChildCommand) -> io::Result<PathBuf> {
+    let program = &command.program;
+    if program.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "PTY executable path is empty",
+        ));
+    }
+    if program.is_absolute() || program.components().count() > 1 {
+        let candidate = if program.is_absolute() {
+            program.clone()
+        } else {
+            let base = command
+                .current_dir
+                .clone()
+                .or_else(|| env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("."));
+            base.join(program)
+        };
+        return if is_executable_file(&candidate) {
+            Ok(candidate)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("PTY executable not found: {}", candidate.to_string_lossy()),
+            ))
+        };
+    }
+
+    let path_value = command
+        .env
+        .iter()
+        .find(|(key, _)| key == "PATH")
+        .map(|(_, value)| value.clone())
+        .or_else(|| env::var_os("PATH"));
+    let Some(path_value) = path_value else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "PTY executable not found on PATH: {}",
+                program.to_string_lossy()
+            ),
+        ));
+    };
+    for directory in env::split_paths(&path_value) {
+        let candidate = directory.join(program);
+        if is_executable_file(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!(
+            "PTY executable not found on PATH: {}",
+            program.to_string_lossy()
+        ),
+    ))
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+}
+
 fn spawn_child(command: ChildCommand) -> io::Result<SpawnedPty> {
+    // Fail before fork when the program is missing — matches Windows ConPTY
+    // "executable not found" and keeps agenterm-con `-e bad` exit non-zero on
+    // macOS/Linux instead of opening a host that only discovers exit 127 later.
+    let resolved_program = resolve_posix_executable(&command)?;
     let (master_fd, slave_fd) = open_pty_pair(command.size)?;
     let master = PtyMaster::from_fd(master_fd)?;
 
-    let program = CString::new(command.program.as_os_str().as_bytes())
+    let program = CString::new(resolved_program.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "program path contains NUL"))?;
     let args = build_argv(&program, &command.args)?;
     let env_pairs = build_env_pairs(&command.env)?;

@@ -226,8 +226,8 @@ fn clamp_font_size(value: f64) -> f64 {
 /// Configuration loaded from `agenterm-con.json` (analogous to conhost
 /// "Defaults" — persist font size, window geometry, etc. without a GUI dialog).
 ///
-/// Location: `%APPDATA%/agenterm-con.json` on Windows,
-/// `~/.config/agenterm-con.json` on Unix.
+/// Location: platform user-config directory + `agenterm-con.json`
+/// (Windows Roaming AppData, Unix `~/.config`, see `runtime::user_config_directory`).
 #[derive(Default)]
 struct ConConfig {
     font_size: Option<f64>,
@@ -331,7 +331,8 @@ fn parse_args(args: &[String]) -> Result<ConArgs, String> {
                 return Err(format!(
                     "error: unknown argument '{unknown}'
 
-{USAGE}"
+{}",
+                    usage_text()
                 ));
             }
         }
@@ -455,7 +456,41 @@ fn main() {
     }
 }
 
-const USAGE: &str = "\
+#[cfg(windows)]
+const USAGE_CONTROL_EXAMPLES: &str = "\
+  agenterm-con --control pipe:\\\\.\\pipe\\agenterm-con-test
+  agenterm-con cli --control pipe:\\\\.\\pipe\\agenterm-con-test list-tabs";
+
+#[cfg(unix)]
+const USAGE_CONTROL_EXAMPLES: &str = "\
+  agenterm-con --control unix:$TMPDIR/agenterm-con-test/control.sock
+  agenterm-con cli --control unix:$TMPDIR/agenterm-con-test/control.sock list-tabs
+  (Unix socket parents may be under /tmp; the host resolves symlink roots such
+   as macOS /tmp → /private/tmp so control works like a Windows named pipe.)";
+
+#[cfg(windows)]
+const USAGE_SHELL_EXAMPLES: &str = "\
+                   agenterm-con -e pwsh -NoLogo
+                   agenterm-con --working-dir C:\\src -e cargo test";
+
+#[cfg(unix)]
+const USAGE_SHELL_EXAMPLES: &str = "\
+                   agenterm-con -e /bin/zsh -l
+                   agenterm-con --working-dir ~/src -e cargo test";
+
+#[cfg(windows)]
+const USAGE_CONFIG_LOCATION: &str =
+    "Configuration: create agenterm-con.json under the user config directory\n\
+     (Windows: %APPDATA%\\agenterm-con.json via runtime::user_config_directory).";
+
+#[cfg(unix)]
+const USAGE_CONFIG_LOCATION: &str =
+    "Configuration: create agenterm-con.json under the user config directory\n\
+     (Unix: ~/.config/agenterm-con.json via runtime::user_config_directory).";
+
+fn usage_text() -> String {
+    format!(
+        "\
 Usage: agenterm-con [--no-activate] [--working-dir DIR]
                    [--font-size N] [--cols N] [--rows N]
                    [--control ENDPOINT] [--emit-snapshot PATH]
@@ -468,8 +503,7 @@ A standalone console host (conhost equivalent). No server, mux, or Fleet.
 
 Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   agenterm-con cli list-commands
-  agenterm-con --control pipe:\\\\.\\pipe\\agenterm-con-test
-  agenterm-con cli --control pipe:\\\\.\\pipe\\agenterm-con-test list-tabs
+{control_examples}
   ... ui-snapshot | perf-stats | reset-perf-stats | close-window
   ... resize-window --width N --height N
   ... new-tab [--parent TAB]
@@ -500,8 +534,7 @@ Mouse coordinates are zero-based terminal cells. Positive wheel notches scroll u
 
   -e, --command  Run PROGRAM instead of the default shell. Everything after
                  -e is passed through verbatim, so it must come last:
-                   agenterm-con -e pwsh -NoLogo
-                   agenterm-con --working-dir C:\\src -e cargo test
+{shell_examples}
 
   --emit-snapshot PATH
                  Write a JSON snapshot of screen text/cursor/selection to
@@ -509,10 +542,15 @@ Mouse coordinates are zero-based terminal cells. Positive wheel notches scroll u
                  and other agents that need to inspect a session without
                  capturing pixels.
 
-Configuration: create agenterm-con.json in %APPDATA% (Windows) or
-~/.config (Unix) with keys: font_size, cols, rows (all optional).
+{config_location}
+Keys: font_size, cols, rows (all optional).
 CLI flags override config; config overrides defaults.
-Ctrl+wheel adjusts font size at runtime.";
+Ctrl+wheel adjusts font size at runtime.",
+        control_examples = USAGE_CONTROL_EXAMPLES,
+        shell_examples = USAGE_SHELL_EXAMPLES,
+        config_location = USAGE_CONFIG_LOCATION,
+    )
+}
 
 /// Flags that must not open a window. Returns `Some(exit_code)` when handled.
 fn write_offline_stdout(text: &str) {
@@ -548,7 +586,7 @@ fn offline_cli_exit(args: &[String]) -> Option<i32> {
             Some(0)
         }
         Some("--help" | "-h") if alone => {
-            let _ = agenterm_platform::parent_console::write_stdout(USAGE);
+            let _ = agenterm_platform::parent_console::write_stdout(&usage_text());
             Some(0)
         }
         Some("--version" | "-V" | "--help" | "-h") => {
@@ -4408,6 +4446,13 @@ impl PixelWindowApplication for ConApp {
         window: &PixelWindow,
         frame: &mut XrgbPixelFrame<'_>,
     ) -> Result<PixelWindowDirective, PixelWindowError> {
+        // Closing the last tab sets `exit` from control drain/event paths.
+        // Portable (macOS/Linux) hosts may still deliver a pending redraw after
+        // that; do not touch active session or report con_session_missing —
+        // match Windows close-window: clean Exit directive.
+        if self.exit {
+            return Ok(PixelWindowDirective::Exit);
+        }
         self.perf_stats.sync_present_stats(window.present_stats());
         if let Some(screenshot) = self.pending_control_screenshot.as_mut() {
             let active = self.workspace.active();
