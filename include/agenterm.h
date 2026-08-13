@@ -1,11 +1,11 @@
 /*
- * agenterm.h — C header for libagenterm (crates/agenterm-abi).
+ * agenterm.h -- C header for libagenterm (crates/agenterm-abi).
  *
  * This is the *mechanism* boundary between embedding consumers and the OS.
  * It deliberately contains no product concepts. Every symbol is prefixed
  * `agt_`. Milestone 1 shipped version / error / capability exports; milestone 2
  * adds the PTY mechanism; milestones 3a/3b add the window + frame mechanisms;
- * milestone 4 adds screenshot export (framebuffer → PNG, native window → PNG);
+ * milestone 4 adds screenshot export (framebuffer -> PNG, native window -> PNG);
  * milestone 5 adds the process group (enumerate / kill / self pid).
  */
 #ifndef AGENTERM_AGENT_ABI_H
@@ -251,8 +251,8 @@ void       agt_window_close         (agt_window_t);
 /* Encode a caller-owned little-endian 0x00RRGGBB framebuffer as a PNG at
  * `path`. `pixel_count` must equal width*height, and both dimensions must be
  * >= 1, or AGT_FAILED with code "bad_dimensions" is returned. Other failures:
- * NULL/non-UTF-8 `path` → "bad_path", NULL `pixels` → "bad_pointer", side
- * > 16384 or pixel count > 64 Mi → "frame_too_large", platform error →
+ * NULL/non-UTF-8 `path` -> "bad_path", NULL `pixels` -> "bad_pointer", side
+ * > 16384 or pixel count > 64 Mi -> "frame_too_large", platform error ->
  * "screenshot_failed". Cropping is not supported in this version (the whole
  * buffer is always encoded). */
 agt_status agt_screenshot_write_png(const char* path, const uint32_t* pixels,
@@ -261,9 +261,9 @@ agt_status agt_screenshot_write_png(const char* path, const uint32_t* pixels,
 
 /* Capture a native window (or its strict client-area rectangle) to a PNG at
  * `path`. `native_window` is the platform window handle as intptr_t;
- * 0 → AGT_FAILED with code "bad_handle". `area_kind` 0 = whole window,
- * 1 = client rectangle given by left/top/width/height; anything else →
- * "bad_area". Platform failure → "screenshot_failed". */
+ * 0 -> AGT_FAILED with code "bad_handle". `area_kind` 0 = whole window,
+ * 1 = client rectangle given by left/top/width/height; anything else ->
+ * "bad_area". Platform failure -> "screenshot_failed". */
 agt_status agt_screenshot_capture_window(intptr_t native_window, const char* path,
                                          int32_t area_kind, int32_t left,
                                          int32_t top, int32_t width,
@@ -283,17 +283,17 @@ typedef struct {
     uint32_t name_truncated; /* 1 when the original name exceeded 64 bytes */
 } agt_process_info;
 
-/* Enumerate live processes into a caller-allocated array (two-stage, §3.4):
- *   cap sufficient   → AGT_OK, *out_count = records written
- *   cap insufficient → AGT_FAILED{code="buffer_too_small"},
+/* Enumerate live processes into a caller-allocated array (two-stage, spec 3.4):
+ *   cap sufficient   -> AGT_OK, *out_count = records written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
  *                      *out_count = required count
  * cap == 0 with buf == NULL is a legal "how big?" probe. NULL out_count
- * (or NULL buf with cap > 0) → AGT_FAILED{code="bad_pointer"}; platform
- * failure → AGT_FAILED{code="process_failed"}. */
+ * (or NULL buf with cap > 0) -> AGT_FAILED{code="bad_pointer"}; platform
+ * failure -> AGT_FAILED{code="process_failed"}. */
 agt_status agt_process_list(agt_process_info* buf, size_t cap, size_t* out_count);
 
-/* Terminate the given process by pid. pid == 0 →
- * AGT_FAILED{code="bad_pid"}; platform failure →
+/* Terminate the given process by pid. pid == 0 ->
+ * AGT_FAILED{code="bad_pid"}; platform failure ->
  * AGT_FAILED{code="process_failed"}. */
 agt_status agt_process_kill(uint32_t pid);
 

@@ -127,3 +127,34 @@ fn header_declares_exactly_the_exported_symbols() {
         "header/export set mismatch: exports.txt={expected:?} header={declared:?}"
     );
 }
+
+/// Boundary gate: `include/agenterm.h` is a public C header compiled by
+/// external consumers, so it must be pure ASCII. A non-ASCII byte (e.g. an
+/// em dash, arrow, or section sign) triggers MSVC C4819 under CJK code pages
+/// and breaks `/WX` builds. Fails on the first offending byte, naming its
+/// line number and the line content for easy location.
+#[test]
+fn header_is_pure_ascii() {
+    let manifest = manifest();
+    let repo_root = manifest.parent().unwrap().parent().unwrap();
+    let header = repo_root.join("include/agenterm.h");
+    let bytes = fs::read(&header)
+        .unwrap_or_else(|e| panic!("include/agenterm.h not found at {}: {e}", header.display()));
+    let mut line_no = 1usize;
+    let mut line_start = 0usize;
+    for (idx, &b) in bytes.iter().enumerate() {
+        if b < 0x80 {
+            if b == b'\n' {
+                line_no += 1;
+                line_start = idx + 1;
+            }
+            continue;
+        }
+        let line_end = bytes[idx..]
+            .iter()
+            .position(|&c| c == b'\n')
+            .map_or(bytes.len(), |p| idx + p);
+        let line = String::from_utf8_lossy(&bytes[line_start..line_end]);
+        panic!("include/agenterm.h contains non-ASCII byte 0x{b:02x} at line {line_no}: {line}");
+    }
+}
