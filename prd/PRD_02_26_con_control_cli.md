@@ -123,9 +123,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   failed child may only fail that request or session; it never terminates
   unrelated sessions or the window. `send-text`, `send-paste`, `send-keys` and
   terminal-routed `send-ui-keys` reject a retained exited tab with
-  `terminal process has exited`; direct text/paste PTY write failures are
-  returned to the CLI rather than reported as successful byte delivery.
-  Capture, local selection and scrollback remain available after exit.
+  `terminal process has exited`; direct text/paste and each encoded key PTY
+  write failure are returned to the CLI rather than reported as successful
+  delivery. Physical keys remain best-effort across concurrent child exit, and
+  local shortcuts, IME suppression and viewport scrolling remain successful
+  without pretending they emitted PTY bytes. Capture, local selection and
+  scrollback remain available after exit.
 - [x] the control endpoint uses a fixed worker pool with bounded connection and
   request queues. Its multi-tab journey floods one PTY with oversized CSI
   parameters while issuing concurrent `capture-pane`, `list-tabs` and

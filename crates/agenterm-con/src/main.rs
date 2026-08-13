@@ -1728,7 +1728,9 @@ impl ConApp {
                     session.ensure_pty_input_open()?;
                     for key in &keys {
                         let (key, ctrl, alt, shift) = parse_control_key(key)?;
-                        session.inject_key(key, ctrl, alt, shift);
+                        session
+                            .inject_key(key, ctrl, alt, shift)
+                            .map_err(|error| format!("terminal input failed: {error}"))?;
                     }
                     Ok(single_field_json("sent_keys", keys.len().into()))
                 })
@@ -1751,7 +1753,9 @@ impl ConApp {
                             .active_session_mut()
                             .map_err(|error| error.to_string())?;
                         session.ensure_pty_input_open()?;
-                        session.forward_key(&event);
+                        session
+                            .forward_key_checked(&event)
+                            .map_err(|error| format!("terminal input failed: {error}"))?;
                     }
                 }
                 self.request_dirty_redraw(window);
@@ -2861,9 +2865,9 @@ impl ConTerminal {
         ));
     }
 
-    fn forward_key(&mut self, event: &NormalizedKeyEvent) {
+    fn forward_key_checked(&mut self, event: &NormalizedKeyEvent) -> std::io::Result<()> {
         if self.exit || self.child_gone {
-            return;
+            return Ok(());
         }
 
         // Typing always shows the cursor and restarts the blink cycle —
@@ -2877,7 +2881,7 @@ impl ConTerminal {
         // already carry committed text (including some winit IME commit
         // representations) must still be forwarded.
         if !self.ime_preedit.is_empty() && event.text.as_deref().is_none_or(str::is_empty) {
-            return;
+            return Ok(());
         }
 
         // Host shortcuts are resolved before the application sees the key.
@@ -2886,11 +2890,11 @@ impl ConTerminal {
             if control && event.modifiers.shift {
                 if text.eq_ignore_ascii_case("c") {
                     self.copy_selection();
-                    return;
+                    return Ok(());
                 }
                 if text.eq_ignore_ascii_case("v") {
                     self.paste_clipboard();
-                    return;
+                    return Ok(());
                 }
             }
             // Bare Ctrl+C copies when there is a selection, matching conhost;
@@ -2903,7 +2907,7 @@ impl ConTerminal {
             {
                 self.copy_selection();
                 self.selection = None;
-                return;
+                return Ok(());
             }
         }
 
@@ -2920,11 +2924,11 @@ impl ConTerminal {
                 match named {
                     NamedKey::PageUp => {
                         self.scroll_by(page);
-                        return;
+                        return Ok(());
                     }
                     NamedKey::PageDown => {
                         self.scroll_by(-page);
-                        return;
+                        return Ok(());
                     }
                     _ => {}
                 }
@@ -2937,9 +2941,14 @@ impl ConTerminal {
         };
         if let Some(bytes) = terminal_input::key_event_to_bytes(event, mode) {
             // Typing returns to the live view, as every terminal does.
+            self.write_pty(&bytes)?;
             self.scroll_to_bottom();
-            let _ = self.write_pty(&bytes);
         }
+        Ok(())
+    }
+
+    fn forward_key(&mut self, event: &NormalizedKeyEvent) {
+        let _ = self.forward_key_checked(event);
     }
 
     fn ensure_pty_input_open(&self) -> Result<(), String> {
@@ -3214,8 +3223,14 @@ impl ConTerminal {
     /// forwards it through [`ConTerminal::forward_key`] — the exact path a
     /// real keystroke takes, including host shortcuts and the live
     /// DECCKM/modifier-aware encoder.
-    fn inject_key(&mut self, key: InjectedKey, ctrl: bool, alt: bool, shift: bool) {
-        self.forward_key(&injected_key_event(key, ctrl, alt, shift));
+    fn inject_key(
+        &mut self,
+        key: InjectedKey,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    ) -> std::io::Result<()> {
+        self.forward_key_checked(&injected_key_event(key, ctrl, alt, shift))
     }
 
     /// Presses then releases a mouse button at a control cell coordinate
@@ -5927,6 +5942,18 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn injected_terminal_key_propagates_closed_pty() {
+        let mut app = ConTerminal::new(None);
+
+        let error = app
+            .inject_key(InjectedKey::Char('a'), false, false, false)
+            .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        assert_eq!(app.scroll_offset, 0);
     }
 
     #[test]
