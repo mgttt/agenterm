@@ -114,6 +114,8 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
+      - name: pkg-config static consumption (end to end)
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test pkgconfig_consume -- --nocapture
       - name: Symbol surface (nm)
         run: |
           set -eu
@@ -196,6 +198,8 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test symbol_presence -- --nocapture
+      - name: pkg-config static consumption (end to end)
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test pkgconfig_consume -- --nocapture
       - name: Symbol surface (nm)
         run: |
           set -eu

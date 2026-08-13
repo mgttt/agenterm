@@ -14,6 +14,11 @@
 //! `packaging/pkgconfig/README.md`; the table row format is the parse
 //! anchor, so keep the `| <platform> |` rows and their backtick cells
 //! intact.
+//!
+//! Milestone 52 added the third leg: the `SYSTEM_LIBS_*` sets baked into
+//! `packaging/pkgconfig/generate-pc.sh` (what a real `pkg-config --static`
+//! consumer actually receives as `Libs.private`) must match too, closing
+//! the three-way gate README table ↔ common::system_libs ↔ generate-pc.sh.
 
 mod common;
 
@@ -81,6 +86,68 @@ fn doc_system_libs_match_link_system_libs() {
     );
     assert_platform_lists_match(&readme, "Linux", "| Linux |", common::system_libs::LINUX);
     assert_platform_lists_match(&readme, "macOS", "| macOS |", common::system_libs::MACOS);
+}
+
+/// The `Libs.private` value embedded in `generate-pc.sh` for one platform:
+/// the whitespace-split tokens of the single-quoted `SYSTEM_LIBS_<OS>='...'`
+/// assignment (the script's own selection data, shipped to consumers as-is).
+/// The assignment line format is the parse anchor — mirroring the README
+/// table rows — so keep it single-line and single-quoted.
+fn script_libs(script: &str, var: &str) -> Vec<String> {
+    let prefix = format!("{var}=");
+    let line = script
+        .lines()
+        .find(|l| l.trim_start().starts_with(&prefix))
+        .unwrap_or_else(|| {
+            panic!(
+                "generate-pc.sh has no {var} assignment (the three-way gate \
+                 parse anchor — keep the `SYSTEM_LIBS_<OS>='...'` line intact)"
+            )
+        });
+    let value = line.split('\'').nth(1).unwrap_or_else(|| {
+        panic!("generate-pc.sh {var} assignment has no single-quoted value: {line:?}")
+    });
+    value.split_whitespace().map(str::to_string).collect()
+}
+
+/// Milestone 52 third leg: the `SYSTEM_LIBS` sets baked into
+/// `generate-pc.sh` must match the linked lists too, so the pkg-config
+/// metadata a real consumer receives (`Libs.private`) can never silently
+/// drift from what `c_static_link.rs` actually links with. With the other
+/// two legs (README table <-> common, script <-> common) this closes the
+/// three-way gate: README table ↔ common::system_libs ↔ generate-pc.sh.
+#[test]
+fn script_system_libs_match_link_system_libs() {
+    let script = std::fs::read_to_string(repo_root().join("packaging/pkgconfig/generate-pc.sh"))
+        .expect("packaging/pkgconfig/generate-pc.sh must exist (milestone 52 deliverable)");
+
+    let linux = script_libs(&script, "SYSTEM_LIBS_LINUX");
+    let macos = script_libs(&script, "SYSTEM_LIBS_DARWIN");
+    let code_linux: Vec<String> = common::system_libs::LINUX
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let code_macos: Vec<String> = common::system_libs::MACOS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    assert_eq!(
+        linux, code_linux,
+        "generate-pc.sh embedded SYSTEM_LIBS_LINUX drifted from \
+         common::system_libs::LINUX (the list c_static_link.rs actually links \
+         with). Single source of truth: tests/common/mod.rs::system_libs. \
+         Update the constant, the README table AND the script in the same \
+         change.",
+    );
+    assert_eq!(
+        macos, code_macos,
+        "generate-pc.sh embedded SYSTEM_LIBS_DARWIN drifted from \
+         common::system_libs::MACOS (the list c_static_link.rs actually links \
+         with). Single source of truth: tests/common/mod.rs::system_libs. \
+         Update the constant, the README table AND the script in the same \
+         change.",
+    );
 }
 
 /// The `.pc.in` template keeps its pkg-config shape: the standard fields
