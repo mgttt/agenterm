@@ -97,6 +97,12 @@ as the default planning method:
    points, and final serial validation path before assigning implementation.
 5. Parallelize independent, exclusively owned leaves; integrate at reviewed
    typed boundaries. Do not confuse a large task list with useful parallelism.
+6. **No PoC / MVP / "first slice then later" sequencing of accepted scope.**
+   Time is the scarce resource. Plan the whole accepted tree, implement
+   independent branches concurrently, then advance by test-and-adjust.
+   Serialize only on a real typed dependency (shared hot file, protocol
+   handshake, missing mechanism). "Smaller demo first" is not a dependency
+   and is not a version gate.
 
 Every shipped leaf must state the user problem, governing invariant or
 authority boundary, observable success evidence, safe failure result, public

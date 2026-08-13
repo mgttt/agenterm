@@ -21,9 +21,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   host remains the MIT Spectacle 1.2.1 rebuild. This module absorbs the
   **action catalog and geometry contract** into `cu`, so an orchestrator can
   issue the same placement without pixels or screenshots.
-- [ ] implementation starts in **v0.1.19**. That version opens the work; it
-  does not have to finish every action. Status stays `[ ]` until public
-  black-box evidence exists against the real `cu` binary.
+- [ ] implementation is planned for **v0.1.19** against the **whole**
+  accepted action catalog, not a half-screen demo. Status stays `[ ]`
+  until public black-box evidence exists against the real `cu` binary.
 
 Provenance (read-only, not a product dependency):
 [mgttt/spectacle](https://github.com/mgttt/spectacle) fork of eczarny/Spectacle,
@@ -108,9 +108,11 @@ agenterm-cu (28)
 - [ ] application min/max size is honored; the pipeline may undershoot the
   ideal rect but must not report success with a fabricated frame.
 
-`undo` / `redo` are **deferred leaves**. They need per-application history
-that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
-`unsupported` with that reason rather than invent a second history model.
+`undo` / `redo` stay in the same accepted tree. They need a per-application
+history that `cu` does not yet own — that is a **typed dependency**, not a
+reason to hide the ids. Ship the history with the rest of the apply path
+when possible; until it exists those two verbs return typed `unsupported`
+and keep the ids.
 
 ## Layering
 
@@ -142,25 +144,25 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
 
 ## Version gate
 
-- [ ] **v0.1.19 starts this module.** Suggested first increment (must-start,
-  not must-finish-the-catalog):
-  1. freeze ids (this file + Spectacle `FEATURE-CATALOG`);
-  2. port geometry for `center` / `fullscreen` / four halves with fixture
-     parity;
-  3. `cu window-place` on `current` + macOS AX set-rect through platform;
-  4. grant/audit black-box.
-- [ ] later increments on the same module: thirds, corners, display walk,
-  larger/smaller, then undo/redo.
-- [ ] roadmap ownership:
-  [18](PRD_02_18_roadmap.md); execution projection:
+- [ ] **v0.1.19 owns this module as one concurrent tree**, not a PoC then a
+  backlog. Geometry (all calculate actions), platform apply (every
+  `current` backend that can move a window), the `window-place` verb with
+  grants/audit, and per-app history are planned together and implemented
+  on independent file domains in parallel. Integrate, then test-and-adjust.
+- [ ] serialize only on real dependencies: history apply needs set-rect;
+  black-box needs geometry + command + a live backend. "Ship four halves
+  first" is not a dependency.
+- [ ] roadmap:
+  [18](PRD_02_18_roadmap.md); execution:
   [`plan/plan-v0.1.19.md`](../plan/plan-v0.1.19.md). v0.1.18 remains the
   in-progress unique version plan until it closes. This module must not be
   marked shipped from design text alone.
 
 ## Evidence
 
-- [ ] pure tests: every frozen action's fixtures agree with Spectacle's
-  calculation specs within 1 pt.
-- [ ] black-box: real `cu` on a real macOS session places a visible window
-  and a subsequent `windows` / `wait` observation shows the new bounds.
+- [ ] pure tests: **every** calculate action's fixtures agree with
+  Spectacle's calculation specs within 1 pt — not a subset.
+- [ ] black-box: real `cu` on each wired `current` backend places a
+  visible window for each non-`unsupported` action; `windows` / `wait`
+  show the new bounds.
 - [ ] unauthorized call is `refused` and does not move the window.

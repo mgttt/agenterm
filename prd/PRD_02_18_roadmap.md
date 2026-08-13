@@ -579,10 +579,10 @@ track remains planned, but every declared dependency must still pass.
   L-CU, which PRD owns it, and its first platform — is resolved as **accepted
   scope with a dedicated subtree**, owned by
   [Computer-use foundation](PRD_02_28_agenterm_cu.md) (children 29–32).
-  The subtree root still has no shipped version. **v0.1.19 starts** the
-  window-placement increment
-  ([32](PRD_02_32_cu_window_placement.md)); that is a start-of-work gate,
-  not a claim that `cu` or placement is shipped. The first *subtree*
+  The subtree root still has no shipped version. **v0.1.19 owns** window
+  placement ([32](PRD_02_32_cu_window_placement.md)) as one concurrent
+  tree (full action catalog + apply + grants), not a half-screen demo.
+  That is not a claim that `cu` or placement is already shipped. The first *subtree*
   promotion gate remains the `current` tier proving the abstract command set
   end to end on one platform with public black-box evidence, and no tier
   ships before its authorization/audit requirements

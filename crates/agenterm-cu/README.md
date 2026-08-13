@@ -17,9 +17,10 @@ loop until goal:
 
 `cu` is capability, not judgment: no planner, model, or agent loop ships here.
 
-Named window placement (`window-place`, Spectacle action catalog) is accepted
-product scope under [`prd/PRD_02_32_cu_window_placement.md`](../../prd/PRD_02_32_cu_window_placement.md).
-Implementation **starts in v0.1.19**; it is not in the current command enum.
+Named window placement (`window-place`, Spectacle **full** action catalog) is
+accepted under [`prd/PRD_02_32_cu_window_placement.md`](../../prd/PRD_02_32_cu_window_placement.md).
+v0.1.19 implements that tree concurrently (geometry + apply + grants +
+history), not a half-screen demo. The verb is not in the command enum yet.
 
 ## Native accessibility mapping (按图索骥)
 
