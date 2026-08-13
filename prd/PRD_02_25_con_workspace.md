@@ -72,8 +72,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] while focused, the composer owns Space and all keyboard events instead of
   leaking ignored keys into the PTY. `Ctrl+A/C/V/X` provide select-all, copy,
-  bounded single-line paste and cut semantics. Its explicit send action is the
-  only path that writes composed text to the active terminal.
+  bounded single-line paste and cut semantics. Every keyboard, IME, paste and
+  accessibility insertion shares a 64 KiB total-buffer ceiling and truncates
+  only at UTF-8 boundaries. Its explicit send action is the only path that
+  writes composed text to the active terminal.
 - [x] composer focus isolation is owned by a Windows black-box journey: it
   obtains the current input bounds from `ui-snapshot`, performs a native client
   click, routes Space and `Ctrl+A/C/X/V` through `send-ui-keys`, proves the

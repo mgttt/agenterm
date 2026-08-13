@@ -5,6 +5,7 @@
 //! frontend without importing terminal or window authority.
 
 pub const PASTE_LIMIT_BYTES: usize = 64 * 1024;
+const COMPOSER_LIMIT_BYTES: usize = PASTE_LIMIT_BYTES;
 
 /// Complete state of the external single-line input surface.
 ///
@@ -44,7 +45,12 @@ pub fn select_all(buffer: &str, selected: &mut bool) {
 
 pub fn insert(buffer: &mut String, selected: &mut bool, text: &str) {
     prepare_edit(buffer, selected);
-    buffer.push_str(text);
+    let remaining = COMPOSER_LIMIT_BYTES.saturating_sub(buffer.len());
+    let mut end = remaining.min(text.len());
+    while !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    buffer.push_str(&text[..end]);
 }
 
 pub fn backspace(buffer: &mut String, selected: &mut bool) {
@@ -123,6 +129,30 @@ mod tests {
         insert(&mut buffer, &mut selected, "new");
         assert_eq!(buffer, "new");
         assert!(!selected);
+    }
+
+    #[test]
+    fn all_insert_paths_bound_total_bytes_at_a_utf8_boundary() {
+        let mut buffer = "a".repeat(COMPOSER_LIMIT_BYTES - 2);
+        let mut selected = false;
+        insert(&mut buffer, &mut selected, "中文");
+        assert_eq!(buffer.len(), COMPOSER_LIMIT_BYTES - 2);
+
+        insert(&mut buffer, &mut selected, "bcdef");
+        assert_eq!(buffer.len(), COMPOSER_LIMIT_BYTES);
+        assert!(buffer.ends_with("bc"));
+
+        paste(&mut buffer, &mut selected, "ignored");
+        assert_eq!(buffer.len(), COMPOSER_LIMIT_BYTES);
+
+        selected = true;
+        insert(
+            &mut buffer,
+            &mut selected,
+            &"中".repeat(COMPOSER_LIMIT_BYTES),
+        );
+        assert!(buffer.len() <= COMPOSER_LIMIT_BYTES);
+        assert_eq!(buffer.len() % '中'.len_utf8(), 0);
     }
 
     #[test]

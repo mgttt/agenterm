@@ -1192,6 +1192,11 @@ leave ownership with the normal dispatch error path and register no latent
 entry, so a small number of hostile or mistaken requests cannot exhaust the
 control surface indefinitely.
 
+Bound aggregate state at the shared mutation primitive, not only at an external
+read boundary. Repeated individually bounded clipboard, IPC, keyboard, or IME
+payloads can otherwise grow one buffer without limit. Byte ceilings for UTF-8
+text must truncate at a character boundary.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as
