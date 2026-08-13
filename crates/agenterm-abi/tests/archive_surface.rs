@@ -84,6 +84,14 @@ enum Class {
     /// unclassified and turns this gate red. Measured on Linux CI, where all
     /// of them are weak.
     LibmWeak,
+    /// The four Objective-C class-registration statics softbuffer's objc2
+    /// `declare_class!` emits with `#[export_name]`
+    /// (`_CLASS_SoftbufferObserver` and friends). Safe: the names are
+    /// specific to that vendored type, so nothing a consumer writes can
+    /// collide. These are the same four `export_exactness.rs` keeps on its
+    /// macOS allowlist — milestone 55 established they cannot be removed from
+    /// the artifact, only accounted for; the reasons are recorded there.
+    ObjcRegistration,
 }
 
 /// The bare libm names compiler-builtins may define. Measured from the Linux
@@ -160,6 +168,15 @@ fn classify(name: &str, is_weak: bool) -> Option<Class> {
     if is_platform_toolchain(n) {
         return Some(Class::Platform);
     }
+    if matches!(
+        n.trim_start_matches('_'),
+        "CLASS_SoftbufferObserver"
+            | "DROP_FLAG_OFFSET_SoftbufferObserver"
+            | "IVAR_OFFSET_SoftbufferObserver"
+            | "REGISTER_CLASS_SoftbufferObserver"
+    ) {
+        return Some(Class::ObjcRegistration);
+    }
     // Deliberately last, and deliberately conditional on the binding: a weak
     // libm definition loses to the consumer's, a strong one would hijack it.
     if is_weak && is_libm_name(n) {
@@ -226,7 +243,43 @@ fn is_compiler_builtin(name: &str) -> bool {
         "__gnu_f2h_ieee",
         "__gnu_h2f_ieee",
     ];
-    BUILTIN_PREFIXES.iter().any(|p| name.starts_with(p))
+    if BUILTIN_PREFIXES.iter().any(|p| name.starts_with(p)) {
+        return true;
+    }
+    // The families below are spelled with a varying number of leading
+    // underscores (Mach-O adds one, and compiler-rt itself uses one or two),
+    // so they are matched on the fully trimmed name. Measured on the macOS
+    // CI archive, where they account for 113 of the 117 names the first run
+    // reported.
+    let bare = name.trim_start_matches('_');
+    // AArch64 outline-atomics (`aarch64_cas4_acq`, `aarch64_ldadd8_rel`, ...)
+    // plus the LSE feature detection they dispatch on. compiler-rt emits
+    // these whenever the target may or may not have LSE atomics.
+    if bare.starts_with("aarch64_") {
+        return true;
+    }
+    const BUILTIN_EXACT: &[&str] = &[
+        // compiler-rt CPU feature resolver, paired with `aarch64_*` above.
+        "init_cpu_features_resolver",
+        // compiler-rt floating-point environment helpers.
+        "fe_getround",
+        "fe_raise_inexact",
+        // clang's availability builtins, emitted for @available / #available.
+        "isOSVersionAtLeast",
+        "isPlatformVersionAtLeast",
+        // compiler-rt's out-of-line C11 atomics. These are bare stdatomic
+        // names rather than a private namespace, but unlike the libm set they
+        // need no weak-binding rule: a consumer with its own definition gets
+        // a duplicate-symbol error from the linker, which is loud, and every
+        // other consumer links the identical compiler-rt implementation.
+        "atomic_thread_fence",
+        "atomic_signal_fence",
+        "atomic_flag_clear",
+        "atomic_flag_clear_explicit",
+        "atomic_flag_test_and_set",
+        "atomic_flag_test_and_set_explicit",
+    ];
+    BUILTIN_EXACT.contains(&bare)
 }
 
 /// Platform / toolchain artifacts. MSVC-heavy on Windows, LLVM `anon.*` on
@@ -400,7 +453,7 @@ fn archive_symbol_surface_is_classified() {
 
     let count = |class: Class| class_counts.get(&class).copied().unwrap_or(0);
     eprintln!(
-        "archive_surface: agt={} rust={} builtins={} unwind={} platform={} import={} libm_weak={} unclassified={:?} total={} ({}, profile={})",
+        "archive_surface: agt={} rust={} builtins={} unwind={} platform={} import={} libm_weak={} objc={} unclassified={:?} total={} ({}, profile={})",
         count(Class::Agt),
         count(Class::RustMangled),
         count(Class::Builtins),
@@ -408,6 +461,7 @@ fn archive_symbol_surface_is_classified() {
         count(Class::Platform),
         count(Class::ImportLibrary),
         count(Class::LibmWeak),
+        count(Class::ObjcRegistration),
         unclassified,
         class_counts.values().sum::<usize>() + unclassified.len(),
         lib_path.display(),
