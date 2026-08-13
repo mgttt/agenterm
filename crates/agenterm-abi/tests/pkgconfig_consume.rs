@@ -89,7 +89,11 @@ fn pkg_config_static_consumer_links_and_runs() {
     let lib_dir = stage.join("lib");
     let include_dir = stage.join("include");
     let pc_dir = lib_dir.join("pkgconfig");
-    std::fs::create_dir_all(&pc_dir).expect("create staging dirs");
+    // Both leaves, explicitly: creating pc_dir brings lib_dir with it but says
+    // nothing about include_dir, and the copy below is the only thing that
+    // would notice — on a platform this test skips.
+    std::fs::create_dir_all(&pc_dir).expect("create staging pkgconfig dir");
+    std::fs::create_dir_all(&include_dir).expect("create staging include dir");
     let _cleanup = Cleanup(stage.clone());
 
     let lib_name = staticlib
