@@ -7,6 +7,11 @@
 > **后续更新（里程碑 23）**：判据 2 已由 `examples/size-probe/` 拿到探针级负面证据
 > （结论档位「档 2：很可能不成立」，待 con 迁移实测确认），数字与结论见 §2.4；
 > 判据 3、判据 4 维持"未测"不变。
+>
+> **后续更新（里程碑 60）**：判据 3 的**"迁移前"列**（静态版 16-step resize journey
+> 的 frame / full-candidate / dirty-pixel / native-present 四项）已实测，数字与离散
+> 程度见 §3；"迁移后"列仍需 con 的 dylib 消费变体，本轮未做，**判据 3 仍未结论**。
+> 判据 4 维持"未测"。
 
 ## 0. 测量环境
 
@@ -133,24 +138,206 @@
 一行否决理由与实测数字，不留残叶"。本文档只陈述判据 2 目前处于什么证据状态
 （探针结论「档 2：很可能不成立」，待实测确认）；是否触发该规则由人决定。
 
-## 3. 未测项清单（诚实声明）
+## 3. 渲染性能四项（判据 3 的"迁移前"列，里程碑 60）
+
+> 本节是判据 3 的**"迁移前"列**：静态版（现存的 con 静态链接形态）自己跑
+> 16-step resize journey 的四项计数器实测。**"迁移后"列需要 con 的 dylib 消费变体，
+> 本轮未做，判据 3 仍未结论**。本节只测量与记录，不下"通过 / 不通过"结论。
+
+### 3.1 测量环境
+
+- 仓库 HEAD：`118a6e04`（`docs(abi): state the one-link-form rule the probe just measured`）
+- 工作树干净（测量前 `git status` 无变更），二进制为当前 HEAD 源码增量重建
+- 构建入口：`cargo build -p agenterm-con --bin agenterm-con`（dev profile，增量命中）
+- 测试入口：`cargo test -p agenterm-con --test agenterm_con_blackbox controlled_resize_storm -- --nocapture`
+- 目标：`x86_64-pc-windows-msvc`（本机 Windows，真实桌面，非 Wine）
+- journey 即现成测试 `controlled_resize_storm_reports_successful_frames_and_exits_cleanly`
+  （`crates/agenterm-con/tests/agenterm_con_blackbox.rs`），**未新写 journey**：
+  - 4 轮 × 4 个尺寸 `(720,460) (1180,740) (640,420) (1100,680)` = **正好 16 步 resize**；
+  - 开头 `{"reset_perf":true}`，结尾 `{"perf_stats":<path>}` 把计数器写成 `perf.json`；
+  - Windows 上带 `native_resize_phase` 的 begin/end；
+  - `perf.json` 由测试写在 `%TEMP%` 下的独立 scratch 目录，测试结束不删除目录；
+    三次实测后原样保留在临时目录并逐字抄录于 §3.2。
+
+### 3.2 三次实测的 `perf.json` 完整内容（原样，未摘要）
+
+**第 1 次**：
+
+```json
+{
+  "frames": 3,
+  "observed_frames": 3,
+  "render_last_us": 13491,
+  "render_average_us": 11428,
+  "render_max_us": 14240,
+  "pty_drained_bytes": 0,
+  "pty_budget_yields": 0,
+  "control_requests": 18,
+  "control_budget_yields": 0,
+  "full_candidate_frames": 2,
+  "partial_candidate_frames": 1,
+  "dirty_pixels": 1496000,
+  "frame_pixels": 2244000,
+  "host_direct_frames": 3,
+  "host_copy_frames": 0,
+  "host_copy_pixels": 0,
+  "discarded_capture_frames": 0,
+  "present_count": 12,
+  "present_success": 12,
+  "present_failure": 0,
+  "last_ns": 692500,
+  "total_ns": 13637900,
+  "max_ns": 1094800,
+  "full_pixels": 9476800,
+  "partial_pixels": 0,
+  "requested_full_pixels": 9476800,
+  "requested_partial_pixels": 0
+}
+```
+
+**第 2 次**：
+
+```json
+{
+  "frames": 3,
+  "observed_frames": 3,
+  "render_last_us": 14367,
+  "render_average_us": 11398,
+  "render_max_us": 14367,
+  "pty_drained_bytes": 0,
+  "pty_budget_yields": 0,
+  "control_requests": 18,
+  "control_budget_yields": 0,
+  "full_candidate_frames": 2,
+  "partial_candidate_frames": 1,
+  "dirty_pixels": 1496000,
+  "frame_pixels": 2244000,
+  "host_direct_frames": 3,
+  "host_copy_frames": 0,
+  "host_copy_pixels": 0,
+  "discarded_capture_frames": 0,
+  "present_count": 12,
+  "present_success": 12,
+  "present_failure": 0,
+  "last_ns": 736300,
+  "total_ns": 14678200,
+  "max_ns": 1452100,
+  "full_pixels": 9060000,
+  "partial_pixels": 0,
+  "requested_full_pixels": 9060000,
+  "requested_partial_pixels": 0
+}
+```
+
+**第 3 次**：
+
+```json
+{
+  "frames": 3,
+  "observed_frames": 3,
+  "render_last_us": 6562,
+  "render_average_us": 8856,
+  "render_max_us": 13975,
+  "pty_drained_bytes": 0,
+  "pty_budget_yields": 0,
+  "control_requests": 18,
+  "control_budget_yields": 0,
+  "full_candidate_frames": 1,
+  "partial_candidate_frames": 2,
+  "dirty_pixels": 748000,
+  "frame_pixels": 2025584,
+  "host_direct_frames": 3,
+  "host_copy_frames": 0,
+  "host_copy_pixels": 0,
+  "discarded_capture_frames": 0,
+  "present_count": 12,
+  "present_success": 12,
+  "present_failure": 0,
+  "last_ns": 573000,
+  "total_ns": 14413500,
+  "max_ns": 1145100,
+  "full_pixels": 8841584,
+  "partial_pixels": 0,
+  "requested_full_pixels": 8841584,
+  "requested_partial_pixels": 0
+}
+```
+
+### 3.3 四项计数：三次实测值与离散程度
+
+判据 3 的"渲染性能"阈值针对四项：**frame / full-candidate / dirty-pixel /
+native-present**。对应本 journey 的计数器如下表。
+
+| 计数（判据 3 对应项） | 第 1 次 | 第 2 次 | 第 3 次 | 极差 | 相对离散（极差 / 中位数） |
+|---|---|---|---|---|---|
+| `frames`（frame） | 3 | 3 | 3 | 0 | 0% |
+| `full_candidate_frames`（full-candidate） | 2 | 2 | 1 | 1 | **50%** |
+| `dirty_pixels`（dirty-pixel） | 1,496,000 | 1,496,000 | 748,000 | 748,000 | **50%** |
+| `host_direct_frames`（native-present） | 3 | 3 | 3 | 0 | 0% |
+| `host_copy_frames`（native-present 副本） | 0 | 0 | 0 | 0 | — |
+
+对照参考（同文件其他字段，帮助判断稳定性）：
+`partial_candidate_frames` 为 1 / 1 / 2（与 full-candidate 互补，总数恒为 3）；
+`frame_pixels` 为 2,244,000 / 2,244,000 / 2,025,584（第 3 次偏小，与
+full-candidate 少 1 帧一致）；`present_count` / `present_success` 恒为 12 / 12，
+`present_failure` 恒为 0。
+
+### 3.4 阈值可判定性：同一二进制自比已远超 5%
+
+**同一二进制（当前 HEAD 静态版）自比**。前三次由本节 §3.2 记录；
+**第 4 次为独立复核**（同一 HEAD、同一命令，另一个会话执行），
+结果推翻了三次样本给出的"零波动"印象：
+
+| 计数 | 第 1 次 | 第 2 次 | 第 3 次 | **第 4 次（复核）** | 极差 / 中位数 |
+|---|---|---|---|---|---|
+| `frames` | 3 | 3 | 3 | **2** | **33%** |
+| `full_candidate_frames` | 2 | 2 | 1 | **1** | **50%** |
+| `dirty_pixels` | 1,496,000 | 1,496,000 | 748,000 | **748,000** | **50%** |
+| `host_direct_frames` | 3 | 3 | 3 | **2** | **33%** |
+| `host_copy_frames` | 0 | 0 | 0 | **0** | 0（零拷贝不变式成立） |
+
+**四项全部不可判定**：自比波动 33%–50%，比 5% 的对照阈值高一个量级。
+
+根因是**样本量**，不是渲染路径不稳：这条 16 步 journey 全程只产生 **2–3 帧**。
+帧数如此之少时，任何一帧在 full-candidate / partial-candidate 之间翻转，
+就会让指标整体移动 33%–50%；`dirty_pixels` 与帧的分类直接耦合，所以同步跳变。
+5% 的分辨率要求与 n=3 的量化粒度在数量级上不匹配。
+
+**方法论注记**：前三次一致曾让 `frames` 与 native-present 看起来"零波动"，
+第 4 次即推翻。**三次样本不足以断言稳定性**，这一点本身也记录在案。
+
+结论（如实陈述，不修改任何阈值）：**判据 3 的"与静态版差异 < 5%"目前不可判定**
+—— 不是因为迁移会不会变慢，而是因为这条 journey 的输出粒度撑不起 5% 的分辨率。
+在 journey 或指标改变之前，即使建出 con 的 dylib 变体也判不出结果。
+是否修订阈值、加大样本（更多 resize 步 / 重复整条 journey 取分布）、
+或改用对帧分类不敏感的指标，由人决定；本仓库不擅改 `plan/plan-v0.1.18.md`。
+
+### 3.5 边界声明（防误读）
+
+- 本节数字是**静态版自己**的"迁移前"列，不是"迁移前 vs 迁移后"的对照；
+- "迁移后"列需要 con 的 dylib 消费变体（§14 的"另建 dylib 变体"），**本轮未做**；
+- **判据 3 仍未结论**：本节不给出"通过 / 不通过"判断，只提供"迁移前"基线与
+  自比离散度，供后续 dylib 变体对照时使用。
+
+## 4. 未测项清单（诚实声明）
 
 以下各项**本轮没有测**，且每项都写明前置条件（全部需要 con 的 dylib 消费变体）：
 
 | 未测项 | 判据 | 前置条件 | 本轮状态 |
 |--------|------|----------|----------|
-| 渲染性能四项：16-step resize journey 的 frame / full-candidate / dirty-pixel / native-present 与静态版差异 < 5% | 判据 3 | con 的 dylib 变体可运行渲染旅程 | **未测** |
+| 渲染性能四项：16-step resize journey 的 frame / full-candidate / dirty-pixel / native-present 与静态版差异 < 5% | 判据 3 | con 的 dylib 变体可运行渲染旅程 | **"迁移前"列已测（里程碑 60，见 §3）；"迁移后"列未测，判据 3 仍未结论** |
 | 行为等价：90 单测 + 21 GUI 黑盒 + 多标签控制旅程全绿；公开 CLI/JSON 合同字节不变 | 判据 4 | 迁移后产物（含 con dylib 变体） | **未测** |
 | 迁移后各产物字节（一份 dylib + 三个瘦身消费者，密封总字节） | 判据 2 "迁移后"列 | con 的 dylib 消费变体 | **有负面证据、待实测确认**（探针结论见 §2.4，完整证据见 `examples/size-probe/README.md`） |
 | `libagenterm.{so,dylib}` 跨平台产物尺寸 | 判据 1 全平台列 | 本机为 Windows，仅测了 `dll` | **未测** |
 
-判据 3、判据 4 维持**未测**：在 con 的 dylib 变体存在并实测之前，二者视为未达成，
-不得解读为"待定 / 大概率通过"。
+判据 3、判据 4 维持**未结论**：判据 3 的"迁移前"列数字见 §3，但"迁移后"列在
+con 的 dylib 变体存在并实测之前仍缺失，判据 3 视为未达成；判据 4 仍完全未测。
+两者都不得解读为"待定 / 大概率通过"。
 判据 2 的"迁移后"列已从"完全未测"移到**有负面证据、待实测确认**：§2.4 的
 size-probe 探针结论为「档 2：很可能不成立」，足以支撑"继续投入前先做决策"，
 但不能替代 con 迁移实测的权威结论；"迁移后"密封总字节仍待实测。
 
-## 4. 构建结果与退出码
+## 5. 构建结果与退出码
 
 | 构建命令 | 退出码 | 备注 |
 |----------|--------|------|
