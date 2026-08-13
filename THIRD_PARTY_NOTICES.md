@@ -11,10 +11,12 @@ Copyright and license terms remain with their respective authors.
 | `anyhow` | MIT OR Apache-2.0 |
 | `atspi` | Apache-2.0 OR MIT |
 | `cc` (dev dependency) | MIT OR Apache-2.0 |
+| `dispatch` | MIT |
 | `itoa` | MIT OR Apache-2.0 |
 | `libc` | MIT OR Apache-2.0 |
 | `libloading` | ISC |
 | `mlua` | MIT |
+| `objc2` | MIT |
 | `objc2-app-kit` | MIT |
 | `objc2-foundation` | MIT |
 | `png` | MIT OR Apache-2.0 |

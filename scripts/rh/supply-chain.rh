@@ -117,6 +117,31 @@ fn entry() {
         "supply_chain_resolve_missing"
     );
 
+    // The resolved package graph is host-filtered: target-specific direct
+    // dependencies disappear when metadata runs on another OS. The manifest
+    // view from `--no-deps` retains every target-conditioned workspace
+    // dependency, so it is the stable authority for THIRD_PARTY_NOTICES.md.
+    let manifest_metadata_name =
+        "cargo-manifest-metadata-" + run_stamp + ".json";
+    let manifest_metadata_path =
+        std::path::join(output_parent, manifest_metadata_name).display;
+    let manifest_metadata_code = std::process::command_stdout_file(
+        "cargo",
+        [
+            "metadata", "--locked", "--format-version", "1", "--no-deps",
+            "--manifest-path", manifest_path
+        ],
+        120000,
+        manifest_metadata_path,
+        #{ current_dir: repo }
+    );
+    require(
+        manifest_metadata_code == 0,
+        "supply_chain_manifest_metadata:exit=" + manifest_metadata_code
+    );
+    let manifest_metadata = rh::json::parse_file(manifest_metadata_path);
+    std::fs::try_remove_file(manifest_metadata_path);
+
     let allowed = #{
         "(Apache-2.0 OR MIT) AND BSD-3-Clause": true,
         "(MIT OR Apache-2.0) AND Unicode-3.0": true,
@@ -294,11 +319,11 @@ fn entry() {
 
     let direct_names = #{};
     let workspace_names = #{};
-    for root in roots {
+    for root in manifest_metadata.packages {
         let root_name = "" + root.name;
         workspace_names[root_name] = true;
     }
-    for root in roots {
+    for root in manifest_metadata.packages {
         for dependency in root.dependencies {
             let dependency_name = "" + dependency.name;
             if !workspace_names.contains(dependency_name) {
