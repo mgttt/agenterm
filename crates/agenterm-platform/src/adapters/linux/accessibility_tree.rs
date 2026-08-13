@@ -5,8 +5,10 @@ use std::sync::{Mutex, OnceLock};
 
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
+use atspi::proxy::component::ComponentProxy;
+use atspi::proxy::device_event_controller::DeviceEventControllerProxy;
 use atspi::proxy::proxy_ext::ProxyExt;
-use atspi::{CoordType, Role, StateSet};
+use atspi::{CoordType, Interface, Role, StateSet};
 use tokio::time::{Duration, timeout};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
@@ -253,7 +255,7 @@ async fn perform_node_action_async(
     let object = resolve_path(&conn, &selected, &indices).await?;
     let proxy = open_bus_object(&conn, &object).await?;
     match action {
-        AccessibilityNodeAction::Click => invoke_click_action(&proxy).await,
+        AccessibilityNodeAction::Click => invoke_structured_click(&proxy).await,
         AccessibilityNodeAction::Focus => {
             if node_reports_focused(&proxy).await {
                 return Ok(());
@@ -797,7 +799,8 @@ async fn read_node(
     // Stay on the Accessible interface during snapshot. WebKitGTK's
     // Component/Action/Text methods (and `proxies()` introspect) routinely
     // hang past 250ms; doing that per node blows the 10s tree deadline
-    // before named document widgets are reached. Click uses DoAction(0).
+    // before named document widgets are reached. Click uses Action
+    // click/press/DoAction(0), then Component GetExtents + AT-SPI mouse.
     AccessibilityNode {
         id,
         parent_id,
@@ -1003,14 +1006,79 @@ async fn do_action_at(
     action_proxy: &atspi::proxy::action::ActionProxy<'_>,
     index: usize,
 ) -> Result<(), AccessibilityTreeError> {
-    action_proxy
+    let performed = action_proxy
         .do_action(index as i32)
         .await
-        .map_err(map_atspi_err)
-        .map(|_| ())
+        .map_err(map_atspi_err)?;
+    if !performed {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_action_unavailable",
+            format!("AT-SPI DoAction({index}) returned false"),
+        ));
+    }
+    Ok(())
 }
 
-async fn invoke_click_action(proxy: &AccessibleProxy<'_>) -> Result<(), AccessibilityTreeError> {
+/// How a resolved node is clicked. `has_action` is `GetInterfaces`.
+/// `None` means the probe timed out — still prefer Action (`DoAction(0)`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ClickRoute {
+    Action { index: usize },
+    Component,
+}
+
+fn click_route(has_action: Option<bool>, names: &[String]) -> ClickRoute {
+    match has_action {
+        Some(false) => ClickRoute::Component,
+        _ => ClickRoute::Action {
+            index: click_action_index(names).unwrap_or(0),
+        },
+    }
+}
+
+fn extents_center(x: i32, y: i32, width: i32, height: i32) -> Option<(i32, i32)> {
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((x.saturating_add(width / 2), y.saturating_add(height / 2)))
+}
+
+async fn node_exposes_action(proxy: &AccessibleProxy<'_>) -> Option<bool> {
+    match timeout(ACTION_TIMEOUT, proxy.get_interfaces()).await {
+        Ok(Ok(ifaces)) => Some(ifaces.contains(Interface::Action)),
+        _ => None,
+    }
+}
+
+fn is_missing_action_interface(error: &AccessibilityTreeError) -> bool {
+    let AccessibilityTreeError::Failed { code, message } = error else {
+        return false;
+    };
+    code == "a11y_action_unavailable"
+        || message.contains("UnknownInterface")
+        || message.contains("UnknownMethod")
+        || message.contains("does not exist")
+}
+
+async fn invoke_structured_click(
+    proxy: &AccessibleProxy<'_>,
+) -> Result<(), AccessibilityTreeError> {
+    let has_action = node_exposes_action(proxy).await;
+    match click_route(has_action, &[]) {
+        ClickRoute::Component => invoke_component_click(proxy).await,
+        ClickRoute::Action { .. } => match invoke_action_click(proxy).await {
+            Ok(()) => Ok(()),
+            Err(action_err)
+                if has_action != Some(true) && is_missing_action_interface(&action_err) =>
+            {
+                invoke_component_click(proxy).await
+            }
+            Err(action_err) => Err(action_err),
+        },
+    }
+}
+
+async fn invoke_action_click(proxy: &AccessibleProxy<'_>) -> Result<(), AccessibilityTreeError> {
     let action_proxy = action_proxy_for(proxy).await?;
     // WebKitGTK advertises Action but `GetActions` often hangs. Prefer a
     // named click when the list arrives quickly; otherwise invoke the
@@ -1019,8 +1087,8 @@ async fn invoke_click_action(proxy: &AccessibleProxy<'_>) -> Result<(), Accessib
         Ok(Ok(names)) => names,
         _ => Vec::new(),
     };
-    let action_index = click_action_index(&names).unwrap_or(0);
-    timeout(NODE_TIMEOUT, do_action_at(&action_proxy, action_index))
+    let index = click_action_index(&names).unwrap_or(0);
+    timeout(NODE_TIMEOUT, do_action_at(&action_proxy, index))
         .await
         .map_err(|_| {
             AccessibilityTreeError::failed(
@@ -1030,11 +1098,59 @@ async fn invoke_click_action(proxy: &AccessibleProxy<'_>) -> Result<(), Accessib
         })?
 }
 
+async fn invoke_component_click(proxy: &AccessibleProxy<'_>) -> Result<(), AccessibilityTreeError> {
+    let component = component_proxy_for(proxy).await?;
+    let (x, y, width, height) = timeout(NODE_TIMEOUT, component.get_extents(CoordType::Screen))
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_action_timeout",
+                "AT-SPI Component GetExtents exceeded its deadline",
+            )
+        })?
+        .map_err(map_atspi_err)?;
+    let Some((cx, cy)) = extents_center(x, y, width, height) else {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_action_unavailable",
+            "node Component extents are empty; not falling back to --coords",
+        ));
+    };
+    let dec = DeviceEventControllerProxy::builder(proxy.inner().connection())
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .map_err(map_atspi_err)?;
+    timeout(NODE_TIMEOUT, dec.generate_mouse_event(cx, cy, "b1c"))
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_action_timeout",
+                "AT-SPI GenerateMouseEvent exceeded its deadline",
+            )
+        })?
+        .map_err(map_atspi_err)
+}
+
 async fn action_proxy_for<'a>(
     proxy: &AccessibleProxy<'a>,
 ) -> Result<ActionProxy<'a>, AccessibilityTreeError> {
     let inner = proxy.inner();
     ActionProxy::builder(inner.connection())
+        .destination(inner.destination().to_owned())
+        .map_err(map_atspi_err)?
+        .path(inner.path().to_owned())
+        .map_err(map_atspi_err)?
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .map_err(map_atspi_err)
+}
+
+async fn component_proxy_for<'a>(
+    proxy: &AccessibleProxy<'a>,
+) -> Result<ComponentProxy<'a>, AccessibilityTreeError> {
+    let inner = proxy.inner();
+    ComponentProxy::builder(inner.connection())
         .destination(inner.destination().to_owned())
         .map_err(map_atspi_err)?
         .path(inner.path().to_owned())
@@ -1463,6 +1579,60 @@ mod tests {
         );
         assert_eq!(click_action_index(&[String::new(), String::new()]), Some(0));
         assert_eq!(click_action_index(&[]), None);
+    }
+
+    #[test]
+    fn click_route_uses_component_when_action_interface_is_absent() {
+        assert_eq!(click_route(Some(false), &[]), ClickRoute::Component);
+        assert_eq!(
+            click_route(Some(false), &["click".into()]),
+            ClickRoute::Component
+        );
+    }
+
+    #[test]
+    fn click_route_prefers_action_when_present_or_unknown() {
+        assert_eq!(
+            click_route(Some(true), &[String::new()]),
+            ClickRoute::Action { index: 0 }
+        );
+        assert_eq!(
+            click_route(None, &["press".into()]),
+            ClickRoute::Action { index: 0 }
+        );
+        assert_eq!(
+            click_route(Some(true), &["focus".into(), "Click".into()]),
+            ClickRoute::Action { index: 1 }
+        );
+    }
+
+    #[test]
+    fn extents_center_rejects_empty_component() {
+        assert_eq!(extents_center(10, 20, 0, 10), None);
+        assert_eq!(extents_center(10, 20, 30, 0), None);
+        assert_eq!(extents_center(10, 20, 30, 10), Some((25, 25)));
+    }
+
+    #[test]
+    fn missing_action_interface_is_typed() {
+        assert!(is_missing_action_interface(
+            &AccessibilityTreeError::failed(
+                "a11y_action_unavailable",
+                "node does not expose the AT-SPI Action interface",
+            )
+        ));
+        assert!(is_missing_action_interface(
+            &AccessibilityTreeError::failed(
+                "a11y_backend_failed",
+                "org.freedesktop.DBus.Error.UnknownMethod: Method does not exist",
+            )
+        ));
+        assert!(!is_missing_action_interface(
+            &AccessibilityTreeError::failed(
+                "a11y_action_timeout",
+                "AT-SPI DoAction exceeded its deadline"
+            )
+        ));
     }
 
     #[test]

@@ -77,7 +77,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   typed `a11y_node_not_found`. Two or more showing matches are typed
   `a11y_node_ambiguous` (with the match count); the command must not pick
   the first. Name addressing must not parse tree dumps, take screenshots,
-  or fall through to `--coords`.
+  or fall through to `--coords`. A showing named node with no Action
+  still uses the AT-SPI Component path and reports
+  `addressing=accessibility-tree`.
 - [~] `send-text` accepts the same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). It focuses the matched
   node through the node-path path, then types; without `--name` it stays the
