@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'crates/agenterm-abi/**'
+      - 'crates/agenterm-cu/**'
       - 'crates/agenterm-platform/**'
       - 'include/**'
       - 'examples/c/**'
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'crates/agenterm-abi/**'
+      - 'crates/agenterm-cu/**'
       - 'crates/agenterm-platform/**'
       - 'include/**'
       - 'examples/c/**'
@@ -32,7 +34,7 @@ permissions:
 
 jobs:
   libagenterm-abi:
-    name: libagenterm ABI (windows)
+    name: libagenterm + cu (windows)
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -59,9 +61,15 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+      - name: Build agenterm-cu
+        run: cargo build --locked -p agenterm-cu --release
+      - name: Test agenterm-cu
+        run: cargo test --locked -p agenterm-cu
+      - name: Clippy agenterm-cu
+        run: cargo clippy --locked -p agenterm-cu --all-targets --no-deps -- -D warnings
 
   libagenterm-abi-macos:
-    name: libagenterm ABI (macos)
+    name: libagenterm + cu (macos)
     # macOS 交付通道:真实构建并验证 libagenterm.dylib 与 libagenterm.a
     # (c_consumer / c_static_link 必须真跑,不许 SKIP)。
     # 故意没有 brew 步骤——linux 那轮已证明编译期平台栈是纯 Rust(窗口 /
@@ -128,9 +136,15 @@ jobs:
           echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -cE '(^|_)agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+      - name: Build agenterm-cu
+        run: cargo build --locked -p agenterm-cu --release
+      - name: Test agenterm-cu
+        run: cargo test --locked -p agenterm-cu
+      - name: Clippy agenterm-cu
+        run: cargo clippy --locked -p agenterm-cu --all-targets --no-deps -- -D warnings
 
   libagenterm-abi-linux:
-    name: libagenterm ABI (linux)
+    name: libagenterm + cu (linux)
     # Linux 交付通道:真实构建并验证 libagenterm.so 与 libagenterm.a(c_consumer /
     # c_static_link 必须真跑,不许 SKIP)。
     # 故意没有 apt 步骤——实测依据(交叉 cargo check/clippy 通过 + 代码路径分析):
@@ -197,3 +211,9 @@ jobs:
           echo "  total=$(wc -l < /tmp/sta.txt) agt=$(grep -c '^_\?agt_' /tmp/sta.txt || true) rust=$(grep -c '_R' /tmp/sta.txt || true)"
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+      - name: Build agenterm-cu
+        run: cargo build --locked -p agenterm-cu --release
+      - name: Test agenterm-cu
+        run: cargo test --locked -p agenterm-cu
+      - name: Clippy agenterm-cu
+        run: cargo clippy --locked -p agenterm-cu --all-targets --no-deps -- -D warnings

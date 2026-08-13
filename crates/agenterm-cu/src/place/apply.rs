@@ -1,9 +1,9 @@
 //! Apply pipeline: write, quantized shrink, clamp to visible frame.
+//!
+//! All OS access goes through the shared libagenterm dynamic library
+//! (`crate::mechanism::window_op`) — no `agenterm-platform` static linking.
 
-use agenterm_platform::{
-    window_enumerate::{ScreenInfo, WindowBounds},
-    window_op::{self, WindowOpError},
-};
+use crate::mechanism::{MechanismError, window_enumerate, window_op};
 
 use super::geometry::Rect;
 
@@ -11,7 +11,7 @@ pub fn apply_rect(
     handle: isize,
     target: Rect,
     visible: Rect,
-) -> Result<(Rect, bool, bool), WindowOpError> {
+) -> Result<(Rect, bool, bool), MechanismError> {
     let (x, y, w, h) = target.to_i32();
     window_op::move_window(handle, x, y, w, h)?;
     let mut quantized = false;
@@ -49,12 +49,12 @@ pub fn apply_rect(
     Ok((actual, quantized, did_clamp))
 }
 
-pub fn read_rect(handle: isize) -> Result<Rect, WindowOpError> {
+pub fn read_rect(handle: isize) -> Result<Rect, MechanismError> {
     let bounds = window_op::window_rect(handle)?;
     Ok(rect_from_bounds(bounds))
 }
 
-pub fn rect_from_bounds(bounds: WindowBounds) -> Rect {
+pub fn rect_from_bounds(bounds: window_enumerate::WindowBounds) -> Rect {
     Rect::new(
         f64::from(bounds.x),
         f64::from(bounds.y),
@@ -63,7 +63,7 @@ pub fn rect_from_bounds(bounds: WindowBounds) -> Rect {
     )
 }
 
-pub fn screen_from_info(info: &ScreenInfo) -> super::geometry::Screen {
+pub fn screen_from_info(info: &window_enumerate::ScreenInfo) -> super::geometry::Screen {
     super::geometry::Screen {
         visible: rect_from_bounds(info.visible),
         frame: rect_from_bounds(info.frame),

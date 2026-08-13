@@ -21,7 +21,7 @@ loop until goal:
 Named window placement (`window-place`) is in the command enum. Geometry
 follows the Spectacle catalog
 ([PRD 32](../../prd/PRD_02_32_cu_window_placement.md)). Apply uses
-`agenterm-platform` `move_window`. Requires `--grant actuate`.
+`libagenterm` `agt_native_window_*` (runtime dynamic library). Requires `--grant actuate`.
 
 ## Native accessibility mapping (按图索骥)
 
@@ -55,7 +55,7 @@ audited separately from AT-SPI actuation.
 
 | Command | Backend |
 |---------|---------|
-| `windows` | X11 window enumeration (`agenterm-platform`) |
+| `windows` | X11 window enumeration (`libagenterm agt_window_enumerate`) |
 | `tree` | AT-SPI2 flattened control tree with role, name, states, bounds, actions |
 | `click --node <path>` | AT-SPI2 `Action` (`click` / `press`, else default `DoAction(0)` when the node exposes Action); no Action → Component `GetExtents` + AT-SPI mouse (`addressing` stays `accessibility-tree`) |
 | `click --window --name PAT [--role ROLE]` | same showing/visible name matcher as `wait --node-name-contains` (exactly one hit), then the `--node` AT-SPI path (never silent `--coords`) |
@@ -220,7 +220,7 @@ running AT-SPI registry (`at-spi2-registryd`):
 ## Layering
 
 ```text
-native primitive     agenterm-platform (AT-SPI2 / X11 / XTest — owned there)
+native primitive     libagenterm dynamic library (agenterm.dll — `agt_*` exports)
     ↑
 abstract command     agenterm-cu library (`Command`, typed `CuReply`)
     ↑
@@ -229,5 +229,6 @@ current transport    in-process `Executor` for target `current`
 shell command        `cu` binary
 ```
 
-`cu` never opens raw OS APIs. Missing mechanisms are added to
-`agenterm-platform` with typed `Available` / `Unsupported` / `Failed`.
+`cu` never opens raw OS APIs. Every call goes through the shared
+libagenterm dynamic library; mechanisms report typed `Available` /
+`Unsupported` / `Failed`.

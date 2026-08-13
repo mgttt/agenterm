@@ -8,6 +8,7 @@ pub mod auth;
 #[cfg(target_os = "macos")]
 pub mod ax_guide;
 pub mod command;
+pub mod dynlib;
 pub mod executor;
 pub mod hotkeys;
 pub mod mechanism;

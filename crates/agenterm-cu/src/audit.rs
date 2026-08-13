@@ -103,10 +103,45 @@ impl AuditLog {
 }
 
 fn default_audit_path() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_owned())?;
-    Ok(PathBuf::from(home)
-        .join(".local")
-        .join("share")
-        .join("agenterm")
-        .join("cu-audit.jsonl"))
+    // Resolution order: AGENTERM_CU_AUDIT_PATH is handled by AuditLog::open();
+    // here we fall back HOME -> USERPROFILE (the latter covers Windows, which
+    // does not set HOME by default).
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| {
+            if cfg!(windows) {
+                "neither HOME nor USERPROFILE is set".to_owned()
+            } else {
+                "HOME is not set".to_owned()
+            }
+        })?;
+    if cfg!(windows) {
+        Ok(PathBuf::from(home)
+            .join("AppData")
+            .join("Local")
+            .join("agenterm")
+            .join("cu-audit.jsonl"))
+    } else {
+        Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("agenterm")
+            .join("cu-audit.jsonl"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_audit_path;
+
+    #[test]
+    fn default_audit_path_resolves_on_current_platform() {
+        let path =
+            default_audit_path().expect("default audit path must resolve on the current platform");
+        assert!(!path.as_os_str().is_empty(), "path must not be empty");
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("cu-audit.jsonl")
+        );
+    }
 }

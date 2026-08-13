@@ -3,6 +3,7 @@
 //! Registers global Carbon hotkeys, runs `window-place` in-process, and shows
 //! a menu-bar extra. Accessibility is checked only when that menu opens.
 
+#[cfg(target_os = "macos")]
 use crate::place::PlaceAction;
 
 #[cfg(not(target_os = "macos"))]
