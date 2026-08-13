@@ -1029,6 +1029,12 @@ substring matcher as `wait --node-name-contains`, then call the existing
 `--node` or `--coords`, and return typed `a11y_node_not_found` on a miss.
 Never satisfy a name click with a screenshot or degraded coordinates.
 
+`cu send-text --name` is the same rule plus one ordering constraint: resolve
+and focus the node BEFORE injecting any keystroke, so a miss types nothing
+instead of spraying text into whatever happened to be focused. Its text
+argument is positional, so parse `--` as the end of flags — otherwise text
+that starts with a dash is eaten as a flag.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must
