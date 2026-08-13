@@ -117,11 +117,15 @@ fn real_atspi_tree_edits_command_and_activates_send() {
     assert_eq!(tree.backend, "at-spi2");
     let command = named(&tree.nodes, "Command").expect("Command node");
     let send = named(&tree.nodes, "SEND").expect("SEND node");
-    assert!(command.actions.iter().any(|action| action == "focus"));
-    assert!(send.actions.iter().any(|action| action == "click"));
 
     let command_id = command.id.clone();
     let send_id = send.id.clone();
+    perform_node_action(None, &command_id, AccessibilityNodeAction::Focus)
+        .expect("AT-SPI Command focus");
+    wait_for(&mut running, "composer focus", |_| {
+        let snapshot = cli_json(executable, &endpoint, &["ui-snapshot"]);
+        (snapshot["composer_focused"] == true).then_some(())
+    });
     set_node_text(None, &command_id, "printf ATSPI_OK").expect("AT-SPI SetTextContents");
     wait_for(&mut running, "composer text", |_| {
         let snapshot = cli_json(executable, &endpoint, &["ui-snapshot"]);
