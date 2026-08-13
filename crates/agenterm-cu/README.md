@@ -31,7 +31,7 @@ follows the Spectacle catalog
 | Control tree | **UIA** (`IUIAutomation`) | **AT-SPI2** (`org.a11y.atspi.*` on D-Bus) | **AX** (`NSAccessibility`) |
 | Node identity | automation id + runtime id + bounds | path id (`/0/2/5`) + role + name + bounds | AX path + role + title + bounds |
 | Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action` (`click`/`press`, else default `DoAction(0)`); no Action → Component `GetExtents` + `GenerateMouseEvent`; focus is `focus` / `Component::grab_focus` | `AXPress` / `AXRaise` |
-| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (future) / `input-inject` | AX value + events |
+| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (`SetTextContents` / `InsertText`) for `--name`; `Text` + toolkit set-value when EditableText is absent (Chrome AX, WebKitGTK eval helper); `input-inject` only without `--name` | AX value + events |
 | Screenshot | GDI native capture | typed `unsupported` (no OCR substitute) | typed `unsupported` (planned) |
 
 Linux `tree` and structured `click` / `focus` use **AT-SPI2 only**. If the
@@ -41,7 +41,8 @@ return typed `unsupported` / `failed` — never a silent coordinate fallback.
 On this Linux box, start Chrome with `scripts/box-chrome-a11y.sh` so
 `--force-renderer-accessibility` is always on (AT-SPI renderer subtree).
 Start Reasonix with `scripts/reasonix-desktop-a11y.sh` so WebKit keeps an
-AT-SPI subtree (`WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`); otherwise the
+AT-SPI subtree (`WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`) and the eval
+helper can implement the missing `EditableText` set-value; otherwise the
 web process aborts and `cu tree` is only unnamed GTK fillers.
 `agenterm-con` registers as an AT-SPI toolkit and publishes inner chrome
 (`Command`, `SEND`, `Tabs`, `Session`); do not treat the one-node X11 title
@@ -61,8 +62,9 @@ audited separately from AT-SPI actuation.
 | `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
 | `focus --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
-| `send-text` / `send-keys` | XTest keyboard injection |
-| `send-text` / `send-keys` `--window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path, then that keyboard injection |
+| `send-text` / `send-keys` | XTest keyboard injection (no `--name`) |
+| `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
+| `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`) |
 

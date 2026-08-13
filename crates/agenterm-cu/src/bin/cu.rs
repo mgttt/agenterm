@@ -314,7 +314,8 @@ Commands:
   send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
                               --name writes via AT-SPI EditableText (SetTextContents /
                               InsertText) or AT-SPI Text + toolkit set-value when
-                              EditableText is absent (Chrome); a node with no
+                              EditableText is absent (Chrome renderer AX; WebKitGTK
+                              AT-SPI id + eval helper); a node with no
                               writeable text interface typed-fails (never XTest).
                               `--` ends flag parsing
   send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>

@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 mod chrome_ax_set_value;
+mod webkit_ax_set_value;
 
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
@@ -178,9 +179,11 @@ pub(crate) fn perform_node_action(
 }
 
 /// Write through AT-SPI `EditableText` when present, otherwise AT-SPI `Text`
-/// plus the toolkit's accessibility set-value (Chrome: renderer AX `kSetValue`).
-/// Confirmed by `Text.GetText`. A named showing node with no writeable text
-/// interface fails typed — never XTest / `GenerateKeyboardEvent`.
+/// plus the toolkit's accessibility set-value (Chrome: renderer AX `kSetValue`;
+/// WebKitGTK/Reasonix: AT-SPI `id` attribute + eval helper, because WebKit
+/// 2.52 never registers `EditableText` even on `<textarea>`). Confirmed by
+/// `Text.GetText`. A named showing node with no writeable text interface
+/// fails typed — never XTest / `GenerateKeyboardEvent`.
 pub(crate) fn set_node_text(
     window_handle: Option<isize>,
     node_id: &str,
@@ -1610,9 +1613,9 @@ async fn text_character_count(proxy: &AccessibleProxy<'_>) -> Option<i32> {
 /// Native AT-SPI write: `EditableText.SetTextContents`, then
 /// `EditableText.InsertText`. Matches libatspi
 /// `atspi_editable_text_set_text_contents` / `atspi_editable_text_insert_text`.
-/// Chrome named fields expose `Text` but not `EditableText`; those take the
-/// `Text` route (renderer AX set-value, confirmed by `GetText`). Never
-/// falls through to XTest / DeviceEventController keyboard.
+/// Chrome and WebKitGTK named fields expose `Text` but not `EditableText`;
+/// those take the `Text` route (toolkit set-value, confirmed by `GetText`).
+/// Never falls through to XTest / DeviceEventController keyboard.
 async fn invoke_editable_text(
     proxy: &AccessibleProxy<'_>,
     text: &str,
@@ -1671,10 +1674,22 @@ async fn write_via_atspi_text(
         .ok()
         .and_then(Result::ok)
         .unwrap_or_default();
-    if name.trim().is_empty() {
+    let attributes = node_object_attributes(proxy).await;
+    let html_id = attributes
+        .get("id")
+        .map(String::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    let toolkit = attributes
+        .get("toolkit")
+        .map(String::as_str)
+        .unwrap_or("")
+        .to_owned();
+    if name.trim().is_empty() && html_id.is_empty() {
         return Err(AccessibilityTreeError::failed(
             "a11y_text_unavailable",
-            "editable AT-SPI Text node has no accessible name for write",
+            "editable AT-SPI Text node has no accessible name or id attribute for write",
         ));
     }
     let identity = window_handle.and_then(window_identity);
@@ -1689,10 +1704,78 @@ async fn write_via_atspi_text(
             pids
         })
         .unwrap_or_default();
-    chrome_ax_set_value::set_named_field_value(pids, &name, text)?;
+    apply_toolkit_set_value(&pids, &name, &html_id, &toolkit, text)?;
     verify_text_contents(proxy, text).await?;
     remember_text_via("text");
     Ok(())
+}
+
+async fn node_object_attributes(proxy: &AccessibleProxy<'_>) -> HashMap<String, String> {
+    timeout(NODE_TIMEOUT, proxy.get_attributes())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default()
+}
+
+fn apply_toolkit_set_value(
+    pids: &[u32],
+    name: &str,
+    html_id: &str,
+    toolkit: &str,
+    text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    let chrome = chrome_ax_set_value::set_named_field_value(pids.iter().copied(), name, text);
+    if chrome.is_ok() {
+        return Ok(());
+    }
+    let webkit = webkit_ax_set_value::set_field_value(html_id, name, text);
+    if webkit.is_ok() {
+        return Ok(());
+    }
+    Err(toolkit_set_value_unavailable(
+        toolkit,
+        name,
+        html_id,
+        chrome.err(),
+        webkit.err(),
+    ))
+}
+
+fn toolkit_set_value_unavailable(
+    toolkit: &str,
+    name: &str,
+    html_id: &str,
+    chrome: Option<AccessibilityTreeError>,
+    webkit: Option<AccessibilityTreeError>,
+) -> AccessibilityTreeError {
+    let chrome_msg = chrome
+        .as_ref()
+        .map(format_a11y_error)
+        .unwrap_or_else(|| "not attempted".into());
+    let webkit_msg = webkit
+        .as_ref()
+        .map(format_a11y_error)
+        .unwrap_or_else(|| "not attempted".into());
+    let identity = if html_id.is_empty() {
+        format!("name {name:?}")
+    } else {
+        format!("id {html_id:?} name {name:?}")
+    };
+    AccessibilityTreeError::failed(
+        "a11y_text_unavailable",
+        format!(
+            "node exposes AT-SPI Text but not EditableText ({identity}, toolkit {toolkit:?}); \
+             toolkit set-value unavailable (chrome: {chrome_msg}; webkit: {webkit_msg})"
+        ),
+    )
+}
+
+fn format_a11y_error(error: &AccessibilityTreeError) -> String {
+    match error {
+        AccessibilityTreeError::Failed { message, .. } => message.clone(),
+        AccessibilityTreeError::Unsupported { reason } => reason.to_string(),
+    }
 }
 
 async fn read_text_contents(proxy: &AccessibleProxy<'_>) -> Option<String> {
@@ -2251,6 +2334,31 @@ mod tests {
             text_write_route(None, None, true),
             TextWriteRoute::EditableText
         );
+    }
+
+    #[test]
+    fn toolkit_set_value_error_names_webkit_textarea_identity() {
+        let error = toolkit_set_value_unavailable(
+            "WebKitGTK",
+            "Message Reasonix",
+            "composer-input",
+            Some(AccessibilityTreeError::failed(
+                "a11y_text_unavailable",
+                "no Chrome remote-debugging port",
+            )),
+            Some(AccessibilityTreeError::failed(
+                "a11y_text_unavailable",
+                "eval helper absent",
+            )),
+        );
+        let AccessibilityTreeError::Failed { code, message } = error else {
+            panic!("expected failed");
+        };
+        assert_eq!(code, "a11y_text_unavailable");
+        assert!(message.contains("composer-input"), "{message}");
+        assert!(message.contains("WebKitGTK"), "{message}");
+        assert!(message.contains("eval helper absent"), "{message}");
+        assert!(!message.contains("XTest"), "{message}");
     }
 
     #[test]

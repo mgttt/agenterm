@@ -41,6 +41,10 @@ pub(crate) fn set_node_text(
     })
 }
 
+pub(crate) fn last_text_write_via() -> &'static str {
+    "editable-text"
+}
+
 pub(crate) fn send_node_keys(
     _window_handle: Option<isize>,
     _node_id: &str,
