@@ -26,6 +26,7 @@ mod json;
 mod palette;
 mod perf;
 mod raster_surface;
+mod session_store;
 #[cfg(windows)]
 mod startup;
 mod terminal_paint;
@@ -58,6 +59,7 @@ use control_pending::{PendingControl, WaitKind, WaitProbe};
 use palette::Rgb;
 use perf::PerfStats;
 use raster_surface::{CellRect, Surface};
+use session_store::SessionStore;
 use terminal_paint::{paint_cells, paint_cells_at};
 
 /// VT callback storage for OSC sequences (window title, etc.) and terminal
@@ -719,54 +721,6 @@ impl Drop for ConTerminal {
     }
 }
 
-/// Compact session ownership for the small interactive tab sets hosted by con.
-///
-/// Tab identity and tree order belong to `Workspace`; this store only maps a
-/// stable id to its terminal. Linear lookup avoids linking the allocation and
-/// rebalancing machinery of a general-purpose ordered map into the miniature
-/// client. Removing by swap is safe because storage order is not observable.
-#[derive(Default)]
-struct SessionStore {
-    entries: Vec<(workspace::TabId, ConTerminal)>,
-}
-
-impl SessionStore {
-    fn insert(&mut self, id: workspace::TabId, session: ConTerminal) {
-        debug_assert!(!self.contains_key(&id));
-        self.entries.push((id, session));
-    }
-
-    fn get(&self, id: &workspace::TabId) -> Option<&ConTerminal> {
-        self.entries
-            .iter()
-            .find(|(candidate, _)| candidate == id)
-            .map(|(_, session)| session)
-    }
-
-    fn get_mut(&mut self, id: &workspace::TabId) -> Option<&mut ConTerminal> {
-        self.entries
-            .iter_mut()
-            .find(|(candidate, _)| candidate == id)
-            .map(|(_, session)| session)
-    }
-
-    fn remove(&mut self, id: &workspace::TabId) -> Option<ConTerminal> {
-        let index = self
-            .entries
-            .iter()
-            .position(|(candidate, _)| candidate == id)?;
-        Some(self.entries.swap_remove(index).1)
-    }
-
-    fn contains_key(&self, id: &workspace::TabId) -> bool {
-        self.entries.iter().any(|(candidate, _)| candidate == id)
-    }
-
-    fn entries_mut(&mut self) -> &mut [(workspace::TabId, ConTerminal)] {
-        self.entries.as_mut_slice()
-    }
-}
-
 /// One lightweight GUI process containing several isolated terminal sessions.
 ///
 /// The wrapper owns tree identity and routing only. A `ConTerminal` still owns
@@ -774,7 +728,7 @@ impl SessionStore {
 /// dead child or malformed output cannot corrupt another session's state.
 struct ConApp {
     workspace: workspace::Workspace,
-    sessions: SessionStore,
+    sessions: SessionStore<ConTerminal>,
     composer: composer::ComposerState,
     tree_scroll_offset: usize,
     sidebar_width_logical: f64,
