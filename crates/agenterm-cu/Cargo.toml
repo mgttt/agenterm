@@ -3,18 +3,17 @@ name = "agenterm-cu"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
-description = "Agenterm computer-use foundation: abstract command surface over agenterm-platform"
+description = "Agenterm computer-use foundation: abstract command surface over the shared libagenterm dynamic library"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mgttt/agenterm"
 
 [dependencies]
-agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["serde", "window-enum", "window-op", "input-inject", "screenshot", "a11y-tree"] }
-agenterm-abi = { path = "../agenterm-abi", features = ["allow-abort-profile"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Milestone 44: `agenterm-cu` must REALLY load the libagenterm dynamic
-# library at run time (dlopen / LoadLibrary). This is a production
-# dependency of the new bin only — the existing `cu` bin is untouched.
+# Milestone 46: both `cu` and `agenterm-cu` REALLY load the libagenterm
+# dynamic library at run time (dlopen / LoadLibrary) through the shared
+# `crate::dynlib` layer. The former platform/abi static dependencies are
+# gone entirely.
 libloading = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -1,11 +1,12 @@
-//! `current` transport: in-process execution through `agenterm-platform` only.
+//! `current` transport: in-process execution through the shared libagenterm
+//! dynamic library (`mechanism` + `dynlib`) only.
 
 use std::{
     thread,
     time::{Duration, Instant},
 };
 
-use agenterm_platform::window_enumerate::WindowInfo;
+use crate::mechanism::window_enumerate::WindowInfo;
 
 use crate::{
     audit::AuditLog,
@@ -40,10 +41,10 @@ impl Executor {
             );
         }
 
-        if required == Grant::Actuate {
-            if let Err(error) = self.audit_before(command) {
-                return CuReply::err(command, error);
-            }
+        if required == Grant::Actuate
+            && let Err(error) = self.audit_before(command)
+        {
+            return CuReply::err(command, error);
         }
 
         let reply = match command.target() {
@@ -89,8 +90,8 @@ impl Executor {
         match command {
             Command::Capabilities { .. } => Ok(capabilities_payload()),
             Command::Windows { .. } => {
-                let windows = agenterm_platform::window_enumerate::enumerate_top_level()
-                    .map_err(map_enum_err)?;
+                let windows = mechanism::window_enumerate::enumerate_top_level()
+                    .map_err(map_mechanism_err)?;
                 serde_json::to_value(&windows)
                     .map_err(|error| CuError::new("serialize", error.to_string()))
             }
@@ -129,8 +130,8 @@ impl Executor {
 }
 
 fn capabilities_payload() -> serde_json::Value {
-    let status = |capability: agenterm_platform::Capability| {
-        format!("{:?}", agenterm_platform::capability_status(capability))
+    let status = |capability: mechanism::Capability| {
+        format!("{:?}", mechanism::capability_status(capability))
     };
     let tree_status = if mechanism::accessibility_tree_available() {
         "Available"
@@ -141,21 +142,21 @@ fn capabilities_payload() -> serde_json::Value {
         "target": "current",
         "mechanism": "libagenterm",
         "capabilities": {
-            "windows": status(agenterm_platform::Capability::WindowEnumerate),
+            "windows": status(mechanism::Capability::WindowEnumerate),
             "tree": tree_status,
-            "screenshot": status(agenterm_platform::Capability::Screenshot),
-            "input": status(agenterm_platform::Capability::InputInject),
-            "window_place": status(agenterm_platform::Capability::WindowOp),
+            "screenshot": status(mechanism::Capability::Screenshot),
+            "input": status(mechanism::Capability::InputInject),
+            "window_place": status(mechanism::Capability::WindowOp),
         },
         "mapping": {
-            "windows": "Win32 EnumWindows / Linux X11 _NET_CLIENT_LIST / macOS CGWindowList",
+            "windows": "libagenterm agt_window_enumerate",
             "tree": "libagenterm agt_a11y_* → Windows UIA / Linux AT-SPI2 / macOS AX",
-            "window_place": "Spectacle catalog via platform move_window (Win32 / X11 / macOS AX)",
+            "window_place": "Spectacle catalog via libagenterm agt_native_window_*",
         },
         "gaps": {
-            "windows": "still agenterm-platform until agt_window_enumerate ships",
-            "screenshot": "still agenterm-platform until unified ABI path",
-            "input_degraded": "still agenterm-platform until agt_input_inject ships",
+            "windows": "none — shared agenterm.dll (milestone 46)",
+            "screenshot": "none — shared agenterm.dll (milestone 46)",
+            "input_degraded": "none — shared agenterm.dll (milestone 46)",
         }
     })
 }
@@ -177,17 +178,15 @@ fn screenshot(path: &str, window: Option<isize>) -> Result<serde_json::Value, Cu
     if path.is_empty() {
         return Err(CuError::new("invalid_input", "screenshot path is required"));
     }
-    let raw = window.unwrap_or(0) as isize;
-    let handle = unsafe { agenterm_platform::screenshot::ScreenshotWindowHandle::from_raw(raw) }
-        .ok_or_else(|| {
-            CuError::new("invalid_input", "screenshot window handle must be non-zero")
-        })?;
-    let result = agenterm_platform::screenshot::capture_native_window_png(
-        handle,
-        std::path::Path::new(path),
-        agenterm_platform::screenshot::NativeCaptureArea::Window,
-    )
-    .map_err(map_screenshot_err)?;
+    let raw = window.unwrap_or(0);
+    if raw == 0 {
+        return Err(CuError::new(
+            "invalid_input",
+            "screenshot window handle must be non-zero",
+        ));
+    }
+    let result = mechanism::screenshot::capture_native_window_png(raw, std::path::Path::new(path))
+        .map_err(map_mechanism_err)?;
     Ok(serde_json::json!({
         "path": path,
         "window": window,
@@ -249,16 +248,12 @@ fn click_command(command: &Command) -> Result<serde_json::Value, CuError> {
         ));
     }
     let inject_button = match button {
-        PointerButton::Left => agenterm_platform::input_inject::PointerButton::Left,
-        PointerButton::Right => agenterm_platform::input_inject::PointerButton::Right,
-        PointerButton::Middle => agenterm_platform::input_inject::PointerButton::Middle,
+        PointerButton::Left => mechanism::input_inject::PointerButton::Left,
+        PointerButton::Right => mechanism::input_inject::PointerButton::Right,
+        PointerButton::Middle => mechanism::input_inject::PointerButton::Middle,
     };
-    agenterm_platform::input_inject::pointer_click(
-        agenterm_platform::input_inject::PointerPosition { x, y },
-        inject_button,
-        clicks,
-    )
-    .map_err(map_inject_err)?;
+    mechanism::input_inject::pointer_click(x, y, inject_button, clicks)
+        .map_err(map_mechanism_err)?;
     Ok(serde_json::json!({
         "addressing": "degraded-coordinates",
         "coords": [x, y],
@@ -288,8 +283,7 @@ fn focus(
 /// `send-text` with `--name` writes through native AT-SPI
 /// `EditableText` (`SetTextContents` / `InsertText`) or, when the named
 /// showing node exposes `Text` + `editable` but not `EditableText`
-/// (Chrome 151, WebKitGTK/Reasonix), through AT-SPI `Text` plus the
-/// toolkit set-value.
+/// (Chrome 151), through AT-SPI `Text` plus the toolkit AX set-value.
 /// Success is confirmed by `Text.GetText`. A named showing node with no
 /// writeable text interface typed-fails (`a11y_text_unavailable`) and
 /// never falls through to XTest / `input_inject::type_text`.
@@ -301,12 +295,12 @@ fn send_text(
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
     let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-text")? else {
-        agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
+        mechanism::input_inject::type_text(text).map_err(map_mechanism_err)?;
         return Ok(serde_json::json!({ "typed": text }));
     };
     mechanism::set_node_text(window, &resolved.node_id, text).map_err(map_mechanism_err)?;
-    agenterm_platform::accessibility_tree::drain_bus();
-    let via = agenterm_platform::accessibility_tree::last_text_write_via();
+    let _ = mechanism::accessibility_tree::drain_bus();
+    let via = mechanism::accessibility_tree::last_text_write_via().unwrap_or_default();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
@@ -332,11 +326,11 @@ fn send_keys(
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
     let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-keys")? else {
-        agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
+        mechanism::input_inject::send_keys(keys).map_err(map_mechanism_err)?;
         return Ok(serde_json::json!({ "keys": keys }));
     };
     mechanism::send_node_keys(window, &resolved.node_id, keys).map_err(map_mechanism_err)?;
-    agenterm_platform::accessibility_tree::drain_bus();
+    let _ = mechanism::accessibility_tree::drain_bus();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
@@ -460,9 +454,8 @@ fn window_place(action_raw: &str, window: Option<isize>) -> Result<serde_json::V
             format!("unknown window-place action '{action_raw}'"),
         )
     })?;
-    let windows =
-        agenterm_platform::window_enumerate::enumerate_top_level().map_err(map_enum_err)?;
-    let screens = agenterm_platform::window_enumerate::list_screens().map_err(map_enum_err)?;
+    let windows = mechanism::window_enumerate::enumerate_top_level().map_err(map_mechanism_err)?;
+    let screens = mechanism::window_enumerate::list_screens().map_err(map_mechanism_err)?;
     if screens.is_empty() {
         return Err(CuError::new("failed", "no screens available"));
     }
@@ -509,7 +502,7 @@ fn window_place(action_raw: &str, window: Option<isize>) -> Result<serde_json::V
     let visible = crate::place::place(crate::place::PlaceAction::Fullscreen, before, &geo_screens)
         .unwrap_or(before);
     let (after, quantized, clamped) =
-        crate::place::apply_rect(apply_handle, after_target, visible).map_err(map_op_err)?;
+        crate::place::apply_rect(apply_handle, after_target, visible).map_err(map_mechanism_err)?;
     if !action.is_history() {
         history.record(&app_key, apply_handle, before, after);
     }
@@ -544,7 +537,7 @@ fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value,
 
     while Instant::now() < deadline {
         let windows =
-            agenterm_platform::window_enumerate::enumerate_top_level().map_err(map_enum_err)?;
+            mechanism::window_enumerate::enumerate_top_level().map_err(map_mechanism_err)?;
         last_observation = serde_json::json!({ "window_count": windows.len(), "windows": windows });
         if condition_met(condition, &windows) {
             return Ok(serde_json::json!({
@@ -622,8 +615,10 @@ fn wait_node(
             }
             // The tree can be missing outright; that is not something more
             // polling will fix.
-            Err(mechanism::MechanismError::Unsupported) => {
-                return Err(map_mechanism_err(mechanism::MechanismError::Unsupported));
+            Err(mechanism::MechanismError::Unsupported { .. }) => {
+                return Err(map_mechanism_err(mechanism::MechanismError::Unsupported {
+                    reason: "accessibility-tree mechanism unavailable".to_owned(),
+                }));
             }
             // A scoped window may not have an AT-SPI root yet — keep polling and
             // report the last failure if we run out of time.
@@ -712,62 +707,10 @@ fn node_is_showing(node: &mechanism::A11yNode) -> bool {
         .any(|state| state.eq_ignore_ascii_case("showing") || state.eq_ignore_ascii_case("visible"))
 }
 
-fn map_op_err(error: agenterm_platform::window_op::WindowOpError) -> CuError {
-    match error {
-        agenterm_platform::window_op::WindowOpError::Unsupported { reason } => {
-            CuError::new("unsupported", reason.to_string())
-        }
-        agenterm_platform::window_op::WindowOpError::Failed { code, message } => {
-            CuError::new(code.to_string(), message)
-        }
-        _ => CuError::new("unknown", "unknown window-op error"),
-    }
-}
-
-fn map_enum_err(error: agenterm_platform::window_enumerate::WindowEnumerateError) -> CuError {
-    match error {
-        agenterm_platform::window_enumerate::WindowEnumerateError::Unsupported { reason } => {
-            CuError::new("unsupported", reason.to_string())
-        }
-        agenterm_platform::window_enumerate::WindowEnumerateError::Failed { code, message } => {
-            CuError::new(code.to_string(), message)
-        }
-        _ => CuError::new("unknown", "unknown window-enumerate error"),
-    }
-}
-
-fn map_inject_err(error: agenterm_platform::input_inject::InputInjectError) -> CuError {
-    match error {
-        agenterm_platform::input_inject::InputInjectError::Unsupported { reason } => {
-            CuError::new("unsupported", reason.to_string())
-        }
-        agenterm_platform::input_inject::InputInjectError::Failed { code, message } => {
-            CuError::new(code.to_string(), message)
-        }
-        _ => CuError::new("unknown", "unknown input-inject error"),
-    }
-}
-
 fn map_mechanism_err(error: mechanism::MechanismError) -> CuError {
     match error {
-        mechanism::MechanismError::Unsupported => {
-            CuError::new("unsupported", "accessibility-tree mechanism unavailable")
-        }
+        mechanism::MechanismError::Unsupported { reason } => CuError::new("unsupported", reason),
         mechanism::MechanismError::Failed { code, message } => CuError::new(code, message),
-    }
-}
-
-fn map_screenshot_err(
-    error: agenterm_platform::contract::ui_screenshot::UiScreenshotError,
-) -> CuError {
-    match error {
-        agenterm_platform::contract::ui_screenshot::UiScreenshotError::Unsupported { .. } => {
-            CuError::new("unsupported", error.message())
-        }
-        agenterm_platform::contract::ui_screenshot::UiScreenshotError::Failed { .. } => {
-            CuError::new(error.code(), error.message())
-        }
-        _ => CuError::new("unknown", "unknown screenshot error"),
     }
 }
 
