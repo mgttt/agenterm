@@ -354,6 +354,10 @@ cannot prove code hidden behind another target's `cfg`.
   Preserve child stderr in black-box launch harnesses so a missing `dlopen`
   dependency is reported as the first failure instead of a generic startup
   timeout or signal.
+- Unix IPC black-box fixtures must create their runtime parent first and set it
+  to mode `0700` before launching the product. A default temp directory created
+  under umask `022` is commonly `0755`; the product must reject that endpoint as
+  unsafe rather than weakening ownership checks for CI.
 
 - Put shared semantics outside target modules.
 - Keep selected adapter APIs type-identical across hosts.

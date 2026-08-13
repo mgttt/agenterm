@@ -1,6 +1,7 @@
 #![cfg(target_os = "linux")]
 
 use std::io::Read as _;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -88,6 +89,8 @@ fn real_atspi_tree_edits_command_and_activates_send() {
     let executable = env!("CARGO_BIN_EXE_agenterm-con");
     let scratch = scratch();
     std::fs::create_dir_all(&scratch).expect("create a11y scratch directory");
+    std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o700))
+        .expect("make a11y scratch directory private");
     let endpoint = format!("unix:{}", scratch.join("control.sock").display());
     let child = Command::new(executable)
         .args(["--no-activate", "--control", &endpoint, "-e", "sh"])
