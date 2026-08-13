@@ -142,6 +142,16 @@ Canonical host mapping (approved product vocabulary):
   `input_inject::type_text`. Resolution failure (miss or ambiguous name)
   aborts before any write. Without `--name`, `send-text` still injects
   into whatever is focused.
+- [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]`
+  resolves through that same path, then writes the clipboard via the same
+  AT-SPI `EditableText` / `Text` + toolkit set-value path as named
+  `send-text` (`agt_a11y_node_set_text`). `--text` only seeds the clipboard
+  (`agt_clipboard_set_text`); the field write always reads
+  `agt_clipboard_get_text`. `--name` is required. A named showing node
+  with no writeable text interface typed-fails (`a11y_text_unavailable`)
+  and never silently uses XTest / `--coords` / screenshot. Resolution
+  failure (miss or ambiguous name) aborts before any write or clipboard
+  seed.
 - [x] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
   resolves through that same path, then delivers the chord via AT-SPI
   `DeviceEventListener` (`NotifyEvent`, `agt_a11y_node_send_keys`). A named
@@ -154,9 +164,10 @@ Canonical host mapping (approved product vocabulary):
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls `agt_a11y_node_get_text` (`Text.GetText`)
   on that unique showing node until the independent text equals `TEXT`.
-  Timeout is typed `timeout`. This is not `send-text` `matched.text`, not
-  a sidecar walk of `cu tree` snapshot `text` fields, and not the WebKit
-  eval helper's queued-job `OK` (Reasonix composer `Message Reasonix…`).
+  Timeout is typed `timeout`. This is not `send-text` / `paste`
+  `matched.text`, not a sidecar walk of `cu tree` snapshot `text` fields,
+  and not the WebKit eval helper's queued-job `OK` (Reasonix composer
+  `Message Reasonix…`).
   Never screenshot, XTest, or `--coords`.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /

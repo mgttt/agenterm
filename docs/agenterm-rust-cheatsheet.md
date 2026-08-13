@@ -1145,13 +1145,23 @@ through to XTest / `input_inject::type_text`. Explicit `--coords` or no
 `--` as the end of flags — otherwise text (or a chord) that starts with a
 dash is eaten as a flag.
 
+`cu paste --name` is the clipboard form of that write. Resolve the unique
+showing node, optionally seed the clipboard with `--text`
+(`agt_clipboard_set_text`), then always read `agt_clipboard_get_text` and
+write through the same AT-SPI `EditableText` / `Text` path. `--name` is
+required. Do not implement paste as Ctrl+V, XTest, `--coords`, or a
+screenshot. A named showing node with no writeable text interface
+typed-fails (`a11y_text_unavailable`). `matched.text` is still the
+resolve-time snapshot.
+
 `cu wait --text-equals` / `--node-text-equals` with `--name` is the
-independent AT-SPI close-the-circuit after named `send-text`. Resolve the
-unique showing node, then call `Text.GetText` (`agt_a11y_node_get_text`).
-Success is `ok:true` only when that GetText equals the typed string. The
-`send-text` reply's `matched.text` is the resolve-time snapshot and does
-not count. A sidecar `cu tree` walk of snapshot `text` fields does not
-count. Timeout is typed `timeout` and reports the last GetText. Never
+independent AT-SPI close-the-circuit after named `send-text` / `paste`.
+Resolve the unique showing node, then call `Text.GetText`
+(`agt_a11y_node_get_text`). Success is `ok:true` only when that GetText
+equals the typed string. The `send-text` / `paste` reply's `matched.text`
+is the resolve-time snapshot and does not count. A sidecar `cu tree` walk
+of snapshot `text` fields does not count. Timeout is typed `timeout` and
+reports the last GetText. Never
 screenshot, XTest, or `--coords`. Chrome AX set-value rides the window
 PID's `--remote-debugging-port`; two Chromes sharing one CDP port can
 make the write report success against another page while GetText on the
@@ -1160,8 +1170,8 @@ write reply. WebKitGTK/Reasonix has the same split: the eval helper
 loaded by `scripts/reasonix-desktop-a11y.sh` returns `OK` when the JS
 set-value is *queued* (worker self-report), not when `Text.GetText` on
 the showing composer (`Message Reasonix…`) equals the typed string. Do
-not treat helper `OK`, `last_text_write_via`, or `send-text` `via=text`
-as the wait hit.
+not treat helper `OK`, `last_text_write_via`, `send-text` / `paste`
+`via=text`, or worker self-report as the wait hit.
 
 ## Do not drop the AT-SPI bus between resolve and keys
 

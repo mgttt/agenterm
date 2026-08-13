@@ -12,7 +12,7 @@ Orchestrator agents (not humans staring at pixels) should run:
 loop until goal:
   observe structured state (windows, control tree, typed capabilities)
   act by structured identity (window + node path, or window + accessible name)
-    click / focus / send-text / send-keys all take --name, so no step parses node ids
+    click / focus / send-text / paste / send-keys all take --name, so no step parses node ids
   wait on observable conditions with bounded timeouts — never sleep
 ```
 
@@ -64,9 +64,10 @@ audited separately from AT-SPI actuation.
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection (no `--name`) |
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
+| `paste --window --name PAT [--role ROLE] [--text TEXT]` | same unique-name matcher, then clipboard (`agt_clipboard_get_text`, optional `--text` seed) written through that same AT-SPI `EditableText` / `Text` path; `--name` required; no writeable text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
 | `screenshot` | typed `unsupported` on Linux native capture |
-| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` (not `send-text` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
+| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` (not `send-text` / `paste` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 
 ### Tree JSON shape (UIA-like)
 
@@ -150,8 +151,15 @@ cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --node-name-contains Reload --node-role button
 
-# After send-text --name, wait until AT-SPI GetText equals the typed string.
-# Independent of send-text matched.text, of a sidecar tree walk, and of the
+# Paste clipboard text into a named field via AT-SPI EditableText / Text.
+# --text seeds the clipboard; the field write always reads the clipboard.
+# Never XTest / --coords. Close the circuit with wait --text-equals GetText;
+# paste matched.text does not count.
+cu --target current --grant observe,act paste --window 25165828 \
+  --name FixtureField --text hello
+
+# After send-text / paste --name, wait until AT-SPI GetText equals the typed string.
+# Independent of send-text / paste matched.text, of a sidecar tree walk, and of the
 # WebKit eval helper's queued-job OK (Reasonix composer: Message Reasonix…).
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --name FixtureField --text-equals hello
