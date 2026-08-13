@@ -49,9 +49,9 @@ type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize
 type ParentConsoleWriteStdout = unsafe extern "C" fn(*const u8, usize) -> i32;
 
 const CDYLIB_NAMES: [&str; 3] = [
-    "agenterm_abi.dll",      // Windows
-    "libagenterm_abi.so",    // Linux
-    "libagenterm_abi.dylib", // macOS
+    "agenterm.dll",      // Windows
+    "libagenterm.so",    // Linux
+    "libagenterm.dylib", // macOS
 ];
 
 /// Candidate locations relative to each ancestor of the probe executable.

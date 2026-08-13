@@ -18,28 +18,28 @@ A C compiler and a built cdylib:
 cargo build -p agenterm-abi --profile abi-dev
 ```
 
-The cdylib (and on Windows the import library `agenterm_abi.dll.lib`) lands
+The cdylib (and on Windows the import library `agenterm.dll.lib`) lands
 in `target/abi-dev/`.
 
 ## MSVC (cl.exe)
 
 ```
-cl /nologo /W4 /WX /Iinclude examples/c/agenterm_probe.c target/abi-dev/agenterm_abi.dll.lib /Fe:probe.exe
+cl /nologo /W4 /WX /Iinclude examples/c/agenterm_probe.c target/abi-dev/agenterm.dll.lib /Fe:probe.exe
 ```
 
 ## gcc / clang (Unix)
 
 ```
-cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c -o probe -Ltarget/abi-dev -lagenterm_abi
+cc -Wall -Wextra -Werror -Iinclude examples/c/agenterm_probe.c -o probe -Ltarget/abi-dev -lagenterm
 ```
 
 ## Run
 
-`agenterm_abi.dll` must sit next to the executable (Windows searches the
+`agenterm.dll` must sit next to the executable (Windows searches the
 executable's own directory first):
 
 ```
-copy target\abi-dev\agenterm_abi.dll probe.exe    (Windows)
+copy target\abi-dev\agenterm.dll probe.exe    (Windows)
 probe.exe
 ```
 

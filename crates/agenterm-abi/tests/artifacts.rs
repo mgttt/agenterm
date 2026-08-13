@@ -20,8 +20,8 @@ fn artifact_search_dirs() -> (PathBuf, PathBuf) {
 }
 
 /// Per-platform artifact file names, keyed by crate-type. The staticlib and
-/// the cdylib's import library can both be named `agenterm_abi.lib` on
-/// Windows (the import library is `agenterm_abi.dll.lib`, so no clash).
+/// the cdylib's import library can both be named `agenterm.lib` on
+/// Windows (the import library is `agenterm.dll.lib`, so no clash).
 struct ArtifactNames {
     cdylib: &'static [&'static str],
     staticlib: &'static [&'static str],
@@ -32,25 +32,25 @@ fn artifact_names() -> ArtifactNames {
     #[cfg(windows)]
     {
         ArtifactNames {
-            cdylib: &["agenterm_abi.dll"],
-            staticlib: &["agenterm_abi.lib"],
-            rlib: "libagenterm_abi.rlib",
+            cdylib: &["agenterm.dll"],
+            staticlib: &["agenterm.lib"],
+            rlib: "libagenterm.rlib",
         }
     }
     #[cfg(target_os = "linux")]
     {
         ArtifactNames {
-            cdylib: &["libagenterm_abi.so"],
-            staticlib: &["libagenterm_abi.a"],
-            rlib: "libagenterm_abi.rlib",
+            cdylib: &["libagenterm.so"],
+            staticlib: &["libagenterm.a"],
+            rlib: "libagenterm.rlib",
         }
     }
     #[cfg(target_os = "macos")]
     {
         ArtifactNames {
-            cdylib: &["libagenterm_abi.dylib"],
-            staticlib: &["libagenterm_abi.a"],
-            rlib: "libagenterm_abi.rlib",
+            cdylib: &["libagenterm.dylib"],
+            staticlib: &["libagenterm.a"],
+            rlib: "libagenterm.rlib",
         }
     }
 }

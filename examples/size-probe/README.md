@@ -50,7 +50,7 @@ cargo build -p size-probe --release
 
 变体 B 的 cdylib 查找顺序：`AGENTERM_ABI_LIB` 环境变量 → 从可执行文件向上
 在候选 profile 目录（`abi-release/`、`abi-dev/`、`release/`、`debug/`）中找
-`agenterm_abi.{dll,so,dylib}`。
+`agenterm.dll` / `libagenterm.so` / `libagenterm.dylib`。
 
 ## 实测结果
 
@@ -62,7 +62,7 @@ cargo build -p size-probe --release
 |------|----------|--------|
 | 变体 A（静态） | `cargo build -p size-probe --release` → `target/release/size-probe-variant-a-static.exe` | **132,608** |
 | 变体 B（动态） | 同上（同一命令）→ `target/release/size-probe-variant-b-dynamic.exe` | **147,456** |
-| （前置）libagenterm | `cargo build -p agenterm-abi --profile abi-release` → `target/abi-release/agenterm_abi.dll` | 400,896（与基线一致） |
+| （前置）libagenterm | `cargo build -p agenterm-abi --profile abi-release` → `target/abi-release/agenterm.dll` | 400,896（与基线一致） |
 
 ```
 S_probe = sizeof(变体A) - sizeof(变体B) = 132,608 - 147,456 = -14,848 B

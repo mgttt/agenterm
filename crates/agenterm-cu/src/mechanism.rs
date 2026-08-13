@@ -3,7 +3,7 @@
 //! above this layer; windows/screenshot/input-degraded paths still use
 //! `agenterm-platform` until their ABI milestones ship.
 
-use agenterm_abi::{
+use agenterm::{
     agt_a11y_node, agt_a11y_node_action_name, agt_a11y_node_perform, agt_a11y_node_string,
     agt_a11y_tree_meta_string, agt_a11y_tree_node, agt_a11y_tree_snapshot, agt_capability,
     agt_capability_query, agt_last_error, agt_status,
@@ -226,7 +226,7 @@ fn map_status(operation: &str, status: agt_status) -> Result<(), MechanismError>
 }
 
 fn last_mechanism_error(operation: &str) -> MechanismError {
-    let mut err = agenterm_abi::agt_error {
+    let mut err = agenterm::agt_error {
         operation: std::ptr::null(),
         code: std::ptr::null(),
         message: std::ptr::null(),

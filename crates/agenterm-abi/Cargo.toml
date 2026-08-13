@@ -11,7 +11,13 @@ autolib = false
 # cdylib —— 交付给 C 消费者的动态库（.dll / .so / .dylib）
 # staticlib —— 交付给 C 消费者的静态库（.a / Windows .lib），
 #   导出同一批 agt_* 符号，适合不想带动态库文件的嵌入场景
-# rlib —— 进程内 Rust 消费者（agenterm-cu）直接 `use agenterm_abi::`
+# rlib —— 进程内 Rust 消费者（agenterm-cu）直接 `use agenterm::`
+# lib target 名是 `agenterm`（包名保持 `agenterm-abi`）：产物文件名
+# 与 plan §14 的 `libagenterm.{so,dylib,dll}` 承诺一致，Windows 上是
+# `agenterm.dll`（+ 导入库 `agenterm.dll.lib`）/ `agenterm.lib`，
+# Unix 上是 `libagenterm.so` / `.dylib` / `libagenterm.a`，rlib 是
+# `libagenterm.rlib`。
+name = "agenterm"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
