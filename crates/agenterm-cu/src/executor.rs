@@ -265,6 +265,14 @@ fn focus(window: Option<isize>, node_id: &str) -> Result<serde_json::Value, CuEr
 }
 
 fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value, CuError> {
+    if let WaitCondition::NodeNameContains {
+        pattern,
+        role,
+        window,
+    } = condition
+    {
+        return wait_node(timeout_ms, pattern, role.as_deref(), *window);
+    }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(120_000));
     let poll = Duration::from_millis(50);
     let mut last_observation = serde_json::json!({ "windows": [] });
@@ -301,7 +309,99 @@ fn condition_met(condition: &WaitCondition, windows: &[WindowInfo]) -> bool {
         WaitCondition::FocusedHandle { handle } => windows
             .iter()
             .any(|window| window.focused && window.handle == *handle),
+        // Polled against the accessibility tree, not the window list.
+        WaitCondition::NodeNameContains { .. } => false,
     }
+}
+
+/// Polls `tree` until a showing node whose name contains `pattern` (and whose
+/// role matches `role`, when given) appears. Timeout is a typed failure so
+/// loop-until callers break on `ok:false` instead of retrying blind.
+fn wait_node(
+    timeout_ms: u64,
+    pattern: &str,
+    role: Option<&str>,
+    window: Option<isize>,
+) -> Result<serde_json::Value, CuError> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(120_000));
+    let poll = Duration::from_millis(50);
+    let name_pat = pattern.to_ascii_lowercase();
+    let role_pat = role.map(str::to_ascii_lowercase);
+    let mut polls = 0usize;
+    let mut last_node_count = 0usize;
+    let mut last_error: Option<CuError> = None;
+
+    loop {
+        polls += 1;
+        match mechanism::tree_for_window(window) {
+            Ok(tree) => {
+                last_node_count = tree.nodes.len();
+                last_error.take();
+                if let Some(node) = tree
+                    .nodes
+                    .iter()
+                    .find(|node| node_matches(node, &name_pat, role_pat.as_deref()))
+                {
+                    return Ok(serde_json::json!({
+                        "met": true,
+                        "addressing": "accessibility-tree",
+                        "mechanism": "libagenterm",
+                        "backend": tree.backend,
+                        "window": window,
+                        "polls": polls,
+                        "node": node,
+                        "observation": { "node_count": last_node_count },
+                    }));
+                }
+            }
+            // The tree can be missing outright; that is not something more
+            // polling will fix.
+            Err(mechanism::MechanismError::Unsupported) => {
+                return Err(map_mechanism_err(mechanism::MechanismError::Unsupported));
+            }
+            // A scoped window may not have an AT-SPI root yet — keep polling and
+            // report the last failure if we run out of time.
+            Err(error) => last_error = Some(map_mechanism_err(error)),
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(poll);
+    }
+
+    let detail = match last_error {
+        Some(error) => format!("last tree read failed: {} ({})", error.message, error.code),
+        None => format!("last tree read had {last_node_count} nodes"),
+    };
+    let scope = match role {
+        Some(role) => format!("name contains '{pattern}' and role '{role}'"),
+        None => format!("name contains '{pattern}'"),
+    };
+    Err(CuError::new(
+        "timeout",
+        format!(
+            "no showing accessibility node with {scope} after {timeout_ms}ms ({polls} polls, {detail})"
+        ),
+    ))
+}
+
+fn node_matches(node: &mechanism::A11yNode, name_pat: &str, role_pat: Option<&str>) -> bool {
+    if !node_is_showing(node) {
+        return false;
+    }
+    if !node.name.to_ascii_lowercase().contains(name_pat) {
+        return false;
+    }
+    match role_pat {
+        Some(role) => node.role.to_ascii_lowercase().contains(role),
+        None => true,
+    }
+}
+
+fn node_is_showing(node: &mechanism::A11yNode) -> bool {
+    node.states
+        .iter()
+        .any(|state| state.eq_ignore_ascii_case("showing") || state.eq_ignore_ascii_case("visible"))
 }
 
 fn map_enum_err(error: agenterm_platform::window_enumerate::WindowEnumerateError) -> CuError {
@@ -396,6 +496,58 @@ mod tests {
                 code,
                 "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
             ),
+            "unexpected code: {code}"
+        );
+    }
+
+    fn node(name: &str, role: &str, states: &[&str]) -> mechanism::A11yNode {
+        mechanism::A11yNode {
+            id: "/0/1".into(),
+            parent_id: Some("/0".into()),
+            role: role.into(),
+            name: name.into(),
+            states: states.iter().map(|state| (*state).to_owned()).collect(),
+            bounds: mechanism::A11yBounds {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            actions: Vec::new(),
+            text: None,
+        }
+    }
+
+    #[test]
+    fn node_match_is_case_insensitive_and_requires_showing() {
+        let shown = node("Reload this page", "push button", &["showing", "enabled"]);
+        assert!(node_matches(&shown, "reload", None));
+        assert!(node_matches(&shown, "reload", Some("push button")));
+        assert!(!node_matches(&shown, "reload", Some("entry")));
+        assert!(!node_matches(&shown, "bookmark", None));
+
+        let hidden = node("Reload this page", "push button", &["enabled"]);
+        assert!(!node_matches(&hidden, "reload", None));
+    }
+
+    #[test]
+    fn node_wait_timeout_is_a_typed_failure() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Wait {
+            target: TargetRef::Current,
+            timeout_ms: 1,
+            condition: WaitCondition::NodeNameContains {
+                pattern: "agenterm-no-such-node".into(),
+                role: None,
+                window: Some(-1),
+            },
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok, "timeout must not report success");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "timeout" | "unsupported"),
             "unexpected code: {code}"
         );
     }

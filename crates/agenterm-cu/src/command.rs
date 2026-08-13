@@ -73,9 +73,24 @@ pub enum Command {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "wait", rename_all = "kebab-case")]
 pub enum WaitCondition {
-    WindowCountGte { count: usize },
-    WindowTitleContains { pattern: String },
-    FocusedHandle { handle: isize },
+    WindowCountGte {
+        count: usize,
+    },
+    WindowTitleContains {
+        pattern: String,
+    },
+    FocusedHandle {
+        handle: isize,
+    },
+    /// Polls the accessibility tree until a showing node matches. Never falls
+    /// back to pixels: addressing stays `accessibility-tree`.
+    NodeNameContains {
+        pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+    },
 }
 
 fn default_clicks() -> u32 {
