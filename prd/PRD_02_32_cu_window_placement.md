@@ -131,8 +131,10 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
 
 ## Explicit non-goals
 
-- [ ] no menu bar, no global hotkeys, no login item, no `Shortcuts.json`.
-  Those stay in the Spectacle 1.2.1 host until a separate product decision.
+- [x] daily-driver host is `cu hotkeys` (menu-bar extra + Spectacle-default
+  global shortcuts). Accessibility is checked only when the menu opens; the
+  first item shows status and opens Settings. No popup, no background TCC
+  poll, no `Shortcuts.json` editor.
 - [ ] no drag-to-snap, no tile occupancy grid, no batch layout of
   non-addressed windows.
 - [ ] no Rectangle-only features (gaps, almost-maximize, custom regions)

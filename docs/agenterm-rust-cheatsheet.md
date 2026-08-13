@@ -1261,6 +1261,73 @@ branches when one target has a provably infallible conversion and another
 requires a checked conversion, then compile both target cells. This avoids
 both silent narrowing and a Clippy fix that fails to type-check elsewhere.
 
+## macOS Accessibility trust is signature + process, not the Settings label
+
+Proven on the `cu hotkeys` / `AgentermCu.app` host (`scripts/install-cu-hotkeys.sh`,
+`crates/agenterm-cu` ax_guide / status_menu / hotkeys).
+
+### What actually gates AX
+
+- Settings → Privacy → Accessibility shows a **name**. Runtime
+  `AXIsProcessTrusted()` checks whether **this process** matches TCC for the
+  **current code requirement**.
+- Ad-hoc `codesign --force --sign -` changes the designated requirement to a
+  bare **cdhash**. Rebuild/reinstall without a fresh grant leaves Settings
+  showing ON while the host logs `ax_trusted=false` and hotkeys fail with
+  `ax_api_disabled`.
+- Measured failure mode: Settings ON, TCC `com.agenterm.cu` csreq
+  `cdhash H"05f4…"`, running binary `cdhash H"f61f…"`, launchd
+  `ax_trusted=false`. After `tccutil reset` + reinstall + user enable once
+  with matching csreq, launchd reported `ax_trusted=true` and Carbon hotkeys
+  applied placements.
+
+### CLI success is not host success
+
+- Terminal/IDE-spawned `cu window-place` can succeed while the LaunchAgent is
+  untrusted. TCC **responsible process** lets the CLI borrow Terminal's grant.
+- The LaunchAgent is responsible for **itself**. Accept only evidence from the
+  launchd-hosted process: `~/.local/share/agenterm/ax-status` (`trusted=1`),
+  log line `ax_trusted=true`, or a real hotkey move — not a CLI place from
+  this shell.
+
+### Install / verify contract
+
+- Install into `~/Applications/AgentermCu.app`, `lsregister -f`, LaunchAgent
+  with `AssociatedBundleIdentifiers` = `com.agenterm.cu`.
+- After every re-sign: `tccutil reset Accessibility com.agenterm.cu` so the UI
+  cannot keep a stale ON. User enables **AgentermCu** once for the new
+  signature. Ignore or remove the old path entry `agenterm-cu` (CLI symlink);
+  it is not the hotkey host.
+- At start: write `ax-status`, log `ax_trusted=…`, optional one-shot
+  `AXIsProcessTrustedWithOptions` + open Accessibility. Build the prompt
+  options with `NSDictionary`/`NSNumber` — a function-local
+  `kCFBooleanTrue` + null-callback `CFDictionaryCreate` SIGSEGV'd in
+  `CFGetTypeID` / `AXIsProcessTrustedWithOptions`.
+- On `ax_api_disabled` after a real grant, exit non-zero once so KeepAlive
+  (`SuccessfulExit=false`) restarts into a process that can read the new
+  grant. Do not claim the switch is fine while `ax-status` says `trusted=0`.
+
+### Product UX for the host
+
+- Menu bar extra only. Refresh the first item in `menuWillOpen` (status + open
+  Settings). No popup card, no timer that reopens Settings or
+  `activateIgnoringOtherApps` (that steals the click needed to flip the
+  switch).
+- No background TCC poll. Humans discover trust when they open the menu or
+  press a hotkey.
+
+### Compare when debugging
+
+```bash
+# Running binary requirement
+codesign -d -r- ~/Applications/AgentermCu.app
+# TCC row (system DB; read-only under SIP)
+# client com.agenterm.cu → auth_value and csreq must match the designated line above
+# Host self-report after kickstart
+cat ~/.local/share/agenterm/ax-status
+tail ~/.local/share/agenterm/cu-hotkeys.log
+```
+
 ## A TCC card must not steal the Settings click
 
 macOS Accessibility onboarding (`AXIsProcessTrusted` / Settings

@@ -1,15 +1,23 @@
 #!/bin/sh
-# Install agenterm-cu as the local Spectacle replacement (macOS).
+# Install AgentermCu as the local Spectacle replacement (macOS).
 # launchd needs absolute paths; this script expands $HOME at install time.
+#
+# Accessibility is keyed to the *code signature* of this process, not just the
+# name in System Settings. Ad-hoc re-sign changes the cdhash; Settings can still
+# show ON while AXIsProcessTrusted is false. After each install we reset the
+# com.agenterm.cu TCC entry so the UI never lies about a stale signature.
 
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 BIN_DIR="${HOME}/.local/bin"
 DATA_DIR="${HOME}/.local/share/agenterm"
+APP_DIR="${HOME}/Applications"
 LAUNCH_DIR="${HOME}/Library/LaunchAgents"
 LABEL=com.agenterm.cu.hotkeys
-APP="${DATA_DIR}/AgentermCu.app"
+APP="${APP_DIR}/AgentermCu.app"
+# Keep a copy under data dir for older docs/paths; primary is ~/Applications.
+LEGACY_APP="${DATA_DIR}/AgentermCu.app"
 APP_BIN="${APP}/Contents/MacOS/agenterm-cu"
 BIN="${BIN_DIR}/agenterm-cu"
 PLIST="${LAUNCH_DIR}/${LABEL}.plist"
@@ -22,7 +30,14 @@ cp "${ROOT}/target/release/cu" "${APP_BIN}"
 chmod 755 "${APP_BIN}"
 ln -sfn "${APP_BIN}" "${BIN}"
 
-cat > "${APP}/Contents/Info.plist" <<'EOF'
+# Mirror for any old absolute paths.
+mkdir -p "${LEGACY_APP}/Contents/MacOS"
+cp "${APP_BIN}" "${LEGACY_APP}/Contents/MacOS/agenterm-cu"
+chmod 755 "${LEGACY_APP}/Contents/MacOS/agenterm-cu"
+
+write_plist() {
+  local dest=$1
+  cat > "${dest}/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -48,8 +63,27 @@ cat > "${APP}/Contents/Info.plist" <<'EOF'
 </dict>
 </plist>
 EOF
-printf 'APPL????' > "${APP}/Contents/PkgInfo"
+  printf 'APPL????' > "${dest}/Contents/PkgInfo"
+}
+
+write_plist "${APP}"
+write_plist "${LEGACY_APP}"
+
+# Sign both copies so their cdhash matches.
 codesign --force --deep --sign - "${APP}" >/dev/null
+codesign --force --deep --sign - "${LEGACY_APP}" >/dev/null
+
+# Register with Launch Services so the Accessibility list shows AgentermCu.
+if [ -x /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister ]; then
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "${APP}" >/dev/null 2>&1 || true
+fi
+
+# Drop stale ON state for this bundle id (wrong cdhash after re-sign).
+tccutil reset Accessibility com.agenterm.cu >/dev/null 2>&1 || true
+
+REQ=$(codesign -d -r- "${APP}" 2>&1 | sed -n 's/^# designated => //p' || true)
+echo "signed ${APP}"
+echo "designated: ${REQ}"
 
 cat > "${PLIST}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -58,6 +92,10 @@ cat > "${PLIST}" <<EOF
 <dict>
   <key>Label</key>
   <string>${LABEL}</string>
+  <key>AssociatedBundleIdentifiers</key>
+  <array>
+    <string>com.agenterm.cu</string>
+  </array>
   <key>ProgramArguments</key>
   <array>
     <string>${APP_BIN}</string>
@@ -73,7 +111,10 @@ cat > "${PLIST}" <<EOF
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>LimitLoadToSessionType</key>
   <string>Aqua</string>
   <key>ProcessType</key>
@@ -91,8 +132,15 @@ launchctl bootstrap "gui/$(id -u)" "${PLIST}"
 launchctl enable "gui/$(id -u)/${LABEL}"
 launchctl kickstart -k "gui/$(id -u)/${LABEL}"
 
+sleep 1
+if [ -f "${DATA_DIR}/ax-status" ]; then
+  echo "ax-status:"
+  cat "${DATA_DIR}/ax-status"
+fi
+
 echo "installed ${APP}"
 echo "cli ${BIN}"
 echo "launchd ${LABEL} loaded"
-echo "if Accessibility is off, AgentermCu opens Settings and shows a card for AgentermCu"
+echo "menu bar: AgentermCu — first item is Accessibility"
+echo "IMPORTANT: enable AgentermCu in Accessibility once after this install"
 echo "Spectacle defaults: ⌥⌘←/→/↑/↓  ⌥⌘C/F/Z  ⌃⌘←/→  …"

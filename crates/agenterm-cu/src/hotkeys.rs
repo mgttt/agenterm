@@ -1,7 +1,7 @@
 //! Local hotkey host that fires Spectacle-default placements.
 //!
-//! This is not a menu-bar app. It only registers global Carbon hotkeys and
-//! runs `window-place` in-process. macOS only.
+//! Registers global Carbon hotkeys, runs `window-place` in-process, and shows
+//! a menu-bar extra. Accessibility is checked only when that menu opens.
 
 use crate::place::PlaceAction;
 
@@ -13,6 +13,10 @@ pub fn run() -> i32 {
 
 #[cfg(target_os = "macos")]
 pub fn run() -> i32 {
+    let self_test = std::env::args().any(|a| a == "--self-test");
+    if self_test {
+        return macos::self_test();
+    }
     macos::run()
 }
 
@@ -206,6 +210,7 @@ mod macos {
             eprintln!("cu hotkeys: failed to start NSApplication");
             return 1;
         }
+        crate::ax_guide::ensure_accessibility_surface();
         let auth = Authorization::new([Grant::Observe, Grant::Actuate].into_iter().collect());
         let mut host = Host {
             executor: Executor::new(auth),
@@ -251,10 +256,68 @@ mod macos {
                 }
             }
         }
-        eprintln!("cu hotkeys: listening with Spectacle defaults");
-        crate::ax_guide::start();
+        let trusted = crate::ax_guide::ax_trusted();
+        crate::ax_guide::write_status(trusted);
+        eprintln!("cu hotkeys: listening with Spectacle defaults (ax_trusted={trusted})");
+        let _status =
+            objc2_foundation::MainThreadMarker::new().and_then(crate::status_menu::install);
         run_nsapp();
         0
+    }
+
+    pub fn self_test() -> i32 {
+        if bootstrap_nsapp().is_err() {
+            eprintln!("cu hotkeys --self-test: NSApplication failed");
+            return 1;
+        }
+        let trusted = crate::ax_guide::ax_trusted();
+        crate::ax_guide::write_status(trusted);
+        eprintln!("cu hotkeys --self-test: ax_trusted={trusted}");
+        if !trusted {
+            return 2;
+        }
+        let auth = Authorization::new([Grant::Observe, Grant::Actuate].into_iter().collect());
+        let executor = Executor::new(auth);
+        let reply = executor.execute(&Command::WindowPlace {
+            target: TargetRef::Current,
+            action: "center".into(),
+            window: None,
+        });
+        if reply.ok {
+            eprintln!("cu hotkeys --self-test: window-place center ok");
+            0
+        } else {
+            let err = reply.error.as_ref();
+            eprintln!(
+                "cu hotkeys --self-test: window-place failed: {} ({})",
+                err.map(|e| e.message.as_str()).unwrap_or("?"),
+                err.map(|e| e.code.as_str()).unwrap_or("?")
+            );
+            3
+        }
+    }
+
+    fn relaunch_for_ax() {
+        let Some(home) = std::env::var_os("HOME") else {
+            return;
+        };
+        let stamp = std::path::PathBuf::from(home).join(".local/share/agenterm/ax-relaunch.stamp");
+        if let Ok(meta) = std::fs::metadata(&stamp) {
+            if let Ok(modified) = meta.modified() {
+                if let Ok(age) = modified.elapsed() {
+                    if age.as_secs() < 20 {
+                        return;
+                    }
+                }
+            }
+        }
+        if let Some(dir) = stamp.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&stamp, b"1");
+        eprintln!("cu hotkeys: process is untrusted; restarting after Accessibility grant");
+        // Non-zero so launchd KeepAlive (SuccessfulExit=false) brings us back.
+        std::process::exit(1);
     }
 
     fn bootstrap_nsapp() -> Result<(), ()> {
@@ -326,7 +389,7 @@ mod macos {
                     error.code
                 );
                 if error.code == "ax_api_disabled" {
-                    crate::ax_guide::nudge();
+                    relaunch_for_ax();
                 }
             }
         }
