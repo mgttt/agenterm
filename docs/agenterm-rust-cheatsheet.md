@@ -1011,14 +1011,27 @@ Linux `GetActions` returns localized names. Chrome with
 entries) whose names are empty strings, so a tree snapshot shows
 `"actions":["",""]`. Structured `click --node` must still invoke AT-SPI:
 prefer a named `click`/`press`, otherwise `DoAction(0)` (the spec default
-action). Do not refuse with `a11y_action_unavailable` merely because names are
-blank, and do not require the caller to pass `--coords` / `--degraded`. Focus
-stays named-`focus` then `Component::grab_focus`; it must not fall through to
-the default click action. Unit-test the index choice with synthetic name
-lists; prove actuation on a live toolkit only in the owning smoke. When
-reading those empty names through libagenterm's two-stage string ABI, a
-`cap==0` probe that reports `required==0` is the empty payload — do not call
-again with `cap==0`, or `buffer_too_small` will fail the whole tree.
+action). Honor the boolean `DoAction` return. Do not refuse with
+`a11y_action_unavailable` merely because names are blank, and do not require
+the caller to pass `--coords` / `--degraded`. Focus stays named-`focus` then
+`Component::grab_focus`; it must not fall through to the default click action.
+Unit-test the index choice with synthetic name lists; prove actuation on a
+live toolkit only in the owning smoke. When reading those empty names through
+libagenterm's two-stage string ABI, a `cap==0` probe that reports
+`required==0` is the empty payload — do not call again with `cap==0`, or
+`buffer_too_small` will fail the whole tree.
+
+## Named click without Action stays on the AT-SPI Component path
+
+A showing named node may expose Component but not Action. Structured
+`click --name` must not become `--coords`. Probe `GetInterfaces` for
+`org.a11y.atspi.Action`; when it is absent, use `Component::GetExtents`
+(screen) plus AT-SPI `DeviceEventController.GenerateMouseEvent` (`b1c`) at
+the extent center. Reply `addressing` remains `accessibility-tree`. Fail
+typed if extents are empty. Do not call XTest / input-inject from this
+path. When `GetInterfaces` times out, still try `DoAction(0)` first (WebKit
+`GetActions` hangs; `DoAction` often works), then Component only if the
+Action interface is missing.
 
 ## Name addressing is wait-matching then the node path
 
@@ -1173,3 +1186,9 @@ trust was revoked; skip reopen while Settings is frontmost; `orderFrontRegardles
 the instruction card without becoming key; put the exact bundle name on a
 highlighted field. Prove the reopen policy with a clock + flags unit test, not
 a live Settings session.
+
+`AXIsProcessTrustedWithOptions` must receive a real CF/NSDictionary. A
+function-local `extern static kCFBooleanTrue` plus `CFDictionaryCreate` with
+null callbacks produced `CFGetTypeID` at address `0x8` and SIGSEGV'd the
+launchd host. Build the `{AXTrustedCheckOptionPrompt: true}` dictionary with
+`NSDictionary` / `NSNumber`, and never let onboarding crash the hotkey process.

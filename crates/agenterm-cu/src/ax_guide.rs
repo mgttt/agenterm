@@ -17,7 +17,9 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSFont, NSScreen, NSTextField, NSWindow,
     NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
 };
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{
+    MainThreadMarker, NSDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString, NSURL,
+};
 
 use crate::ax_guide_policy::{GuideState, TickOut};
 
@@ -150,50 +152,14 @@ fn settings_is_front() -> bool {
 
 fn prompt_system_dialog() {
     #[link(name = "ApplicationServices", kind = "framework")]
-    #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         fn AXIsProcessTrustedWithOptions(options: *const c_void) -> u8;
-        fn CFStringCreateWithCString(
-            alloc: *const c_void,
-            c_str: *const i8,
-            encoding: u32,
-        ) -> *const c_void;
-        fn CFDictionaryCreate(
-            alloc: *const c_void,
-            keys: *const *const c_void,
-            values: *const *const c_void,
-            num_values: isize,
-            key_callbacks: *const c_void,
-            value_callbacks: *const c_void,
-        ) -> *const c_void;
-        fn CFRelease(cf: *const c_void);
-        static kCFBooleanTrue: *const c_void;
     }
-    const UTF8: u32 = 0x0800_0100;
+    let key = NSString::from_str("AXTrustedCheckOptionPrompt");
+    let yes = NSNumber::numberWithBool(true);
+    let dict = NSDictionary::from_id_slice(&[&*key], &[yes]);
     unsafe {
-        let key = CFStringCreateWithCString(
-            std::ptr::null(),
-            b"AXTrustedCheckOptionPrompt\0".as_ptr().cast(),
-            UTF8,
-        );
-        if key.is_null() {
-            return;
-        }
-        let keys = [key];
-        let vals = [kCFBooleanTrue];
-        let dict = CFDictionaryCreate(
-            std::ptr::null(),
-            keys.as_ptr().cast(),
-            vals.as_ptr().cast(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-        );
-        if !dict.is_null() {
-            let _ = AXIsProcessTrustedWithOptions(dict);
-            CFRelease(dict);
-        }
-        CFRelease(key);
+        let _ = AXIsProcessTrustedWithOptions(objc2::rc::Retained::as_ptr(&dict).cast());
     }
 }
 
