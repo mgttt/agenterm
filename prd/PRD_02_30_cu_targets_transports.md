@@ -95,6 +95,16 @@ Canonical host mapping (approved product vocabulary):
   rather than calling platform accessibility APIs directly. Nodes carry role,
   name, states, screen bounds, and action names; node ids are child-index paths
   from each application root (for example `/3/0/0/1/0`).
+  A `--window` snapshot matches AT-SPI application roots by the X11
+  `_NET_WM_PID`, that process's descendants (WebKit web process), and
+  exact title / `WM_CLASS` / `comm` equality — not PID equality alone.
+  Child walks read raw `(bus name, path)` pairs so well-known embed
+  destinations (WebKit `org.webkit.app-*.Sandboxed.WebProcess-*`) are
+  not dropped by unique-name-only `ObjectRef` parsing. A toolkit that
+  never registered with AT-SPI still returns a one-node showing `frame`
+  from the X11 window title and bounds so named `wait` / `focus` /
+  `send-keys` can address that window; `focus`/`click` on that node
+  raise it. This is not a screenshot or coordinate substitute.
 - [~] `click --node <path>` and `focus --node <path>` invoke AT-SPI `Action`
   / `Component::grab_focus` for the resolved node via `agt_a11y_node_perform`.
   A node-addressed click uses a named `click`/`press` when present, otherwise
