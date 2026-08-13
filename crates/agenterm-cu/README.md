@@ -40,6 +40,9 @@ return typed `unsupported` / `failed` — never a silent coordinate fallback.
 
 On this Linux box, start Chrome with `scripts/box-chrome-a11y.sh` so
 `--force-renderer-accessibility` is always on (AT-SPI renderer subtree).
+Start Reasonix with `scripts/reasonix-desktop-a11y.sh` so WebKit keeps an
+AT-SPI subtree (`WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`); otherwise the
+web process aborts and `cu tree` is only unnamed GTK fillers.
 `agenterm-con` registers as an AT-SPI toolkit and publishes inner chrome
 (`Command`, `SEND`, `Tabs`, `Session`); do not treat the one-node X11 title
 frame as its success path.
