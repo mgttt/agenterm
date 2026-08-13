@@ -649,7 +649,7 @@ fn parse_mouse_button(value: &str) -> Result<MouseButton, String> {
 pub type Reply = Result<JsonValue, String>;
 pub struct ReplySender(Arc<ReplySlot>);
 
-struct ReplyReceiver(Arc<ReplySlot>);
+pub(crate) struct ReplyReceiver(Arc<ReplySlot>);
 
 struct ReplySlot {
     value: std::sync::Mutex<Option<Reply>>,
@@ -684,7 +684,7 @@ impl ReplySender {
 }
 
 impl ReplyReceiver {
-    fn recv_timeout(&self, timeout: Duration) -> Result<Reply, ()> {
+    pub(crate) fn recv_timeout(&self, timeout: Duration) -> Result<Reply, ()> {
         let slot = self
             .0
             .value
@@ -708,7 +708,7 @@ impl Drop for ReplySender {
     }
 }
 
-fn reply_channel() -> (ReplySender, ReplyReceiver) {
+pub(crate) fn reply_channel() -> (ReplySender, ReplyReceiver) {
     let slot = Arc::new(ReplySlot::default());
     (ReplySender(Arc::clone(&slot)), ReplyReceiver(slot))
 }
