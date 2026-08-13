@@ -9,6 +9,7 @@ on:
       - 'crates/agenterm-platform/**'
       - 'include/**'
       - 'examples/c/**'
+      - 'examples/cpp/**'
       - 'examples/size-probe/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -20,6 +21,7 @@ on:
       - 'crates/agenterm-platform/**'
       - 'include/**'
       - 'examples/c/**'
+      - 'examples/cpp/**'
       - 'examples/size-probe/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -59,6 +61,10 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: C++ consumer (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test cpp_consumer -- --nocapture
       - name: Mixed static+dynamic linkage probe (abi-release artifacts)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
@@ -128,6 +134,10 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: C++ consumer (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test cpp_consumer -- --nocapture
       - name: Mixed static+dynamic linkage probe (abi-release artifacts)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
@@ -204,6 +214,10 @@ jobs:
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
           cargo test --locked -p agenterm-abi --profile abi-dev --test c_window -- --nocapture
+      - name: C++ consumer (abi-release artifacts)
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test cpp_consumer -- --nocapture
       - name: Mixed static+dynamic linkage probe (abi-release artifacts)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release

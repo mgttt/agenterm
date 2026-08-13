@@ -1297,6 +1297,33 @@ mixing MinGW with an MSVC Rust library produces misleading unresolved runtime
 and system symbols rather than evidence about the public ABI. Print the chosen
 target environment and compiler in test logs so CI selection is auditable.
 
+## C++ consumer probes: no `/TP`, and ASCII-only generated sources
+
+Two measured MSVC failure modes when a test compiles a real `.cpp` consumer
+against the shipped library (milestone 62, `tests/cpp_consumer.rs`):
+
+- **Do NOT pass `cl /TP`.** cl.exe compiles a `.cpp` as C++ by suffix alone.
+  `/TP` instead forces EVERY input file to be treated as a C++ source, so the
+  `.lib` link inputs (`agenterm.dll.lib`, `agenterm.lib`, `ws2_32.lib`, ...)
+  are handed to c1xx as sources: C2220/C4819 noise on the first `.lib`, then
+  `C1083: cannot open source file: 'ws2_32.lib'` for the rest. The C-side
+  consumers never needed `/TP` and the C++ side must not add it either; the
+  `.cpp` suffix is the mode switch.
+- **Generated sources must be pure ASCII.** MSVC reads source in the host
+  code page (936 on zh-CN CI/locales); any non-ASCII byte (e.g. an em dash in
+  a comment) triggers C4819 "file cannot be represented in the current code
+  page", which `/WX` escalates to C2220. Keep every string written into a
+  generated `.c`/`.cpp`/`.inc` ASCII-only (use `--` instead of `—`), even
+  when the generating Rust source itself is UTF-8.
+
+The same guard-coverage idea as the C symbol-presence gate works from C++:
+generate (from `exports.txt`) an address table of all exports via
+`reinterpret_cast<void (*)()>(name)` — never a call — and iterate the WHOLE
+table so the linker must resolve every name. Link success = the `extern "C"`
+guard unmangles all of them; commenting the guard out must turn that link
+into `LNK1120: N unresolved externals` with mangled names (`?agt_*@@...`).
+That negative proof is the only evidence the guard actually does something.
+
 ## Close may wake a reader with buffered data before EOF
 
 For pipes, PTYs, and stream-like native handles, a cross-thread close contract

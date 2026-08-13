@@ -339,6 +339,59 @@ pub mod toolchain {
         }
     }
 
+    /// Locate a C++ compiler whose ABI matches the Rust target this test was
+    /// compiled for (milestone 62, `cpp_consumer.rs`). The C-side discovery
+    /// (`find_c_compiler`) selects a C compiler; a `.cpp` must be compiled by
+    /// a C++ compiler (different name-mangling rules and type system), so a
+    /// separate decision exists:
+    ///
+    /// - `target_env = "msvc"`: reuse the EXACT SAME MSVC discovery as the C
+    ///   side. cl.exe is a unified front end: a `.cpp` source switches it to
+    ///   C++ mode by suffix, so there is no second MSVC-finding logic to
+    ///   write -- and no `/TP` flag (which would force EVERY input, `.lib`
+    ///   files included, to be treated as C++ sources); only the MSVC
+    ///   toolchain can link MSVC-ABI objects anyway.
+    /// - everything else (GNU / macOS / ...): PATH `c++` / `g++` / `clang++`,
+    ///   deliberately NOT the C-side `cc`/`gcc`/`clang` list -- a C compiler
+    ///   cannot consume a `.cpp`.
+    ///
+    /// `label` prefixes the eprintln decision line (e.g. "cpp_consumer") so a
+    /// wrong selection is visible at a glance in CI logs.
+    pub fn find_cpp_compiler(label: &str) -> Option<CCompiler> {
+        if cfg!(target_env = "msvc") {
+            let found = find_c_compiler(label);
+            if found.is_some() {
+                eprintln!("{label}: MSVC cl.exe reused for C++ (mode via .cpp suffix)");
+            }
+            found
+        } else {
+            path_compiler_cpp(label, target_env_name())
+        }
+    }
+
+    /// PATH lookup for a C++ compiler with a printed decision line:
+    /// `label: target_env=... -> using <name> at <path>` on success,
+    /// `... -> SKIP` when nothing matches.
+    fn path_compiler_cpp(label: &str, target_env: &str) -> Option<CCompiler> {
+        if let Some(path) = find_on_path(&["c++", "g++", "clang++"]) {
+            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("?");
+            eprintln!(
+                "{label}: target_env={target_env} -> using {name} at {}",
+                path.display()
+            );
+            Some(CCompiler {
+                path,
+                env: Vec::new(),
+            })
+        } else {
+            eprintln!(
+                "{label}: target_env={target_env} -> none of [c++, g++, clang++] \
+                 on PATH -> SKIP: no C++ compiler matching the target ABI found"
+            );
+            None
+        }
+    }
+
     /// Locate cl.exe through the cc crate's Windows registry API, which knows
     /// how to find the installed Visual Studio toolchain without vcvarsall on
     /// PATH.
