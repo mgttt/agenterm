@@ -53,11 +53,12 @@ decisions, status, and acceptance detail. A requirement has exactly one owning
 module; other documents link to it instead of copying it.
 
 A module may be a subtree root when one product is large enough to need its own
-second-level tree. Two subtrees exist today: `agenterm-con` (23, with 24-27) and
-`agenterm-cu` (28, with 29-31). The root owns the product definition, boundary,
-invariants and gates; the children own third-level requirements. A shared kernel
-consumed by more than one product keeps its requirement in the owning shared
-module and is referenced, not copied, from the subtree.
+second-level tree. Three product subtrees exist today: `agenterm-con` (23, with
+24–27), `agenterm-cu` (28, with 29–32), and `agenterm-mobile` (33, children
+split later). The root owns the product definition, boundary, invariants and
+gates; the children own third-level requirements. A shared kernel consumed by
+more than one product keeps its requirement in the owning shared module and is
+referenced, not copied, from the subtree.
 
 A subtree may be opened before a product exists, to hook newly accepted scope
 into the tree so it cannot accumulate inside an unrelated module. Such a subtree
@@ -139,6 +140,12 @@ AgenTerm — local agent & process fleet work OS
 │     ├─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
      └─ 32 Window placement     命名摆放（Spectacle 目录）→ `window-place`；v0.1.19 开工
 │
+├─ agenterm-mobile（reach · 全部 planned）
+│  └─ 33 Mobile reach           第三 host：连桌面 server，不跑手机 PTY
+│     ├─ PWA                    https://agenterm.work/app（复用 docs/ 入口）
+│     ├─ Store apps             iOS / Android 占位（审核慢，不急开）
+│     └─ QR pairing             扫码绑定桌面客户端，先观察后协同
+│
 └─ 未来面（里程碑 / 灵感）
    ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
    ├─ 19 Inspiration backlog      灵感花园、北极星层、晋升路径（非 shipped）
@@ -182,6 +189,7 @@ AgenTerm — local agent & process fleet work OS
 | 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2）、会话模型 |
 | 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
 | 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放动作与几何合同（Spectacle 收录）；v0.1.19 开始做进 `cu` |
+| 33 | [Mobile reach (`agenterm-mobile`)](prd/PRD_02_33_mobile_reach.md) | 手机接入端：PWA 先行（`https://agenterm.work/app`）、商店 App 占位、扫码绑定桌面；无版本承诺 |
 
 ## Non-negotiable invariants
 

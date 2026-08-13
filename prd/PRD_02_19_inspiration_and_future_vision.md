@@ -56,7 +56,7 @@ consumer launch.
 - **Terminal viewport** = observe output; not the primary typing surface.
 - **Composer** = external input per tab (draft → Send).
 - **`agenterm server`** = single authority for tree, PTYs, events, persistence.
-- **Clients** = GUI, CLI, mux, script, MCP, (later) mobile — same contract.
+- **Clients** = GUI, CLI, mux, script, MCP, PWA, (later) store apps — same contract.
 
 North star:
 
@@ -96,7 +96,9 @@ AgenTerm optimizes **fleet durability and verifiable control**:
   CLI/script/mux foundations, Observable Fleet, script runtime v0.1.9 slice.
 - Still hardening: typed operations, receipts, control-plane completeness,
   MCP read-only bridge (engineering on v0.1.10 plan).
-- **Not** current work: mobile store release or persona templates. The
+- **Not** current work: iOS/Android store release or persona templates.
+  Phone reach is accepted as [33](PRD_02_33_mobile_reach.md) with a **PWA
+  first**; store apps stay placeholders. The
   v0.1.11 plan promotes an isolated libp2p/CID research proof and the
   independent Control Center foundation; Workflow pipelines, PluginHub,
   AppHub and InfoHub content then mature through later accepted slices
@@ -683,13 +685,15 @@ Feeds non-goals:
 ### Lane F — Mobile connector (REACH · W6)
 
 Phone as **desktop fleet remote client**, not a standalone mobile terminal.
+Product contract: [33 Mobile reach](PRD_02_33_mobile_reach.md) (PWA first at
+`https://agenterm.work/app`; iOS/Android store apps remain placeholders).
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| F1 | [idea] | Mobile app connects to desktop `agenterm server` over authenticated channel | B3, B4 | Agent control plane (+ future Mobile module) |
-| F2 | [idea] | Monitor fleet tree, tab status, bounded output summaries | F1 | Human workspace, Agent control plane |
-| F3 | [idea] | Mobile Composer + keyboard; voice-to-text into draft before Send | F1 | Human workspace |
-| F4 | [idea] | **Push notifications** for urgent fleet events (dead, wait timeout, keyword, modal) | B4, predicates | Observable Fleet |
+| F1 | [promoted] | Phone surface connects to desktop `agenterm server` (PWA first, store later) | B3, B4 | [33 Mobile reach](PRD_02_33_mobile_reach.md) |
+| F2 | [promoted] | Monitor fleet tree, tab status, bounded output summaries | F1 | [33](PRD_02_33_mobile_reach.md) + 06 / 07 |
+| F3 | [promoted] | Mobile Composer + keyboard; voice-to-text into draft before Send | F1 | [33](PRD_02_33_mobile_reach.md) + 06 |
+| F4 | [idea] | **Push notifications** for urgent fleet events (dead, wait timeout, keyword, modal) | B4, predicates | Observable Fleet (+ 33 when a host exists) |
 | F5 | [idea] | On-phone small model assists monitoring (triage, summarize) without becoming authority | E3, F1 | Specialized intelligence |
 | F6 | [deferred] | Full mobile PTY fleet | — | **rejected** — contradicts connector positioning |
 

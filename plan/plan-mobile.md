@@ -1,8 +1,15 @@
 # AgenTerm 移动端计划（占位稿 / 思维工作树）
 
-状态：**占位草案**（2026-08-04 起草）。
+状态：**占位草案**（2026-08-04 起草；2026-08-13 与 PRD 33 对齐）。
+产品真理：[`prd/PRD_02_33_mobile_reach.md`](../prd/PRD_02_33_mobile_reach.md)。
+本文只保留 **原生壳**（M-A / M-B / M-C）的执行投影。
+
+**第一宿主是 PWA**，不是商店 App：`https://agenterm.work/app`，源在 `docs/`，
+首页加 **Mobile App** 入口。iOS / Android 因审核慢（及避免双壳抢跑）**不急开**，
+树上只留占位。扫码绑定桌面是 PWA 之后的增量。
+
 不改变任何已发布/在途版本的授权状态；不创建 tag/Candidate/Release；
-不改动本仓任何代码。开工前需人工确认 §三 壳选型与 §七 决策项。
+不把本轨塞进 v0.1.18 / v0.1.19。原生开工前仍需人工确认 §三 壳选型与 §七 K1–K3。
 
 产品定位（用户已定，不再讨论）：**移动端 = 桌面端的接入端 + 去中心化链接端**。
 手机上**不跑** agent/terminal 本体（无 PTY、无 workspace 权威、无 server）。
@@ -48,7 +55,14 @@
 ```text
 Mobile  接入端 + 去中心化链接端
 │
-├─ M-A. crates/agenterm-protocol —— 抽取线协议（第一步，收益即时）
+├─ M-P. PWA 第一宿主（产品在 PRD 33；本仓 docs/）
+│  ├─ [ ] P1 docs/ 首页增加 Mobile App 入口，打开 /app
+│  ├─ [ ] P2 Web App Manifest + 可安装独立显示
+│  ├─ [ ] P3 诚实占位 UI（未绑定设备列表 / 「等桌面出示二维码」）
+│  └─ [ ] P4 以后：扫码绑定（LAN、observe）再谈 live 投影
+│     非目标：不把 PWA 做成第二个网站；不进 0.1.18/0.1.19
+│
+├─ M-A. crates/agenterm-protocol —— 抽取线协议（原生壳仍需要；PWA 可后接）
 │  ├─ [ ] A1 从 src/ui_bridge.rs 抽出传输无关 DTO 层
 │  │     动机：移动客户端与桌面 remote UI 必须共用同一份 schema，否则版本漂移
 │  │     候选抽取物（以代码为准，均在 src/ui_bridge.rs）：
@@ -160,8 +174,9 @@ Mobile  接入端 + 去中心化链接端
 | `prd/PRD_02_18_roadmap.md` M12 | Control Center 内容成熟；CC 与 mobile 都是 server 的消费者，不互为前置（原 plan-v0.2.0.md 已并入） |
 | `prd/PRD_02_22_decentralized_network.md` | agenterm-net 成熟度门（N0→N4），约束 §四 |
 | `prd/PRD_02_20_native_platform.md` | Platform Facade 纪律来源；capability/typed Unsupported 的样板 |
-| `prd/PRD_02_18_roadmap.md` | 里程碑权威；移动端立项后需在此登记归口 |
-| `prd/PRD_02_19_inspiration_and_future_vision.md` | 若移动端暂不立项，先按 promotion 工作流入灵感库 |
+| `prd/PRD_02_33_mobile_reach.md` | **产品归口**（PWA / 商店占位 / 扫码绑定） |
+| `prd/PRD_02_18_roadmap.md` | 里程碑权威；33 已登记，无版本号 |
+| `prd/PRD_02_19_inspiration_and_future_vision.md` | Lane F；F1–F3 已 promote 到 33 |
 
 ## 七、待拍板决策项（agent 不自主执行）
 
@@ -170,8 +185,8 @@ Mobile  接入端 + 去中心化链接端
 | K1 | 壳选型：Flutter / React Native / Tauri 2 mobile | 决定 M-C 全部形态与 FFI 路径 |
 | K2 | `apps/mobile` 是 workspace member 还是自带 `[workspace]` 隔离（照 agenterm-net） | 决定构建/CI 隔离强度 |
 | K3 | 失租/断网时移动端的产品语义（只读投影 vs 显式断开态） | 决定 B3 状态机与 UX |
-| K4 | 远程链路的授权面（配对/信任/加密）归哪个 PRD、证据门是什么 | 决定移动端能否离开 LAN |
-| K5 | 移动端是否立项、归口 PRD、目标版本 | 决定本文从占位稿升级的时机 |
+| K4 | 远程链路的授权面（配对/信任/加密）归哪个 PRD、证据门是什么 | **已拍：产品 UX 归 [33](../prd/PRD_02_33_mobile_reach.md)**；密码学可参考 22，不得放宽本机 `validate_local()` |
+| K5 | 移动端是否立项、归口 PRD、目标版本 | **已拍：立项，归 PRD 33；无版本号。PWA 先行，商店 App 占位** |
 
 ---
 
@@ -183,3 +198,4 @@ Mobile  接入端 + 去中心化链接端
 | 2026-08-04 | 采用同仓 workspace-member 布局（protocol → client-core → apps/mobile），否决 `src_mobile/` |
 | 2026-08-04 | 移动端不进桌面发布链与 default-members；独立 CI 车道与独立 tag（mobile-v0.1.*） |
 | 2026-08-04 | 协议 crate 保持传输无关；agenterm-net 维持 research，不作为移动端前置 |
+| 2026-08-13 | 产品归口 PRD 33。第一宿主 = PWA（`https://agenterm.work/app`，复用 `docs/`）。iOS/Android 商店 App 保持占位。K4/K5 关闭。原生 M-C 仍待 K1 |

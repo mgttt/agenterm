@@ -19,6 +19,7 @@
 | [`goal-crate-platform.md`](goal-crate-platform.md) / [`plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md) | platform crate 边界、机制漏点与固定执行句式 |
 | [`goal-agenterm-osx.md`](goal-agenterm-osx.md) | macOS 原生证据与安装尾账 goal |
 | [`plan-multiplatform-gui.md`](plan-multiplatform-gui.md) | Linux/macOS GUI 交付里程碑 |
+| [`plan-mobile.md`](plan-mobile.md) | 移动原生壳执行投影；**产品归 PRD 33**（PWA 先行，商店 App 占位） |
 | [`plan-control-center-ux.md`](plan-control-center-ux.md) / [`design-control-center-ux.md`](design-control-center-ux.md) | Control Center 任务书与实现级设计 |
 | [`plan-cc-automation-cli.md`](plan-cc-automation-cli.md) | CC 自动化 CLI 未实现设计 |
 | [`design-rh-aot.md`](design-rh-aot.md) | Rh Build/CI AOT 轨；不是 product App Engine |

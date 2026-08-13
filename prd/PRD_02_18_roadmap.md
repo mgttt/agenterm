@@ -560,7 +560,8 @@ track remains planned, but every declared dependency must still pass.
       later line
     - [ ] future-lane boundaries: InfoHub may reserve a net source type,
       Extensions may reserve a remote catalog concept, but neither embeds a
-      node; computer-use (P4) and mobile (plan-mobile.md) are independent
+      node; computer-use (P4) and mobile reach
+      ([33](PRD_02_33_mobile_reach.md)) are independent
     - [ ] sequencing and delivery history belong to this milestone; the
       former public plan file is deleted (2026-08-04); inspiration lanes
       J1–J5 remain in
@@ -588,6 +589,15 @@ track remains planned, but every declared dependency must still pass.
   ([31](PRD_02_31_cu_authorization_safety.md)) pass for that tier.
   Execution projection for 32:
   [`plan/plan-v0.1.19.md`](../plan/plan-v0.1.19.md).
+- [ ] `agenterm-mobile` reach track: accepted scope owned by
+  [Mobile reach](PRD_02_33_mobile_reach.md). The **first host is a PWA**
+  at `https://agenterm.work/app`, sourced from `docs/` with a homepage
+  **Mobile App** entry. Native iOS/Android store apps are placeholders
+  only (store review is too slow to be the first surface). QR pairing to
+  the desktop client is planned after the static shell. **No version is
+  assigned**; this track must not borrow v0.1.18 / v0.1.19. Native-shell
+  engineering, if ever authorized, stays in
+  [`plan/plan-mobile.md`](../plan/plan-mobile.md).
 - [~] `agenterm-con` second-product track (independent of the workbench version
   gates): the standalone host ships in ordinary builds and has its own CI, but
   no release version is committed to it yet. Its promotion gate is explicit —
@@ -619,7 +629,10 @@ track remains planned, but every declared dependency must still pass.
   - [ ] v0.1.18 non-goals: remote channel/signature/apply, real CC authority
     migration, WASM product wiring, APE/polyglot loader, and npm dependencies
 - [ ] M13 / v0.2.x Distribution surface and one package substrate
-  - [ ] `agenterm.work` becomes the single public distribution entry point:
+  - [ ] `agenterm.work` becomes the single public distribution entry point
+    **and** the PWA origin (Mobile App lives at `/app` under
+    [33](PRD_02_33_mobile_reach.md); this milestone still owns install /
+    `releases.json` / provenance only):
     OS/architecture detection, one copyable install command per platform, a
     `302` artifact redirect to the Release bytes, and a machine-readable
     `releases.json` index derived from the existing per-artifact
