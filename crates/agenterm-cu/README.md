@@ -151,6 +151,10 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
 # Place the focused window (Spectacle catalog)
 cu --target current --grant actuate window-place --action left-half
 
+# Replace Spectacle: same default shortcuts, launchd-hosted
+# ./scripts/install-cu-hotkeys.sh
+cu hotkeys
+
 # Refused without actuate grant
 cu --target current --grant observe send-text hello
 

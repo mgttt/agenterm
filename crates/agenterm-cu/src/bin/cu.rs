@@ -5,7 +5,11 @@
 use agenterm_cu::{Authorization, Command, Executor, PointerButton, TargetRef, WaitCondition};
 
 fn main() {
-    let reply = dispatch(std::env::args().skip(1).collect());
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("hotkeys") {
+        std::process::exit(agenterm_cu::hotkeys::run());
+    }
+    let reply = dispatch(args);
     let json = serde_json::to_string(&reply).unwrap_or_else(|_| {
         r#"{"ok":false,"target":"","command":"","error":{"code":"serialize","message":"reply serialization failed"}}"#
             .to_string()
@@ -292,6 +296,7 @@ fn eprint_usage() {
     eprintln!(
         r#"usage: cu --target <current> [--grant observe,actuate] <command> [args...]
        cu exec [--grant observe,actuate] --json '<command-json>'
+       cu hotkeys                     macOS: Spectacle-default global shortcuts
 
 Global:
   --target current          explicit target reference (required)
