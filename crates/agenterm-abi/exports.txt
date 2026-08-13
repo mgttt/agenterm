@@ -29,6 +29,8 @@ agt_a11y_node_action_name
 agt_a11y_node_perform
 agt_a11y_node_set_text
 agt_a11y_node_send_keys
+agt_a11y_drain_bus
+agt_a11y_last_text_write_via
 agt_clipboard_set_text
 agt_clipboard_get_text
 agt_clipboard_has_text
@@ -40,6 +42,7 @@ agt_runtime_env_present
 agt_runtime_arg_count
 agt_runtime_arg
 agt_window_enumerate
+agt_screen_list
 agt_native_window_show
 agt_native_window_move
 agt_native_window_rect

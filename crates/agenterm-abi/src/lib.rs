@@ -55,6 +55,13 @@
 //! `AGT_CAP_WINDOW_ENUMERATE` / `AGT_CAP_WINDOW_OP` / `AGT_CAP_INPUT_INJECT`
 //! now report the platform's `capability_status()` truthfully instead of a
 //! blanket `AGT_OK`: these mechanisms are not guaranteed on every host.
+//! Milestone 45 closes the last ABI gaps so `agenterm-cu` can drop the
+//! platform dependency entirely (both executables then share one
+//! `agenterm.dll`): `agt_screen_list` (two-stage, §3.4, same semantics as
+//! `agt_window_enumerate`), `agt_a11y_drain_bus` (no failure path; drains the
+//! accessibility event bus), and `agt_a11y_last_text_write_via` (diagnostic
+//! string, two-stage buffer protocol). Both a11y exports report
+//! `AGT_UNSUPPORTED` when the accessibility mechanism is absent.
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -73,8 +80,8 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, perform_node_action, send_node_keys,
-    set_node_text, tree_for_window,
+    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, last_text_write_via,
+    perform_node_action, send_node_keys, set_node_text, tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
@@ -100,7 +107,9 @@ use agenterm_platform::screenshot::{
     capture_native_window_png, write_xrgb_png,
 };
 use agenterm_platform::threading::spawn_named_detached;
-use agenterm_platform::window_enumerate::{WindowInfo, enumerate_top_level};
+use agenterm_platform::window_enumerate::{
+    ScreenInfo, WindowInfo, enumerate_top_level, list_screens,
+};
 use agenterm_platform::window_host::{
     LogicalPoint, LogicalSize, PixelFrameWrite, PixelWindow, PixelWindowApplication,
     PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowMetrics,
@@ -247,7 +256,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 4);
+abi_version!(1, 5);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -3356,6 +3365,72 @@ pub extern "C" fn agt_a11y_node_send_keys(
     }
 }
 
+/// Drain the accessibility event bus. No side effects on user-visible state;
+/// has no failure path and returns `AGT_OK` when the mechanism is present.
+/// `AGT_UNSUPPORTED` when the accessibility mechanism is absent on this
+/// build/host; a panic (the only other failure mode) is caught by the fence
+/// and reported as `AGT_FAILED{code="panic"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_drain_bus() -> agt_status {
+    fn inner() -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        drain_bus();
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(inner)) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_drain_bus",
+                c"panic",
+                "panic in agt_a11y_drain_bus",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Route of the last successful text write on this thread (diagnostic string,
+/// e.g. `"editable-text"` on Windows/macOS, `"editable-text"` or `"text"` on
+/// Linux). Two-stage buffer protocol identical to `agt_a11y_tree_meta_string`
+/// (via the shared `copy_bytes_two_stage` helper): `cap` insufficient →
+/// `AGT_FAILED{code="buffer_too_small"}` with the required byte count written
+/// to `*out_len`. `AGT_UNSUPPORTED` when the accessibility mechanism is
+/// absent.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_last_text_write_via(
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        copy_bytes_two_stage(
+            c"agt_a11y_last_text_write_via",
+            last_text_write_via().as_bytes(),
+            buf,
+            cap,
+            out_len,
+        )
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_last_text_write_via",
+                c"panic",
+                "panic in agt_a11y_last_text_write_via",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
 // --- clipboard (milestone 8) -------------------------------------------
 
 /// Internal read ceiling for `agt_clipboard_get_text`: the library never
@@ -4044,6 +4119,107 @@ pub extern "C" fn agt_window_enumerate(
                 c"panic",
                 "panic in agt_window_enumerate",
             );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// C-compatible single-screen record mirroring `include/agenterm.h`.
+/// `frame` covers the whole display; `visible` is the work area after the
+/// taskbar / docks; `primary` is 0/1 (exactly one screen is primary).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub struct agt_screen_info {
+    pub frame_x: i32,
+    pub frame_y: i32,
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub visible_x: i32,
+    pub visible_y: i32,
+    pub visible_width: u32,
+    pub visible_height: u32,
+    /// 0/1.
+    pub primary: i32,
+}
+
+/// Translate one platform screen record into the C-compatible record (no
+/// strings, so no truncation — the platform values are copied verbatim).
+fn screen_info_to_record(s: &ScreenInfo) -> agt_screen_info {
+    agt_screen_info {
+        frame_x: s.frame.x,
+        frame_y: s.frame.y,
+        frame_width: s.frame.width,
+        frame_height: s.frame.height,
+        visible_x: s.visible.x,
+        visible_y: s.visible.y,
+        visible_width: s.visible.width,
+        visible_height: s.visible.height,
+        primary: i32::from(s.primary),
+    }
+}
+
+/// Enumerate the host's displays into a caller-allocated array (two-stage,
+/// §3.4 — identical semantics to `agt_window_enumerate`, reusing the same
+/// shape):
+/// - `cap` sufficient → `AGT_OK`, `*out_count` = records actually written.
+/// - `cap` insufficient (including `cap == 0` with `buf == NULL`, the legal
+///   "how big?" probe) → `AGT_FAILED { code = "buffer_too_small" }`,
+///   `*out_count` = required count.
+/// - NULL `out_count` (or NULL `buf` with `cap > 0`) →
+///   `AGT_FAILED { code = "bad_pointer" }`.
+/// - mechanism absent on this host → `AGT_UNSUPPORTED`.
+/// - platform failure → `AGT_FAILED { code = "window_failed" }`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_screen_list(
+    buf: *mut agt_screen_info,
+    cap: usize,
+    out_count: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut agt_screen_info, cap: usize, out_count: *mut usize) -> agt_status {
+        if out_count.is_null() {
+            record_error(c"agt_screen_list", c"bad_pointer", "out_count is null");
+            return agt_status::AGT_FAILED;
+        }
+        if cap > 0 && buf.is_null() {
+            record_error(c"agt_screen_list", c"bad_pointer", "buf is null");
+            return agt_status::AGT_FAILED;
+        }
+        if !window_enumerate_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        let screens = match list_screens() {
+            Ok(v) => v,
+            Err(e) => {
+                // `WindowEnumerateError` has no `Display` impl in
+                // `agenterm-platform`; the facade convention is to forward
+                // the message verbatim, so `Debug` stands in (no variant
+                // matching, no type annotation — the crate is not modified).
+                record_error(c"agt_screen_list", c"window_failed", format!("{e:?}"));
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let required = screens.len();
+        if cap < required {
+            unsafe { *out_count = required };
+            record_error(
+                c"agt_screen_list",
+                c"buffer_too_small",
+                "cap is smaller than the screen count; allocate the required count and call again",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe { *out_count = required };
+        for (i, s) in screens.iter().enumerate() {
+            unsafe { *buf.add(i) = screen_info_to_record(s) };
+        }
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_count))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(c"agt_screen_list", c"panic", "panic in agt_screen_list");
             agt_status::AGT_FAILED
         }
     }

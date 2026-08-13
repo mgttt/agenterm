@@ -141,6 +141,25 @@ type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
 type InputTypeText = unsafe extern "C" fn(*const u8, usize) -> i32;
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+#[allow(non_camel_case_types)]
+struct agt_screen_info {
+    frame_x: i32,
+    frame_y: i32,
+    frame_width: u32,
+    frame_height: u32,
+    visible_x: i32,
+    visible_y: i32,
+    visible_width: u32,
+    visible_height: u32,
+    primary: i32,
+}
+
+type ScreenList = unsafe extern "C" fn(*mut agt_screen_info, usize, *mut usize) -> i32;
+type A11yDrainBus = unsafe extern "C" fn() -> i32;
+type A11yLastTextWriteVia = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 struct agt_a11y_node {
     bounds_x: i32,
@@ -2289,6 +2308,166 @@ fn window_enumerate_rejects_null_out_count() {
     assert!(
         msg.contains("bad_pointer"),
         "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 45: two-stage `agt_screen_list` round trip. Probes with
+/// cap=0/buf=NULL (the legal "how big?" probe), allocates the required count,
+/// calls again and asserts AGT_OK with at least one screen carrying a
+/// non-empty frame and exactly one primary screen (platform contract).
+#[test]
+fn screen_list_roundtrip_reports_valid_screens() {
+    let lib = load();
+    let list: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
+
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
+    );
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        required >= 1,
+        "the host must expose at least one screen, got {required}"
+    );
+
+    let mut screens = vec![agt_screen_info::default(); required];
+    let mut got = 0usize;
+    let st = unsafe { list(screens.as_mut_ptr(), required, &mut got) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "second-stage screen list failed: {}",
+        last_error_message(lib)
+    );
+    assert!(
+        got <= required,
+        "out_count {got} exceeds capacity {required}"
+    );
+    screens.truncate(got);
+    assert!(
+        screens
+            .iter()
+            .any(|s| s.frame_width > 0 && s.frame_height > 0),
+        "at least one screen must have a non-empty frame"
+    );
+    assert_eq!(
+        screens.iter().filter(|s| s.primary == 1).count(),
+        1,
+        "exactly one screen must be primary (got {} screens)",
+        screens.len()
+    );
+}
+
+/// Milestone 45: a deliberately too-small cap returns
+/// AGT_FAILED{code="buffer_too_small"} and *out_count reports the required
+/// (larger) count.
+#[test]
+fn screen_list_small_cap_reports_required_count() {
+    let lib = load();
+    let list: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(st, AGT_FAILED, "cap=0 probe must fail, got {st}");
+    assert!(
+        required >= 1,
+        "the host must expose at least one screen, got {required}"
+    );
+    if required == 1 {
+        // A single-screen host cannot demonstrate the small-cap path with
+        // cap=1; the cap=0 probe above already covers the buffer_too_small
+        // contract.
+        return;
+    }
+    let mut one = [agt_screen_info::default(); 1];
+    let mut got = 0usize;
+    let st = unsafe { list(one.as_mut_ptr(), 1, &mut got) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        got > 1,
+        "out_count must report the required count > 1, got {got}"
+    );
+}
+
+/// Milestone 45: NULL out_count -> AGT_FAILED{code="bad_pointer"}.
+#[test]
+fn screen_list_rejects_null_out_count() {
+    let lib = load();
+    let list: Symbol<ScreenList> = unsafe { sym(lib, b"agt_screen_list") };
+    let mut one = [agt_screen_info::default(); 1];
+    let st = unsafe { list(one.as_mut_ptr(), 1, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 45: `agt_a11y_drain_bus()` returns AGT_OK (mechanism present)
+/// or AGT_UNSUPPORTED (mechanism absent on this build/host) — never
+/// AGT_FAILED (the export has no failure path other than a caught panic).
+#[test]
+fn a11y_drain_bus_ok_or_unsupported_never_failed() {
+    let lib = load();
+    let drain: Symbol<A11yDrainBus> = unsafe { sym(lib, b"agt_a11y_drain_bus") };
+    let st = unsafe { drain() };
+    assert!(
+        st == AGT_OK || st == AGT_UNSUPPORTED,
+        "agt_a11y_drain_bus must be AGT_OK or AGT_UNSUPPORTED, got {st}"
+    );
+}
+
+/// Milestone 45: two-stage `agt_a11y_last_text_write_via` round trip. Probes
+/// with cap=0 for the required byte count, allocates, reads back and asserts
+/// the payload is valid UTF-8. The exact content is a diagnostic string that
+/// may change, so it is never asserted. When the mechanism is absent the
+/// first probe returns AGT_UNSUPPORTED and the test accepts that.
+#[test]
+fn a11y_last_text_write_via_two_stage_utf8() {
+    let lib = load();
+    let via: Symbol<A11yLastTextWriteVia> = unsafe { sym(lib, b"agt_a11y_last_text_write_via") };
+    let mut required = 0usize;
+    let st = unsafe { via(std::ptr::null_mut(), 0, &mut required) };
+    if st == AGT_UNSUPPORTED {
+        return;
+    }
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
+    );
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        required > 0,
+        "the diagnostic string must be non-empty, got {required}"
+    );
+    let mut buf = vec![0u8; required];
+    let mut got = 0usize;
+    let st = unsafe { via(buf.as_mut_ptr(), required, &mut got) };
+    assert_eq!(
+        st,
+        AGT_OK,
+        "second-stage read failed: {}",
+        last_error_message(lib)
+    );
+    assert_eq!(got, required, "out_len {got} != required {required}");
+    assert!(
+        std::str::from_utf8(&buf).is_ok(),
+        "the diagnostic string must be valid UTF-8"
     );
 }
 

@@ -16,6 +16,11 @@
  * `agt_native_window_*` operations on raw OS handles (deliberately distinct
  * from `agt_window_close`, which owns the ABI's own window), and the
  * `agt_input_*` pointer / text / hotkey injection exports.
+ * milestone 45 closes the last ABI gaps for the computer-use runtime:
+ * `agt_screen_list` (two-stage display enumeration, same semantics as
+ * `agt_window_enumerate`), `agt_a11y_drain_bus` (drain the accessibility
+ * event bus), and `agt_a11y_last_text_write_via` (diagnostic string, two-stage
+ * buffer protocol).
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -37,7 +42,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 4
+#define AGT_ABI_MINOR 5
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -430,6 +435,23 @@ agt_status agt_a11y_node_set_text(intptr_t window_handle, const char* node_id,
 agt_status agt_a11y_node_send_keys(intptr_t window_handle, const char* node_id,
                                    const uint8_t* keys, size_t len);
 
+/* Drain the accessibility event bus. No side effects on user-visible state;
+ * has no failure path and returns AGT_OK when the mechanism is present.
+ * AGT_UNSUPPORTED when the accessibility mechanism is absent on this
+ * build/host; a panic (the only other failure mode) is caught and reported
+ * as AGT_FAILED{code="panic"}. */
+agt_status agt_a11y_drain_bus(void);
+
+/* Route of the last successful text write on this thread (diagnostic string,
+ * e.g. "editable-text" on Windows/macOS, "editable-text" or "text" on Linux).
+ * Two-stage buffer protocol identical to agt_a11y_tree_meta_string:
+ *   cap sufficient   -> AGT_OK, *out_len = bytes written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
+ *                       *out_len = required bytes
+ * NULL out_len (or NULL buf with cap > 0) ->
+ * AGT_FAILED{code="bad_pointer"}; mechanism absent -> AGT_UNSUPPORTED. */
+agt_status agt_a11y_last_text_write_via(uint8_t* buf, size_t cap, size_t* out_len);
+
 /* --- clipboard (milestone 8) ---------------------------------------- */
 
 /* Publish UTF-8 text. `text == NULL`, or a slice that is not valid UTF-8,
@@ -529,6 +551,26 @@ typedef struct {
  * absent on this host -> AGT_UNSUPPORTED; platform failure ->
  * AGT_FAILED{code="window_failed"}. */
 agt_status agt_window_enumerate(agt_window_info* buf, size_t cap, size_t* out_count);
+
+/* Single-screen record. `frame` covers the whole display; `visible` is the
+ * work area after the taskbar / docks; `primary` is 0/1 (exactly one screen
+ * is primary). */
+typedef struct {
+    int32_t  frame_x, frame_y;      uint32_t frame_width, frame_height;
+    int32_t  visible_x, visible_y;  uint32_t visible_width, visible_height;
+    int32_t  primary;   /* 0/1 */
+} agt_screen_info;
+
+/* Enumerate the host's displays into a caller-allocated array (two-stage,
+ * spec 3.4, identical semantics to agt_window_enumerate):
+ *   cap sufficient   -> AGT_OK, *out_count = records written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
+ *                       *out_count = required count
+ * cap == 0 with buf == NULL is a legal "how big?" probe. NULL out_count
+ * (or NULL buf with cap > 0) -> AGT_FAILED{code="bad_pointer"}; mechanism
+ * absent on this host -> AGT_UNSUPPORTED; platform failure ->
+ * AGT_FAILED{code="window_failed"}. */
+agt_status agt_screen_list(agt_screen_info* buf, size_t cap, size_t* out_count);
 
 /* Native-window operations. These act on raw OS handles obtained from
  * agt_window_enumerate, NEVER on the ABI's own window handle from
