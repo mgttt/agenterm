@@ -27,6 +27,11 @@
 //! publishes UTF-8 text, `agt_clipboard_get_text` reads it back two-stage, and
 //! `agt_clipboard_has_text` probes for Unicode text. `AGT_CAP_CLIPBOARD` now
 //! reports `AGT_OK`.
+//! Milestone 9 ships the parent-console write mechanism:
+//! `agt_parent_console_write_stdout` / `agt_parent_console_write_stderr`
+//! forward one UTF-8 line to the parent console. "No writable parent console"
+//! maps to `AGT_UNSUPPORTED` (the environment lacks the mechanism), never
+//! `AGT_FAILED`; `AGT_CAP_PARENT_CONSOLE` now reports `AGT_OK`.
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -48,6 +53,7 @@ use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
+use agenterm_platform::parent_console::{write_stderr, write_stdout};
 use agenterm_platform::process::{kill, list};
 use agenterm_platform::pty::{
     ChildCommand, PtyChild, PtyMaster, TerminalSize, initialize_shutdown_reaper,
@@ -236,11 +242,11 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 
 /// Capability negotiation. §3.2/§14.2 rule two: compile-time feature → runtime
 /// capability query. The `pty`, `native-pixel-window`, `screenshot`,
-/// `process` and `clipboard` features are compiled into this build, so
-/// `AGT_CAP_PTY`, `AGT_CAP_WINDOW_HOST`, `AGT_CAP_SCREENSHOT`,
-/// `AGT_CAP_PROCESS_OBSERVE` and `AGT_CAP_CLIPBOARD` report `AGT_OK`;
-/// mechanisms that have not shipped yet report `AGT_UNSUPPORTED`
-/// (a product gap, never a permission statement).
+/// `process`, `clipboard` and `parent-console` features are compiled into
+/// this build, so `AGT_CAP_PTY`, `AGT_CAP_WINDOW_HOST`,
+/// `AGT_CAP_SCREENSHOT`, `AGT_CAP_PROCESS_OBSERVE`, `AGT_CAP_CLIPBOARD` and
+/// `AGT_CAP_PARENT_CONSOLE` report `AGT_OK`; mechanisms that have not shipped
+/// yet report `AGT_UNSUPPORTED` (a product gap, never a permission statement).
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
     match cap {
@@ -248,7 +254,8 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
         | agt_capability::AGT_CAP_WINDOW_HOST
         | agt_capability::AGT_CAP_SCREENSHOT
         | agt_capability::AGT_CAP_PROCESS_OBSERVE
-        | agt_capability::AGT_CAP_CLIPBOARD => agt_status::AGT_OK,
+        | agt_capability::AGT_CAP_CLIPBOARD
+        | agt_capability::AGT_CAP_PARENT_CONSOLE => agt_status::AGT_OK,
         _ => agt_status::AGT_UNSUPPORTED,
     }
     // Pure match — no panic surface; the fence is kept for uniformity.
@@ -2696,6 +2703,115 @@ pub extern "C" fn agt_clipboard_get_text(
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_clipboard_has_text() -> i32 {
     catch_unwind(|| if has_unicode_text() { 1 } else { 0 }).unwrap_or(0)
+}
+
+// --- parent console (milestone 9) -------------------------------------
+
+/// Write UTF-8 text to the parent console's stdout. `text == NULL` (with
+/// `len > 0`), or a slice that is not valid UTF-8 →
+/// `AGT_FAILED{code="bad_text"}`; "no writable parent console" →
+/// `AGT_UNSUPPORTED` (the environment lacks the mechanism, which is *not* a
+/// call failure — spec 3.1); success → `AGT_OK`. `len == 0` is legal input:
+/// an empty line is written and the platform result is mapped as above.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_parent_console_write_stdout(text: *const u8, len: usize) -> agt_status {
+    fn inner(text: *const u8, len: usize) -> agt_status {
+        if text.is_null() && len > 0 {
+            record_error(
+                c"agt_parent_console_write_stdout",
+                c"bad_text",
+                "text pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let message = if len == 0 {
+            ""
+        } else {
+            // SAFETY: the pointer/length pair is a C ABI contract (see
+            // include/agenterm.h); the caller guarantees `len` readable bytes.
+            let slice = unsafe { std::slice::from_raw_parts(text, len) };
+            match std::str::from_utf8(slice) {
+                Ok(s) => s,
+                Err(_) => {
+                    record_error(
+                        c"agt_parent_console_write_stdout",
+                        c"bad_text",
+                        "text is not valid UTF-8",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+            }
+        };
+        if write_stdout(message) {
+            agt_status::AGT_OK
+        } else {
+            agt_status::AGT_UNSUPPORTED
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(text, len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_parent_console_write_stdout",
+                c"panic",
+                "panic in agt_parent_console_write_stdout",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Write UTF-8 text to the parent console's stderr. Same contract as
+/// `agt_parent_console_write_stdout`; "no writable parent console" maps to
+/// `AGT_UNSUPPORTED`, never `AGT_FAILED`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_parent_console_write_stderr(text: *const u8, len: usize) -> agt_status {
+    fn inner(text: *const u8, len: usize) -> agt_status {
+        if text.is_null() && len > 0 {
+            record_error(
+                c"agt_parent_console_write_stderr",
+                c"bad_text",
+                "text pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let message = if len == 0 {
+            ""
+        } else {
+            // SAFETY: the pointer/length pair is a C ABI contract (see
+            // include/agenterm.h); the caller guarantees `len` readable bytes.
+            let slice = unsafe { std::slice::from_raw_parts(text, len) };
+            match std::str::from_utf8(slice) {
+                Ok(s) => s,
+                Err(_) => {
+                    record_error(
+                        c"agt_parent_console_write_stderr",
+                        c"bad_text",
+                        "text is not valid UTF-8",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+            }
+        };
+        if write_stderr(message) {
+            agt_status::AGT_OK
+        } else {
+            agt_status::AGT_UNSUPPORTED
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(text, len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_parent_console_write_stderr",
+                c"panic",
+                "panic in agt_parent_console_write_stderr",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
 }
 
 // --- milestone 3b unit tests (pure translation functions) ---------------

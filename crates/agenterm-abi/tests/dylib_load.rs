@@ -69,6 +69,7 @@ const AGT_CAP_PROCESS_OBSERVE: i32 = 3;
 const AGT_CAP_WINDOW_HOST: i32 = 4;
 const AGT_CAP_SCREENSHOT: i32 = 7;
 const AGT_CAP_CLIPBOARD: i32 = 8;
+const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
 const EXPECTED_BUILD_ID: &str = "0.1.16+abi.1";
@@ -91,6 +92,7 @@ type ProcessSelf = unsafe extern "C" fn() -> u32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type ClipboardHasText = unsafe extern "C" fn() -> i32;
+type ParentConsoleWrite = unsafe extern "C" fn(*const u8, usize) -> i32;
 
 /// Locate the cdylib built under the active profile. The test binary lives in
 /// `target/<profile>/deps/`, the cdylib in `target/<profile>/`.
@@ -247,6 +249,8 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_OBSERVE) }, AGT_OK);
     // Milestone 8 ships the clipboard mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_CLIPBOARD) }, AGT_OK);
+    // Milestone 9 ships the parent-console write mechanism → AGT_OK.
+    assert_eq!(unsafe { f(AGT_CAP_PARENT_CONSOLE) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_SPAWN) }, AGT_UNSUPPORTED);
 }
@@ -1464,5 +1468,111 @@ fn clipboard_set_text_rejects_null_and_non_utf8() {
     assert!(
         msg.contains("bad_text"),
         "expected code \"bad_text\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 9 evidence 1: a normal UTF-8 line written to the parent
+/// console's stdout must be either AGT_OK (this process has a writable
+/// parent console) or AGT_UNSUPPORTED (it has none) — never AGT_FAILED —
+/// and must not crash. Which status it is depends on the test process, so
+/// the actual value is printed for manual cross-checking.
+#[test]
+fn parent_console_write_stdout_valid_text_never_fails() {
+    let lib = load();
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stdout") };
+    let text = b"agenterm-abi-probe: milestone-9 stdout write\n";
+    let st = unsafe { f(text.as_ptr(), text.len()) };
+    assert!(
+        st == AGT_OK || st == AGT_UNSUPPORTED,
+        "valid UTF-8 stdout write must be AGT_OK or AGT_UNSUPPORTED, got {st}"
+    );
+    eprintln!(
+        "parent-console stdout write returned {} on this host",
+        if st == AGT_OK {
+            "AGT_OK"
+        } else {
+            "AGT_UNSUPPORTED"
+        }
+    );
+}
+
+/// Milestone 9 evidence 1 (stderr twin): same contract, same assertion, same
+/// printed verdict for manual cross-checking.
+#[test]
+fn parent_console_write_stderr_valid_text_never_fails() {
+    let lib = load();
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stderr") };
+    let text = b"agenterm-abi-probe: milestone-9 stderr write\n";
+    let st = unsafe { f(text.as_ptr(), text.len()) };
+    assert!(
+        st == AGT_OK || st == AGT_UNSUPPORTED,
+        "valid UTF-8 stderr write must be AGT_OK or AGT_UNSUPPORTED, got {st}"
+    );
+    eprintln!(
+        "parent-console stderr write returned {} on this host",
+        if st == AGT_OK {
+            "AGT_OK"
+        } else {
+            "AGT_UNSUPPORTED"
+        }
+    );
+}
+
+/// Milestone 9 evidence 2 + 3: NULL text (with len > 0) and non-UTF-8 bytes
+/// both -> AGT_FAILED{code="bad_text"}.
+#[test]
+fn parent_console_write_rejects_null_and_non_utf8() {
+    let lib = load();
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stdout") };
+    // NULL text with a nonzero length -> bad_text.
+    let st = unsafe { f(std::ptr::null(), 5) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
+    );
+    // Non-UTF-8 bytes -> bad_text.
+    let invalid = [0xffu8, 0xfe];
+    let st = unsafe { f(invalid.as_ptr(), invalid.len()) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
+    );
+    // Same bad-input contract on the stderr export.
+    let g: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stderr") };
+    let st = unsafe { g(std::ptr::null(), 5) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 9 evidence 4: `len == 0` is legal input (an empty line is
+/// written), so it must never return AGT_FAILED{code="bad_text"} — with
+/// either a non-NULL empty pointer or NULL (NULL is only rejected when
+/// len > 0).
+#[test]
+fn parent_console_write_accepts_empty_text() {
+    let lib = load();
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stdout") };
+    let empty: &[u8] = b"";
+    for text in [empty.as_ptr(), std::ptr::null()] {
+        let st = unsafe { f(text, 0) };
+        assert_ne!(
+            st, AGT_FAILED,
+            "len == 0 must never be AGT_FAILED {{bad_text}}, got {st}"
+        );
+    }
+    // Same contract on the stderr export.
+    let g: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stderr") };
+    let st = unsafe { g(std::ptr::null(), 0) };
+    assert_ne!(
+        st, AGT_FAILED,
+        "len == 0 must never be AGT_FAILED, got {st}"
     );
 }

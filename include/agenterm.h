@@ -8,6 +8,7 @@
  * milestone 4 adds screenshot export (framebuffer -> PNG, native window -> PNG);
  * milestone 5 adds the process group (enumerate / kill / self pid).
  * milestone 8 adds the clipboard group (set / get / has-text).
+ * milestone 9 adds the parent-console group (write stdout / write stderr).
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -68,8 +69,9 @@ typedef enum {
 } agt_capability;
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
- * milestone 8, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT,
- * AGT_CAP_PROCESS_OBSERVE and AGT_CAP_CLIPBOARD all report AGT_OK. */
+ * milestone 9, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT,
+ * AGT_CAP_PROCESS_OBSERVE, AGT_CAP_CLIPBOARD and AGT_CAP_PARENT_CONSOLE all
+ * report AGT_OK. */
 agt_status agt_capability_query(agt_capability cap);
 
 /* --- pty ------------------------------------------------------------ */
@@ -324,6 +326,20 @@ agt_status agt_clipboard_get_text(uint8_t* buf, size_t cap, size_t* out_len);
 /* 1 when the clipboard currently holds Unicode text, 0 otherwise. Never
  * fails. */
 int32_t    agt_clipboard_has_text(void);
+
+/* --- parent console (milestone 9) ------------------------------------ */
+
+/* Write UTF-8 text to the parent console's stdout/stderr.
+ *   text == NULL (with len > 0), or a slice that is not valid UTF-8
+ *     -> AGT_FAILED with code "bad_text"
+ *   no writable parent console -> AGT_UNSUPPORTED
+ *     (the environment lacks the mechanism; intentionally NOT AGT_FAILED,
+ *      see spec 3.1 - the two are never merged)
+ *   write succeeded -> AGT_OK
+ * len == 0 is legal input: an empty line is written and the platform result
+ * is mapped as above. */
+agt_status agt_parent_console_write_stdout(const uint8_t* text, size_t len);
+agt_status agt_parent_console_write_stderr(const uint8_t* text, size_t len);
 
 /* --- known platform limitation -------------------------------------- */
 
