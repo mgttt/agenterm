@@ -1029,3 +1029,13 @@ encoder has completed and can surface valid in-progress output as
 `UnexpectedEof`. Atomic product publication may use complete-file visibility as
 its contract; a direct native test helper without that publication boundary may
 not borrow the same assumption.
+
+## Native consumers must match the Rust target ABI
+
+Do not select a C or C++ compiler merely because it appears first on the host
+`PATH`. Derive the compiler family from Rust's `target_env`: an MSVC artifact
+must use the discovered MSVC toolchain, while a GNU artifact may use the GNU
+family from `PATH`. This applies to both dynamic and static consumer probes;
+mixing MinGW with an MSVC Rust library produces misleading unresolved runtime
+and system symbols rather than evidence about the public ABI. Print the chosen
+target environment and compiler in test logs so CI selection is auditable.
