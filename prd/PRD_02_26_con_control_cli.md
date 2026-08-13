@@ -67,6 +67,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   writes propagate a closed PTY instead of constructing success outcomes. A
   failed application report does not commit its last-reported cell or gesture
   ownership, preserving the next physical/control gesture's routing state.
+- [x] press/release control gestures have one window-scoped tab owner. A second
+  press, cross-tab move/release, or click during an open gesture fails
+  explicitly; selecting, closing, or replacing the active tab cancels the old
+  gesture and releases native capture. Public evidence proves a stale release
+  after `select-tab` cannot revive the cancelled selection.
 - [x] public `wait-text` delegates exact per-visible-row UTF-8 containment to one
   allocation-free control kernel. It preserves the existing authority: no row
   joining, newline insertion, cross-row match, hidden-scrollback scan, Unicode

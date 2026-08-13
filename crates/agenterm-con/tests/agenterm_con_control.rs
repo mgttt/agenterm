@@ -555,6 +555,93 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert_eq!(exited_wheel["delivered_notches"], 1);
     assert_eq!(exited_wheel["changed"], true);
 
+    let held_pointer = cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "press",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    assert_eq!(held_pointer["route"], "selection");
+    cli_json(exe, &endpoint, &["select-tab", "--target", &root]);
+    let stale_release = invoke(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "release",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    assert!(!stale_release.status.success());
+    assert!(
+        error_text(&stale_release).contains("no matching control pointer press"),
+        "tab activation must cancel the old control gesture: {}",
+        error_text(&stale_release)
+    );
+
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "press",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    let replacement = cli_json(exe, &endpoint, &["new-tab"]);
+    let replacement_id = replacement["id"].as_str().unwrap().to_owned();
+    let stale_background_release = invoke(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "release",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    assert!(!stale_background_release.status.success());
+    assert!(
+        error_text(&stale_background_release).contains("no matching control pointer press"),
+        "new-tab must cancel a background control gesture: {}",
+        error_text(&stale_background_release)
+    );
+    cli_json(exe, &endpoint, &["close-tab", "--target", &replacement_id]);
+
     cli_json(
         exe,
         &endpoint,

@@ -737,6 +737,7 @@ struct ConApp {
     control_endpoint: Option<String>,
     control_server: Option<control::ControlServer>,
     pending_control: PendingControl,
+    control_pointer_owner: Option<workspace::TabId>,
     perf_stats: PerfStats,
     chrome_dirty: DirtyRegion,
     retained: RetainedXrgbFrame,
@@ -841,6 +842,7 @@ impl ConApp {
             control_endpoint,
             control_server: None,
             pending_control: PendingControl::default(),
+            control_pointer_owner: None,
             perf_stats: PerfStats::default(),
             chrome_dirty: DirtyRegion::full(),
             retained: RetainedXrgbFrame::new(),
@@ -878,6 +880,35 @@ impl ConApp {
         })
     }
 
+    fn cancel_pointer_gesture_for_tab(&mut self, window: &PixelWindow, id: workspace::TabId) {
+        if self.control_pointer_owner == Some(id) {
+            self.control_pointer_owner = None;
+        }
+        if let Some(session) = self.sessions.get_mut(&id) {
+            session.cancel_pointer_gesture(window);
+        }
+    }
+
+    fn cancel_pointer_gestures_for_activation(&mut self, window: &PixelWindow) {
+        let owner = self.control_pointer_owner;
+        if let Some(owner) = owner {
+            self.cancel_pointer_gesture_for_tab(window, owner);
+        }
+        if let Some(active) = self.workspace.active()
+            && Some(active) != owner
+        {
+            self.cancel_pointer_gesture_for_tab(window, active);
+        }
+    }
+
+    fn activate_session(&mut self, window: &PixelWindow, id: workspace::TabId) {
+        if self.workspace.active() == Some(id) {
+            return;
+        }
+        self.cancel_pointer_gestures_for_activation(window);
+        self.workspace.set_active(id);
+    }
+
     fn refresh_title(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         let session = self.active_session()?;
         let id = self.workspace.active().ok_or_else(|| {
@@ -894,6 +925,7 @@ impl ConApp {
         let id = self.workspace.active().ok_or_else(|| {
             PixelWindowError::failed("con_session_missing", "no active terminal session")
         })?;
+        self.cancel_pointer_gestures_for_activation(window);
         self.cancel_control_for_tab(
             id,
             &format!(
@@ -1168,6 +1200,7 @@ impl ConApp {
                 current.rows,
             )
         };
+        self.cancel_pointer_gestures_for_activation(window);
         let parent = self.workspace.active();
         let id = match (child, parent) {
             (true, Some(parent)) => self.workspace.add_child(parent, "terminal".to_owned()),
@@ -1220,7 +1253,7 @@ impl ConApp {
         };
         let next = (index as isize + direction).rem_euclid(ids.len() as isize) as usize;
         self.mark_chrome_full();
-        self.workspace.set_active(ids[next]);
+        self.activate_session(window, ids[next]);
         self.reveal_active_tree_row(window)?;
         let metrics = window.metrics()?;
         let sidebar_width = self.sidebar_width_logical;
@@ -1312,7 +1345,7 @@ impl ConApp {
                 return Ok(true);
             }
             ui::TreeHit::Close(index) => {
-                self.workspace.set_active(ids[index]);
+                self.activate_session(window, ids[index]);
                 self.mark_chrome_full();
                 self.close_active_session(window)?;
                 self.tree_scroll_offset = ui::clamp_tree_scroll(
@@ -1323,7 +1356,7 @@ impl ConApp {
                 return Ok(true);
             }
             ui::TreeHit::Select(index) => {
-                self.workspace.set_active(ids[index]);
+                self.activate_session(window, ids[index]);
                 self.reveal_active_tree_row(window)?;
                 self.mark_chrome_full();
             }
@@ -1609,6 +1642,7 @@ impl ConApp {
                 Ok(single_field_json("reset", true.into()))
             }
             CliCommand::CloseWindow => {
+                self.cancel_pointer_gestures_for_activation(window);
                 self.cancel_all_control_requests(
                     "terminal window closed while control request was pending",
                 );
@@ -1622,7 +1656,7 @@ impl ConApp {
             CliCommand::NewTab { parent } => (|| {
                 if let Some(parent) = parent {
                     self.control_target(Some(parent))?;
-                    self.workspace.set_active(parent);
+                    self.activate_session(window, parent);
                 }
                 self.open_session(window, parent.is_some())
                     .map_err(|error| error.to_string())?;
@@ -1637,12 +1671,12 @@ impl ConApp {
             })(),
             CliCommand::SelectTab { target } => self.control_target(Some(target)).map(|id| {
                 self.mark_chrome_full();
-                self.workspace.set_active(id);
+                self.activate_session(window, id);
                 window.request_redraw();
                 single_field_json("active", tab_id_json(Some(id)))
             }),
             CliCommand::CloseTab { target } => self.control_target(Some(target)).and_then(|id| {
-                self.workspace.set_active(id);
+                self.activate_session(window, id);
                 self.close_active_session(window)
                     .map_err(|error| error.to_string())?;
                 Ok(single_field_json("closed", tab_id_json(Some(id))))
@@ -1720,28 +1754,69 @@ impl ConApp {
                 button,
                 column,
                 row,
-            } => self.control_session_mut(target).and_then(|session| {
-                Self::validate_control_cell(session, row, column)?;
-                let outcome = match action {
-                    control::MouseAction::Move => session.inject_mouse_move(window, row, column),
-                    control::MouseAction::Click => {
-                        let button = control_mouse_button(button)?;
-                        session.inject_click(window, row, column, button)
+            } => (|| {
+                let id = self.control_target(target)?;
+                match (action, self.control_pointer_owner) {
+                    (control::MouseAction::Press, Some(owner)) => {
+                        return Err(format!(
+                            "control pointer gesture is already owned by @{}",
+                            owner.get()
+                        ));
                     }
-                    control::MouseAction::Press | control::MouseAction::Release => {
-                        let button = control_mouse_button(button)?;
-                        let state = if action == control::MouseAction::Press {
-                            PointerButtonState::Pressed
-                        } else {
-                            PointerButtonState::Released
-                        };
-                        session.inject_pointer_button(window, row, column, button, state)
+                    (control::MouseAction::Release, owner) if owner != Some(id) => {
+                        return Err(format!(
+                            "no matching control pointer press for @{}",
+                            id.get()
+                        ));
+                    }
+                    (control::MouseAction::Click, Some(owner)) => {
+                        return Err(format!(
+                            "control pointer gesture is already owned by @{}",
+                            owner.get()
+                        ));
+                    }
+                    (control::MouseAction::Move, Some(owner)) if owner != id => {
+                        return Err(format!(
+                            "control pointer gesture is owned by @{}",
+                            owner.get()
+                        ));
+                    }
+                    _ => {}
+                }
+                let outcome = {
+                    let session = self
+                        .sessions
+                        .get_mut(&id)
+                        .ok_or_else(|| format!("terminal @{} is unavailable", id.get()))?;
+                    Self::validate_control_cell(session, row, column)?;
+                    match action {
+                        control::MouseAction::Move => {
+                            session.inject_mouse_move(window, row, column)
+                        }
+                        control::MouseAction::Click => {
+                            let button = control_mouse_button(button)?;
+                            session.inject_click(window, row, column, button)
+                        }
+                        control::MouseAction::Press | control::MouseAction::Release => {
+                            let button = control_mouse_button(button)?;
+                            let state = if action == control::MouseAction::Press {
+                                PointerButtonState::Pressed
+                            } else {
+                                PointerButtonState::Released
+                            };
+                            session.inject_pointer_button(window, row, column, button, state)
+                        }
                     }
                 };
-                outcome
-                    .map(mouse_outcome_json)
-                    .map_err(|error| format!("terminal input failed: {error}"))
-            }),
+                if action == control::MouseAction::Release {
+                    self.control_pointer_owner = None;
+                }
+                let outcome = outcome.map_err(|error| format!("terminal input failed: {error}"))?;
+                if action == control::MouseAction::Press {
+                    self.control_pointer_owner = Some(id);
+                }
+                Ok(mouse_outcome_json(outcome))
+            })(),
             CliCommand::SendWheel {
                 target,
                 column,
@@ -3681,6 +3756,7 @@ impl ConTerminal {
     }
 
     fn cancel_pointer_gesture(&mut self, window: &PixelWindow) {
+        let _ = window.set_pointer_capture(false);
         if let Some((button, point)) = self.take_cancelled_pointer_release() {
             let modifiers = agenterm_platform::input::ModifierState {
                 control: false,
