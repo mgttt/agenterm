@@ -269,7 +269,7 @@ fn open_pty(
 #[test]
 fn abi_version_encodes_major_and_minor() {
     let lib = load();
-    let f: Symbol<unsafe extern "C" fn() -> u32> = unsafe { sym(&lib, b"agt_abi_version") };
+    let f: Symbol<unsafe extern "C" fn() -> u32> = unsafe { sym(lib, b"agt_abi_version") };
     let v = unsafe { f() };
     // Anti-drift gate: the encoded value must match the crate's own ABI
     // constants, so a bump in `abi_version!` cannot leave a stale literal
@@ -289,7 +289,7 @@ fn abi_version_encodes_major_and_minor() {
 #[test]
 fn build_id_is_a_valid_nul_terminated_utf8_c_string() {
     let lib = load();
-    let f: Symbol<unsafe extern "C" fn() -> *const c_char> = unsafe { sym(&lib, b"agt_build_id") };
+    let f: Symbol<unsafe extern "C" fn() -> *const c_char> = unsafe { sym(lib, b"agt_build_id") };
     let p = unsafe { f() };
     assert!(!p.is_null(), "agt_build_id returned NULL");
     // Defect-1 regression gate: the pointer must be readable as a C string
@@ -324,7 +324,7 @@ fn build_id_is_a_valid_nul_terminated_utf8_c_string() {
 #[test]
 fn capability_query_reports_pty_ok_others_unsupported() {
     let lib = load();
-    let f: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let f: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
     // Milestone 2 ships the PTY mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_PTY) }, AGT_OK);
     // Milestone 3a ships the window host mechanism → AGT_OK.
@@ -344,7 +344,7 @@ fn capability_query_reports_pty_ok_others_unsupported() {
 #[test]
 fn last_error_fields_are_readable_c_strings() {
     let lib = load();
-    let f: Symbol<LastError> = unsafe { sym(&lib, b"agt_last_error") };
+    let f: Symbol<LastError> = unsafe { sym(lib, b"agt_last_error") };
     let mut e = agt_error {
         operation: std::ptr::null(),
         code: std::ptr::null(),
@@ -367,7 +367,7 @@ fn last_error_fields_are_readable_c_strings() {
 #[test]
 fn last_error_accepts_null_out_without_crashing() {
     let lib = load();
-    let f: Symbol<LastError> = unsafe { sym(&lib, b"agt_last_error") };
+    let f: Symbol<LastError> = unsafe { sym(lib, b"agt_last_error") };
     assert_eq!(unsafe { f(std::ptr::null_mut()) }, AGT_FAILED);
 }
 
@@ -377,13 +377,13 @@ fn last_error_accepts_null_out_without_crashing() {
 #[test]
 fn pty_roundtrip_echo_probe() {
     let lib = load();
-    let open: Symbol<PtyOpen> = unsafe { sym(&lib, b"agt_pty_open") };
-    let read: Symbol<PtyRead> = unsafe { sym(&lib, b"agt_pty_read") };
-    let wait: Symbol<PtyWait> = unsafe { sym(&lib, b"agt_pty_wait") };
-    let close: Symbol<PtyClose> = unsafe { sym(&lib, b"agt_pty_close") };
+    let open: Symbol<PtyOpen> = unsafe { sym(lib, b"agt_pty_open") };
+    let read: Symbol<PtyRead> = unsafe { sym(lib, b"agt_pty_read") };
+    let wait: Symbol<PtyWait> = unsafe { sym(lib, b"agt_pty_wait") };
+    let close: Symbol<PtyClose> = unsafe { sym(lib, b"agt_pty_close") };
 
     let (program, args) = pty_echo_probe_program();
-    let pty = open_pty(&lib, &open, program, &args);
+    let pty = open_pty(lib, &open, program, &args);
 
     // Blocking read loop until the probe is seen or EOF (15 s cap).
     let mut collected = Vec::new();
@@ -401,7 +401,7 @@ fn pty_roundtrip_echo_probe() {
             st,
             AGT_OK,
             "agt_pty_read failed: {}",
-            last_error_message(&lib)
+            last_error_message(lib)
         );
         if n == 0 {
             break; // EOF
@@ -423,7 +423,7 @@ fn pty_roundtrip_echo_probe() {
         st,
         AGT_OK,
         "agt_pty_wait failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     assert_eq!(code, 0, "expected exit code 0, got {code}");
 
@@ -436,19 +436,19 @@ fn pty_roundtrip_echo_probe() {
 #[test]
 fn pty_wait_times_out_for_a_long_running_process() {
     let lib = load();
-    let open: Symbol<PtyOpen> = unsafe { sym(&lib, b"agt_pty_open") };
-    let wait: Symbol<PtyWait> = unsafe { sym(&lib, b"agt_pty_wait") };
-    let close: Symbol<PtyClose> = unsafe { sym(&lib, b"agt_pty_close") };
+    let open: Symbol<PtyOpen> = unsafe { sym(lib, b"agt_pty_open") };
+    let wait: Symbol<PtyWait> = unsafe { sym(lib, b"agt_pty_wait") };
+    let close: Symbol<PtyClose> = unsafe { sym(lib, b"agt_pty_close") };
 
     let (program, args) = pty_long_running_program();
-    let pty = open_pty(&lib, &open, program, &args);
+    let pty = open_pty(lib, &open, program, &args);
 
     let started = Instant::now();
     let mut code: i32 = -999;
     let st = unsafe { wait(pty, 50, &mut code) };
     let elapsed = started.elapsed();
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("timeout"),
         "expected code \"timeout\" in error, got: {msg}"
@@ -468,11 +468,11 @@ fn pty_wait_times_out_for_a_long_running_process() {
 #[test]
 fn pty_close_unblocks_a_reader_on_another_thread() {
     let lib = load();
-    let open: Symbol<PtyOpen> = unsafe { sym(&lib, b"agt_pty_open") };
-    let close: Symbol<PtyClose> = unsafe { sym(&lib, b"agt_pty_close") };
+    let open: Symbol<PtyOpen> = unsafe { sym(lib, b"agt_pty_open") };
+    let close: Symbol<PtyClose> = unsafe { sym(lib, b"agt_pty_close") };
 
     let (program, args) = pty_long_running_program();
-    let pty = open_pty(&lib, &open, program, &args);
+    let pty = open_pty(lib, &open, program, &args);
 
     let (tx, rx) = mpsc::channel::<(i32, usize)>();
     // `*mut c_void` is not `Send`; carry the opaque handle as `usize` (Send)
@@ -483,7 +483,7 @@ fn pty_close_unblocks_a_reader_on_another_thread() {
         let pty = reader_pty as *mut std::ffi::c_void;
         // Symbol is not Send, so the reader loads the library itself.
         let lib = load();
-        let read: Symbol<PtyRead> = unsafe { sym(&lib, b"agt_pty_read") };
+        let read: Symbol<PtyRead> = unsafe { sym(lib, b"agt_pty_read") };
         let mut buf = [0u8; 256];
         let mut n = 0usize;
         let st = unsafe { read(pty, buf.as_mut_ptr(), buf.len(), &mut n) };
@@ -652,12 +652,12 @@ fn try_open_window(lib: &Library, open: &Symbol<WindowOpen>) -> Option<*mut std:
 #[test]
 fn window_frame_roundtrip_begin_write_commit_close() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
-    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
-    let metrics: Symbol<WindowMetrics> = unsafe { sym(&lib, b"agt_window_metrics") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(lib, b"agt_frame_begin") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(lib, b"agt_frame_commit") };
+    let metrics: Symbol<WindowMetrics> = unsafe { sym(lib, b"agt_window_metrics") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -672,7 +672,7 @@ fn window_frame_roundtrip_begin_write_commit_close() {
         st,
         AGT_OK,
         "agt_frame_begin failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     assert!(!desc.pixels.is_null(), "frame pixel pointer is null");
     assert!(
@@ -697,7 +697,7 @@ fn window_frame_roundtrip_begin_write_commit_close() {
         st,
         AGT_OK,
         "agt_frame_commit failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
 
     // After open the loop thread has recorded geometry: metrics must work.
@@ -709,7 +709,7 @@ fn window_frame_roundtrip_begin_write_commit_close() {
         st,
         AGT_OK,
         "agt_window_metrics failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     assert!(
         w > 0 && h > 0 && scale > 0.0,
@@ -724,10 +724,10 @@ fn window_frame_roundtrip_begin_write_commit_close() {
 #[test]
 fn frame_commit_without_pending_frame_returns_no_frame() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(lib, b"agt_frame_commit") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -737,7 +737,7 @@ fn frame_commit_without_pending_frame_returns_no_frame() {
         st, AGT_FAILED,
         "expected AGT_FAILED for commit without a pending frame, got {st}"
     );
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("no_frame"),
         "expected code \"no_frame\" in error, got: {msg}"
@@ -754,11 +754,11 @@ fn frame_commit_without_pending_frame_returns_no_frame() {
 #[test]
 fn frame_begin_times_out_when_no_frame_is_available() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
-    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(lib, b"agt_frame_begin") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(lib, b"agt_frame_commit") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -777,7 +777,7 @@ fn frame_begin_times_out_when_no_frame_is_available() {
                     unsafe { commit(window) },
                     AGT_OK,
                     "agt_frame_commit failed: {}",
-                    last_error_message(&lib)
+                    last_error_message(lib)
                 );
             }
             st => {
@@ -785,7 +785,7 @@ fn frame_begin_times_out_when_no_frame_is_available() {
                     st, AGT_FAILED,
                     "expected AGT_FAILED from a frameless begin, got {st}"
                 );
-                let msg = last_error_message(&lib);
+                let msg = last_error_message(lib);
                 assert!(
                     msg.contains("timeout"),
                     "expected code \"timeout\" in error, got: {msg}"
@@ -807,10 +807,10 @@ fn frame_begin_times_out_when_no_frame_is_available() {
 #[test]
 fn close_without_committing_taken_frame_does_not_hang() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(lib, b"agt_frame_begin") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -827,7 +827,7 @@ fn close_without_committing_taken_frame_does_not_hang() {
         st,
         AGT_OK,
         "agt_frame_begin failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     assert!(!desc.pixels.is_null());
 
@@ -850,11 +850,11 @@ fn close_without_committing_taken_frame_does_not_hang() {
 #[test]
 fn close_wakes_a_caller_blocked_in_frame_begin() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
-    let commit: Symbol<FrameCommit> = unsafe { sym(&lib, b"agt_frame_commit") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let begin: Symbol<FrameBegin> = unsafe { sym(lib, b"agt_frame_begin") };
+    let commit: Symbol<FrameCommit> = unsafe { sym(lib, b"agt_frame_commit") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -871,14 +871,14 @@ fn close_wakes_a_caller_blocked_in_frame_begin() {
         st,
         AGT_OK,
         "agt_frame_begin failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     let st = unsafe { commit(window) };
     assert_eq!(
         st,
         AGT_OK,
         "agt_frame_commit failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
 
     // Waiter thread blocks in agt_frame_begin(10 s). `*mut c_void` is not
@@ -888,7 +888,7 @@ fn close_wakes_a_caller_blocked_in_frame_begin() {
     let waiter = std::thread::spawn(move || {
         let window = waiter_window as *mut std::ffi::c_void;
         let lib = load();
-        let begin: Symbol<FrameBegin> = unsafe { sym(&lib, b"agt_frame_begin") };
+        let begin: Symbol<FrameBegin> = unsafe { sym(lib, b"agt_frame_begin") };
         let mut desc = agt_frame_desc {
             pixels: std::ptr::null_mut(),
             width: 0,
@@ -896,7 +896,7 @@ fn close_wakes_a_caller_blocked_in_frame_begin() {
             stride_px: 0,
         };
         let st = unsafe { begin(window, &mut desc, 10_000) };
-        let msg = last_error_message(&lib);
+        let msg = last_error_message(lib);
         let _ = tx.send((st, msg));
     });
 
@@ -925,11 +925,11 @@ fn close_wakes_a_caller_blocked_in_frame_begin() {
 #[test]
 fn request_redraw_produces_a_render_due_event() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let redraw: Symbol<WindowRedraw> = unsafe { sym(&lib, b"agt_window_request_redraw") };
-    let poll: Symbol<WindowPoll> = unsafe { sym(&lib, b"agt_window_poll_event") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let redraw: Symbol<WindowRedraw> = unsafe { sym(lib, b"agt_window_request_redraw") };
+    let poll: Symbol<WindowPoll> = unsafe { sym(lib, b"agt_window_poll_event") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -938,7 +938,7 @@ fn request_redraw_produces_a_render_due_event() {
         st,
         AGT_OK,
         "agt_window_request_redraw failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -950,7 +950,7 @@ fn request_redraw_produces_a_render_due_event() {
             st,
             AGT_OK,
             "agt_window_poll_event failed: {}",
-            last_error_message(&lib)
+            last_error_message(lib)
         );
         if ev.kind == AGT_EV_RENDER_DUE {
             break;
@@ -972,11 +972,11 @@ type WindowEventText =
 #[test]
 fn window_event_text_two_stage_contract() {
     let lib = load();
-    let open: Symbol<WindowOpen> = unsafe { sym(&lib, b"agt_window_open") };
-    let poll: Symbol<WindowPoll> = unsafe { sym(&lib, b"agt_window_poll_event") };
-    let text_fn: Symbol<WindowEventText> = unsafe { sym(&lib, b"agt_window_event_text") };
-    let close: Symbol<WindowClose> = unsafe { sym(&lib, b"agt_window_close") };
-    let Some(window) = try_open_window(&lib, &open) else {
+    let open: Symbol<WindowOpen> = unsafe { sym(lib, b"agt_window_open") };
+    let poll: Symbol<WindowPoll> = unsafe { sym(lib, b"agt_window_poll_event") };
+    let text_fn: Symbol<WindowEventText> = unsafe { sym(lib, b"agt_window_event_text") };
+    let close: Symbol<WindowClose> = unsafe { sym(lib, b"agt_window_close") };
+    let Some(window) = try_open_window(lib, &open) else {
         return;
     };
 
@@ -988,7 +988,7 @@ fn window_event_text_two_stage_contract() {
         st,
         AGT_OK,
         "agt_window_event_text (no text) failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     assert_eq!(len, 0, "expected no pending text, got len={len}");
 
@@ -1004,7 +1004,7 @@ fn window_event_text_two_stage_contract() {
             st,
             AGT_OK,
             "agt_window_poll_event failed: {}",
-            last_error_message(&lib)
+            last_error_message(lib)
         );
         if ev.kind != AGT_EV_NONE {
             break;
@@ -1017,7 +1017,7 @@ fn window_event_text_two_stage_contract() {
     let mut probe = usize::MAX;
     let st = unsafe { text_fn(window, std::ptr::null_mut(), 0, &mut probe) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED for cap == 0, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("buffer_too_small"),
         "expected code \"buffer_too_small\" in error, got: {msg}"
@@ -1047,7 +1047,7 @@ fn temp_png_path(tag: &str) -> (std::path::PathBuf, CString) {
 #[test]
 fn screenshot_write_png_roundtrip() {
     let lib = load();
-    let f: Symbol<ScreenshotWritePng> = unsafe { sym(&lib, b"agt_screenshot_write_png") };
+    let f: Symbol<ScreenshotWritePng> = unsafe { sym(lib, b"agt_screenshot_write_png") };
     let pixels: Vec<u32> = vec![0x00FF0000u32; 16]; // 4x4 red (XRGB little-endian)
     let (path, path_c) = temp_png_path("roundtrip");
     let st = unsafe { f(path_c.as_ptr(), pixels.as_ptr(), pixels.len(), 4, 4) };
@@ -1055,7 +1055,7 @@ fn screenshot_write_png_roundtrip() {
         st,
         AGT_OK,
         "agt_screenshot_write_png failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     let data = std::fs::read(&path)
         .unwrap_or_else(|e| panic!("PNG not readable at {}: {e}", path.display()));
@@ -1075,12 +1075,12 @@ fn screenshot_write_png_roundtrip() {
 #[test]
 fn screenshot_write_png_rejects_mismatched_pixel_count() {
     let lib = load();
-    let f: Symbol<ScreenshotWritePng> = unsafe { sym(&lib, b"agt_screenshot_write_png") };
+    let f: Symbol<ScreenshotWritePng> = unsafe { sym(lib, b"agt_screenshot_write_png") };
     let pixels = [0u32; 4];
     let (_, path_c) = temp_png_path("dim-mismatch");
     let st = unsafe { f(path_c.as_ptr(), pixels.as_ptr(), 3, 2, 2) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_dimensions"),
         "expected code \"bad_dimensions\" in error, got: {msg}"
@@ -1092,7 +1092,7 @@ fn screenshot_write_png_rejects_mismatched_pixel_count() {
 #[test]
 fn screenshot_write_png_rejects_null_pointers() {
     let lib = load();
-    let f: Symbol<ScreenshotWritePng> = unsafe { sym(&lib, b"agt_screenshot_write_png") };
+    let f: Symbol<ScreenshotWritePng> = unsafe { sym(lib, b"agt_screenshot_write_png") };
     let pixels = [0x00FFFFFFu32; 4];
     let (_, path_c) = temp_png_path("null-pointers");
 
@@ -1102,7 +1102,7 @@ fn screenshot_write_png_rejects_null_pointers() {
         st, AGT_FAILED,
         "expected AGT_FAILED for NULL path, got {st}"
     );
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_path"),
         "expected code \"bad_path\" in error, got: {msg}"
@@ -1114,7 +1114,7 @@ fn screenshot_write_png_rejects_null_pointers() {
         st, AGT_FAILED,
         "expected AGT_FAILED for NULL pixels, got {st}"
     );
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "expected code \"bad_pointer\" in error, got: {msg}"
@@ -1126,11 +1126,11 @@ fn screenshot_write_png_rejects_null_pointers() {
 #[test]
 fn screenshot_capture_window_rejects_zero_handle() {
     let lib = load();
-    let f: Symbol<ScreenshotCaptureWindow> = unsafe { sym(&lib, b"agt_screenshot_capture_window") };
+    let f: Symbol<ScreenshotCaptureWindow> = unsafe { sym(lib, b"agt_screenshot_capture_window") };
     let (_, path_c) = temp_png_path("zero-handle");
     let st = unsafe { f(0, path_c.as_ptr(), 0, 0, 0, 0, 0) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_handle"),
         "expected code \"bad_handle\" in error, got: {msg}"
@@ -1145,8 +1145,8 @@ fn screenshot_capture_window_rejects_zero_handle() {
 #[test]
 fn process_list_roundtrip_contains_self() {
     let lib = load();
-    let list: Symbol<ProcessList> = unsafe { sym(&lib, b"agt_process_list") };
-    let self_pid: Symbol<ProcessSelf> = unsafe { sym(&lib, b"agt_process_self") };
+    let list: Symbol<ProcessList> = unsafe { sym(lib, b"agt_process_list") };
+    let self_pid: Symbol<ProcessSelf> = unsafe { sym(lib, b"agt_process_self") };
     let pid = unsafe { self_pid() };
     assert!(pid > 0, "agt_process_self must return a real pid, got 0");
 
@@ -1157,7 +1157,7 @@ fn process_list_roundtrip_contains_self() {
         st, AGT_FAILED,
         "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
     );
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("buffer_too_small"),
         "expected code \"buffer_too_small\" in error, got: {msg}"
@@ -1187,9 +1187,9 @@ fn process_list_roundtrip_contains_self() {
             st,
             AGT_FAILED,
             "agt_process_list failed: {}",
-            last_error_message(&lib)
+            last_error_message(lib)
         );
-        let msg = last_error_message(&lib);
+        let msg = last_error_message(lib);
         assert!(
             msg.contains("buffer_too_small"),
             "expected code \"buffer_too_small\" in error, got: {msg}"
@@ -1216,7 +1216,7 @@ fn process_list_roundtrip_contains_self() {
 #[test]
 fn process_list_small_cap_reports_required_count() {
     let lib = load();
-    let list: Symbol<ProcessList> = unsafe { sym(&lib, b"agt_process_list") };
+    let list: Symbol<ProcessList> = unsafe { sym(lib, b"agt_process_list") };
     let mut required = 0usize;
     let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
     assert_eq!(st, AGT_FAILED);
@@ -1229,7 +1229,7 @@ fn process_list_small_cap_reports_required_count() {
     let mut got = 0usize;
     let st = unsafe { list(one.as_mut_ptr(), 1, &mut got) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("buffer_too_small"),
         "expected code \"buffer_too_small\" in error, got: {msg}"
@@ -1244,11 +1244,11 @@ fn process_list_small_cap_reports_required_count() {
 #[test]
 fn process_list_rejects_null_out_count() {
     let lib = load();
-    let list: Symbol<ProcessList> = unsafe { sym(&lib, b"agt_process_list") };
+    let list: Symbol<ProcessList> = unsafe { sym(lib, b"agt_process_list") };
     let mut one = [agt_process_info::default(); 1];
     let st = unsafe { list(one.as_mut_ptr(), 1, std::ptr::null_mut()) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "expected code \"bad_pointer\" in error, got: {msg}"
@@ -1261,10 +1261,10 @@ fn process_list_rejects_null_out_count() {
 #[test]
 fn process_kill_rejects_pid_zero() {
     let lib = load();
-    let kill: Symbol<ProcessKill> = unsafe { sym(&lib, b"agt_process_kill") };
+    let kill: Symbol<ProcessKill> = unsafe { sym(lib, b"agt_process_kill") };
     let st = unsafe { kill(0) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pid"),
         "expected code \"bad_pid\" in error, got: {msg}"
@@ -1275,7 +1275,7 @@ fn process_kill_rejects_pid_zero() {
 #[test]
 fn a11y_capability_query_is_ok_or_unsupported() {
     let lib = load();
-    let query: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
     let st = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
     assert!(
         st == AGT_OK || st == AGT_UNSUPPORTED,
@@ -1287,11 +1287,11 @@ fn a11y_capability_query_is_ok_or_unsupported() {
 #[test]
 fn a11y_tree_node_without_snapshot_fails() {
     let lib = load();
-    let node_fn: Symbol<A11yTreeNode> = unsafe { sym(&lib, b"agt_a11y_tree_node") };
+    let node_fn: Symbol<A11yTreeNode> = unsafe { sym(lib, b"agt_a11y_tree_node") };
     let mut record = agt_a11y_node::default();
     let st = unsafe { node_fn(0, &mut record) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("no_snapshot"),
         "expected code \"no_snapshot\" in error, got: {msg}"
@@ -1303,9 +1303,9 @@ fn a11y_tree_node_without_snapshot_fails() {
 #[test]
 fn a11y_node_perform_rejects_null_node_id() {
     let lib = load();
-    let query: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
     let cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
-    let perform: Symbol<A11yNodePerform> = unsafe { sym(&lib, b"agt_a11y_node_perform") };
+    let perform: Symbol<A11yNodePerform> = unsafe { sym(lib, b"agt_a11y_node_perform") };
     let st = unsafe { perform(0, std::ptr::null(), 0) };
     if cap == AGT_UNSUPPORTED {
         eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
@@ -1313,7 +1313,7 @@ fn a11y_node_perform_rejects_null_node_id() {
         return;
     }
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "expected code \"bad_pointer\" in error, got: {msg}"
@@ -1325,16 +1325,16 @@ fn a11y_node_perform_rejects_null_node_id() {
 #[test]
 fn a11y_tree_snapshot_roundtrip_when_available() {
     let lib = load();
-    let query: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
     let st = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
     if st == AGT_UNSUPPORTED {
         eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
         return;
     }
-    let snapshot: Symbol<A11yTreeSnapshot> = unsafe { sym(&lib, b"agt_a11y_tree_snapshot") };
-    let meta: Symbol<A11yTreeMetaString> = unsafe { sym(&lib, b"agt_a11y_tree_meta_string") };
-    let node_fn: Symbol<A11yTreeNode> = unsafe { sym(&lib, b"agt_a11y_tree_node") };
-    let node_str: Symbol<A11yNodeString> = unsafe { sym(&lib, b"agt_a11y_node_string") };
+    let snapshot: Symbol<A11yTreeSnapshot> = unsafe { sym(lib, b"agt_a11y_tree_snapshot") };
+    let meta: Symbol<A11yTreeMetaString> = unsafe { sym(lib, b"agt_a11y_tree_meta_string") };
+    let node_fn: Symbol<A11yTreeNode> = unsafe { sym(lib, b"agt_a11y_tree_node") };
+    let node_str: Symbol<A11yNodeString> = unsafe { sym(lib, b"agt_a11y_node_string") };
     let mut count = 0usize;
     let snap_st = unsafe { snapshot(0, &mut count) };
     if snap_st == AGT_UNSUPPORTED {
@@ -1345,9 +1345,9 @@ fn a11y_tree_snapshot_roundtrip_when_available() {
         snap_st,
         AGT_OK,
         "snapshot failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
-    let backend = read_two_stage_bytes(&lib, |buf, cap, out_len| unsafe {
+    let backend = read_two_stage_bytes(lib, |buf, cap, out_len| unsafe {
         meta(0, buf, cap, out_len)
     });
     assert!(
@@ -1361,9 +1361,9 @@ fn a11y_tree_snapshot_roundtrip_when_available() {
             node_st,
             AGT_OK,
             "node read failed: {}",
-            last_error_message(&lib)
+            last_error_message(lib)
         );
-        let role = read_two_stage_bytes(&lib, |buf, cap, out_len| unsafe {
+        let role = read_two_stage_bytes(lib, |buf, cap, out_len| unsafe {
             node_str(0, 0, buf, cap, out_len)
         });
         assert!(!role.is_empty(), "first node role should be non-empty");
@@ -1678,7 +1678,7 @@ fn clipboard_set_text_rejects_null_and_non_utf8() {
 #[test]
 fn parent_console_write_stdout_valid_text_never_fails() {
     let lib = load();
-    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stdout") };
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(lib, b"agt_parent_console_write_stdout") };
     let text = b"agenterm-abi-probe: milestone-9 stdout write\n";
     let st = unsafe { f(text.as_ptr(), text.len()) };
     assert!(
@@ -1700,7 +1700,7 @@ fn parent_console_write_stdout_valid_text_never_fails() {
 #[test]
 fn parent_console_write_stderr_valid_text_never_fails() {
     let lib = load();
-    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stderr") };
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(lib, b"agt_parent_console_write_stderr") };
     let text = b"agenterm-abi-probe: milestone-9 stderr write\n";
     let st = unsafe { f(text.as_ptr(), text.len()) };
     assert!(
@@ -1722,7 +1722,7 @@ fn parent_console_write_stderr_valid_text_never_fails() {
 #[test]
 fn parent_console_write_rejects_null_and_non_utf8() {
     let lib = load();
-    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stdout") };
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(lib, b"agt_parent_console_write_stdout") };
     // NULL text with a nonzero length -> bad_text.
     let st = unsafe { f(std::ptr::null(), 5) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
@@ -1741,7 +1741,7 @@ fn parent_console_write_rejects_null_and_non_utf8() {
         "expected code \"bad_text\" in error, got: {msg}"
     );
     // Same bad-input contract on the stderr export.
-    let g: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stderr") };
+    let g: Symbol<ParentConsoleWrite> = unsafe { sym(lib, b"agt_parent_console_write_stderr") };
     let st = unsafe { g(std::ptr::null(), 5) };
     assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
     let msg = last_error_message(lib);
@@ -1758,7 +1758,7 @@ fn parent_console_write_rejects_null_and_non_utf8() {
 #[test]
 fn parent_console_write_accepts_empty_text() {
     let lib = load();
-    let f: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stdout") };
+    let f: Symbol<ParentConsoleWrite> = unsafe { sym(lib, b"agt_parent_console_write_stdout") };
     let empty: &[u8] = b"";
     for text in [empty.as_ptr(), std::ptr::null()] {
         let st = unsafe { f(text, 0) };
@@ -1768,7 +1768,7 @@ fn parent_console_write_accepts_empty_text() {
         );
     }
     // Same contract on the stderr export.
-    let g: Symbol<ParentConsoleWrite> = unsafe { sym(&lib, b"agt_parent_console_write_stderr") };
+    let g: Symbol<ParentConsoleWrite> = unsafe { sym(lib, b"agt_parent_console_write_stderr") };
     let st = unsafe { g(std::ptr::null(), 0) };
     assert_ne!(
         st, AGT_FAILED,
@@ -1783,7 +1783,7 @@ fn parent_console_write_accepts_empty_text() {
 #[test]
 fn runtime_user_config_dir_two_stage_contract() {
     let lib = load();
-    let dir: Symbol<RuntimeUserConfigDir> = unsafe { sym(&lib, b"agt_runtime_user_config_dir") };
+    let dir: Symbol<RuntimeUserConfigDir> = unsafe { sym(lib, b"agt_runtime_user_config_dir") };
 
     // Stage 1: the legal "how big?" probe (cap == 0, buf == NULL).
     let mut needed = 0usize;
@@ -1792,7 +1792,7 @@ fn runtime_user_config_dir_two_stage_contract() {
         st, AGT_FAILED,
         "cap=0 probe must fail with buffer_too_small, got {st}"
     );
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("buffer_too_small"),
         "expected code \"buffer_too_small\" in error, got: {msg}"
@@ -1806,7 +1806,7 @@ fn runtime_user_config_dir_two_stage_contract() {
     let mut buf = vec![0u8; needed];
     let mut got = 0usize;
     let st = unsafe { dir(buf.as_mut_ptr(), needed, &mut got) };
-    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(&lib));
+    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(lib));
     assert_eq!(
         got, needed,
         "written length {got} must equal the probed length {needed}"
@@ -1823,7 +1823,7 @@ fn runtime_user_config_dir_two_stage_contract() {
 #[test]
 fn runtime_default_shell_two_stage_contract() {
     let lib = load();
-    let shell: Symbol<RuntimeDefaultShell> = unsafe { sym(&lib, b"agt_runtime_default_shell") };
+    let shell: Symbol<RuntimeDefaultShell> = unsafe { sym(lib, b"agt_runtime_default_shell") };
 
     let mut needed = 0usize;
     let st = unsafe { shell(std::ptr::null_mut(), 0, &mut needed) };
@@ -1831,7 +1831,7 @@ fn runtime_default_shell_two_stage_contract() {
         st, AGT_FAILED,
         "cap=0 probe must fail with buffer_too_small, got {st}"
     );
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("buffer_too_small"),
         "expected code \"buffer_too_small\" in error, got: {msg}"
@@ -1844,7 +1844,7 @@ fn runtime_default_shell_two_stage_contract() {
     let mut buf = vec![0u8; needed];
     let mut got = 0usize;
     let st = unsafe { shell(buf.as_mut_ptr(), needed, &mut got) };
-    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(&lib));
+    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(lib));
     assert_eq!(
         got, needed,
         "written length {got} must equal the probed length {needed}"
@@ -1861,7 +1861,7 @@ fn runtime_default_shell_two_stage_contract() {
 #[test]
 fn runtime_env_present_probes_real_environment() {
     let lib = load();
-    let present: Symbol<RuntimeEnvPresent> = unsafe { sym(&lib, b"agt_runtime_env_present") };
+    let present: Symbol<RuntimeEnvPresent> = unsafe { sym(lib, b"agt_runtime_env_present") };
 
     let path = b"PATH";
     assert_eq!(
@@ -1902,8 +1902,8 @@ fn runtime_arg_child_probe() {
         return;
     }
     let lib = load();
-    let count: Symbol<RuntimeArgCount> = unsafe { sym(&lib, b"agt_runtime_arg_count") };
-    let arg: Symbol<RuntimeArg> = unsafe { sym(&lib, b"agt_runtime_arg") };
+    let count: Symbol<RuntimeArgCount> = unsafe { sym(lib, b"agt_runtime_arg_count") };
+    let arg: Symbol<RuntimeArg> = unsafe { sym(lib, b"agt_runtime_arg") };
 
     let mut n = 0usize;
     let st = unsafe { count(&mut n) };
@@ -1911,7 +1911,7 @@ fn runtime_arg_child_probe() {
         st,
         AGT_OK,
         "agt_runtime_arg_count failed: {}",
-        last_error_message(&lib)
+        last_error_message(lib)
     );
     assert!(
         n >= 1,
@@ -1932,7 +1932,7 @@ fn runtime_arg_child_probe() {
     let mut buf = vec![0u8; needed];
     let mut got = 0usize;
     let st = unsafe { arg(0, buf.as_mut_ptr(), needed, &mut got) };
-    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(&lib));
+    assert_eq!(st, AGT_OK, "fetch failed: {}", last_error_message(lib));
     assert_eq!(
         got, needed,
         "written length {got} must equal the probed length {needed}"
@@ -1968,8 +1968,8 @@ fn runtime_arg_count_reports_real_arguments() {
 #[test]
 fn runtime_arg_bad_index_and_bad_pointer() {
     let lib = load();
-    let count: Symbol<RuntimeArgCount> = unsafe { sym(&lib, b"agt_runtime_arg_count") };
-    let arg: Symbol<RuntimeArg> = unsafe { sym(&lib, b"agt_runtime_arg") };
+    let count: Symbol<RuntimeArgCount> = unsafe { sym(lib, b"agt_runtime_arg_count") };
+    let arg: Symbol<RuntimeArg> = unsafe { sym(lib, b"agt_runtime_arg") };
 
     let mut scratch = [0u8; 64];
     let mut out = 0usize;
@@ -1977,7 +1977,7 @@ fn runtime_arg_bad_index_and_bad_pointer() {
     // Valid pointers but out-of-range index -> bad_index.
     let st = unsafe { arg(9999, scratch.as_mut_ptr(), 64, &mut out) };
     assert_eq!(st, AGT_FAILED, "out-of-range index must fail, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_index"),
         "expected code \"bad_index\" in error, got: {msg}"
@@ -1986,7 +1986,7 @@ fn runtime_arg_bad_index_and_bad_pointer() {
     // NULL out_count -> bad_pointer.
     let st = unsafe { count(std::ptr::null_mut()) };
     assert_eq!(st, AGT_FAILED, "NULL out_count must fail, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "expected code \"bad_pointer\" in error, got: {msg}"
@@ -1995,7 +1995,7 @@ fn runtime_arg_bad_index_and_bad_pointer() {
     // NULL out_len -> bad_pointer (checked before the index range).
     let st = unsafe { arg(9999, scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
     assert_eq!(st, AGT_FAILED, "NULL out_len must fail, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "expected code \"bad_pointer\" in error, got: {msg}"
@@ -2008,15 +2008,15 @@ fn runtime_arg_bad_index_and_bad_pointer() {
 #[test]
 fn runtime_two_stage_rejects_null_out_len() {
     let lib = load();
-    let dir: Symbol<RuntimeUserConfigDir> = unsafe { sym(&lib, b"agt_runtime_user_config_dir") };
-    let shell: Symbol<RuntimeDefaultShell> = unsafe { sym(&lib, b"agt_runtime_default_shell") };
-    let arg: Symbol<RuntimeArg> = unsafe { sym(&lib, b"agt_runtime_arg") };
+    let dir: Symbol<RuntimeUserConfigDir> = unsafe { sym(lib, b"agt_runtime_user_config_dir") };
+    let shell: Symbol<RuntimeDefaultShell> = unsafe { sym(lib, b"agt_runtime_default_shell") };
+    let arg: Symbol<RuntimeArg> = unsafe { sym(lib, b"agt_runtime_arg") };
 
     let mut scratch = [0u8; 64];
 
     let st = unsafe { dir(scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
     assert_eq!(st, AGT_FAILED, "dir: NULL out_len must fail, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "dir: expected code \"bad_pointer\" in error, got: {msg}"
@@ -2024,7 +2024,7 @@ fn runtime_two_stage_rejects_null_out_len() {
 
     let st = unsafe { shell(scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
     assert_eq!(st, AGT_FAILED, "shell: NULL out_len must fail, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "shell: expected code \"bad_pointer\" in error, got: {msg}"
@@ -2032,7 +2032,7 @@ fn runtime_two_stage_rejects_null_out_len() {
 
     let st = unsafe { arg(0, scratch.as_mut_ptr(), 64, std::ptr::null_mut()) };
     assert_eq!(st, AGT_FAILED, "arg: NULL out_len must fail, got {st}");
-    let msg = last_error_message(&lib);
+    let msg = last_error_message(lib);
     assert!(
         msg.contains("bad_pointer"),
         "arg: expected code \"bad_pointer\" in error, got: {msg}"
