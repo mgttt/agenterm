@@ -920,6 +920,7 @@ impl ConApp {
             width,
             height,
             self.composer.focused,
+            &self.composer.text,
         ));
         self.a11y_dirty = false;
     }
@@ -933,6 +934,20 @@ impl ConApp {
         };
         for request in requests {
             match (request.node, request.action) {
+                (
+                    agenterm_platform::accessibility_publish::NODE_COMMAND,
+                    agenterm_platform::accessibility_publish::PublishedAction::SetText(text),
+                ) => {
+                    self.composer.focused = true;
+                    composer::replace_text(
+                        &mut self.composer.text,
+                        &mut self.composer.select_all,
+                        &text,
+                    );
+                    self.composer.preedit.clear();
+                    let _ = self.update_composer_ime_anchor(window);
+                    self.mark_composer_dirty();
+                }
                 (agenterm_platform::accessibility_publish::NODE_COMMAND, _) => {
                     self.composer.focused = true;
                     let _ = self.update_composer_ime_anchor(window);

@@ -285,9 +285,11 @@ fn focus(
     Ok(focus_tree_payload(&resolved, window))
 }
 
-/// `send-text` with `--name` focuses the matched node first (same matcher as
-/// `focus`), then reuses the existing keyboard-injection path. Without
-/// `--name` it stays the plain "type into whatever is focused" verb.
+/// `send-text` with `--name` writes through native AT-SPI
+/// `EditableText` (`SetTextContents` / `InsertText`). A named showing
+/// node with no text interface typed-fails (`a11y_text_unavailable`)
+/// and never falls through to XTest / `input_inject::type_text`.
+/// Without `--name` it stays the plain "type into whatever is focused" verb.
 fn send_text(
     text: &str,
     window: Option<isize>,
@@ -298,9 +300,7 @@ fn send_text(
         agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
         return Ok(serde_json::json!({ "typed": text }));
     };
-    mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
-        .map_err(map_mechanism_err)?;
-    agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
+    mechanism::set_node_text(window, &resolved.node_id, text).map_err(map_mechanism_err)?;
     agenterm_platform::accessibility_tree::drain_bus();
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
@@ -309,6 +309,7 @@ fn send_text(
         "window": window,
         "action": "send-text",
         "typed": text,
+        "via": "editable-text",
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)

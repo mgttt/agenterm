@@ -7,7 +7,9 @@ use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
 use atspi::proxy::component::ComponentProxy;
 use atspi::proxy::device_event_controller::DeviceEventControllerProxy;
+use atspi::proxy::editable_text::EditableTextProxy;
 use atspi::proxy::proxy_ext::ProxyExt;
+use atspi::proxy::text::TextProxy;
 use atspi::{CoordType, Interface, Role, StateSet};
 use tokio::time::{Duration, timeout};
 use zbus::fdo::DBusProxy;
@@ -157,6 +159,29 @@ pub(crate) fn perform_node_action(
     })
 }
 
+/// Write through AT-SPI `EditableText` (`SetTextContents`, then `InsertText`).
+/// A named showing node with no writeable text interface fails typed —
+/// never XTest / `GenerateKeyboardEvent`.
+pub(crate) fn set_node_text(
+    window_handle: Option<isize>,
+    node_id: &str,
+    text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            set_node_text_async(window_handle, node_id, text),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_text_timeout",
+                "AT-SPI text write exceeded its deadline",
+            )
+        })?
+    })
+}
+
 async fn tree_for_window_async(
     window_handle: Option<isize>,
     max_nodes: usize,
@@ -271,6 +296,27 @@ async fn perform_node_action_async(
             Ok(())
         }
     }
+}
+
+async fn set_node_text_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+    text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            format!("node path {node_id} has no AT-SPI text interface"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_editable_text(&proxy, text).await
 }
 
 fn activate_window_node(
@@ -470,16 +516,24 @@ async fn select_roots(
     Ok(selected)
 }
 
+/// When the a11y destination publishes a Unix PID, that PID is
+/// authoritative. Two `agenterm-con` processes share toolkit name
+/// `agenterm-con`; falling through to name matching would merge both
+/// trees and make `--name Command` ambiguous. Name/title fallback stays
+/// only for destinations whose PID cannot be read (some embeds).
+fn dest_pid_verdict(dest_pid: Option<u32>, owns_pid: bool) -> Option<bool> {
+    dest_pid.map(|_| owns_pid)
+}
+
 async fn root_matches_window(
     conn: &zbus::Connection,
     dbus: Option<&DBusProxy<'_>>,
     object: &BusObject,
     identity: &WindowIdentity,
 ) -> bool {
-    if let Some(pid) = dest_pid(dbus, &object.dest).await
-        && identity.owns_pid(pid)
-    {
-        return true;
+    let pid = dest_pid(dbus, &object.dest).await;
+    if let Some(matched) = dest_pid_verdict(pid, pid.is_some_and(|pid| identity.owns_pid(pid))) {
+        return matched;
     }
     let Ok(proxy) = open_bus_object(conn, object).await else {
         return false;
@@ -791,11 +845,17 @@ async fn read_node(
     let role = role_name(proxy).await;
     let name = proxy.name().await.unwrap_or_default();
     let states = states_from_proxy(proxy).await;
-    // Stay on the Accessible interface during snapshot. WebKitGTK's
-    // Component/Action/Text methods (and `proxies()` introspect) routinely
-    // hang past 250ms; doing that per node blows the 10s tree deadline
-    // before named document widgets are reached. Click uses Action
-    // click/press/DoAction(0), then Component GetExtents + AT-SPI mouse.
+    // Stay off Component/Action/`proxies()` during snapshot — WebKitGTK
+    // hangs those. GetText on an entry/text/editable node is bounded
+    // (ACTION_TIMEOUT) so `cu tree` can show what EditableText wrote.
+    let text = if node_looks_like_text_field(&role, &states) {
+        timeout(ACTION_TIMEOUT, text_from_text_proxy(proxy))
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
     AccessibilityNode {
         id,
         parent_id,
@@ -809,8 +869,16 @@ async fn read_node(
             height: 0,
         },
         actions: Vec::new(),
-        text: None,
+        text,
     }
+}
+
+fn node_looks_like_text_field(role: &str, states: &[String]) -> bool {
+    let role = role.to_ascii_lowercase();
+    matches!(
+        role.as_str(),
+        "entry" | "text" | "password text" | "passwordtext" | "edit" | "edit box"
+    ) || states.iter().any(|state| state == "editable")
 }
 
 async fn role_name(proxy: &AccessibleProxy<'_>) -> String {
@@ -1154,6 +1222,164 @@ async fn component_proxy_for<'a>(
         .build()
         .await
         .map_err(map_atspi_err)
+}
+
+async fn editable_text_proxy_for<'a>(
+    proxy: &AccessibleProxy<'a>,
+) -> Result<EditableTextProxy<'a>, AccessibilityTreeError> {
+    let inner = proxy.inner();
+    EditableTextProxy::builder(inner.connection())
+        .destination(inner.destination().to_owned())
+        .map_err(map_atspi_err)?
+        .path(inner.path().to_owned())
+        .map_err(map_atspi_err)?
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .map_err(map_atspi_err)
+}
+
+async fn text_proxy_for<'a>(
+    proxy: &AccessibleProxy<'a>,
+) -> Result<TextProxy<'a>, AccessibilityTreeError> {
+    let inner = proxy.inner();
+    TextProxy::builder(inner.connection())
+        .destination(inner.destination().to_owned())
+        .map_err(map_atspi_err)?
+        .path(inner.path().to_owned())
+        .map_err(map_atspi_err)?
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .map_err(map_atspi_err)
+}
+
+/// How a resolved node is written. `has_editable` is `GetInterfaces` for
+/// `org.a11y.atspi.EditableText`. `None` means the probe timed out — still
+/// try the write (WebKit `GetInterfaces` hangs; `SetTextContents` may work).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TextWriteRoute {
+    EditableText,
+    Unavailable,
+}
+
+fn text_write_route(has_editable: Option<bool>) -> TextWriteRoute {
+    match has_editable {
+        Some(false) => TextWriteRoute::Unavailable,
+        _ => TextWriteRoute::EditableText,
+    }
+}
+
+/// `InsertText` length is a character count (libatspi
+/// `atspi_editable_text_insert_text`). Cap at i32::MAX; empty is 0.
+fn insert_text_char_count(text: &str) -> i32 {
+    i32::try_from(text.chars().count()).unwrap_or(i32::MAX)
+}
+
+fn is_missing_text_interface(error: &AccessibilityTreeError) -> bool {
+    let AccessibilityTreeError::Failed { code, message } = error else {
+        return false;
+    };
+    code == "a11y_text_unavailable"
+        || message.contains("UnknownInterface")
+        || message.contains("UnknownMethod")
+        || message.contains("does not exist")
+}
+
+async fn node_exposes_editable_text(proxy: &AccessibleProxy<'_>) -> Option<bool> {
+    match timeout(ACTION_TIMEOUT, proxy.get_interfaces()).await {
+        Ok(Ok(ifaces)) => Some(ifaces.contains(Interface::EditableText)),
+        _ => None,
+    }
+}
+
+async fn text_from_text_proxy(proxy: &AccessibleProxy<'_>) -> Option<String> {
+    let text = text_proxy_for(proxy).await.ok()?;
+    let count = text.character_count().await.ok()?.clamp(0, 4096);
+    if count == 0 {
+        return None;
+    }
+    text.get_text(0, count)
+        .await
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+async fn text_character_count(proxy: &AccessibleProxy<'_>) -> Option<i32> {
+    let text = timeout(ACTION_TIMEOUT, text_proxy_for(proxy))
+        .await
+        .ok()?
+        .ok()?;
+    timeout(ACTION_TIMEOUT, text.character_count())
+        .await
+        .ok()?
+        .ok()
+        .map(|count| count.max(0))
+}
+
+/// Native AT-SPI write: `EditableText.SetTextContents`, then
+/// `EditableText.InsertText`. Matches libatspi
+/// `atspi_editable_text_set_text_contents` / `atspi_editable_text_insert_text`.
+/// Never falls through to XTest / DeviceEventController keyboard.
+async fn invoke_editable_text(
+    proxy: &AccessibleProxy<'_>,
+    text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    let has_editable = node_exposes_editable_text(proxy).await;
+    match text_write_route(has_editable) {
+        TextWriteRoute::Unavailable => Err(AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            "node does not expose the AT-SPI EditableText interface",
+        )),
+        TextWriteRoute::EditableText => match write_editable_text(proxy, text).await {
+            Ok(()) => Ok(()),
+            Err(write_err)
+                if has_editable != Some(true) && is_missing_text_interface(&write_err) =>
+            {
+                Err(AccessibilityTreeError::failed(
+                    "a11y_text_unavailable",
+                    "node does not expose the AT-SPI EditableText interface",
+                ))
+            }
+            Err(write_err) => Err(write_err),
+        },
+    }
+}
+
+async fn write_editable_text(
+    proxy: &AccessibleProxy<'_>,
+    text: &str,
+) -> Result<(), AccessibilityTreeError> {
+    let editable = editable_text_proxy_for(proxy).await?;
+    match timeout(NODE_TIMEOUT, editable.set_text_contents(text)).await {
+        Ok(Ok(true)) => return Ok(()),
+        Ok(Ok(false)) => {}
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_text_interface(&mapped) {
+                return Err(mapped);
+            }
+        }
+        Err(_) => {}
+    }
+    let position = text_character_count(proxy).await.unwrap_or(0);
+    let length = insert_text_char_count(text);
+    let inserted = timeout(NODE_TIMEOUT, editable.insert_text(position, text, length))
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_text_timeout",
+                "AT-SPI InsertText exceeded its deadline",
+            )
+        })?
+        .map_err(map_atspi_err)?;
+    if !inserted {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            format!("AT-SPI InsertText({position}) returned false"),
+        ));
+    }
+    Ok(())
 }
 
 async fn invoke_named_action(
@@ -1607,6 +1833,55 @@ mod tests {
     }
 
     #[test]
+    fn text_write_route_unavailable_when_editable_text_absent() {
+        assert_eq!(text_write_route(Some(false)), TextWriteRoute::Unavailable);
+    }
+
+    #[test]
+    fn text_write_route_tries_write_when_present_or_unknown() {
+        assert_eq!(text_write_route(Some(true)), TextWriteRoute::EditableText);
+        assert_eq!(text_write_route(None), TextWriteRoute::EditableText);
+    }
+
+    #[test]
+    fn insert_text_length_is_unicode_scalar_count() {
+        assert_eq!(insert_text_char_count(""), 0);
+        assert_eq!(insert_text_char_count("hi"), 2);
+        assert_eq!(insert_text_char_count("héllo"), 5);
+    }
+
+    #[test]
+    fn missing_text_interface_is_typed() {
+        assert!(is_missing_text_interface(&AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            "node does not expose the AT-SPI EditableText interface",
+        )));
+        assert!(is_missing_text_interface(&AccessibilityTreeError::failed(
+            "a11y_backend_failed",
+            "org.freedesktop.DBus.Error.UnknownInterface: Interface does not exist",
+        )));
+        assert!(!is_missing_text_interface(&AccessibilityTreeError::failed(
+            "a11y_text_timeout",
+            "AT-SPI InsertText exceeded its deadline"
+        )));
+    }
+
+    #[test]
+    fn text_like_roles_are_read_during_snapshot() {
+        assert!(node_looks_like_text_field("entry", &[]));
+        assert!(node_looks_like_text_field("text", &[]));
+        assert!(node_looks_like_text_field(
+            "button",
+            &["editable".to_owned()]
+        ));
+        assert!(!node_looks_like_text_field(
+            "button",
+            &["showing".to_owned()]
+        ));
+        assert!(!node_looks_like_text_field("document web", &[]));
+    }
+
+    #[test]
     fn missing_action_interface_is_typed() {
         assert!(is_missing_action_interface(
             &AccessibilityTreeError::failed(
@@ -1725,6 +2000,14 @@ mod tests {
             Some(205990)
         );
         assert_eq!(parse_status_ppid("Name:\tinit\n"), None);
+    }
+
+    #[test]
+    #[test]
+    fn known_dest_pid_is_authoritative() {
+        assert_eq!(dest_pid_verdict(Some(10), true), Some(true));
+        assert_eq!(dest_pid_verdict(Some(11), false), Some(false));
+        assert_eq!(dest_pid_verdict(None, false), None);
     }
 
     #[test]

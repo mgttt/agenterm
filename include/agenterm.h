@@ -32,12 +32,12 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 1
+#define AGT_ABI_MINOR 2
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
 /* Human-readable build identity: "<crate version>+abi.<major>.<minor>"
- * (e.g. "0.1.16+abi.1.1"), derived at compile time from the crate version
+ * (e.g. "0.1.16+abi.1.2"), derived at compile time from the crate version
  * and the ABI constants above. NUL-terminated, static, permanently valid. */
 const char* agt_build_id(void);
 
@@ -402,6 +402,15 @@ agt_status agt_a11y_node_action_name(size_t node_index, size_t action_index,
  * codes such as "a11y_node_not_found". */
 agt_status agt_a11y_node_perform(intptr_t window_handle, const char* node_id,
                                    agt_a11y_action_kind action);
+
+/* Write UTF-8 text through the host accessibility text interface
+ * (Linux: AT-SPI EditableText SetTextContents / InsertText). `node_id`
+ * is a NUL-terminated UTF-8 child-index path. `text == NULL` with
+ * `len > 0` -> AGT_FAILED{code="bad_pointer"}; non-UTF-8 -> "bad_encoding".
+ * A node that does not expose a writeable text interface ->
+ * AGT_FAILED{code="a11y_text_unavailable"}. Never injects keystrokes. */
+agt_status agt_a11y_node_set_text(intptr_t window_handle, const char* node_id,
+                                  const uint8_t* text, size_t len);
 
 /* --- clipboard (milestone 8) ---------------------------------------- */
 

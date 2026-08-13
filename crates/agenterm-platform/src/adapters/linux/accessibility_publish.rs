@@ -3,7 +3,8 @@
 //! winit/softbuffer never loads GTK's atk-bridge, so a process that only
 //! paints pixels is invisible on the a11y bus. This adapter registers the
 //! process as an AT-SPI application and serves Accessible/Component/Action
-//! children. `cu` then walks those children the same way it walks GTK/Chrome.
+//! children, plus Text/EditableText on editable nodes. `cu` then walks those
+//! children the same way it walks GTK/Chrome.
 
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -77,6 +78,8 @@ struct Ctx {
 struct AccessibleNode(Ctx);
 struct ComponentNode(Ctx);
 struct ActionNode(Ctx);
+struct TextNode(Ctx);
+struct EditableTextNode(Ctx);
 struct ApplicationRoot(Ctx);
 
 fn lock_store(store: &Mutex<Store>) -> std::sync::MutexGuard<'_, Store> {
@@ -180,7 +183,96 @@ fn interfaces_for(node: &PublishedNode) -> Vec<String> {
     if node.clickable || node.focusable {
         names.push("org.a11y.atspi.Action".to_owned());
     }
+    if node.editable {
+        names.push("org.a11y.atspi.Text".to_owned());
+        names.push("org.a11y.atspi.EditableText".to_owned());
+    }
     names
+}
+
+fn node_text(store: &Store, id: u32) -> String {
+    store
+        .node(id)
+        .map(|node| node.text.clone())
+        .unwrap_or_default()
+}
+
+fn char_count(text: &str) -> i32 {
+    i32::try_from(text.chars().count()).unwrap_or(i32::MAX)
+}
+
+/// AT-SPI `GetText` offsets are Unicode scalar counts. `end < 0` means
+/// through the last character (libatspi / atk-bridge convention).
+fn slice_text(text: &str, start: i32, end: i32) -> String {
+    let total = text.chars().count();
+    let start = usize::try_from(start.max(0)).unwrap_or(0).min(total);
+    let end = if end < 0 {
+        total
+    } else {
+        usize::try_from(end).unwrap_or(total).min(total)
+    };
+    if start >= end {
+        return String::new();
+    }
+    text.chars()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .collect()
+}
+
+fn insert_at_char(text: &str, position: i32, piece: &str, length: i32) -> String {
+    let total = text.chars().count();
+    let pos = if position < 0 {
+        total
+    } else {
+        usize::try_from(position).unwrap_or(total).min(total)
+    };
+    let take = if length < 0 {
+        piece.chars().count()
+    } else {
+        usize::try_from(length).unwrap_or(0)
+    };
+    let piece: String = piece.chars().take(take).collect();
+    let mut out = String::with_capacity(text.len().saturating_add(piece.len()));
+    out.extend(text.chars().take(pos));
+    out.push_str(&piece);
+    out.extend(text.chars().skip(pos));
+    out
+}
+
+fn delete_range(text: &str, start: i32, end: i32) -> String {
+    let total = text.chars().count();
+    let start = usize::try_from(start.max(0)).unwrap_or(0).min(total);
+    let end = if end < 0 {
+        total
+    } else {
+        usize::try_from(end).unwrap_or(total).min(total).max(start)
+    };
+    let mut out = String::with_capacity(text.len());
+    out.extend(text.chars().take(start));
+    out.extend(text.chars().skip(end));
+    out
+}
+
+/// Update stored text immediately so `GetText` reflects the write before
+/// the product event loop applies it to the painted composer.
+fn replace_node_text(store: &Mutex<Store>, id: u32, text: String) -> bool {
+    let handler = {
+        let mut store = lock_store(store);
+        let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) else {
+            return false;
+        };
+        if !node.editable {
+            return false;
+        }
+        node.text = text.clone();
+        store.focused = Some(id);
+        store.handler.clone()
+    };
+    if let Some(handler) = handler {
+        handler(id, PublishedAction::SetText(text));
+    }
+    true
 }
 
 fn actions_for(node: &PublishedNode) -> Vec<(String, String, String)> {
@@ -484,6 +576,107 @@ impl ActionNode {
     }
 }
 
+#[interface(name = "org.a11y.atspi.Text")]
+impl TextNode {
+    fn get_text(&self, start_offset: i32, end_offset: i32) -> String {
+        let store = lock_store(&self.0.store);
+        slice_text(&node_text(&store, self.0.id), start_offset, end_offset)
+    }
+
+    fn get_character_at_offset(&self, offset: i32) -> i32 {
+        let store = lock_store(&self.0.store);
+        let text = node_text(&store, self.0.id);
+        if offset < 0 {
+            return 0;
+        }
+        text.chars()
+            .nth(usize::try_from(offset).unwrap_or(usize::MAX))
+            .map(|ch| ch as i32)
+            .unwrap_or(0)
+    }
+
+    #[zbus(name = "GetNSelections")]
+    fn get_n_selections(&self) -> i32 {
+        0
+    }
+
+    fn get_selection(&self, _selection_num: i32) -> (i32, i32) {
+        (0, 0)
+    }
+
+    fn add_selection(&self, _start_offset: i32, _end_offset: i32) -> bool {
+        false
+    }
+
+    fn remove_selection(&self, _selection_num: i32) -> bool {
+        false
+    }
+
+    fn set_selection(&self, _selection_num: i32, _start_offset: i32, _end_offset: i32) -> bool {
+        false
+    }
+
+    fn set_caret_offset(&self, _offset: i32) -> bool {
+        true
+    }
+
+    #[zbus(property)]
+    fn character_count(&self) -> i32 {
+        let store = lock_store(&self.0.store);
+        char_count(&node_text(&store, self.0.id))
+    }
+
+    #[zbus(property)]
+    fn caret_offset(&self) -> i32 {
+        self.character_count()
+    }
+}
+
+#[interface(name = "org.a11y.atspi.EditableText")]
+impl EditableTextNode {
+    fn set_text_contents(&self, new_contents: String) -> bool {
+        replace_node_text(&self.0.store, self.0.id, new_contents)
+    }
+
+    fn insert_text(&self, position: i32, text: String, length: i32) -> bool {
+        let next = {
+            let store = lock_store(&self.0.store);
+            let Some(node) = store.node(self.0.id) else {
+                return false;
+            };
+            if !node.editable {
+                return false;
+            }
+            insert_at_char(&node.text, position, &text, length)
+        };
+        replace_node_text(&self.0.store, self.0.id, next)
+    }
+
+    fn copy_text(&self, _start_pos: i32, _end_pos: i32) {}
+
+    fn cut_text(&self, start_pos: i32, end_pos: i32) -> bool {
+        self.delete_text(start_pos, end_pos)
+    }
+
+    fn delete_text(&self, start_pos: i32, end_pos: i32) -> bool {
+        let next = {
+            let store = lock_store(&self.0.store);
+            let Some(node) = store.node(self.0.id) else {
+                return false;
+            };
+            if !node.editable {
+                return false;
+            }
+            delete_range(&node.text, start_pos, end_pos)
+        };
+        replace_node_text(&self.0.store, self.0.id, next)
+    }
+
+    fn paste_text(&self, _position: i32) -> bool {
+        false
+    }
+}
+
 #[interface(name = "org.a11y.atspi.Application")]
 impl ApplicationRoot {
     fn get_locale(&self, _lctype: u32) -> String {
@@ -551,6 +744,7 @@ fn empty_tree(app_name: &str) -> PublishedTree {
             focused: false,
             editable: false,
             clickable: false,
+            text: String::new(),
         }],
     }
 }
@@ -588,6 +782,14 @@ async fn register_node(
         .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
     conn.object_server()
         .at(path.as_str(), ActionNode(ctx.clone()))
+        .await
+        .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
+    conn.object_server()
+        .at(path.as_str(), TextNode(ctx.clone()))
+        .await
+        .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
+    conn.object_server()
+        .at(path.as_str(), EditableTextNode(ctx.clone()))
         .await
         .map_err(|error| AccessibilityPublishError::failed("a11y_publish_export", error))?;
     if id == 0 {
@@ -720,6 +922,7 @@ mod tests {
             parent: Some(1),
             role: PublishedRole::Text,
             name: "Command".into(),
+            text: String::new(),
             bounds: AccessibilityBounds {
                 x: 0,
                 y: 0,
@@ -745,6 +948,7 @@ mod tests {
             parent: Some(1),
             role: PublishedRole::Button,
             name: "SEND".into(),
+            text: String::new(),
             bounds: AccessibilityBounds {
                 x: 0,
                 y: 0,
@@ -759,5 +963,85 @@ mod tests {
         let actions = actions_for(&node);
         assert_eq!(actions[0].0, "click");
         assert!(actions.iter().any(|action| action.0 == "focus"));
+    }
+
+    fn sample_command(text: &str) -> PublishedNode {
+        PublishedNode {
+            id: 4,
+            parent: Some(1),
+            role: PublishedRole::Text,
+            name: "Command".into(),
+            text: text.to_owned(),
+            bounds: AccessibilityBounds {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            focusable: true,
+            focused: true,
+            editable: true,
+            clickable: true,
+        }
+    }
+
+    #[test]
+    fn editable_command_advertises_native_text_interfaces() {
+        let ifaces = interfaces_for(&sample_command(""));
+        assert!(ifaces.iter().any(|name| name == "org.a11y.atspi.Text"));
+        assert!(
+            ifaces
+                .iter()
+                .any(|name| name == "org.a11y.atspi.EditableText")
+        );
+    }
+
+    #[test]
+    fn button_does_not_advertise_editable_text() {
+        let node = PublishedNode {
+            id: 5,
+            parent: Some(1),
+            role: PublishedRole::Button,
+            name: "SEND".into(),
+            text: String::new(),
+            bounds: AccessibilityBounds {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            focusable: true,
+            focused: false,
+            editable: false,
+            clickable: true,
+        };
+        let ifaces = interfaces_for(&node);
+        assert!(
+            !ifaces
+                .iter()
+                .any(|name| name == "org.a11y.atspi.EditableText")
+        );
+        assert!(!ifaces.iter().any(|name| name == "org.a11y.atspi.Text"));
+    }
+
+    #[test]
+    fn get_text_uses_unicode_offsets_and_negative_end() {
+        assert_eq!(slice_text("héllo", 0, -1), "héllo");
+        assert_eq!(slice_text("héllo", 1, 3), "él");
+        assert_eq!(slice_text("héllo", 4, 99), "o");
+        assert_eq!(slice_text("héllo", 3, 1), "");
+    }
+
+    #[test]
+    fn insert_text_appends_at_negative_or_past_end() {
+        assert_eq!(insert_at_char("ab", -1, "xy", 2), "abxy");
+        assert_eq!(insert_at_char("ab", 99, "z", 1), "abz");
+        assert_eq!(insert_at_char("ab", 1, "éé", 1), "aéb");
+    }
+
+    #[test]
+    fn delete_text_drops_the_requested_range() {
+        assert_eq!(delete_range("héllo", 1, 3), "hlo");
+        assert_eq!(delete_range("abc", 0, -1), "");
     }
 }

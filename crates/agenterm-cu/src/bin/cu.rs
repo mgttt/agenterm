@@ -312,8 +312,9 @@ Commands:
                               --name reuses wait NodeNameContains matching, then the --node AT-SPI path
   focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
   send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
-                              --name focuses that node first (same matcher as click/focus),
-                              then types; `--` ends flag parsing
+                              --name writes via AT-SPI EditableText (SetTextContents /
+                              InsertText); a node with no text interface typed-fails
+                              (never XTest). `--` ends flag parsing
   send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
                               e.g. ctrl+c / alt+f4 / enter; --name focuses that node first
                               (same matcher as click/focus/send-text), then sends
