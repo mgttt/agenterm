@@ -9,6 +9,8 @@ Copyright and license terms remain with their respective authors.
 | --- | --- |
 | `ab_glyph` | Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
+| `atspi` | Apache-2.0 OR MIT |
+| `cc` (dev dependency) | MIT OR Apache-2.0 |
 | `itoa` | MIT OR Apache-2.0 |
 | `libc` | MIT OR Apache-2.0 |
 | `libloading` | ISC |
@@ -25,6 +27,7 @@ Copyright and license terms remain with their respective authors.
 | `softbuffer` | MIT OR Apache-2.0 |
 | `sqlparser` | Apache-2.0 |
 | `tempfile` | MIT OR Apache-2.0 |
+| `tokio` | MIT |
 | `unicode-width` | MIT OR Apache-2.0 |
 | `ureq` | MIT OR Apache-2.0 |
 | `vt100` | MIT |
@@ -35,6 +38,7 @@ Copyright and license terms remain with their respective authors.
 | `winit` | Apache-2.0 |
 | `winresource` (build dependency) | MIT |
 | `x11rb` | MIT OR Apache-2.0 |
+| `zbus` | MIT |
 
 The corresponding sources and complete license files are available from each
 package's entry in the Cargo registry. `scripts/rh/supply-chain.rh` uses

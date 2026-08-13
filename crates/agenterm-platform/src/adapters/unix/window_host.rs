@@ -250,7 +250,7 @@ impl PixelWindowBackend for NativeWindowBackend {
 fn native_pixel_window_identity(window: &Window) -> Option<i64> {
     let handle = window.window_handle().ok()?;
     match handle.as_raw() {
-        RawWindowHandle::Xlib(handle) => i64::try_from(handle.window).ok(),
+        RawWindowHandle::Xlib(handle) => Some(i64::from(handle.window)),
         RawWindowHandle::Xcb(handle) => Some(i64::from(handle.window.get())),
         RawWindowHandle::Wayland(handle) => Some(handle.surface.as_ptr() as isize as i64),
         RawWindowHandle::AppKit(handle) => Some(handle.ns_view.as_ptr() as isize as i64),
