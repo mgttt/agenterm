@@ -14,3 +14,5 @@ target-click-release/
 
 # 外部 agent 派单回执（本地证据，不入库）
 .reasonix-dispatch/
+# reasonix CLI 在项目根落的会话/任务工作区
+.reasonix/

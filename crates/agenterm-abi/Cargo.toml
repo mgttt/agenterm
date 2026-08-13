@@ -12,6 +12,11 @@ autolib = false
 # exports.txt and do not link against the crate, so no rlib is required.
 crate-type = ["cdylib"]
 
+[dependencies]
+# The PTY mechanism (milestone 2). `pty` is a real feature: without it the
+# whole `agenterm_platform::pty` module does not exist.
+agenterm-platform = { path = "../agenterm-platform", features = ["pty"] }
+
 [dev-dependencies]
 # The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built
 # cdylib to prove the FFI contract (NUL-terminated C strings, §3.8 fence).

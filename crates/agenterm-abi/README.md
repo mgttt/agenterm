@@ -17,6 +17,9 @@ cargo build -p agenterm-abi --profile abi-release
 
 # 开发 / 测试（panic=unwind；同时构建 cdylib 并运行全部测试）
 cargo test -p agenterm-abi --profile abi-dev
+
+# 格式化检查（CI 闸：全 workspace 必须干净，退出码 0）
+cargo fmt --all -- --check
 ```
 
 任何不带 `--profile abi-*` 的 `cargo build/test -p agenterm-abi` 都会因编译期

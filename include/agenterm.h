@@ -3,12 +3,13 @@
  *
  * This is the *mechanism* boundary between embedding consumers and the OS.
  * It deliberately contains no product concepts. Every symbol is prefixed
- * `agt_`. Milestone 1 implements only version / error / capability exports;
- * PTY / window / screenshot mechanisms arrive in later milestones.
+ * `agt_`. Milestone 1 shipped version / error / capability exports; milestone 2
+ * adds the PTY mechanism. Window / screenshot mechanisms arrive later.
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -65,6 +66,53 @@ typedef enum {
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). */
 agt_status agt_capability_query(agt_capability cap);
+
+/* --- pty ------------------------------------------------------------ */
+
+/* Opaque, library-owned PTY handle. Cross-thread safe: any thread may call
+ * the agt_pty_* functions on the same handle, and close may run while another
+ * thread is blocked in read (the blocked read is unblocked). The handle is
+ * released by agt_pty_close, which must be called exactly once. */
+typedef struct agt_pty* agt_pty_t;
+
+typedef struct {
+    const char* program;        /* required, NUL-terminated, UTF-8 */
+    /* argv[0] is the program name by POSIX convention and is not re-passed
+     * as an argument; arguments are argv[1..argc]. NULL/0 = no arguments. */
+    const char* const* argv;
+    size_t argc;
+    const char* cwd;            /* NULL = inherit the caller's directory */
+    /* "K=V" entries; NULL or envc == 0 = inherit the parent environment. */
+    const char* const* envp;
+    size_t envc;
+    uint16_t cols, rows;        /* terminal size, each >= 1 */
+} agt_pty_spawn;
+
+/* Spawn program in a new PTY; *out receives an opaque library-owned handle.
+ * On failure returns AGT_FAILED (never AGT_UNSUPPORTED); the reason is
+ * available via agt_last_error. */
+agt_status agt_pty_open  (const agt_pty_spawn*, agt_pty_t* out);
+
+/* Block until data is available or the PTY is closed. Caller-allocated buffer:
+ * the library never takes memory ownership. EOF is AGT_OK with *out_len == 0.
+ * cap == 0 fails with code "buffer_too_small" and *out_len = required length. */
+agt_status agt_pty_read  (agt_pty_t, uint8_t* buf, size_t cap, size_t* out_len);
+
+/* Write len bytes to the PTY master; on success *written == len. */
+agt_status agt_pty_write (agt_pty_t, const uint8_t*, size_t, size_t* written);
+
+/* Resize the PTY to cols x rows (each >= 1). */
+agt_status agt_pty_resize(agt_pty_t, uint16_t cols, uint16_t rows);
+
+/* Wait up to timeout_ms for the process to exit; on exit *exit_code is filled
+ * and AGT_OK is returned. On timeout returns AGT_FAILED with code "timeout"
+ * (never AGT_UNSUPPORTED). The underlying blocking wait runs on a
+ * library-private thread. */
+agt_status agt_pty_wait  (agt_pty_t, uint32_t timeout_ms, int32_t* exit_code);
+
+/* Release the handle; must be called exactly once. Unblocks any thread
+ * currently blocked in agt_pty_read on the same handle. */
+void       agt_pty_close (agt_pty_t);
 
 #ifdef __cplusplus
 } /* extern "C" */
