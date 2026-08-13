@@ -87,6 +87,7 @@ dependencies = [
 name = "agenterm-cu"
 version = "0.1.0"
 dependencies = [
+ "agenterm-abi",
  "agenterm-platform",
  "serde",
  "serde_json",

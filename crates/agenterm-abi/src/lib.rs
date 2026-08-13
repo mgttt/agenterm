@@ -23,6 +23,12 @@
 //! live processes (two-stage, §3.4), `agt_process_kill` terminates by pid, and
 //! `agt_process_self` reports the calling process pid. `AGT_CAP_PROCESS_OBSERVE`
 //! now reports `AGT_OK`; spawn stays `AGT_UNSUPPORTED` (not built this round).
+//! Milestone 6 ships structured accessibility-tree observe and node actuation:
+//! `agt_a11y_tree_snapshot` captures a flattened tree, variable-length node fields
+//! are fetched with `agt_a11y_node_string` / `agt_a11y_node_action_name`, and
+//! `agt_a11y_node_perform` invokes click/focus by child-index path. Backends are
+//! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
+//! `agenterm-platform`; the C header names mechanisms only.
 //! Milestone 8 ships the clipboard mechanism: `agt_clipboard_set_text`
 //! publishes UTF-8 text, `agt_clipboard_get_text` reads it back two-stage, and
 //! `agt_clipboard_has_text` probes for Unicode text. `AGT_CAP_CLIPBOARD` now
@@ -48,6 +54,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use agenterm_platform::CapabilityStatus;
+use agenterm_platform::accessibility_tree::{
+    AccessibilityNodeAction, AccessibilityTreeError, perform_node_action, tree_for_window,
+};
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::input::{
@@ -176,6 +186,7 @@ pub enum agt_capability {
     AGT_CAP_FILESYSTEM_PUBLISH,
     AGT_CAP_SHARED_MEMORY,
     AGT_CAP_PARENT_CONSOLE,
+    AGT_CAP_ACCESSIBILITY_TREE,
 }
 
 const ABI_MAJOR: u16 = 1;
@@ -190,7 +201,7 @@ pub extern "C" fn agt_abi_version() -> u32 {
 /// Human-readable build identity. Static, permanently valid.
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_build_id() -> *const c_char {
-    catch_unwind(|| cstr_static(c"0.1.16+abi.1")).unwrap_or(std::ptr::null())
+    catch_unwind(|| cstr_static(c"0.1.16+abi.2")).unwrap_or(std::ptr::null())
 }
 
 /// Fill `out` with the last error recorded on this thread, or a "no error"
@@ -245,8 +256,10 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 /// `process`, `clipboard` and `parent-console` features are compiled into
 /// this build, so `AGT_CAP_PTY`, `AGT_CAP_WINDOW_HOST`,
 /// `AGT_CAP_SCREENSHOT`, `AGT_CAP_PROCESS_OBSERVE`, `AGT_CAP_CLIPBOARD` and
-/// `AGT_CAP_PARENT_CONSOLE` report `AGT_OK`; mechanisms that have not shipped
-/// yet report `AGT_UNSUPPORTED` (a product gap, never a permission statement).
+/// `AGT_CAP_CLIPBOARD` and `AGT_CAP_PARENT_CONSOLE` report `AGT_OK`;
+/// `AGT_CAP_ACCESSIBILITY_TREE` reports `AGT_OK` when the host accessibility
+/// stack is wired in this build. Mechanisms that have not shipped yet report
+/// `AGT_UNSUPPORTED` (a product gap, never a permission statement).
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
     match cap {
@@ -256,6 +269,13 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
         | agt_capability::AGT_CAP_PROCESS_OBSERVE
         | agt_capability::AGT_CAP_CLIPBOARD
         | agt_capability::AGT_CAP_PARENT_CONSOLE => agt_status::AGT_OK,
+        agt_capability::AGT_CAP_ACCESSIBILITY_TREE => {
+            if a11y_mechanism_available() {
+                agt_status::AGT_OK
+            } else {
+                agt_status::AGT_UNSUPPORTED
+            }
+        }
         _ => agt_status::AGT_UNSUPPORTED,
     }
     // Pure match — no panic surface; the fence is kept for uniformity.
@@ -2548,6 +2568,489 @@ pub extern "C" fn agt_process_kill(pid: u32) -> agt_status {
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_process_self() -> u32 {
     catch_unwind(std::process::id).unwrap_or(0)
+}
+
+// --- accessibility tree (milestone 6) --------------------------------
+
+const AGT_A11Y_META_BACKEND: i32 = 0;
+const AGT_A11Y_META_ROOT_ID: i32 = 1;
+
+const AGT_A11Y_STR_ROLE: i32 = 0;
+const AGT_A11Y_STR_NAME: i32 = 1;
+const AGT_A11Y_STR_TEXT: i32 = 2;
+const AGT_A11Y_STR_STATES: i32 = 3;
+
+const AGT_A11Y_ACTION_CLICK: i32 = 0;
+const AGT_A11Y_ACTION_FOCUS: i32 = 1;
+
+/// Fixed-size node record mirroring `include/agenterm.h`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct agt_a11y_node {
+    pub bounds_x: i32,
+    pub bounds_y: i32,
+    pub bounds_width: i32,
+    pub bounds_height: i32,
+    pub id: [u8; 64],
+    pub id_len: u32,
+    pub id_truncated: u32,
+    pub parent_id: [u8; 64],
+    pub parent_id_len: u32,
+    pub parent_id_truncated: u32,
+    pub has_parent: u8,
+    pub actions_count: u32,
+}
+
+struct A11ySnapshot {
+    backend: String,
+    root_id: String,
+    nodes: Vec<agenterm_platform::accessibility_tree::AccessibilityNode>,
+}
+
+thread_local! {
+    static A11Y_SNAPSHOT: RefCell<Option<A11ySnapshot>> = const { RefCell::new(None) };
+}
+
+fn a11y_mechanism_available() -> bool {
+    matches!(
+        agenterm_platform::accessibility_tree::capability_status(),
+        CapabilityStatus::Available
+    )
+}
+
+fn path_to_fixed(path: &str) -> ([u8; 64], u32, u32) {
+    let (kept, truncated) = truncate_name(path, 64);
+    let mut bytes = [0u8; 64];
+    bytes[..kept].copy_from_slice(&path.as_bytes()[..kept]);
+    (bytes, kept as u32, u32::from(truncated))
+}
+
+fn node_to_record(
+    node: &agenterm_platform::accessibility_tree::AccessibilityNode,
+) -> agt_a11y_node {
+    let (id, id_len, id_truncated) = path_to_fixed(&node.id);
+    let (parent_id, parent_id_len, parent_id_truncated) = match node.parent_id.as_deref() {
+        Some(p) => {
+            let (bytes, len, trunc) = path_to_fixed(p);
+            (bytes, len, trunc)
+        }
+        None => ([0u8; 64], 0, 0),
+    };
+    agt_a11y_node {
+        bounds_x: node.bounds.x,
+        bounds_y: node.bounds.y,
+        bounds_width: node.bounds.width,
+        bounds_height: node.bounds.height,
+        id,
+        id_len,
+        id_truncated,
+        parent_id,
+        parent_id_len,
+        parent_id_truncated,
+        has_parent: u8::from(node.parent_id.is_some()),
+        actions_count: node.actions.len() as u32,
+    }
+}
+
+fn map_a11y_error(operation: &'static CStr, error: AccessibilityTreeError) -> agt_status {
+    match error {
+        AccessibilityTreeError::Unsupported { .. } => agt_status::AGT_UNSUPPORTED,
+        AccessibilityTreeError::Failed { code, message } => {
+            let code_cstr: &'static CStr = match code.as_ref() {
+                "a11y_connect_failed" => c"a11y_connect_failed",
+                "a11y_tree_empty" => c"a11y_tree_empty",
+                "a11y_node_not_found" => c"a11y_node_not_found",
+                "a11y_action_unavailable" => c"a11y_action_unavailable",
+                "a11y_backend_failed" => c"a11y_backend_failed",
+                "a11y_invalid_node_id" => c"a11y_invalid_node_id",
+                other => {
+                    record_error(
+                        operation,
+                        c"a11y_backend_failed",
+                        format!("{other}: {message}"),
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+            };
+            record_error(operation, code_cstr, message);
+            agt_status::AGT_FAILED
+        }
+        _ => {
+            record_error(
+                operation,
+                c"a11y_backend_failed",
+                "unknown accessibility-tree error",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+fn copy_bytes_two_stage(
+    operation: &'static CStr,
+    data: &[u8],
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    if out_len.is_null() {
+        record_error(operation, c"bad_pointer", "out_len is null");
+        return agt_status::AGT_FAILED;
+    }
+    let required = data.len();
+    if cap == 0 {
+        unsafe { *out_len = required };
+        record_error(
+            operation,
+            c"buffer_too_small",
+            "cap is 0; allocate the required byte count and call again",
+        );
+        return agt_status::AGT_FAILED;
+    }
+    if buf.is_null() {
+        record_error(operation, c"bad_pointer", "buf is null");
+        return agt_status::AGT_FAILED;
+    }
+    if cap < required {
+        unsafe { *out_len = required };
+        record_error(
+            operation,
+            c"buffer_too_small",
+            "cap is smaller than the string; allocate the required byte count and call again",
+        );
+        return agt_status::AGT_FAILED;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(data.as_ptr(), buf, required);
+        *out_len = required;
+    }
+    agt_status::AGT_OK
+}
+
+fn with_snapshot_node(
+    index: usize,
+    operation: &'static CStr,
+    f: impl FnOnce(&agenterm_platform::accessibility_tree::AccessibilityNode) -> agt_status,
+) -> agt_status {
+    A11Y_SNAPSHOT.with(|cell| {
+        let guard = cell.borrow();
+        let snap = match guard.as_ref() {
+            Some(s) => s,
+            None => {
+                record_error(
+                    operation,
+                    c"no_snapshot",
+                    "call agt_a11y_tree_snapshot before reading nodes",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let node = match snap.nodes.get(index) {
+            Some(n) => n,
+            None => {
+                record_error(operation, c"bad_index", "node index is out of range");
+                return agt_status::AGT_FAILED;
+            }
+        };
+        f(node)
+    })
+}
+
+/// Capture a flattened accessibility tree for the host OS stack.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_tree_snapshot(
+    window_handle: isize,
+    out_node_count: *mut usize,
+) -> agt_status {
+    fn inner(window_handle: isize, out_node_count: *mut usize) -> agt_status {
+        if out_node_count.is_null() {
+            record_error(
+                c"agt_a11y_tree_snapshot",
+                c"bad_pointer",
+                "out_node_count is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        let tree = match tree_for_window(filter) {
+            Ok(t) => t,
+            Err(e) => return map_a11y_error(c"agt_a11y_tree_snapshot", e),
+        };
+        let count = tree.nodes.len();
+        A11Y_SNAPSHOT.with(|cell| {
+            *cell.borrow_mut() = Some(A11ySnapshot {
+                backend: tree.backend.to_string(),
+                root_id: tree.root_id.clone(),
+                nodes: tree.nodes,
+            });
+        });
+        unsafe { *out_node_count = count };
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(window_handle, out_node_count))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_tree_snapshot",
+                c"panic",
+                "panic in agt_a11y_tree_snapshot",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Fetch snapshot metadata (backend or root id).
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_tree_meta_string(
+    field: i32,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(field: i32, buf: *mut u8, cap: usize, out_len: *mut usize) -> agt_status {
+        A11Y_SNAPSHOT.with(|cell| {
+            let guard = cell.borrow();
+            let snap = match guard.as_ref() {
+                Some(s) => s,
+                None => {
+                    record_error(
+                        c"agt_a11y_tree_meta_string",
+                        c"no_snapshot",
+                        "call agt_a11y_tree_snapshot before reading metadata",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+            };
+            let data = match field {
+                AGT_A11Y_META_BACKEND => snap.backend.as_bytes(),
+                AGT_A11Y_META_ROOT_ID => snap.root_id.as_bytes(),
+                _ => {
+                    record_error(
+                        c"agt_a11y_tree_meta_string",
+                        c"bad_field",
+                        "unknown meta field",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+            };
+            copy_bytes_two_stage(c"agt_a11y_tree_meta_string", data, buf, cap, out_len)
+        })
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(field, buf, cap, out_len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_tree_meta_string",
+                c"panic",
+                "panic in agt_a11y_tree_meta_string",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Copy one node from the thread-local snapshot.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_tree_node(index: usize, out: *mut agt_a11y_node) -> agt_status {
+    fn inner(index: usize, out: *mut agt_a11y_node) -> agt_status {
+        if out.is_null() {
+            record_error(c"agt_a11y_tree_node", c"bad_pointer", "out is null");
+            return agt_status::AGT_FAILED;
+        }
+        with_snapshot_node(index, c"agt_a11y_tree_node", |node| {
+            unsafe { *out = node_to_record(node) };
+            agt_status::AGT_OK
+        })
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(index, out))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_tree_node",
+                c"panic",
+                "panic in agt_a11y_tree_node",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Fetch a variable-length string for a snapshot node.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_string(
+    node_index: usize,
+    kind: i32,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(
+        node_index: usize,
+        kind: i32,
+        buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> agt_status {
+        with_snapshot_node(node_index, c"agt_a11y_node_string", |node| {
+            let data: Vec<u8> = match kind {
+                AGT_A11Y_STR_ROLE => node.role.as_bytes().to_vec(),
+                AGT_A11Y_STR_NAME => node.name.as_bytes().to_vec(),
+                AGT_A11Y_STR_TEXT => node.text.as_deref().unwrap_or("").as_bytes().to_vec(),
+                AGT_A11Y_STR_STATES => {
+                    if node.states.is_empty() {
+                        Vec::new()
+                    } else {
+                        node.states.join(",").into_bytes()
+                    }
+                }
+                _ => {
+                    record_error(c"agt_a11y_node_string", c"bad_field", "unknown string kind");
+                    return agt_status::AGT_FAILED;
+                }
+            };
+            copy_bytes_two_stage(c"agt_a11y_node_string", &data, buf, cap, out_len)
+        })
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(node_index, kind, buf, cap, out_len)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_string",
+                c"panic",
+                "panic in agt_a11y_node_string",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Fetch an action name for a snapshot node.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_action_name(
+    node_index: usize,
+    action_index: usize,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> agt_status {
+    fn inner(
+        node_index: usize,
+        action_index: usize,
+        buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> agt_status {
+        with_snapshot_node(node_index, c"agt_a11y_node_action_name", |node| {
+            let action = match node.actions.get(action_index) {
+                Some(a) => a,
+                None => {
+                    record_error(
+                        c"agt_a11y_node_action_name",
+                        c"bad_index",
+                        "action index is out of range",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+            };
+            copy_bytes_two_stage(
+                c"agt_a11y_node_action_name",
+                action.as_bytes(),
+                buf,
+                cap,
+                out_len,
+            )
+        })
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(node_index, action_index, buf, cap, out_len)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_action_name",
+                c"panic",
+                "panic in agt_a11y_node_action_name",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Perform click or focus on a child-index path without a prior snapshot.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_perform(
+    window_handle: isize,
+    node_id: *const c_char,
+    action: i32,
+) -> agt_status {
+    fn inner(window_handle: isize, node_id: *const c_char, action: i32) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(c"agt_a11y_node_perform", c"bad_pointer", "node_id is null");
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_perform",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let platform_action = match action {
+            AGT_A11Y_ACTION_CLICK => AccessibilityNodeAction::Click,
+            AGT_A11Y_ACTION_FOCUS => AccessibilityNodeAction::Focus,
+            _ => {
+                record_error(
+                    c"agt_a11y_node_perform",
+                    c"bad_action",
+                    "unknown action kind",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match perform_node_action(filter, node_id, platform_action) {
+            Ok(()) => agt_status::AGT_OK,
+            Err(e) => map_a11y_error(c"agt_a11y_node_perform", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(window_handle, node_id, action))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_perform",
+                c"panic",
+                "panic in agt_a11y_node_perform",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
 }
 
 // --- clipboard (milestone 8) -------------------------------------------

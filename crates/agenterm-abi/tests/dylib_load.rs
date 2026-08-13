@@ -72,7 +72,8 @@ const AGT_CAP_CLIPBOARD: i32 = 8;
 const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
-const EXPECTED_BUILD_ID: &str = "0.1.16+abi.1";
+const EXPECTED_BUILD_ID: &str = "0.1.16+abi.2";
+const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
 const PROBE: &[u8] = b"agenterm-abi-probe";
 /// PNG signature: `89 50 4E 47 0D 0A 1A 0A`.
 const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -89,6 +90,48 @@ type ScreenshotCaptureWindow =
 type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize) -> i32;
 type ProcessKill = unsafe extern "C" fn(u32) -> i32;
 type ProcessSelf = unsafe extern "C" fn() -> u32;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct agt_a11y_node {
+    bounds_x: i32,
+    bounds_y: i32,
+    bounds_width: i32,
+    bounds_height: i32,
+    id: [u8; 64],
+    id_len: u32,
+    id_truncated: u32,
+    parent_id: [u8; 64],
+    parent_id_len: u32,
+    parent_id_truncated: u32,
+    has_parent: u8,
+    actions_count: u32,
+}
+
+impl Default for agt_a11y_node {
+    fn default() -> Self {
+        agt_a11y_node {
+            bounds_x: 0,
+            bounds_y: 0,
+            bounds_width: 0,
+            bounds_height: 0,
+            id: [0u8; 64],
+            id_len: 0,
+            id_truncated: 0,
+            parent_id: [0u8; 64],
+            parent_id_len: 0,
+            parent_id_truncated: 0,
+            has_parent: 0,
+            actions_count: 0,
+        }
+    }
+}
+
+type A11yTreeSnapshot = unsafe extern "C" fn(isize, *mut usize) -> i32;
+type A11yTreeMetaString = unsafe extern "C" fn(i32, *mut u8, usize, *mut usize) -> i32;
+type A11yTreeNode = unsafe extern "C" fn(usize, *mut agt_a11y_node) -> i32;
+type A11yNodeString = unsafe extern "C" fn(usize, i32, *mut u8, usize, *mut usize) -> i32;
+type A11yNodePerform = unsafe extern "C" fn(isize, *const c_char, i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type ClipboardHasText = unsafe extern "C" fn() -> i32;
@@ -1183,6 +1226,111 @@ fn process_kill_rejects_pid_zero() {
         msg.contains("bad_pid"),
         "expected code \"bad_pid\" in error, got: {msg}"
     );
+}
+
+/// Milestone 6 evidence 1: accessibility-tree capability is queryable.
+#[test]
+fn a11y_capability_query_is_ok_or_unsupported() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let st = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
+    assert!(
+        st == AGT_OK || st == AGT_UNSUPPORTED,
+        "capability query must not return AGT_FAILED, got {st}"
+    );
+}
+
+/// Milestone 6 evidence 2: reading a node without a snapshot fails typed.
+#[test]
+fn a11y_tree_node_without_snapshot_fails() {
+    let lib = load();
+    let node_fn: Symbol<A11yTreeNode> = unsafe { sym(&lib, b"agt_a11y_tree_node") };
+    let mut record = agt_a11y_node::default();
+    let st = unsafe { node_fn(0, &mut record) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("no_snapshot"),
+        "expected code \"no_snapshot\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 6 evidence 3: NULL node_id → AGT_FAILED{code="bad_pointer"}.
+#[test]
+fn a11y_node_perform_rejects_null_node_id() {
+    let lib = load();
+    let perform: Symbol<A11yNodePerform> = unsafe { sym(&lib, b"agt_a11y_node_perform") };
+    let st = unsafe { perform(0, std::ptr::null(), 0) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(&lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 6 evidence 4: on hosts with a wired accessibility stack, snapshot
+/// returns a tree and metadata strings round-trip.
+#[test]
+fn a11y_tree_snapshot_roundtrip_when_available() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(&lib, b"agt_capability_query") };
+    let st = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
+    if st == AGT_UNSUPPORTED {
+        eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
+        return;
+    }
+    let snapshot: Symbol<A11yTreeSnapshot> = unsafe { sym(&lib, b"agt_a11y_tree_snapshot") };
+    let meta: Symbol<A11yTreeMetaString> = unsafe { sym(&lib, b"agt_a11y_tree_meta_string") };
+    let node_fn: Symbol<A11yTreeNode> = unsafe { sym(&lib, b"agt_a11y_tree_node") };
+    let node_str: Symbol<A11yNodeString> = unsafe { sym(&lib, b"agt_a11y_node_string") };
+    let mut count = 0usize;
+    let snap_st = unsafe { snapshot(0, &mut count) };
+    if snap_st == AGT_UNSUPPORTED {
+        eprintln!("SKIP (runtime a11y unavailable): snapshot unsupported");
+        return;
+    }
+    assert_eq!(
+        snap_st,
+        AGT_OK,
+        "snapshot failed: {}",
+        last_error_message(&lib)
+    );
+    let backend = read_two_stage_bytes(&lib, |buf, cap, out_len| unsafe {
+        meta(0, buf, cap, out_len)
+    });
+    assert!(
+        !backend.is_empty(),
+        "backend metadata must be non-empty on success"
+    );
+    if count > 0 {
+        let mut record = agt_a11y_node::default();
+        let node_st = unsafe { node_fn(0, &mut record) };
+        assert_eq!(
+            node_st,
+            AGT_OK,
+            "node read failed: {}",
+            last_error_message(&lib)
+        );
+        let role = read_two_stage_bytes(&lib, |buf, cap, out_len| unsafe {
+            node_str(0, 0, buf, cap, out_len)
+        });
+        assert!(!role.is_empty(), "first node role should be non-empty");
+    }
+}
+
+fn read_two_stage_bytes(
+    lib: &Library,
+    mut read: impl FnMut(*mut u8, usize, *mut usize) -> i32,
+) -> Vec<u8> {
+    let mut required = 0usize;
+    let probe = read(std::ptr::null_mut(), 0, &mut required);
+    assert_eq!(probe, AGT_FAILED, "probe should request allocation");
+    let mut buf = vec![0u8; required];
+    let st = read(buf.as_mut_ptr(), required, &mut required);
+    assert_eq!(st, AGT_OK, "read failed: {}", last_error_message(lib));
+    buf.truncate(required);
+    buf
 }
 
 // --- clipboard (milestone 8) --------------------------------------------
