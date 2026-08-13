@@ -313,6 +313,7 @@ ime = [
 ]
 activation = ["portable-pixel-window"]
 clipboard = [
+    "dep:x11rb",
     "windows-sys/Win32_System_DataExchange",
     "windows-sys/Win32_System_Memory",
 ]

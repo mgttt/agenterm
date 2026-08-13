@@ -147,11 +147,13 @@ Canonical host mapping (approved product vocabulary):
   AT-SPI `EditableText` / `Text` + toolkit set-value path as named
   `send-text` (`agt_a11y_node_set_text`). `--text` only seeds the clipboard
   (`agt_clipboard_set_text`); the field write always reads
-  `agt_clipboard_get_text`. `--name` is required. A named showing node
+  `agt_clipboard_get_text`. On Linux X11 the seed is a native CLIPBOARD
+  selection owner, not `xclip`. `--name` is required. A named showing node
   with no writeable text interface typed-fails (`a11y_text_unavailable`)
   and never silently uses XTest / `--coords` / screenshot. Resolution
   failure (miss or ambiguous name) aborts before any write or clipboard
-  seed.
+  seed. Reasonix composer (`Message Reasonix…`) writes through the same
+  WebKit eval-helper set-value path as named `send-text`.
 - [x] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
   resolves through that same path, then delivers the chord via AT-SPI
   `DeviceEventListener` (`NotifyEvent`, `agt_a11y_node_send_keys`). A named
