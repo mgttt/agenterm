@@ -127,6 +127,7 @@ pub enum CliCommand {
     UiSnapshot,
     PerfStats,
     ResetPerfStats,
+    CancelPointer,
     CloseWindow,
     ResizeWindow {
         width: u16,
@@ -274,6 +275,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
         "reset-perf-stats" => {
             cursor.finish()?;
             CliCommand::ResetPerfStats
+        }
+        "cancel-pointer" => {
+            cursor.finish()?;
+            CliCommand::CancelPointer
         }
         "close-window" => {
             cursor.finish()?;
@@ -436,10 +441,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliRequest, String> {
 }
 
 pub fn usage() -> String {
-    "usage: agenterm-con cli list-commands\n       agenterm-con cli --control ENDPOINT <list-tabs|ui-snapshot|perf-stats|reset-perf-stats|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-ui-keys|send-mouse|send-wheel|wait-text|wait-tab-exit> ...".to_owned()
+    "usage: agenterm-con cli list-commands\n       agenterm-con cli --control ENDPOINT <list-tabs|ui-snapshot|perf-stats|reset-perf-stats|cancel-pointer|close-window|resize-window|new-tab|select-tab|close-tab|capture-pane|screenshot-pane|send-text|send-paste|send-keys|send-ui-keys|send-mouse|send-wheel|wait-text|wait-tab-exit> ...".to_owned()
 }
 
-const CLI_COMMAND_CATALOG: &str = "capture-pane\nclose-tab\nclose-window\nlist-commands\nlist-tabs\nnew-tab\nperf-stats\nreset-perf-stats\nresize-window\nscreenshot-pane\nselect-tab\nsend-keys\nsend-mouse\nsend-paste\nsend-text\nsend-ui-keys\nsend-wheel\nui-snapshot\nwait-tab-exit\nwait-text\n";
+const CLI_COMMAND_CATALOG: &str = "cancel-pointer\ncapture-pane\nclose-tab\nclose-window\nlist-commands\nlist-tabs\nnew-tab\nperf-stats\nreset-perf-stats\nresize-window\nscreenshot-pane\nselect-tab\nsend-keys\nsend-mouse\nsend-paste\nsend-text\nsend-ui-keys\nsend-wheel\nui-snapshot\nwait-tab-exit\nwait-text\n";
 
 fn validate_window_size(width: u16, height: u16) -> Result<(), String> {
     if width == 0 || height == 0 || width > MAX_WINDOW_DIMENSION || height > MAX_WINDOW_DIMENSION {
@@ -1027,6 +1032,7 @@ fn encode_request(command: CliCommand) -> Result<Vec<u8>, String> {
         CliCommand::UiSnapshot => wire.byte(16),
         CliCommand::PerfStats => wire.byte(1),
         CliCommand::ResetPerfStats => wire.byte(2),
+        CliCommand::CancelPointer => wire.byte(19),
         CliCommand::CloseWindow => wire.byte(15),
         CliCommand::ResizeWindow { width, height } => {
             wire.byte(14);
@@ -1254,6 +1260,7 @@ fn decode_request(bytes: &[u8]) -> Result<CliCommand, String> {
             CliCommand::ResizeWindow { width, height }
         }
         15 => CliCommand::CloseWindow,
+        19 => CliCommand::CancelPointer,
         18 => {
             let target = wire.tab()?;
             let timeout_ms = wire.u64()?;
@@ -1656,6 +1663,7 @@ mod tests {
             CliCommand::UiSnapshot,
             CliCommand::PerfStats,
             CliCommand::ResetPerfStats,
+            CliCommand::CancelPointer,
             CliCommand::CloseWindow,
             CliCommand::ResizeWindow {
                 width: 960,

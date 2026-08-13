@@ -28,7 +28,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm-con cli list-commands` is an offline, no-window and no-endpoint
   discovery surface. Its exact command set is owned by con's machine-readable
   capability contract and checked against the running executable in CI. The
-  catalog is `capture-pane`, `close-tab`, `close-window`, `list-commands`,
+  catalog is `cancel-pointer`, `capture-pane`, `close-tab`, `close-window`, `list-commands`,
   `list-tabs`, `new-tab`, `perf-stats`, `reset-perf-stats`, `resize-window`,
   `screenshot-pane`, `select-tab`, `send-keys`, `send-mouse`, `send-paste`,
   `send-text`, `send-ui-keys`, `send-wheel`, `ui-snapshot`, `wait-tab-exit` and
@@ -75,6 +75,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   window owner before active-session dispatch, so a background control owner
   cannot survive an OS cancellation. Public evidence proves a stale release
   after `select-tab` cannot revive the cancelled selection.
+- [x] `cancel-pointer` is an idempotent window-scoped recovery command for an
+  automation client that dies or times out between press and release. It
+  cancels the control owner and active physical gesture through the same path
+  as native capture loss, returns the nullable cancelled owner, releases native
+  capture, and makes a later unmatched release fail explicitly.
 - [x] public `wait-text` delegates exact per-visible-row UTF-8 containment to one
   allocation-free control kernel. It preserves the existing authority: no row
   joining, newline insertion, cross-row match, hidden-scrollback scan, Unicode

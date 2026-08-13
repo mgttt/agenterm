@@ -501,7 +501,7 @@ A standalone console host (conhost equivalent). No server, mux, or Fleet.
 Control endpoint and CLI (TAB is a stable @ID; omitted target means active tab):
   agenterm-con cli list-commands
 {control_examples}
-  ... ui-snapshot | perf-stats | reset-perf-stats | close-window
+  ... ui-snapshot | perf-stats | reset-perf-stats | cancel-pointer | close-window
   ... resize-window --width N --height N
   ... new-tab [--parent TAB]
   ... select-tab --target TAB | close-tab --target TAB
@@ -1644,6 +1644,11 @@ impl ConApp {
             CliCommand::ResetPerfStats => {
                 self.perf_stats.reset(window.present_stats());
                 Ok(single_field_json("reset", true.into()))
+            }
+            CliCommand::CancelPointer => {
+                let cancelled = self.control_pointer_owner;
+                self.cancel_pointer_gestures_for_activation(window);
+                Ok(single_field_json("cancelled_owner", tab_id_json(cancelled)))
             }
             CliCommand::CloseWindow => {
                 self.cancel_pointer_gestures_for_activation(window);

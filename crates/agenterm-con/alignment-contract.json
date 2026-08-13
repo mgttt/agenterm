@@ -2,7 +2,7 @@
   "schema_version": 1,
   "product": "agenterm-con",
   "public_commands": [
-    "capture-pane", "close-tab", "close-window", "list-commands", "list-tabs",
+    "cancel-pointer", "capture-pane", "close-tab", "close-window", "list-commands", "list-tabs",
     "new-tab", "perf-stats", "reset-perf-stats", "resize-window", "screenshot-pane",
     "select-tab", "send-keys", "send-mouse", "send-paste", "send-text",
     "send-ui-keys", "send-wheel", "ui-snapshot", "wait-tab-exit", "wait-text"
@@ -62,7 +62,7 @@
         "agenterm_con_blackbox::controlled_press_drag_release_extends_a_local_selection",
         "agenterm_con_blackbox::controlled_wheel_moves_the_real_scrollback_offset_up_then_down"
       ],
-      "commands": ["send-mouse", "send-wheel", "ui-snapshot"]
+      "commands": ["cancel-pointer", "send-mouse", "send-wheel", "ui-snapshot"]
     },
     {
       "id": "con.control.observation",

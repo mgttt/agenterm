@@ -555,6 +555,55 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert_eq!(exited_wheel["delivered_notches"], 1);
     assert_eq!(exited_wheel["changed"], true);
 
+    cli_json(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "press",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    let cancelled_pointer = cli_json(exe, &endpoint, &["cancel-pointer"]);
+    assert_eq!(cancelled_pointer["cancelled_owner"], child_id);
+    let cancelled_snapshot = cli_json(exe, &endpoint, &["ui-snapshot"]);
+    assert_eq!(
+        cancelled_snapshot["control_pointer_owner"],
+        serde_json::Value::Null
+    );
+    let idempotent_cancel = cli_json(exe, &endpoint, &["cancel-pointer"]);
+    assert_eq!(
+        idempotent_cancel["cancelled_owner"],
+        serde_json::Value::Null
+    );
+    let release_after_cancel = invoke(
+        exe,
+        &endpoint,
+        &[
+            "send-mouse",
+            "--target",
+            &child_id,
+            "--action",
+            "release",
+            "--button",
+            "left",
+            "--column",
+            "0",
+            "--row",
+            "0",
+        ],
+    );
+    assert!(!release_after_cancel.status.success());
+    assert!(error_text(&release_after_cancel).contains("no matching control pointer press"));
+
     let held_pointer = cli_json(
         exe,
         &endpoint,
