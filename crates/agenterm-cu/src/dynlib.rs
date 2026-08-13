@@ -148,6 +148,18 @@ pub const AGT_NATIVE_WINDOW_MINIMIZE: i32 = 2;
 pub const AGT_NATIVE_WINDOW_MAXIMIZE: i32 = 3;
 pub const AGT_NATIVE_WINDOW_RESTORE: i32 = 4;
 
+/// The ABI major this build of cu speaks. libagenterm promises that a major
+/// bump means breaking changes, so a library with a different major must be
+/// refused rather than called through mismatched signatures.
+///
+/// Why hard-coded: since milestone 46 `agenterm-cu` no longer depends on
+/// `agenterm-abi`, so there is no compile-time `ABI_MAJOR` to read.
+/// Why safe: the `gate_expected_abi_major_matches_real_artifact` test loads
+/// the real artifact and asserts `agt_abi_version() >> 16 ==
+/// EXPECTED_ABI_MAJOR`, so this value cannot drift from the library without
+/// that gate failing first.
+const EXPECTED_ABI_MAJOR: u16 = 1;
+
 /// `agt_input_pointer_click` buttons.
 pub const AGT_INPUT_BUTTON_LEFT: i32 = 0;
 pub const AGT_INPUT_BUTTON_RIGHT: i32 = 1;
@@ -205,6 +217,28 @@ impl Dynlib {
 }
 
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
+
+/// `agt_abi_version`: returns `(major << 16) | minor` (see `include/agenterm.h`).
+type AbiVersion = unsafe extern "C" fn() -> u32;
+
+/// Compare a library-reported ABI version (`major << 16 | minor`, as returned
+/// by `agt_abi_version`) with the major this build of cu speaks. Only the
+/// major is checked here — the minor is additive: a library with a higher
+/// minor simply has extra exports cu does not use, and a lower minor surfaces
+/// later as a missing-symbol error from the per-call `Dynlib::sym`
+/// resolution. A major mismatch must fail the whole load so mismatched
+/// signatures are never invoked.
+fn check_abi_major(reported: u32) -> Result<(), String> {
+    let major = (reported >> 16) as u16;
+    let minor = (reported & 0xffff) as u16;
+    if major == EXPECTED_ABI_MAJOR {
+        return Ok(());
+    }
+    Err(format!(
+        "reports ABI {major}.{minor} but this build of cu speaks ABI major \
+         {EXPECTED_ABI_MAJOR}; refusing to call through mismatched signatures"
+    ))
+}
 
 // ---------------------------------------------------------------------------
 // Location + process-wide cache.
@@ -279,8 +313,11 @@ pub struct LoadError {
 static LIB: OnceLock<Result<&'static Dynlib, LoadError>> = OnceLock::new();
 
 /// Load the libagenterm dynamic library exactly once per process and return
-/// the cached handle. On failure the returned error lists every candidate
-/// path that was tried.
+/// the cached handle. The load refuses (a) an unlocatable library and (b) a
+/// library whose ABI major differs from [`EXPECTED_ABI_MAJOR`] — one gate at
+/// load time instead of one at every call site, so a mismatched library never
+/// gets invoked through cu's signatures. On failure the returned error lists
+/// every candidate path that was tried.
 pub fn load() -> Result<&'static Dynlib, &'static LoadError> {
     match LIB.get_or_init(|| {
         let path = match locate_library() {
@@ -292,15 +329,155 @@ pub fn load() -> Result<&'static Dynlib, &'static LoadError> {
                 });
             }
         };
-        match unsafe { Library::new(&path) } {
-            Ok(lib) => Ok(Box::leak(Box::new(Dynlib { lib, path }))),
-            Err(e) => Err(LoadError {
-                message: format!("LoadLibrary({}) failed: {e}", path.display()),
+        let lib = match unsafe { Library::new(&path) } {
+            Ok(lib) => lib,
+            Err(e) => {
+                return Err(LoadError {
+                    message: format!("LoadLibrary({}) failed: {e}", path.display()),
+                    tried: vec![path],
+                });
+            }
+        };
+        // ABI gate (milestone 57): refuse a library whose major differs from
+        // what this build of cu speaks, before any of its symbols are called.
+        // The minor is deliberately not compared — see `check_abi_major` for
+        // the additive-minor / per-symbol division of labour.
+        let gate = Dynlib {
+            lib,
+            path: path.clone(),
+        };
+        let verify = unsafe {
+            let version: Symbol<AbiVersion> = match gate.sym(b"agt_abi_version") {
+                Ok(f) => f,
+                Err(message) => {
+                    return Err(LoadError {
+                        message: format!(
+                            "libagenterm at {} does not export agt_abi_version ({message}); \
+                             refusing to call without an ABI check",
+                            path.display()
+                        ),
+                        tried: vec![path],
+                    });
+                }
+            };
+            check_abi_major(version())
+        };
+        if let Err(message) = verify {
+            return Err(LoadError {
+                message: format!("libagenterm at {} {message}", path.display()),
                 tried: vec![path],
-            }),
+            });
         }
+        Ok(Box::leak(Box::new(gate)))
     }) {
         Ok(lib) => Ok(*lib),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- check_abi_major (pure) -------------------------------------------
+
+    #[test]
+    fn check_abi_major_accepts_same_major_higher_minor() {
+        // Major 1, minor 6 (the current artifact); a higher minor is additive.
+        assert!(check_abi_major(0x0001_0006).is_ok());
+    }
+
+    #[test]
+    fn check_abi_major_accepts_same_major_lower_minor() {
+        // Major 1, minor 0: a lower minor is additive too and must not fail
+        // here — the per-call `Dynlib::sym` reports any missing symbol later.
+        assert!(check_abi_major(0x0001_0000).is_ok());
+    }
+
+    #[test]
+    fn check_abi_major_rejects_other_major() {
+        // Major 2 vs expected 1: must be refused, and the message must carry
+        // both the reported major.minor and the expected major.
+        let err = check_abi_major(0x0002_0000).unwrap_err();
+        assert!(
+            err.contains("ABI 2.0"),
+            "message carries reported version: {err}"
+        );
+        assert!(
+            err.contains("major 1"),
+            "message carries expected major: {err}"
+        );
+        assert!(
+            err.contains("refusing to call through mismatched signatures"),
+            "message states the refusal: {err}"
+        );
+    }
+
+    #[test]
+    fn check_abi_major_rejects_major_zero() {
+        // Major 0, minor 6: any major other than the expected one is refused.
+        let err = check_abi_major(0x0000_0006).unwrap_err();
+        assert!(
+            err.contains("ABI 0.6"),
+            "message carries reported version: {err}"
+        );
+        assert!(
+            err.contains("major 1"),
+            "message carries expected major: {err}"
+        );
+    }
+
+    // -- gate against the real artifact -----------------------------------
+
+    /// Gate (milestone 57): the real libagenterm artifact must report the ABI
+    /// major this build of cu speaks, so `EXPECTED_ABI_MAJOR` cannot drift
+    /// from the library — a future major bump with a stale constant fails this
+    /// test instead of surfacing only at run time.
+    ///
+    /// The artifact must exist; when it cannot be located or opened the test
+    /// prints an explicit `SKIP: <reason>` and returns instead of failing.
+    /// CI builds the ABI library before this test runs, so it really runs
+    /// there.
+    #[test]
+    fn gate_expected_abi_major_matches_real_artifact() {
+        let path = match locate_library() {
+            Ok(path) => path,
+            Err(tried) => {
+                let tried = tried
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("SKIP: could not locate the libagenterm dynamic library (tried: {tried})");
+                return;
+            }
+        };
+        let lib = match unsafe { Library::new(&path) } {
+            Ok(lib) => lib,
+            Err(e) => {
+                println!(
+                    "SKIP: could not open the libagenterm dynamic library at {}: {e}",
+                    path.display()
+                );
+                return;
+            }
+        };
+        let version: Symbol<AbiVersion> = match unsafe { lib.get(b"agt_abi_version") } {
+            Ok(f) => f,
+            Err(e) => {
+                println!("SKIP: agt_abi_version missing in {}: {e}", path.display());
+                return;
+            }
+        };
+        let reported = unsafe { version() };
+        assert_eq!(
+            (reported >> 16) as u16,
+            EXPECTED_ABI_MAJOR,
+            "libagenterm at {} reports ABI major {} but this build of cu speaks major {}; \
+             EXPECTED_ABI_MAJOR must be bumped in lockstep with the library",
+            path.display(),
+            reported >> 16,
+            EXPECTED_ABI_MAJOR,
+        );
     }
 }
