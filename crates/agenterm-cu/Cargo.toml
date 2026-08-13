@@ -12,6 +12,10 @@ agenterm-platform = { path = "../agenterm-platform", default-features = false, f
 agenterm-abi = { path = "../agenterm-abi", features = ["allow-abort-profile"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Milestone 44: `agenterm-cu` must REALLY load the libagenterm dynamic
+# library at run time (dlopen / LoadLibrary). This is a production
+# dependency of the new bin only — the existing `cu` bin is untouched.
+libloading = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5.2"
@@ -38,3 +42,9 @@ objc2-foundation = { version = "0.2.2", features = [
 [[bin]]
 name = "cu"
 path = "src/bin/cu.rs"
+
+# Milestone 44: runtime dynamic-library demo binary. Loads libagenterm via
+# dlopen / LoadLibrary and exercises a read-only subset of the agt_* exports.
+[[bin]]
+name = "agenterm-cu"
+path = "src/bin/agenterm_cu.rs"
