@@ -71,7 +71,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] press/release control gestures have one window-scoped tab owner. A second
   press, cross-tab move/release, or click during an open gesture fails
   explicitly; selecting, closing, or replacing the active tab cancels the old
-  gesture and releases native capture. Public evidence proves a stale release
+  gesture and releases native capture. Native capture loss is consumed at the
+  window owner before active-session dispatch, so a background control owner
+  cannot survive an OS cancellation. Public evidence proves a stale release
   after `select-tab` cannot revive the cancelled selection.
 - [x] public `wait-text` delegates exact per-visible-row UTF-8 containment to one
   allocation-free control kernel. It preserves the existing authority: no row

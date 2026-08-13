@@ -4232,6 +4232,10 @@ impl PixelWindowApplication for ConApp {
             }
             return Ok(PixelWindowDirective::Continue);
         }
+        if matches!(event, PixelWindowEvent::PointerCaptureLost) {
+            self.cancel_pointer_gestures_for_activation(window);
+            return Ok(PixelWindowDirective::Continue);
+        }
         if self.handle_sidebar_resize(window, &event)? {
             self.mark_chrome_full();
             return Ok(PixelWindowDirective::Continue);
