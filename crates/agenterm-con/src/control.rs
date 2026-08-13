@@ -62,13 +62,12 @@ mod compact_channel_tests {
         let queue = RequestQueue::new(alive);
         queue.close();
         let (reply, receiver) = reply_channel();
-        assert!(
-            queue
-                .push(IncomingRequest {
-                    command: CliCommand::ListTabs,
-                    reply,
-                })
-                .is_err()
+        assert_eq!(
+            queue.push(IncomingRequest {
+                command: CliCommand::ListTabs,
+                reply,
+            }),
+            Err(RequestQueueReject::Closed)
         );
         assert!(receiver.recv_timeout(Duration::from_secs(1)).is_err());
     }
@@ -89,13 +88,12 @@ mod compact_channel_tests {
             );
         }
         let (reply, _receiver) = reply_channel();
-        assert!(
-            queue
-                .push(IncomingRequest {
-                    command: CliCommand::ListTabs,
-                    reply,
-                })
-                .is_err()
+        assert_eq!(
+            queue.push(IncomingRequest {
+                command: CliCommand::ListTabs,
+                reply,
+            }),
+            Err(RequestQueueReject::Full)
         );
     }
 
@@ -718,6 +716,21 @@ struct RequestQueue {
     alive: Arc<AtomicBool>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequestQueueReject {
+    Full,
+    Closed,
+}
+
+impl RequestQueueReject {
+    fn message(self) -> &'static str {
+        match self {
+            Self::Full => "control server is busy",
+            Self::Closed => "terminal window is closing",
+        }
+    }
+}
+
 impl RequestQueue {
     fn new(alive: Arc<AtomicBool>) -> Self {
         Self {
@@ -726,13 +739,16 @@ impl RequestQueue {
         }
     }
 
-    fn push(&self, request: IncomingRequest) -> Result<bool, IncomingRequest> {
+    fn push(&self, request: IncomingRequest) -> Result<bool, RequestQueueReject> {
         let mut items = self
             .items
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !self.alive.load(Ordering::Acquire) || items.len() >= REQUEST_QUEUE_CAPACITY {
-            return Err(request);
+        if !self.alive.load(Ordering::Acquire) {
+            return Err(RequestQueueReject::Closed);
+        }
+        if items.len() >= REQUEST_QUEUE_CAPACITY {
+            return Err(RequestQueueReject::Full);
         }
         let should_wake = items.is_empty();
         items.push_back(request);
@@ -924,7 +940,7 @@ fn serve_one(
         let (reply, response_rx) = reply_channel();
         let should_wake = request_tx
             .push(IncomingRequest { command, reply })
-            .map_err(|_| "terminal window is closing".to_owned())?;
+            .map_err(|reason| reason.message().to_owned())?;
         if should_wake {
             wake();
         }

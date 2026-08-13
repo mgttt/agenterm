@@ -96,6 +96,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   callback and reposts Wake while backlog remains; public request/yield counters
   expose field evidence, while a deterministic queue test proves wake coalescing,
   the fixed batch limit and backlog reporting without scheduler timing assumptions.
+  Saturation reports `control server is busy`, while a closed GUI reports
+  `terminal window is closing`; both paths drop the rejected reply owner
+  immediately instead of consuming the GUI response timeout.
 - [x] closing a tab immediately cancels its pending text/exit waits and
   screenshot reply with a typed target-close error. `ui-snapshot` exposes
   pending counts, so a black-box journey proves registration, cancellation,
