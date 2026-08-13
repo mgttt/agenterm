@@ -108,6 +108,9 @@ Canonical host mapping (approved product vocabulary):
   `--name` cannot be combined with `--node` or `--coords`. A miss is typed
   `a11y_node_not_found`; there is no screenshot or degraded-coordinate
   substitute.
+- [~] `send-text --window HANDLE --name PAT [--role ROLE] [--] <text...>`
+  resolves and focuses through that same path, then injects the text with the
+  existing XTest keyboard path. Resolution failure aborts before any keystroke.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

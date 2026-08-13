@@ -125,10 +125,23 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
-        "send-text" => Command::SendText {
-            target,
-            text: args.join(" "),
-        },
+        "send-text" => {
+            // `--` ends flag parsing so the text may itself start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            Command::SendText {
+                target,
+                text: literal_text.unwrap_or_else(|| args.join(" ")),
+                window,
+                name,
+                role,
+            }
+        }
         "send-keys" => Command::SendKeys {
             target,
             keys: args.join("+"),
@@ -280,7 +293,9 @@ Commands:
         [--button left|right|middle] [--clicks N]
                               --name reuses wait NodeNameContains matching, then the --node AT-SPI path
   focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
-  send-text <text...>
+  send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
+                              --name focuses that node first (same matcher as click/focus),
+                              then types; `--` ends flag parsing
   send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE])

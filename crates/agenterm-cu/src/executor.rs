@@ -104,10 +104,13 @@ impl Executor {
                 role,
                 ..
             } => focus(*window, node.as_deref(), name.as_deref(), role.as_deref()),
-            Command::SendText { text, .. } => {
-                agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
-                Ok(serde_json::json!({ "typed": text }))
-            }
+            Command::SendText {
+                text,
+                window,
+                name,
+                role,
+                ..
+            } => send_text(text, *window, name.as_deref(), role.as_deref()),
             Command::SendKeys { keys, .. } => {
                 agenterm_platform::input_inject::send_keys(keys).map_err(map_inject_err)?;
                 Ok(serde_json::json!({ "keys": keys }))
@@ -277,6 +280,34 @@ fn focus(
     mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
         .map_err(map_mechanism_err)?;
     Ok(focus_tree_payload(&resolved, window))
+}
+
+/// `send-text` with `--name` focuses the matched node first (same matcher as
+/// `focus`), then reuses the existing keyboard-injection path. Without
+/// `--name` it stays the plain "type into whatever is focused" verb.
+fn send_text(
+    text: &str,
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-text")? else {
+        agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
+        return Ok(serde_json::json!({ "typed": text }));
+    };
+    mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
+        .map_err(map_mechanism_err)?;
+    agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "send-text",
+        "typed": text,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
 }
 
 struct ResolvedNode {
@@ -890,6 +921,9 @@ mod tests {
         let command = Command::SendText {
             target: TargetRef::Current,
             text: "hello".into(),
+            window: None,
+            name: None,
+            role: None,
         };
         let reply = executor.execute(&command);
         assert!(!reply.ok);
@@ -920,6 +954,38 @@ mod tests {
             window: None,
         };
         let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_send_text_missing_node_is_typed_and_types_nothing() {
+        let command = Command::SendText {
+            target: TargetRef::Current,
+            text: "hello".into(),
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not type into the wrong place");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn name_send_text_requires_window() {
+        let command = Command::SendText {
+            target: TargetRef::Current,
+            text: "hello".into(),
+            window: None,
+            name: Some("Address and search bar".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
     }
