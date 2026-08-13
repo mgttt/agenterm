@@ -915,9 +915,9 @@ fn cap_group() -> Vec<SweepCase> {
 #[test]
 fn null_sweep_every_pointer_export() {
     let lib = load();
-    run_sweep(&lib, &null_group(), "null");
-    run_sweep(&lib, &probe_group(), "probe(cap=0)");
-    run_sweep(&lib, &cap_group(), "cap>0");
+    run_sweep(lib, &null_group(), "null");
+    run_sweep(lib, &probe_group(), "probe(cap=0)");
+    run_sweep(lib, &cap_group(), "cap>0");
 }
 
 /// Reviewed and kept as designed: `agt_runtime_env_present` returns `0` for
@@ -931,7 +931,7 @@ fn null_sweep_every_pointer_export() {
 #[ignore = "design quirk: agt_runtime_env_present(NULL) returns 0 == AGT_OK numeric value; reviewed and kept as designed (milestone 13)"]
 fn runtime_env_present_null_returns_zero_design_quirk() {
     let lib = load();
-    let present: Symbol<RuntimeEnvPresent> = unsafe { sym(&lib, b"agt_runtime_env_present") };
+    let present: Symbol<RuntimeEnvPresent> = unsafe { sym(lib, b"agt_runtime_env_present") };
     // NULL + len == 0 and NULL + len > 0 both answer "not present" (0).
     assert_eq!(
         unsafe { present(std::ptr::null(), 0) },
@@ -945,5 +945,5 @@ fn runtime_env_present_null_returns_zero_design_quirk() {
     );
     // The error record is untouched by this query (it never records errors);
     // it must still be readable as three C strings.
-    check_last_error_readable(&lib, "agt_runtime_env_present(NULL)");
+    check_last_error_readable(lib, "agt_runtime_env_present(NULL)");
 }
