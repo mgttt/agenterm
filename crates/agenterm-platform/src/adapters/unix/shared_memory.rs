@@ -12,13 +12,32 @@ pub(crate) struct SharedMemory {
     creator: bool,
 }
 
+/// Set `FD_CLOEXEC` after `shm_open`.
+///
+/// `O_CLOEXEC` cannot be passed to `shm_open` portably: Linux documents it,
+/// macOS rejects the whole call with EINVAL, which is why shared memory
+/// looked broken on macOS ("create mapping: Invalid argument (os error 22)")
+/// until CI first ran these tests there. Setting the flag afterwards costs
+/// one fcntl and behaves the same on both.
+fn set_cloexec(descriptor: libc::c_int) {
+    // A failure here only means the descriptor survives exec; it is not worth
+    // failing an otherwise successful mapping over, and there is nothing the
+    // caller could do about it.
+    unsafe {
+        let flags = libc::fcntl(descriptor, libc::F_GETFD);
+        if flags >= 0 {
+            libc::fcntl(descriptor, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+        }
+    }
+}
+
 impl SharedMemory {
     pub(crate) fn create(name: &str, len: usize) -> Result<Self, SharedMemoryError> {
         let native_name = native_name(name);
         let descriptor = unsafe {
             libc::shm_open(
                 native_name.as_ptr(),
-                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
                 0o600,
             )
         };
@@ -31,6 +50,7 @@ impl SharedMemory {
                 },
             ));
         }
+        set_cloexec(descriptor);
         let length = libc::off_t::try_from(len).map_err(|source| {
             cleanup_created(descriptor, &native_name);
             SharedMemoryError::new(SharedMemoryErrorKind::InvalidLength, source.to_string())
@@ -45,8 +65,7 @@ impl SharedMemory {
 
     pub(crate) fn open(name: &str, len: usize) -> Result<Self, SharedMemoryError> {
         let native_name = native_name(name);
-        let descriptor =
-            unsafe { libc::shm_open(native_name.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC, 0) };
+        let descriptor = unsafe { libc::shm_open(native_name.as_ptr(), libc::O_RDWR, 0) };
         if descriptor < 0 {
             let native = std::io::Error::last_os_error();
             let kind = if native.raw_os_error() == Some(libc::ENOENT) {
@@ -56,6 +75,7 @@ impl SharedMemory {
             };
             return Err(SharedMemoryError::new(kind, native.to_string()));
         }
+        set_cloexec(descriptor);
         let mut status = unsafe { std::mem::zeroed::<libc::stat>() };
         if unsafe { libc::fstat(descriptor, &mut status) } != 0 {
             let error = errno_error(SharedMemoryErrorKind::Inspect);
