@@ -60,6 +60,34 @@ fn wait_for_server(context, cli, server) {
     rh::json::parse("{}")
 }
 
+fn wait_for_bootstrap_terminal(context, cli, server) {
+    let server_pid = 0 + server.id;
+    for attempt in 0..400 {
+        let bootstrap = command_json(context, cli, ["ui-bootstrap"]);
+        let active_id = "" + bootstrap.active_tab_id;
+        let active_process_id = 0;
+        for index in 0..bootstrap.tabs.len {
+            let tab = bootstrap.tabs[index];
+            if "" + tab.id == active_id {
+                active_process_id = 0 + tab.process_id;
+            }
+        }
+        if bootstrap.server_pid == server_pid && active_process_id != 0 {
+            return bootstrap;
+        }
+        if server.state == "exited" {
+            let output = server.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw "remote_upgrade_server_before_terminal_ready:" + output.stderr;
+            return rh::json::parse("{}");
+        }
+        rh::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "remote_upgrade_baseline_terminal_timeout";
+    rh::json::parse("{}")
+}
+
 fn wait_for_exit(child, timeout_attempts, code) {
     for attempt in 0..timeout_attempts {
         if child.state == "exited" {
@@ -206,7 +234,7 @@ fn entry() {
         let server = server_command.start();
         wait_for_server(context, cli, server);
 
-        let baseline = command_json(context, cli, ["ui-bootstrap"]);
+        let baseline = wait_for_bootstrap_terminal(context, cli, server);
         let tab_id = "" + baseline.active_tab_id;
         let baseline_tab_index = -1;
         for index in 0..baseline.tabs.len {
@@ -217,10 +245,9 @@ fn entry() {
             }
         }
         let baseline_tab = baseline.tabs[baseline_tab_index];
-        let server_child_id = 0 + server.id;
         test_harness::require(
             baseline_tab_index >= 0
-                && baseline.server_pid == server_child_id
+                && baseline.server_pid == server.id
                 && baseline_tab.process_id != 0,
             "remote_upgrade_baseline_identity"
         );
