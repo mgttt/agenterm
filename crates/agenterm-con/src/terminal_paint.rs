@@ -109,13 +109,14 @@ pub(super) fn paint_cells_at(
             let mut fg = palette::resolve(cell.fgcolor(), default_fg, cell.bold());
             let mut bg = palette::resolve(cell.bgcolor(), default_bg, false);
 
-            if let Some((lo, hi)) = selection {
-                if row >= lo.row && row <= hi.row {
-                    let col_start = if row == lo.row { lo.col } else { 0 };
-                    let col_end = if row == hi.row { hi.col } else { u16::MAX };
-                    if col >= col_start && col <= col_end {
-                        std::mem::swap(&mut fg, &mut bg);
-                    }
+            if let Some((lo, hi)) = selection
+                && row >= lo.row
+                && row <= hi.row
+            {
+                let col_start = if row == lo.row { lo.col } else { 0 };
+                let col_end = if row == hi.row { hi.col } else { u16::MAX };
+                if col >= col_start && col <= col_end {
+                    std::mem::swap(&mut fg, &mut bg);
                 }
             }
 
