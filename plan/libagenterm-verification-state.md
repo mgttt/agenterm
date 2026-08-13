@@ -27,6 +27,7 @@
 | 消费者拒绝 ABI major 不匹配 | `agenterm-cu` 单测 + 真实产物门控 | 校验在 `load()` 一处，不匹配的库根本没机会被调用 |
 | 一个进程只选一种链接形态 | `mixed_linkage.rs` | 三平台实测两份错误状态独立；规则写进头文件 |
 | 开着窗口时枚举不死锁 | `enumerate_while_hosting.rs` | 见 §3 的修复 |
+| `agt_native_window_*` 成功路径 | `native_window_ops.rs` | 对**子进程**开的普通窗口操作（不是 ABI 托管窗口，头文件禁止那样用）。每次调用前按标题 + `process_id` 重核归属；`close` 后断言子进程退出码 0 |
 
 ## 2. 系统库清单：四方一致
 
