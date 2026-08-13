@@ -187,11 +187,11 @@ async fn tree_for_window_async(
         if nodes.len() >= max_nodes {
             break;
         }
-        let object = match resolve_walk_object(&conn, dbus.as_ref(), identity.as_ref(), object).await
-        {
-            Some(object) => object,
-            None => continue,
-        };
+        let object =
+            match resolve_walk_object(&conn, dbus.as_ref(), identity.as_ref(), object).await {
+                Some(object) => object,
+                None => continue,
+            };
         let Ok(Ok(proxy)) = timeout(NODE_TIMEOUT, open_bus_object(&conn, &object)).await else {
             continue;
         };
@@ -325,9 +325,7 @@ async fn open_a11y_bus() -> Result<zbus::Connection, AccessibilityTreeError> {
         .map_err(map_atspi_err)
 }
 
-async fn a11y_bus_address(
-    session: &zbus::Connection,
-) -> Result<String, AccessibilityTreeError> {
+async fn a11y_bus_address(session: &zbus::Connection) -> Result<String, AccessibilityTreeError> {
     if let Ok(value) = std::env::var("AT_SPI_BUS_ADDRESS")
         && !value.is_empty()
     {
@@ -336,10 +334,7 @@ async fn a11y_bus_address(
     let proxy = zbus::Proxy::new(session, A11Y_BUS_DEST, A11Y_BUS_PATH, A11Y_BUS_IFACE)
         .await
         .map_err(map_atspi_err)?;
-    proxy
-        .call("GetAddress", &())
-        .await
-        .map_err(map_atspi_err)
+    proxy.call("GetAddress", &()).await.map_err(map_atspi_err)
 }
 
 fn hydrate_session_bus_env() {
@@ -1184,8 +1179,6 @@ async fn invoke_named_action(
     })?;
     do_action_at(&action_proxy, action_index).await
 }
-
-
 
 fn parse_node_path(node_id: &str) -> Result<Vec<usize>, AccessibilityTreeError> {
     if !node_id.starts_with('/') {

@@ -13,7 +13,7 @@
 //! nothing statically enters this artifact.
 
 use libloading::{Library, Symbol};
-use std::ffi::{c_char, CStr};
+use std::ffi::{CStr, c_char};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -107,7 +107,11 @@ fn last_error_code(lib: &Library) -> Option<String> {
     if unsafe { f(&mut e) } != AGT_OK || e.code.is_null() {
         return None;
     }
-    Some(unsafe { CStr::from_ptr(e.code) }.to_string_lossy().into_owned())
+    Some(
+        unsafe { CStr::from_ptr(e.code) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 const CDYLIB_NAMES: [&str; 3] = [
@@ -217,7 +221,11 @@ fn window_probe(lib: &Library) -> Result<String, String> {
 /// with the wait outcome when the spawn succeeded.
 fn pty_probe(lib: &Library) -> Result<String, String> {
     let pty_open: Symbol<PtyOpen> = sym(lib, b"agt_pty_open")?;
-    let program: &CStr = if cfg!(windows) { c"cmd.exe" } else { c"/bin/sh" };
+    let program: &CStr = if cfg!(windows) {
+        c"cmd.exe"
+    } else {
+        c"/bin/sh"
+    };
     let arg0: &CStr = if cfg!(windows) { c"/c" } else { c"-c" };
     let arg1: &CStr = c"exit";
     // ABI convention: argv[0] is the program name and is not re-passed as an
