@@ -87,7 +87,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   failures and the move/none pairing rule remain byte compatible.
 - [x] requests and responses are size and time bounded. A malformed request or a
   failed child may only fail that request or session; it never terminates
-  unrelated sessions or the window.
+  unrelated sessions or the window. `send-text`, `send-paste` and `send-keys`
+  reject a retained exited tab with `terminal process has exited`; direct
+  text/paste PTY write failures are returned to the CLI rather than reported as
+  successful byte delivery. Capture, local selection and scrollback remain
+  available after exit.
 - [x] the control endpoint uses a fixed worker pool with bounded connection and
   request queues. Its multi-tab journey floods one PTY with oversized CSI
   parameters while issuing concurrent `capture-pane`, `list-tabs` and

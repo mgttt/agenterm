@@ -72,8 +72,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   with [terminal runtime](PRD_02_01_terminal_runtime.md).
 - [x] a public multi-tab journey uses `wait-tab-exit` to prove one child can
   exit with a non-zero code while a sibling continues accepting input, the dead
-  tab remains capturable, parent promotion still holds, and closing the final
-  retained tab ends the GUI cleanly.
+  tab remains capturable but rejects further PTY input, parent promotion still
+  holds, and closing the final retained tab ends the GUI cleanly.
 
 ## Scheduling
 

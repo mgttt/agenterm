@@ -1412,7 +1412,7 @@ impl ConApp {
             // terminal cells; the composer rectangle alone is not enough.
             session.dirty.mark_full();
             session.scroll_to_bottom();
-            session.write_pty(input.as_bytes());
+            let _ = session.write_pty(input.as_bytes());
         }
     }
 
@@ -1627,20 +1627,27 @@ impl ConApp {
                 })
             }
             CliCommand::SendText { target, text } => {
-                self.control_session_mut(target).map(|session| {
+                self.control_session_mut(target).and_then(|session| {
+                    session.ensure_pty_input_open()?;
                     session.scroll_to_bottom();
-                    session.write_pty(text.as_bytes());
-                    single_field_json("sent_bytes", text.len().into())
+                    session
+                        .write_pty(text.as_bytes())
+                        .map_err(|error| format!("terminal input failed: {error}"))?;
+                    Ok(single_field_json("sent_bytes", text.len().into()))
                 })
             }
             CliCommand::SendPaste { target, text } => {
-                self.control_session_mut(target).map(|session| {
-                    session.paste_text(&text);
-                    single_field_json("sent_bytes", text.len().into())
+                self.control_session_mut(target).and_then(|session| {
+                    session.ensure_pty_input_open()?;
+                    session
+                        .paste_text(&text)
+                        .map_err(|error| format!("terminal input failed: {error}"))?;
+                    Ok(single_field_json("sent_bytes", text.len().into()))
                 })
             }
             CliCommand::SendKeys { target, keys } => {
                 self.control_session_mut(target).and_then(|session| {
+                    session.ensure_pty_input_open()?;
                     for key in &keys {
                         let (key, ctrl, alt, shift) = parse_control_key(key)?;
                         session.inject_key(key, ctrl, alt, shift);
@@ -1662,9 +1669,11 @@ impl ConApp {
                         self.handle_composer_key(window, &event);
                         self.mark_composer_dirty();
                     } else {
-                        self.active_session_mut()
-                            .map_err(|error| error.to_string())?
-                            .forward_key(&event);
+                        let session = self
+                            .active_session_mut()
+                            .map_err(|error| error.to_string())?;
+                        session.ensure_pty_input_open()?;
+                        session.forward_key(&event);
                     }
                 }
                 self.request_dirty_redraw(window);
@@ -2529,7 +2538,7 @@ impl ConTerminal {
             // input span that completed them.
             let replies = std::mem::take(&mut self.parser.callbacks_mut().pending_replies);
             if !replies.is_empty() {
-                self.write_pty(&replies);
+                let _ = self.write_pty(&replies);
             }
         });
         outcome.bytes = report.bytes;
@@ -2623,7 +2632,7 @@ impl ConTerminal {
                 self.ime_preedit.clear();
                 if !self.exit && !self.child_gone {
                     self.scroll_to_bottom();
-                    self.write_pty(text.as_bytes());
+                    let _ = self.write_pty(text.as_bytes());
                 }
             }
             // `ImeAction` is non-exhaustive; an unknown future action must not
@@ -2806,15 +2815,28 @@ impl ConTerminal {
         if let Some(bytes) = terminal_input::key_event_to_bytes(event, mode) {
             // Typing returns to the live view, as every terminal does.
             self.scroll_to_bottom();
-            self.write_pty(&bytes);
+            let _ = self.write_pty(&bytes);
         }
     }
 
-    /// Writes bytes to the PTY, ignoring errors from a shell that already exited.
-    fn write_pty(&self, bytes: &[u8]) {
-        if let Some(master) = &self.master {
-            let _ = master.write_all(bytes);
+    fn ensure_pty_input_open(&self) -> Result<(), String> {
+        if self.child_gone
+            || self.child_exit_pending.load(Ordering::Acquire)
+            || self.master.is_none()
+            || self.child.is_none()
+        {
+            return Err("terminal process has exited".to_owned());
         }
+        Ok(())
+    }
+
+    /// Writes bytes to an owned PTY. Physical input may ignore a concurrent
+    /// child-exit error; public control callers propagate it to the client.
+    fn write_pty(&self, bytes: &[u8]) -> std::io::Result<()> {
+        self.master
+            .as_ref()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "PTY is closed"))?
+            .write_all(bytes)
     }
 
     /// Scrolls the viewport by `lines` (positive = toward older output).
@@ -3031,7 +3053,7 @@ impl ConTerminal {
         else {
             return;
         };
-        self.paste_text(&text);
+        let _ = self.paste_text(&text);
     }
 
     /// The paste path proper, independent of where the text came from — the
@@ -3039,19 +3061,19 @@ impl ConTerminal {
     /// must go through the same normalization and bracketing, which is the
     /// point of factoring this out: a scripted test exercises the exact
     /// logic a real Ctrl+V does, not a lookalike.
-    fn paste_text(&mut self, text: &str) {
+    fn paste_text(&mut self, text: &str) -> std::io::Result<()> {
         // Normalization drops ESC, so a payload cannot close the bracketed
         // guard early and have its tail executed as keystrokes.
         let normalized = terminal_input::normalize_terminal_paste(text);
         if normalized.is_empty() {
-            return;
+            return Ok(());
         }
         let bracketed = self.parser.screen().bracketed_paste();
         self.scroll_to_bottom();
         self.write_pty(&terminal_input::terminal_paste_bytes(
             &normalized,
             bracketed,
-        ));
+        ))
     }
 
     /// Whether `needle` appears in any rendered row right now. Used by the
@@ -3256,7 +3278,7 @@ impl ConTerminal {
             return false;
         };
         self.last_reported_cell = Some(point);
-        self.write_pty(&bytes);
+        let _ = self.write_pty(&bytes);
         true
     }
 
@@ -3342,7 +3364,7 @@ impl ConTerminal {
                 (true, false) => b"\x1b[A",
                 (false, false) => b"\x1b[B",
             };
-            self.write_pty(&sequence.repeat(count.min(120)));
+            let _ = self.write_pty(&sequence.repeat(count.min(120)));
             return;
         }
 
