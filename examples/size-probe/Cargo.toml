@@ -21,12 +21,14 @@ path = "src/variant_b_dynamic.rs"
 
 [dependencies]
 # Variant A only: statically links the mechanism code it actually calls.
-# `process` already pulls in `parent-console` and `runtime`; `clipboard` is
-# explicit. Milestone 23 adds `pty` plus the pixel-window host: the
-# `window_host` module and its `run_pixel_window` entry require
-# `window` + `input` + `ime` (same feature set the libagenterm ABI itself
-# enables), so `native-pixel-window` alone is not enough to compile it.
-agenterm-platform = { path = "../../crates/agenterm-platform", features = ["process", "clipboard", "pty", "native-pixel-window", "input", "ime"] }
+# The feature list is copied verbatim from the `agenterm-abi` dependency in
+# `crates/agenterm-abi/Cargo.toml` (neither more nor fewer): milestone 34 adds
+# `screenshot` + `a11y-tree` (and `portable-pixel-window`, which the ABI also
+# enables) so the probe links exactly the mechanism set the delivered
+# libagenterm ships. `process` also pulls in `parent-console` + `runtime`;
+# `clipboard` is explicit; `window_host` and its `run_pixel_window` entry
+# require `input` + `ime` + a pixel-window feature.
+agenterm-platform = { path = "../../crates/agenterm-platform", features = ["pty", "native-pixel-window", "portable-pixel-window", "input", "ime", "screenshot", "process", "clipboard", "parent-console", "a11y-tree", "runtime"] }
 
 # Variant B only: the dynamic path never depends on agenterm-platform; it
 # dlopens the libagenterm cdylib through this tiny loader. `libloading` is

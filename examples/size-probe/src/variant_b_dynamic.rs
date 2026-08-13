@@ -1,19 +1,23 @@
 //! Size probe — variant B (dynamic).
 //!
-//! Milestone 15 + 23: the same probes as variant A, but the mechanism code is
-//! NOT statically linked. This binary depends only on `libloading` (plus
-//! std); every capability comes from the `libagenterm` cdylib's C exports,
-//! loaded at run time. If the mechanism code were statically linked too,
-//! variant B's artifact would be much larger than it is.
+//! Milestone 15 + 23 + 34: the same probes as variant A, but the mechanism
+//! code is NOT statically linked. This binary depends only on `libloading`
+//! (plus std); every capability comes from the `libagenterm` cdylib's C
+//! exports, loaded at run time. If the mechanism code were statically linked
+//! too, variant B's artifact would be much larger than it is.
 //!
 //! Milestone 23 adds the two biggest mechanisms: `agt_window_open` and
 //! `agt_pty_open`/`wait`/`close` (spawn `cmd.exe /c exit` / `/bin/sh -c exit`
 //! and reap it immediately). Both may report AGT_UNSUPPORTED or AGT_FAILED on
 //! headless hosts; the point is that the calls route through the dylib and
 //! nothing statically enters this artifact.
+//! Milestone 34 adds the remaining exports: `agt_screenshot_write_png` /
+//! `agt_screenshot_capture_window`, `agt_a11y_tree_snapshot`, and
+//! `agt_window_event_text` (served from the opened window, after
+//! `agt_window_open` succeeds).
 
 use libloading::{Library, Symbol};
-use std::ffi::{CStr, c_char};
+use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -85,6 +89,15 @@ type PtyOpen = unsafe extern "C" fn(*const agt_pty_spawn, *mut *mut u8) -> i32;
 type PtyWait = unsafe extern "C" fn(*mut u8, u32, *mut i32) -> i32;
 type PtyClose = unsafe extern "C" fn(*mut u8) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
+/// `agt_screenshot_write_png(path, pixels, pixel_count, width, height)`.
+type ScreenshotWritePng = unsafe extern "C" fn(*const c_char, *const u32, usize, u32, u32) -> i32;
+/// `agt_screenshot_capture_window(native_window, path, area_kind, l, t, w, h)`.
+type ScreenshotCaptureWindow =
+    unsafe extern "C" fn(isize, *const c_char, i32, i32, i32, i32, i32) -> i32;
+/// `agt_a11y_tree_snapshot(window_handle, *out_node_count)`.
+type A11yTreeSnapshot = unsafe extern "C" fn(isize, *mut usize) -> i32;
+/// `agt_window_event_text(window, buf, cap, *out_len)` — two-stage UTF-8.
+type WindowEventText = unsafe extern "C" fn(*mut u8, *mut u8, usize, *mut usize) -> i32;
 
 /// C-compatible last-error record (mirror of `agt_error`); only `code` is
 /// read by this probe, for diagnostics.
@@ -170,14 +183,27 @@ fn run() -> Result<(), String> {
     // 6. window: open-then-close probe (milestone 23). AGT_UNSUPPORTED or
     //    AGT_FAILED is acceptable on headless hosts; on a real desktop the
     //    window opens without activation and is closed immediately.
-    let window_open = window_probe(&lib)?;
+    //    Milestone 34: when the window opens, the input event-text path
+    //    (`agt_window_event_text`) is probed on the live handle first.
+    let (window_open, event_text_len) = window_probe(&lib)?;
 
     // 7. pty: spawn the shortest-lived child, wait for it, close (milestone
     //    23). Failure is acceptable too; the exports must merely be resolved
     //    and routed through the dylib.
     let pty_open = pty_probe(&lib)?;
 
-    // 8. ABI version from the dylib export
+    // 8. screenshot (milestone 34): encode a 1x1 PNG into `std::env::temp_dir()`
+    //    and delete it (never write into the repository tree), plus the
+    //    window-capture export with `native_window == 0` (parameter
+    //    validation only, no file produced).
+    let screenshot = screenshot_probe(&lib)?;
+    let screenshot_capture = screenshot_capture_probe(&lib)?;
+
+    // 9. a11y (milestone 34): capture the accessibility tree for all roots.
+    //    AGT_UNSUPPORTED is perfectly acceptable on hosts without a stack.
+    let a11y = a11y_probe(&lib)?;
+
+    // 10. ABI version from the dylib export
     let abi_version: Symbol<AbiVersion> = sym(&lib, b"agt_abi_version")?;
     let abi_version = unsafe { abi_version() };
 
@@ -188,13 +214,18 @@ fn run() -> Result<(), String> {
     println!("parent_console_write_stdout={parent_console}");
     println!("window_open={window_open}");
     println!("pty_open={pty_open}");
+    println!("screenshot={screenshot}");
+    println!("screenshot_capture={screenshot_capture}");
+    println!("a11y={a11y}");
+    println!("event_text_len={event_text_len}");
     println!("abi_version={abi_version}");
     Ok(())
 }
 
-/// `agt_window_open` with a no-activate title, then `agt_window_close` when
-/// it succeeds. Returns a short status string (never the window contents).
-fn window_probe(lib: &Library) -> Result<String, String> {
+/// `agt_window_open` with a no-activate title, then `agt_window_event_text`
+/// on the live handle (milestone 34), then `agt_window_close`. Returns a
+/// short status string and the event-text length (never the text itself).
+fn window_probe(lib: &Library) -> Result<(String, String), String> {
     let window_open: Symbol<WindowOpen> = sym(lib, b"agt_window_open")?;
     let title: &CStr = c"size-probe";
     let spec = agt_window_spec {
@@ -207,10 +238,86 @@ fn window_probe(lib: &Library) -> Result<String, String> {
     let mut window: *mut u8 = std::ptr::null_mut();
     match unsafe { window_open(&spec, &mut window) } {
         AGT_OK => {
+            let event_text_len = window_event_text_len(lib, window);
             let window_close: Symbol<WindowClose> = sym(lib, b"agt_window_close")?;
             unsafe { window_close(window) };
-            Ok("ok".to_string())
+            Ok(("ok".to_string(), event_text_len?))
         }
+        AGT_UNSUPPORTED => Ok(("unsupported".to_string(), "unavailable".to_string())),
+        other => Ok((format!("failed(status={other})"), "unavailable".to_string())),
+    }
+}
+
+/// Two-stage `agt_window_event_text` on a live window handle. `cap == 0` is
+/// the canonical "how big?" probe (returns AGT_FAILED + required length);
+/// the second stage reads the text and reports only its byte length.
+fn window_event_text_len(lib: &Library, window: *mut u8) -> Result<String, String> {
+    let f: Symbol<WindowEventText> = sym(lib, b"agt_window_event_text")?;
+    let mut required = 0usize;
+    let s = unsafe { f(window, std::ptr::null_mut(), 0, &mut required) };
+    match s {
+        AGT_OK => Ok(format!("len={required}")),
+        AGT_UNSUPPORTED => Ok("unsupported".to_string()),
+        AGT_FAILED => {
+            if required == 0 {
+                // First-stage probe succeeded: the window has no staged IME
+                // text, so the required length is zero. Report it directly
+                // (a second call with cap == 0 would re-trigger
+                // buffer_too_small by design).
+                return Ok("len=0".to_string());
+            }
+            let mut buf = vec![0u8; required];
+            let mut written = 0usize;
+            let s2 = unsafe { f(window, buf.as_mut_ptr(), buf.len(), &mut written) };
+            if s2 == AGT_OK {
+                Ok(format!("len={written}"))
+            } else {
+                Ok(format!("failed(read_status={s2}, required={required})"))
+            }
+        }
+        other => Ok(format!("failed(status={other})")),
+    }
+}
+
+/// `agt_screenshot_write_png` encoding a 1x1 framebuffer into
+/// `std::env::temp_dir()` and deleting it immediately. A real PNG encode
+/// routes through the dylib; only the status is returned.
+fn screenshot_probe(lib: &Library) -> Result<String, String> {
+    let f: Symbol<ScreenshotWritePng> = sym(lib, b"agt_screenshot_write_png")?;
+    let path =
+        std::env::temp_dir().join(format!("size-probe-variant-b-{}.png", std::process::id()));
+    let path_c = CString::new(path.to_str().ok_or("temp path is not UTF-8")?)
+        .map_err(|e| format!("temp path contains NUL: {e}"))?;
+    let pixels: [u32; 1] = [0xFF0000];
+    let status = unsafe { f(path_c.as_ptr(), pixels.as_ptr(), 1, 1, 1) };
+    let _ = std::fs::remove_file(&path);
+    match status {
+        AGT_OK => Ok("ok(pixels=1)".to_string()),
+        AGT_UNSUPPORTED => Ok("unsupported".to_string()),
+        other => Ok(format!("failed(status={other})")),
+    }
+}
+
+/// `agt_screenshot_capture_window` with `native_window == 0` — the export
+/// returns AGT_FAILED{bad_handle} without touching the filesystem. The point
+/// is that the symbol resolves and routes through the dylib.
+fn screenshot_capture_probe(lib: &Library) -> Result<String, String> {
+    let f: Symbol<ScreenshotCaptureWindow> = sym(lib, b"agt_screenshot_capture_window")?;
+    let status = unsafe { f(0, std::ptr::null(), 0, 0, 0, 0, 0) };
+    match status {
+        AGT_UNSUPPORTED => Ok("unsupported".to_string()),
+        AGT_OK => Ok("ok".to_string()),
+        other => Ok(format!("failed(status={other})")),
+    }
+}
+
+/// `agt_a11y_tree_snapshot` over all application roots. AGT_UNSUPPORTED is
+/// acceptable on hosts without an accessibility stack.
+fn a11y_probe(lib: &Library) -> Result<String, String> {
+    let f: Symbol<A11yTreeSnapshot> = sym(lib, b"agt_a11y_tree_snapshot")?;
+    let mut count = 0usize;
+    match unsafe { f(0, &mut count) } {
+        AGT_OK => Ok(format!("ok(nodes={count})")),
         AGT_UNSUPPORTED => Ok("unsupported".to_string()),
         other => Ok(format!("failed(status={other})")),
     }
