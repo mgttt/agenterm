@@ -34,6 +34,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Untrusted/extreme dimensions cannot wrap a close target onto another row,
   overflow layout construction, or collapse the sidebar through an unordered
   floating-point comparison.
+- [x] terminal selection endpoints are normalized once per raster pass rather
+  than once per visible cell, and wide-cell/decoration geometry saturates at
+  native numeric limits so malformed resize state cannot panic painting.
 - [x] shared iterative tree-depth resolution sorts `(id,index)` pairs and uses
   binary lookup, preserving typed duplicate/missing/cycle failures and the
   20,000-node non-recursive test without randomized hashing. Its index replaces

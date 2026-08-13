@@ -77,6 +77,7 @@ pub(super) fn paint_cells_at(
     top: u32,
 ) {
     let (rows, cols) = screen.size();
+    let selection = selection.map(|(start, end)| normalize_endpoints(start, end));
     for row in 0..rows {
         let y0 = top.saturating_add(u32::from(row).saturating_mul(cell_h));
         if y0 >= surface.height {
@@ -96,7 +97,11 @@ pub(super) fn paint_cells_at(
             if cell.is_wide_continuation() {
                 continue;
             }
-            let span_w = if cell.is_wide() { cell_w * 2 } else { cell_w };
+            let span_w = if cell.is_wide() {
+                cell_w.saturating_mul(2)
+            } else {
+                cell_w
+            };
             if !surface.intersects_rect(x0, y0, span_w, cell_h) {
                 continue;
             }
@@ -104,8 +109,7 @@ pub(super) fn paint_cells_at(
             let mut fg = palette::resolve(cell.fgcolor(), default_fg, cell.bold());
             let mut bg = palette::resolve(cell.bgcolor(), default_bg, false);
 
-            if let Some((sa, sb)) = selection {
-                let (lo, hi) = normalize_endpoints(sa, sb);
+            if let Some((lo, hi)) = selection {
                 if row >= lo.row && row <= hi.row {
                     let col_start = if row == lo.row { lo.col } else { 0 };
                     let col_end = if row == hi.row { hi.col } else { u16::MAX };
@@ -145,7 +149,7 @@ pub(super) fn paint_cells_at(
             }
 
             if cell.underline() {
-                let y = y0 + cell_h.saturating_sub(2);
+                let y = y0.saturating_add(cell_h.saturating_sub(2));
                 surface.fill_rect(x0, y, span_w, 1, fg.to_xrgb());
             }
         }
@@ -305,5 +309,22 @@ mod tests {
         for row in pixels.chunks_exact(32) {
             assert!(row[16..].iter().all(|pixel| *pixel == BG.to_xrgb()));
         }
+    }
+
+    #[test]
+    fn wide_cell_span_saturates_at_extreme_cell_width() {
+        let mut parser = parser();
+        parser.process("中".as_bytes());
+        let mut pixels = vec![BG.to_xrgb(); 1];
+        paint_cells(
+            &mut Surface::new(&mut pixels, 1, 1),
+            parser.screen(),
+            None,
+            u32::MAX,
+            1,
+            FG,
+            BG,
+            1,
+        );
     }
 }
