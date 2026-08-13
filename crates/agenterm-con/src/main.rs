@@ -778,6 +778,26 @@ struct WheelOutcome {
     changed: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MouseOutcome {
+    route: &'static str,
+    changed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MouseReportOutcome {
+    consumed: bool,
+    wrote: bool,
+}
+
+fn mouse_outcome_json(outcome: MouseOutcome) -> json::JsonValue {
+    json::object(vec![
+        ("delivered", true.into()),
+        ("route", outcome.route.into()),
+        ("changed", outcome.changed.into()),
+    ])
+}
+
 fn wheel_outcome_json(outcome: WheelOutcome) -> json::JsonValue {
     json::object(vec![
         ("delivered_notches", outcome.delivered_notches.into()),
@@ -1702,11 +1722,11 @@ impl ConApp {
                 row,
             } => self.control_session_mut(target).and_then(|session| {
                 Self::validate_control_cell(session, row, column)?;
-                match action {
+                let outcome = match action {
                     control::MouseAction::Move => session.inject_mouse_move(window, row, column),
                     control::MouseAction::Click => {
                         let button = control_mouse_button(button)?;
-                        session.inject_click(window, row, column, button);
+                        session.inject_click(window, row, column, button)
                     }
                     control::MouseAction::Press | control::MouseAction::Release => {
                         let button = control_mouse_button(button)?;
@@ -1715,10 +1735,12 @@ impl ConApp {
                         } else {
                             PointerButtonState::Released
                         };
-                        session.inject_pointer_button(window, row, column, button, state);
+                        session.inject_pointer_button(window, row, column, button, state)
                     }
-                }
-                Ok(single_field_json("delivered", true.into()))
+                };
+                outcome
+                    .map(mouse_outcome_json)
+                    .map_err(|error| format!("terminal input failed: {error}"))
             }),
             CliCommand::SendWheel {
                 target,
@@ -3120,9 +3142,19 @@ impl ConTerminal {
         row: u16,
         col: u16,
         button: InjectedMouseButton,
-    ) {
-        self.inject_pointer_button(window, row, col, button, PointerButtonState::Pressed);
-        self.inject_pointer_button(window, row, col, button, PointerButtonState::Released);
+    ) -> std::io::Result<MouseOutcome> {
+        let press =
+            self.inject_pointer_button(window, row, col, button, PointerButtonState::Pressed)?;
+        let release =
+            self.inject_pointer_button(window, row, col, button, PointerButtonState::Released)?;
+        Ok(MouseOutcome {
+            route: if press.route != "noop" {
+                press.route
+            } else {
+                release.route
+            },
+            changed: press.changed || release.changed,
+        })
     }
 
     /// One half of a control press-drag-release gesture, shared by
@@ -3134,27 +3166,32 @@ impl ConTerminal {
         col: u16,
         button: InjectedMouseButton,
         state: PointerButtonState,
-    ) {
+    ) -> std::io::Result<MouseOutcome> {
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
         let platform_button = match button {
             InjectedMouseButton::Left => PointerButton::Left,
             InjectedMouseButton::Middle => PointerButton::Middle,
             InjectedMouseButton::Right => PointerButton::Right,
         };
-        self.handle_pointer_button(
+        self.handle_pointer_button_checked(
             window,
             platform_button,
             state,
             Some(position),
             &ModifierState::default(),
-        );
+        )
     }
 
     /// Moves the pointer to a control cell coordinate through the physical
     /// pointer-motion path.
-    fn inject_mouse_move(&mut self, window: &PixelWindow, row: u16, col: u16) {
+    fn inject_mouse_move(
+        &mut self,
+        window: &PixelWindow,
+        row: u16,
+        col: u16,
+    ) -> std::io::Result<MouseOutcome> {
         let position = self.terminal_point_to_logical(TerminalPoint { row, col });
-        self.handle_pointer_moved(window, position, &ModifierState::default());
+        self.handle_pointer_moved_checked(window, position, &ModifierState::default())
     }
 
     /// Sends wheel input at a control cell coordinate through `handle_wheel`.
@@ -3285,7 +3322,7 @@ impl ConTerminal {
         pressed: bool,
         motion: bool,
         modifiers: &agenterm_platform::input::ModifierState,
-    ) -> std::io::Result<bool> {
+    ) -> std::io::Result<MouseReportOutcome> {
         let (mode, encoding) = self.mouse_mode();
         let delivery = terminal_input::mouse_delivery(
             mode,
@@ -3296,21 +3333,33 @@ impl ConTerminal {
             pressed,
         );
         if delivery != terminal_input::MouseDelivery::Application {
-            return Ok(false);
+            return Ok(MouseReportOutcome {
+                consumed: false,
+                wrote: false,
+            });
         }
         // Motion reports repeat per pixel; collapse them to one per cell.
         if motion && self.last_reported_cell == Some(point) {
-            return Ok(true);
+            return Ok(MouseReportOutcome {
+                consumed: true,
+                wrote: false,
+            });
         }
         let code = terminal_input::mouse_code_with_modifiers(button, motion, *modifiers);
         let Some(bytes) =
             terminal_input::mouse_report_bytes(encoding, code, point.col, point.row, pressed)
         else {
-            return Ok(false);
+            return Ok(MouseReportOutcome {
+                consumed: false,
+                wrote: false,
+            });
         };
-        self.last_reported_cell = Some(point);
         self.write_pty(&bytes)?;
-        Ok(true)
+        self.last_reported_cell = Some(point);
+        Ok(MouseReportOutcome {
+            consumed: true,
+            wrote: true,
+        })
     }
 
     fn report_mouse(
@@ -3325,7 +3374,7 @@ impl ConTerminal {
         // application ownership must remain stable so a failed write does not
         // accidentally begin a local selection gesture.
         self.report_mouse_checked(button, point, pressed, motion, modifiers)
-            .unwrap_or(true)
+            .map_or(true, |outcome| outcome.consumed)
     }
 
     /// One Ctrl+wheel notch's worth of font-size zoom: `grow = true` is one
@@ -3396,7 +3445,10 @@ impl ConTerminal {
             let mut delivered = 0_i16;
             for _ in 0..count {
                 // Wheel is press-only; never emit a matching release.
-                if self.report_mouse_checked(button, point, true, false, modifiers)? {
+                if self
+                    .report_mouse_checked(button, point, true, false, modifiers)?
+                    .wrote
+                {
                     delivered += 1;
                 }
             }
@@ -3442,14 +3494,14 @@ impl ConTerminal {
     }
 
     /// Routes a pointer button press/release, preferring the application.
-    fn handle_pointer_button(
+    fn handle_pointer_button_checked(
         &mut self,
         window: &PixelWindow,
         button: PointerButton,
         state: PointerButtonState,
         position: Option<LogicalPoint>,
         modifiers: &agenterm_platform::input::ModifierState,
-    ) {
+    ) -> std::io::Result<MouseOutcome> {
         let old_selection = self.selection;
         let pressed = state == PointerButtonState::Pressed;
         let point = match position {
@@ -3463,13 +3515,25 @@ impl ConTerminal {
             PointerButton::Left => 0,
             PointerButton::Middle => 1,
             PointerButton::Right => 2,
-            _ => return,
+            _ => {
+                return Ok(MouseOutcome {
+                    route: "noop",
+                    changed: false,
+                });
+            }
         };
 
         let _ = window.set_pointer_capture(pressed);
 
         if pressed {
-            if self.report_mouse(code, point, true, false, modifiers) {
+            let report = match self.report_mouse_checked(code, point, true, false, modifiers) {
+                Ok(report) => report,
+                Err(error) => {
+                    let _ = window.set_pointer_capture(false);
+                    return Err(error);
+                }
+            };
+            if report.consumed {
                 self.mouse_dragging = true;
                 self.active_button = Some(code);
                 // The application owns this gesture; drop any stale selection
@@ -3477,17 +3541,30 @@ impl ConTerminal {
                 self.selection = None;
                 self.mark_selection_change(old_selection, self.selection);
                 self.request_dirty_redraw(window);
-                return;
+                return Ok(MouseOutcome {
+                    route: "application",
+                    changed: report.wrote,
+                });
             }
         } else if self.mouse_dragging {
             let held = self.active_button.unwrap_or(code);
-            self.report_mouse(held, point, false, false, modifiers);
+            let reported = self.report_mouse_checked(held, point, false, false, modifiers);
             self.mouse_dragging = false;
             self.active_button = None;
-            return;
+            let reported = reported?;
+            return Ok(MouseOutcome {
+                route: "application",
+                changed: reported.wrote,
+            });
         }
 
         // Local handling.
+        let was_selecting = self.selecting;
+        let route = match (button, pressed) {
+            (PointerButton::Left, _) => "selection",
+            (PointerButton::Right, true) => "clipboard",
+            _ => "noop",
+        };
         match (button, pressed) {
             (PointerButton::Left, true) => {
                 match self.register_click(point) {
@@ -3529,8 +3606,21 @@ impl ConTerminal {
             }
             _ => {}
         }
+        let changed = old_selection != self.selection || was_selecting != self.selecting;
         self.mark_selection_change(old_selection, self.selection);
         self.request_dirty_redraw(window);
+        Ok(MouseOutcome { route, changed })
+    }
+
+    fn handle_pointer_button(
+        &mut self,
+        window: &PixelWindow,
+        button: PointerButton,
+        state: PointerButtonState,
+        position: Option<LogicalPoint>,
+        modifiers: &agenterm_platform::input::ModifierState,
+    ) {
+        let _ = self.handle_pointer_button_checked(window, button, state, position, modifiers);
     }
 
     /// Routes a pointer move: an application gesture in flight keeps
@@ -3539,27 +3629,55 @@ impl ConTerminal {
     /// Factored out of the `PointerMoved` event arm so a control command
     /// `mouse_move` command drives the identical logic a real OS pointer
     /// move does, not a lookalike.
+    fn handle_pointer_moved_checked(
+        &mut self,
+        window: &PixelWindow,
+        position: LogicalPoint,
+        modifiers: &agenterm_platform::input::ModifierState,
+    ) -> std::io::Result<MouseOutcome> {
+        let old_selection = self.selection;
+        let pt = self.hit_test(&position);
+        let route = if self.mouse_dragging {
+            let button = self.active_button.unwrap_or(0);
+            let report = self.report_mouse_checked(button, pt, true, true, modifiers)?;
+            let wrote = report.wrote;
+            self.mark_selection_change(old_selection, self.selection);
+            self.request_dirty_redraw(window);
+            return Ok(MouseOutcome {
+                route: "application",
+                changed: wrote,
+            });
+        } else if self.selecting {
+            if let Some((anchor, _)) = self.selection {
+                self.selection = Some((anchor, pt));
+            }
+            "selection"
+        } else if self.mouse_mode().0 == terminal_input::ApplicationMouseMode::AnyMotion {
+            // 1003: report motion with no button held (button 3 = none).
+            let report = self.report_mouse_checked(3, pt, true, true, modifiers)?;
+            let wrote = report.wrote;
+            self.mark_selection_change(old_selection, self.selection);
+            self.request_dirty_redraw(window);
+            return Ok(MouseOutcome {
+                route: "application",
+                changed: wrote,
+            });
+        } else {
+            "noop"
+        };
+        let changed = old_selection != self.selection;
+        self.mark_selection_change(old_selection, self.selection);
+        self.request_dirty_redraw(window);
+        Ok(MouseOutcome { route, changed })
+    }
+
     fn handle_pointer_moved(
         &mut self,
         window: &PixelWindow,
         position: LogicalPoint,
         modifiers: &agenterm_platform::input::ModifierState,
     ) {
-        let old_selection = self.selection;
-        let pt = self.hit_test(&position);
-        if self.mouse_dragging {
-            let button = self.active_button.unwrap_or(0);
-            self.report_mouse(button, pt, true, true, modifiers);
-        } else if self.selecting {
-            if let Some((anchor, _)) = self.selection {
-                self.selection = Some((anchor, pt));
-            }
-        } else if self.mouse_mode().0 == terminal_input::ApplicationMouseMode::AnyMotion {
-            // 1003: report motion with no button held (button 3 = none).
-            self.report_mouse(3, pt, true, true, modifiers);
-        }
-        self.mark_selection_change(old_selection, self.selection);
-        self.request_dirty_redraw(window);
+        let _ = self.handle_pointer_moved_checked(window, position, modifiers);
     }
 
     fn cancel_pointer_gesture(&mut self, window: &PixelWindow) {

@@ -358,7 +358,7 @@ fn gui_control_surface_isolated_multitab_black_box() {
     assert!(!root_text.contains("LOAD_DONE"));
     assert!(child_text.contains("VT_NOISE_1200"));
 
-    cli_json(
+    let mouse_move_receipt = cli_json(
         exe,
         &endpoint,
         &[
@@ -375,7 +375,10 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "1",
         ],
     );
-    cli_json(
+    assert_eq!(mouse_move_receipt["delivered"], true);
+    assert_eq!(mouse_move_receipt["route"], "noop");
+    assert_eq!(mouse_move_receipt["changed"], false);
+    let mouse_click_receipt = cli_json(
         exe,
         &endpoint,
         &[
@@ -392,6 +395,9 @@ fn gui_control_surface_isolated_multitab_black_box() {
             "1",
         ],
     );
+    assert_eq!(mouse_click_receipt["delivered"], true);
+    assert_eq!(mouse_click_receipt["route"], "selection");
+    assert_eq!(mouse_click_receipt["changed"], true);
     let wheel_receipt = cli_json(
         exe,
         &endpoint,

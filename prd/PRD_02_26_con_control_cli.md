@@ -52,6 +52,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   changed. Application and alternate-screen PTY write failures fail the request
   instead of returning a false-success receipt; physical wheel input remains
   best-effort across concurrent child exit.
+- [x] `send-mouse` preserves its compatible `delivered` field and additionally
+  reports the route actually taken (`application`, local selection, clipboard,
+  or no-op) plus whether the gesture changed state or wrote application input.
+  Application mouse write failures fail the CLI request, while physical pointer
+  input remains best-effort across concurrent child exit and keeps gesture
+  ownership through release.
 - [x] public `wait-text` delegates exact per-visible-row UTF-8 containment to one
   allocation-free control kernel. It preserves the existing authority: no row
   joining, newline insertion, cross-row match, hidden-scrollback scan, Unicode
