@@ -318,6 +318,7 @@ struct ResolvedNode {
 
 /// Shared addressing gate for structured click/focus: `--node` or `--name`,
 /// never both, and `--name` never opens a coordinate/screenshot path.
+/// `--name` requires exactly one showing/visible match.
 fn resolve_actuation_node(
     window: Option<isize>,
     node: Option<&str>,
@@ -360,16 +361,8 @@ fn resolve_named_node(
         ));
     };
     let tree = mechanism::tree_for_window(Some(window)).map_err(map_mechanism_err)?;
-    match find_showing_node(&tree.nodes, pattern, role).cloned() {
-        Some(node) => Ok((tree, node)),
-        None => Err(CuError::new(
-            "a11y_node_not_found",
-            format!(
-                "no showing accessibility node with {}",
-                name_scope(pattern, role)
-            ),
-        )),
-    }
+    let node = require_unique_showing_node(&tree.nodes, pattern, role)?.clone();
+    Ok((tree, node))
 }
 
 fn click_tree_payload(
@@ -546,9 +539,11 @@ fn condition_met(condition: &WaitCondition, windows: &[WindowInfo]) -> bool {
     }
 }
 
-/// Polls `tree` until a showing node whose name contains `pattern` (and whose
-/// role matches `role`, when given) appears. Timeout is a typed failure so
-/// loop-until callers break on `ok:false` instead of retrying blind.
+/// Polls `tree` until exactly one showing node whose name contains `pattern`
+/// (and whose role matches `role`, when given) appears. Two or more showing
+/// hits fail typed (`a11y_node_ambiguous`) instead of taking the first.
+/// Timeout is a typed failure so loop-until callers break on `ok:false`
+/// instead of retrying blind.
 fn wait_node(
     timeout_ms: u64,
     pattern: &str,
@@ -567,17 +562,22 @@ fn wait_node(
             Ok(tree) => {
                 last_node_count = tree.nodes.len();
                 last_error.take();
-                if let Some(node) = find_showing_node(&tree.nodes, pattern, role) {
-                    return Ok(serde_json::json!({
-                        "met": true,
-                        "addressing": "accessibility-tree",
-                        "mechanism": "libagenterm",
-                        "backend": tree.backend,
-                        "window": window,
-                        "polls": polls,
-                        "node": node,
-                        "observation": { "node_count": last_node_count },
-                    }));
+                let matches = showing_name_matches(&tree.nodes, pattern, role);
+                match matches.len() {
+                    0 => {}
+                    1 => {
+                        return Ok(serde_json::json!({
+                            "met": true,
+                            "addressing": "accessibility-tree",
+                            "mechanism": "libagenterm",
+                            "backend": tree.backend,
+                            "window": window,
+                            "polls": polls,
+                            "node": matches[0],
+                            "observation": { "node_count": last_node_count },
+                        }));
+                    }
+                    count => return Err(name_match_error(pattern, role, count)),
                 }
             }
             // The tree can be missing outright; that is not something more
@@ -608,16 +608,49 @@ fn wait_node(
     ))
 }
 
-fn find_showing_node<'a>(
+fn showing_name_matches<'a>(
     nodes: &'a [mechanism::A11yNode],
     pattern: &str,
     role: Option<&str>,
-) -> Option<&'a mechanism::A11yNode> {
+) -> Vec<&'a mechanism::A11yNode> {
     let name_pat = pattern.to_ascii_lowercase();
     let role_pat = role.map(str::to_ascii_lowercase);
     nodes
         .iter()
-        .find(|node| node_matches(node, &name_pat, role_pat.as_deref()))
+        .filter(|node| node_matches(node, &name_pat, role_pat.as_deref()))
+        .collect()
+}
+
+fn require_unique_showing_node<'a>(
+    nodes: &'a [mechanism::A11yNode],
+    pattern: &str,
+    role: Option<&str>,
+) -> Result<&'a mechanism::A11yNode, CuError> {
+    let matches = showing_name_matches(nodes, pattern, role);
+    match matches.len() {
+        1 => Ok(matches[0]),
+        count => Err(name_match_error(pattern, role, count)),
+    }
+}
+
+fn name_match_error(pattern: &str, role: Option<&str>, count: usize) -> CuError {
+    if count == 0 {
+        return CuError::new(
+            "a11y_node_not_found",
+            format!(
+                "no showing accessibility node with {}",
+                name_scope(pattern, role)
+            ),
+        );
+    }
+    CuError::new(
+        "a11y_node_ambiguous",
+        format!(
+            "{count} showing accessibility nodes with {}",
+            name_scope(pattern, role)
+        ),
+    )
+    .with_count(count)
 }
 
 fn node_matches(node: &mechanism::A11yNode, name_pat: &str, role_pat: Option<&str>) -> bool {
@@ -752,8 +785,12 @@ mod tests {
     }
 
     fn node(name: &str, role: &str, states: &[&str]) -> mechanism::A11yNode {
+        node_at("/0/1", name, role, states)
+    }
+
+    fn node_at(id: &str, name: &str, role: &str, states: &[&str]) -> mechanism::A11yNode {
         mechanism::A11yNode {
-            id: "/0/1".into(),
+            id: id.into(),
             parent_id: Some("/0".into()),
             role: role.into(),
             name: name.into(),
@@ -909,9 +946,37 @@ mod tests {
             node("hidden Reload", "button", &["enabled"]),
             node("Reload this page", "push button", &["showing", "enabled"]),
         ];
-        let matched = find_showing_node(&nodes, "reload", Some("button")).expect("shown match");
+        let matched =
+            require_unique_showing_node(&nodes, "reload", Some("button")).expect("shown match");
         assert_eq!(matched.name, "Reload this page");
-        assert!(find_showing_node(&nodes, "reload", Some("entry")).is_none());
+        let missing = require_unique_showing_node(&nodes, "reload", Some("entry")).unwrap_err();
+        assert_eq!(missing.code, "a11y_node_not_found");
+        assert_eq!(missing.count, None);
+    }
+
+    #[test]
+    fn two_showing_nodes_named_alike_are_ambiguous() {
+        let nodes = vec![
+            node_at("/0/1", "Tab search", "push button", &["showing", "enabled"]),
+            node_at("/0/2", "Tab search", "push button", &["visible", "enabled"]),
+        ];
+        let err = require_unique_showing_node(&nodes, "Tab search", None).unwrap_err();
+        assert_eq!(err.code, "a11y_node_ambiguous");
+        assert_eq!(err.count, Some(2));
+        assert!(
+            err.message.contains("2"),
+            "ambiguous error must carry the match count: {}",
+            err.message
+        );
+
+        // A hidden duplicate must not count; only showing/visible nodes do.
+        let one_showing = vec![
+            node_at("/0/1", "Tab search", "push button", &["showing"]),
+            node_at("/0/2", "Tab search", "push button", &["enabled"]),
+        ];
+        let matched = require_unique_showing_node(&one_showing, "Tab search", None)
+            .expect("hidden twin is not a match");
+        assert_eq!(matched.id, "/0/1");
     }
 
     #[test]

@@ -1027,7 +1027,10 @@ backend. Resolve with the same showing/visible + case-insensitive
 substring matcher as `wait --node-name-contains`, then call the existing
 `--node` AT-SPI path. Require `--window`, reject `--name` combined with
 `--node` or `--coords`, and return typed `a11y_node_not_found` on a miss.
-Never satisfy a name click with a screenshot or degraded coordinates.
+Two or more showing/visible hits must return typed `a11y_node_ambiguous`
+with the match count — never silently pick the first. The same uniqueness
+rule applies to `wait --node-name-contains`. Never satisfy a name click
+with a screenshot or degraded coordinates.
 
 `cu send-text --name` is the same rule plus one ordering constraint: resolve
 and focus the node BEFORE injecting any keystroke, so a miss types nothing

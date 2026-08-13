@@ -74,13 +74,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`--window` + `--name` + optional `--role`). Resolution reuses the
   `wait --node-name-contains` matcher (showing/visible, case-insensitive
   substring) and then acts on the existing node-path a11y path. A miss is
-  typed `a11y_node_not_found`. Name addressing must not parse tree dumps,
-  take screenshots, or fall through to `--coords`.
+  typed `a11y_node_not_found`. Two or more showing matches are typed
+  `a11y_node_ambiguous` (with the match count); the command must not pick
+  the first. Name addressing must not parse tree dumps, take screenshots,
+  or fall through to `--coords`.
 - [~] `send-text` accepts the same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). It focuses the matched
   node through the node-path path, then types; without `--name` it stays the
-  plain "type into whatever is focused" verb. A miss types nothing and fails
-  typed, so a loop-until caller never sprays text at the wrong control.
+  plain "type into whatever is focused" verb. A miss or an ambiguous name
+  types nothing and fails typed, so a loop-until caller never sprays text
+  at the wrong control.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

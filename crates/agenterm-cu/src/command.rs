@@ -40,7 +40,9 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         node: Option<String>,
         /// Accessible-name substring; resolved with the same showing/visible
-        /// matcher as `WaitCondition::NodeNameContains`, then acted via `--node`.
+        /// matcher as `WaitCondition::NodeNameContains` (exactly one match),
+        /// then acted via `--node`. Two or more showing hits are
+        /// `a11y_node_ambiguous`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,8 +109,10 @@ pub enum WaitCondition {
     FocusedHandle {
         handle: isize,
     },
-    /// Polls the accessibility tree until a showing node matches. Never falls
-    /// back to pixels: addressing stays `accessibility-tree`.
+    /// Polls the accessibility tree until exactly one showing node matches.
+    /// Two or more showing hits fail typed (`a11y_node_ambiguous`) instead of
+    /// picking the first. Never falls back to pixels: addressing stays
+    /// `accessibility-tree`.
     NodeNameContains {
         pattern: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
