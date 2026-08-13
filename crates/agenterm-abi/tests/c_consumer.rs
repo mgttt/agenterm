@@ -6,11 +6,15 @@
 //!
 //! Compile/link/run failures all fail the test, with the compiler's stderr
 //! echoed verbatim in the panic. The ONLY allowed skip is "no C compiler
-//! found": PATH (cc/gcc/clang/cl.exe) first, then — on Windows — the MSVC
-//! toolchain located through cc::windows_registry::find_tool, which finds
-//! cl.exe without vcvarsall having been sourced into PATH. Artifacts go under
-//! the system temp directory and are cleaned up; nothing is written into the
-//! repository tree.
+//! matching the target's ABI found": the C toolchain is selected from the
+//! Rust target's own ABI (`cfg!(target_env)`), never from what happens to
+//! sit on PATH — an MSVC target links with the MSVC toolchain only (via
+//! cc::windows_registry, which finds cl.exe without vcvarsall on PATH), a
+//! GNU target with PATH cc/gcc/clang, so a mingw ld can never be chosen to
+//! consume an MSVC-ABI import library (undefined `__chkstk` /
+//! `??_7type_info@@6B@` / `__imp_*`). Artifacts go under the system temp
+//! directory and are cleaned up; nothing is written into the repository
+//! tree.
 
 use agenterm::{ABI_MAJOR, ABI_MINOR};
 use std::ffi::OsString;
@@ -60,28 +64,101 @@ struct CCompiler {
     env: Vec<(OsString, OsString)>,
 }
 
-/// C compiler priority: cc, gcc, clang (plus cl.exe on Windows) on PATH, then
-/// (Windows only) the MSVC toolchain located via cc::windows_registry — this
-/// finds cl.exe without requiring vcvarsall to have been sourced into PATH.
-fn find_c_compiler() -> Option<CCompiler> {
-    let mut candidates = vec!["cc", "gcc", "clang"];
-    if cfg!(windows) {
-        candidates.push("cl.exe");
+/// Human-readable `target_env` for the printed decision line, derived from
+/// the same `cfg!(target_env)` checks that drive the toolchain branch.
+fn target_env_name() -> &'static str {
+    if cfg!(target_env = "msvc") {
+        "msvc"
+    } else if cfg!(target_env = "gnu") {
+        "gnu"
+    } else if cfg!(target_env = "musl") {
+        "musl"
+    } else {
+        "other"
     }
-    if let Some(path) = find_on_path(&candidates) {
-        return Some(CCompiler {
+}
+
+/// Locate a C compiler whose ABI matches the Rust target this test was
+/// compiled for. The cdylib ships the Rust target's ABI, so the C toolchain
+/// must agree with it:
+///
+/// - `target_env = "msvc"`: ONLY the MSVC toolchain (found through
+///   `cc::windows_registry`, so vcvarsall need not have been sourced into
+///   PATH). PATH `gcc`/`clang` are deliberately not consulted — a mingw ld
+///   cannot consume MSVC-ABI objects (undefined `__chkstk` /
+///   `??_7type_info@@6B@` / `__imp_*`), which is the exact CI failure this
+///   selection exists to prevent.
+/// - `target_env = "gnu"`: the GNU C ABI — PATH `cc`/`gcc`/`clang`, never
+///   MSVC. Covers mingw on Windows and the ordinary libc toolchain on
+///   Linux/macOS (unchanged non-Windows behavior).
+/// - anything else (e.g. macOS): unchanged PATH `cc`/`gcc`/`clang`.
+///
+/// `label` prefixes the eprintln decision line (e.g. "c_consumer") so a
+/// wrong selection is visible at a glance in CI logs.
+fn find_c_compiler(label: &str) -> Option<CCompiler> {
+    let target_env = target_env_name();
+    if cfg!(target_env = "msvc") {
+        #[cfg(windows)]
+        {
+            match find_msvc_tool() {
+                Some(tool) => {
+                    eprintln!(
+                        "{label}: target_env={target_env} -> using MSVC cl.exe at {}",
+                        tool.path().display()
+                    );
+                    Some(CCompiler {
+                        path: tool.path().to_path_buf(),
+                        env: tool.env().to_vec(),
+                    })
+                }
+                None => {
+                    eprintln!(
+                        "{label}: target_env={target_env} -> no MSVC toolchain \
+                         found via cc::windows_registry -> SKIP (only MSVC \
+                         matches the ABI of this target)"
+                    );
+                    None
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // An msvc target_env exists only on Windows targets; this arm is
+            // present solely so the branch compiles on non-Windows hosts.
+            path_compiler(label, target_env, &["cc", "gcc", "clang"])
+        }
+    } else if cfg!(target_env = "gnu") {
+        path_compiler(label, target_env, &["cc", "gcc", "clang"])
+    } else {
+        // Non-Windows / other environments (e.g. macOS): unchanged behavior.
+        let mut candidates = vec!["cc", "gcc", "clang"];
+        if cfg!(windows) {
+            candidates.push("cl.exe");
+        }
+        path_compiler(label, target_env, &candidates)
+    }
+}
+
+/// PATH lookup with a printed decision line: `label: target_env=... ->
+/// using <name> at <path>` on success, `... -> SKIP` when nothing matches.
+fn path_compiler(label: &str, target_env: &str, candidates: &[&str]) -> Option<CCompiler> {
+    if let Some(path) = find_on_path(candidates) {
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("?");
+        eprintln!(
+            "{label}: target_env={target_env} -> using {name} at {}",
+            path.display()
+        );
+        Some(CCompiler {
             path,
             env: Vec::new(),
-        });
+        })
+    } else {
+        eprintln!(
+            "{label}: target_env={target_env} -> none of [{}] on PATH -> SKIP",
+            candidates.join(", ")
+        );
+        None
     }
-    #[cfg(windows)]
-    if let Some(tool) = find_msvc_tool() {
-        return Some(CCompiler {
-            path: tool.path().to_path_buf(),
-            env: tool.env().to_vec(),
-        });
-    }
-    None
 }
 
 /// Locate cl.exe through the cc crate's Windows registry API, which knows how
@@ -162,15 +239,15 @@ fn run_or_panic(label: &str, cmd: &mut Command) -> std::process::Output {
 
 #[test]
 fn c_consumer_compiles_links_and_runs() {
-    let Some(compiler) = find_c_compiler() else {
+    let Some(compiler) = find_c_compiler("c_consumer") else {
         eprintln!(
-            "SKIP: no C compiler found (PATH cc/gcc/clang/cl.exe, plus MSVC \
-             registry lookup on Windows) — cannot prove link-time usability \
-             of the C ABI on this machine"
+            "SKIP: no C compiler matching target_env={} was found (see the \
+             target_env= decision line above) — cannot prove link-time \
+             usability of the C ABI on this machine",
+            target_env_name()
         );
         return;
     };
-    eprintln!("c_consumer: using C compiler {}", compiler.path.display());
 
     let root = repo_root();
     let include = root.join("include");
