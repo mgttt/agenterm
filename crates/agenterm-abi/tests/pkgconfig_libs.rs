@@ -177,3 +177,50 @@ fn pc_in_template_shape_ok() {
         );
     }
 }
+
+/// The fourth copy of the MSVC system-library list: the copy-pasteable `cl`
+/// command line in `crates/agenterm-abi/README.md`.
+///
+/// `packaging/pkgconfig/README.md` sends MSVC users there by name, because
+/// pkg-config is not how anyone links on Windows, so that command line is the
+/// list a Windows consumer actually reads -- and until now nothing compared
+/// it to anything. The other three copies have been gated against each other
+/// since milestone 42; this one drifted freely.
+///
+/// The parse anchor is the `cl ` line inside the fenced block: every
+/// whitespace token ending in `.lib` that is not the library's own
+/// `agenterm.lib`. Keep it on one line.
+#[test]
+fn abi_readme_msvc_command_line_matches_link_system_libs() {
+    let readme = std::fs::read_to_string(repo_root().join("crates/agenterm-abi/README.md"))
+        .expect("crates/agenterm-abi/README.md must exist");
+    let line = readme
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("cl ") && l.contains(".lib"))
+        .unwrap_or_else(|| {
+            panic!(
+                "crates/agenterm-abi/README.md has no `cl ... .lib ...` command line \
+                 (that command is the anti-drift parse anchor for the MSVC system \
+                 libraries -- keep it on a single line inside its fenced block)"
+            )
+        });
+    let documented: Vec<String> = line
+        .split_whitespace()
+        .filter(|t| t.ends_with(".lib"))
+        .filter(|t| !t.ends_with("agenterm.lib"))
+        .map(|t| t.trim_end_matches(".lib").to_owned())
+        .collect();
+    let linked: Vec<String> = common::system_libs::MSVC
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    assert_eq!(
+        documented, linked,
+        "the `cl` command line in crates/agenterm-abi/README.md drifted from \
+         common::system_libs::MSVC (the list c_static_link.rs actually links \
+         with). Single source of truth: tests/common/mod.rs::system_libs. \
+         Update the constant, the packaging README table, generate-pc.sh AND \
+         this command line in the same change."
+    );
+}
