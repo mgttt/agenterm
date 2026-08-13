@@ -34,9 +34,13 @@ use std::sync::Mutex;
 /// pinyin inline and anchor the candidate window next to it.
 static COMPOSITION: Mutex<Option<ImeComposition>> = Mutex::new(None);
 
-pub(crate) fn capability_status(_display_available: bool) -> CapabilityStatus {
-    CapabilityStatus::Unsupported {
-        reason: Cow::Borrowed("ime-preedit-not-yet-adapted"),
+pub(crate) fn capability_status(display_available: bool) -> CapabilityStatus {
+    if display_available {
+        CapabilityStatus::Available
+    } else {
+        CapabilityStatus::Unsupported {
+            reason: Cow::Borrowed("headless-display"),
+        }
     }
 }
 
@@ -304,7 +308,21 @@ fn layout_language_name(language_id: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::utf16_cursor_to_char_index;
+    use std::borrow::Cow;
+
+    use super::{capability_status, utf16_cursor_to_char_index};
+    use crate::CapabilityStatus;
+
+    #[test]
+    fn capability_tracks_display_after_native_preedit_adoption() {
+        assert_eq!(capability_status(true), CapabilityStatus::Available);
+        assert!(matches!(
+            capability_status(false),
+            CapabilityStatus::Unsupported {
+                reason: Cow::Borrowed("headless-display")
+            }
+        ));
+    }
 
     #[test]
     fn composition_cursor_converts_utf16_units_without_splitting_surrogates() {

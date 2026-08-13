@@ -256,9 +256,11 @@ Available, Unsupported, and Failed without reading source or assuming parity.
     reclaimed, and product renderers receive only neutral alpha coverage and
     placement. The con Windows graph no longer links ab_glyph/ttf_parser;
     Linux/macOS retain file-font parsing in one shared platform adapter.
-  - [x] Windows capability reporting no longer claims full IME support:
-    committed UTF-16 text is shipped, while unadapted IME preedit reports
-    explicit `ime-preedit-not-yet-adapted`
+  - [x] Windows IME capability reporting follows the selected adapter rather
+    than a product-side OS exception. Native IMM32 preedit/commit, UTF-16
+    cursor conversion and candidate anchoring are shipped, so a displayed
+    Windows host reports `available`; a headless probe remains explicitly
+    `unsupported` with `headless-display`.
   - [x] contract-revision-3 makes native minimize/maximize/restore snapshot
     state and bounded client resize consume the shared window lifecycle
     contract; Win32 retains HWND sizing and non-client-frame arithmetic

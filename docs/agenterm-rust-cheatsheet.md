@@ -412,6 +412,18 @@ and report terminal commit success only after the complete PTY write. Such a
 hook proves product routing and failure transactions; it does not prove a real
 installed IME's IMM32/TSF keyboard behavior.
 
+Capability facts belong to the selected platform adapter. Once an adapter ships
+the normalized mechanism, remove product-side OS exceptions that duplicate an
+older unsupported state; otherwise the implementation can work while public
+discovery still forces callers to degrade. Keep human acceptance as a separate
+product-evidence status rather than misreporting the mechanism capability.
+
+Feature-gate an adapter facade on both its contract prerequisites and at least
+one concrete provider feature. `input + ime` can expose IME facts without
+selecting a pixel host; compiling `run_pixel_window` in that graph leaves its
+native/portable implementation module absent. Prove narrow capability features
+independently instead of relying on a product's larger unified graph.
+
 Process completion and host lifetime are separate states. A terminal waiter
 must publish any exit code before its completion flag with release ordering;
 the GUI consumes the flag and status with acquire ordering, retains the final

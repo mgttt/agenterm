@@ -180,4 +180,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   host. Native IME preedit/commit from IMM32, candidate anchoring in documented
   client coordinates, matched pointer capture/loss cancellation, and DPI
   suggested rectangles are wired; human Chinese-IME keyboard acceptance remains
-  required before the IME surface is claimed complete.
+  required before the IME surface is claimed complete. The shared platform
+  capability now truthfully reports this shipped native mechanism as available
+  on a displayed Windows host; that mechanism fact does not substitute for the
+  remaining human keyboard acceptance.

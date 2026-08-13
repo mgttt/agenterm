@@ -19,7 +19,11 @@ use windows_sys::Win32::{
     },
 };
 
-#[cfg(all(feature = "input", feature = "ime"))]
+#[cfg(all(
+    feature = "input",
+    feature = "ime",
+    any(feature = "native-pixel-window", feature = "portable-pixel-window")
+))]
 use crate::contract::window_host::{PixelWindowApplication, PixelWindowError, PixelWindowOptions};
 use crate::window::{
     DisplayBackendFacts, NativeTextInputEvent, NativeTextKey, NativeTextPointerButton,
@@ -56,7 +60,11 @@ mod native_pixel_window;
 #[path = "../unix/window_host.rs"]
 mod window_host;
 
-#[cfg(all(feature = "input", feature = "ime"))]
+#[cfg(all(
+    feature = "input",
+    feature = "ime",
+    any(feature = "native-pixel-window", feature = "portable-pixel-window")
+))]
 pub(crate) fn run_pixel_window(
     options: PixelWindowOptions,
     application: Box<dyn PixelWindowApplication>,

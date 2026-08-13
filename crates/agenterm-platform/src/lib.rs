@@ -277,7 +277,12 @@ pub mod ime;
 #[cfg(feature = "window")]
 pub mod window;
 
-#[cfg(all(feature = "window", feature = "input", feature = "ime"))]
+#[cfg(all(
+    feature = "window",
+    feature = "input",
+    feature = "ime",
+    any(feature = "native-pixel-window", feature = "portable-pixel-window")
+))]
 pub mod window_host;
 
 #[cfg(feature = "webview")]

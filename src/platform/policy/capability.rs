@@ -103,19 +103,11 @@ pub(crate) fn platform_info_json() -> serde_json::Value {
                     "headless-display",
                     "window-failed",
                 ),
-                CapabilityKind::Ime => {
-                    if matches!(kind, agenterm_platform::PlatformKind::Windows) {
-                        CapabilityStatus::Unsupported {
-                            reason: "ime-preedit-not-yet-adapted",
-                        }
-                    } else {
-                        project_capability_status(
-                            agenterm_platform::ime::capability_status(!display.headless),
-                            "headless-display",
-                            "ime-failed",
-                        )
-                    }
-                }
+                CapabilityKind::Ime => project_capability_status(
+                    agenterm_platform::ime::capability_status(!display.headless),
+                    "headless-display",
+                    "ime-failed",
+                ),
                 CapabilityKind::Clipboard => CapabilityStatus::Available,
                 CapabilityKind::Font => project_capability_status(
                     agenterm_platform::font::capability_status(),
@@ -197,5 +189,7 @@ mod tests {
         for capability in CapabilityKind::ALL {
             assert!(info["capabilities"][capability.as_str()]["status"].is_string());
         }
+        #[cfg(windows)]
+        assert_eq!(info["capabilities"]["ime"]["status"], "available");
     }
 }
