@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+use std::io::Read as _;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -64,7 +65,14 @@ fn wait_for<T>(
             return value;
         }
         if let Some(status) = running.child.try_wait().expect("poll agenterm-con") {
-            panic!("agenterm-con exited before {label}: {status}");
+            let mut stderr = String::new();
+            if let Some(mut stream) = running.child.stderr.take() {
+                let _ = stream.read_to_string(&mut stderr);
+            }
+            panic!(
+                "agenterm-con exited before {label}: {status}\nstderr:\n{}",
+                stderr.trim()
+            );
         }
         assert!(Instant::now() < deadline, "timed out waiting for {label}");
         std::thread::sleep(Duration::from_millis(50));
@@ -83,9 +91,10 @@ fn real_atspi_tree_edits_command_and_activates_send() {
     let endpoint = format!("unix:{}", scratch.join("control.sock").display());
     let child = Command::new(executable)
         .args(["--no-activate", "--control", &endpoint, "-e", "sh"])
+        .env("RUST_BACKTRACE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("launch agenterm-con under AT-SPI session");
     let mut running = RunningCon { child, scratch };
