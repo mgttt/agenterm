@@ -11,7 +11,7 @@ Orchestrator agents (not humans staring at pixels) should run:
 ```text
 loop until goal:
   observe structured state (windows, control tree, typed capabilities)
-  act by structured identity (window + node path id) when a tree exists
+  act by structured identity (window + node path, or window + accessible name)
   wait on observable conditions with bounded timeouts — never sleep
 ```
 
@@ -46,7 +46,9 @@ audited separately from AT-SPI actuation.
 | `windows` | X11 window enumeration (`agenterm-platform`) |
 | `tree` | AT-SPI2 flattened control tree with role, name, states, bounds, actions |
 | `click --node <path>` | AT-SPI2 `Action` (`click` / `press`, else default `DoAction(0)` when the node exposes actions) |
+| `click --window --name PAT [--role ROLE]` | same showing/visible name matcher as `wait --node-name-contains`, then the `--node` AT-SPI path |
 | `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
+| `focus --window --name PAT [--role ROLE]` | same matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `send-text` / `send-keys` | XTest keyboard injection |
 | `screenshot` | typed `unsupported` on Linux native capture |
@@ -107,6 +109,10 @@ cu --target current --grant observe tree --window 0x3c00007
 
 # Structured click by node path (AT-SPI)
 cu --target current --grant actuate click --node /3/0/0/1/0
+
+# Structured click / focus by accessible name — no tree-dump parsing, no --coords
+cu --target current --grant observe,act click --window 25165828 --name Reload
+cu --target current --grant observe,act focus --window 25165828 --name Reload --role button
 
 # Structured focus
 cu --target current --grant actuate focus --node /3/0/0/1/0
