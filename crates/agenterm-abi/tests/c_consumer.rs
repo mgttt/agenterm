@@ -92,13 +92,53 @@ fn debug_info_note() -> &'static str {
     }
 }
 
-/// Active Cargo profile name for the size printout, derived from the test
-/// binary's own path: it lives in `target/<profile>/deps/` (the same layout
-/// `locate_cdylib` relies on), so the `deps` parent's name is the profile,
-/// e.g. "abi-dev". Avoids the compile-time `env!("PROFILE")`, which current
-/// Cargo no longer provides to rustc, and the run-time `PROFILE` var, which
-/// Cargo does not set in the test process.
+/// Raw `AGENTERM_ABI_PROFILE_DIR` value, if set. An explicit override names
+/// the artifact tree to measure (CI sets `target/abi-release`); the raw value
+/// is kept for the size printout so the log shows exactly what was
+/// configured.
+fn profile_dir_override_raw() -> Option<String> {
+    std::env::var("AGENTERM_ABI_PROFILE_DIR").ok()
+}
+
+/// Resolved override directory. Relative values resolve against the repo
+/// root: the test process CWD is the crate dir, while CI passes
+/// `target/abi-release` relative to the workspace root.
+fn profile_dir_override() -> Option<PathBuf> {
+    let raw = profile_dir_override_raw()?;
+    let p = PathBuf::from(&raw);
+    Some(if p.is_absolute() {
+        p
+    } else {
+        repo_root().join(p)
+    })
+}
+
+/// Directory the ABI artifact is looked up in: the `AGENTERM_ABI_PROFILE_DIR`
+/// override when set, otherwise the profile dir derived from the test
+/// binary's own path (target/<profile>/deps/ -> target/<profile>/).
+fn active_profile_dir() -> PathBuf {
+    if let Some(dir) = profile_dir_override() {
+        return dir;
+    }
+    let exe = std::env::current_exe().expect("current_exe()");
+    let deps = exe.parent().expect("test binary has a parent dir");
+    deps.parent()
+        .expect("deps dir has a parent dir")
+        .to_path_buf()
+}
+
+/// Active Cargo profile name for the size printout. An explicit
+/// `AGENTERM_ABI_PROFILE_DIR` wins (its raw value is printed, e.g.
+/// `target/abi-release`); otherwise the profile name is derived from the
+/// test binary's own path: it lives in `target/<profile>/deps/` (the same
+/// layout `locate_cdylib` relies on), so the `deps` parent's name is the
+/// profile, e.g. "abi-dev". Avoids the compile-time `env!("PROFILE")`, which
+/// current Cargo no longer provides to rustc, and the run-time `PROFILE` var,
+/// which Cargo does not set in the test process.
 fn profile_name() -> String {
+    if let Some(raw) = profile_dir_override_raw() {
+        return raw;
+    }
     let Ok(exe) = std::env::current_exe() else {
         return "unknown".to_string();
     };
@@ -209,20 +249,28 @@ fn find_msvc_tool() -> Option<cc::Tool> {
     cc::windows_registry::find_tool(&format!("{arch}-pc-windows-msvc"), "cl.exe")
 }
 
-/// Locate the cdylib built under the active profile (same layout as
-/// tests/dylib_load.rs): the test binary sits in target/<profile>/deps/, the
-/// cdylib in target/<profile>/. Missing cdylib = hard test failure, never a
-/// silent skip.
+/// Locate the cdylib. An explicit `AGENTERM_ABI_PROFILE_DIR` wins (relative
+/// values resolve against the repo root, matching how CI passes
+/// `target/abi-release`) and is searched directly; otherwise the default
+/// layout (same as tests/dylib_load.rs) is used: the test binary sits in
+/// target/<profile>/deps/, the cdylib in target/<profile>/. Missing cdylib =
+/// hard test failure, never a silent skip.
 fn locate_cdylib() -> PathBuf {
-    let exe = std::env::current_exe().expect("current_exe()");
-    let deps = exe.parent().expect("test binary has a parent dir");
-    let profile_dir = deps.parent().expect("deps dir has a parent dir");
     const CANDIDATES: [&str; 3] = [
         "agenterm.dll",      // Windows
         "libagenterm.so",    // Linux
         "libagenterm.dylib", // macOS
     ];
-    for dir in [profile_dir, deps] {
+    let profile_dir = active_profile_dir();
+    // The deps/ fallback is only meaningful for the test binary's own profile
+    // tree; an explicit override looks only in the configured directory.
+    let mut dirs = vec![profile_dir.clone()];
+    if profile_dir_override().is_none() {
+        let exe = std::env::current_exe().expect("current_exe()");
+        let deps = exe.parent().expect("test binary has a parent dir");
+        dirs.push(deps.to_path_buf());
+    }
+    for dir in &dirs {
         for name in CANDIDATES {
             let p = dir.join(name);
             if p.exists() {
