@@ -67,6 +67,7 @@ dependencies = [
  "agenterm-platform",
  "cc",
  "libloading 0.8.9",
+ "object",
 ]
 
 [[package]]

@@ -57,3 +57,10 @@ libloading = "0.8"
 # c_consumer.rs uses cc::windows_registry::find_tool to locate the MSVC
 # toolchain without requiring vcvarsall to have been sourced into PATH.
 cc = "1.4"
+# export_exactness.rs (milestone 54) parses the built cdylib's export table
+# with `object` (ELF dynsym / Mach-O external-defined symbols / PE export
+# directory) so the "export set == exports.txt ∪ platform allowlist" gate
+# never shells out to nm/dumpbin. `read` covers all three formats; the
+# default `compression` feature is not needed (no debug-section parsing) and
+# would only drag in flate2/ruzstd.
+object = { version = "0.39.1", default-features = false, features = ["read", "std"] }
