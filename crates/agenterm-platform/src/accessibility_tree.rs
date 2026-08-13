@@ -25,7 +25,8 @@ pub fn perform_node_action(
 
 /// Write `text` through the host accessibility text interface (Linux:
 /// AT-SPI `EditableText` `SetTextContents` / `InsertText`, or AT-SPI `Text`
-/// plus the toolkit set-value when EditableText is absent). Never injects
+/// plus the toolkit set-value when EditableText is absent: Chrome renderer
+/// AX or the WebKitGTK eval helper). Never injects
 /// keystrokes. A node without a writeable text interface fails typed.
 pub fn set_node_text(
     window_handle: Option<isize>,

@@ -134,8 +134,9 @@ Canonical host mapping (approved product vocabulary):
 - [x] `send-text --window HANDLE --name PAT [--role ROLE] [--] <text...>`
   resolves through that same path, then writes via AT-SPI `EditableText`
   (`SetTextContents` / `InsertText`, `agt_a11y_node_set_text`) or, when
-  the node exposes `Text` + `editable` but not `EditableText` (Chrome),
-  via AT-SPI `Text` plus the toolkit AX set-value, confirmed by
+  the node exposes `Text` + `editable` but not `EditableText` (Chrome,
+  WebKitGTK/Reasonix `<textarea>`), via AT-SPI `Text` plus the toolkit
+  set-value, confirmed by
   `GetText`. A named showing node with no writeable text interface
   typed-fails (`a11y_text_unavailable`) and never silently uses XTest /
   `input_inject::type_text`. Resolution failure (miss or ambiguous name)

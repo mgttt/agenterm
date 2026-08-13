@@ -288,7 +288,8 @@ fn focus(
 /// `send-text` with `--name` writes through native AT-SPI
 /// `EditableText` (`SetTextContents` / `InsertText`) or, when the named
 /// showing node exposes `Text` + `editable` but not `EditableText`
-/// (Chrome 151), through AT-SPI `Text` plus the toolkit AX set-value.
+/// (Chrome 151, WebKitGTK/Reasonix), through AT-SPI `Text` plus the
+/// toolkit set-value.
 /// Success is confirmed by `Text.GetText`. A named showing node with no
 /// writeable text interface typed-fails (`a11y_text_unavailable`) and
 /// never falls through to XTest / `input_inject::type_text`.
