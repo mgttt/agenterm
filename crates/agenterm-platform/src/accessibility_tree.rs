@@ -36,6 +36,17 @@ pub fn set_node_text(
     crate::selected::accessibility_tree::set_node_text(window_handle, node_id, text)
 }
 
+/// Read the node's independent accessible text (Linux: AT-SPI `Text.GetText`).
+/// This is not the resolve-time snapshot `text` field and is not the
+/// `send-text` reply's `matched.text`. A node with no Text interface
+/// fails typed.
+pub fn get_node_text(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<String, AccessibilityTreeError> {
+    crate::selected::accessibility_tree::get_node_text(window_handle, node_id)
+}
+
 /// Route of the last successful `set_node_text` on this thread.
 /// Linux: `"editable-text"` or `"text"`. Other hosts: `"editable-text"`.
 pub fn last_text_write_via() -> &'static str {

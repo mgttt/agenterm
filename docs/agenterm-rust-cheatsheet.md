@@ -1130,6 +1130,19 @@ through to XTest / `input_inject::type_text`. Explicit `--coords` or no
 `--` as the end of flags — otherwise text (or a chord) that starts with a
 dash is eaten as a flag.
 
+`cu wait --text-equals` / `--node-text-equals` with `--name` is the
+independent AT-SPI close-the-circuit after named `send-text`. Resolve the
+unique showing node, then call `Text.GetText` (`agt_a11y_node_get_text`).
+Success is `ok:true` only when that GetText equals the typed string. The
+`send-text` reply's `matched.text` is the resolve-time snapshot and does
+not count. A sidecar `cu tree` walk of snapshot `text` fields does not
+count. Timeout is typed `timeout` and reports the last GetText. Never
+screenshot, XTest, or `--coords`. Chrome AX set-value rides the window
+PID's `--remote-debugging-port`; two Chromes sharing one CDP port can
+make the write report success against another page while GetText on the
+named node stays empty — that is why wait must observe GetText, not the
+write reply.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`

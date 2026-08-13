@@ -4,9 +4,10 @@
 //! `agenterm-platform` until their ABI milestones ship.
 
 use agenterm::{
-    agt_a11y_node, agt_a11y_node_action_name, agt_a11y_node_perform, agt_a11y_node_send_keys,
-    agt_a11y_node_set_text, agt_a11y_node_string, agt_a11y_tree_meta_string, agt_a11y_tree_node,
-    agt_a11y_tree_snapshot, agt_capability, agt_capability_query, agt_last_error, agt_status,
+    agt_a11y_node, agt_a11y_node_action_name, agt_a11y_node_get_text, agt_a11y_node_perform,
+    agt_a11y_node_send_keys, agt_a11y_node_set_text, agt_a11y_node_string,
+    agt_a11y_tree_meta_string, agt_a11y_tree_node, agt_a11y_tree_snapshot, agt_capability,
+    agt_capability_query, agt_last_error, agt_status,
 };
 
 const AGT_A11Y_META_BACKEND: i32 = 0;
@@ -104,6 +105,50 @@ pub fn set_node_text(
     let status = agt_a11y_node_set_text(handle, node_c.as_ptr(), text.as_ptr(), text.len());
     map_status("agt_a11y_node_set_text", status)?;
     Ok(())
+}
+
+/// Independent AT-SPI `Text.GetText` for a resolved child-index path.
+/// Distinguishes a real mechanism failure from the two-stage empty-payload
+/// probe (`buffer_too_small` + required == 0).
+pub fn get_node_text(window: Option<isize>, node_id: &str) -> Result<String, MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let mut required = 0usize;
+    let status = agt_a11y_node_get_text(
+        handle,
+        node_c.as_ptr(),
+        std::ptr::null_mut(),
+        0,
+        &mut required,
+    );
+    if status == agt_status::AGT_UNSUPPORTED {
+        return Err(MechanismError::Unsupported);
+    }
+    if status != agt_status::AGT_FAILED {
+        return Err(last_mechanism_error("agt_a11y_node_get_text"));
+    }
+    let probe = last_mechanism_error("agt_a11y_node_get_text");
+    match &probe {
+        MechanismError::Failed { code, .. } if code == "buffer_too_small" => {}
+        other => return Err(other.clone()),
+    }
+    if required == 0 {
+        return Ok(String::new());
+    }
+    let mut buf = vec![0u8; required];
+    let status = agt_a11y_node_get_text(
+        handle,
+        node_c.as_ptr(),
+        buf.as_mut_ptr(),
+        required,
+        &mut required,
+    );
+    map_status("agt_a11y_node_get_text", status)?;
+    buf.truncate(required);
+    String::from_utf8(buf).map_err(|_| MechanismError::Failed {
+        code: "bad_encoding".into(),
+        message: "node text is not UTF-8".into(),
+    })
 }
 
 pub fn send_node_keys(

@@ -41,6 +41,15 @@ pub(crate) fn set_node_text(
     })
 }
 
+pub(crate) fn get_node_text(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<String, AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "accessibility-tree not wired on this unix host".into(),
+    })
+}
+
 pub(crate) fn last_text_write_via() -> &'static str {
     "editable-text"
 }

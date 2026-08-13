@@ -100,6 +100,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   XTest / `input_inject::send_keys`. Without `--name` it stays the plain
   "send to whatever is focused" verb. A miss or an ambiguous name sends no
   chord at all.
+- [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
+  (alias `--node-text-equals`) polls AT-SPI `Text.GetText` on the unique
+  showing named node until that independent text equals `TEXT`. Timeout is
+  typed `timeout` and reports the last GetText. `send-text` `matched.text`
+  and a sidecar `tree` walk of snapshot `text` fields are not this
+  condition. Never screenshot, XTest, or `--coords`.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
@@ -110,8 +116,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Determinism
 
-- [ ] every state transition a caller must observe is waitable with a bounded
-  typed timeout. No documented workflow depends on a fixed sleep.
+- [~] every state transition a caller must observe is waitable with a bounded
+  typed timeout. No documented workflow depends on a fixed sleep. Named
+  `send-text` is waitable with `--text-equals` / `--node-text-equals`.
 - [ ] a wait failure reports what was observed at the deadline, not only that
   the deadline passed.
 - [ ] requests, responses, enumerations and transfers are size and time bounded.

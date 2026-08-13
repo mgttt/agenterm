@@ -119,6 +119,8 @@ type A11yNodeString = unsafe extern "C" fn(usize, i32, *mut u8, usize, *mut usiz
 type A11yNodeActionName = unsafe extern "C" fn(usize, usize, *mut u8, usize, *mut usize) -> i32;
 type A11yNodePerform = unsafe extern "C" fn(isize, *const c_char, i32) -> i32;
 type A11yNodeSetText = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
+type A11yNodeGetText =
+    unsafe extern "C" fn(isize, *const c_char, *mut u8, usize, *mut usize) -> i32;
 type A11yNodeSendKeys = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
@@ -577,6 +579,22 @@ fn null_group() -> Vec<SweepCase> {
             }),
         },
         SweepCase {
+            label: "agt_a11y_node_get_text[window_handle=0,node_id=NULL,buf=NULL,cap=0,out_len=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeGetText> = unsafe { sym(lib, b"agt_a11y_node_get_text") };
+                unsafe {
+                    CallResult::Status(f(
+                        0,
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                        0,
+                        std::ptr::null_mut(),
+                    ))
+                }
+            }),
+        },
+        SweepCase {
             label: "agt_a11y_node_send_keys[window_handle=0,node_id=NULL,keys=NULL,len=1]",
             kind: Kind::MustFail,
             call: Box::new(|lib| {
@@ -720,6 +738,15 @@ fn probe_group() -> Vec<SweepCase> {
             }),
         },
         SweepCase {
+            label: "agt_a11y_node_get_text[window_handle=0,node_id=/0,buf=NULL,cap=0,out_len=&n]",
+            kind: Kind::Probe,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeGetText> = unsafe { sym(lib, b"agt_a11y_node_get_text") };
+                let mut n = 0usize;
+                unsafe { CallResult::Status(f(0, c"/0".as_ptr(), std::ptr::null_mut(), 0, &mut n)) }
+            }),
+        },
+        SweepCase {
             label: "agt_a11y_node_action_name[index=0,action=0,buf=NULL,cap=0,out_len=&n]",
             kind: Kind::Probe,
             call: Box::new(|lib| {
@@ -858,6 +885,15 @@ fn cap_group() -> Vec<SweepCase> {
                 let f: Symbol<A11yNodeString> = unsafe { sym(lib, b"agt_a11y_node_string") };
                 let mut n = 0usize;
                 unsafe { CallResult::Status(f(0, 0, std::ptr::null_mut(), 1, &mut n)) }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_get_text[window_handle=0,node_id=/0,buf=NULL,cap=1,out_len=&n]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeGetText> = unsafe { sym(lib, b"agt_a11y_node_get_text") };
+                let mut n = 0usize;
+                unsafe { CallResult::Status(f(0, c"/0".as_ptr(), std::ptr::null_mut(), 1, &mut n)) }
             }),
         },
         SweepCase {

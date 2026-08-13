@@ -530,13 +530,21 @@ fn window_place(action_raw: &str, window: Option<isize>) -> Result<serde_json::V
 }
 
 fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value, CuError> {
-    if let WaitCondition::NodeNameContains {
-        pattern,
-        role,
-        window,
-    } = condition
-    {
-        return wait_node(timeout_ms, pattern, role.as_deref(), *window);
+    match condition {
+        WaitCondition::NodeNameContains {
+            pattern,
+            role,
+            window,
+        } => return wait_node(timeout_ms, pattern, role.as_deref(), *window),
+        WaitCondition::NodeTextEquals {
+            expected,
+            name,
+            role,
+            window,
+        } => {
+            return wait_node_text(timeout_ms, expected, name, role.as_deref(), *window);
+        }
+        _ => {}
     }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(120_000));
     let poll = Duration::from_millis(50);
@@ -575,7 +583,7 @@ fn condition_met(condition: &WaitCondition, windows: &[WindowInfo]) -> bool {
             .iter()
             .any(|window| window.focused && window.handle == *handle),
         // Polled against the accessibility tree, not the window list.
-        WaitCondition::NodeNameContains { .. } => false,
+        WaitCondition::NodeNameContains { .. } | WaitCondition::NodeTextEquals { .. } => false,
     }
 }
 
@@ -644,6 +652,95 @@ fn wait_node(
         format!(
             "no showing accessibility node with {} after {timeout_ms}ms ({polls} polls, {detail})",
             name_scope(pattern, role)
+        ),
+    ))
+}
+
+/// Polls AT-SPI `Text.GetText` on the unique showing node addressed by
+/// `name` until that independent text equals `expected`. Snapshot
+/// `node.text` and a prior `send-text` `matched.text` are not this
+/// predicate. Timeout is typed so loop-until callers break on `ok:false`.
+fn wait_node_text(
+    timeout_ms: u64,
+    expected: &str,
+    name: &str,
+    role: Option<&str>,
+    window: Option<isize>,
+) -> Result<serde_json::Value, CuError> {
+    if window.is_none() {
+        return Err(CuError::new(
+            "invalid_input",
+            "wait --text-equals requires --window <handle>",
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(120_000));
+    let poll = Duration::from_millis(50);
+    let mut polls = 0usize;
+    let mut last_node_count = 0usize;
+    let mut last_text: Option<String> = None;
+    let mut last_error: Option<CuError> = None;
+
+    loop {
+        polls += 1;
+        match mechanism::tree_for_window(window) {
+            Ok(tree) => {
+                last_node_count = tree.nodes.len();
+                last_error.take();
+                let matches = showing_name_matches(&tree.nodes, name, role);
+                match matches.len() {
+                    0 => {}
+                    1 => match mechanism::get_node_text(window, &matches[0].id) {
+                        Ok(text) => {
+                            last_text = Some(text.clone());
+                            if text == expected {
+                                return Ok(serde_json::json!({
+                                    "met": true,
+                                    "addressing": "accessibility-tree",
+                                    "mechanism": "libagenterm",
+                                    "backend": tree.backend,
+                                    "window": window,
+                                    "polls": polls,
+                                    "node": matches[0],
+                                    "text": text,
+                                    "via": "gettext",
+                                    "observation": {
+                                        "node_count": last_node_count,
+                                        "text": text,
+                                    },
+                                }));
+                            }
+                        }
+                        Err(mechanism::MechanismError::Unsupported) => {
+                            return Err(map_mechanism_err(mechanism::MechanismError::Unsupported));
+                        }
+                        Err(error) => last_error = Some(map_mechanism_err(error)),
+                    },
+                    count => return Err(name_match_error(name, role, count)),
+                }
+            }
+            Err(mechanism::MechanismError::Unsupported) => {
+                return Err(map_mechanism_err(mechanism::MechanismError::Unsupported));
+            }
+            Err(error) => last_error = Some(map_mechanism_err(error)),
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(poll);
+    }
+
+    let detail = match (last_text.as_deref(), last_error.as_ref()) {
+        (Some(text), _) => format!("last GetText={text:?}"),
+        (None, Some(error)) => {
+            format!("last GetText failed: {} ({})", error.message, error.code)
+        }
+        (None, None) => format!("last tree read had {last_node_count} nodes"),
+    };
+    Err(CuError::new(
+        "timeout",
+        format!(
+            "accessibility node with {} did not reach text {expected:?} after {timeout_ms}ms ({polls} polls, {detail})",
+            name_scope(name, role)
         ),
     ))
 }
@@ -878,6 +975,48 @@ mod tests {
             matches!(code, "timeout" | "unsupported"),
             "unexpected code: {code}"
         );
+    }
+
+    #[test]
+    fn node_text_equals_timeout_is_a_typed_failure() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Wait {
+            target: TargetRef::Current,
+            timeout_ms: 1,
+            condition: WaitCondition::NodeTextEquals {
+                expected: "agenterm-no-such-text".into(),
+                name: "agenterm-no-such-node".into(),
+                role: None,
+                window: Some(-1),
+            },
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok, "timeout must not report success");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "timeout" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn node_text_equals_requires_window() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Wait {
+            target: TargetRef::Current,
+            timeout_ms: 1,
+            condition: WaitCondition::NodeTextEquals {
+                expected: "x".into(),
+                name: "FixtureField".into(),
+                role: None,
+                window: None,
+            },
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
     }
 
     fn actuate_executor() -> Executor {
