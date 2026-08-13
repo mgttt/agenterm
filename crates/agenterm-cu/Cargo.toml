@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/mgttt/agenterm"
 
 [dependencies]
-agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["serde", "window-enum", "window-op", "input-inject"] }
+agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["serde", "window-enum", "input-inject", "screenshot"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

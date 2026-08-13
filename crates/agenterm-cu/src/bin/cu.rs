@@ -1,154 +1,245 @@
 //! `cu` — agenterm-cu shell command (PRD_02_29 shell layer).
 //!
-//! Machine-readable JSON on stdout; usage on stderr when arguments are bad.
+//! Machine-readable JSON on stdout; human usage on stderr.
 
-use agenterm_cu::{Command, CuReply, CurrentExecutor, PointerButton, WindowShowState};
+use agenterm_cu::{
+    Authorization, Command, Executor, PointerButton, TargetRef, WaitCondition,
+};
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let reply = dispatch(&args);
+    let reply = dispatch(std::env::args().skip(1).collect());
     let json = serde_json::to_string(&reply).unwrap_or_else(|_| {
-        r#"{"ok":false,"command":"","error":{"code":"serialize","message":"reply serialization failed"}}"#
+        r#"{"ok":false,"target":"","command":"","error":{"code":"serialize","message":"reply serialization failed"}}"#
             .to_string()
     });
     println!("{json}");
 }
 
-fn dispatch(args: &[String]) -> CuReply {
-    let executor = CurrentExecutor::new();
-    let Some(verb) = args.first() else {
+fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
+    if args.is_empty() || matches!(args[0].as_str(), "help" | "--help" | "-h") {
         eprint_usage();
-        return CuReply {
-            ok: false,
-            command: "help".into(),
-            data: None,
-            error: Some(agenterm_cu::CuError::new(
-                "usage",
-                "no command; see usage below",
-            )),
-        };
+        return help_reply(true);
+    }
+
+    if args[0] == "exec" {
+        return dispatch_json(&args[1..]);
+    }
+
+    let mut grant: Option<String> = None;
+    let mut target: Option<TargetRef> = None;
+    while let Some(flag) = args.first() {
+        match flag.as_str() {
+            "--target" => {
+                let value = take_value(&mut args, "--target");
+                target = TargetRef::parse(&value).or_else(|| {
+                    eprint_usage();
+                    None
+                });
+                if target.is_none() {
+                    return usage_err("unknown --target value; only 'current' is supported");
+                }
+            }
+            "--grant" => {
+                grant = Some(take_value(&mut args, "--grant"));
+            }
+            _ if flag.starts_with('-') => {
+                return usage_err(format!("unknown global flag '{flag}'"));
+            }
+            _ => break,
+        }
+    }
+
+    let Some(target) = target else {
+        eprint_usage();
+        return usage_err("--target is required on every command");
     };
 
+    let Some(verb) = args.first().cloned() else {
+        eprint_usage();
+        return usage_err("missing command verb");
+    };
+    args.remove(0);
+
     let command = match verb.as_str() {
-        "capabilities" => Command::Capabilities,
-        "window-list" => Command::WindowList,
-        "window-find" => Command::WindowFind {
-            pattern: arg(args, 1),
-        },
-        "window-show" => Command::WindowShow {
-            handle: parse_handle(args, 1),
-            state: match args.get(2).map(String::as_str) {
-                Some("hide") => WindowShowState::Hide,
-                Some("show") => WindowShowState::Show,
-                Some("minimize") => WindowShowState::Minimize,
-                Some("maximize") => WindowShowState::Maximize,
-                Some("restore") => WindowShowState::Restore,
-                other => {
-                    return usage_err(format!(
-                        "window-show needs state in [hide|show|minimize|maximize|restore], got {other:?}"
-                    ));
-                }
-            },
-        },
-        "window-move" => Command::WindowMove {
-            handle: parse_handle(args, 1),
-            x: parse_int(args, 2),
-            y: parse_int(args, 3),
-            width: parse_u32(args, 4, 0),
-            height: parse_u32(args, 5, 0),
-        },
-        "window-topmost" => Command::WindowTopmost {
-            handle: parse_handle(args, 1),
-            topmost: match args.get(2).map(String::as_str) {
-                Some("on") | Some("1") | Some("true") => true,
-                Some("off") | Some("0") | Some("false") => false,
-                other => return usage_err(format!("window-topmost needs on|off, got {other:?}")),
-            },
-        },
-        "window-close" => Command::WindowClose {
-            handle: parse_handle(args, 1),
-        },
-        "pointer-move" => Command::PointerMove {
-            x: parse_int(args, 1),
-            y: parse_int(args, 2),
-        },
-        "pointer-click" => Command::PointerClick {
-            x: parse_int(args, 1),
-            y: parse_int(args, 2),
-            button: match args.get(3).map(String::as_str) {
+        "capabilities" => Command::Capabilities { target },
+        "windows" => Command::Windows { target },
+        "tree" => {
+            let window = flag_isize(&mut args, "--window");
+            Command::Tree { target, window }
+        }
+        "screenshot" => {
+            let path = flag_value(&mut args, "--out")
+                .or_else(|| args.first().cloned())
+                .unwrap_or_default();
+            if !args.is_empty() {
+                args.remove(0);
+            }
+            let window = flag_isize(&mut args, "--window");
+            Command::Screenshot {
+                target,
+                path,
+                window,
+            }
+        }
+        "click" => {
+            let window = flag_isize(&mut args, "--window");
+            let node = flag_value(&mut args, "--node");
+            let coords = flag_coords(&mut args, "--coords");
+            let degraded = args.iter().any(|arg| arg == "--degraded");
+            args.retain(|arg| arg != "--degraded");
+            let clicks = flag_u32(&mut args, "--clicks").unwrap_or(1);
+            let button = match flag_value(&mut args, "--button").as_deref() {
                 Some("right") => PointerButton::Right,
                 Some("middle") => PointerButton::Middle,
                 _ => PointerButton::Left,
-            },
-            clicks: parse_u32(args, 4, 1),
-        },
-        "type-text" => Command::TypeText {
-            text: args[1..].join(" "),
-        },
-        "keys" => Command::Keys {
-            shortcut: args[1..].join("+"),
-        },
-        "help" | "--help" | "-h" => {
-            eprint_usage();
-            return CuReply {
-                ok: true,
-                command: "help".into(),
-                data: Some(serde_json::json!({ "usage": "see stderr" })),
-                error: None,
             };
+            Command::Click {
+                target,
+                window,
+                node,
+                coords,
+                degraded,
+                clicks,
+                button,
+            }
         }
-        other => {
-            return usage_err(format!("unknown command '{other}'"));
+        "send-text" => Command::SendText {
+            target,
+            text: args.join(" "),
+        },
+        "send-keys" => Command::SendKeys {
+            target,
+            keys: args.join("+"),
+        },
+        "wait" => {
+            let timeout_ms = flag_u64(&mut args, "--timeout-ms").unwrap_or(5_000);
+            let condition = if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
+                WaitCondition::WindowCountGte { count }
+            } else if let Some(pattern) = flag_value(&mut args, "--window-title-contains") {
+                WaitCondition::WindowTitleContains { pattern }
+            } else if let Some(handle) = flag_isize(&mut args, "--focused-handle") {
+                WaitCondition::FocusedHandle { handle }
+            } else {
+                return usage_err(
+                    "wait requires one of --window-count-gte, --window-title-contains, or --focused-handle",
+                );
+            };
+            Command::Wait {
+                target,
+                timeout_ms,
+                condition,
+            }
         }
+        other => return usage_err(format!("unknown command '{other}'")),
     };
 
-    executor.execute(&command)
+    let auth = Authorization::from_cli_and_env(grant.as_deref());
+    Executor::new(auth).execute(&command)
 }
 
-fn usage_err(message: impl Into<String>) -> CuReply {
+fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
+    let mut grant: Option<String> = None;
+    let mut payload = None;
+    for arg in args {
+        if let Some(value) = arg.strip_prefix("--grant=") {
+            grant = Some(value.to_owned());
+        } else if arg == "--json" {
+            continue;
+        } else if payload.is_none() {
+            payload = Some(arg.clone());
+        }
+    }
+    let Some(raw) = payload else {
+        return usage_err("exec requires a JSON command payload argument");
+    };
+    let command: Command = match serde_json::from_str(&raw) {
+        Ok(command) => command,
+        Err(error) => return usage_err(format!("invalid JSON command: {error}")),
+    };
+    let auth = Authorization::from_cli_and_env(grant.as_deref());
+    Executor::new(auth).execute(&command)
+}
+
+fn take_value(args: &mut Vec<String>, flag: &str) -> String {
+    args.remove(0);
+    if args.is_empty() {
+        eprintln!("missing value for {flag}");
+        return String::new();
+    }
+    args.remove(0)
+}
+
+fn flag_value(args: &mut Vec<String>, flag: &str) -> Option<String> {
+    let index = args.iter().position(|arg| arg == flag)?;
+    args.remove(index);
+    args.get(index).cloned()
+}
+
+fn flag_isize(args: &mut Vec<String>, flag: &str) -> Option<isize> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_u32(args: &mut Vec<String>, flag: &str) -> Option<u32> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_u64(args: &mut Vec<String>, flag: &str) -> Option<u64> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_usize(args: &mut Vec<String>, flag: &str) -> Option<usize> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_coords(args: &mut Vec<String>, flag: &str) -> Option<[i32; 2]> {
+    let raw = flag_value(args, flag)?;
+    let mut parts = raw.split(',');
+    let x = parts.next()?.trim().parse().ok()?;
+    let y = parts.next()?.trim().parse().ok()?;
+    Some([x, y])
+}
+
+fn usage_err(message: impl Into<String>) -> agenterm_cu::CuReply {
     eprint_usage();
-    CuReply {
+    agenterm_cu::CuReply {
         ok: false,
+        target: String::new(),
         command: "usage".into(),
         data: None,
         error: Some(agenterm_cu::CuError::new("usage", message)),
     }
 }
 
-fn arg(args: &[String], index: usize) -> String {
-    args.get(index).cloned().unwrap_or_default()
-}
-
-fn parse_handle(args: &[String], index: usize) -> i64 {
-    arg(args, index).parse().unwrap_or_default()
-}
-
-fn parse_int(args: &[String], index: usize) -> i32 {
-    arg(args, index).parse().unwrap_or_default()
-}
-
-fn parse_u32(args: &[String], index: usize, default: u32) -> u32 {
-    match args.get(index) {
-        Some(raw) => raw.parse().unwrap_or(default),
-        None => default,
+fn help_reply(ok: bool) -> agenterm_cu::CuReply {
+    agenterm_cu::CuReply {
+        ok,
+        target: String::new(),
+        command: "help".into(),
+        data: Some(serde_json::json!({ "usage": "see stderr" })),
+        error: None,
     }
 }
 
 fn eprint_usage() {
     eprintln!(
-        r#"usage: cu <command> [args...]
-  capabilities                          declare target capability status
-  window-list                           list visible top-level windows (JSON)
-  window-find <pattern>                 find window by title/app/pid: prefix
-  window-show <handle> <state>          state: hide|show|minimize|maximize|restore
-  window-move <handle> <x> <y> [w] [h]  move/resize window
-  window-topmost <handle> <on|off>      pin window on top
-  window-close <handle>                 close window
-  pointer-move <x> <y>                  move the pointer
-  pointer-click <x> <y> [btn] [clicks]  btn: left|right|middle (default left)
-  type-text <text...>                   type into the focused control
-  keys <shortcut>                       hotkey, e.g. ctrl+s / alt+f4 / enter
-All replies are JSON on stdout: {{"ok":bool,"command":..,"data":..,"error":..}}
+        r#"usage: cu --target <current> [--grant observe,actuate] <command> [args...]
+       cu exec [--grant observe,actuate] --json '<command-json>'
+
+Global:
+  --target current          explicit target reference (required)
+  --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
+
+Commands:
+  capabilities
+  windows
+  tree [--window HANDLE]
+  screenshot --out PATH [--window HANDLE]
+  click (--window HANDLE --node ID | --coords X,Y --degraded) [--button left|right|middle] [--clicks N]
+  send-text <text...>
+  send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
+  wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE)
+
+All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"error":..}}
 "#
     );
 }

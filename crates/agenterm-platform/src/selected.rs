@@ -443,7 +443,11 @@ pub(crate) mod input;
 #[path = "adapters/windows/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
 
-#[cfg(all(feature = "window-enum", not(windows)))]
+#[cfg(all(feature = "window-enum", target_os = "linux"))]
+#[path = "adapters/linux/window_enumerate.rs"]
+pub(crate) mod window_enumerate;
+
+#[cfg(all(feature = "window-enum", not(any(windows, target_os = "linux"))))]
 #[path = "adapters/unix/window_enumerate.rs"]
 pub(crate) mod window_enumerate;
 
@@ -459,7 +463,11 @@ pub(crate) mod window_op;
 #[path = "adapters/windows/input_inject.rs"]
 pub(crate) mod input_inject;
 
-#[cfg(all(feature = "input-inject", not(windows)))]
+#[cfg(all(feature = "input-inject", target_os = "linux"))]
+#[path = "adapters/linux/input_inject.rs"]
+pub(crate) mod input_inject;
+
+#[cfg(all(feature = "input-inject", not(any(windows, target_os = "linux"))))]
 #[path = "adapters/unix/input_inject.rs"]
 pub(crate) mod input_inject;
 
