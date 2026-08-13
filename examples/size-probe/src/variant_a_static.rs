@@ -17,11 +17,11 @@ use std::time::Instant;
 use agenterm_platform::clipboard::has_unicode_text;
 use agenterm_platform::parent_console::write_stdout;
 use agenterm_platform::process::list;
-use agenterm_platform::pty::{shutdown_session_detached, ChildCommand, TerminalSize};
+use agenterm_platform::pty::{ChildCommand, TerminalSize, shutdown_session_detached};
 use agenterm_platform::runtime::{default_terminal_shell, user_config_directory};
 use agenterm_platform::window_host::{
-    run_pixel_window, LogicalSize, PixelWindow, PixelWindowApplication, PixelWindowDirective,
-    PixelWindowError, PixelWindowEvent, PixelWindowOptions, XrgbPixelFrame,
+    LogicalSize, PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError,
+    PixelWindowEvent, PixelWindowOptions, XrgbPixelFrame, run_pixel_window,
 };
 
 /// Static linking has no ABI-version concept: a constant placeholder, per
@@ -34,10 +34,7 @@ const ABI_VERSION_PLACEHOLDER: u32 = 0;
 struct ExitOnOpenApplication;
 
 impl PixelWindowApplication for ExitOnOpenApplication {
-    fn opened(
-        &mut self,
-        _window: &PixelWindow,
-    ) -> Result<PixelWindowDirective, PixelWindowError> {
+    fn opened(&mut self, _window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
         Ok(PixelWindowDirective::Exit)
     }
 
@@ -129,10 +126,7 @@ fn run() -> Result<(), String> {
     for arg in args {
         command = command.arg(arg);
     }
-    let pty_open = match command
-        .size(TerminalSize { rows: 24, cols: 80 })
-        .spawn()
-    {
+    let pty_open = match command.size(TerminalSize { rows: 24, cols: 80 }).spawn() {
         Ok(spawned) => {
             let (master, child) = spawned.into_parts();
             match shutdown_session_detached(Some(master), Some(child)) {

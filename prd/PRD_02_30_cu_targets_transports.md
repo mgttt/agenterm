@@ -115,12 +115,15 @@ Canonical host mapping (approved product vocabulary):
   is not the success path for `agenterm-con` and is not a screenshot or
   coordinate substitute.
 - [~] `click --node <path>` and `focus --node <path>` invoke AT-SPI `Action`
-  / `Component::grab_focus` for the resolved node via `agt_a11y_node_perform`.
-  A node-addressed click uses a named `click`/`press` when present, otherwise
-  the AT-SPI default action (index 0) when the node exposes any actions —
-  including Chrome controls whose `GetActions` names are empty. It does not
-  require `--coords` / `--degraded`. Invalid paths return typed
-  `a11y_node_not_found`.
+  / `Component` for the resolved node via `agt_a11y_node_perform`. A
+  node-addressed click uses a named `click`/`press` when present, otherwise
+  the AT-SPI default action (`DoAction(0)`) when the node exposes Action —
+  including Chrome controls whose `GetActions` names are empty. A showing
+  named node with no Action interface uses the AT-SPI Component path
+  (`GetExtents` + registry `GenerateMouseEvent`) and still reports
+  `addressing=accessibility-tree`. It never silently becomes `--coords` /
+  `--degraded`. Focus stays named-`focus` then `Component::grab_focus`.
+  Invalid paths return typed `a11y_node_not_found`.
 - [~] `click --window HANDLE --name PAT [--role ROLE]` and the matching
   `focus` form resolve one showing node with the same matcher as
   `wait --node-name-contains`, then call the node-path AT-SPI action above.
