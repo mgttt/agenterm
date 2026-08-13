@@ -214,9 +214,13 @@ fn locate_staticlib() -> PathBuf {
 /// symbols these six libraries resolve (ws2_32: Winsock2; ntdll: Nt* /
 /// RtlGetVersion; ole32: COM + drag-drop; user32: touch input; uxtheme:
 /// SetWindowTheme; dwmapi: DWM). kernel32 needs no explicit entry — MSVC
-/// links it by default. Unix lists are initial sets for CI to calibrate the
-/// same way (link, read the linker's unresolved symbols, add exactly those);
-/// macOS has not been measured yet and may need AppKit/CoreFoundation etc.
+/// links it by default. Linux list is measured by CI. **macOS list is the
+/// first-CI-calibrated initial set (milestone 21b)**: the first macOS CI run
+/// failed with unresolved `_CF*` / CG / NS symbols pulled in via winit /
+/// core-*, so the C side must add the Apple frameworks (`-framework` flags,
+/// see the branch below) on top of the Unix `-ldl -lpthread -lm`. It is
+/// deliberately *not* verified locally — it awaits the next CI run to
+/// confirm, and further unresolved symbols get added the same way.
 fn system_libs(msvc: bool) -> Vec<&'static str> {
     if msvc {
         vec![
@@ -234,7 +238,50 @@ fn system_libs(msvc: bool) -> Vec<&'static str> {
         }
         #[cfg(target_os = "macos")]
         {
-            vec![]
+            // macOS: first-CI-calibrated initial set (milestone 21b). Rust
+            // staticlib statically linked into a C program pulls in the
+            // Apple frameworks through winit / core-*; the first macOS CI
+            // run's linker errors named these symbols:
+            //   CoreFoundation: _CF* 一族 —— _CFAbsoluteTimeGetCurrent
+            //     (winit EventLoopWaker::start_at), _CFArrayGetCount /
+            //     _CFArrayGetValueAtIndex (agenterm_platform search_windows,
+            //     winit MonitorHandle::video_modes, core_graphics
+            //     CFArray::len), _CFAttributedStringCreateMutable
+            //     (core_foundation), _CFBundleCopyBundleURL /
+            //     _CFBundleCopyExecutableURL /
+            //     _CFBundleCopyPrivateFrameworksURL /
+            //     _CFBundleCopyResourcesDirectoryURL;
+            //   CoreGraphics: the core_graphics adapter (CG* display /
+            //     window geometry symbols);
+            //   AppKit + Foundation: winit platform_impl::macos (NS*
+            //     application / run-loop symbols);
+            //   QuartzCore + Metal + IOKit: winit's macOS backend commonly
+            //     pulls these in too — extra frameworks never fail the link,
+            //     missing ones do, so they are listed preemptively.
+            // `-framework X` is TWO separate arguments (`-framework`, then
+            // the name) — never `-framework=X`. The Unix `-ldl -lpthread
+            // -lm` are harmless on macOS and kept for the shared runtime
+            // deps. Still an initial CI-calibrated set: if the next CI run
+            // reports more unresolved symbols, add exactly those frameworks.
+            vec![
+                "-framework",
+                "CoreFoundation",
+                "-framework",
+                "CoreGraphics",
+                "-framework",
+                "AppKit",
+                "-framework",
+                "Foundation",
+                "-framework",
+                "QuartzCore",
+                "-framework",
+                "Metal",
+                "-framework",
+                "IOKit",
+                "-ldl",
+                "-lpthread",
+                "-lm",
+            ]
         }
         // Non-MSVC Windows (mingw gcc/clang) cannot link an MSVC-target
         // staticlib anyway (incompatible COFF/object format), so no list is
