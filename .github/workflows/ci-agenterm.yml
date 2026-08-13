@@ -105,6 +105,10 @@ jobs:
         run: cargo build --locked -p agenterm-abi --profile abi-release
       - name: Test libagenterm ABI (abi-dev)
         run: cargo test --locked -p agenterm-abi --profile abi-dev
+      - name: C ABI evidence (toolchain + artifact sizes)
+        run: |
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
@@ -130,6 +134,10 @@ jobs:
         run: cargo build --locked -p agenterm-abi --profile abi-release
       - name: Test libagenterm ABI (abi-dev)
         run: cargo test --locked -p agenterm-abi --profile abi-dev
+      - name: C ABI evidence (toolchain + artifact sizes)
+        run: |
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
@@ -156,5 +164,9 @@ jobs:
         run: cargo build --locked -p agenterm-abi --profile abi-release
       - name: Test libagenterm ABI (abi-dev)
         run: cargo test --locked -p agenterm-abi --profile abi-dev
+      - name: C ABI evidence (toolchain + artifact sizes)
+        run: |
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_consumer -- --nocapture
+          cargo test --locked -p agenterm-abi --profile abi-dev --test c_static_link -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
