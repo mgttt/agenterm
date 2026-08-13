@@ -68,7 +68,7 @@ pub(super) fn set_field_value(
 }
 
 pub(super) fn eval_sock_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("AGENTERM_WEBKIT_EVAL_SOCK")
+    if let Ok(path) = std::env::var("PLATFORM_WEBKIT_EVAL_SOCK")
         && !path.is_empty()
     {
         return Some(PathBuf::from(path));
@@ -112,9 +112,9 @@ mod tests {
 
     #[test]
     fn env_socket_path_wins() {
-        let previous = std::env::var_os("AGENTERM_WEBKIT_EVAL_SOCK");
+        let previous = std::env::var_os("PLATFORM_WEBKIT_EVAL_SOCK");
         unsafe {
-            std::env::set_var("AGENTERM_WEBKIT_EVAL_SOCK", "/tmp/agenterm-eval-test.sock");
+            std::env::set_var("PLATFORM_WEBKIT_EVAL_SOCK", "/tmp/agenterm-eval-test.sock");
         }
         assert_eq!(
             eval_sock_path().as_deref(),
@@ -122,8 +122,8 @@ mod tests {
         );
         unsafe {
             match previous {
-                Some(value) => std::env::set_var("AGENTERM_WEBKIT_EVAL_SOCK", value),
-                None => std::env::remove_var("AGENTERM_WEBKIT_EVAL_SOCK"),
+                Some(value) => std::env::set_var("PLATFORM_WEBKIT_EVAL_SOCK", value),
+                None => std::env::remove_var("PLATFORM_WEBKIT_EVAL_SOCK"),
             }
         }
     }

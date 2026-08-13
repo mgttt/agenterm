@@ -39,14 +39,7 @@ pub fn set_node_text(
 /// Route of the last successful `set_node_text` on this thread.
 /// Linux: `"editable-text"` or `"text"`. Other hosts: `"editable-text"`.
 pub fn last_text_write_via() -> &'static str {
-    #[cfg(all(feature = "a11y-tree", target_os = "linux"))]
-    {
-        crate::selected::accessibility_tree::last_text_write_via()
-    }
-    #[cfg(not(all(feature = "a11y-tree", target_os = "linux")))]
-    {
-        "editable-text"
-    }
+    crate::selected::accessibility_tree::last_text_write_via()
 }
 
 /// Deliver `keys` through the host accessibility Device/key interface

@@ -35,7 +35,7 @@ struct Job {
 
 static char *sock_path(void)
 {
-    const char *env = getenv("AGENTERM_WEBKIT_EVAL_SOCK");
+    const char *env = getenv("PLATFORM_WEBKIT_EVAL_SOCK");
     if (env && env[0])
         return strdup(env);
     const char *runtime = getenv("XDG_RUNTIME_DIR");

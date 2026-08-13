@@ -1155,6 +1155,15 @@ are on. This also removes the second failure mode of the `cfg` pair: the
 `#[cfg(not(...))]` stub method has no caller on that host, and `-D warnings`
 turns `dead_code` into a build error only on that one target cell.
 
+The same `target_os` ban applies inside `crates/agenterm-platform/src/*.rs`
+facades. `selected.rs` and `adapters/**` are the only legal OS-selection
+sites; a one-line Linux probe such as `last_text_write_via` still has to
+live on the selected module, with the off-host stub returning the documented
+default. Platform adapters also cannot read `AGENTERM_*` environment names
+(`platform_crate_has_no_agenterm_product_dependency_or_source_coupling`).
+Use `PLATFORM_*` (already used for IME). Product launchers and LD_PRELOAD
+helpers must read and export that same `PLATFORM_*` name, not `AGENTERM_*`.
+
 ## File existence is not writer completion
 
 For a synchronous writer running on a test driver thread, another thread must
