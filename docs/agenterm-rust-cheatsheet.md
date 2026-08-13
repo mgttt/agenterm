@@ -1141,7 +1141,12 @@ screenshot, XTest, or `--coords`. Chrome AX set-value rides the window
 PID's `--remote-debugging-port`; two Chromes sharing one CDP port can
 make the write report success against another page while GetText on the
 named node stays empty — that is why wait must observe GetText, not the
-write reply.
+write reply. WebKitGTK/Reasonix has the same split: the eval helper
+loaded by `scripts/reasonix-desktop-a11y.sh` returns `OK` when the JS
+set-value is *queued* (worker self-report), not when `Text.GetText` on
+the showing composer (`Message Reasonix…`) equals the typed string. Do
+not treat helper `OK`, `last_text_write_via`, or `send-text` `via=text`
+as the wait hit.
 
 ## Do not drop the AT-SPI bus between resolve and keys
 

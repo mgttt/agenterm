@@ -359,7 +359,8 @@ Commands:
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE)
                               --text-equals / --node-text-equals polls AT-SPI Text.GetText
                               on the unique showing named node until that independent
-                              text equals TEXT. send-text matched.text is not this
+                              text equals TEXT. send-text matched.text, last_text_write_via,
+                              and the WebKit eval helper's queued-job OK are not this
                               condition. Timeout is typed ("timeout"). Never
                               screenshot / XTest / --coords. `--` ends flag parsing.
   window-place --action <id> [--window HANDLE]

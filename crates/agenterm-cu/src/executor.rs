@@ -283,11 +283,14 @@ fn focus(
 /// `send-text` with `--name` writes through native AT-SPI
 /// `EditableText` (`SetTextContents` / `InsertText`) or, when the named
 /// showing node exposes `Text` + `editable` but not `EditableText`
-/// (Chrome 151), through AT-SPI `Text` plus the toolkit AX set-value.
-/// Success is confirmed by `Text.GetText`. A named showing node with no
-/// writeable text interface typed-fails (`a11y_text_unavailable`) and
-/// never falls through to XTest / `input_inject::type_text`.
-/// Without `--name` it stays the plain "type into whatever is focused" verb.
+/// (Chrome 151, WebKitGTK/Reasonix `<textarea>`), through AT-SPI `Text`
+/// plus the toolkit set-value. Success is confirmed by `Text.GetText`.
+/// The WebKit eval helper's `OK` and `last_text_write_via` are write-path
+/// reports; `wait --text-equals` must poll GetText again. A named showing
+/// node with no writeable text interface typed-fails
+/// (`a11y_text_unavailable`) and never falls through to XTest /
+/// `input_inject::type_text`. Without `--name` it stays the plain "type
+/// into whatever is focused" verb.
 fn send_text(
     text: &str,
     window: Option<isize>,
@@ -651,10 +654,12 @@ fn wait_node(
     ))
 }
 
-/// Polls AT-SPI `Text.GetText` on the unique showing node addressed by
-/// `name` until that independent text equals `expected`. Snapshot
-/// `node.text` and a prior `send-text` `matched.text` are not this
-/// predicate. Timeout is typed so loop-until callers break on `ok:false`.
+/// Polls AT-SPI `Text.GetText` (`agt_a11y_node_get_text`) on the unique
+/// showing node addressed by `name` until that independent text equals
+/// `expected`. The tree snapshot `node.text`, a prior `send-text`
+/// `matched.text`, `last_text_write_via`, and the WebKit eval helper's
+/// queued-job `OK` (Reasonix composer) are not this predicate. Timeout
+/// is typed so loop-until callers break on `ok:false`.
 fn wait_node_text(
     timeout_ms: u64,
     expected: &str,
@@ -688,21 +693,14 @@ fn wait_node_text(
                         Ok(text) => {
                             last_text = Some(text.clone());
                             if text == expected {
-                                return Ok(serde_json::json!({
-                                    "met": true,
-                                    "addressing": "accessibility-tree",
-                                    "mechanism": "libagenterm",
-                                    "backend": tree.backend,
-                                    "window": window,
-                                    "polls": polls,
-                                    "node": matches[0],
-                                    "text": text,
-                                    "via": "gettext",
-                                    "observation": {
-                                        "node_count": last_node_count,
-                                        "text": text,
-                                    },
-                                }));
+                                return Ok(text_equals_success(
+                                    &tree.backend,
+                                    window,
+                                    polls,
+                                    matches[0],
+                                    &text,
+                                    last_node_count,
+                                ));
                             }
                         }
                         Err(error @ mechanism::MechanismError::Unsupported { .. }) => {
@@ -724,20 +722,58 @@ fn wait_node_text(
         thread::sleep(poll);
     }
 
-    let detail = match (last_text.as_deref(), last_error.as_ref()) {
+    Err(CuError::new(
+        "timeout",
+        format!(
+            "accessibility node with {} did not reach text {expected:?} after {timeout_ms}ms ({polls} polls, {})",
+            name_scope(name, role),
+            text_equals_timeout_detail(last_text.as_deref(), last_error.as_ref(), last_node_count,)
+        ),
+    ))
+}
+
+/// Success payload for `--text-equals`. `gettext` is the only text
+/// authority: snapshot `node.text` is overwritten so a sidecar tree
+/// walk or `send-text` `matched.text` cannot be mistaken for the hit.
+fn text_equals_success(
+    backend: &str,
+    window: Option<isize>,
+    polls: usize,
+    node: &mechanism::A11yNode,
+    gettext: &str,
+    node_count: usize,
+) -> serde_json::Value {
+    let mut node = node.clone();
+    node.text = Some(gettext.to_owned());
+    serde_json::json!({
+        "met": true,
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "backend": backend,
+        "window": window,
+        "polls": polls,
+        "node": node,
+        "text": gettext,
+        "via": "gettext",
+        "observation": {
+            "node_count": node_count,
+            "text": gettext,
+        },
+    })
+}
+
+fn text_equals_timeout_detail(
+    last_text: Option<&str>,
+    last_error: Option<&CuError>,
+    last_node_count: usize,
+) -> String {
+    match (last_text, last_error) {
         (Some(text), _) => format!("last GetText={text:?}"),
         (None, Some(error)) => {
             format!("last GetText failed: {} ({})", error.message, error.code)
         }
         (None, None) => format!("last tree read had {last_node_count} nodes"),
-    };
-    Err(CuError::new(
-        "timeout",
-        format!(
-            "accessibility node with {} did not reach text {expected:?} after {timeout_ms}ms ({polls} polls, {detail})",
-            name_scope(name, role)
-        ),
-    ))
+    }
 }
 
 fn showing_name_matches<'a>(
@@ -940,6 +976,34 @@ mod tests {
         assert!(
             matches!(code, "timeout" | "unsupported"),
             "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn text_equals_success_publishes_gettext_not_snapshot_text() {
+        let mut snapshot = node("Message Reasonix…", "text", &["showing", "editable"]);
+        snapshot.text = Some("stale-snapshot".into());
+        snapshot.id = "/0/0/0/0/0/0/0/0/8/1/0".into();
+        let payload =
+            text_equals_success("at-spi2", Some(4194318), 2, &snapshot, "RXWAIT-TYPED", 130);
+        assert_eq!(payload["via"], "gettext");
+        assert_eq!(payload["text"], "RXWAIT-TYPED");
+        assert_eq!(payload["observation"]["text"], "RXWAIT-TYPED");
+        assert_eq!(payload["node"]["text"], "RXWAIT-TYPED");
+        assert_ne!(payload["via"], "text");
+        assert_ne!(payload["node"]["text"], "stale-snapshot");
+    }
+
+    #[test]
+    fn text_equals_timeout_reports_last_gettext() {
+        assert_eq!(
+            text_equals_timeout_detail(Some("RXWAIT-TYPED"), None, 130),
+            "last GetText=\"RXWAIT-TYPED\""
+        );
+        let failed = CuError::new("a11y_text_unavailable", "no Text.GetText");
+        assert_eq!(
+            text_equals_timeout_detail(None, Some(&failed), 130),
+            "last GetText failed: no Text.GetText (a11y_text_unavailable)"
         );
     }
 

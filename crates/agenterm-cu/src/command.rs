@@ -130,7 +130,8 @@ pub enum WaitCondition {
     },
     /// Polls AT-SPI `Text.GetText` on the unique showing node addressed by
     /// `--name` until that independent text equals `expected`. Snapshot
-    /// `node.text` and `send-text` `matched.text` are not this condition.
+    /// `node.text`, `send-text` `matched.text`, `last_text_write_via`, and
+    /// the WebKit eval helper's queued-job `OK` are not this condition.
     /// Timeout is typed. Never screenshot / XTest / `--coords`.
     NodeTextEquals {
         expected: String,

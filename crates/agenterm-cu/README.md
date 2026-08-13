@@ -66,7 +66,7 @@ audited separately from AT-SPI actuation.
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
 | `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
 | `screenshot` | typed `unsupported` on Linux native capture |
-| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` |
+| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` (not `send-text` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 
 ### Tree JSON shape (UIA-like)
 
@@ -151,9 +151,12 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --node-name-contains Reload --node-role button
 
 # After send-text --name, wait until AT-SPI GetText equals the typed string.
-# Independent of send-text matched.text and of a sidecar tree walk.
+# Independent of send-text matched.text, of a sidecar tree walk, and of the
+# WebKit eval helper's queued-job OK (Reasonix composer: Message Reasonix…).
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --name FixtureField --text-equals hello
+cu --target current --grant observe wait --timeout-ms 4000 --window 4194318 \
+  --name "Message Reasonix" --text-equals hello
 
 # Place the focused window (Spectacle catalog)
 cu --target current --grant actuate window-place --action left-half

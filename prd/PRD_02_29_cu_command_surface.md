@@ -103,9 +103,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls AT-SPI `Text.GetText` on the unique
   showing named node until that independent text equals `TEXT`. Timeout is
-  typed `timeout` and reports the last GetText. `send-text` `matched.text`
-  and a sidecar `tree` walk of snapshot `text` fields are not this
-  condition. Never screenshot, XTest, or `--coords`.
+  typed `timeout` and reports the last GetText. `send-text` `matched.text`,
+  a sidecar `tree` walk of snapshot `text` fields, `last_text_write_via`,
+  and the WebKit eval helper's queued-job `OK` are not this condition.
+  Never screenshot, XTest, or `--coords`. Live evidence includes Chrome
+  `FixtureField` and the Reasonix composer (`Message Reasonix…`).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
