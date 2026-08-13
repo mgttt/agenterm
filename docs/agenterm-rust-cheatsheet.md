@@ -1222,6 +1222,11 @@ state only after acceptance; a fire-and-forget handler plus a bounded product
 queue otherwise reports success and permanently diverges when saturation drops
 the event.
 
+Count-bounded queues are not memory-bounded when events own strings or blobs.
+Enforce both a per-item payload ceiling and an aggregate queued-byte ceiling,
+account bytes before ownership transfer, and return the exact allowance when a
+batch drains. Expose queued bytes alongside item/drop counts.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as

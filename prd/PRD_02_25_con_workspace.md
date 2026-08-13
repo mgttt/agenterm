@@ -59,9 +59,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   registers itself. Inner `cu focus`/`click --name Command` (or `SEND`) uses
   `addressing=accessibility-tree`. Windows/macOS publishers are not claimed.
 - [x] AT-SPI actions cross into the GUI through a 64-entry FIFO and a 32-action
-  per-turn drain budget. Saturation drops only new actions, records a monotonic
-  counter, coalesces producer wakes on the empty-to-nonempty transition, and
-  self-wakes while backlog remains; `ui-snapshot` exposes pending and dropped
+  per-turn drain budget, with a 64 KiB per-action and 256 KiB aggregate payload
+  ceiling. Saturation drops only new actions, records a monotonic counter,
+  coalesces producer wakes on the empty-to-nonempty transition, and self-wakes
+  while backlog remains; `ui-snapshot` exposes pending item/byte and dropped
   counts so an accessibility flood cannot hide unbounded GUI work.
 - [x] publisher actions commit their AT-SPI text/focus mirror only after the
   product queue accepts ownership. Queue saturation returns `false` to the

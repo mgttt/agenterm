@@ -1554,6 +1554,7 @@ impl ConApp {
                                 self.pending_control.screenshot_count().into(),
                             ),
                             ("a11y_pending_actions", a11y.pending.into()),
+                            ("a11y_pending_bytes", a11y.pending_bytes.into()),
                             ("a11y_dropped_actions", a11y.dropped.into()),
                             (
                                 "composer_input",

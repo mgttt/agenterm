@@ -19,6 +19,7 @@ pub const SEND_NAME: &str = "SEND";
 pub const TABS_NAME: &str = "Tabs";
 pub const SESSION_NAME: &str = "Session";
 const ACTION_QUEUE_CAPACITY: usize = 64;
+const ACTION_QUEUE_MAX_BYTES: usize = 256 * 1024;
 pub const ACTION_DRAIN_BUDGET: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,9 +28,20 @@ pub struct Request {
     pub action: PublishedAction,
 }
 
+impl Request {
+    fn payload_bytes(&self) -> usize {
+        match &self.action {
+            PublishedAction::SetText(text) => text.len(),
+            PublishedAction::Key(key) => key.event_string.len(),
+            PublishedAction::Click | PublishedAction::Focus => 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ActionInboxStats {
     pub pending: usize,
+    pub pending_bytes: usize,
     pub dropped: u64,
 }
 
@@ -42,6 +54,7 @@ pub struct ActionPush {
 #[derive(Default)]
 struct ActionQueue {
     requests: VecDeque<Request>,
+    pending_bytes: usize,
     dropped: u64,
 }
 
@@ -52,12 +65,18 @@ pub struct ActionInbox {
 
 impl ActionInbox {
     pub fn push(&self, request: Request) -> ActionPush {
+        let payload_bytes = request.payload_bytes();
         let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
-        if queue.requests.len() >= ACTION_QUEUE_CAPACITY {
+        let next_bytes = queue.pending_bytes.checked_add(payload_bytes);
+        if queue.requests.len() >= ACTION_QUEUE_CAPACITY
+            || payload_bytes > crate::composer::PASTE_LIMIT_BYTES
+            || next_bytes.is_none_or(|bytes| bytes > ACTION_QUEUE_MAX_BYTES)
+        {
             queue.dropped = queue.dropped.saturating_add(1);
             return ActionPush::default();
         }
         let should_wake = queue.requests.is_empty();
+        queue.pending_bytes = next_bytes.unwrap_or(queue.pending_bytes);
         queue.requests.push_back(request);
         ActionPush {
             accepted: true,
@@ -68,7 +87,12 @@ impl ActionInbox {
     pub fn pop_batch(&self, limit: usize) -> (Vec<Request>, bool) {
         let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
         let count = limit.min(queue.requests.len());
-        let batch = queue.requests.drain(..count).collect();
+        let batch: Vec<_> = queue.requests.drain(..count).collect();
+        let drained_bytes = batch
+            .iter()
+            .map(Request::payload_bytes)
+            .fold(0usize, usize::saturating_add);
+        queue.pending_bytes = queue.pending_bytes.saturating_sub(drained_bytes);
         (batch, !queue.requests.is_empty())
     }
 
@@ -76,6 +100,7 @@ impl ActionInbox {
         let queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
         ActionInboxStats {
             pending: queue.requests.len(),
+            pending_bytes: queue.pending_bytes,
             dropped: queue.dropped,
         }
     }
@@ -289,6 +314,7 @@ mod tests {
             inbox.stats(),
             ActionInboxStats {
                 pending: ACTION_QUEUE_CAPACITY,
+                pending_bytes: 0,
                 dropped: 1,
             }
         );
@@ -305,5 +331,47 @@ mod tests {
         assert!(!backlog);
         assert_eq!(second.len(), ACTION_QUEUE_CAPACITY - ACTION_DRAIN_BUDGET);
         assert_eq!(inbox.stats().pending, 0);
+    }
+
+    #[test]
+    fn action_inbox_bounds_payload_bytes_and_returns_drained_capacity() {
+        let inbox = ActionInbox::default();
+        let chunk = "x".repeat(crate::composer::PASTE_LIMIT_BYTES);
+        for _ in 0..ACTION_QUEUE_MAX_BYTES / chunk.len() {
+            assert!(
+                inbox
+                    .push(Request {
+                        node: NODE_COMMAND,
+                        action: PublishedAction::SetText(chunk.clone()),
+                    })
+                    .accepted
+            );
+        }
+        assert!(
+            !inbox
+                .push(Request {
+                    node: NODE_COMMAND,
+                    action: PublishedAction::SetText("overflow".into()),
+                })
+                .accepted
+        );
+        assert_eq!(inbox.stats().pending_bytes, ACTION_QUEUE_MAX_BYTES);
+
+        let (drained, _) = inbox.pop_batch(1);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(
+            inbox.stats().pending_bytes,
+            ACTION_QUEUE_MAX_BYTES - crate::composer::PASTE_LIMIT_BYTES
+        );
+        assert!(
+            !inbox
+                .push(Request {
+                    node: NODE_COMMAND,
+                    action: PublishedAction::SetText(
+                        "y".repeat(crate::composer::PASTE_LIMIT_BYTES + 1),
+                    ),
+                })
+                .accepted
+        );
     }
 }
