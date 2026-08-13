@@ -54,12 +54,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [ ] a control-tree observation returns stable per-node identity, role, label,
   state and **exact bounds** — not a bitmap the caller must interpret.
+- [ ] `tree` is sourced from the host's **platform accessibility backend**
+  ([30 § Platform accessibility backends](PRD_02_30_cu_targets_transports.md#platform-accessibility-backends)):
+  Windows native API + UIA, macOS AX (`NSAccessibility`), Linux AT-SPI2.
+  `cu` does not implement these stacks; it consumes `agenterm-platform`.
 - [ ] node identity is stable enough to be re-addressed across observations, or
   the instability is reported. An agent must never silently act on a node whose
   identity has been recycled.
 - [ ] where a target cannot expose a control tree, the response says so
-  explicitly and the caller receives a typed degraded mode. Coordinate-only
-  operation is always visible in the result, never inferred by the caller.
+  explicitly with typed `Unsupported` / `Failed`. Coordinate-only or
+  screenshot-only operation is always visible in the result, never inferred by
+  the caller.
+- [ ] structured `click` / `focus` by node id use the same platform a11y
+  backend as `tree`. Coordinate `click` is a separate degraded path requiring
+  an explicit marker; it never substitutes silently when structured actuation
+  was requested.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

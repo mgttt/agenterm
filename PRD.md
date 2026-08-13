@@ -130,7 +130,12 @@ AgenTerm — local agent & process fleet work OS
 ├─ agenterm-cu（computer-use 子树 · 全部 planned）
 │  └─ 28 agenterm-cu            自有 computer-use 底座：定义、边界、不变量、晋升门
 │     ├─ 29 Command surface       抽象命令集、洋葱分层、结构化控件树、确定性等待
-│     ├─ 30 Targets & transports  current/ssh/rdp/vnc 目标族、平台后端、会话模型
+│     ├─ 30 Targets & transports  current/ssh/rdp/vnc 目标族、transport、平台后端
+│     │  ├─ target family        current（首发）/ ssh / rdp / vnc
+│     │  └─ platform a11y backends（agenterm-platform）
+│     │     ├─ Windows           native API + UIA
+│     │     ├─ macOS             AX (NSAccessibility)
+│     │     └─ Linux             AT-SPI2
 │     └─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
 │
 └─ 未来面（里程碑 / 灵感）
@@ -173,7 +178,7 @@ AgenTerm — local agent & process fleet work OS
 | 27 | [`agenterm-con` package and delivery](prd/PRD_02_27_con_delivery.md) | 独立 package、`con-*` unwind profile、体积预算、独立 CI、体积历史 |
 | 28 | [Computer-use foundation (`agenterm-cu`)](prd/PRD_02_28_agenterm_cu.md) | 子树根：自有 computer-use 底座的定义、边界、不变量、晋升门（全部 planned） |
 | 29 | [`agenterm-cu` command surface](prd/PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树观察、确定性等待 |
-| 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、平台后端、会话与进程模型 |
+| 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2）、会话模型 |
 | 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
 
 ## Non-negotiable invariants
