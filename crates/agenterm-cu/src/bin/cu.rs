@@ -82,6 +82,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         "click" => {
             let window = flag_isize(&mut args, "--window");
             let node = flag_value(&mut args, "--node");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
             let coords = flag_coords(&mut args, "--coords");
             let degraded = args.iter().any(|arg| arg == "--degraded");
             args.retain(|arg| arg != "--degraded");
@@ -95,6 +97,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 target,
                 window,
                 node,
+                name,
+                role,
                 coords,
                 degraded,
                 clicks,
@@ -103,14 +107,22 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         }
         "focus" => {
             let window = flag_isize(&mut args, "--window");
-            let node = flag_value(&mut args, "--node").unwrap_or_default();
-            if node.is_empty() {
-                return usage_err("focus requires --node <path-id>");
+            let node = flag_value(&mut args, "--node");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if node.as_ref().is_none_or(|value| value.is_empty())
+                && name.as_ref().is_none_or(|value| value.is_empty())
+            {
+                return usage_err(
+                    "focus requires --node <path-id> or --window <handle> --name <pattern>",
+                );
             }
             Command::Focus {
                 target,
                 window,
                 node,
+                name,
+                role,
             }
         }
         "send-text" => Command::SendText {
@@ -250,8 +262,10 @@ Commands:
   windows
   tree [--window HANDLE]
   screenshot --out PATH [--window HANDLE]
-  click (--window HANDLE --node ID | --coords X,Y --degraded) [--button left|right|middle] [--clicks N]
-  focus [--window HANDLE] --node ID
+  click (--window HANDLE --node ID | --window HANDLE --name PAT [--role ROLE] | --coords X,Y --degraded)
+        [--button left|right|middle] [--clicks N]
+                              --name reuses wait NodeNameContains matching, then the --node AT-SPI path
+  focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
   send-text <text...>
   send-keys <keys...>         e.g. ctrl+c / alt+f4 / enter
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE

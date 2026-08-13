@@ -70,6 +70,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   backend as `tree`. Coordinate `click` is a separate degraded path requiring
   an explicit marker; it never substitutes silently when structured actuation
   was requested.
+- [~] structured `click` / `focus` also accept an accessible name
+  (`--window` + `--name` + optional `--role`). Resolution reuses the
+  `wait --node-name-contains` matcher (showing/visible, case-insensitive
+  substring) and then acts on the existing node-path a11y path. A miss is
+  typed `a11y_node_not_found`. Name addressing must not parse tree dumps,
+  take screenshots, or fall through to `--coords`.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

@@ -102,6 +102,12 @@ Canonical host mapping (approved product vocabulary):
   including Chrome controls whose `GetActions` names are empty. It does not
   require `--coords` / `--degraded`. Invalid paths return typed
   `a11y_node_not_found`.
+- [~] `click --window HANDLE --name PAT [--role ROLE]` and the matching
+  `focus` form resolve one showing node with the same matcher as
+  `wait --node-name-contains`, then call the node-path AT-SPI action above.
+  `--name` cannot be combined with `--node` or `--coords`. A miss is typed
+  `a11y_node_not_found`; there is no screenshot or degraded-coordinate
+  substitute.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

@@ -96,23 +96,14 @@ impl Executor {
             }
             Command::Tree { window, .. } => tree_payload(*window),
             Command::Screenshot { path, window, .. } => screenshot(path, *window),
-            Command::Click {
+            Command::Click { .. } => click_command(command),
+            Command::Focus {
                 window,
                 node,
-                coords,
-                degraded,
-                clicks,
-                button,
+                name,
+                role,
                 ..
-            } => click(
-                *window,
-                node.as_deref(),
-                *coords,
-                *degraded,
-                *clicks,
-                *button,
-            ),
-            Command::Focus { window, node, .. } => focus(*window, node),
+            } => focus(*window, node.as_deref(), name.as_deref(), role.as_deref()),
             Command::SendText { text, .. } => {
                 agenterm_platform::input_inject::type_text(text).map_err(map_inject_err)?;
                 Ok(serde_json::json!({ "typed": text }))
@@ -197,33 +188,49 @@ fn screenshot(path: &str, window: Option<isize>) -> Result<serde_json::Value, Cu
     }))
 }
 
-fn click(
-    window: Option<isize>,
-    node: Option<&str>,
-    coords: Option<[i32; 2]>,
-    degraded: bool,
-    clicks: u32,
-    button: PointerButton,
-) -> Result<serde_json::Value, CuError> {
-    if let Some(node_id) = node {
+fn click_command(command: &Command) -> Result<serde_json::Value, CuError> {
+    let Command::Click {
+        window,
+        node,
+        name,
+        role,
+        coords,
+        degraded,
+        clicks,
+        button,
+        ..
+    } = command
+    else {
+        return Err(CuError::new(
+            "invalid_input",
+            "internal: expected click command",
+        ));
+    };
+    let window = *window;
+    let node = node.as_deref();
+    let name = name.as_deref();
+    let role = role.as_deref();
+    let coords = *coords;
+    let degraded = *degraded;
+    let clicks = *clicks;
+    let button = *button;
+    if name.filter(|value| !value.is_empty()).is_some() && coords.is_some() {
+        return Err(CuError::new(
+            "invalid_input",
+            "click --name is accessibility-tree addressing; do not pass --coords",
+        ));
+    }
+    if let Some(resolved) = resolve_actuation_node(window, node, name, role, "click")? {
         for _ in 0..clicks.max(1) {
-            mechanism::perform_node_action(window, node_id, mechanism::NodeAction::Click)
+            mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Click)
                 .map_err(map_mechanism_err)?;
         }
-        return Ok(serde_json::json!({
-            "addressing": "accessibility-tree",
-            "mechanism": "libagenterm",
-            "node": node_id,
-            "window": window,
-            "action": "click",
-            "clicks": clicks,
-            "button": button,
-        }));
+        return Ok(click_tree_payload(&resolved, window, clicks, button));
     }
     let Some([x, y]) = coords else {
         return Err(CuError::new(
             "invalid_input",
-            "click requires --window + --node for structured AT-SPI actuation, or --coords with --degraded",
+            "click requires --window + --node, --window + --name, or --coords with --degraded",
         ));
     };
     if !degraded {
@@ -232,14 +239,14 @@ fn click(
             "coordinate click requires --degraded so callers can see pixel addressing explicitly",
         ));
     }
-    let button = match button {
+    let inject_button = match button {
         PointerButton::Left => agenterm_platform::input_inject::PointerButton::Left,
         PointerButton::Right => agenterm_platform::input_inject::PointerButton::Right,
         PointerButton::Middle => agenterm_platform::input_inject::PointerButton::Middle,
     };
     agenterm_platform::input_inject::pointer_click(
         agenterm_platform::input_inject::PointerPosition { x, y },
-        button,
+        inject_button,
         clicks,
     )
     .map_err(map_inject_err)?;
@@ -252,16 +259,131 @@ fn click(
     }))
 }
 
-fn focus(window: Option<isize>, node_id: &str) -> Result<serde_json::Value, CuError> {
-    mechanism::perform_node_action(window, node_id, mechanism::NodeAction::Focus)
+fn focus(
+    window: Option<isize>,
+    node: Option<&str>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let resolved = resolve_actuation_node(window, node, name, role, "focus")?.ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "focus requires --node <path-id> or --window + --name",
+        )
+    })?;
+    mechanism::perform_node_action(window, &resolved.node_id, mechanism::NodeAction::Focus)
         .map_err(map_mechanism_err)?;
-    Ok(serde_json::json!({
+    Ok(focus_tree_payload(&resolved, window))
+}
+
+struct ResolvedNode {
+    node_id: String,
+    matched: Option<mechanism::A11yNode>,
+    backend: Option<String>,
+}
+
+/// Shared addressing gate for structured click/focus: `--node` or `--name`,
+/// never both, and `--name` never opens a coordinate/screenshot path.
+fn resolve_actuation_node(
+    window: Option<isize>,
+    node: Option<&str>,
+    name: Option<&str>,
+    role: Option<&str>,
+    verb: &str,
+) -> Result<Option<ResolvedNode>, CuError> {
+    let node = node.filter(|value| !value.is_empty());
+    let name = name.filter(|value| !value.is_empty());
+    if node.is_some() && name.is_some() {
+        return Err(CuError::new(
+            "invalid_input",
+            format!("{verb} accepts --node or --name, not both"),
+        ));
+    }
+    if let Some(pattern) = name {
+        let (tree, matched) = resolve_named_node(window, pattern, role)?;
+        return Ok(Some(ResolvedNode {
+            node_id: matched.id.clone(),
+            matched: Some(matched),
+            backend: Some(tree.backend),
+        }));
+    }
+    Ok(node.map(|node_id| ResolvedNode {
+        node_id: node_id.to_owned(),
+        matched: None,
+        backend: None,
+    }))
+}
+
+fn resolve_named_node(
+    window: Option<isize>,
+    pattern: &str,
+    role: Option<&str>,
+) -> Result<(mechanism::A11yTree, mechanism::A11yNode), CuError> {
+    let Some(window) = window else {
+        return Err(CuError::new(
+            "invalid_input",
+            "name addressing requires --window <handle>",
+        ));
+    };
+    let tree = mechanism::tree_for_window(Some(window)).map_err(map_mechanism_err)?;
+    match find_showing_node(&tree.nodes, pattern, role).cloned() {
+        Some(node) => Ok((tree, node)),
+        None => Err(CuError::new(
+            "a11y_node_not_found",
+            format!(
+                "no showing accessibility node with {}",
+                name_scope(pattern, role)
+            ),
+        )),
+    }
+}
+
+fn click_tree_payload(
+    resolved: &ResolvedNode,
+    window: Option<isize>,
+    clicks: u32,
+    button: PointerButton,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
-        "node": node_id,
+        "node": resolved.node_id,
+        "window": window,
+        "action": "click",
+        "clicks": clicks,
+        "button": button,
+    });
+    attach_name_match(&mut payload, resolved);
+    payload
+}
+
+fn focus_tree_payload(resolved: &ResolvedNode, window: Option<isize>) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
         "window": window,
         "action": "focus",
-    }))
+    });
+    attach_name_match(&mut payload, resolved);
+    payload
+}
+
+fn attach_name_match(payload: &mut serde_json::Value, resolved: &ResolvedNode) {
+    let Some(matched) = &resolved.matched else {
+        return;
+    };
+    if let Some(backend) = &resolved.backend {
+        payload["backend"] = serde_json::json!(backend);
+    }
+    payload["matched"] = serde_json::to_value(matched).unwrap_or(serde_json::Value::Null);
+}
+
+fn name_scope(pattern: &str, role: Option<&str>) -> String {
+    match role {
+        Some(role) => format!("name contains '{pattern}' and role '{role}'"),
+        None => format!("name contains '{pattern}'"),
+    }
 }
 
 fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value, CuError> {
@@ -325,8 +447,6 @@ fn wait_node(
 ) -> Result<serde_json::Value, CuError> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(120_000));
     let poll = Duration::from_millis(50);
-    let name_pat = pattern.to_ascii_lowercase();
-    let role_pat = role.map(str::to_ascii_lowercase);
     let mut polls = 0usize;
     let mut last_node_count = 0usize;
     let mut last_error: Option<CuError> = None;
@@ -337,11 +457,7 @@ fn wait_node(
             Ok(tree) => {
                 last_node_count = tree.nodes.len();
                 last_error.take();
-                if let Some(node) = tree
-                    .nodes
-                    .iter()
-                    .find(|node| node_matches(node, &name_pat, role_pat.as_deref()))
-                {
+                if let Some(node) = find_showing_node(&tree.nodes, pattern, role) {
                     return Ok(serde_json::json!({
                         "met": true,
                         "addressing": "accessibility-tree",
@@ -373,16 +489,25 @@ fn wait_node(
         Some(error) => format!("last tree read failed: {} ({})", error.message, error.code),
         None => format!("last tree read had {last_node_count} nodes"),
     };
-    let scope = match role {
-        Some(role) => format!("name contains '{pattern}' and role '{role}'"),
-        None => format!("name contains '{pattern}'"),
-    };
     Err(CuError::new(
         "timeout",
         format!(
-            "no showing accessibility node with {scope} after {timeout_ms}ms ({polls} polls, {detail})"
+            "no showing accessibility node with {} after {timeout_ms}ms ({polls} polls, {detail})",
+            name_scope(pattern, role)
         ),
     ))
+}
+
+fn find_showing_node<'a>(
+    nodes: &'a [mechanism::A11yNode],
+    pattern: &str,
+    role: Option<&str>,
+) -> Option<&'a mechanism::A11yNode> {
+    let name_pat = pattern.to_ascii_lowercase();
+    let role_pat = role.map(str::to_ascii_lowercase);
+    nodes
+        .iter()
+        .find(|node| node_matches(node, &name_pat, role_pat.as_deref()))
 }
 
 fn node_matches(node: &mechanism::A11yNode, name_pat: &str, role_pat: Option<&str>) -> bool {
@@ -465,6 +590,8 @@ mod tests {
             target: TargetRef::Current,
             window: None,
             node: None,
+            name: None,
+            role: None,
             coords: Some([1, 2]),
             degraded: false,
             clicks: 1,
@@ -483,6 +610,8 @@ mod tests {
             target: TargetRef::Current,
             window: None,
             node: Some("/0/999999".into()),
+            name: None,
+            role: None,
             coords: None,
             degraded: false,
             clicks: 1,
@@ -550,6 +679,117 @@ mod tests {
             matches!(code, "timeout" | "unsupported"),
             "unexpected code: {code}"
         );
+    }
+
+    fn actuate_executor() -> Executor {
+        Executor::new(Authorization::new(
+            [Grant::Observe, Grant::Actuate].into_iter().collect(),
+        ))
+    }
+
+    #[test]
+    fn name_click_requires_window() {
+        let command = Command::Click {
+            target: TargetRef::Current,
+            window: None,
+            node: None,
+            name: Some("Reload".into()),
+            role: None,
+            coords: None,
+            degraded: false,
+            clicks: 1,
+            button: PointerButton::Left,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_and_node_are_exclusive() {
+        let command = Command::Click {
+            target: TargetRef::Current,
+            window: Some(1),
+            node: Some("/0/1".into()),
+            name: Some("Reload".into()),
+            role: None,
+            coords: None,
+            degraded: false,
+            clicks: 1,
+            button: PointerButton::Left,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_and_coords_are_exclusive() {
+        let command = Command::Click {
+            target: TargetRef::Current,
+            window: Some(1),
+            node: None,
+            name: Some("Reload".into()),
+            role: None,
+            coords: Some([1, 2]),
+            degraded: true,
+            clicks: 1,
+            button: PointerButton::Left,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_click_missing_node_is_typed() {
+        let command = Command::Click {
+            target: TargetRef::Current,
+            window: Some(-1),
+            node: None,
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+            coords: None,
+            degraded: false,
+            clicks: 1,
+            button: PointerButton::Left,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not report success");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn name_focus_missing_node_is_typed() {
+        let command = Command::Focus {
+            target: TargetRef::Current,
+            window: Some(-1),
+            node: None,
+            name: Some("agenterm-no-such-node".into()),
+            role: Some("button".into()),
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn find_showing_node_reuses_wait_matcher() {
+        let nodes = vec![
+            node("hidden Reload", "button", &["enabled"]),
+            node("Reload this page", "push button", &["showing", "enabled"]),
+        ];
+        let matched = find_showing_node(&nodes, "reload", Some("button")).expect("shown match");
+        assert_eq!(matched.name, "Reload this page");
+        assert!(find_showing_node(&nodes, "reload", Some("entry")).is_none());
     }
 
     #[test]

@@ -39,6 +39,12 @@ pub enum Command {
         window: Option<isize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         node: Option<String>,
+        /// Accessible-name substring; resolved with the same showing/visible
+        /// matcher as `WaitCondition::NodeNameContains`, then acted via `--node`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         coords: Option<[i32; 2]>,
         #[serde(default)]
@@ -52,7 +58,12 @@ pub enum Command {
         target: TargetRef,
         #[serde(skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
-        node: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
     },
     SendText {
         target: TargetRef,
