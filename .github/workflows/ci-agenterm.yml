@@ -108,6 +108,31 @@ jobs:
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
 
+  libagenterm-abi-macos:
+    name: libagenterm ABI (macos)
+    # macOS 交付通道:真实构建并验证 libagenterm.dylib 与 libagenterm.a
+    # (c_consumer / c_static_link 必须真跑,不许 SKIP)。
+    # 故意没有 brew 步骤——linux 那轮已证明编译期平台栈是纯 Rust(窗口 /
+    # 剪贴板 / a11y 适配层全部 dlopen/dyn 加载,不链接系统 -dev 包),
+    # macos-latest 自带的 clang 覆盖 C probe 编译。运行期 headless runner
+    # 上窗口 / 剪贴板 / a11y 由适配层短路为 AGT_UNSUPPORTED(测试按设计
+    # SKIP,不触碰 AppKit 主线程限制,已声明于 include/agenterm.h 与
+    # README)。若 CI 首次运行报缺库,按报错补 brew 包,并回填本注释。
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install Rust ABI toolchain components
+        run: rustup component add clippy
+      - name: Build libagenterm ABI (abi-release)
+        run: cargo build --locked -p agenterm-abi --profile abi-release
+      - name: Test libagenterm ABI (abi-dev)
+        run: cargo test --locked -p agenterm-abi --profile abi-dev
+      - name: Clippy libagenterm ABI (abi-dev)
+        run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
+
   libagenterm-abi-linux:
     name: libagenterm ABI (linux)
     # Linux 交付通道:真实构建并验证 libagenterm.so 与 libagenterm.a(c_consumer /
