@@ -194,7 +194,10 @@ fn gui_control_surface_isolated_multitab_black_box() {
         agenterm_platform::ipc::native_runtime_directory().join(format!("shot-{suffix}.png"))
     };
     let mut host = Command::new(exe);
-    host.arg("--no-activate").arg("--control").arg(&endpoint).arg("-e");
+    host.arg("--no-activate")
+        .arg("--control")
+        .arg(&endpoint)
+        .arg("-e");
     for arg in host_shell_args() {
         host.arg(arg);
     }
@@ -286,22 +289,12 @@ fn gui_control_surface_isolated_multitab_black_box() {
     cli_json(
         exe,
         &endpoint,
-        &[
-            "send-text",
-            "--target",
-            &child_id,
-            shell_vt_noise_command(),
-        ],
+        &["send-text", "--target", &child_id, shell_vt_noise_command()],
     );
     cli_json(
         exe,
         &endpoint,
-        &[
-            "send-text",
-            "--target",
-            &child_id,
-            shell_vt_noise_body(),
-        ],
+        &["send-text", "--target", &child_id, shell_vt_noise_body()],
     );
     thread::scope(|scope| {
         let mut requests = Vec::new();

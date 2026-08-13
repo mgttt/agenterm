@@ -479,13 +479,11 @@ const USAGE_SHELL_EXAMPLES: &str = "\
                    agenterm-con --working-dir ~/src -e cargo test";
 
 #[cfg(windows)]
-const USAGE_CONFIG_LOCATION: &str =
-    "Configuration: create agenterm-con.json under the user config directory\n\
+const USAGE_CONFIG_LOCATION: &str = "Configuration: create agenterm-con.json under the user config directory\n\
      (Windows: %APPDATA%\\agenterm-con.json via runtime::user_config_directory).";
 
 #[cfg(unix)]
-const USAGE_CONFIG_LOCATION: &str =
-    "Configuration: create agenterm-con.json under the user config directory\n\
+const USAGE_CONFIG_LOCATION: &str = "Configuration: create agenterm-con.json under the user config directory\n\
      (Unix: ~/.config/agenterm-con.json via runtime::user_config_directory).";
 
 fn usage_text() -> String {

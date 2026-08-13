@@ -711,8 +711,8 @@ fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> Transpo
         permissions.set_mode(0o700);
         std::fs::set_permissions(&resolved, permissions)
             .map_err(|error| transport_io(endpoint, error))?;
-        let metadata = std::fs::symlink_metadata(&resolved)
-            .map_err(|error| transport_io(endpoint, error))?;
+        let metadata =
+            std::fs::symlink_metadata(&resolved).map_err(|error| transport_io(endpoint, error))?;
         if metadata.mode() & 0o077 != 0 {
             return Err(unsafe_endpoint(
                 endpoint,

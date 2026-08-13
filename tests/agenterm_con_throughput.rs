@@ -144,7 +144,12 @@ fn sustained_long_output_keeps_control_and_sibling_responsive() {
         cli_json(
             exe,
             &endpoint,
-            &["send-text", "--target", &producer, "echo THROUGHPUT_READY\r"],
+            &[
+                "send-text",
+                "--target",
+                &producer,
+                "echo THROUGHPUT_READY\r",
+            ],
         );
     }
     cli_json(

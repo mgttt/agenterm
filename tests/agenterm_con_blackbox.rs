@@ -1265,10 +1265,7 @@ fn controlled_press_drag_release_extends_a_local_selection() {
         ]"#,
     );
     let args = interactive_shell_args(&script);
-    let mut session = ConSession::spawn(
-        &dir,
-        &args,
-    );
+    let mut session = ConSession::spawn(&dir, &args);
     let snapshot = session.wait_for(Duration::from_secs(10), |snapshot| {
         snapshot["selection"].is_array()
             && snapshot["selection"][1]["col"] != snapshot["selection"][0]["col"]
