@@ -327,8 +327,26 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     let f: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
     // Milestone 2 ships the PTY mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_PTY) }, AGT_OK);
-    // Milestone 3a ships the window host mechanism → AGT_OK.
-    assert_eq!(unsafe { f(AGT_CAP_WINDOW_HOST) }, AGT_OK);
+    // Milestone 3a ships the window host mechanism → AGT_OK on Windows/Linux.
+    // macOS is the deliberate exception: the window host is AGT_UNSUPPORTED
+    // because AppKit requires the main thread, which an FFI entry point called
+    // from an arbitrary thread cannot guarantee — milestone 22 implemented that
+    // as an explicit platform contract. Assert exactly per platform so the
+    // Windows/Linux AGT_OK requirement is never silently dropped.
+    let window_host_status = unsafe { f(AGT_CAP_WINDOW_HOST) };
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            window_host_status, AGT_UNSUPPORTED,
+            "AGT_CAP_WINDOW_HOST must be AGT_UNSUPPORTED on macOS (AppKit main-thread requirement, milestone 22); got {window_host_status}"
+        );
+    } else {
+        assert_eq!(
+            window_host_status,
+            AGT_OK,
+            "AGT_CAP_WINDOW_HOST must be AGT_OK on {} (milestone 3a); got {window_host_status}",
+            std::env::consts::OS
+        );
+    }
     // Milestone 4 ships the screenshot mechanism → AGT_OK.
     assert_eq!(unsafe { f(AGT_CAP_SCREENSHOT) }, AGT_OK);
     // Milestone 5 ships process observation → AGT_OK.
