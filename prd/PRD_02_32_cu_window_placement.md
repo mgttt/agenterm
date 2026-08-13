@@ -13,17 +13,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Why this module exists
 
-- [ ] an agent that can click and type still cannot *arrange* a desktop.
-  Human window managers (Spectacle, Rectangle, and the system tiling keys)
-  are a distinct skill: move the focused — or a named — window into a
-  predictable region without dragging.
-- [ ] the product gap is not another menu-bar hotkey host. The daily-driver
-  host remains the MIT Spectacle 1.2.1 rebuild. This module absorbs the
-  **action catalog and geometry contract** into `cu`, so an orchestrator can
-  issue the same placement without pixels or screenshots.
-- [ ] implementation starts in **v0.1.19**. That version opens the work; it
-  does not have to finish every action. Status stays `[ ]` until public
-  black-box evidence exists against the real `cu` binary.
+- [~] an agent that can click and type still needs to *arrange* a desktop.
+  Human window managers (Spectacle, Rectangle, system tiling keys) are a
+  distinct skill: move the focused — or a named — window into a predictable
+  region without dragging.
+- [~] the command surface owns the **action catalog and geometry contract**
+  so orchestrators issue the same placements without pixels. The macOS
+  daily-driver hotkey host is now `cu hotkeys` / `AgentermCu.app` (menu bar +
+  Spectacle-default shortcuts), not a continued dependency on Spectacle.app.
+  Geometry still comes from this module; host TCC/install lessons live in
+  `docs/agenterm-rust-cheatsheet.md` (macOS Accessibility trust).
+- [~] implementation opened early against the v0.1.19 draft (macOS
+  `window-place` + host). Linux/Windows apply and full black-box promotion
+  remain open; checkbox rows below stay honest until public gates close.
 
 Provenance (read-only, not a product dependency):
 [mgttt/spectacle](https://github.com/mgttt/spectacle) fork of eczarny/Spectacle,
@@ -44,12 +46,13 @@ agenterm-cu (28)
 
 ## Product outcome
 
-- [ ] `cu window-place` applies one named action to one window on a `current`
-  (later: remote) target and returns the before/after rect plus the resolved
-  action id.
-- [ ] it succeeds when an agent can tile, third-cycle, move-across-displays,
+- [~] `cu window-place` applies one named action to one window on a `current`
+  target (macOS apply path live; remote later) and returns the before/after
+  rect plus the resolved action id.
+- [~] it succeeds when an agent can tile, third-cycle, move-across-displays,
   and grow/shrink a real window by structured identity, wait on the resulting
   bounds, and see `refused` / `unsupported` / `failed` as distinct outcomes.
+  Full catalog + multi-OS black-box promotion still open.
 
 ## Command contract
 

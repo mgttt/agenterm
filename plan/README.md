@@ -9,7 +9,7 @@
 |------|------|
 | [`plan-v0.1.16.md`](plan-v0.1.16.md) | **当前代码线/发布链修复**；是否发布仍服从 exact-SHA 授权 |
 | [`plan-v0.1.18.md`](plan-v0.1.18.md) | **在制唯一版本计划**，五条轨：A App Substrate、B v0.1.17 承接树、C `agenterm-con`、D `agenterm-cu`、E `libagenterm` 机制库 |
-| [`plan-v0.1.19.md`](plan-v0.1.19.md) | **预开草案**（0.1.18 关闭后开工）：CC Phase 1 + cu `window-place`（PRD 32 / Spectacle 收录） |
+| [`plan-v0.1.19.md`](plan-v0.1.19.md) | **预开草案**：CC Phase 1 + cu `window-place` / `cu hotkeys`（PRD 32；macOS 已部分落地） |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层、热文件与结构禁令 SSOT |
 | [`plan-rh-3.md`](plan-rh-3.md) | Rh 当前执行与证据轨；已归档 namespace/trace 文档不得替代它 |
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix 可见行为差距地图 |

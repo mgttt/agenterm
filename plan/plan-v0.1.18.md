@@ -248,7 +248,7 @@ authority。Phase 0 的价值是证明边界和交付解耦，而不是展示脚
 | 原专题 Phase | 建议版本 | 仍需交付的完整结果 |
 |--------------|----------|--------------------|
 | **Phase 1** | v0.1.19 | 首条真实 CC 静态语义竖线；typed callback、等价短期 fallback、interrupt、熔断、event；迁完一块删一块 Rust 重复 |
-| **cu window-place** | v0.1.19 | 开始把 Spectacle 命名摆放收进 `agenterm-cu`（[PRD 32](../prd/PRD_02_32_cu_window_placement.md)）。与 Phase 1 并行、互不阻塞。详见 [`plan-v0.1.19.md`](plan-v0.1.19.md) |
+| **cu window-place** | v0.1.19（代码已抢跑） | Spectacle 命名摆放收进 `agenterm-cu`（[PRD 32](../prd/PRD_02_32_cu_window_placement.md)）；macOS 命令 + 日用 `cu hotkeys` 已先于关闸落地。详见 [`plan-v0.1.19.md`](plan-v0.1.19.md) |
 | **Phase 2** | v0.1.20+ | CC nav/empty/settings 静态语义；CC 经 IPC 缓存并响应 reload invalidation；进入本 Phase 时 fallback 改为最小安全态 |
 | **Phase 3** | v0.1.20+ 独立授权 | signed channel、静默下载但显式 apply、staging、atomic rollback、密钥轮换/吊销与磁盘代际上限 |
 | **Phase 4** | v0.2.x | 主 GUI toolbar/shortcut/context-menu 等声明式语义；Win/Unix 同 pack parity；仍不进入终端网格渲染 |

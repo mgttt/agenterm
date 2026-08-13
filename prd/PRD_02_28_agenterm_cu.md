@@ -48,7 +48,7 @@ fork a fifth screenshot stack.
 | 29 | [Command surface and layering](PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树与确定性等待 |
 | 30 | [Targets and transports](PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport 抽象、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2） |
 | 31 | [Authorization, safety and audit](PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义与证据 |
-| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放动作（Spectacle 目录）：几何核 + `window-place`；v0.1.19 开工 |
+| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放（Spectacle 目录）：几何核 + `window-place` + macOS 日用 `cu hotkeys` 宿主 |
 
 ## Product outcome
 
@@ -149,8 +149,9 @@ independent implementation.
   structured `click` / `focus` by node path (`scripts/cu-linux-smoke.sh` against
   the real `cu` binary). Windows UIA and macOS AX are not claimed in this slice.
 - [ ] the subtree root still has no shipped version. Roadmap ownership is
-  [18 Focused product roadmap](PRD_02_18_roadmap.md). **v0.1.19 starts**
-  window placement ([32](PRD_02_32_cu_window_placement.md)) as a cu increment;
+  [18 Focused product roadmap](PRD_02_18_roadmap.md). Window placement
+  ([32](PRD_02_32_cu_window_placement.md)) opened under the v0.1.19 draft and
+  is partially landed on macOS (command + day-driver host);
   that assignment does not promote this root or any other child.
 - [ ] no capability may be marked shipped on design documents, reference
   assets, or a passing unit test alone. The evidence standard is the same as the

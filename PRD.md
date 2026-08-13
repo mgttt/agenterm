@@ -138,7 +138,7 @@ AgenTerm — local agent & process fleet work OS
 │     │     ├─ macOS             AX (NSAccessibility)
 │     │     └─ Linux             AT-SPI2
 │     ├─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
-     └─ 32 Window placement     命名摆放（Spectacle 目录）→ `window-place`；v0.1.19 开工
+     └─ 32 Window placement     命名摆放（Spectacle 目录）→ `window-place` + macOS `cu hotkeys`
 │
 ├─ agenterm-mobile（reach · 全部 planned）
 │  └─ 33 Mobile reach           第三 host：连桌面 server，不跑手机 PTY
@@ -188,7 +188,7 @@ AgenTerm — local agent & process fleet work OS
 | 29 | [`agenterm-cu` command surface](prd/PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树观察、确定性等待 |
 | 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2）、会话模型 |
 | 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
-| 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放动作与几何合同（Spectacle 收录）；v0.1.19 开始做进 `cu` |
+| 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放与几何合同（Spectacle 收录）；macOS `window-place` + `cu hotkeys` 日用宿主 |
 | 33 | [Mobile reach (`agenterm-mobile`)](prd/PRD_02_33_mobile_reach.md) | 手机接入端：PWA 先行（`https://agenterm.work/app`）、商店 App 占位、扫码绑定桌面；无版本承诺 |
 
 ## Non-negotiable invariants
