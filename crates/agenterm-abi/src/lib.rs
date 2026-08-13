@@ -3144,7 +3144,8 @@ pub extern "C" fn agt_a11y_node_perform(
 }
 
 /// Write UTF-8 text through the host accessibility text interface
-/// (Linux: AT-SPI `EditableText` `SetTextContents` / `InsertText`).
+/// (Linux: AT-SPI `EditableText` `SetTextContents` / `InsertText`, or
+/// AT-SPI `Text` plus toolkit set-value when EditableText is absent).
 /// `node_id` is a NUL-terminated UTF-8 child-index path. `text == NULL`
 /// with `len > 0`, or a slice that is not valid UTF-8, →
 /// `AGT_FAILED{code="bad_pointer"}` / `bad_encoding`. A node that does

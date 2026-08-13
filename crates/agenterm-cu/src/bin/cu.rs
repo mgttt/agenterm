@@ -313,8 +313,10 @@ Commands:
   focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
   send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
                               --name writes via AT-SPI EditableText (SetTextContents /
-                              InsertText); a node with no text interface typed-fails
-                              (never XTest). `--` ends flag parsing
+                              InsertText) or AT-SPI Text + toolkit set-value when
+                              EditableText is absent (Chrome); a node with no
+                              writeable text interface typed-fails (never XTest).
+                              `--` ends flag parsing
   send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
                               --name delivers AT-SPI Device/key events
                               (DeviceEventListener NotifyEvent); a node with no

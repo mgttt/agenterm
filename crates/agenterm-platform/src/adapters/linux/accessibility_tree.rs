@@ -1,7 +1,10 @@
 //! Linux AT-SPI2 accessibility tree and node actuation.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
+
+mod chrome_ax_set_value;
 
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
@@ -59,6 +62,20 @@ struct WindowIdentity {
 
 static RUNTIME: OnceLock<&'static tokio::runtime::Runtime> = OnceLock::new();
 static SHARED_CONNECTION: OnceLock<Mutex<Option<zbus::Connection>>> = OnceLock::new();
+
+thread_local! {
+    static LAST_TEXT_VIA: Cell<&'static str> = const { Cell::new("editable-text") };
+}
+
+/// Last successful named text write route on this thread (`editable-text`
+/// or `text`). `cu` reads this after `agt_a11y_node_set_text`.
+pub(crate) fn last_text_write_via() -> &'static str {
+    LAST_TEXT_VIA.with(Cell::get)
+}
+
+fn remember_text_via(via: &'static str) {
+    LAST_TEXT_VIA.with(|cell| cell.set(via));
+}
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
@@ -160,9 +177,10 @@ pub(crate) fn perform_node_action(
     })
 }
 
-/// Write through AT-SPI `EditableText` (`SetTextContents`, then `InsertText`).
-/// A named showing node with no writeable text interface fails typed —
-/// never XTest / `GenerateKeyboardEvent`.
+/// Write through AT-SPI `EditableText` when present, otherwise AT-SPI `Text`
+/// plus the toolkit's accessibility set-value (Chrome: renderer AX `kSetValue`).
+/// Confirmed by `Text.GetText`. A named showing node with no writeable text
+/// interface fails typed — never XTest / `GenerateKeyboardEvent`.
 pub(crate) fn set_node_text(
     window_handle: Option<isize>,
     node_id: &str,
@@ -340,7 +358,7 @@ async fn set_node_text_async(
     }
     let object = resolve_path(&conn, &selected, &indices).await?;
     let proxy = open_bus_object(&conn, &object).await?;
-    invoke_editable_text(&proxy, text).await
+    invoke_editable_text(&proxy, text, window_handle).await
 }
 
 async fn send_node_keys_async(
@@ -1315,19 +1333,27 @@ async fn text_proxy_for<'a>(
         .map_err(map_atspi_err)
 }
 
-/// How a resolved node is written. `has_editable` is `GetInterfaces` for
-/// `org.a11y.atspi.EditableText`. `None` means the probe timed out — still
-/// try the write (WebKit `GetInterfaces` hangs; `SetTextContents` may work).
+/// How a resolved node is written. `has_editable` / `has_text` are
+/// `GetInterfaces` for `EditableText` / `Text`. `None` means the probe
+/// timed out — still try the write (WebKit `GetInterfaces` hangs).
+/// Chrome 151 reports `Text` + `editable` but never `EditableText`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TextWriteRoute {
     EditableText,
+    Text,
     Unavailable,
 }
 
-fn text_write_route(has_editable: Option<bool>) -> TextWriteRoute {
+fn text_write_route(
+    has_editable: Option<bool>,
+    has_text: Option<bool>,
+    is_editable_state: bool,
+) -> TextWriteRoute {
     match has_editable {
+        Some(true) => TextWriteRoute::EditableText,
+        None => TextWriteRoute::EditableText,
+        Some(false) if is_editable_state && has_text != Some(false) => TextWriteRoute::Text,
         Some(false) => TextWriteRoute::Unavailable,
-        _ => TextWriteRoute::EditableText,
     }
 }
 
@@ -1347,11 +1373,15 @@ fn is_missing_text_interface(error: &AccessibilityTreeError) -> bool {
         || message.contains("does not exist")
 }
 
-async fn node_exposes_editable_text(proxy: &AccessibleProxy<'_>) -> Option<bool> {
+async fn node_interfaces(proxy: &AccessibleProxy<'_>) -> Option<atspi::InterfaceSet> {
     match timeout(ACTION_TIMEOUT, proxy.get_interfaces()).await {
-        Ok(Ok(ifaces)) => Some(ifaces.contains(Interface::EditableText)),
+        Ok(Ok(ifaces)) => Some(ifaces),
         _ => None,
     }
+}
+
+fn node_has_editable_state(states: &[String]) -> bool {
+    states.iter().any(|state| state == "editable")
 }
 
 /// How a resolved node receives keys. `has_listener` is `GetInterfaces` for
@@ -1580,30 +1610,125 @@ async fn text_character_count(proxy: &AccessibleProxy<'_>) -> Option<i32> {
 /// Native AT-SPI write: `EditableText.SetTextContents`, then
 /// `EditableText.InsertText`. Matches libatspi
 /// `atspi_editable_text_set_text_contents` / `atspi_editable_text_insert_text`.
-/// Never falls through to XTest / DeviceEventController keyboard.
+/// Chrome named fields expose `Text` but not `EditableText`; those take the
+/// `Text` route (renderer AX set-value, confirmed by `GetText`). Never
+/// falls through to XTest / DeviceEventController keyboard.
 async fn invoke_editable_text(
     proxy: &AccessibleProxy<'_>,
     text: &str,
+    window_handle: Option<isize>,
 ) -> Result<(), AccessibilityTreeError> {
-    let has_editable = node_exposes_editable_text(proxy).await;
-    match text_write_route(has_editable) {
+    let ifaces = node_interfaces(proxy).await;
+    let has_editable = ifaces.map(|set| set.contains(Interface::EditableText));
+    let has_text = ifaces.map(|set| set.contains(Interface::Text));
+    let states = states_from_proxy(proxy).await;
+    let is_editable_state = node_has_editable_state(&states);
+    match text_write_route(has_editable, has_text, is_editable_state) {
         TextWriteRoute::Unavailable => Err(AccessibilityTreeError::failed(
             "a11y_text_unavailable",
             "node does not expose the AT-SPI EditableText interface",
         )),
         TextWriteRoute::EditableText => match write_editable_text(proxy, text).await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                verify_text_contents(proxy, text).await?;
+                remember_text_via("editable-text");
+                Ok(())
+            }
             Err(write_err)
                 if has_editable != Some(true) && is_missing_text_interface(&write_err) =>
             {
-                Err(AccessibilityTreeError::failed(
-                    "a11y_text_unavailable",
-                    "node does not expose the AT-SPI EditableText interface",
-                ))
+                if is_editable_state && has_text != Some(false) {
+                    write_via_atspi_text(proxy, text, window_handle).await
+                } else {
+                    Err(AccessibilityTreeError::failed(
+                        "a11y_text_unavailable",
+                        "node does not expose the AT-SPI EditableText interface",
+                    ))
+                }
             }
             Err(write_err) => Err(write_err),
         },
+        TextWriteRoute::Text => write_via_atspi_text(proxy, text, window_handle).await,
     }
+}
+
+async fn write_via_atspi_text(
+    proxy: &AccessibleProxy<'_>,
+    text: &str,
+    window_handle: Option<isize>,
+) -> Result<(), AccessibilityTreeError> {
+    if let Ok(component) = component_proxy_for(proxy).await {
+        let _ = timeout(NODE_TIMEOUT, component.grab_focus()).await;
+    }
+    if let Ok(text_proxy) = text_proxy_for(proxy).await {
+        let _ = timeout(ACTION_TIMEOUT, text_proxy.set_caret_offset(0)).await;
+        if let Some(count) = text_character_count(proxy).await {
+            let _ = timeout(ACTION_TIMEOUT, text_proxy.set_selection(0, 0, count)).await;
+        }
+    }
+    let name = timeout(ACTION_TIMEOUT, proxy.name())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    if name.trim().is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_text_unavailable",
+            "editable AT-SPI Text node has no accessible name for write",
+        ));
+    }
+    let identity = window_handle.and_then(window_identity);
+    let pids = identity
+        .as_ref()
+        .map(|identity| {
+            let mut pids = Vec::new();
+            if let Some(pid) = identity.pid {
+                pids.push(pid);
+            }
+            pids.extend(identity.descendant_pids.iter().copied());
+            pids
+        })
+        .unwrap_or_default();
+    chrome_ax_set_value::set_named_field_value(pids, &name, text)?;
+    verify_text_contents(proxy, text).await?;
+    remember_text_via("text");
+    Ok(())
+}
+
+async fn read_text_contents(proxy: &AccessibleProxy<'_>) -> Option<String> {
+    let text = timeout(ACTION_TIMEOUT, text_proxy_for(proxy))
+        .await
+        .ok()?
+        .ok()?;
+    let count = timeout(ACTION_TIMEOUT, text.character_count())
+        .await
+        .ok()?
+        .ok()?
+        .clamp(0, 4096);
+    timeout(ACTION_TIMEOUT, text.get_text(0, count))
+        .await
+        .ok()
+        .and_then(Result::ok)
+}
+
+async fn verify_text_contents(
+    proxy: &AccessibleProxy<'_>,
+    expected: &str,
+) -> Result<(), AccessibilityTreeError> {
+    for _ in 0..10 {
+        if read_text_contents(proxy).await.as_deref() == Some(expected) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(80)).await;
+    }
+    let got = read_text_contents(proxy).await;
+    Err(AccessibilityTreeError::failed(
+        "a11y_text_unavailable",
+        format!(
+            "AT-SPI Text contents did not become {expected:?} after write (got {got:?}); \
+             refusing to report success"
+        ),
+    ))
 }
 
 async fn write_editable_text(
@@ -2093,14 +2218,39 @@ mod tests {
     }
 
     #[test]
-    fn text_write_route_unavailable_when_editable_text_absent() {
-        assert_eq!(text_write_route(Some(false)), TextWriteRoute::Unavailable);
+    fn text_write_route_unavailable_when_editable_text_absent_and_not_editable() {
+        assert_eq!(
+            text_write_route(Some(false), Some(true), false),
+            TextWriteRoute::Unavailable
+        );
+        assert_eq!(
+            text_write_route(Some(false), Some(false), true),
+            TextWriteRoute::Unavailable
+        );
+    }
+
+    #[test]
+    fn text_write_route_uses_text_when_editable_without_editable_text() {
+        assert_eq!(
+            text_write_route(Some(false), Some(true), true),
+            TextWriteRoute::Text
+        );
+        assert_eq!(
+            text_write_route(Some(false), None, true),
+            TextWriteRoute::Text
+        );
     }
 
     #[test]
     fn text_write_route_tries_write_when_present_or_unknown() {
-        assert_eq!(text_write_route(Some(true)), TextWriteRoute::EditableText);
-        assert_eq!(text_write_route(None), TextWriteRoute::EditableText);
+        assert_eq!(
+            text_write_route(Some(true), Some(true), true),
+            TextWriteRoute::EditableText
+        );
+        assert_eq!(
+            text_write_route(None, None, true),
+            TextWriteRoute::EditableText
+        );
     }
 
     #[test]
