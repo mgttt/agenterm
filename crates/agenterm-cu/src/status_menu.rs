@@ -8,7 +8,7 @@
 use objc2::mutability::MainThreadOnly;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
-use objc2::{declare_class, msg_send_id, sel, ClassType, DeclaredClass};
+use objc2::{ClassType, DeclaredClass, declare_class, msg_send_id, sel};
 use objc2_app_kit::{
     NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem,
     NSStatusBar, NSVariableStatusItemLength,
