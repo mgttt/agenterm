@@ -39,3 +39,13 @@ agt_runtime_default_shell
 agt_runtime_env_present
 agt_runtime_arg_count
 agt_runtime_arg
+agt_window_enumerate
+agt_native_window_show
+agt_native_window_move
+agt_native_window_rect
+agt_native_window_set_topmost
+agt_native_window_close
+agt_input_pointer_move
+agt_input_pointer_click
+agt_input_type_text
+agt_input_send_keys

@@ -46,7 +46,7 @@ cargo fmt --all -- --check
 
 三者均位于 `target/<profile>/`（profile 为 `abi-dev` 或 `abi-release`）。
 
-**静态库与动态库导出同一批 40 个 `agt_*` 符号**（`exports.txt` 为准，
+**静态库与动态库导出同一批 52 个 `agt_*` 符号**（`exports.txt` 为准，
 `tests/exports_set.rs` 与 `tests/artifacts.rs` 分别闸住符号集与产物存在性）。
 
 **静态链接时 panic 围栏同样要求 `panic = "unwind"`**：静态库仍必须用

@@ -11,6 +11,11 @@
  * milestone 9 adds the parent-console group (write stdout / write stderr).
  * milestone 10 adds the runtime-environment group (user config dir, default
  * terminal shell, environment probe, argument list).
+ * milestone 43 adds the native-window and input-injection groups consumed by
+ * the computer-use runtime: `agt_window_enumerate` (two-stage), the
+ * `agt_native_window_*` operations on raw OS handles (deliberately distinct
+ * from `agt_window_close`, which owns the ABI's own window), and the
+ * `agt_input_*` pointer / text / hotkey injection exports.
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -32,12 +37,12 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 3
+#define AGT_ABI_MINOR 4
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
 /* Human-readable build identity: "<crate version>+abi.<major>.<minor>"
- * (e.g. "0.1.16+abi.1.3"), derived at compile time from the crate version
+ * (e.g. "0.1.16+abi.1.4"), derived at compile time from the crate version
  * and the ABI constants above. NUL-terminated, static, permanently valid. */
 const char* agt_build_id(void);
 
@@ -87,8 +92,12 @@ typedef enum {
  * milestone 9, AGT_CAP_PTY, AGT_CAP_WINDOW_HOST, AGT_CAP_SCREENSHOT,
  * AGT_CAP_PROCESS_OBSERVE, AGT_CAP_CLIPBOARD and AGT_CAP_PARENT_CONSOLE all
  * report AGT_OK; AGT_CAP_ACCESSIBILITY_TREE reports AGT_OK when the host
- * accessibility stack is wired. Platform exception (milestone 22):
- * AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED on macOS, mirroring
+ * accessibility stack is wired. Milestone 43: AGT_CAP_WINDOW_ENUMERATE,
+ * AGT_CAP_WINDOW_OP and AGT_CAP_INPUT_INJECT report the host's real
+ * capability status - AGT_OK only when the mechanism is available on this
+ * host (they are compiled in, but the host adapter may be absent, e.g. a
+ * headless build), never a blanket AGT_OK. Platform exception (milestone
+ * 22): AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED on macOS, mirroring
  * agt_window_open - AppKit requires the window event loop on the main
  * thread, and this ABI hosts it on a library-private thread, so the window
  * host mechanism does not exist on macOS. */
@@ -491,6 +500,85 @@ agt_status agt_runtime_arg_count(size_t* out_count);
  * AGT_FAILED{code="bad_index"}; platform failure ->
  * AGT_FAILED{code="runtime_failed"}. */
 agt_status agt_runtime_arg(size_t index, uint8_t* buf, size_t cap, size_t* out_len);
+
+/* --- native window & input injection (milestone 43) ------------------ */
+
+/* Single native-window record. `handle` is a raw OS window handle (HWND on
+ * Windows) valid only for the observation instant. `title` / `app_name` are
+ * inline UTF-8, NOT NUL-terminated by the library; use the `*_len` fields.
+ * When the original exceeds the fixed size it is truncated at a UTF-8
+ * character boundary (a multi-byte character is never split) and the
+ * matching `*_truncated` flag is set to 1. */
+typedef struct {
+    intptr_t handle;
+    uint32_t process_id;
+    int32_t  x, y; uint32_t width, height;
+    int32_t  focused;      /* 0/1 */
+    int32_t  minimized;    /* 0/1 */
+    uint8_t  title[128];    uint32_t title_len;    uint32_t title_truncated;
+    uint8_t  app_name[64];  uint32_t app_name_len; uint32_t app_name_truncated;
+} agt_window_info;
+
+/* Enumerate visible top-level windows into a caller-allocated array
+ * (two-stage, spec 3.4, identical semantics to agt_process_list):
+ *   cap sufficient   -> AGT_OK, *out_count = records written
+ *   cap insufficient -> AGT_FAILED{code="buffer_too_small"},
+ *                       *out_count = required count
+ * cap == 0 with buf == NULL is a legal "how big?" probe. NULL out_count
+ * (or NULL buf with cap > 0) -> AGT_FAILED{code="bad_pointer"}; mechanism
+ * absent on this host -> AGT_UNSUPPORTED; platform failure ->
+ * AGT_FAILED{code="window_failed"}. */
+agt_status agt_window_enumerate(agt_window_info* buf, size_t cap, size_t* out_count);
+
+/* Native-window operations. These act on raw OS handles obtained from
+ * agt_window_enumerate, NEVER on the ABI's own window handle from
+ * agt_window_open (agt_window_close owns that one; the two are unrelated).
+ * handle == 0 -> AGT_FAILED{code="bad_handle"}; mechanism absent ->
+ * AGT_UNSUPPORTED; platform failure -> AGT_FAILED{code="window_op_failed"}. */
+
+/* Show/hide/minimize/maximize/restore. state: 0=Hide 1=Show 2=Minimize
+ * 3=Maximize 4=Restore; any other value -> AGT_FAILED{code="bad_state"}
+ * (validated before any platform call, so an invalid state never touches
+ * the window). */
+agt_status agt_native_window_show(intptr_t handle, int32_t state);
+
+/* Move/resize the window to the given rectangle (physical pixels). */
+agt_status agt_native_window_move(intptr_t handle, int32_t x, int32_t y,
+                                  uint32_t w, uint32_t h);
+
+/* Read the window rectangle (physical pixels, top-origin) into x/y/w/h.
+ * A NULL output pointer -> AGT_FAILED{code="bad_pointer"}. */
+agt_status agt_native_window_rect(intptr_t handle, int32_t* x, int32_t* y,
+                                  uint32_t* w, uint32_t* h);
+
+/* Pin/unpin the window above other windows. topmost: any non-zero = true. */
+agt_status agt_native_window_set_topmost(intptr_t handle, int32_t topmost);
+
+/* Close a native window handle. */
+agt_status agt_native_window_close(intptr_t handle);
+
+/* Input injection. Mechanism absent on this host -> AGT_UNSUPPORTED;
+ * platform failure -> AGT_FAILED{code="input_failed"}. */
+
+/* Move the pointer to absolute screen coordinates. */
+agt_status agt_input_pointer_move(int32_t x, int32_t y);
+
+/* Click a pointer button at absolute screen coordinates. button:
+ * 0=Left 1=Right 2=Middle; any other value ->
+ * AGT_FAILED{code="bad_button"} (validated before any platform call, so an
+ * invalid button never clicks). */
+agt_status agt_input_pointer_click(int32_t x, int32_t y, int32_t button,
+                                   uint32_t clicks);
+
+/* Type UTF-8 text into the focused control via Unicode key events.
+ * text == NULL, or a slice that is not valid UTF-8 ->
+ * AGT_FAILED{code="bad_text"}. */
+agt_status agt_input_type_text(const uint8_t* text, size_t len);
+
+/* Send a hotkey chord such as "ctrl+s", "alt+f4" or "enter".
+ * shortcut == NULL, or a slice that is not valid UTF-8 ->
+ * AGT_FAILED{code="bad_text"}. */
+agt_status agt_input_send_keys(const uint8_t* shortcut, size_t len);
 
 /* --- platform contract: macOS window host ----------------------------- */
 

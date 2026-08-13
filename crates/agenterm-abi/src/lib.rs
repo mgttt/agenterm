@@ -46,6 +46,15 @@
 //! variable probe, and the process argument list (`agt_runtime_arg_count` /
 //! `agt_runtime_arg`). Runtime exports have no capability entry — they are
 //! always available on a built library, so the capability enum is untouched.
+//! Milestone 43 ships the native-window and input-injection mechanisms that
+//! `agenterm-cu` consumes: `agt_window_enumerate` (two-stage, §3.4, with the
+//! same inline fixed-size string truncation as `agt_process_list`),
+//! `agt_native_window_show/move/rect/set_topmost/close` (native OS handles
+//! only — deliberately distinct from `agt_window_close`, which owns the ABI's
+//! own window), and `agt_input_pointer_move/pointer_click/type_text/send_keys`.
+//! `AGT_CAP_WINDOW_ENUMERATE` / `AGT_CAP_WINDOW_OP` / `AGT_CAP_INPUT_INJECT`
+//! now report the platform's `capability_status()` truthfully instead of a
+//! blanket `AGT_OK`: these mechanisms are not guaranteed on every host.
 //!
 //! Every export is wrapped in `catch_unwind`; a panic never crosses the FFI
 //! boundary and is reported as `AGT_FAILED { code = "panic" }`. `catch_unwind`
@@ -72,6 +81,10 @@ use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
+use agenterm_platform::input_inject::{
+    PointerButton as InjectPointerButton, PointerPosition, pointer_click, pointer_move, send_keys,
+    type_text,
+};
 use agenterm_platform::parent_console::{write_stderr, write_stdout};
 use agenterm_platform::process::{kill, list};
 use agenterm_platform::pty::{
@@ -87,11 +100,15 @@ use agenterm_platform::screenshot::{
     capture_native_window_png, write_xrgb_png,
 };
 use agenterm_platform::threading::spawn_named_detached;
+use agenterm_platform::window_enumerate::{WindowInfo, enumerate_top_level};
 use agenterm_platform::window_host::{
     LogicalPoint, LogicalSize, PixelFrameWrite, PixelWindow, PixelWindowApplication,
     PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowMetrics,
     PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, WindowWaker, XrgbPixelFrame,
     run_pixel_window,
+};
+use agenterm_platform::window_op::{
+    WindowShowState, close, move_window, set_topmost, show, window_rect,
 };
 
 // §3.8 panic fence: building this crate under an abort profile would neuter
@@ -230,7 +247,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 3);
+abi_version!(1, 4);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -307,16 +324,28 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 /// `process`, `clipboard` and `parent-console` features are compiled into
 /// this build, so `AGT_CAP_PTY`, `AGT_CAP_WINDOW_HOST`,
 /// `AGT_CAP_SCREENSHOT`, `AGT_CAP_PROCESS_OBSERVE`, `AGT_CAP_CLIPBOARD` and
-/// `AGT_CAP_CLIPBOARD` and `AGT_CAP_PARENT_CONSOLE` report `AGT_OK`;
+/// `AGT_CAP_PARENT_CONSOLE` report `AGT_OK`;
 /// `AGT_CAP_ACCESSIBILITY_TREE` reports `AGT_OK` when the host accessibility
 /// stack is wired in this build. One platform exception: `AGT_CAP_WINDOW_HOST`
 /// reports `AGT_UNSUPPORTED` on macOS, because AppKit requires the window
 /// event loop on the main thread while this ABI hosts it on a library-private
-/// thread (so `agt_window_open` can never work there). Mechanisms that have
-/// not shipped yet report `AGT_UNSUPPORTED` (a product gap, never a
-/// permission statement).
+/// thread (so `agt_window_open` can never work there). Milestone 43:
+/// `AGT_CAP_WINDOW_ENUMERATE` / `AGT_CAP_WINDOW_OP` / `AGT_CAP_INPUT_INJECT`
+/// report the platform `capability_status()` truthfully — `AGT_OK` only when
+/// the mechanism is actually available on this host (the window-enum /
+/// window-op / input-inject features are compiled in, but the host adapter
+/// may still be absent, e.g. a headless build). Mechanisms that have not
+/// shipped yet report `AGT_UNSUPPORTED` (a product gap, never a permission
+/// statement).
 #[unsafe(no_mangle)]
 pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
+    fn capability_ok(status: CapabilityStatus) -> agt_status {
+        if matches!(status, CapabilityStatus::Available) {
+            agt_status::AGT_OK
+        } else {
+            agt_status::AGT_UNSUPPORTED
+        }
+    }
     match cap {
         agt_capability::AGT_CAP_PTY
         | agt_capability::AGT_CAP_SCREENSHOT
@@ -340,6 +369,18 @@ pub extern "C" fn agt_capability_query(cap: agt_capability) -> agt_status {
             } else {
                 agt_status::AGT_UNSUPPORTED
             }
+        }
+        // Milestone 43: report the host's real capability status for the
+        // native-window and input-injection mechanisms (never a blanket
+        // AGT_OK — Linux/macOS hosts may not implement them).
+        agt_capability::AGT_CAP_WINDOW_ENUMERATE => {
+            capability_ok(agenterm_platform::window_enumerate::capability_status())
+        }
+        agt_capability::AGT_CAP_WINDOW_OP => {
+            capability_ok(agenterm_platform::window_op::capability_status())
+        }
+        agt_capability::AGT_CAP_INPUT_INJECT => {
+            capability_ok(agenterm_platform::input_inject::capability_status())
         }
         _ => agt_status::AGT_UNSUPPORTED,
     }
@@ -3811,6 +3852,639 @@ pub extern "C" fn agt_runtime_arg(
         Ok(s) => s,
         Err(_) => {
             record_error(c"agt_runtime_arg", c"panic", "panic in agt_runtime_arg");
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+// --- native window & input injection (milestone 43) -------------------
+
+/// Native-window handle guard: 0 is never a legal native handle (the ABI's
+/// own windows are a separate `agt_window_t` identity; native handles are
+/// raw `isize` values from `agt_window_enumerate`).
+fn native_handle_error(operation: &'static CStr, handle: isize) -> bool {
+    if handle == 0 {
+        record_error(operation, c"bad_handle", "native window handle is 0");
+        true
+    } else {
+        false
+    }
+}
+
+fn window_enumerate_available() -> bool {
+    matches!(
+        agenterm_platform::window_enumerate::capability_status(),
+        CapabilityStatus::Available
+    )
+}
+
+fn window_op_available() -> bool {
+    matches!(
+        agenterm_platform::window_op::capability_status(),
+        CapabilityStatus::Available
+    )
+}
+
+fn input_inject_available() -> bool {
+    matches!(
+        agenterm_platform::input_inject::capability_status(),
+        CapabilityStatus::Available
+    )
+}
+
+/// Truncate `s` at a UTF-8 character boundary and copy it into a fixed-size
+/// inline array (the same two-stage semantics and the same `truncate_name`
+/// helper as `agt_process_list` — one helper, no second copy). Returns
+/// `(bytes, len, truncated)`.
+fn string_to_fixed<const N: usize>(s: &str) -> ([u8; N], u32, u32) {
+    let (kept, truncated) = truncate_name(s, N);
+    let mut bytes = [0u8; N];
+    bytes[..kept].copy_from_slice(&s.as_bytes()[..kept]);
+    (bytes, kept as u32, u32::from(truncated))
+}
+
+/// C-compatible single native-window record mirroring `include/agenterm.h`.
+/// `handle` is a raw native window handle valid only for the observation
+/// instant; `title` / `app_name` are inline UTF-8 (not NUL-terminated by the
+/// library — use the `*_len` fields) truncated at a UTF-8 character boundary
+/// with the matching `*_truncated` flag set when the original exceeded the
+/// fixed size.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub struct agt_window_info {
+    pub handle: isize,
+    pub process_id: u32,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    /// 0/1.
+    pub focused: i32,
+    /// 0/1.
+    pub minimized: i32,
+    pub title: [u8; 128],
+    /// Bytes actually written into `title` (<= 128).
+    pub title_len: u32,
+    /// 1 when the original title exceeded 128 bytes.
+    pub title_truncated: u32,
+    pub app_name: [u8; 64],
+    /// Bytes actually written into `app_name` (<= 64).
+    pub app_name_len: u32,
+    /// 1 when the original app name exceeded 64 bytes.
+    pub app_name_truncated: u32,
+}
+
+impl Default for agt_window_info {
+    fn default() -> Self {
+        agt_window_info {
+            handle: 0,
+            process_id: 0,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            focused: 0,
+            minimized: 0,
+            title: [0u8; 128],
+            title_len: 0,
+            title_truncated: 0,
+            app_name: [0u8; 64],
+            app_name_len: 0,
+            app_name_truncated: 0,
+        }
+    }
+}
+
+/// Translate one platform window record into the C-compatible record,
+/// truncating `title` (128) and `app_name` (64) at UTF-8 character
+/// boundaries with the shared `truncate_name` helper.
+fn window_info_to_record(info: &WindowInfo) -> agt_window_info {
+    let (title, title_len, title_truncated) = string_to_fixed::<128>(&info.title);
+    let (app_name, app_name_len, app_name_truncated) = string_to_fixed::<64>(&info.app_name);
+    agt_window_info {
+        handle: info.handle,
+        process_id: info.process_id,
+        x: info.bounds.x,
+        y: info.bounds.y,
+        width: info.bounds.width,
+        height: info.bounds.height,
+        focused: i32::from(info.focused),
+        minimized: i32::from(info.minimized),
+        title,
+        title_len,
+        title_truncated,
+        app_name,
+        app_name_len,
+        app_name_truncated,
+    }
+}
+
+/// Enumerate visible top-level windows into a caller-allocated array
+/// (two-stage, §3.4, identical semantics to `agt_process_list`):
+/// - `cap` sufficient → `AGT_OK`, `*out_count` = records actually written.
+/// - `cap` insufficient (including `cap == 0` with `buf == NULL`, the legal
+///   "how big?" probe) → `AGT_FAILED { code = "buffer_too_small" }`,
+///   `*out_count` = required count.
+/// - NULL `out_count` (or NULL `buf` with `cap > 0`) →
+///   `AGT_FAILED { code = "bad_pointer" }`.
+/// - mechanism absent on this host → `AGT_UNSUPPORTED`.
+/// - platform failure → `AGT_FAILED { code = "window_failed" }`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_window_enumerate(
+    buf: *mut agt_window_info,
+    cap: usize,
+    out_count: *mut usize,
+) -> agt_status {
+    fn inner(buf: *mut agt_window_info, cap: usize, out_count: *mut usize) -> agt_status {
+        if out_count.is_null() {
+            record_error(c"agt_window_enumerate", c"bad_pointer", "out_count is null");
+            return agt_status::AGT_FAILED;
+        }
+        if cap > 0 && buf.is_null() {
+            record_error(c"agt_window_enumerate", c"bad_pointer", "buf is null");
+            return agt_status::AGT_FAILED;
+        }
+        if !window_enumerate_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        let windows = match enumerate_top_level() {
+            Ok(v) => v,
+            Err(e) => {
+                // `WindowEnumerateError` has no `Display` impl in
+                // `agenterm-platform`; the facade convention is to forward
+                // the message verbatim, so `Debug` stands in (no variant
+                // matching, no type annotation — the crate is not modified).
+                record_error(c"agt_window_enumerate", c"window_failed", format!("{e:?}"));
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let required = windows.len();
+        if cap < required {
+            unsafe { *out_count = required };
+            record_error(
+                c"agt_window_enumerate",
+                c"buffer_too_small",
+                "cap is smaller than the window count; allocate the required count and call again",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe { *out_count = required };
+        for (i, w) in windows.iter().enumerate() {
+            unsafe { *buf.add(i) = window_info_to_record(w) };
+        }
+        agt_status::AGT_OK
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(buf, cap, out_count))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_window_enumerate",
+                c"panic",
+                "panic in agt_window_enumerate",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// `state` codes for `agt_native_window_show`.
+const AGT_NATIVE_WINDOW_HIDE: i32 = 0;
+const AGT_NATIVE_WINDOW_SHOW: i32 = 1;
+const AGT_NATIVE_WINDOW_MINIMIZE: i32 = 2;
+const AGT_NATIVE_WINDOW_MAXIMIZE: i32 = 3;
+const AGT_NATIVE_WINDOW_RESTORE: i32 = 4;
+
+fn show_state_from_i32(state: i32) -> Option<WindowShowState> {
+    match state {
+        AGT_NATIVE_WINDOW_HIDE => Some(WindowShowState::Hide),
+        AGT_NATIVE_WINDOW_SHOW => Some(WindowShowState::Show),
+        AGT_NATIVE_WINDOW_MINIMIZE => Some(WindowShowState::Minimize),
+        AGT_NATIVE_WINDOW_MAXIMIZE => Some(WindowShowState::Maximize),
+        AGT_NATIVE_WINDOW_RESTORE => Some(WindowShowState::Restore),
+        _ => None,
+    }
+}
+
+/// Show/hide/minimize/maximize/restore a native window handle.
+/// `handle == 0` → `AGT_FAILED{code="bad_handle"}`; an invalid `state` →
+/// `AGT_FAILED{code="bad_state"}` (validated before any platform call, so an
+/// invalid state never touches the window); mechanism absent →
+/// `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="window_op_failed"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_native_window_show(handle: isize, state: i32) -> agt_status {
+    fn inner(handle: isize, state: i32) -> agt_status {
+        if native_handle_error(c"agt_native_window_show", handle) {
+            return agt_status::AGT_FAILED;
+        }
+        let Some(state) = show_state_from_i32(state) else {
+            record_error(
+                c"agt_native_window_show",
+                c"bad_state",
+                "state is not 0 (Hide)..=4 (Restore)",
+            );
+            return agt_status::AGT_FAILED;
+        };
+        if !window_op_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match show(handle, state) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_native_window_show",
+                    c"window_op_failed",
+                    format!("{e:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(handle, state))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_native_window_show",
+                c"panic",
+                "panic in agt_native_window_show",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Move/resize a native window handle. `handle == 0` → `bad_handle`;
+/// mechanism absent → `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="window_op_failed"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_native_window_move(
+    handle: isize,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+) -> agt_status {
+    fn inner(handle: isize, x: i32, y: i32, w: u32, h: u32) -> agt_status {
+        if native_handle_error(c"agt_native_window_move", handle) {
+            return agt_status::AGT_FAILED;
+        }
+        if !window_op_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match move_window(handle, x, y, w, h) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_native_window_move",
+                    c"window_op_failed",
+                    format!("{e:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(handle, x, y, w, h))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_native_window_move",
+                c"panic",
+                "panic in agt_native_window_move",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Read a native window handle's rectangle (physical pixels, top-origin).
+/// `handle == 0` → `bad_handle`; a NULL output pointer → `bad_pointer`;
+/// mechanism absent → `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="window_op_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_native_window_rect(
+    handle: isize,
+    x: *mut i32,
+    y: *mut i32,
+    w: *mut u32,
+    h: *mut u32,
+) -> agt_status {
+    fn inner(handle: isize, x: *mut i32, y: *mut i32, w: *mut u32, h: *mut u32) -> agt_status {
+        if native_handle_error(c"agt_native_window_rect", handle) {
+            return agt_status::AGT_FAILED;
+        }
+        if x.is_null() || y.is_null() || w.is_null() || h.is_null() {
+            record_error(
+                c"agt_native_window_rect",
+                c"bad_pointer",
+                "one of the x/y/w/h out pointers is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if !window_op_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match window_rect(handle) {
+            Ok(b) => {
+                unsafe {
+                    *x = b.x;
+                    *y = b.y;
+                    *w = b.width;
+                    *h = b.height;
+                }
+                agt_status::AGT_OK
+            }
+            Err(e) => {
+                record_error(
+                    c"agt_native_window_rect",
+                    c"window_op_failed",
+                    format!("{e:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(handle, x, y, w, h))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_native_window_rect",
+                c"panic",
+                "panic in agt_native_window_rect",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Pin/unpin a native window handle above other windows. `topmost` is any
+/// non-zero value for true, 0 for false. `handle == 0` → `bad_handle`;
+/// mechanism absent → `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="window_op_failed"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_native_window_set_topmost(handle: isize, topmost: i32) -> agt_status {
+    fn inner(handle: isize, topmost: i32) -> agt_status {
+        if native_handle_error(c"agt_native_window_set_topmost", handle) {
+            return agt_status::AGT_FAILED;
+        }
+        if !window_op_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match set_topmost(handle, topmost != 0) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_native_window_set_topmost",
+                    c"window_op_failed",
+                    format!("{e:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(handle, topmost))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_native_window_set_topmost",
+                c"panic",
+                "panic in agt_native_window_set_topmost",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Close a **native** window handle. Deliberately distinct from
+/// `agt_window_close`, which releases the ABI's *own* window handle
+/// (`agt_window_open`'s `agt_window_t`); `agt_native_window_close` operates
+/// on a raw OS handle from `agt_window_enumerate` — the two must never be
+/// confused. `handle == 0` → `bad_handle`; mechanism absent →
+/// `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="window_op_failed"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_native_window_close(handle: isize) -> agt_status {
+    fn inner(handle: isize) -> agt_status {
+        if native_handle_error(c"agt_native_window_close", handle) {
+            return agt_status::AGT_FAILED;
+        }
+        if !window_op_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match close(handle) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_native_window_close",
+                    c"window_op_failed",
+                    format!("{e:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(handle))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_native_window_close",
+                c"panic",
+                "panic in agt_native_window_close",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Move the pointer to absolute screen coordinates. Mechanism absent →
+/// `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="input_failed"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_input_pointer_move(x: i32, y: i32) -> agt_status {
+    fn inner(x: i32, y: i32) -> agt_status {
+        if !input_inject_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match pointer_move(PointerPosition { x, y }) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(c"agt_input_pointer_move", c"input_failed", format!("{e:?}"));
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(x, y))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_input_pointer_move",
+                c"panic",
+                "panic in agt_input_pointer_move",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// `button` codes for `agt_input_pointer_click`.
+const AGT_INPUT_BUTTON_LEFT: i32 = 0;
+const AGT_INPUT_BUTTON_RIGHT: i32 = 1;
+const AGT_INPUT_BUTTON_MIDDLE: i32 = 2;
+
+fn pointer_button_from_i32(button: i32) -> Option<InjectPointerButton> {
+    match button {
+        AGT_INPUT_BUTTON_LEFT => Some(InjectPointerButton::Left),
+        AGT_INPUT_BUTTON_RIGHT => Some(InjectPointerButton::Right),
+        AGT_INPUT_BUTTON_MIDDLE => Some(InjectPointerButton::Middle),
+        _ => None,
+    }
+}
+
+/// Click a pointer button at absolute screen coordinates. An invalid
+/// `button` → `AGT_FAILED{code="bad_button"}` (validated before any platform
+/// call, so an invalid button never clicks); mechanism absent →
+/// `AGT_UNSUPPORTED`; platform failure →
+/// `AGT_FAILED{code="input_failed"}`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_input_pointer_click(x: i32, y: i32, button: i32, clicks: u32) -> agt_status {
+    fn inner(x: i32, y: i32, button: i32, clicks: u32) -> agt_status {
+        let Some(button) = pointer_button_from_i32(button) else {
+            record_error(
+                c"agt_input_pointer_click",
+                c"bad_button",
+                "button is not 0 (Left)..=2 (Middle)",
+            );
+            return agt_status::AGT_FAILED;
+        };
+        if !input_inject_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match pointer_click(PointerPosition { x, y }, button, clicks) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(
+                    c"agt_input_pointer_click",
+                    c"input_failed",
+                    format!("{e:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(x, y, button, clicks))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_input_pointer_click",
+                c"panic",
+                "panic in agt_input_pointer_click",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Type UTF-8 text into the focused control via Unicode key events.
+/// `text == NULL`, or a slice that is not valid UTF-8 →
+/// `AGT_FAILED{code="bad_text"}`; mechanism absent → `AGT_UNSUPPORTED`;
+/// platform failure → `AGT_FAILED{code="input_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_input_type_text(text: *const u8, len: usize) -> agt_status {
+    fn inner(text: *const u8, len: usize) -> agt_status {
+        if text.is_null() {
+            record_error(c"agt_input_type_text", c"bad_text", "text pointer is null");
+            return agt_status::AGT_FAILED;
+        }
+        // SAFETY: the pointer/length pair is a C ABI contract (see
+        // include/agenterm.h); the caller guarantees `len` readable bytes.
+        let slice = unsafe { std::slice::from_raw_parts(text, len) };
+        let text = match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_input_type_text",
+                    c"bad_text",
+                    "text is not valid UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        if !input_inject_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match type_text(text) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(c"agt_input_type_text", c"input_failed", format!("{e:?}"));
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(text, len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_input_type_text",
+                c"panic",
+                "panic in agt_input_type_text",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Send a hotkey chord such as `ctrl+s`, `alt+f4` or `enter`. `shortcut ==
+/// NULL`, or a slice that is not valid UTF-8 →
+/// `AGT_FAILED{code="bad_text"}`; mechanism absent → `AGT_UNSUPPORTED`;
+/// platform failure → `AGT_FAILED{code="input_failed"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_input_send_keys(shortcut: *const u8, len: usize) -> agt_status {
+    fn inner(shortcut: *const u8, len: usize) -> agt_status {
+        if shortcut.is_null() {
+            record_error(
+                c"agt_input_send_keys",
+                c"bad_text",
+                "shortcut pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        // SAFETY: the pointer/length pair is a C ABI contract (see
+        // include/agenterm.h); the caller guarantees `len` readable bytes.
+        let slice = unsafe { std::slice::from_raw_parts(shortcut, len) };
+        let shortcut = match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_input_send_keys",
+                    c"bad_text",
+                    "shortcut is not valid UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        if !input_inject_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match send_keys(shortcut) {
+            Ok(_) => agt_status::AGT_OK,
+            Err(e) => {
+                record_error(c"agt_input_send_keys", c"input_failed", format!("{e:?}"));
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(shortcut, len))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_input_send_keys",
+                c"panic",
+                "panic in agt_input_send_keys",
+            );
             agt_status::AGT_FAILED
         }
     }

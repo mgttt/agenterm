@@ -61,6 +61,47 @@ impl Default for agt_process_info {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+struct agt_window_info {
+    handle: isize,
+    process_id: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    focused: i32,
+    minimized: i32,
+    title: [u8; 128],
+    title_len: u32,
+    title_truncated: u32,
+    app_name: [u8; 64],
+    app_name_len: u32,
+    app_name_truncated: u32,
+}
+
+impl Default for agt_window_info {
+    fn default() -> Self {
+        agt_window_info {
+            handle: 0,
+            process_id: 0,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            focused: 0,
+            minimized: 0,
+            title: [0u8; 128],
+            title_len: 0,
+            title_truncated: 0,
+            app_name: [0u8; 64],
+            app_name_len: 0,
+            app_name_truncated: 0,
+        }
+    }
+}
+
 const AGT_OK: i32 = 0;
 const AGT_UNSUPPORTED: i32 = 1;
 const AGT_FAILED: i32 = 2;
@@ -68,8 +109,11 @@ const AGT_CAP_PTY: i32 = 1;
 const AGT_CAP_PROCESS_SPAWN: i32 = 2;
 const AGT_CAP_PROCESS_OBSERVE: i32 = 3;
 const AGT_CAP_WINDOW_HOST: i32 = 4;
+const AGT_CAP_WINDOW_ENUMERATE: i32 = 5;
+const AGT_CAP_WINDOW_OP: i32 = 6;
 const AGT_CAP_SCREENSHOT: i32 = 7;
 const AGT_CAP_CLIPBOARD: i32 = 8;
+const AGT_CAP_INPUT_INJECT: i32 = 10;
 const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 const AGT_EV_NONE: u32 = 0;
 const AGT_EV_RENDER_DUE: u32 = 4;
@@ -91,6 +135,10 @@ type ScreenshotCaptureWindow =
 type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize) -> i32;
 type ProcessKill = unsafe extern "C" fn(u32) -> i32;
 type ProcessSelf = unsafe extern "C" fn() -> u32;
+type WindowEnumerate = unsafe extern "C" fn(*mut agt_window_info, usize, *mut usize) -> i32;
+type NativeWindowShow = unsafe extern "C" fn(isize, i32) -> i32;
+type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
+type InputTypeText = unsafe extern "C" fn(*const u8, usize) -> i32;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -1310,6 +1358,26 @@ fn a11y_capability_query_is_ok_or_unsupported() {
     );
 }
 
+/// Milestone 43: the native-window / input-injection capabilities report the
+/// host's real capability status — AGT_OK or AGT_UNSUPPORTED, never a blanket
+/// AGT_OK (they must not lie on hosts that lack the mechanism).
+#[test]
+fn native_window_and_input_capabilities_query_ok_or_unsupported() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    for cap in [
+        AGT_CAP_WINDOW_ENUMERATE,
+        AGT_CAP_WINDOW_OP,
+        AGT_CAP_INPUT_INJECT,
+    ] {
+        let st = unsafe { query(cap) };
+        assert!(
+            st == AGT_OK || st == AGT_UNSUPPORTED,
+            "capability query for {cap} must return AGT_OK or AGT_UNSUPPORTED, got {st}"
+        );
+    }
+}
+
 /// Milestone 6 evidence 2: reading a node without a snapshot fails typed.
 #[test]
 fn a11y_tree_node_without_snapshot_fails() {
@@ -2107,5 +2175,228 @@ fn runtime_two_stage_rejects_null_out_len() {
     assert!(
         msg.contains("bad_pointer"),
         "arg: expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 43: two-stage `agt_window_enumerate` round trip. Probes with
+/// cap=0/buf=NULL (the legal "how big?" probe), allocates the required count,
+/// calls again and asserts AGT_OK with at least one record carrying a
+/// non-empty title. Window titles are never printed — they may contain user
+/// privacy.
+#[test]
+fn window_enumerate_roundtrip_returns_window_with_title() {
+    let lib = load();
+    let list: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(
+        st, AGT_FAILED,
+        "cap=0 probe must return AGT_FAILED (buffer_too_small), got {st}"
+    );
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        required > 0,
+        "the desktop must expose at least one top-level window, got {required}"
+    );
+
+    // Allocate and fill. The window set can change between the two calls, so
+    // on a larger fresh count re-allocate and retry (same pattern as
+    // agt_process_list).
+    let mut capacity = required + 32;
+    let windows = loop {
+        assert!(
+            capacity < 1_000_000,
+            "window count exploded far beyond the probe result"
+        );
+        let mut recs = vec![agt_window_info::default(); capacity];
+        let mut got = 0usize;
+        let st = unsafe { list(recs.as_mut_ptr(), capacity, &mut got) };
+        if st == AGT_OK {
+            assert!(
+                got <= capacity,
+                "out_count {got} exceeds capacity {capacity}"
+            );
+            recs.truncate(got);
+            break recs;
+        }
+        assert_eq!(
+            st,
+            AGT_FAILED,
+            "agt_window_enumerate failed: {}",
+            last_error_message(lib)
+        );
+        let msg = last_error_message(lib);
+        assert!(
+            msg.contains("buffer_too_small"),
+            "expected code \"buffer_too_small\" in error, got: {msg}"
+        );
+        assert!(
+            got > capacity,
+            "out_count must report a required count > capacity, got {got} <= {capacity}"
+        );
+        capacity = got + 32;
+    };
+    assert!(
+        windows.iter().any(|w| w.title_len > 0),
+        "at least one enumerated window must carry a non-empty title"
+    );
+}
+
+/// Milestone 43: a deliberately too-small cap returns
+/// AGT_FAILED{code="buffer_too_small"} and *out_count reports the required
+/// (larger) count.
+#[test]
+fn window_enumerate_small_cap_reports_required_count() {
+    let lib = load();
+    let list: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(st, AGT_FAILED);
+    assert!(
+        required > 1,
+        "the desktop must expose more than one top-level window, got {required}"
+    );
+
+    let mut one = [agt_window_info::default(); 1];
+    let mut got = 0usize;
+    let st = unsafe { list(one.as_mut_ptr(), 1, &mut got) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("buffer_too_small"),
+        "expected code \"buffer_too_small\" in error, got: {msg}"
+    );
+    assert!(
+        got > 1,
+        "out_count must report the required count > 1, got {got}"
+    );
+}
+
+/// Milestone 43: NULL out_count -> AGT_FAILED{code="bad_pointer"}.
+#[test]
+fn window_enumerate_rejects_null_out_count() {
+    let lib = load();
+    let list: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    let mut one = [agt_window_info::default(); 1];
+    let st = unsafe { list(one.as_mut_ptr(), 1, std::ptr::null_mut()) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 43: `agt_native_window_show(0, 1)` -> AGT_FAILED{code="bad_handle"}.
+/// Only the handle-0 rejection path is exercised — no real window is touched.
+#[test]
+fn native_window_show_rejects_zero_handle() {
+    let lib = load();
+    let show: Symbol<NativeWindowShow> = unsafe { sym(lib, b"agt_native_window_show") };
+    let st = unsafe { show(0, 1) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_handle"),
+        "expected code \"bad_handle\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 43: `agt_native_window_show(<valid handle>, 99)` ->
+/// AGT_FAILED{code="bad_state"}. The handle comes from a real enumeration,
+/// but the state is invalid, so the state validation rejects the call before
+/// any platform call — the window is never actually moved.
+#[test]
+fn native_window_show_rejects_bad_state() {
+    let lib = load();
+    let list: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    let show: Symbol<NativeWindowShow> = unsafe { sym(lib, b"agt_native_window_show") };
+
+    let mut required = 0usize;
+    let st = unsafe { list(std::ptr::null_mut(), 0, &mut required) };
+    assert_eq!(st, AGT_FAILED, "cap=0 probe must fail, got {st}");
+    assert!(
+        required > 0,
+        "desktop must have at least one window, got {required}"
+    );
+
+    // The window set can change between the two calls, so re-allocate and
+    // retry on a larger fresh count (same pattern as agt_process_list).
+    let mut capacity = required + 32;
+    let first_handle = loop {
+        assert!(
+            capacity < 1_000_000,
+            "window count exploded far beyond the probe result"
+        );
+        let mut recs = vec![agt_window_info::default(); capacity];
+        let mut got = 0usize;
+        let st = unsafe { list(recs.as_mut_ptr(), capacity, &mut got) };
+        if st == AGT_OK {
+            assert!(got > 0, "second-stage enumerate returned no records");
+            let handle = recs[0].handle;
+            assert!(handle != 0, "enumerated handle must be non-zero");
+            break handle;
+        }
+        assert_eq!(
+            st,
+            AGT_FAILED,
+            "second-stage enumerate failed: {}",
+            last_error_message(lib)
+        );
+        let msg = last_error_message(lib);
+        assert!(
+            msg.contains("buffer_too_small"),
+            "expected code \"buffer_too_small\" in error, got: {msg}"
+        );
+        assert!(
+            got > capacity,
+            "out_count must report a required count > capacity, got {got} <= {capacity}"
+        );
+        capacity = got + 32;
+    };
+
+    let st = unsafe { show(first_handle, 99) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_state"),
+        "expected code \"bad_state\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 43: `agt_input_pointer_click(0, 0, 99, 1)` ->
+/// AGT_FAILED{code="bad_button"}. The invalid button is rejected before any
+/// platform call, so nothing is ever clicked on the user's desktop.
+#[test]
+fn input_pointer_click_rejects_bad_button() {
+    let lib = load();
+    let click: Symbol<InputPointerClick> = unsafe { sym(lib, b"agt_input_pointer_click") };
+    let st = unsafe { click(0, 0, 99, 1) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_button"),
+        "expected code \"bad_button\" in error, got: {msg}"
+    );
+}
+
+/// Milestone 43: `agt_input_type_text(NULL, 5)` ->
+/// AGT_FAILED{code="bad_text"} (pointer validated before any platform call —
+/// nothing is typed).
+#[test]
+fn input_type_text_rejects_null_text() {
+    let lib = load();
+    let type_text: Symbol<InputTypeText> = unsafe { sym(lib, b"agt_input_type_text") };
+    let st = unsafe { type_text(std::ptr::null(), 5) };
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_text"),
+        "expected code \"bad_text\" in error, got: {msg}"
     );
 }

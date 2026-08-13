@@ -44,8 +44,11 @@ allow-abort-profile = []
 # cannot compile. `a11y-tree` (milestone 6) gates accessibility-tree observe
 # and node actuation. `runtime` (milestone 10) gates the whole
 # `agenterm_platform::runtime` module: without it the runtime exports below
-# cannot compile.
-agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "portable-pixel-window", "input", "ime", "screenshot", "process", "clipboard", "parent-console", "a11y-tree", "runtime"] }
+# cannot compile. `window-enum` / `window-op` / `input-inject` (milestone 43)
+# gate the native-window enumeration, native-window operation and input
+# injection mechanisms: without them the `agt_window_enumerate` /
+# `agt_native_window_*` / `agt_input_*` exports cannot compile.
+agenterm-platform = { path = "../agenterm-platform", features = ["pty", "native-pixel-window", "portable-pixel-window", "input", "ime", "screenshot", "process", "clipboard", "parent-console", "a11y-tree", "runtime", "window-enum", "window-op", "input-inject"] }
 
 [dev-dependencies]
 # The dylib-load acceptance regression (tests/dylib_load.rs) dlopens the built
