@@ -6,10 +6,10 @@
 
 export async function sendUsageAlert(config, provider, snapshot, reason) {
   const lines = formatAlertBody(provider, snapshot, reason);
-  const title = `Usage Watch: ${provider.name}`;
+  const title = `AgenTerm WebExt: ${provider.name}`;
 
   if (config.notificationsEnabled) {
-    await chrome.notifications.create(`usage-watch-${provider.id}-${Date.now()}`, {
+    await chrome.notifications.create(`agenterm-webext-${provider.id}-${Date.now()}`, {
       type: "basic",
       iconUrl: "icons/icon128.png",
       title,
@@ -22,7 +22,7 @@ export async function sendUsageAlert(config, provider, snapshot, reason) {
   if (config.webhookEnabled && config.webhookUrl) {
     await sendWebhook(config.webhookUrl, {
       to: config.emailDestination,
-      subject: `[Usage Watch] ${provider.name} — ${reason}`,
+      subject: `[AgenTerm WebExt] ${provider.name} — ${reason}`,
       body: lines.join("\n"),
       providerId: provider.id,
       snapshot,
@@ -30,7 +30,7 @@ export async function sendUsageAlert(config, provider, snapshot, reason) {
   }
 
   if (config.mailtoEnabled && config.emailDestination) {
-    const subject = encodeURIComponent(`[Usage Watch] ${provider.name} — ${reason}`);
+    const subject = encodeURIComponent(`[AgenTerm WebExt] ${provider.name} — ${reason}`);
     const body = encodeURIComponent(lines.join("\n"));
     const mailto = `mailto:${config.emailDestination}?subject=${subject}&body=${body}`;
     // Open as draft in default mail client; user sends manually.
@@ -61,9 +61,9 @@ async function sendWebhook(url, payload) {
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      console.warn("[usage-watch] webhook failed:", response.status, await response.text());
+      console.warn("[agenterm-webext] webhook failed:", response.status, await response.text());
     }
   } catch (err) {
-    console.warn("[usage-watch] webhook error:", err);
+    console.warn("[agenterm-webext] webhook error:", err);
   }
 }

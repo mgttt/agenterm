@@ -38,8 +38,8 @@ export const DEFAULT_CONFIG = {
   providers: {
     cursor: { enabled: true, thresholdPct: 15 },
     grok: { enabled: true, thresholdPct: 15 },
+    chatgpt: { enabled: true, thresholdPct: 15 },
     anthropic: { enabled: false, thresholdPct: 15 },
-    openai: { enabled: false, thresholdPct: 15 },
     github_copilot: { enabled: false, thresholdPct: 15 },
   },
 };

@@ -1,5 +1,5 @@
 {
-  "name": "usage-watch",
+  "name": "agenterm-webext",
   "version": "0.1.0",
   "private": true,
   "type": "module",

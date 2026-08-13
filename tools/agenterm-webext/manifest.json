@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Usage Watch",
+  "name": "AgenTerm WebExt",
   "version": "0.1.0",
-  "description": "Monitor AI provider usage quotas and alert when remaining usage is low.",
+  "description": "AgenTerm browser extension — usage monitoring is the first module; more capabilities will follow.",
   "permissions": [
     "alarms",
     "notifications",
@@ -32,7 +32,7 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "Usage Watch",
+    "default_title": "AgenTerm WebExt",
     "default_popup": "popup/popup.html"
   },
   "content_scripts": [
@@ -48,6 +48,18 @@
       "matches": [
         "https://grok.com/*",
         "https://accounts.x.ai/*"
+      ],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://platform.openai.com/account/usage*",
+        "https://platform.openai.com/usage*",
+        "https://platform.openai.com/settings/*",
+        "https://platform.openai.com/account/billing*"
       ],
       "js": ["content/content.js"],
       "run_at": "document_idle"
