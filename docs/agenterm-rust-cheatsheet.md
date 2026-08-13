@@ -979,3 +979,12 @@ resolved, but caller-created symlinks must fail as unsafe. Likewise, reject an
 existing directory with group/other permission bits; never silently `chmod` a
 caller-owned path to make an unsafe endpoint appear valid. Only directories
 created by the adapter may be initialized at `0700`.
+
+## Headless CI is not a desktop-service fixture
+
+Linux adapter unit tests must not require the current host to run AT-SPI,
+DBus, a compositor, or another desktop daemon. Split environment/proc parsing
+into bounded pure helpers and test synthetic byte fixtures, including malformed
+and missing values. Keep live service discovery best-effort in the adapter and
+prove actual desktop integration only in a matching-host smoke environment that
+explicitly owns that service.

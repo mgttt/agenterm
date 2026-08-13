@@ -220,15 +220,8 @@ fn dbus_address_from_process(process_name: &str) -> Option<String> {
             continue;
         }
         let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
-        for item in environ.split(|byte| *byte == 0) {
-            let Ok(text) = std::str::from_utf8(item) else {
-                continue;
-            };
-            if let Some(value) = text.strip_prefix("DBUS_SESSION_BUS_ADDRESS=") {
-                if !value.is_empty() {
-                    return Some(value.to_owned());
-                }
-            }
+        if let Some(address) = dbus_address_from_environ(&environ) {
+            return Some(address);
         }
     }
     None
@@ -269,6 +262,15 @@ async fn child_at_logical_index(
         "a11y_node_not_found",
         format!("child index {logical_index} is unavailable"),
     ))
+}
+
+fn dbus_address_from_environ(environ: &[u8]) -> Option<String> {
+    environ.split(|byte| *byte == 0).find_map(|item| {
+        let text = std::str::from_utf8(item).ok()?;
+        text.strip_prefix("DBUS_SESSION_BUS_ADDRESS=")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
 }
 
 async fn registry_children(
@@ -592,11 +594,21 @@ mod tests {
     }
 
     #[test]
-    fn discovers_dbus_session_from_atspi_registry() {
-        let address = dbus_address_from_process("at-spi2-registryd");
-        assert!(
-            address.is_some(),
-            "expected AT-SPI registry to publish DBUS_SESSION_BUS_ADDRESS"
+    fn parses_dbus_session_from_registry_environment() {
+        assert_eq!(
+            dbus_address_from_environ(
+                b"LANG=C\0DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\0"
+            )
+            .as_deref(),
+            Some("unix:path=/run/user/1000/bus")
+        );
+        assert_eq!(
+            dbus_address_from_environ(b"DBUS_SESSION_BUS_ADDRESS=\0"),
+            None
+        );
+        assert_eq!(
+            dbus_address_from_environ(b"NOT_DBUS_SESSION_BUS_ADDRESS=value\0\xff\0"),
+            None
         );
     }
 
