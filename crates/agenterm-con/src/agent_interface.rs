@@ -206,6 +206,10 @@ pub fn write_png_atomic(
 
 type PngCompletion = Box<dyn FnOnce(std::io::Result<u64>) + Send + 'static>;
 
+fn complete_png(completion: PngCompletion, result: std::io::Result<u64>) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| completion(result)));
+}
+
 struct PngJob {
     path: PathBuf,
     pixels: Vec<u32>,
@@ -237,9 +241,7 @@ fn png_worker() -> std::io::Result<&'static mpsc::SyncSender<PngJob>> {
                             .map(|()| started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64)
                     }))
                     .unwrap_or_else(|_| Err(std::io::Error::other("PNG worker panicked")));
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        completion(result);
-                    }));
+                    complete_png(completion, result);
                 }
             }),
         )
@@ -272,7 +274,7 @@ pub fn submit_png_atomic(
     let worker = match png_worker() {
         Ok(worker) => worker,
         Err(error) => {
-            (job.completion)(Err(error));
+            complete_png(job.completion, Err(error));
             return;
         }
     };
@@ -289,7 +291,7 @@ pub fn submit_png_atomic(
                 job,
             ),
         };
-        (job.completion)(Err(std::io::Error::new(kind, message)));
+        complete_png(job.completion, Err(std::io::Error::new(kind, message)));
     }
 }
 
@@ -390,5 +392,19 @@ mod tests {
         );
         assert!(!path.exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn panicking_png_completion_is_contained() {
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = called.clone();
+        complete_png(
+            Box::new(move |_| {
+                observed.store(true, std::sync::atomic::Ordering::Release);
+                panic!("completion panic must not escape");
+            }),
+            Ok(1),
+        );
+        assert!(called.load(std::sync::atomic::Ordering::Acquire));
     }
 }

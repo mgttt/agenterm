@@ -149,6 +149,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] screenshot success is returned only after atomic PNG output has crossed
   the platform durability barrier.
+- [x] every asynchronous PNG completion path shares one panic-containment
+  boundary, including worker initialization failure and queue-full fallback on
+  the caller thread; a faulty completion cannot unwind into GUI dispatch or
+  terminate the fixed encoder worker.
 - [x] screenshot ownership is global and bounded across the pending-render and
   background-encode phases. PNG encoding and atomic publication run on one fixed
   worker rather than the GUI thread, and concurrent cross-tab requests receive a

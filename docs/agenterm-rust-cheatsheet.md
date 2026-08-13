@@ -1202,6 +1202,12 @@ collections. Capacity, id exhaustion, or duplicate insertion must leave tree,
 active-selection, and owned-resource stores aligned; a `debug_assert!` is not a
 release-build uniqueness contract.
 
+An asynchronous completion boundary must cover synchronous fallback delivery
+as well as the normal worker path. Initialization failure, queue-full, and
+disconnected-worker branches often invoke the same user callback on the caller
+thread; route every branch through one panic-contained completion helper so a
+fallback cannot unwind into GUI or FFI dispatch.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as
