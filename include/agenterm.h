@@ -260,7 +260,25 @@ typedef struct {
  * on the main thread, while this ABI hosts it on a library-private thread.
  * No thread is started and no retry can ever succeed, so treat the status
  * as permanent, not transient. AGT_CAP_WINDOW_HOST reports AGT_UNSUPPORTED
- * on macOS for the same reason. */
+ * on macOS for the same reason.
+ *
+ * Measured defect (milestone 64b, Windows): DO NOT call
+ * agt_window_enumerate while this process holds an open window from
+ * agt_window_open. Enumeration queries every top-level window, including
+ * this one, and those queries are answered by the owning thread -- which is
+ * parked at the frame rendezvous waiting for the caller. The caller is
+ * instead inside enumerate, so the two wait on each other and the call never
+ * returns. agt_window_open itself succeeds; the hang is in the enumerate
+ * that follows. Existing consumers are unaffected only because none of them
+ * does both: cu enumerates but opens no window, and the window probes open
+ * one but never enumerate.
+ *
+ * Two consequences follow. Anything reached through a native handle from
+ * agt_window_enumerate is therefore unreachable for a process hosting its
+ * own window. And once the caller is stuck, the loop thread keeps the
+ * process alive: it does not exit and the window stays on the desktop until
+ * killed. A consumer with a crash-handling path must call agt_window_close
+ * before exiting. */
 agt_status agt_window_open           (const agt_window_spec*, agt_window_t* out);
 
 /* Pop the next event into *out, waiting up to timeout_ms. Timeout returns
