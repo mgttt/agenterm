@@ -261,15 +261,6 @@ pub const LAYER3_CANDIDATES: &[&str] = &["eval_special_form_match", "dlcall_libf
 // `SLJIT_WX_EXECUTABLE_ALLOCATOR`; Apple hosts already use MAP_JIT in-tree elsewhere.
 // Licenses for future survey only: SLJIT 2-clause BSD, DynASM MIT — not vendored here.
 
-/// Names of LAYER3-CANDIDATE markers in this crate (grep / registry hook). No SLJIT/DynASM
-/// dependency is linked yet; see README for portable-backend preference and W^X notes.
-pub const LAYER3_CANDIDATES: &[&str] = &["eval_special_form_match", "dlcall_libffi_dynamic_cif"];
-
-// LAYER3-CANDIDATE (portable codegen, deferred): prefer SLJIT (one LIR, both ISAs) over
-// DynASM (per-ISA macro assembler). If SLJIT is ever linked on Linux/Windows, pin
-// `SLJIT_WX_EXECUTABLE_ALLOCATOR`; Apple hosts already use MAP_JIT in-tree elsewhere.
-// Licenses for future survey only: SLJIT 2-clause BSD, DynASM MIT — not vendored here.
-
 /// Host OS facet for a catalog cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostOs {

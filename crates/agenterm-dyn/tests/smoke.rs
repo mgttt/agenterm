@@ -7,8 +7,7 @@ use std::ffi::{CString, c_void};
 
 use agenterm_dyn::DynError;
 use agenterm_dyn::{
-    CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, LINUX_ATSPI_EXISTENCE_LIBS, SecondaryProbe,
-    SizeProbe, Value, live_cell,
+    CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, SecondaryProbe, Value, live_cell,
 };
 
 #[test]
@@ -24,7 +23,7 @@ fn cu_adjacent_catalog_has_six_cells() {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use agenterm_dyn::HostCell;
+    use agenterm_dyn::{HostCell, LINUX_ATSPI_EXISTENCE_LIBS, SizeProbe};
 
     #[repr(C)]
     struct Winsize {
