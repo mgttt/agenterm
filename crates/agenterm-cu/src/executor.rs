@@ -733,29 +733,38 @@ fn get_caret(
 
 /// `get-text --name` reads independent AT-SPI `Text.GetText`
 /// (`agt_a11y_node_get_text`) once for the unique showing named node.
-/// Without `--name` it reads the focused node instead: the tree node
-/// carrying the AT-SPI `focused` state, so `focus --name X` then
-/// `get-text --window H` closes the loop on whatever holds focus.
-/// This is the same text authority `wait --text-equals` polls, exposed
-/// as a first-class one-shot readback so an independent observation does
-/// not need a wait timeout. Not `send-text` / `paste` / `copy`
-/// `matched.text`, `last_text_write_via`, the WebKit eval helper's
-/// queued-job `OK`, or a tree snapshot `text`. Missing Text typed-fails
-/// (`a11y_text_unavailable`). Never XTest / `--coords` / screenshot.
+/// Without `--name` it reads the focused node instead: toolkits may mark
+/// a whole ancestor chain `focused` (Reasonix marks a container that has
+/// no Text interface), so the candidates are every showing node carrying
+/// the AT-SPI `focused` state, probed innermost-first, and the winner is
+/// the innermost one that actually exposes `Text.GetText`. So
+/// `focus --name X` then `get-text --window H` closes the loop on
+/// whatever holds focus. This is the same text authority
+/// `wait --text-equals` polls, exposed as a first-class one-shot readback
+/// so an independent observation does not need a wait timeout. Not
+/// `send-text` / `paste` / `copy` `matched.text`, `last_text_write_via`,
+/// the WebKit eval helper's queued-job `OK`, or a tree snapshot `text`.
+/// No focused candidate with Text typed-fails (`a11y_text_unavailable`).
+/// Never XTest / `--coords` / screenshot.
 fn get_text(
     window: Option<isize>,
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
     let name = name.filter(|value| !value.is_empty());
-    let resolved = match name {
-        Some(name) => resolve_actuation_node(window, None, Some(name), role, "get-text")?
-            .ok_or_else(|| {
-                CuError::new(
-                    "invalid_input",
-                    "get-text requires --window <handle> [--name <pattern>]",
-                )
-            })?,
+    let (resolved, text) = match name {
+        Some(name) => {
+            let resolved = resolve_actuation_node(window, None, Some(name), role, "get-text")?
+                .ok_or_else(|| {
+                    CuError::new(
+                        "invalid_input",
+                        "get-text requires --window <handle> [--name <pattern>]",
+                    )
+                })?;
+            let text =
+                mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
+            (resolved, text)
+        }
         None => {
             if role.is_some() {
                 return Err(CuError::new(
@@ -763,10 +772,9 @@ fn get_text(
                     "get-text --role requires --name <pattern>",
                 ));
             }
-            resolve_focused_node(window, "get-text")?
+            get_text_focused(window)?
         }
     };
-    let text = mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
@@ -786,33 +794,64 @@ struct ResolvedNode {
     backend: Option<String>,
 }
 
-/// Focused-node addressing: the unique tree node carrying the AT-SPI
-/// `focused` state in the scoped window's tree snapshot. No name pattern,
-/// no coordinates — the toolkit's own focus report picks the node.
-fn resolve_focused_node(window: Option<isize>, verb: &str) -> Result<ResolvedNode, CuError> {
+/// Focused-node text readback: no name pattern, no coordinates — the
+/// toolkit's own focus report picks the node. Probes every showing
+/// `focused` node innermost-first with independent `Text.GetText` and
+/// returns the first that exposes it. A `focused` ancestor without the
+/// Text interface (`a11y_text_unavailable`) falls through to the next
+/// candidate; any other mechanism failure aborts. All candidates missing
+/// Text re-raises the innermost candidate's `a11y_text_unavailable`.
+fn get_text_focused(window: Option<isize>) -> Result<(ResolvedNode, String), CuError> {
     let Some(handle) = window else {
         return Err(CuError::new(
             "invalid_input",
-            format!("{verb} without --name requires --window <handle>"),
+            "get-text without --name requires --window <handle>",
         ));
     };
     let tree = mechanism::tree_for_window(Some(handle)).map_err(map_mechanism_err)?;
-    let node = tree
-        .nodes
+    let candidates = focused_candidates_innermost_first(&tree.nodes);
+    if candidates.is_empty() {
+        return Err(CuError::new(
+            "a11y_node_not_found",
+            "no showing focused accessibility node in window tree",
+        ));
+    }
+    let mut text_unavailable: Option<CuError> = None;
+    for node in candidates {
+        match mechanism::get_node_text(window, &node.id) {
+            Ok(text) => {
+                let resolved = ResolvedNode {
+                    node_id: node.id.clone(),
+                    matched: Some(node.clone()),
+                    backend: Some(tree.backend.clone()),
+                };
+                return Ok((resolved, text));
+            }
+            Err(mechanism::MechanismError::Failed { code, message })
+                if code == "a11y_text_unavailable" =>
+            {
+                text_unavailable.get_or_insert(CuError::new(code, message));
+            }
+            Err(other) => return Err(map_mechanism_err(other)),
+        }
+    }
+    Err(text_unavailable.expect("non-empty candidates yield Ok or a stored error"))
+}
+
+/// Every showing node carrying the AT-SPI `focused` state, deepest child
+/// path first, so an innermost real widget wins over a `focused` ancestor
+/// container. Depth is the child-index path length; the stable sort keeps
+/// snapshot pre-order between equal depths.
+fn focused_candidates_innermost_first(
+    nodes: &[mechanism::A11yNode],
+) -> Vec<&mechanism::A11yNode> {
+    let mut candidates: Vec<&mechanism::A11yNode> = nodes
         .iter()
-        .find(|node| node.states.iter().any(|state| state == "focused"))
-        .ok_or_else(|| {
-            CuError::new(
-                "a11y_node_not_found",
-                "no focused accessibility node in window tree",
-            )
-        })?
-        .clone();
-    Ok(ResolvedNode {
-        node_id: node.id.clone(),
-        matched: Some(node),
-        backend: Some(tree.backend),
-    })
+        .filter(|node| node_is_showing(node))
+        .filter(|node| node.states.iter().any(|state| state == "focused"))
+        .collect();
+    candidates.sort_by_key(|node| std::cmp::Reverse(node.id.matches('/').count()));
+    candidates
 }
 
 /// Shared addressing gate for structured click/focus: `--node` or `--name`,
@@ -1515,6 +1554,25 @@ mod tests {
         assert_eq!(payload["node"]["text"], "RXWAIT-TYPED");
         assert_ne!(payload["via"], "text");
         assert_ne!(payload["node"]["text"], "stale-snapshot");
+    }
+
+    #[test]
+    fn focused_candidates_order_innermost_widget_before_focused_ancestor() {
+        // Reasonix shape: a focused container without Text sits above the
+        // focused composer textarea; the composer must be probed first.
+        let panel = node_at("/0/0/0/0/0/0/0", "", "filler", &["showing", "focused"]);
+        let composer = node_at(
+            "/0/0/0/0/0/0/0/0/5/1/0",
+            "Message Reasonix…",
+            "text",
+            &["showing", "editable", "focused"],
+        );
+        let hidden = node_at("/0/0/0/0/0/0/0/0/9", "", "text", &["focused"]);
+        let unfocused = node_at("/0/1", "Send", "push button", &["showing"]);
+        let nodes = vec![panel.clone(), composer.clone(), hidden, unfocused];
+        let candidates = focused_candidates_innermost_first(&nodes);
+        let ids: Vec<&str> = candidates.iter().map(|node| node.id.as_str()).collect();
+        assert_eq!(ids, vec![composer.id.as_str(), panel.id.as_str()]);
     }
 
     #[test]
