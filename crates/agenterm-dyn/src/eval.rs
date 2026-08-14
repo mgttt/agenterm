@@ -31,6 +31,9 @@ fn eval_list(env: &mut Dyn, items: &[SExpr]) -> Result<Value, DynError> {
             "application of non-symbol head is not supported".into(),
         ));
     };
+    // LAYER3-CANDIDATE: this special-form match is the natural lower boundary — a future
+    // layer could emit SLJIT LIR (`sljit_emit_*`) for both ISAs from the same tree walk.
+    // DynASM is per-ISA macro assembly and is not the first portable backend choice.
     match form.as_str() {
         "do" => eval_do(env, &items[1..]),
         "set" => eval_set(env, &items[1..]),

@@ -178,6 +178,9 @@ fn expect_string(expr: &SExpr, what: &str) -> Result<String, DynError> {
 }
 
 /// Evaluate `(dlcall lib sym rettype [argtype arg]...)`.
+///
+/// LAYER3-CANDIDATE: keep **libffi** + dynamic `Cif` here. SLJIT `sljit_emit_icall` is
+/// fixed-signature (≤4 args) and cannot replace script-driven CIF construction.
 pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     if args.len() < 3 {
         return Err(DynError::Arity {
