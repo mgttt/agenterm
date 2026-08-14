@@ -42,7 +42,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 8
+#define AGT_ABI_MINOR 9
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -514,6 +514,23 @@ agt_status agt_a11y_node_set_selection(intptr_t window_handle, const char* node_
 agt_status agt_a11y_node_get_selection(intptr_t window_handle, const char* node_id,
                                        int32_t* out_n, int32_t* out_start,
                                        int32_t* out_end);
+
+/* One-shot AT-SPI Text.SetCaretOffset on `node_id` (NUL-terminated UTF-8
+ * child-index path). `window_handle` uses the same filter as
+ * agt_a11y_tree_snapshot. Missing Text / UnknownMethod ->
+ * AGT_FAILED{code="a11y_caret_unavailable"}. SetCaretOffset false ->
+ * AGT_FAILED{code="a11y_caret_no_effect"}. Never XTest or --coords.
+ * The reply is not proof; callers observe via
+ * agt_a11y_node_get_caret_offset. */
+agt_status agt_a11y_node_set_caret_offset(intptr_t window_handle, const char* node_id,
+                                          int32_t offset);
+
+/* Independent AT-SPI Text.CaretOffset / GetCaretOffset for `node_id`.
+ * Not the set-caret reply payload. NULL node_id or NULL out_offset ->
+ * AGT_FAILED{code="bad_pointer"}. Missing Text / UnknownMethod ->
+ * AGT_FAILED{code="a11y_caret_unavailable"}. */
+agt_status agt_a11y_node_get_caret_offset(intptr_t window_handle, const char* node_id,
+                                          int32_t* out_offset);
 
 /* Drain the accessibility event bus. No side effects on user-visible state;
  * has no failure path and returns AGT_OK when the mechanism is present.

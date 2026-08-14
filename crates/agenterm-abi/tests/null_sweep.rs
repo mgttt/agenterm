@@ -165,6 +165,8 @@ type A11yNodeGetExtents =
 type A11yNodeSetSelection = unsafe extern "C" fn(isize, *const c_char, i32, i32) -> i32;
 type A11yNodeGetSelection =
     unsafe extern "C" fn(isize, *const c_char, *mut i32, *mut i32, *mut i32) -> i32;
+type A11yNodeSetCaretOffset = unsafe extern "C" fn(isize, *const c_char, i32) -> i32;
+type A11yNodeGetCaretOffset = unsafe extern "C" fn(isize, *const c_char, *mut i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type RuntimeUserConfigDir = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
@@ -840,6 +842,24 @@ fn null_group() -> Vec<SweepCase> {
                         std::ptr::null_mut(),
                     ))
                 }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_set_caret_offset[window_handle=0,node_id=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeSetCaretOffset> =
+                    unsafe { sym(lib, b"agt_a11y_node_set_caret_offset") };
+                unsafe { CallResult::Status(f(0, std::ptr::null(), 2)) }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_get_caret_offset[window_handle=0,node_id=NULL,out=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeGetCaretOffset> =
+                    unsafe { sym(lib, b"agt_a11y_node_get_caret_offset") };
+                unsafe { CallResult::Status(f(0, std::ptr::null(), std::ptr::null_mut())) }
             }),
         },
         SweepCase {

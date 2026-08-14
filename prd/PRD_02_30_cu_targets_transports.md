@@ -233,6 +233,21 @@ Canonical host mapping (approved product vocabulary):
   `agenterm-con` composer `Command` publishes real
   `SetSelection` / `GetNSelections` / `GetSelection` (same verbs,
   no ABI change).
+- [x] `set-caret --window HANDLE --name PAT --offset N [--role ROLE]`
+  resolves through that same path, then one-shot AT-SPI
+  `Text.SetCaretOffset` (`agt_a11y_node_set_caret_offset`).
+  Success is `via=set-caret-offset`. Missing Text / `UnknownMethod`
+  typed-fails (`a11y_caret_unavailable`). SetCaretOffset false
+  typed-fails (`a11y_caret_no_effect`). Never XTest, `--coords`, or
+  screenshot. Proof is independent `get-caret`, not the `set-caret`
+  reply.
+- [x] `get-caret --window HANDLE --name PAT [--role ROLE]` resolves
+  through that same path, then independent AT-SPI `Text.CaretOffset`
+  / `GetCaretOffset` (`agt_a11y_node_get_caret_offset`). The
+  `set-caret` reply payload does not count. Missing Text typed-fails
+  (`a11y_caret_unavailable`). Linux `agenterm-con` composer
+  `Command` publishes real `SetCaretOffset` / `CaretOffset` (ABI 1.9
+  verbs).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

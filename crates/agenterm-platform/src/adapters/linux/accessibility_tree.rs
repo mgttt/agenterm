@@ -312,6 +312,50 @@ pub(crate) fn get_node_selection(
     })
 }
 
+/// One-shot AT-SPI `Text.SetCaretOffset`. Missing Text / `UnknownMethod`
+/// is `a11y_caret_unavailable`. SetCaretOffset false is
+/// `a11y_caret_no_effect`. Never XTest or `--coords`.
+pub(crate) fn set_node_caret_offset(
+    window_handle: Option<isize>,
+    node_id: &str,
+    offset: i32,
+) -> Result<(), AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            set_node_caret_offset_async(window_handle, node_id, offset),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_caret_unavailable",
+                "AT-SPI Text.SetCaretOffset exceeded its deadline",
+            )
+        })?
+    })
+}
+
+/// Independent AT-SPI `Text.CaretOffset` for one child-index path. Not
+/// the set-caret reply.
+pub(crate) fn get_node_caret_offset(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<i32, AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            get_node_caret_offset_async(window_handle, node_id),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_caret_unavailable",
+                "AT-SPI Text.GetCaretOffset exceeded its deadline",
+            )
+        })?
+    })
+}
+
 /// Deliver a chord through AT-SPI Device/key events (`DeviceEventListener`
 /// `NotifyEvent`). A named showing node with no key interface fails typed —
 /// never XTest / `input_inject::send_keys`.
@@ -568,6 +612,53 @@ async fn get_node_selection_async(
     invoke_text_get_selection(&proxy).await
 }
 
+async fn set_node_caret_offset_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+    offset: i32,
+) -> Result<(), AccessibilityTreeError> {
+    if offset < 0 {
+        return Err(AccessibilityTreeError::failed(
+            "invalid_input",
+            format!("caret offset {offset} is invalid"),
+        ));
+    }
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_caret_unavailable",
+            format!("node path {node_id} has no AT-SPI Text.SetCaretOffset"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_text_set_caret_offset(&proxy, offset).await
+}
+
+async fn get_node_caret_offset_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<i32, AccessibilityTreeError> {
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_caret_unavailable",
+            format!("node path {node_id} has no AT-SPI Text.GetCaretOffset"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_text_get_caret_offset(&proxy).await
+}
+
 async fn invoke_component_scroll_to(
     proxy: &AccessibleProxy<'_>,
     original_dest: &str,
@@ -788,6 +879,16 @@ fn is_missing_selection_interface(error: &AccessibilityTreeError) -> bool {
         || message.contains("does not exist")
 }
 
+fn is_missing_caret_interface(error: &AccessibilityTreeError) -> bool {
+    let AccessibilityTreeError::Failed { code, message } = error else {
+        return false;
+    };
+    code == "a11y_caret_unavailable"
+        || message.contains("UnknownInterface")
+        || message.contains("UnknownMethod")
+        || message.contains("does not exist")
+}
+
 async fn invoke_text_set_selection(
     proxy: &AccessibleProxy<'_>,
     start: i32,
@@ -913,6 +1014,83 @@ async fn invoke_text_get_selection(
         }
     };
     Ok(AccessibilitySelection { n, start, end })
+}
+
+async fn invoke_text_set_caret_offset(
+    proxy: &AccessibleProxy<'_>,
+    offset: i32,
+) -> Result<(), AccessibilityTreeError> {
+    let text = match text_proxy_for(proxy).await {
+        Ok(text) => text,
+        Err(error) if is_missing_caret_interface(&error) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_caret_unavailable",
+                "node does not expose AT-SPI Text.SetCaretOffset",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    if let Ok(component) = component_proxy_for(proxy).await {
+        let _ = timeout(NODE_TIMEOUT, component.grab_focus()).await;
+    }
+    let applied = match timeout(NODE_TIMEOUT, text.set_caret_offset(offset)).await {
+        Ok(Ok(applied)) => applied,
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_caret_interface(&mapped) {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_caret_unavailable",
+                    "AT-SPI Text.SetCaretOffset is missing or UnknownMethod",
+                ));
+            }
+            return Err(mapped);
+        }
+        Err(_) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_caret_unavailable",
+                "AT-SPI Text.SetCaretOffset exceeded its deadline",
+            ));
+        }
+    };
+    if !applied {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_caret_no_effect",
+            format!("AT-SPI Text.SetCaretOffset returned false for {offset}"),
+        ));
+    }
+    Ok(())
+}
+
+async fn invoke_text_get_caret_offset(
+    proxy: &AccessibleProxy<'_>,
+) -> Result<i32, AccessibilityTreeError> {
+    let text = match text_proxy_for(proxy).await {
+        Ok(text) => text,
+        Err(error) if is_missing_caret_interface(&error) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_caret_unavailable",
+                "node does not expose AT-SPI Text.GetCaretOffset",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    match timeout(NODE_TIMEOUT, text.caret_offset()).await {
+        Ok(Ok(offset)) => Ok(offset),
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_caret_interface(&mapped) {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_caret_unavailable",
+                    "AT-SPI Text.GetCaretOffset is missing or UnknownMethod",
+                ));
+            }
+            Err(mapped)
+        }
+        Err(_) => Err(AccessibilityTreeError::failed(
+            "a11y_caret_unavailable",
+            "AT-SPI Text.GetCaretOffset exceeded its deadline",
+        )),
+    }
 }
 
 async fn set_node_text_async(

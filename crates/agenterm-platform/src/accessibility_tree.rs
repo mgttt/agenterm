@@ -90,6 +90,28 @@ pub fn get_node_selection(
     crate::selected::accessibility_tree::get_node_selection(window_handle, node_id)
 }
 
+/// One-shot AT-SPI `Text.SetCaretOffset` (Linux). Missing Text /
+/// `UnknownMethod` fails typed (`a11y_caret_unavailable`). SetCaretOffset
+/// false fails typed (`a11y_caret_no_effect`). Never XTest, `--coords`,
+/// or screenshot.
+pub fn set_node_caret_offset(
+    window_handle: Option<isize>,
+    node_id: &str,
+    offset: i32,
+) -> Result<(), AccessibilityTreeError> {
+    crate::selected::accessibility_tree::set_node_caret_offset(window_handle, node_id, offset)
+}
+
+/// Independent AT-SPI `Text.CaretOffset` / `GetCaretOffset` for one
+/// resolved child-index path. Not the set-caret reply. Missing Text
+/// fails typed (`a11y_caret_unavailable`).
+pub fn get_node_caret_offset(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<i32, AccessibilityTreeError> {
+    crate::selected::accessibility_tree::get_node_caret_offset(window_handle, node_id)
+}
+
 /// Route of the last successful `set_node_text` on this thread.
 /// Linux: `"editable-text"` or `"text"`. Other hosts: `"editable-text"`.
 pub fn last_text_write_via() -> &'static str {

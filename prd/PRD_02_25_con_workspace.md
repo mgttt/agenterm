@@ -81,6 +81,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`n=1`). Tree snapshots keep replacing node text; the publisher
   stores the range separately. Never XTest, mouse-drag, `--coords`,
   or screenshot. The `select` reply is not proof.
+- [x] Linux publish implements AT-SPI `Text.SetCaretOffset` /
+  `CaretOffset` (`GetCaretOffset`) on the named composer `Command`
+  field. Independent `cu get-caret --name Command` after
+  `cu set-caret --name Command --offset N` reports that offset.
+  Tree snapshots keep replacing node text; the publisher stores the
+  caret separately. Never XTest, `--coords`, or screenshot. The
+  `set-caret` reply is not proof.
 - [x] AT-SPI actions cross into the GUI through a 64-entry FIFO and a 32-action
   per-turn drain budget, with a 64 KiB per-action and 256 KiB aggregate payload
   ceiling. Saturation drops only new actions, records a monotonic counter,

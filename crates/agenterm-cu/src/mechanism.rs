@@ -739,6 +739,34 @@ pub fn get_node_selection(
     Ok(A11ySelection { n, start, end })
 }
 
+/// One-shot AT-SPI `Text.SetCaretOffset` for a resolved child-index
+/// path. Missing Text / `UnknownMethod` is `a11y_caret_unavailable`.
+/// SetCaretOffset false is `a11y_caret_no_effect`.
+pub fn set_node_caret_offset(
+    window: Option<isize>,
+    node_id: &str,
+    offset: i32,
+) -> Result<(), MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeSetCaretOffset>(b"agt_a11y_node_set_caret_offset")?;
+    let status = unsafe { f(handle, node_c.as_ptr(), offset) };
+    map_status("agt_a11y_node_set_caret_offset", status)?;
+    Ok(())
+}
+
+/// Independent AT-SPI `Text.CaretOffset` / `GetCaretOffset` for a
+/// resolved child-index path. Not the set-caret reply payload.
+pub fn get_node_caret_offset(window: Option<isize>, node_id: &str) -> Result<i32, MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeGetCaretOffset>(b"agt_a11y_node_get_caret_offset")?;
+    let mut offset = 0i32;
+    let status = unsafe { f(handle, node_c.as_ptr(), &mut offset) };
+    map_status("agt_a11y_node_get_caret_offset", status)?;
+    Ok(offset)
+}
+
 /// Resident menu and global-shortcut host through libagenterm.
 pub mod desktop_host {
     use std::ffi::c_void;
@@ -1224,6 +1252,8 @@ type NodeGetExtents = unsafe extern "C" fn(
 type NodeSetSelection = unsafe extern "C" fn(isize, *const std::ffi::c_char, i32, i32) -> i32;
 type NodeGetSelection =
     unsafe extern "C" fn(isize, *const std::ffi::c_char, *mut i32, *mut i32, *mut i32) -> i32;
+type NodeSetCaretOffset = unsafe extern "C" fn(isize, *const std::ffi::c_char, i32) -> i32;
+type NodeGetCaretOffset = unsafe extern "C" fn(isize, *const std::ffi::c_char, *mut i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;

@@ -173,6 +173,34 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// One-shot AT-SPI `Text.SetCaretOffset` on the unique showing named
+    /// node. Success is `via=set-caret-offset`. Missing Text /
+    /// `UnknownMethod` typed-fails (`a11y_caret_unavailable`).
+    /// SetCaretOffset false typed-fails (`a11y_caret_no_effect`). Never
+    /// XTest, `--coords`, or screenshot. The reply is not proof; callers
+    /// observe via `get-caret`.
+    SetCaret {
+        target: TargetRef,
+        offset: i32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
+    /// Independent AT-SPI `Text.CaretOffset` / `GetCaretOffset` for the
+    /// unique showing named node. Not the `set-caret` reply payload.
+    /// Missing Text typed-fails (`a11y_caret_unavailable`).
+    GetCaret {
+        target: TargetRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
     Wait {
         target: TargetRef,
         timeout_ms: u64,
@@ -260,6 +288,8 @@ impl Command {
             Self::GetExtents { .. } => "get-extents".into(),
             Self::Select { .. } => "select".into(),
             Self::GetSelection { .. } => "get-selection".into(),
+            Self::SetCaret { .. } => "set-caret".into(),
+            Self::GetCaret { .. } => "get-caret".into(),
             Self::Wait { .. } => "wait".into(),
             Self::WindowPlace { .. } => "window-place".into(),
         }
@@ -281,6 +311,8 @@ impl Command {
             | Self::GetExtents { target, .. }
             | Self::Select { target, .. }
             | Self::GetSelection { target, .. }
+            | Self::SetCaret { target, .. }
+            | Self::GetCaret { target, .. }
             | Self::Wait { target, .. }
             | Self::WindowPlace { target, .. } => *target,
         }
@@ -296,6 +328,7 @@ impl Command {
             | Self::SendKeys { .. }
             | Self::Scroll { .. }
             | Self::Select { .. }
+            | Self::SetCaret { .. }
             | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }

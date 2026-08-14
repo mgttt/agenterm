@@ -272,6 +272,38 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
+        "set-caret" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            let offset = flag_i32(&mut args, "--offset");
+            if name.as_ref().is_none_or(|value| value.is_empty()) || offset.is_none() {
+                return usage_err(
+                    "set-caret requires --window <handle> --name <pattern> --offset N",
+                );
+            }
+            Command::SetCaret {
+                target,
+                offset: offset.unwrap_or(0),
+                window,
+                name,
+                role,
+            }
+        }
+        "get-caret" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-caret requires --window <handle> --name <pattern>");
+            }
+            Command::GetCaret {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
         "window-place" => {
             let action = flag_value(&mut args, "--action")
                 .or_else(|| args.first().cloned())
@@ -551,6 +583,19 @@ Commands:
                               Missing Text typed-fails
                               (a11y_selection_unavailable). n=0 is empty
                               success.
+  set-caret --window HANDLE --name PAT --offset N [--role ROLE]
+                              one-shot AT-SPI Text.SetCaretOffset.
+                              addressing=accessibility-tree via=set-caret-offset.
+                              Missing Text / UnknownMethod typed-fails
+                              (a11y_caret_unavailable). SetCaretOffset false
+                              typed-fails (a11y_caret_no_effect). Never
+                              XTest, --coords, or screenshot. The reply is
+                              not proof; observe with get-caret.
+  get-caret --window HANDLE --name PAT [--role ROLE]
+                              independent AT-SPI Text.CaretOffset /
+                              GetCaretOffset. Not the set-caret reply payload.
+                              Missing Text typed-fails
+                              (a11y_caret_unavailable).
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE

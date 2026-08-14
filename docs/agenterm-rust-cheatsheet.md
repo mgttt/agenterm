@@ -1324,6 +1324,18 @@ backspace clear the stored range; `Ctrl+A` sets `0..len`. Independent
 `get-selection` is the proof. Do not treat `SetSelection` true as
 proof, and do not implement select as a mouse-drag.
 
+con publish also implements `Text.SetCaretOffset` / `CaretOffset`
+(`GetCaretOffset`) on named `Command`. The previous stub returned
+true from `SetCaretOffset` and always reported `character_count` for
+`CaretOffset`, so independent readback never matched a typed offset.
+Store the caret beside the selection map; layout snapshots must not
+drop it. A negative offset is false; an offset past the end clamps.
+`SetCaretOffset` collapses the stored selection; `SetSelection` moves
+the caret to `end`. Independent `cu get-caret --name` after
+`cu set-caret --name --offset N` is the proof. Do not treat
+`SetCaretOffset` true as proof, and do not implement caret as
+`--coords` / XTest.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. An `agenterm-cu`
