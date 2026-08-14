@@ -100,6 +100,8 @@ same native facts that cu's windows, focus, and get-text hands may consume,
 without wiring dyn into cu, platform, or the ABI:
 
 - [current PID](examples/getpid.md)
+- [current user ID via `getuid`](examples/getuid.md)
+- [current working directory via `getcwd`](examples/getcwd.md)
 - [terminal window size via `ioctl`](examples/ioctl-window-size.md)
 - [`DISPLAY` via `getenv`](examples/getenv-display.md)
 - [explicit missing-symbol failure](examples/failure-missing-symbol.md)
