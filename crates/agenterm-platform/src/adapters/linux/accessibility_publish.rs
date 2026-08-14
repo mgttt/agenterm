@@ -75,6 +75,10 @@ struct Store {
     /// snapshots keep publishing the unscrolled bounds; `GetExtents` adds
     /// this so an independent observe call sees the move immediately.
     scroll_dy: HashMap<u32, i32>,
+    /// Persistent AT-SPI Text selection (`SetSelection` / `GetSelection`).
+    /// Layout snapshots replace node text but must not drop a live range;
+    /// independent `GetNSelections` / `GetSelection` is the proof.
+    selections: HashMap<u32, (i32, i32)>,
 }
 
 impl Store {
@@ -241,6 +245,81 @@ fn apply_scroll_node_locked(store: &mut Store, id: u32, scroll_type: u32) -> boo
     true
 }
 
+fn text_n_selections(store: &Store, id: u32) -> i32 {
+    match store.selections.get(&id).copied() {
+        Some((start, end)) if start != end => 1,
+        _ => 0,
+    }
+}
+
+fn text_selection(store: &Store, id: u32, selection_num: i32) -> (i32, i32) {
+    if selection_num != 0 {
+        return (0, 0);
+    }
+    store.selections.get(&id).copied().unwrap_or((0, 0))
+}
+
+fn clamp_selection_range(text: &str, start: i32, end: i32) -> Option<(i32, i32)> {
+    if start < 0 || end < start {
+        return None;
+    }
+    let total = char_count(text);
+    Some((start.min(total), end.min(total)))
+}
+
+/// `Text.SetSelection`: persist one range so later `GetNSelections` /
+/// `GetSelection` report it. Only selection 0 is supported. A collapsed
+/// range (`start == end` after clamp) clears the selection.
+fn apply_text_set_selection(
+    store: &Mutex<Store>,
+    id: u32,
+    selection_num: i32,
+    start: i32,
+    end: i32,
+) -> bool {
+    if selection_num != 0 {
+        return false;
+    }
+    let mut store = lock_store(store);
+    let Some(node) = store.node(id) else {
+        return false;
+    };
+    if !node.editable {
+        return false;
+    }
+    let Some((start, end)) = clamp_selection_range(&node.text, start, end) else {
+        return false;
+    };
+    if start == end {
+        store.selections.remove(&id);
+    } else {
+        store.selections.insert(id, (start, end));
+    }
+    true
+}
+
+fn apply_text_add_selection(store: &Mutex<Store>, id: u32, start: i32, end: i32) -> bool {
+    {
+        let locked = lock_store(store);
+        if text_n_selections(&locked, id) > 0 {
+            return false;
+        }
+    }
+    apply_text_set_selection(store, id, 0, start, end)
+}
+
+fn apply_text_remove_selection(store: &Mutex<Store>, id: u32, selection_num: i32) -> bool {
+    if selection_num != 0 {
+        return false;
+    }
+    let mut store = lock_store(store);
+    store.selections.remove(&id).is_some()
+}
+
+fn clear_node_selection(store: &mut Store, id: u32) {
+    store.selections.remove(&id);
+}
+
 /// `Component.ScrollTo`: move a named inner widget (or every child of a
 /// scrollable pane) so later `GetExtents` reports the new y. Returns false
 /// only when the node is missing or has no scrollable ancestor.
@@ -367,14 +446,17 @@ fn replace_node_text(store: &Mutex<Store>, id: u32, text: String) -> bool {
         return false;
     }
     let mut store = lock_store(store);
-    let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) else {
-        return false;
-    };
-    if !node.editable {
-        return false;
+    {
+        let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) else {
+            return false;
+        };
+        if !node.editable {
+            return false;
+        }
+        node.text = text;
     }
-    node.text = text;
     store.focused = Some(id);
+    clear_node_selection(&mut store, id);
     true
 }
 
@@ -403,14 +485,32 @@ fn apply_node_key(store: &Mutex<Store>, id: u32, key: PublishedKey) -> bool {
     }
     let mut store = lock_store(store);
     store.focused = Some(id);
+    let mut select_all_end = None;
+    let mut clear_selection = false;
     if let Some(node) = store.tree.nodes.iter_mut().find(|node| node.id == id) {
         match effect {
-            KeyEffect::Insert(piece) => node.text.push_str(&piece),
+            KeyEffect::Insert(piece) => {
+                node.text.push_str(&piece);
+                clear_selection = true;
+            }
             KeyEffect::Backspace => {
                 let _ = node.text.pop();
+                clear_selection = true;
             }
-            KeyEffect::SelectAll | KeyEffect::Submit | KeyEffect::Cancel | KeyEffect::Ignore => {}
+            KeyEffect::SelectAll => {
+                select_all_end = Some(char_count(&node.text));
+            }
+            KeyEffect::Submit | KeyEffect::Cancel | KeyEffect::Ignore => {}
         }
+    }
+    if let Some(end) = select_all_end {
+        if end > 0 {
+            store.selections.insert(id, (0, end));
+        } else {
+            store.selections.remove(&id);
+        }
+    } else if clear_selection {
+        clear_node_selection(&mut store, id);
     }
     true
 }
@@ -755,23 +855,31 @@ impl TextNode {
 
     #[zbus(name = "GetNSelections")]
     fn get_n_selections(&self) -> i32 {
-        0
+        let store = lock_store(&self.0.store);
+        text_n_selections(&store, self.0.id)
     }
 
-    fn get_selection(&self, _selection_num: i32) -> (i32, i32) {
-        (0, 0)
+    fn get_selection(&self, selection_num: i32) -> (i32, i32) {
+        let store = lock_store(&self.0.store);
+        text_selection(&store, self.0.id, selection_num)
     }
 
-    fn add_selection(&self, _start_offset: i32, _end_offset: i32) -> bool {
-        false
+    fn add_selection(&self, start_offset: i32, end_offset: i32) -> bool {
+        apply_text_add_selection(&self.0.store, self.0.id, start_offset, end_offset)
     }
 
-    fn remove_selection(&self, _selection_num: i32) -> bool {
-        false
+    fn remove_selection(&self, selection_num: i32) -> bool {
+        apply_text_remove_selection(&self.0.store, self.0.id, selection_num)
     }
 
-    fn set_selection(&self, _selection_num: i32, _start_offset: i32, _end_offset: i32) -> bool {
-        false
+    fn set_selection(&self, selection_num: i32, start_offset: i32, end_offset: i32) -> bool {
+        apply_text_set_selection(
+            &self.0.store,
+            self.0.id,
+            selection_num,
+            start_offset,
+            end_offset,
+        )
     }
 
     fn set_caret_offset(&self, _offset: i32) -> bool {
@@ -1199,6 +1307,7 @@ pub(crate) fn start(
         focused: None,
         handler: None,
         scroll_dy: HashMap::new(),
+        selections: HashMap::new(),
     }));
     let publishing = Arc::new(AtomicBool::new(false));
     let thread_store = Arc::clone(&store);
@@ -1380,6 +1489,7 @@ mod tests {
             focused: None,
             handler: Some(Arc::new(|_, _| false)),
             scroll_dy: HashMap::new(),
+            selections: HashMap::new(),
         });
         assert!(!replace_node_text(&store, 4, "rejected".into()));
         assert_eq!(lock_store(&store).node(4).unwrap().text, "original");
@@ -1492,6 +1602,7 @@ mod tests {
                 focused: None,
                 handler: None,
                 scroll_dy: HashMap::new(),
+                selections: HashMap::new(),
             })),
             publishing: Arc::clone(&publishing),
         };
@@ -1554,6 +1665,7 @@ mod tests {
             focused: None,
             handler: None,
             scroll_dy: HashMap::new(),
+            selections: HashMap::new(),
         })
     }
 
@@ -1625,8 +1737,104 @@ mod tests {
             focused: None,
             handler: None,
             scroll_dy: HashMap::new(),
+            selections: HashMap::new(),
         });
         assert!(!apply_component_scroll(&store, 4, ATSPI_SCROLL_TOP_EDGE));
+    }
+
+    fn store_with_command(text: &str) -> Mutex<Store> {
+        Mutex::new(Store {
+            tree: PublishedTree {
+                app_name: "agenterm-con".into(),
+                nodes: vec![sample_command(text)],
+            },
+            window_handle: None,
+            unique_name: String::new(),
+            app_id: 0,
+            focused: None,
+            handler: Some(Arc::new(|_, _| true)),
+            scroll_dy: HashMap::new(),
+            selections: HashMap::new(),
+        })
+    }
+
+    #[test]
+    fn set_selection_sticks_for_independent_get_selection() {
+        let store = store_with_command("HELLO");
+        {
+            let locked = lock_store(&store);
+            assert_eq!(text_n_selections(&locked, 4), 0);
+            assert_eq!(text_selection(&locked, 4, 0), (0, 0));
+        }
+        assert!(apply_text_set_selection(&store, 4, 0, 0, 4));
+        let locked = lock_store(&store);
+        assert_eq!(text_n_selections(&locked, 4), 1);
+        assert_eq!(text_selection(&locked, 4, 0), (0, 4));
+    }
+
+    #[test]
+    fn collapsed_or_invalid_selection_is_empty() {
+        let store = store_with_command("HELLO");
+        assert!(apply_text_set_selection(&store, 4, 0, 2, 2));
+        assert_eq!(text_n_selections(&lock_store(&store), 4), 0);
+        assert!(!apply_text_set_selection(&store, 4, 0, 4, 1));
+        assert!(!apply_text_set_selection(&store, 4, 1, 0, 4));
+        assert!(!apply_text_set_selection(&store, 4, 0, -1, 2));
+    }
+
+    #[test]
+    fn add_selection_creates_only_the_first_range() {
+        let store = store_with_command("HELLO");
+        assert!(apply_text_add_selection(&store, 4, 0, 4));
+        assert!(!apply_text_add_selection(&store, 4, 1, 3));
+        let locked = lock_store(&store);
+        assert_eq!(text_n_selections(&locked, 4), 1);
+        assert_eq!(text_selection(&locked, 4, 0), (0, 4));
+    }
+
+    #[test]
+    fn publish_does_not_clear_text_selection() {
+        let store = store_with_command("HELLO");
+        assert!(apply_text_set_selection(&store, 4, 0, 0, 4));
+        {
+            let mut locked = lock_store(&store);
+            locked.tree = PublishedTree {
+                app_name: "agenterm-con".into(),
+                nodes: vec![sample_command("HELLO")],
+            };
+        }
+        let locked = lock_store(&store);
+        assert_eq!(text_n_selections(&locked, 4), 1);
+        assert_eq!(text_selection(&locked, 4, 0), (0, 4));
+    }
+
+    #[test]
+    fn replace_text_clears_the_stored_selection() {
+        let store = store_with_command("HELLO");
+        assert!(apply_text_set_selection(&store, 4, 0, 0, 4));
+        assert!(replace_node_text(&store, 4, "WORLD".into()));
+        let locked = lock_store(&store);
+        assert_eq!(locked.node(4).unwrap().text, "WORLD");
+        assert_eq!(text_n_selections(&locked, 4), 0);
+    }
+
+    #[test]
+    fn select_all_key_sets_the_full_range() {
+        let store = store_with_command("HELLO");
+        assert!(apply_node_key(
+            &store,
+            4,
+            PublishedKey {
+                keysym: i32::from(b'a'),
+                event_string: "a".into(),
+                is_text: true,
+                modifiers: 1 << 2,
+                pressed: true,
+            }
+        ));
+        let locked = lock_store(&store);
+        assert_eq!(text_n_selections(&locked, 4), 1);
+        assert_eq!(text_selection(&locked, 4, 0), (0, 5));
     }
 
     #[test]

@@ -74,6 +74,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `via=scroll-to`). Layout snapshots keep the unscrolled bounds; the
   publisher applies a persistent y offset. Never Action `scroll*`, XTest
   wheel, `--coords`, or screenshot.
+- [x] Linux publish implements AT-SPI `Text.SetSelection` /
+  `GetNSelections` / `GetSelection` on the named composer `Command`
+  field. Independent `cu get-selection --name Command` after
+  `cu select --name Command --start N --end M` reports that range
+  (`n=1`). Tree snapshots keep replacing node text; the publisher
+  stores the range separately. Never XTest, mouse-drag, `--coords`,
+  or screenshot. The `select` reply is not proof.
 - [x] AT-SPI actions cross into the GUI through a 64-entry FIFO and a 32-action
   per-turn drain budget, with a 64 KiB per-action and 256 KiB aggregate payload
   ceiling. Saturation drops only new actions, records a monotonic counter,

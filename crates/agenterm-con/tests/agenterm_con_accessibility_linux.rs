@@ -7,8 +7,8 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNode, AccessibilityNodeAction, get_node_extents, perform_node_action, scroll_node,
-    set_node_text, tree_for_window,
+    AccessibilityNode, AccessibilityNodeAction, get_node_extents, get_node_selection,
+    perform_node_action, scroll_node, set_node_selection, set_node_text, tree_for_window,
 };
 
 const DEADLINE: Duration = Duration::from_secs(20);
@@ -143,6 +143,23 @@ fn real_atspi_tree_edits_command_and_activates_send() {
         &["wait-text", "--timeout-ms", "10000", "ATSPI_OK"],
     );
     assert_eq!(matched["matched"], true);
+
+    set_node_text(None, &command_id, "HELLO").expect("seed Command text for selection");
+    wait_for(&mut running, "HELLO in composer", |_| {
+        let snapshot = cli_json(executable, &endpoint, &["ui-snapshot"]);
+        (snapshot["composer_text"] == "HELLO").then_some(())
+    });
+    let before_sel =
+        get_node_selection(None, &command_id).expect("GetSelection before SetSelection");
+    assert!(
+        before_sel.n == 0 || before_sel.start != 0 || before_sel.end != 4,
+        "pre-select range must not already be 0..4: {before_sel:?}"
+    );
+    set_node_selection(None, &command_id, 0, 4).expect("AT-SPI SetSelection");
+    let after_sel = get_node_selection(None, &command_id).expect("GetSelection after SetSelection");
+    assert_eq!(after_sel.n, 1);
+    assert_eq!(after_sel.start, 0);
+    assert_eq!(after_sel.end, 4);
 
     let before = get_node_extents(None, &field_id).expect("GetExtents before ScrollTo");
     assert!(

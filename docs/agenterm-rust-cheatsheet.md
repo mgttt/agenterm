@@ -1301,6 +1301,14 @@ get-selection need no eval-helper glue and must not grow an
 `A11YSELECT1` hello. Independent `get-selection` after `0..4` is
 `n=1 start=0 end=4`. Do not treat the `select` reply as proof.
 
+con publish implements those same Text methods on named `Command`.
+Layout snapshots replace node text; the publisher stores the range
+separately (same persistence pattern as `scroll_dy`). A collapsed
+range (`start == end`) is `n=0`. Product `SetText` / insert /
+backspace clear the stored range; `Ctrl+A` sets `0..len`. Independent
+`get-selection` is the proof. Do not treat `SetSelection` true as
+proof, and do not implement select as a mouse-drag.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. An `agenterm-cu`
