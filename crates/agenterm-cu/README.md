@@ -138,19 +138,23 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). Send-keys evidence is a **gate-owned** loopback
+env or `--vnc-env`). Select evidence is a **gate-owned** loopback
 `x11vnc` plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
-as the only proof): host `focus --window HANDLE --name Command` then
-`send-keys --window HANDLE -- KEYS` (no `--name`; same focused path as
-local con / ssh send-keys) types plain keys into `Command` via native
-AT-SPI Device/key or EditableText fallback on the session worker, then
-host independent `get-text --window HANDLE --name Command` equals those
-keys (`via=gettext`; never screenshot / `--coords` / RFB framebuffer
-OCR). `copy` / `paste --text` / `send-text` over vnc and observe-only
-`windows` / `get-text` / `wait` remain valid too. Connect / protocol
-failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
-`vnc_auth_failed`).
+as the only proof): host `send-text --window HANDLE --name Command -- SEED`
+(payload after `--`; not `--text`) plants the seed, host
+`select --window HANDLE --name Command --start N --end M` runs session
+AT-SPI `Text.SetSelection` (`via=set-selection`), then host independent
+`get-selection --window HANDLE --name Command` returns that range
+(`via=get-selection`; start/end equal the selected slice of the seed, or
+the seed when the range is the whole field). Native AT-SPI
+`GetNSelections` + `GetSelection` via the session worker — never
+screenshot / `--coords` / mouse-drag / RFB framebuffer OCR. Missing Text
+typed-fails `a11y_selection_unavailable` on the session worker the same
+as local `current`. `send-keys` / `copy` / `paste --text` / `send-text`
+over vnc and observe-only `windows` / `get-text` / `wait` remain valid
+too. Connect / protocol failures are typed (`vnc_unavailable` /
+`vnc_transport_failed` / `vnc_auth_failed`).
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -164,13 +168,13 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Send-keys path: focus Command → host send-keys --window HANDLE -- KEYS → get-text == KEYS.
-agenterm-cu --vnc 127.0.0.1:5935 --grant observe,actuate \
-  focus --window HANDLE --name Command
-agenterm-cu --vnc 127.0.0.1:5935 --grant observe,actuate \
-  send-keys --window HANDLE -- KEYS
-agenterm-cu --vnc 127.0.0.1:5935 --grant observe \
-  get-text --window HANDLE --name Command
+# Select path: send-text SEED → select 0..LEN → get-selection start/end == range.
+agenterm-cu --vnc 127.0.0.1:5936 --grant observe,actuate \
+  send-text --window HANDLE --name Command -- SEED
+agenterm-cu --vnc 127.0.0.1:5936 --grant observe,actuate \
+  select --window HANDLE --name Command --start 0 --end 11
+agenterm-cu --vnc 127.0.0.1:5936 --grant observe \
+  get-selection --window HANDLE --name Command
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
 # Get-selection observe path: send-text SEED → select N..M → get-selection
