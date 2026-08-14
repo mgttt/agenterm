@@ -186,6 +186,12 @@ Canonical host mapping (approved product vocabulary):
   and not the WebKit eval helper's queued-job `OK` (Reasonix composer
   `Message Reasonix…`).
   Never screenshot, XTest, or `--coords`.
+- [x] `wait --window HANDLE --name PAT [--role ROLE] --text-contains SUB`
+  (alias `--node-text-contains`) polls that same `agt_a11y_node_get_text`
+  until the independent GetText contains `SUB`. Success reports
+  `via=gettext` and the full GetText. Timeout is typed `timeout` and
+  reports the last GetText. `send-text` / `paste` / `copy` `matched.text`
+  do not count. Never screenshot, XTest, or `--coords`.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

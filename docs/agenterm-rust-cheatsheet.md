@@ -1220,6 +1220,15 @@ the showing composer (`Message Reasonix…`) equals the typed string. Do
 not treat helper `OK`, `last_text_write_via`, `send-text` / `paste`
 `via=text`, or worker self-report as the wait hit.
 
+`cu wait --text-contains` / `--node-text-contains` with `--name` is the
+same independent GetText poll with a substring predicate. Success is
+`ok:true` only when that GetText contains `SUB`; published `text` /
+`via=gettext` is still the full GetText, not the substring.
+`send-text` / `paste` / `copy` `matched.text` does not count. Timeout is
+typed `timeout` and reports the last GetText. Never screenshot, XTest,
+or `--coords`. Do not implement contains as OCR, a sidecar tree walk, or
+a check of the write reply.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`

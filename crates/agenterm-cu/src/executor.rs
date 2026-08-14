@@ -644,7 +644,29 @@ fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value,
             role,
             window,
         } => {
-            return wait_node_text(timeout_ms, expected, name, role.as_deref(), *window);
+            return wait_node_text(
+                timeout_ms,
+                expected,
+                name,
+                role.as_deref(),
+                *window,
+                NodeTextMatch::Equals,
+            );
+        }
+        WaitCondition::NodeTextContains {
+            substring,
+            name,
+            role,
+            window,
+        } => {
+            return wait_node_text(
+                timeout_ms,
+                substring,
+                name,
+                role.as_deref(),
+                *window,
+                NodeTextMatch::Contains,
+            );
         }
         _ => {}
     }
@@ -685,7 +707,9 @@ fn condition_met(condition: &WaitCondition, windows: &[WindowInfo]) -> bool {
             .iter()
             .any(|window| window.focused && window.handle == *handle),
         // Polled against the accessibility tree, not the window list.
-        WaitCondition::NodeNameContains { .. } | WaitCondition::NodeTextEquals { .. } => false,
+        WaitCondition::NodeNameContains { .. }
+        | WaitCondition::NodeTextEquals { .. }
+        | WaitCondition::NodeTextContains { .. } => false,
     }
 }
 
@@ -760,23 +784,54 @@ fn wait_node(
     ))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NodeTextMatch {
+    Equals,
+    Contains,
+}
+
+impl NodeTextMatch {
+    fn flag(self) -> &'static str {
+        match self {
+            Self::Equals => "--text-equals",
+            Self::Contains => "--text-contains",
+        }
+    }
+
+    fn matches(self, text: &str, expected: &str) -> bool {
+        match self {
+            Self::Equals => text == expected,
+            Self::Contains => text.contains(expected),
+        }
+    }
+
+    fn timeout_verb(self) -> &'static str {
+        match self {
+            Self::Equals => "did not reach text",
+            Self::Contains => "did not contain",
+        }
+    }
+}
+
 /// Polls AT-SPI `Text.GetText` (`agt_a11y_node_get_text`) on the unique
 /// showing node addressed by `name` until that independent text equals
-/// `expected`. The tree snapshot `node.text`, a prior `send-text` or
-/// `paste` `matched.text`, `last_text_write_via`, and the WebKit eval
-/// helper's queued-job `OK` (Reasonix composer) are not this predicate.
-/// Timeout is typed so loop-until callers break on `ok:false`.
+/// `expected` (`--text-equals`) or contains it (`--text-contains`). The
+/// tree snapshot `node.text`, a prior `send-text` / `paste` / `copy`
+/// `matched.text`, `last_text_write_via`, and the WebKit eval helper's
+/// queued-job `OK` (Reasonix composer) are not this predicate. Timeout
+/// is typed so loop-until callers break on `ok:false`.
 fn wait_node_text(
     timeout_ms: u64,
     expected: &str,
     name: &str,
     role: Option<&str>,
     window: Option<isize>,
+    match_kind: NodeTextMatch,
 ) -> Result<serde_json::Value, CuError> {
     if window.is_none() {
         return Err(CuError::new(
             "invalid_input",
-            "wait --text-equals requires --window <handle>",
+            format!("wait {} requires --window <handle>", match_kind.flag()),
         ));
     }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(120_000));
@@ -798,7 +853,7 @@ fn wait_node_text(
                     1 => match mechanism::get_node_text(window, &matches[0].id) {
                         Ok(text) => {
                             last_text = Some(text.clone());
-                            if text == expected {
+                            if match_kind.matches(&text, expected) {
                                 return Ok(text_equals_success(
                                     &tree.backend,
                                     window,
@@ -831,16 +886,18 @@ fn wait_node_text(
     Err(CuError::new(
         "timeout",
         format!(
-            "accessibility node with {} did not reach text {expected:?} after {timeout_ms}ms ({polls} polls, {})",
+            "accessibility node with {} {} {expected:?} after {timeout_ms}ms ({polls} polls, {})",
             name_scope(name, role),
+            match_kind.timeout_verb(),
             text_equals_timeout_detail(last_text.as_deref(), last_error.as_ref(), last_node_count,)
         ),
     ))
 }
 
-/// Success payload for `--text-equals`. `gettext` is the only text
-/// authority: snapshot `node.text` is overwritten so a sidecar tree
-/// walk or `send-text` / `paste` `matched.text` cannot be mistaken for the hit.
+/// Success payload for `--text-equals` / `--text-contains`. `gettext` is
+/// the only text authority: snapshot `node.text` is overwritten so a
+/// sidecar tree walk or `send-text` / `paste` `matched.text` cannot be
+/// mistaken for the hit. Published `text` is the full independent GetText.
 fn text_equals_success(
     backend: &str,
     window: Option<isize>,
@@ -1130,6 +1187,78 @@ mod tests {
         let reply = executor.execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn node_text_contains_timeout_is_a_typed_failure() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Wait {
+            target: TargetRef::Current,
+            timeout_ms: 1,
+            condition: WaitCondition::NodeTextContains {
+                substring: "agenterm-no-such-sub".into(),
+                name: "agenterm-no-such-node".into(),
+                role: None,
+                window: Some(-1),
+            },
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok, "timeout must not report success");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "timeout" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn node_text_contains_requires_window() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Wait {
+            target: TargetRef::Current,
+            timeout_ms: 1,
+            condition: WaitCondition::NodeTextContains {
+                substring: "GATE".into(),
+                name: "FixtureField".into(),
+                role: None,
+                window: None,
+            },
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+        assert!(
+            reply
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("--text-contains"),
+            "missing-window message should name the flag"
+        );
+    }
+
+    #[test]
+    fn text_contains_matches_substring_of_independent_gettext() {
+        assert!(NodeTextMatch::Contains.matches("34aGATEXXXX", "GATE"));
+        assert!(!NodeTextMatch::Contains.matches("34aGATEXXXX", "NOPE"));
+        assert!(!NodeTextMatch::Equals.matches("34aGATEXXXX", "GATE"));
+        assert!(NodeTextMatch::Equals.matches("34aGATEXXXX", "34aGATEXXXX"));
+    }
+
+    #[test]
+    fn text_contains_success_publishes_full_gettext_not_substring() {
+        let mut snapshot = node("FixtureField", "entry", &["showing", "editable"]);
+        snapshot.text = Some("stale-snapshot".into());
+        let payload =
+            text_equals_success("at-spi2", Some(4194318), 2, &snapshot, "34aGATEXXXX", 12);
+        assert_eq!(payload["via"], "gettext");
+        assert_eq!(payload["text"], "34aGATEXXXX");
+        assert!(payload["text"].as_str().unwrap().contains("GATE"));
+        assert_ne!(payload["text"], "GATE");
+        assert_ne!(payload["node"]["text"], "stale-snapshot");
     }
 
     fn actuate_executor() -> Executor {

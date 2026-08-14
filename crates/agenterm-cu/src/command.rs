@@ -169,6 +169,19 @@ pub enum WaitCondition {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
     },
+    /// Same independent `Text.GetText` poll as `NodeTextEquals`, but the
+    /// hit is `gettext.contains(substring)`. Snapshot `node.text`,
+    /// `send-text` / `paste` / `copy` `matched.text`, `last_text_write_via`,
+    /// and the WebKit eval helper's queued-job `OK` are not this condition.
+    /// Timeout is typed. Never screenshot / XTest / `--coords`.
+    NodeTextContains {
+        substring: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+    },
 }
 
 fn default_clicks() -> u32 {

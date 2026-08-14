@@ -68,7 +68,7 @@ audited separately from AT-SPI actuation.
 | `paste --window --name PAT [--role ROLE] [--text TEXT]` | same unique-name matcher, then clipboard (`agt_clipboard_get_text`, optional `--text` seed) written through that same AT-SPI `EditableText` / `Text` path; `--name` required; no writeable text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
 | `screenshot` | typed `unsupported` on Linux native capture |
-| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` with `--name` (not `send-text` / `paste` / `copy` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
+| `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` / `--text-contains` / `--node-text-contains` with `--name` (not `send-text` / `paste` / `copy` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 
 ### Tree JSON shape (UIA-like)
 
@@ -174,11 +174,14 @@ cu --target current --grant observe,act paste --window 25165828 \
 cu --target current --grant observe,act paste --window 4194318 \
   --name "Message Reasonix"
 
-# After send-text / paste / copy --name, wait until AT-SPI GetText equals the source.
-# Independent of send-text / paste / copy matched.text, of a sidecar tree walk, and of the
-# WebKit eval helper's queued-job OK (Reasonix composer: Message Reasonix…).
+# After send-text / paste / copy --name, wait until AT-SPI GetText equals the source
+# or contains a substring. Independent of send-text / paste / copy matched.text, of
+# a sidecar tree walk, and of the WebKit eval helper's queued-job OK
+# (Reasonix composer: Message Reasonix…).
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --name FixtureField --text-equals hello
+cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
+  --name FixtureField --text-contains GATE
 cu --target current --grant observe wait --timeout-ms 4000 --window 4194318 \
   --name "Message Reasonix" --text-equals hello
 

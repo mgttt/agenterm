@@ -218,7 +218,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             }
         }
         "wait" => {
-            // `--` ends flag parsing so --text-equals may start with a dash.
+            // `--` ends flag parsing so --text-equals / --text-contains may start with a dash.
             let literal_text = match args.iter().position(|arg| arg == "--") {
                 Some(index) => Some(args.split_off(index)[1..].join(" ")),
                 None => None,
@@ -227,7 +227,12 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             let text_equals_present = args
                 .iter()
                 .any(|arg| arg == "--text-equals" || arg == "--node-text-equals");
-            let condition = if text_equals_present {
+            let text_contains_present = args
+                .iter()
+                .any(|arg| arg == "--text-contains" || arg == "--node-text-contains");
+            let condition = if text_equals_present && text_contains_present {
+                return usage_err("wait accepts one of --text-equals or --text-contains, not both");
+            } else if text_equals_present {
                 let expected = flag_value(&mut args, "--text-equals")
                     .or_else(|| flag_value(&mut args, "--node-text-equals"))
                     .filter(|value| value != "--")
@@ -250,6 +255,29 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                         .or_else(|| flag_value(&mut args, "--node-role")),
                     window: flag_isize(&mut args, "--window"),
                 }
+            } else if text_contains_present {
+                let substring = flag_value(&mut args, "--text-contains")
+                    .or_else(|| flag_value(&mut args, "--node-text-contains"))
+                    .filter(|value| value != "--")
+                    .or(literal_text);
+                let Some(substring) = substring else {
+                    return usage_err(
+                        "wait --text-contains / --node-text-contains requires the substring",
+                    );
+                };
+                let name = flag_value(&mut args, "--name")
+                    .or_else(|| flag_value(&mut args, "--node-name-contains"))
+                    .filter(|value| !value.is_empty());
+                let Some(name) = name else {
+                    return usage_err("wait --text-contains requires --name <pattern>");
+                };
+                WaitCondition::NodeTextContains {
+                    substring,
+                    name,
+                    role: flag_value(&mut args, "--role")
+                        .or_else(|| flag_value(&mut args, "--node-role")),
+                    window: flag_isize(&mut args, "--window"),
+                }
             } else if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
                 WaitCondition::WindowCountGte { count }
             } else if let Some(pattern) = flag_value(&mut args, "--window-title-contains") {
@@ -264,7 +292,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 }
             } else {
                 return usage_err(
-                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, --node-name-contains, or --text-equals",
+                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, --node-name-contains, --text-equals, or --text-contains",
                 );
             };
             Command::Wait {
@@ -427,13 +455,16 @@ Commands:
                               ends flag parsing. e.g. ctrl+c / enter / k
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
-                        | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE)
-                              --text-equals / --node-text-equals polls AT-SPI Text.GetText
-                              on the unique showing named node until that independent
-                              text equals TEXT. send-text / paste / copy matched.text, last_text_write_via,
-                              and the WebKit eval helper's queued-job OK are not this
-                              condition. Timeout is typed ("timeout"). Never
-                              screenshot / XTest / --coords. `--` ends flag parsing.
+                        | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE
+                        | --text-contains SUB --name PAT [--role ROLE] --window HANDLE)
+                              --text-equals / --node-text-equals and --text-contains /
+                              --node-text-contains poll AT-SPI Text.GetText on the unique
+                              showing named node until that independent text equals TEXT
+                              or contains SUB. send-text / paste / copy matched.text,
+                              last_text_write_via, and the WebKit eval helper's queued-job
+                              OK are not this condition. Timeout is typed ("timeout")
+                              and reports the last GetText. Never screenshot / XTest /
+                              --coords. `--` ends flag parsing.
   window-place --action <id> [--window HANDLE]
       ids: center|fullscreen|left-half|right-half|top-half|bottom-half
            upper-left|lower-left|upper-right|lower-right
