@@ -291,6 +291,14 @@ These are places where the same `.rh` behaves differently once `mode=native`.
    lane, and emits `format!(...)` — which then fails to compile as an `INT`
    argument. Every scrollbar step in `remote-ui-smoke.rh` binds components first
    for exactly this reason.
+9. **Removing a branch can erase native type specialization.** A branch that
+   combines imported helpers with `Command`, `Child`, `Output`, and JSON paths
+   can be the only expression topology that closes the file-wide return-kind
+   fixpoint. Replacing it with a smaller helper or an unexecuted type-witness
+   branch may pass `mode_probe` yet fail the real task pack. Preserve the useful
+   topology with a real bounded probe that has no product side effect, such as
+   running alternate executable bytes with `--version` and then asserting that
+   the live lease, server PID, and PTY identity did not change.
 
 These three used to be traps and are now fixed in codegen 98 — they work, and
 you should use them freely:

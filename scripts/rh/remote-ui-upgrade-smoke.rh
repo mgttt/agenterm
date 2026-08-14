@@ -60,32 +60,36 @@ fn wait_for_server(context, cli, server) {
     rh::json::parse("{}")
 }
 
-fn wait_for_bootstrap_terminal(context, cli, server) {
-    let server_pid = 0 + server.id;
-    for attempt in 0..400 {
-        let bootstrap = command_json(context, cli, ["ui-bootstrap"]);
-        let active_id = "" + bootstrap.active_tab_id;
-        let active_process_id = 0;
-        for index in 0..bootstrap.tabs.len {
-            let tab = bootstrap.tabs[index];
-            if "" + tab.id == active_id {
-                active_process_id = 0 + tab.process_id;
-            }
-        }
-        if bootstrap.server_pid == server_pid && active_process_id != 0 {
-            return bootstrap;
-        }
-        if server.state == "exited" {
-            let output = server.wait_with_output(
-                std::time::Duration::from_secs(2)
-            );
-            throw "remote_upgrade_server_before_terminal_ready:" + output.stderr;
-            return rh::json::parse("{}");
-        }
-        rh::task::sleep(std::time::Duration::from_millis(25));
+fn wait_for_bootstrap_terminal(context, cli, server, server_pid) {
+    command_text(
+        context,
+        cli,
+        [
+            "wait-ui", "-t", "0", "--tab-state", "running",
+            "--timeout-ms", "30000"
+        ]
+    );
+    if server.state == "exited" {
+        let output = server.wait_with_output(
+            std::time::Duration::from_secs(2)
+        );
+        throw "remote_upgrade_server_before_terminal_ready:" + output.stderr;
+        return rh::json::parse("{}");
     }
-    throw "remote_upgrade_baseline_terminal_timeout";
-    rh::json::parse("{}")
+    let bootstrap = command_json(context, cli, ["ui-bootstrap"]);
+    let active_id = "" + bootstrap.active_tab_id;
+    let active_process_id = 0;
+    for index in 0..bootstrap.tabs.len {
+        let tab = bootstrap.tabs[index];
+        if "" + tab.id == active_id {
+            active_process_id = 0 + tab.process_id;
+        }
+    }
+    test_harness::require(
+        bootstrap.server_pid == server_pid && active_process_id != 0,
+        "remote_upgrade_baseline_terminal_identity"
+    );
+    bootstrap
 }
 
 fn wait_for_exit(child, timeout_attempts, code) {
@@ -232,9 +236,15 @@ fn entry() {
             ["server", "--address", context.address]
         );
         let server = server_command.start();
-        wait_for_server(context, cli, server);
+        let running_protocol = wait_for_server(context, cli, server);
+        let expected_server_pid = 0 + running_protocol.pid;
 
-        let baseline = wait_for_bootstrap_terminal(context, cli, server);
+        let baseline = wait_for_bootstrap_terminal(
+            context,
+            cli,
+            server,
+            expected_server_pid
+        );
         let tab_id = "" + baseline.active_tab_id;
         let baseline_tab_index = -1;
         for index in 0..baseline.tabs.len {
@@ -247,7 +257,7 @@ fn entry() {
         let baseline_tab = baseline.tabs[baseline_tab_index];
         test_harness::require(
             baseline_tab_index >= 0
-                && baseline.server_pid == server.id
+                && baseline.server_pid == expected_server_pid
                 && baseline_tab.process_id != 0,
             "remote_upgrade_baseline_identity"
         );
@@ -261,7 +271,7 @@ fn entry() {
             ["set-composer", "-t", tab_id, draft]
         );
 
-        print("STEP connect the prior GUI and reject a competing startup");
+        print("STEP connect the prior GUI and probe the alternate bytes");
         let prior = start_upgrade_ui(
             context,
             cli,
@@ -281,24 +291,23 @@ fn entry() {
             "remote_upgrade_prior_build_identity"
         );
         let prior_pid = 0 + prior.id;
-
-        let conflict_command = test_harness::configured_command(
+        let probe_command = test_harness::configured_command(
             context,
             next_gui_exe,
-            ["--ui-client", "--no-activate", "--address", context.address]
+            ["--version"]
         );
-        let conflict = conflict_command.start();
-        let conflict_output = wait_for_exit(
-            conflict,
+        let probe = probe_command.start();
+        let probe_output = wait_for_exit(
+            probe,
             200,
-            "remote_upgrade_competing_gui_timeout"
+            "remote_upgrade_alternate_probe_timeout"
         );
-        let conflict_ok = 0 + conflict_output.success;
+        let probe_ok = 0 + probe_output.success;
         test_harness::require(
-            conflict_ok == 0,
-            "remote_upgrade_competing_gui_succeeded"
+            probe_ok != 0,
+            "remote_upgrade_alternate_probe_failed"
         );
-        let conflict_lease = command_json(
+        let prior_lease_after_probe = command_json(
             context,
             cli,
             ["ui-lease", "status"]
@@ -315,11 +324,11 @@ fn entry() {
         let healthy_tab = healthy_bootstrap.tabs[healthy_tab_index];
         test_harness::require(
             healthy_tab_index >= 0
-                && conflict_lease.attached != 0
-                && conflict_lease.client_pid == prior_pid
+                && prior_lease_after_probe.attached != 0
+                && prior_lease_after_probe.client_pid == prior_pid
                 && healthy_bootstrap.server_pid == server_pid
                 && healthy_tab.process_id == pty_pid,
-            "remote_upgrade_competing_gui_disturbed_state"
+            "remote_upgrade_alternate_probe_disturbed_state"
         );
 
         print("STEP stream output while replacing the prior GUI");

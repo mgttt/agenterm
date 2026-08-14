@@ -1191,7 +1191,7 @@
       "responsibility": "UI/server upgrade regression",
       "replacement_task": "remote-ui-upgrade-smoke",
       "replacement": "scripts/rh/remote-ui-upgrade-smoke.rh plus typed owned-child opaque window identity and the shared rh harness",
-      "evidence": "named public task preserves distinct real GUI byte hashes and build identities, competing-lease rejection, stable server/epoch/PTY/draft/CWD/proxy facts, live streamed output, incompatible-protocol rejection, rollback scrollback continuity, public close/detach actions, and orphan-free owned-child cleanup",
+      "evidence": "named public task preserves distinct real GUI byte hashes and build identities, serial lease handoff, stable server/epoch/PTY/draft/CWD/proxy facts, live streamed output, incompatible-protocol rejection, rollback scrollback continuity, public close/detach actions, and orphan-free owned-child cleanup",
       "status": "deleted",
       "callers": [
         "check task"
@@ -1220,7 +1220,7 @@
         {
           "id": "migration-parity:ps1-test-remote-upgrade",
           "owner": "remote-ui-upgrade-smoke",
-          "proof": "named public task preserves distinct real GUI byte hashes and build identities, competing-lease rejection, stable server/epoch/PTY/draft/CWD/proxy facts, live streamed output, incompatible-protocol rejection, rollback scrollback continuity, public close/detach actions, and orphan-free owned-child cleanup"
+          "proof": "named public task preserves distinct real GUI byte hashes and build identities, serial lease handoff, stable server/epoch/PTY/draft/CWD/proxy facts, live streamed output, incompatible-protocol rejection, rollback scrollback continuity, public close/detach actions, and orphan-free owned-child cleanup"
         }
       ]
     },
