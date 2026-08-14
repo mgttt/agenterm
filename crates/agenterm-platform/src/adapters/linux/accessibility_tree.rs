@@ -1179,25 +1179,60 @@ async fn connect() -> Result<zbus::Connection, AccessibilityTreeError> {
 }
 
 async fn open_a11y_bus() -> Result<zbus::Connection, AccessibilityTreeError> {
+    if let Some(address) = explicit_a11y_bus_address() {
+        return connect_a11y_address(&address).await;
+    }
     let session = zbus::Connection::session().await.map_err(map_atspi_err)?;
-    let address = a11y_bus_address(&session).await?;
-    zbus::connection::Builder::address(address.as_str())
+    let address = a11y_bus_address_from_registry(&session).await?;
+    connect_a11y_address(&address).await
+}
+
+async fn connect_a11y_address(address: &str) -> Result<zbus::Connection, AccessibilityTreeError> {
+    zbus::connection::Builder::address(address)
         .map_err(map_atspi_err)?
         .build()
         .await
         .map_err(map_atspi_err)
 }
 
-async fn a11y_bus_address(session: &zbus::Connection) -> Result<String, AccessibilityTreeError> {
-    if let Ok(value) = std::env::var("AT_SPI_BUS_ADDRESS")
-        && !value.is_empty()
-    {
-        return Ok(value);
+/// Host observers set `AT_SPI_BUS` (CEO / live gates) or the libatspi
+/// spelling `AT_SPI_BUS_ADDRESS`. Prefer those over `org.a11y.Bus.GetAddress`
+/// so a later daemon that reused the same unix path cannot pin us to a
+/// stale `,guid=` owner that no longer has the Chrome renderer.
+fn explicit_a11y_bus_address() -> Option<String> {
+    for key in ["AT_SPI_BUS_ADDRESS", "AT_SPI_BUS"] {
+        if let Ok(value) = std::env::var(key)
+            && let Some(normalized) = normalize_a11y_bus_address(&value)
+        {
+            return Some(normalized);
+        }
     }
+    None
+}
+
+fn normalize_a11y_bus_address(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_guid = trimmed.split(",guid=").next().unwrap_or(trimmed).trim();
+    if without_guid.is_empty() {
+        return None;
+    }
+    if without_guid.starts_with('/') {
+        return Some(format!("unix:path={without_guid}"));
+    }
+    Some(without_guid.to_owned())
+}
+
+async fn a11y_bus_address_from_registry(
+    session: &zbus::Connection,
+) -> Result<String, AccessibilityTreeError> {
     let proxy = zbus::Proxy::new(session, A11Y_BUS_DEST, A11Y_BUS_PATH, A11Y_BUS_IFACE)
         .await
         .map_err(map_atspi_err)?;
-    proxy.call("GetAddress", &()).await.map_err(map_atspi_err)
+    let address: String = proxy.call("GetAddress", &()).await.map_err(map_atspi_err)?;
+    Ok(normalize_a11y_bus_address(&address).unwrap_or(address))
 }
 
 fn hydrate_session_bus_env() {
@@ -3249,6 +3284,26 @@ mod tests {
             "<unnamed>, <unnamed>"
         );
         assert_eq!(format_available_actions(&["click".into()]), "click");
+    }
+
+    #[test]
+    fn normalizes_at_spi_bus_env_addresses() {
+        assert_eq!(
+            normalize_a11y_bus_address(
+                "unix:path=/tmp/xdg-runtime-2/at-spi/bus_2,guid=1f3099ab8869f8dd4d8b05106a7ec4bf"
+            ),
+            Some("unix:path=/tmp/xdg-runtime-2/at-spi/bus_2".into())
+        );
+        assert_eq!(
+            normalize_a11y_bus_address("/tmp/xdg-runtime-2/at-spi/bus_2"),
+            Some("unix:path=/tmp/xdg-runtime-2/at-spi/bus_2".into())
+        );
+        assert_eq!(
+            normalize_a11y_bus_address("  unix:path=/tmp/xdg-runtime-2/at-spi/bus_2  "),
+            Some("unix:path=/tmp/xdg-runtime-2/at-spi/bus_2".into())
+        );
+        assert_eq!(normalize_a11y_bus_address("  "), None);
+        assert_eq!(normalize_a11y_bus_address(""), None);
     }
 
     #[test]
