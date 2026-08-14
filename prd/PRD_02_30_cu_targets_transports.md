@@ -35,13 +35,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first observe evidence reuses the same con-publish GetText path over
-  a **gate-owned** loopback `x11vnc` (not the resident `:2` listener alone)
-  against a second `agenterm-con` with a unique title: seed `Command` via
-  local `current`, then host independent `cu --vnc 127.0.0.1:<port>
-  get-text --name Command` equals that seed (`via=gettext`). Never
-  screenshot, `--coords`, RFB framebuffer OCR, or steal the resident control
-  socket.
+  `vnc` first actuate evidence reuses the same con-publish EditableText /
+  GetText path over a **gate-owned** loopback `x11vnc` (not the resident
+  `:2` listener alone) against a second `agenterm-con` with a unique title:
+  host `cu --vnc 127.0.0.1:<port> send-text --name Command -- SEED` plants
+  the seed (payload after `--`; not `--text`), then host independent
+  `cu --vnc 127.0.0.1:<port> get-text --name Command` equals that seed
+  (`via=gettext`). Never screenshot, `--coords`, RFB framebuffer OCR, or
+  steal the resident control socket. Observe-only `get-text` / `wait`
+  still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -442,14 +444,17 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Seed a unique string on a
-  second `agenterm-con` `Command` field (unique title; never steal
-  `unix:/tmp/run-box/agenterm-con.sock`), then host independent
-  `windows` / `get-text --name Command` (or `wait --text-equals`) equals that
-  seed via AT-SPI GetText (`via=gettext`; never screenshot / `--coords` /
-  RFB framebuffer OCR). Worker JSON does not count; CEO owns the official
-  gate. Connect / protocol / auth failures are typed (`vnc_unavailable` /
-  `vnc_transport_failed` / `vnc_auth_failed` / `invalid_input`).
+  `agenterm-cu --target current` session worker. Write path: host
+  `send-text --window HANDLE --name Command -- SEED` (payload after `--`;
+  not `--text`) plants a unique seed on a second `agenterm-con` `Command`
+  field (unique title; never steal `unix:/tmp/run-box/agenterm-con.sock`);
+  host independent `get-text --window HANDLE --name Command` equals that
+  seed via AT-SPI EditableText / GetText (`via=gettext`; never screenshot /
+  `--coords` / RFB framebuffer OCR). Observe-only `windows` / `get-text` /
+  `wait --text-equals` still hold. Worker JSON does not count; CEO owns the
+  official gate. Connect / protocol / auth failures are typed
+  (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed` /
+  `invalid_input`).
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
   runs remote `agenterm-cu --target current`. Get-selection observe path: host
   `send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
