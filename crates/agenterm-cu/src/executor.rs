@@ -413,23 +413,23 @@ fn copy(
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
-    let resolved =
-        if let Some(resolved) = resolve_actuation_node(window, None, name, role, "copy")? {
-            resolved
-        } else if role.filter(|value| !value.is_empty()).is_some() {
-            return Err(CuError::new(
-                "invalid_input",
-                "copy --role requires --name <pattern>",
-            ));
-        } else if window.is_some() {
-            let (resolved, _current) = get_text_focused(window)?;
-            resolved
-        } else {
-            return Err(CuError::new(
-                "invalid_input",
-                "copy requires --window <handle> [--name <pattern>]",
-            ));
-        };
+    let resolved = if let Some(resolved) = resolve_actuation_node(window, None, name, role, "copy")?
+    {
+        resolved
+    } else if role.filter(|value| !value.is_empty()).is_some() {
+        return Err(CuError::new(
+            "invalid_input",
+            "copy --role requires --name <pattern>",
+        ));
+    } else if window.is_some() {
+        let (resolved, _current) = get_text_focused(window)?;
+        resolved
+    } else {
+        return Err(CuError::new(
+            "invalid_input",
+            "copy requires --window <handle> [--name <pattern>]",
+        ));
+    };
     let text = mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
     mechanism::clipboard::publish_text(&text).map_err(map_mechanism_err)?;
     let mut payload = serde_json::json!({

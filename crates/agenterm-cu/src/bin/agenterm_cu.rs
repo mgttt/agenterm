@@ -160,9 +160,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             let name = flag_value(&mut args, "--name");
             let role = flag_value(&mut args, "--role");
             if window.is_none() {
-                return usage_err(
-                    "copy requires --window <handle> [--name <pattern>]",
-                );
+                return usage_err("copy requires --window <handle> [--name <pattern>]");
             }
             if name.as_ref().is_none_or(|value| value.is_empty())
                 && role.as_ref().is_some_and(|value| !value.is_empty())
