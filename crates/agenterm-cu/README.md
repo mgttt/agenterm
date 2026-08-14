@@ -62,8 +62,9 @@ audited separately from AT-SPI actuation.
 | `focus --node <path>` | AT-SPI2 `focus` action or `Component::grab_focus` |
 | `focus --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
-| `send-text` / `send-keys` | XTest keyboard injection (no `--name`) |
+| `send-text` / `send-keys` without `--window` | XTest keyboard injection into whatever is focused |
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
+| `send-text --window HANDLE` (no `--name`) | same innermost focused Text node `get-text --window` reads, then `agt_a11y_node_set_text`; never XTest when `--window` is set. Chrome `GetTextField` after `focus --name`; Reasonix composer `Message Reasonix…` after `focus --name` / `click --name` (eval-helper set-value). Proof is independent `get-text --window` (no `--name`) |
 | `copy --window --name PAT [--role ROLE]` | same unique-name matcher, then AT-SPI `Text.GetText` published onto the native clipboard (`agt_clipboard_set_text`; Linux X11 `SetSelectionOwner`, not xclip); `--name` required; no Text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `paste --window --name PAT [--role ROLE] [--text TEXT]` | same unique-name matcher, then clipboard (`agt_clipboard_get_text`, optional `--text` seed) written through that same AT-SPI `EditableText` / `Text` path; `--name` required; no writeable text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `send-keys --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`); no key interface → typed `a11y_key_unavailable` (never XTest) |
@@ -74,6 +75,7 @@ audited separately from AT-SPI actuation.
 | `set-caret --window --name PAT --offset N [--role ROLE]` | same unique-name matcher, then one-shot AT-SPI `Text.SetCaretOffset`; missing Text/`UnknownMethod` → typed `a11y_caret_unavailable`; SetCaretOffset false → typed `a11y_caret_no_effect`; never XTest / `--coords` |
 | `get-caret --window --name PAT [--role ROLE]` | same unique-name matcher, then independent AT-SPI `CaretOffset` / `GetCaretOffset`; `set-caret` reply does not count; missing Text → typed `a11y_caret_unavailable` |
 | `get-text --window --name PAT [--role ROLE]` | same unique-name matcher, then one-shot independent AT-SPI `Text.GetText` — the same authority `wait --text-equals` polls, without a timeout; `send-text` / `paste` / `copy` `matched.text`, `last_text_write_via`, the WebKit eval helper queued-job `OK`, and tree snapshot `text` do not count; missing Text → typed `a11y_text_unavailable` (never XTest / `--coords` / screenshot) |
+| `get-text --window HANDLE` (no `--name`) | innermost showing `focused` node that exposes `Text.GetText`; `via=gettext`. After focused `send-text --window`, this must equal the typed string |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` / `--text-contains` / `--node-text-contains` with `--name` (not `send-text` / `paste` / `copy` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 

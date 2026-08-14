@@ -336,8 +336,12 @@ fn focus(
 /// focused node — the same innermost `Text.GetText` candidate
 /// `get-text --window` reads — so `focus --name X` then
 /// `send-text --window H TEXT` then `get-text --window H` closes the
-/// loop. Never XTest when `--window` is set. Without `--window` it stays
-/// the plain "type into whatever is focused" inject.
+/// loop on Chrome `GetTextField` and the Reasonix composer
+/// (`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`).
+/// WebKit 2.52 still has no `EditableText`; the write is AT-SPI `Text`
+/// plus the eval-helper set-value (`id=composer-input`). Never XTest
+/// when `--window` is set. Without `--window` it stays the plain
+/// "type into whatever is focused" inject.
 fn send_text(
     text: &str,
     window: Option<isize>,

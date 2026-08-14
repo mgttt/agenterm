@@ -478,20 +478,7 @@ async fn perform_node_action_async(
     let proxy = open_bus_object(&conn, &object).await?;
     match action {
         AccessibilityNodeAction::Click => invoke_structured_click(&proxy).await,
-        AccessibilityNodeAction::Focus => {
-            if node_reports_focused(&proxy).await {
-                return Ok(());
-            }
-            if invoke_named_action(&proxy, &["focus"]).await.is_ok() {
-                wait_until_focused(&proxy).await;
-                return Ok(());
-            }
-            let proxies = proxy.proxies().await.map_err(map_atspi_err)?;
-            let component = proxies.component().await.map_err(map_atspi_err)?;
-            component.grab_focus().await.map_err(map_atspi_err)?;
-            wait_until_focused(&proxy).await;
-            Ok(())
-        }
+        AccessibilityNodeAction::Focus => invoke_structured_focus(&proxy).await,
     }
 }
 
@@ -1975,6 +1962,45 @@ fn is_missing_action_interface(error: &AccessibilityTreeError) -> bool {
         || message.contains("does not exist")
 }
 
+/// Named `focus` must not call unbounded Action `GetActions` / `DoAction`.
+/// WebKitGTK advertises Action but those methods often hang (same trap as
+/// click). Bound the named-action probe to `ACTION_TIMEOUT` so the outer
+/// `SNAPSHOT_TIMEOUT` still has room for `Component.grab_focus`. A hang
+/// here used to surface as `a11y_action_timeout` before grab_focus ran,
+/// leaving the Reasonix composer unfocused.
+async fn invoke_structured_focus(
+    proxy: &AccessibleProxy<'_>,
+) -> Result<(), AccessibilityTreeError> {
+    if node_reports_focused(proxy).await {
+        return Ok(());
+    }
+    if let Ok(Ok(())) = timeout(ACTION_TIMEOUT, invoke_named_action(proxy, &["focus"])).await {
+        wait_until_focused(proxy).await;
+        if node_reports_focused(proxy).await {
+            return Ok(());
+        }
+    }
+    let component = component_proxy_for(proxy).await?;
+    match timeout(NODE_TIMEOUT, component.grab_focus()).await {
+        Ok(Ok(_)) => {
+            wait_until_focused(proxy).await;
+            Ok(())
+        }
+        Ok(Err(err)) => Err(map_atspi_err(err)),
+        Err(_) => {
+            wait_until_focused(proxy).await;
+            if node_reports_focused(proxy).await {
+                Ok(())
+            } else {
+                Err(AccessibilityTreeError::failed(
+                    "a11y_action_timeout",
+                    "AT-SPI Component grab_focus exceeded its deadline",
+                ))
+            }
+        }
+    }
+}
+
 async fn invoke_structured_click(
     proxy: &AccessibleProxy<'_>,
 ) -> Result<(), AccessibilityTreeError> {
@@ -3253,6 +3279,17 @@ mod tests {
             &["showing".to_owned()]
         ));
         assert!(!node_looks_like_text_field("document web", &[]));
+    }
+
+    #[test]
+    fn focus_action_probe_leaves_room_for_grab_focus() {
+        // Reasonix composer: unbounded Action.GetActions ate SNAPSHOT_TIMEOUT
+        // so grab_focus never ran. The named-action probe plus grab_focus
+        // plus the short focused-state wait must fit inside the outer
+        // perform_node_action deadline.
+        let focused_wait = Duration::from_millis(200);
+        assert!(ACTION_TIMEOUT < SNAPSHOT_TIMEOUT);
+        assert!(ACTION_TIMEOUT + NODE_TIMEOUT + focused_wait < SNAPSHOT_TIMEOUT);
     }
 
     #[test]

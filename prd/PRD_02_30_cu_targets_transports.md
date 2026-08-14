@@ -146,14 +146,17 @@ Canonical host mapping (approved product vocabulary):
   `input_inject::type_text`. Resolution failure (miss or ambiguous name)
   aborts before any write. Without `--window`, `send-text` still injects
   into whatever is focused.
-- [~] `send-text --window HANDLE` without `--name` writes that same
+- [x] `send-text --window HANDLE` without `--name` writes that same
   AT-SPI `EditableText` / `Text` + toolkit set-value path on the
   showing focused node (innermost Text candidate). Never XTest /
   `input_inject::type_text` when `--window` is set. Independent
   `get-text --window HANDLE` (no `--name`) must equal the typed
   string. Chrome `GetTextField` after `focus --name` still needs the
   renderer on the same host AT-SPI bus (`AT_SPI_BUS` /
-  `AT_SPI_BUS_ADDRESS`). Do not mark this leaf shipped on worker JSON.
+  `AT_SPI_BUS_ADDRESS`). Reasonix composer `Message Reasonix…`
+  under `scripts/reasonix-desktop-a11y.sh` uses the same verb; the
+  write is AT-SPI `Text` plus the eval-helper set-value (no protocol
+  change). Do not mark this leaf shipped on worker JSON.
 - [x] `copy --window HANDLE --name PAT [--role ROLE]` resolves through
   that same path, then publishes AT-SPI `Text.GetText`
   (`agt_a11y_node_get_text`) onto the native clipboard
