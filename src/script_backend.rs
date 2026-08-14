@@ -159,14 +159,13 @@ pub fn try_execute_rh_invocation(
         }
         ScriptOperation::Run | ScriptOperation::Eval => {
             // Deliberately NOT wrapping a bare expression in `fn entry()` here.
-            // `script eval '1 + 1'` does answer `cdylib pack requires fn entry()`
-            // and that is worth fixing, but not at this layer: this function is
-            // reached through `ScriptEngineBackend::execute`, whose fail-closed
+            // The client command boundary adapts `script eval '1 + 1'` before
+            // dispatch. This function is also reached through
+            // `ScriptEngineBackend::execute`, whose fail-closed
             // behaviour for a source with no `entry` is a documented, tested
             // contract (`script_engine_exec_parity_execute_missing_entry_fails_closed`
-            // asserts `execute("40 + 2")` errors). Wrapping here made that
-            // succeed. The wrapper belongs in the `script eval` command path,
-            // where the source really is known to be an expression.
+            // asserts `execute("40 + 2")` errors). Wrapping here would make
+            // that invalid program succeed.
             let (pack, native_path) = resolve_rh_pack(source, options.project_root.as_deref())?;
             let entry_result = crate::script_rh_host::call_pack_entry_with_host_result(
                 &native_path,

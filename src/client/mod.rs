@@ -1595,7 +1595,7 @@ fn run_script_command_with_context(
                 cli_eprintln!("script eval requires an expression");
                 return 2;
             };
-            ("eval".to_owned(), expression.to_owned())
+            ("eval".to_owned(), script_eval_entry_source(expression))
         }
         ScriptOperation::Check | ScriptOperation::Run => {
             let Some(path) = operand else {
@@ -3368,6 +3368,13 @@ fn normalize_script_source(mut source: String) -> String {
     source
 }
 
+/// `script eval` owns expression-to-program adaptation. Keep this out of the
+/// engine backend so file-backed scripts and direct engine callers continue to
+/// fail closed when their program omits the required entry point.
+fn script_eval_entry_source(expression: &str) -> String {
+    format!("fn entry() {{ {expression} }}")
+}
+
 fn script_operand(arguments: &[String]) -> Option<&str> {
     let mut position = 2;
     while position < arguments.len() {
@@ -4165,7 +4172,7 @@ fn print_mux_compatibility(json: bool) {
 mod tests {
     use super::{
         HostedSubcommand, hosted_subcommand, normalize_script_source, parse_loopback_ipc_address,
-        parse_terminal_grid, run_wait_ui, script_worker_executable,
+        parse_terminal_grid, run_wait_ui, script_eval_entry_source, script_worker_executable,
     };
 
     #[test]
@@ -4224,6 +4231,14 @@ mod tests {
             "///usr/bin/env agenterm-rh\nprint(1);"
         );
         assert_eq!(normalize_script_source("print(1);".to_owned()), "print(1);");
+    }
+
+    #[test]
+    fn script_eval_wraps_expression_at_the_command_boundary() {
+        assert_eq!(
+            script_eval_entry_source("let value = 40; value + 2"),
+            "fn entry() { let value = 40; value + 2 }"
+        );
     }
 
     #[test]
