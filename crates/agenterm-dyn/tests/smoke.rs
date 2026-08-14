@@ -215,6 +215,42 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_sysconf_clk_tck_matches_libc() {
+        let probe = live_system_probe("sysconf_clk_tck");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {})"#,
+                libc::_SC_CLK_TCK
+            ))
+            .expect("sysconf(_SC_CLK_TCK) dlcall");
+        let real = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        assert!(real > 0, "host clock ticks per second should be positive");
+        assert_eq!(got, Value::Int(real));
+    }
+
+    #[test]
+    fn dlcall_sysconf_nprocessors_onln_matches_libc() {
+        let probe = live_system_probe("sysconf_nprocessors_onln");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {})"#,
+                libc::_SC_NPROCESSORS_ONLN
+            ))
+            .expect("sysconf(_SC_NPROCESSORS_ONLN) dlcall");
+        let real = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+        assert!(real > 0, "online processor count should be positive");
+        assert_eq!(got, Value::Int(real));
+    }
+
+    #[test]
     fn dlcall_getcwd_writes_current_directory() {
         use std::os::unix::ffi::OsStrExt;
 

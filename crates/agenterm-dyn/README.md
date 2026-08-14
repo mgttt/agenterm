@@ -70,7 +70,7 @@ supported and fail explicitly.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `geteuid`, `getegid`, `sysconf(_SC_PAGESIZE)`, `getcwd` dlcalls |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `geteuid`, `getegid`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd` dlcalls |
 | macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` | `time` | placeholders only |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
@@ -130,7 +130,8 @@ cargo test -p agenterm-dyn
 **Linux** (CI): `getpid` + `getppid` + `getuid` + `getgid` + `geteuid` +
 `getegid` cross-checked with libc; real headless
 `time(NULL)`, `clock_gettime(CLOCK_MONOTONIC)`, `uname`, `sysconf(_SC_PAGESIZE)`,
-and `getcwd` dlcalls; `ioctl(TIOCGWINSZ)`
+`sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, and `getcwd` dlcalls;
+`ioctl(TIOCGWINSZ)`
 on a 24×80 pty when `openpty` succeeds; `getenv("DISPLAY")`; honest `libX11`
 `XOpenDisplay` and AT-SPI library existence probes (no session a11y bus).
 

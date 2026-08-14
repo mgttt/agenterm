@@ -96,6 +96,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "geteuid",
                 "getegid",
                 "sysconf_pagesize",
+                "sysconf_clk_tck",
+                "sysconf_nprocessors_onln",
                 "getcwd"
             ]
         );
@@ -113,6 +115,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("geteuid", "libc.so.6", "geteuid"),
                 ("getegid", "libc.so.6", "getegid"),
                 ("sysconf_pagesize", "libc.so.6", "sysconf"),
+                ("sysconf_clk_tck", "libc.so.6", "sysconf"),
+                ("sysconf_nprocessors_onln", "libc.so.6", "sysconf"),
                 ("getcwd", "libc.so.6", "getcwd"),
             ]
         );
