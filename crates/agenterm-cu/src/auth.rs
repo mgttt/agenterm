@@ -52,7 +52,7 @@ impl Authorization {
 
     /// Reconstruct a `--grant` CLI value for remote workers (ssh transport).
     /// Observe and actuate both forward so remote send-text / paste / copy /
-    /// send-keys work.
+    /// send-keys / select work.
     pub fn grant_cli_arg(&self) -> String {
         let mut parts = Vec::new();
         if self.grants.contains(&Grant::Observe) {

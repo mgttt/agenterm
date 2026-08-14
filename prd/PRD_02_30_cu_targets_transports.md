@@ -22,14 +22,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` send-keys evidence reuses the #47 con-publish
-  focused `send-keys` / `wait` / `get-text` circuit over loopback `sshd`
-  against a second `agenterm-con` (never steal the resident control socket):
-  host `cu --ssh focus --name Command` then `cu --ssh send-keys --window H --
-  KEYS` (no `--name`; plain typeable text uses remote AT-SPI EditableText /
-  Text when Device/key is absent), then host `cu --ssh wait` + `get-text`
-  equals those keys. Never screenshot or `--coords`. Keys ride in the remote
-  command JSON (`--` ends flags).
+  commands above it. `ssh` select evidence reuses the #47 con-publish
+  `select` / `get-selection` circuit over loopback `sshd` against a second
+  `agenterm-con` (never steal the resident control socket): host
+  `cu --ssh send-text --name Command -- SEED` (payload after `--`; not
+  `--text`) plants the seed, host `cu --ssh select --start N --end M` runs
+  remote AT-SPI `Text.SetSelection`, then host `cu --ssh get-selection`
+  returns that range (start/end equal the selected slice of the seed). Never
+  screenshot, `--coords`, or mouse-drag.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -428,17 +428,18 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Send-keys path: host
-  `focus --name Command` then `send-keys --window HANDLE -- KEYS` (no
-  `--name`; same focused path as local con send-keys) on a second
-  `agenterm-con` plants plain keys via remote AT-SPI Device/key or EditableText
-  / Text fallback; host `wait --text-equals` / `get-text --name Command`
-  equals those keys via AT-SPI GetText (never screenshot / `--coords`). Keys
-  ride in remote command JSON (`--` ends flags; leftover argv joined with
-  `+`). No focused field typed-fails on the remote worker the same as local
-  `current`. `copy` / `paste --text` / `send-text` over ssh and observe-only
-  `wait` / `get-text` still hold. Worker JSON does not count; CEO owns the
-  official gate. Auth failure and missing destination are typed
+  runs remote `agenterm-cu --target current`. Select path: host
+  `send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
+  `--text`) plants a seed on a second `agenterm-con` `Command` field; host
+  `select --window HANDLE --name Command --start N --end M` runs remote AT-SPI
+  `Text.SetSelection` (`via=set-selection`); host independent
+  `get-selection --window HANDLE --name Command` returns that range
+  (`via=get-selection`; start/end equal the selected slice of the seed). Never
+  screenshot / `--coords` / mouse-drag / XTest. Missing Text typed-fails
+  `a11y_selection_unavailable` on the remote worker the same as local
+  `current`. `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
+  observe-only `wait` / `get-text` still hold. Worker JSON does not count; CEO
+  owns the official gate. Auth failure and missing destination are typed
   (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized

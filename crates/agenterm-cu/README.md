@@ -118,16 +118,17 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Send-keys evidence is
-loopback `sshd` plus a second `agenterm-con`: host `focus --name Command` then
-`send-keys --window HANDLE -- KEYS` (no `--name`; same focused path as local
-con send-keys — plain typeable text uses native AT-SPI EditableText / Text
-when Device/key is absent) plants the keys, then host `wait --text-equals` /
-`get-text --name Command` equals those keys via AT-SPI GetText (never
-screenshot / `--coords`). Keys ride in the remote command JSON (`--` ends
-flags; leftover argv joined with `+`). No focused field typed-fails on the
-remote worker the same as local `current`. `copy` / `paste --text` /
-`send-text` over ssh and observe-only `wait` / `get-text` remain valid too.
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Select evidence is
+loopback `sshd` plus a second `agenterm-con`: host `send-text --window HANDLE
+--name Command -- SEED` (payload after `--`; not `--text`) plants the seed,
+host `select --window HANDLE --name Command --start N --end M` runs remote
+AT-SPI `Text.SetSelection` (`via=set-selection`), then host independent
+`get-selection --window HANDLE --name Command` returns that range
+(`via=get-selection`; start/end equal the selected slice of the seed). Never
+screenshot / `--coords` / mouse-drag / XTest. Missing Text typed-fails
+`a11y_selection_unavailable` on the remote worker the same as local
+`current`. `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
+observe-only `wait` / `get-text` remain valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -141,16 +142,13 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Send-keys path: focus Command → host send-keys -- KEYS → wait + get-text == KEYS.
+# Select path: send-text SEED → select 0..LEN → get-selection start/end == range.
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate focus --window HANDLE --name Command
+  --grant observe,actuate send-text --window HANDLE --name Command -- SEED
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate send-keys --window HANDLE -- KEYS
-agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe wait --timeout-ms 8000 --window HANDLE --name Command \
-  --text-equals KEYS
+  --grant observe,actuate select --window HANDLE --name Command --start 0 --end 11
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
-  get-text --window HANDLE --name Command
+  get-selection --window HANDLE --name Command
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows
