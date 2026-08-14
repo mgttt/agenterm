@@ -102,9 +102,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   candidate — the same node `get-text --window HANDLE` reads). Never
   XTest / `input_inject::type_text` when `--window` is set. Proof is
   independent `get-text --window HANDLE` (no `--name`) equal to the
-  typed string, not `send-text` `matched.text`. Chrome `GetTextField`
-  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name`, and
-  Reasonix composer `Message Reasonix…` under
+  typed string, not `send-text` `matched.text`. Live hosts: agenterm-con
+  named `Command` (native `EditableText`, `via=editable-text` on a
+  second con that never steals the resident control socket), Chrome
+  `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`) after
+  `focus --name`, and Reasonix composer `Message Reasonix…` under
   `scripts/reasonix-desktop-a11y.sh` (WebKit 2.52 has `Text` but not
   `EditableText`; write is AT-SPI `Text` plus the eval-helper
   set-value). Without `--window` it stays the plain "type into
