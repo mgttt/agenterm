@@ -405,11 +405,12 @@ Commands:
                               copies AT-SPI Text.GetText from the unique showing
                               named node onto the native clipboard (Linux X11:
                               SetSelectionOwner, not xclip). addressing=
-                              accessibility-tree. A node with no Text interface
-                              typed-fails (never XTest / --coords / screenshot).
-                              Close the circuit with paste --name (no --text)
-                              then wait --text-equals; copy matched.text does
-                              not count
+                              accessibility-tree via=gettext. A node with no
+                              Text interface typed-fails (never XTest / --coords
+                              / screenshot). Close the circuit with paste --name
+                              (no --text) then wait --text-equals; copy
+                              matched.text does not count. Live: Chrome fixture
+                              and Reasonix composer (Message Reasonix…)
   paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]
                               writes clipboard text into the unique showing named
                               field via native AT-SPI EditableText / Text

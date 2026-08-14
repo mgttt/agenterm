@@ -145,11 +145,17 @@ Canonical host mapping (approved product vocabulary):
 - [x] `copy --window HANDLE --name PAT [--role ROLE]` resolves through
   that same path, then publishes AT-SPI `Text.GetText`
   (`agt_a11y_node_get_text`) onto the native clipboard
-  (`agt_clipboard_set_text`). On Linux X11 the seed is a native CLIPBOARD
-  selection owner, not `xclip`. `--name` is required. A named showing node
-  with no Text interface typed-fails (`a11y_text_unavailable`) and never
-  silently uses XTest / `--coords` / screenshot. Resolution failure (miss
-  or ambiguous name) aborts before any clipboard write.
+  (`agt_clipboard_set_text`) and reports `via=gettext`. On Linux X11 the
+  seed is a native CLIPBOARD selection owner, not `xclip`. `--name` is
+  required. A named showing node with no Text interface typed-fails
+  (`a11y_text_unavailable`) and never silently uses XTest / `--coords` /
+  screenshot. Resolution failure (miss or ambiguous name) aborts before
+  any clipboard write. Live close-the-circuit includes Chrome fixture
+  fields and the Reasonix composer (`Message Reasonix…`): after
+  `copy --name`, a different `send-text`, then `paste --name` with no
+  `--text`, `wait --text-equals` sees independent GetText equal the
+  copied source (paste write still uses the WebKit eval-helper set-value
+  path).
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]`
   resolves through that same path, then writes the clipboard via the same
   AT-SPI `EditableText` / `Text` + toolkit set-value path as named

@@ -335,7 +335,10 @@ fn send_text(
 /// node with no Text interface typed-fails (`a11y_text_unavailable`) and
 /// never falls through to XTest / `--coords` / screenshot. `--name` is
 /// required. `matched.text` is the resolve-time snapshot; the copied
-/// payload is independent GetText.
+/// payload is independent GetText. Live close-the-circuit includes Chrome
+/// fixture fields and the Reasonix composer (`Message Reasonix…`): paste
+/// after copy still uses the WebKit eval-helper set-value path; only
+/// `wait --text-equals` GetText proves the restore.
 fn copy(
     window: Option<isize>,
     name: Option<&str>,

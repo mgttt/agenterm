@@ -1191,7 +1191,14 @@ takes it. Do not persist via `xclip` / `xsel`. A later process must
 not treat a 1-byte `get_text` probe `TooLarge` as "no clipboard
 text": `agt_clipboard_has_text` would then lie and
 `agt_clipboard_get_text` would return empty, so `paste --name`
-without `--text` writes nothing.
+without `--text` writes nothing. Chrome fixture fields and the
+Reasonix composer (`Message Reasonix…` under
+`scripts/reasonix-desktop-a11y.sh`) share this path: after
+`send-text SRC`, `copy --name` reports `via=gettext`, a different
+`send-text` clears the field, `paste --name` with no `--text` rewrites
+SRC through the same WebKit eval-helper set-value path as named
+`send-text`, and `wait --text-equals SRC` must see independent
+GetText == SRC (not copy/paste/send `matched.text`).
 
 `cu wait --text-equals` / `--node-text-equals` with `--name` is the
 independent AT-SPI close-the-circuit after named `send-text` / `paste` /
