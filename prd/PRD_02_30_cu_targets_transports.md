@@ -174,13 +174,16 @@ Canonical host mapping (approved product vocabulary):
   copied source (paste write still uses the WebKit eval-helper set-value
   path).
 - [x] `copy --window HANDLE` without `--name` publishes GetText from the
-  showing focused node (innermost Text candidate) onto native CLIPBOARD.
-  Never XTest / `--coords` when `--window` is set. Proof is independent
-  seed → focused `copy` → clear → focused `paste` →
+  showing focused node (innermost Text candidate) onto native CLIPBOARD
+  (`via=gettext`). Never XTest / `--coords` when `--window` is set. Proof
+  is independent seed → focused `copy` → clear → focused `paste` →
   `get-text --window HANDLE` (no `--name`) equal to the seeded string.
-  Live: Chrome `GetTextField` after `focus --name`; Reasonix composer and
-  agenterm-con `Command` share the focused path. Without `--window` copy
-  is invalid.
+  Live: Chrome `GetTextField` after `focus --name` on the host AT-SPI bus
+  (`AT_SPI_BUS` / `AT_SPI_BUS_ADDRESS`); Reasonix composer
+  `Message Reasonix…` after `focus --name` under
+  `scripts/reasonix-desktop-a11y.sh` (`via=gettext`; paste restore uses
+  eval-helper set-value, `via=text`); agenterm-con `Command` after
+  `focus --name`. Without `--window` copy is invalid.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]`
   resolves through that same path, then writes the clipboard via the same
   AT-SPI `EditableText` / `Text` + toolkit set-value path as named
