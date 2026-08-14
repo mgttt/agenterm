@@ -49,7 +49,14 @@
 //! `get-extents --name OffscreenField` returns screen extents whose
 //! `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
 //! AT-SPI `Component.GetExtents(Screen)`). Snapshot `node.bounds` do not
-//! count. Never screenshot / `--coords` / mouse-drag / XTest.
+//! count. Cut 3.30 locks get-selection as its own observe path: host
+//! `send-text` plants a seed on remote Command (`--` ends flags; not
+//! `--text`), host `select --start N --end M` runs remote AT-SPI
+//! `Text.SetSelection`, then host independent `get-selection --name
+//! Command` returns that range (`via=get-selection`; start/end equal the
+//! selected slice of the seed, or the seed when the range is the whole
+//! field). Native AT-SPI `GetNSelections` + `GetSelection`. Never
+//! screenshot / `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -620,9 +627,20 @@ mod tests {
 
     #[test]
     fn get_selection_observe_survives_target_rewrite() {
-        // 3.22 observe sibling: get-selection must also rewrite target only
-        // and keep window/name/role so independent GetNSelections+GetSelection
-        // proof rides the same OpenSSH exec path as select.
+        // 3.30: first ssh get-selection as its own observe path reuses the
+        // same OpenSSH exec rewrite; remote worker runs target=current
+        // get-selection. Circuit: host send-text plants SEED on remote
+        // Command (`--` ends flags; not --text), host select --window H
+        // --name Command --start N --end M runs remote AT-SPI
+        // Text.SetSelection, then host independent get-selection --window H
+        // --name Command returns that range (via=get-selection; start/end
+        // equal the selected slice of the seed, or the seed when the range
+        // is the whole field). Native AT-SPI GetNSelections + GetSelection.
+        // Never screenshot / --coords / mouse-drag / XTest. Missing Text
+        // typed-fails a11y_selection_unavailable on the remote worker the
+        // same as local current. No new verb; observe grant only. select
+        // (3.22) remains a separate write path that may use get-selection
+        // as readback.
         let command = CuCommand::GetSelection {
             target: TargetRef::Ssh,
             window: Some(42),
