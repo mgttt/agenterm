@@ -12,20 +12,21 @@
 //! actuate path via `send-text`. Cut 3.33 locked the first clipboard write
 //! via `paste --text`. Cut 3.34 locked clipboard publish via `copy`.
 //! Cut 3.35 locked key delivery via `send-keys`. Cut 3.36 locked text
-//! selection via `select` / `get-selection`. Cut 3.37 locks caret
-//! placement: host `send-text` plants a seed on a second `agenterm-con`
+//! selection via `select` / `get-selection`. Cut 3.37 locked caret
+//! placement via `set-caret` / `get-caret`. Cut 3.38 locks named Action
+//! click: host `send-text` plants a seed on a second `agenterm-con`
 //! `Command` field (payload after `--`; not `--text`), host
-//! `set-caret --offset N` over `--vnc` runs session AT-SPI
-//! `Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
-//! `get-caret` over the same `--vnc` returns that offset
-//! (`via=get-caret-offset`) and host `get-text` still equals the seed.
-//! Native AT-SPI `CaretOffset` / `GetCaretOffset` / `SetCaretOffset` via
-//! the session worker — never screenshot / `--coords` / mouse-drag /
-//! RFB framebuffer OCR. Gate-owned dedicated loopback x11vnc; never steal
+//! `click --name SEND` over `--vnc` runs session AT-SPI Action `DoAction`
+//! (`addressing=accessibility-tree`), then host independent
+//! `get-text --name Command` over the same `--vnc` returns empty
+//! (composer cleared on SEND submit). Native AT-SPI Action via the
+//! session worker — never screenshot / `--coords` / RFB pointer /
+//! framebuffer OCR. Gate-owned dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
 //! as the only proof. Observe and actuate grants both forward.
-//! `select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
-//! (3.33), and `send-text` (3.32) over vnc remain valid.
+//! `set-caret` (3.37), `select` (3.36), `send-keys` (3.35), `copy`
+//! (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc remain
+//! valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -869,6 +870,57 @@ mod tests {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("Command"));
                 assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn click_name_survives_target_rewrite() {
+        // 3.38: first vnc click path reuses the same RFB + session-worker
+        // rewrite; the worker still runs target=current click. Circuit:
+        // host send-text plants SEED on session Command (`--` ends flags;
+        // not --text), host click --window H --name SEND runs session
+        // AT-SPI Action DoAction (addressing=accessibility-tree; never
+        // --coords / RFB pointer / screenshot), then host independent
+        // get-text --name Command returns empty (composer cleared on SEND
+        // submit). Missing / ambiguous name typed-fails a11y_node_not_found
+        // / a11y_node_ambiguous on the session worker the same as local
+        // current. coords:None and selector must survive the rewrite.
+        let command = CuCommand::Click {
+            target: TargetRef::Vnc,
+            window: Some(42),
+            node: None,
+            name: Some("SEND".into()),
+            role: Some("button".into()),
+            coords: None,
+            degraded: false,
+            clicks: 1,
+            button: crate::command::PointerButton::Left,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "click");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Click {
+                window,
+                node,
+                name,
+                role,
+                coords,
+                degraded,
+                clicks,
+                button,
+                ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert!(node.is_none());
+                assert_eq!(name.as_deref(), Some("SEND"));
+                assert_eq!(role.as_deref(), Some("button"));
+                assert!(coords.is_none());
+                assert!(!degraded);
+                assert_eq!(clicks, 1);
+                assert_eq!(button, crate::command::PointerButton::Left);
             }
             other => panic!("unexpected command {other:?}"),
         }

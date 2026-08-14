@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn grant_cli_arg_forwards_actuate_for_session_write() {
-        // ssh / vnc session workers need actuate for send-text / paste / copy / send-keys / select / set-caret.
+        // ssh / vnc session workers need actuate for send-text / paste / copy / send-keys / select / set-caret / click.
         let auth = Authorization::from_cli_and_env(Some("observe,actuate"));
         assert_eq!(auth.grant_cli_arg(), "observe,actuate");
         assert!(auth.allows(Grant::Observe));
