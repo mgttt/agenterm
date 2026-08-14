@@ -51,6 +51,7 @@ impl Authorization {
     }
 
     /// Reconstruct a `--grant` CLI value for remote workers (ssh transport).
+    /// Observe and actuate both forward so remote send-text / paste work.
     pub fn grant_cli_arg(&self) -> String {
         let mut parts = Vec::new();
         if self.grants.contains(&Grant::Observe) {
@@ -60,5 +61,25 @@ impl Authorization {
             parts.push("actuate");
         }
         parts.join(",")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grant_cli_arg_forwards_actuate_for_ssh_write() {
+        let auth = Authorization::from_cli_and_env(Some("observe,actuate"));
+        assert_eq!(auth.grant_cli_arg(), "observe,actuate");
+        assert!(auth.allows(Grant::Observe));
+        assert!(auth.allows(Grant::Actuate));
+    }
+
+    #[test]
+    fn grant_cli_arg_observe_only() {
+        let auth = Authorization::from_cli_and_env(Some("observe"));
+        assert_eq!(auth.grant_cli_arg(), "observe");
+        assert!(!auth.allows(Grant::Actuate));
     }
 }

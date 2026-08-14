@@ -1,10 +1,11 @@
 //! OpenSSH transport for the `ssh` target tier (PRD_02_30).
 //!
-//! First cut: host `agenterm-cu --ssh <dest>` rewrites the abstract command to
+//! Host `agenterm-cu --ssh <dest>` rewrites the abstract command to
 //! `target=current` and runs a remote `agenterm-cu exec --json -` worker over
-//! `ssh` stdio. No new verbs. Desktop observation still happens on the remote
-//! side (AT-SPI / UIA / AX via the remote worker's libagenterm), so loopback
-//! `sshd` against a second `agenterm-con` is a valid first evidence path.
+//! `ssh` stdio. No new verbs. Observe and actuate grants both forward; the
+//! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
+//! Loopback `sshd` against a second `agenterm-con` is the first evidence path
+//! for both read (`wait` / `get-text`) and write (`send-text` / `paste`).
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -403,6 +404,37 @@ mod tests {
         let remote = rewrite_command_target_current(&command).expect("rewrite");
         assert_eq!(remote.verb(), "wait");
         assert_eq!(remote.target(), TargetRef::Current);
+    }
+
+    #[test]
+    fn send_text_write_survives_target_rewrite() {
+        // 3.18: first ssh WRITE path reuses the same OpenSSH exec rewrite as
+        // observe; the remote worker still runs target=current send-text.
+        let command = CuCommand::SendText {
+            target: TargetRef::Ssh,
+            text: "318SSHSEED".into(),
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "send-text");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::SendText {
+                text,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(text, "318SSHSEED");
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
     }
 
     #[test]

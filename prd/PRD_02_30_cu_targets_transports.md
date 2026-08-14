@@ -18,12 +18,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   command set. `current` is the **local degenerate tier** — transport is
   in-process — not a temporary prototype to be replaced later. `ssh` first cut
   is OpenSSH `ssh` exec of a remote `agenterm-cu --target current` worker
-  (`--ssh <user@host>`; same verbs; no new verb). `rdp` / `vnc` remain planned.
+  (`--ssh <user@host>`; same verbs including actuate; no new verb). `rdp` /
+  `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` first evidence reuses the #47 con-publish
-  `wait --text-contains` / `get-text` circuit over loopback `sshd` against a
-  second `agenterm-con` (never steal the resident control socket).
+  commands above it. `ssh` write evidence reuses the #47 con-publish
+  `send-text` / `get-text` circuit over loopback `sshd` against a second
+  `agenterm-con` (never steal the resident control socket): the seed is planted
+  by host `cu --ssh send-text` (or `paste`), not by a local `current` write.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -422,12 +424,13 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`; seed a unique string on a second
-  `agenterm-con` `Command` field, then host `wait --text-contains` /
-  `get-text --name Command` equals that seed via AT-SPI GetText (never
-  screenshot / `--coords`). Worker JSON does not count; CEO owns the official
-  gate. Auth failure and missing destination are typed (`ssh_unavailable` /
-  `ssh_transport_failed` / `invalid_input`).
+  runs remote `agenterm-cu --target current`. Write path: host
+  `send-text --name Command` (or `paste`) plants a unique seed on a second
+  `agenterm-con` `Command` field; host `get-text --name Command` equals that
+  seed via AT-SPI GetText (never screenshot / `--coords`). Observe-only
+  `wait --text-contains` / `get-text` still hold. Worker JSON does not count;
+  CEO owns the official gate. Auth failure and missing destination are typed
+  (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
   actuation, audited degraded coordinate click, invalid node path failure, and
