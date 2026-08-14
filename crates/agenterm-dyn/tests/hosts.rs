@@ -87,7 +87,7 @@ fn additional_system_probes_are_live_only_on_linux() {
     for c in [LINUX_X86_64, LINUX_AARCH64] {
         assert_eq!(
             c.system_probes.map(|probe| probe.name),
-            ["time", "clock_gettime", "uname"]
+            ["time", "clock_gettime", "uname", "getuid", "getgid"]
         );
         assert!(c.system_probes.iter().all(|probe| matches!(
             probe.status,

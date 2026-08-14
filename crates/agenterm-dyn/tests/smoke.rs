@@ -23,7 +23,9 @@ fn cu_adjacent_catalog_has_six_cells() {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use agenterm_dyn::{HostCell, LINUX_ATSPI_EXISTENCE_LIBS, SizeProbe};
+    use agenterm_dyn::{
+        HostCell, LINUX_ATSPI_EXISTENCE_LIBS, SizeProbe, SystemProbe, SystemProbeStatus,
+    };
 
     #[repr(C)]
     struct Winsize {
@@ -115,6 +117,44 @@ mod linux {
         let uts = unsafe { uts.assume_init() };
         let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()) };
         assert_eq!(sysname.to_bytes(), b"Linux");
+    }
+
+    fn live_system_probe(name: &str) -> SystemProbe {
+        let probe = cell()
+            .system_probes
+            .into_iter()
+            .find(|probe| probe.name == name)
+            .unwrap_or_else(|| panic!("missing {name} system probe"));
+        assert!(matches!(probe.status, SystemProbeStatus::LiveDlcall { .. }));
+        probe
+    }
+
+    #[test]
+    fn dlcall_getuid_matches_libc() {
+        let probe = live_system_probe("getuid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+            .expect("getuid dlcall");
+        let real = unsafe { libc::getuid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_getgid_matches_libc() {
+        let probe = live_system_probe("getgid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+            .expect("getgid dlcall");
+        let real = unsafe { libc::getgid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
     }
 
     #[test]
