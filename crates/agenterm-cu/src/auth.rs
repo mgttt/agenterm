@@ -71,7 +71,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grant_cli_arg_forwards_actuate_for_ssh_write() {
+    fn grant_cli_arg_forwards_actuate_for_session_write() {
+        // ssh / vnc session workers need actuate forwarded for send-text.
         let auth = Authorization::from_cli_and_env(Some("observe,actuate"));
         assert_eq!(auth.grant_cli_arg(), "observe,actuate");
         assert!(auth.allows(Grant::Observe));

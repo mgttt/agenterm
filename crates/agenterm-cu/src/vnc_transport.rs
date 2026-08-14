@@ -8,12 +8,14 @@
 //! observation still uses AT-SPI GetText on that session — never
 //! screenshot / `--coords` / RFB framebuffer OCR.
 //!
-//! Cut 3.31 locks the first observe path: a unique seed on a second
-//! `agenterm-con` `Command` field, host `windows` / `get-text` (or
-//! `wait --text-equals`) over `--vnc 127.0.0.1:<port>` equals that seed
+//! Cut 3.31 locked the first observe path. Cut 3.32 locks the first
+//! actuate path: host `send-text --name Command` over `--vnc` plants a
+//! unique seed on a second `agenterm-con` `Command` field (native AT-SPI
+//! EditableText via the session worker), then host independent
+//! `get-text --name Command` over the same `--vnc` equals that seed
 //! (`via=gettext`). Gate-owned dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
-//! as the only proof.
+//! as the only proof. Observe and actuate grants both forward.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -598,6 +600,37 @@ mod tests {
         let remote = rewrite_command_target_current(&command).expect("rewrite");
         assert_eq!(remote.verb(), "windows");
         assert_eq!(remote.target(), TargetRef::Current);
+    }
+
+    #[test]
+    fn send_text_write_survives_target_rewrite() {
+        // 3.32: first vnc WRITE path reuses the same RFB + session-worker
+        // rewrite as observe; the worker still runs target=current send-text.
+        let command = CuCommand::SendText {
+            target: TargetRef::Vnc,
+            text: "332VNCSEED".into(),
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "send-text");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::SendText {
+                text,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(text, "332VNCSEED");
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
     }
 
     #[test]
