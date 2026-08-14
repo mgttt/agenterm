@@ -733,6 +733,9 @@ fn get_caret(
 
 /// `get-text --name` reads independent AT-SPI `Text.GetText`
 /// (`agt_a11y_node_get_text`) once for the unique showing named node.
+/// Without `--name` it reads the focused node instead: the tree node
+/// carrying the AT-SPI `focused` state, so `focus --name X` then
+/// `get-text --window H` closes the loop on whatever holds focus.
 /// This is the same text authority `wait --text-equals` polls, exposed
 /// as a first-class one-shot readback so an independent observation does
 /// not need a wait timeout. Not `send-text` / `paste` / `copy`
@@ -744,19 +747,25 @@ fn get_text(
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
-    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
-        CuError::new(
-            "invalid_input",
-            "get-text requires --window <handle> --name <pattern>",
-        )
-    })?;
-    let resolved =
-        resolve_actuation_node(window, None, Some(name), role, "get-text")?.ok_or_else(|| {
-            CuError::new(
-                "invalid_input",
-                "get-text requires --window <handle> --name <pattern>",
-            )
-        })?;
+    let name = name.filter(|value| !value.is_empty());
+    let resolved = match name {
+        Some(name) => resolve_actuation_node(window, None, Some(name), role, "get-text")?
+            .ok_or_else(|| {
+                CuError::new(
+                    "invalid_input",
+                    "get-text requires --window <handle> [--name <pattern>]",
+                )
+            })?,
+        None => {
+            if role.is_some() {
+                return Err(CuError::new(
+                    "invalid_input",
+                    "get-text --role requires --name <pattern>",
+                ));
+            }
+            resolve_focused_node(window, "get-text")?
+        }
+    };
     let text = mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
@@ -775,6 +784,35 @@ struct ResolvedNode {
     node_id: String,
     matched: Option<mechanism::A11yNode>,
     backend: Option<String>,
+}
+
+/// Focused-node addressing: the unique tree node carrying the AT-SPI
+/// `focused` state in the scoped window's tree snapshot. No name pattern,
+/// no coordinates — the toolkit's own focus report picks the node.
+fn resolve_focused_node(window: Option<isize>, verb: &str) -> Result<ResolvedNode, CuError> {
+    let Some(handle) = window else {
+        return Err(CuError::new(
+            "invalid_input",
+            format!("{verb} without --name requires --window <handle>"),
+        ));
+    };
+    let tree = mechanism::tree_for_window(Some(handle)).map_err(map_mechanism_err)?;
+    let node = tree
+        .nodes
+        .iter()
+        .find(|node| node.states.iter().any(|state| state == "focused"))
+        .ok_or_else(|| {
+            CuError::new(
+                "a11y_node_not_found",
+                "no focused accessibility node in window tree",
+            )
+        })?
+        .clone();
+    Ok(ResolvedNode {
+        node_id: node.id.clone(),
+        matched: Some(node),
+        backend: Some(tree.backend),
+    })
 }
 
 /// Shared addressing gate for structured click/focus: `--node` or `--name`,
@@ -2314,10 +2352,10 @@ mod tests {
     }
 
     #[test]
-    fn get_text_requires_window_and_name() {
+    fn get_text_without_name_requires_window() {
         let command = Command::GetText {
             target: TargetRef::Current,
-            window: Some(1),
+            window: None,
             name: None,
             role: None,
         };
@@ -2330,8 +2368,30 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .message
-                .contains("--window <handle> --name <pattern>"),
-            "missing-name message should name the addressing contract"
+                .contains("requires --window <handle>"),
+            "missing-window message should name the addressing contract"
+        );
+    }
+
+    #[test]
+    fn get_text_role_without_name_is_typed() {
+        let command = Command::GetText {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: Some("text".into()),
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+        assert!(
+            reply
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("--role requires --name"),
+            "role-without-name message should name the addressing contract"
         );
     }
 
