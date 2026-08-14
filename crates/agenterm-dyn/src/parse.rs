@@ -57,11 +57,19 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some('(') => self.parse_list(),
             Some('"') => self.parse_string(),
-            Some('-') | Some('0'..='9') => self.parse_int(),
+            Some('-') if self.peek_next_is_digit() => self.parse_int(),
+            Some('-') => Ok(SExpr::Sym(self.parse_symbol()?)),
+            Some('0'..='9') => self.parse_int(),
             Some(ch) if is_sym_start(ch) => Ok(SExpr::Sym(self.parse_symbol()?)),
             Some(ch) => Err(DynError::Parse(format!("unexpected character `{ch}`"))),
             None => Err(DynError::Parse("unexpected end of input".into())),
         }
+    }
+
+    fn peek_next_is_digit(&self) -> bool {
+        let mut iter = self.input[self.pos..].chars();
+        iter.next(); // skip leading '-'
+        matches!(iter.next(), Some('0'..='9'))
     }
 
     fn parse_list(&mut self) -> Result<SExpr, DynError> {
@@ -169,5 +177,19 @@ mod tests {
                 SExpr::Sym("x".into()),
             ])
         );
+    }
+
+    #[test]
+    fn parses_minus_as_symbol_in_list() {
+        let expr = parse("(- 5)").expect("parse unary sub form");
+        assert_eq!(
+            expr,
+            SExpr::List(vec![SExpr::Sym("-".into()), SExpr::Int(5)])
+        );
+    }
+
+    #[test]
+    fn parses_negative_integer_literal() {
+        assert_eq!(parse("-12").expect("negative literal"), SExpr::Int(-12));
     }
 }

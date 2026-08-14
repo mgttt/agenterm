@@ -1,6 +1,8 @@
-//! Error-path tests: parse failures, unknown symbols/forms, bad FFI types, missing libs.
+//! Error-path tests: parse failures, unknown symbols/forms, bad FFI types, language errors.
 
-use agenterm_dyn::{Dyn, DynError};
+use std::ffi::c_void;
+
+use agenterm_dyn::{Dyn, DynError, REPEAT_MAX};
 
 #[test]
 fn parse_unclosed_list() {
@@ -108,4 +110,86 @@ fn missing_symbol() {
     let script = format!(r#"(dlcall "{lib}" "agenterm_dyn_no_such_symbol_xyz" "i32")"#);
     let err = env.eval(&script).unwrap_err();
     assert!(matches!(err, DynError::DlCall(_)));
+}
+
+#[test]
+fn comparison_requires_two_int_operands() {
+    let mut env = Dyn::new();
+    env.bind("p", std::ptr::dangling_mut::<c_void>())
+        .expect("bind ptr");
+    let err = env.eval("(= 1 p)").unwrap_err();
+    assert!(matches!(err, DynError::Type(_)));
+}
+
+#[test]
+fn comparison_arity_mismatch() {
+    let mut env = Dyn::new();
+    let err = env.eval("(= 1)").unwrap_err();
+    assert!(matches!(
+        err,
+        DynError::Arity {
+            form: "=",
+            expected: 2,
+            got: 1
+        }
+    ));
+}
+
+#[test]
+fn and_and_or_require_at_least_one_operand() {
+    let mut env = Dyn::new();
+    assert!(matches!(
+        env.eval("(and)").unwrap_err(),
+        DynError::Arity {
+            form: "and",
+            expected: 1,
+            got: 0
+        }
+    ));
+    assert!(matches!(
+        env.eval("(or)").unwrap_err(),
+        DynError::Arity {
+            form: "or",
+            expected: 1,
+            got: 0
+        }
+    ));
+}
+
+#[test]
+fn arithmetic_type_and_overflow_errors() {
+    let mut env = Dyn::new();
+    env.bind("z", std::ptr::null_mut::<c_void>()).expect("bind");
+    assert!(matches!(
+        env.eval("(+ 1 z)").unwrap_err(),
+        DynError::Type(_)
+    ));
+    let huge = format!("(+ {} 1)", i64::MAX);
+    let err = env.eval(&huge).unwrap_err();
+    assert!(matches!(err, DynError::Type(_)));
+}
+
+#[test]
+fn repeat_rejects_negative_and_over_cap() {
+    let mut env = Dyn::new();
+    let neg = env.eval("(repeat -1 1)").unwrap_err();
+    assert!(matches!(neg, DynError::Type(_)));
+
+    let over = env
+        .eval(&format!("(repeat {} 1)", REPEAT_MAX + 1))
+        .unwrap_err();
+    assert!(matches!(over, DynError::Type(_)));
+}
+
+#[test]
+fn repeat_arity_mismatch() {
+    let mut env = Dyn::new();
+    assert!(matches!(
+        env.eval("(repeat 1)").unwrap_err(),
+        DynError::Arity {
+            form: "repeat",
+            expected: 2,
+            got: 1
+        }
+    ));
 }
