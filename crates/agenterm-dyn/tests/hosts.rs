@@ -98,7 +98,9 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "sysconf_pagesize",
                 "sysconf_clk_tck",
                 "sysconf_nprocessors_onln",
-                "getcwd"
+                "getcwd",
+                "isatty_stdin",
+                "open_dev_null"
             ]
         );
         assert_eq!(
@@ -118,6 +120,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("sysconf_clk_tck", "libc.so.6", "sysconf"),
                 ("sysconf_nprocessors_onln", "libc.so.6", "sysconf"),
                 ("getcwd", "libc.so.6", "getcwd"),
+                ("isatty_stdin", "libc.so.6", "isatty"),
+                ("open_dev_null", "libc.so.6", "open"),
             ]
         );
     }

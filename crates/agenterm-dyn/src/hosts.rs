@@ -50,7 +50,7 @@ pub struct HostCell {
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates; only Linux is live in this leaf.
-    pub system_probes: [SystemProbe; 11],
+    pub system_probes: [SystemProbe; 13],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -76,7 +76,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 11] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 13] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -154,9 +154,23 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 11] = [
             symbol: "getcwd",
         },
     },
+    SystemProbe {
+        name: "isatty_stdin",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "isatty",
+        },
+    },
+    SystemProbe {
+        name: "open_dev_null",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "open",
+        },
+    },
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 11] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 13] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -199,6 +213,14 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 11] = [
     },
     SystemProbe {
         name: "getcwd",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "isatty_stdin",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "open_dev_null",
         status: SystemProbeStatus::Placeholder,
     },
 ];

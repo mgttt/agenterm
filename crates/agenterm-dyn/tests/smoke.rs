@@ -278,6 +278,48 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_isatty_stdin_reports_real_host_state() {
+        let probe = live_system_probe("isatty_stdin");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
+            .expect("isatty(0) dlcall");
+        let real = unsafe { libc::isatty(0) };
+        assert!(matches!(real, 0 | 1));
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_open_dev_null_is_not_tty_and_closes_fd() {
+        let probe = live_system_probe("open_dev_null");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let path = CString::new("/dev/null").expect("/dev/null path");
+        let mut env = Dyn::new();
+        env.bind("dev_null", path.as_ptr().cast_mut().cast())
+            .expect("bind /dev/null path");
+        let fd = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" dev_null "i32" {})"#,
+                libc::O_RDONLY
+            ))
+            .expect("open(/dev/null) dlcall")
+            .as_int()
+            .expect("open return code");
+        assert!(fd >= 0, "open(/dev/null) returned {fd}");
+
+        let isatty = env.eval(&format!(r#"(dlcall "{lib}" "isatty" "i32" "i32" {fd})"#));
+        let close = env.eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#));
+
+        assert_eq!(isatty.expect("isatty(/dev/null) dlcall"), Value::Int(0));
+        assert_eq!(close.expect("close(/dev/null) dlcall"), Value::Int(0));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
