@@ -28,6 +28,8 @@ jobs:
         run: rustup component add clippy
       - name: Build libagenterm ABI (abi-release)
         run: cargo build --locked -p agenterm-abi --profile abi-release
+      - name: Build Windows libagenterm installer task host
+        run: cargo build --locked -p agenterm --bin agenterm
       - name: Test libagenterm ABI (abi-dev)
         run: cargo test --locked -p agenterm-abi --profile abi-dev
       - name: C ABI evidence (toolchain + artifact sizes)
@@ -80,8 +82,6 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_identity -- --nocapture
-      - name: Build Windows libagenterm installer task host
-        run: cargo build --locked -p agenterm --bin agenterm
       - name: Install and consume from the installed tree (Windows, abi-release)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
