@@ -21,12 +21,13 @@ S-expression list language (`do` / `set` / `if`), and one native primitive
   into the root `agenterm` binary yet.
 - **Not** integrated with `agenterm-cu` / `agenterm-con` in this crate's
   initial landing.
+- **Not** integrated with `agenterm-platform` — that wiring is explicitly
+  deferred to a later milestone.
 
 ## Integration (deferred)
 
-Cross-arch logic aggregation and libagenterm wiring are explicitly **out of
-scope** until `agenterm-dyn` matures on its own. Future work may pile higher
-layers on top of this crate; that integration is a separate milestone.
+Cross-arch logic aggregation, libagenterm wiring, and `agenterm-platform`
+facades are **out of scope** until `agenterm-dyn` matures on its own.
 
 ## Public surface
 
@@ -36,6 +37,22 @@ layers on top of this crate; that integration is a separate milestone.
 | `Dyn::bind` | Hand an existing pointer/handle into the environment |
 | `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, `dlcall`) |
 | `dlcall` | Only native primitive — invoked from lists, not a verb table |
+| `hosts::*` | Six-cell host table (script data for native smoke / future packs) |
+
+## Six-cell host table
+
+`src/hosts.rs` records explicit rows for every `{linux, macos, windows} ×
+{x86_64, aarch64}` cell:
+
+| Cell | PID library | PID symbol | Size probe | Secondary probe |
+|------|-------------|------------|------------|-----------------|
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` | `time` |
+| windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` |
+
+All six rows compile as data on every host. `live_cell()` selects the row
+matching `cfg(target_os)` × `cfg(target_arch)`; the other five are
+placeholders for matrix completeness and future native smokes.
 
 ## Example
 
@@ -52,11 +69,29 @@ dyn_env.bind("ws", ws_ptr)?;
 dyn_env.eval(r#"(dlcall "libc.so.6" "ioctl" "i32" "i32" 0 "u64" 21523 "ptr" ws)"#)?;
 ```
 
-## Tests
+## Test suite
+
+Independent integration tests live under `crates/agenterm-dyn/tests/`:
+
+| File | Coverage |
+|------|----------|
+| `language.rs` | `intern`, `bind`, `do` / `set` / `if`, nested lists, truthiness |
+| `errors.rs` | Bad S-exprs, unknown vars/forms, arity, bad FFI types, missing lib/symbol |
+| `hosts.rs` | Six-cell matrix completeness, `live_cell()` selection, row well-formedness |
+| `smoke.rs` | Real `dlcall` into host libraries per OS (`#[cfg]`-gated) |
 
 ```bash
 cargo test -p agenterm-dyn
 ```
 
-Smoke tests prove `getpid`/`GetCurrentProcessId` via `dlcall` and, on Linux,
-that `ioctl(TIOCGWINSZ)` is actually invoked.
+**Linux** (CI): `getpid` + `getppid` cross-checked with libc and a second
+`dlcall`; `ioctl(TIOCGWINSZ)` on a 24×80 pty when `openpty` succeeds.
+
+**macOS** (local / CI when available): `getpid`, `time(NULL)`, optional
+`ioctl` on `/dev/tty`.
+
+**Windows** (local / CI when available): `GetCurrentProcessId`,
+`GetCurrentThreadId`.
+
+Non-live cells are never faked on the wrong OS — only data rows and
+compile-only gates.

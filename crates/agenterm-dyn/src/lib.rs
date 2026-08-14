@@ -3,12 +3,17 @@ use std::ffi::c_void;
 
 mod error;
 mod eval;
+mod hosts;
 mod native;
 mod parse;
 mod sym;
 mod value;
 
 pub use error::DynError;
+pub use hosts::{
+    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
+    SizeProbe, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
+};
 pub use sym::Symbol;
 pub use value::Value;
 
@@ -53,36 +58,5 @@ impl Dyn {
 impl Default for Dyn {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn intern_is_stable() {
-        let mut env = Dyn::new();
-        let a = env.intern("ioctl");
-        let b = env.intern("ioctl");
-        let c = env.intern("getpid");
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-    }
-
-    #[test]
-    fn set_and_lookup() {
-        let mut env = Dyn::new();
-        let v = env.eval("(do (set x 42) x)").expect("set/get should work");
-        assert_eq!(v, Value::Int(42));
-    }
-
-    #[test]
-    fn if_form() {
-        let mut env = Dyn::new();
-        let t = env.eval("(if 1 7 9)").expect("true branch");
-        let f = env.eval("(if 0 7 9)").expect("false branch");
-        assert_eq!(t, Value::Int(7));
-        assert_eq!(f, Value::Int(9));
     }
 }
