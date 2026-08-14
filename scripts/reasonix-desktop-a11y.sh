@@ -13,6 +13,9 @@
 # do not add an eval-helper caret path.
 # Text.GetText (cu get-text --name readback, wait --text-equals polling)
 # works on that textarea as well — do not add an eval-helper get-text path.
+# send-text --window without --name writes that same textarea once it
+# reports AT-SPI focused (innermost Text node); do not add a second
+# focused-write protocol.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1

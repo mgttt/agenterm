@@ -97,15 +97,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   through to XTest / `input_inject::type_text`. A miss or an ambiguous
   name writes nothing and fails typed, so a loop-until caller never
   sprays text at the wrong control.
-- [~] `send-text --window HANDLE` without `--name` writes that same
+- [x] `send-text --window HANDLE` without `--name` writes that same
   AT-SPI path on the showing focused node (innermost `Text.GetText`
   candidate — the same node `get-text --window HANDLE` reads). Never
   XTest / `input_inject::type_text` when `--window` is set. Proof is
   independent `get-text --window HANDLE` (no `--name`) equal to the
   typed string, not `send-text` `matched.text`. Chrome `GetTextField`
-  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name`.
-  Without `--window` it stays the plain "type into whatever is
-  focused" inject. Do not mark this leaf shipped on worker JSON.
+  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name`, and
+  Reasonix composer `Message Reasonix…` under
+  `scripts/reasonix-desktop-a11y.sh` (WebKit 2.52 has `Text` but not
+  `EditableText`; write is AT-SPI `Text` plus the eval-helper
+  set-value). Without `--window` it stays the plain "type into
+  whatever is focused" inject. Do not mark this leaf shipped on
+  worker JSON.
 - [x] `copy --window HANDLE --name PAT [--role ROLE]` copies AT-SPI
   `Text.GetText` (`agt_a11y_node_get_text`) from the unique showing named
   node onto the native clipboard (`agt_clipboard_set_text`) and reports

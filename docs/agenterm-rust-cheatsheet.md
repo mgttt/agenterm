@@ -1205,7 +1205,17 @@ is not that inject: it writes the same innermost focused Text node
 synthetic `--window` with no focused Text node typed-fails; it must
 not spray XTest. Chrome 151 still has no `EditableText`; the write is
 AT-SPI `Text` plus the existing renderer AX set-value over that
-Chrome's own `--remote-debugging-port`. `DISPLAY=:2` box-chrome
+Chrome's own `--remote-debugging-port`. The Reasonix composer
+(`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`) is the
+same verb: WebKit 2.52 has `Text` but never `EditableText`, so the
+write uses the eval-helper set-value (`id=composer-input`) and proof
+is independent `get-text --window` (no `--name`). Named `focus` on
+that textarea must not call unbounded Action `GetActions` /
+`DoAction` — those hang the same way click's `GetActions` does, and
+the outer 10s snapshot deadline then fires as `a11y_action_timeout`
+before `Component.grab_focus` runs. Bound the Action probe to
+`ACTION_TIMEOUT` (250ms), then `grab_focus`. `click --name` also
+sets the AT-SPI `focused` state if a caller already has that path. `DISPLAY=:2` box-chrome
 defaults to 9224, which standing `chrome-profile-2` already owns on
 `127.0.0.1` — a second window whose cmdline still says 9224 then
 writes the wrong CDP tree (`no writable node named …`). Launch the
@@ -1446,7 +1456,10 @@ Connect to the a11y bus only. Skip dests with no owner (a dead web
 process leaves a filler stub). WebKit `GetRoleName` is often empty —
 use `GetRole` (43 = button). Snapshot only Accessible name/role/state;
 `GetActions` / `proxies()` introspect hang per node and blow the 10s
-deadline. Named `click` invokes AT-SPI `DoAction(0)`.
+deadline. Named `click` invokes AT-SPI `DoAction(0)` only after a
+bounded `GetActions`; named `focus` must bound that same Action
+probe and then `Component.grab_focus`, or Reasonix composer
+`focus --name` times out before the textarea reports `focused`.
 
 Match a window to application roots by, in order: the window's
 `_NET_WM_PID`, descendant PIDs (`/proc/*/status` PPid), then exact
