@@ -49,4 +49,16 @@ impl Authorization {
     pub fn allows(&self, required: Grant) -> bool {
         self.grants.contains(&required)
     }
+
+    /// Reconstruct a `--grant` CLI value for remote workers (ssh transport).
+    pub fn grant_cli_arg(&self) -> String {
+        let mut parts = Vec::new();
+        if self.grants.contains(&Grant::Observe) {
+            parts.push("observe");
+        }
+        if self.grants.contains(&Grant::Actuate) {
+            parts.push("actuate");
+        }
+        parts.join(",")
+    }
 }

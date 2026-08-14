@@ -14,12 +14,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Target family
 
-- [ ] `current`, `ssh`, `rdp` and `vnc` are tiers of one family sharing one
+- [~] `current`, `ssh`, `rdp` and `vnc` are tiers of one family sharing one
   command set. `current` is the **local degenerate tier** — transport is
-  in-process — not a temporary prototype to be replaced later.
-- [ ] `current` ships first. Doing so is the cheapest way to pin the interface,
+  in-process — not a temporary prototype to be replaced later. `ssh` first cut
+  is OpenSSH `ssh` exec of a remote `agenterm-cu --target current` worker
+  (`--ssh <user@host>`; same verbs; no new verb). `rdp` / `vnc` remain planned.
+- [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it.
+  commands above it. `ssh` first evidence reuses the #47 con-publish
+  `wait --text-contains` / `get-text` circuit over loopback `sshd` against a
+  second `agenterm-con` (never steal the resident control socket).
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -417,6 +421,13 @@ Canonical host mapping (approved product vocabulary):
 
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
+- [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
+  runs remote `agenterm-cu --target current`; seed a unique string on a second
+  `agenterm-con` `Command` field, then host `wait --text-contains` /
+  `get-text --name Command` equals that seed via AT-SPI GetText (never
+  screenshot / `--coords`). Worker JSON does not count; CEO owns the official
+  gate. Auth failure and missing destination are typed (`ssh_unavailable` /
+  `ssh_transport_failed` / `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
   actuation, audited degraded coordinate click, invalid node path failure, and

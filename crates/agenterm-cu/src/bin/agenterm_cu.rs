@@ -2,7 +2,11 @@
 //!
 //! Machine-readable JSON on stdout; human usage on stderr.
 
-use agenterm_cu::{Authorization, Command, Executor, PointerButton, TargetRef, WaitCondition};
+use std::path::PathBuf;
+
+use agenterm_cu::{
+    Authorization, Command, Executor, PointerButton, SshEndpoint, TargetRef, WaitCondition,
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -32,12 +36,13 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         return help_reply(true);
     }
 
-    if args[0] == "exec" {
-        return dispatch_json(&args[1..]);
-    }
-
     let mut grant: Option<String> = None;
     let mut target: Option<TargetRef> = None;
+    let mut ssh_dest: Option<String> = None;
+    let mut ssh_port: Option<u16> = None;
+    let mut ssh_identity: Option<PathBuf> = None;
+    let mut ssh_cu: Option<PathBuf> = None;
+    let mut ssh_env: Vec<(String, String)> = Vec::new();
     while let Some(flag) = args.first() {
         match flag.as_str() {
             "--target" => {
@@ -47,8 +52,49 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                     None
                 });
                 if target.is_none() {
-                    return usage_err("unknown --target value; only 'current' is supported");
+                    return usage_err("unknown --target value; supported: 'current' and 'ssh'");
                 }
+            }
+            "--ssh" => {
+                let value = take_value(&mut args, "--ssh");
+                if value.is_empty() {
+                    return usage_err("--ssh requires <user@host>");
+                }
+                ssh_dest = Some(value);
+                if target.is_none() {
+                    target = Some(TargetRef::Ssh);
+                }
+            }
+            "--ssh-port" => {
+                let value = take_value(&mut args, "--ssh-port");
+                match value.parse::<u16>() {
+                    Ok(port) => ssh_port = Some(port),
+                    Err(_) => return usage_err("--ssh-port requires a TCP port number"),
+                }
+            }
+            "--ssh-identity" => {
+                let value = take_value(&mut args, "--ssh-identity");
+                if value.is_empty() {
+                    return usage_err("--ssh-identity requires a private-key path");
+                }
+                ssh_identity = Some(PathBuf::from(value));
+            }
+            "--ssh-cu" => {
+                let value = take_value(&mut args, "--ssh-cu");
+                if value.is_empty() {
+                    return usage_err("--ssh-cu requires a remote agenterm-cu path");
+                }
+                ssh_cu = Some(PathBuf::from(value));
+            }
+            "--ssh-env" => {
+                let value = take_value(&mut args, "--ssh-env");
+                let Some((key, val)) = value.split_once('=') else {
+                    return usage_err("--ssh-env requires KEY=VAL");
+                };
+                if key.is_empty() {
+                    return usage_err("--ssh-env requires a non-empty KEY");
+                }
+                ssh_env.push((key.to_owned(), val.to_owned()));
             }
             "--grant" => {
                 grant = Some(take_value(&mut args, "--grant"));
@@ -60,10 +106,43 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         }
     }
 
+    // Allow global flags before `exec` so remote workers can be invoked as
+    // `agenterm-cu --grant observe exec --json -` as well as `exec` first.
+    if args.first().map(String::as_str) == Some("exec") {
+        let mut exec_args: Vec<String> = Vec::new();
+        if let Some(raw) = grant.as_ref() {
+            exec_args.push(format!("--grant={raw}"));
+        }
+        exec_args.extend(args.into_iter().skip(1));
+        return dispatch_json(&exec_args);
+    }
+
+    if target.is_none()
+        && let Ok(dest) = std::env::var("AGENTERM_CU_SSH")
+        && !dest.is_empty()
+    {
+        ssh_dest = Some(dest);
+        target = Some(TargetRef::Ssh);
+    }
+
     let Some(target) = target else {
         eprint_usage();
-        return usage_err("--target is required on every command");
+        return usage_err("--target current or --ssh <user@host> is required on every command");
     };
+
+    if target == TargetRef::Current && ssh_dest.is_some() {
+        return usage_err("--ssh cannot be combined with --target current");
+    }
+    if target == TargetRef::Ssh
+        && ssh_dest.is_none()
+        && let Ok(dest) = std::env::var("AGENTERM_CU_SSH")
+        && !dest.is_empty()
+    {
+        ssh_dest = Some(dest);
+    }
+    if target == TargetRef::Ssh && ssh_dest.is_none() {
+        return usage_err("ssh target requires --ssh <user@host> (or AGENTERM_CU_SSH)");
+    }
 
     let Some(verb) = args.first().cloned() else {
         eprint_usage();
@@ -432,23 +511,80 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     };
 
     let auth = Authorization::from_cli_and_env(grant.as_deref());
-    Executor::new(auth).execute(&command)
+    let mut executor = Executor::new(auth);
+    if target == TargetRef::Ssh {
+        let dest = ssh_dest.expect("ssh destination checked above");
+        match SshEndpoint::from_parts(dest, ssh_port, ssh_identity, ssh_cu, ssh_env) {
+            Ok(endpoint) => executor = executor.with_ssh(endpoint),
+            Err(error) => {
+                return agenterm_cu::CuReply {
+                    ok: false,
+                    target: "ssh".into(),
+                    command: "usage".into(),
+                    data: None,
+                    error: Some(error),
+                };
+            }
+        }
+    }
+    executor.execute(&command)
 }
 
 fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
     let mut grant: Option<String> = None;
     let mut payload = None;
-    for arg in args {
+    let mut read_stdin = false;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
         if let Some(value) = arg.strip_prefix("--grant=") {
             grant = Some(value.to_owned());
+            i += 1;
+        } else if arg == "--grant" {
+            i += 1;
+            if let Some(value) = args.get(i) {
+                grant = Some(value.clone());
+                i += 1;
+            }
         } else if arg == "--json" {
-            continue;
+            i += 1;
+            if let Some(value) = args.get(i) {
+                if value == "-" {
+                    read_stdin = true;
+                } else {
+                    payload = Some(value.clone());
+                }
+                i += 1;
+            } else {
+                read_stdin = true;
+            }
+        } else if arg == "--json-stdin" || arg == "-" {
+            read_stdin = true;
+            i += 1;
         } else if payload.is_none() {
-            payload = Some(arg.clone());
+            if arg == "-" {
+                read_stdin = true;
+            } else {
+                payload = Some(arg.clone());
+            }
+            i += 1;
+        } else {
+            i += 1;
         }
     }
-    let Some(raw) = payload else {
-        return usage_err("exec requires a JSON command payload argument");
+    let raw = if read_stdin {
+        let mut buf = String::new();
+        if let Err(error) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf) {
+            return usage_err(format!("could not read JSON command from stdin: {error}"));
+        }
+        buf
+    } else {
+        let Some(raw) = payload else {
+            return usage_err(
+                "exec requires a JSON command payload argument, --json '-', or --json-stdin",
+            );
+        };
+        raw
     };
     let command: Command = match serde_json::from_str(&raw) {
         Ok(command) => command,
@@ -536,14 +672,26 @@ fn run_x11_clipboard_owner() -> i32 {
 
 fn eprint_usage() {
     eprintln!(
-        r#"usage: agenterm-cu --target <current> [--grant observe,actuate] <command> [args...]
+        r#"usage: agenterm-cu --target <current|ssh> [--grant observe,actuate] <command> [args...]
+       agenterm-cu --ssh <user@host> [--ssh-port N] [--ssh-identity PATH] [--ssh-cu PATH]
+                   [--ssh-env KEY=VAL]... [--grant observe,actuate] <command> [args...]
        agenterm-cu exec [--grant observe,actuate] --json '<command-json>'
+       agenterm-cu exec [--grant observe,actuate] --json -   # JSON command on stdin
        agenterm-cu host                        desktop menu and global shortcuts
        agenterm-cu hotkeys                     compatibility alias for host
 
 Global:
-  --target current          explicit target reference (required)
+  --target current|ssh      explicit target reference (required unless --ssh)
+  --ssh <user@host>         ssh target destination (implies --target ssh)
+  --ssh-port N              OpenSSH -p (or AGENTERM_CU_SSH_PORT)
+  --ssh-identity PATH       OpenSSH -i (or AGENTERM_CU_SSH_IDENTITY)
+  --ssh-cu PATH             remote agenterm-cu path (or AGENTERM_CU_SSH_CU; default: this exe)
+  --ssh-env KEY=VAL         remote env for the worker (repeatable; also AGENTERM_CU_SSH_ENV)
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
+
+  ssh transport runs the same verbs on a remote agenterm-cu --target current
+  worker over OpenSSH stdio (no new verb). First evidence: loopback sshd +
+  second agenterm-con, host wait --text-contains / get-text equals a unique seed.
 
 Commands:
   capabilities
