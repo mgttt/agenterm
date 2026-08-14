@@ -101,6 +101,8 @@ without wiring dyn into cu, platform, or the ABI:
 
 - [current PID](examples/getpid.md)
 - [current user ID via `getuid`](examples/getuid.md)
+- [effective user ID via `geteuid`](examples/geteuid.md)
+- [effective group ID via `getegid`](examples/getegid.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
 - [terminal window size via `ioctl`](examples/ioctl-window-size.md)
 - [`DISPLAY` via `getenv`](examples/getenv-display.md)
