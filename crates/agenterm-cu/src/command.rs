@@ -94,9 +94,12 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
-    /// Write clipboard text into the unique showing named field via native
-    /// AT-SPI `EditableText` / `Text`. `--text` only seeds the clipboard;
-    /// the field write always reads the clipboard. Never XTest / `--coords`.
+    /// Write clipboard text via native AT-SPI `EditableText` / `Text`.
+    /// With `--name`, the unique showing named field. With `--window` and
+    /// no `--name`, the showing focused node (same innermost Text
+    /// candidate as `GetText` without `--name`). `--text` only seeds the
+    /// clipboard; the field write always reads the clipboard. Never XTest
+    /// / `--coords` when `--window` is set.
     Paste {
         target: TargetRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]

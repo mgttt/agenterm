@@ -1248,17 +1248,23 @@ dash is eaten as a flag.
 `agenterm-cu paste --name` is the clipboard form of that write. Resolve the unique
 showing node, optionally seed the clipboard with `--text`
 (`agt_clipboard_set_text`), then always read `agt_clipboard_get_text` and
-write through the same AT-SPI `EditableText` / `Text` path. `--name` is
-required. Do not implement paste as Ctrl+V, XTest, `--coords`, or a
-screenshot. A named showing node with no writeable text interface
-typed-fails (`a11y_text_unavailable`). `matched.text` is still the
-resolve-time snapshot. Linux X11 seed is a native CLIPBOARD
-`SetSelectionOwner` in `adapters/linux/x11_clipboard.rs`, not `xclip` /
-`xsel`. A missing helper is not `clipboard-unavailable` when `DISPLAY`
-is set. Do not drop a one-off `/tmp/xclip` binary to unblock
-`paste --text`. WebKit/Reasonix still uses the eval-helper set-value
-path; `wait --text-equals` must see `GetText ==` the clipboard/typed
-string.
+write through the same AT-SPI `EditableText` / `Text` path. Do not
+implement paste as Ctrl+V, XTest, `--coords`, or a screenshot. A named
+showing node with no writeable text interface typed-fails
+(`a11y_text_unavailable`). `matched.text` is still the resolve-time
+snapshot. Linux X11 seed is a native CLIPBOARD `SetSelectionOwner` in
+`adapters/linux/x11_clipboard.rs`, not `xclip` / `xsel`. A missing helper
+is not `clipboard-unavailable` when `DISPLAY` is set. Do not drop a
+one-off `/tmp/xclip` binary to unblock `paste --text`. WebKit/Reasonix
+still uses the eval-helper set-value path; `wait --text-equals` must see
+`GetText ==` the clipboard/typed string.
+
+`paste --window HANDLE` without `--name` writes that same clipboard path
+on the showing focused node — the same innermost `Text.GetText` candidate
+`get-text --window` reads. Never XTest when `--window` is set. Proof is
+independent `get-text --window HANDLE` (no `--name`) equal to the
+clipboard string after `focus --name` (Chrome `GetTextField`, Reasonix
+composer, con `Command`). Without `--window` paste is invalid.
 
 `agenterm-cu copy --name` is the inverse read. Resolve the unique showing node,
 read AT-SPI `Text.GetText` (`agt_a11y_node_get_text`), and publish that

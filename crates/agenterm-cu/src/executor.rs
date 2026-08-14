@@ -438,29 +438,42 @@ fn copy(
 /// named `send-text`. `--text` only seeds the clipboard; the field write
 /// always reads `agt_clipboard_get_text` first. A named showing node with
 /// no writeable text interface typed-fails (`a11y_text_unavailable`) and
-/// never falls through to XTest / `--coords` / screenshot. `--name` is
-/// required: there is no "paste into whatever is focused" verb. A miss or
-/// an ambiguous name writes nothing. `matched.text` is the resolve-time
-/// snapshot; `wait --text-equals` must poll `Text.GetText` independently.
+/// never falls through to XTest / `--coords` / screenshot.
+///
+/// `--window` without `--name` writes that same clipboard path on the
+/// showing focused node — the same innermost `Text.GetText` candidate
+/// `get-text --window` reads — so `focus --name X` then
+/// `paste --window H` (optional `--text` seed) then
+/// `get-text --window H` closes the loop on Chrome `GetTextField`,
+/// Reasonix composer, and agenterm-con `Command`. Never XTest when
+/// `--window` is set. Without `--window` paste is invalid: there is no
+/// plain "paste into whatever is focused" inject verb. A miss or an
+/// ambiguous name writes nothing. `matched.text` is the resolve-time
+/// snapshot; independent `get-text --window` / `wait --text-equals` must
+/// poll `Text.GetText`.
 fn paste(
     seed: Option<&str>,
     window: Option<isize>,
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
-    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
-        CuError::new(
-            "invalid_input",
-            "paste requires --window <handle> --name <pattern>",
-        )
-    })?;
     let resolved =
-        resolve_actuation_node(window, None, Some(name), role, "paste")?.ok_or_else(|| {
-            CuError::new(
+        if let Some(resolved) = resolve_actuation_node(window, None, name, role, "paste")? {
+            resolved
+        } else if role.filter(|value| !value.is_empty()).is_some() {
+            return Err(CuError::new(
                 "invalid_input",
-                "paste requires --window <handle> --name <pattern>",
-            )
-        })?;
+                "paste --role requires --name <pattern>",
+            ));
+        } else if window.is_some() {
+            let (resolved, _current) = get_text_focused(window)?;
+            resolved
+        } else {
+            return Err(CuError::new(
+                "invalid_input",
+                "paste requires --window <handle> [--name <pattern>]",
+            ));
+        };
     if let Some(seed) = seed {
         mechanism::clipboard::set_text(seed).map_err(map_mechanism_err)?;
     }
@@ -2191,13 +2204,41 @@ mod tests {
     }
 
     #[test]
-    fn name_paste_requires_name() {
+    fn focused_paste_without_live_focus_fails_typed() {
+        // --window without --name is focused paste, not a missing-name usage
+        // error. Without a real tree/focus it typed-fails on the a11y path.
         let command = Command::Paste {
             target: TargetRef::Current,
             text: Some("hello".into()),
             window: Some(1),
             name: None,
             role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(
+                code,
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_text_unavailable"
+                    | "a11y_backend_failed"
+                    | "dylib_load"
+                    | "unsupported"
+            ),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn paste_role_requires_name() {
+        let command = Command::Paste {
+            target: TargetRef::Current,
+            text: Some("hello".into()),
+            window: Some(1),
+            name: None,
+            role: Some("entry".into()),
         };
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);

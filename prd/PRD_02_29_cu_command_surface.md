@@ -130,14 +130,25 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and reports `addressing=accessibility-tree`. `--text` only seeds the
   clipboard (`agt_clipboard_set_text`); the field write always reads
   `agt_clipboard_get_text`. On Linux X11, `--text` seeds CLIPBOARD
-  through the native selection owner (not `xclip`). `--name` is required.
-  A named showing node with no writeable text interface typed-fails
-  (`a11y_text_unavailable`) and never falls through to XTest / `--coords`
-  / screenshot. A miss or an ambiguous name writes nothing. Close the
-  circuit with `wait --text-equals`; `paste` `matched.text` does not
-  count. Live Reasonix composer (`Message Reasonix…`) uses the same
-  WebKit eval-helper set-value path as named `send-text`. A prior
-  `copy --name` may seed the clipboard instead of `--text`.
+  through the native selection owner (not `xclip`). A named showing node
+  with no writeable text interface typed-fails (`a11y_text_unavailable`)
+  and never falls through to XTest / `--coords` / screenshot. A miss or
+  an ambiguous name writes nothing. Close the circuit with
+  `wait --text-equals`; `paste` `matched.text` does not count. Live
+  Reasonix composer (`Message Reasonix…`) uses the same WebKit
+  eval-helper set-value path as named `send-text`. A prior `copy --name`
+  may seed the clipboard instead of `--text`.
+- [x] `paste --window HANDLE` without `--name` writes that same clipboard
+  path on the showing focused node (innermost `Text.GetText` candidate —
+  the same node `get-text --window HANDLE` reads). Never XTest /
+  `--coords` / screenshot when `--window` is set. Proof is independent
+  `get-text --window HANDLE` (no `--name`) equal to the clipboard string,
+  not `paste` `matched.text`. Live hosts: Chrome `GetTextField`
+  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name` (optional
+  `--text` seeds CLIPBOARD); Reasonix composer and agenterm-con `Command`
+  share the same focused write path as focused `send-text`. Without
+  `--window` paste is invalid (no plain inject paste). Do not mark this
+  leaf shipped on worker JSON.
 - [x] `send-keys` accepts that same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). Named chords go through
   native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`) and
