@@ -1387,6 +1387,23 @@ closes the socket under those events and the next named command sees
 `tree --window` still reporting 100+ Chrome nodes on a live `DISPLAY`
 host; unit tests must not require that bus.
 
+## Honor `AT_SPI_BUS`; strip `GetAddress` guids
+
+Host live gates set `AT_SPI_BUS=unix:path=$XDG_RUNTIME_DIR/at-spi/bus_N`.
+cu used to ignore that name and call `org.a11y.Bus.GetAddress`, which
+returns the same path plus `,guid=…`. Later `dbus-daemon` /
+`at-spi-bus-launcher` processes can reuse that unix path without being
+killable; the guid then names a dead owner, `select_roots` is empty, and
+`tree --window` synthesizes a one-node X11 `frame` (`tree_n=1`) that is
+not Chrome's renderer. Prefer `AT_SPI_BUS_ADDRESS` then `AT_SPI_BUS`,
+connect to the path without the guid, and skip the session-bus hop when
+either env is set. `scripts/box-chrome-a11y.sh` must also export
+`AT_SPI_BUS_ADDRESS` and write `$XDG_RUNTIME_DIR/at-spi/bus` after
+box-chrome rewrites XDG to `/tmp/xdg-runtime-box-$DISPLAY` — atk-bridge
+looks for the file named `bus`, not `bus_2`. Do not pkill at-spi to
+"fix" a shared socket. Unit-test the address normalizer on synthetic
+strings; do not require a live registry.
+
 ## Window matching is more than `_NET_WM_PID`
 
 Linux `tree --window` must not treat D-Bus connection PID equality as the

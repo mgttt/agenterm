@@ -270,6 +270,14 @@ Canonical host mapping (approved product vocabulary):
   `<textarea>` (no `A11YGETTEXT1` eval helper). Linux `agenterm-con`
   composer `Command` publishes real `Text.GetText` (same verb, no
   ABI change).
+- [~] `get-text --window HANDLE` without `--name` uses that same
+  GetText authority on the showing focused node (innermost Text
+  candidate). Linux connect prefers `AT_SPI_BUS_ADDRESS` then
+  `AT_SPI_BUS`, strips a `GetAddress` `,guid=` suffix, and only then
+  asks `org.a11y.Bus`. `scripts/box-chrome-a11y.sh` writes the
+  standard `$XDG_RUNTIME_DIR/at-spi/bus` file after box-chrome's
+  XDG rewrite so the renderer joins that same host socket. A
+  one-node synthetic X11 `frame` is not a Chrome document tree.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

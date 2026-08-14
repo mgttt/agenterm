@@ -225,6 +225,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `scripts/reasonix-desktop-a11y.sh` (WebKit 2.52 exposes `Text` on
   the composer `<textarea>` — no eval-helper get-text glue, unlike
   `ScrollTo` / EditableText helpers).
+- [~] `get-text --window HANDLE` without `--name` reads the showing
+  focused node (innermost `Text.GetText` candidate) and reports
+  `via=gettext`. con and Reasonix already close that loop. Chrome
+  `GetTextField` still needs the renderer on the same host AT-SPI bus
+  the observer uses (`AT_SPI_BUS` / `AT_SPI_BUS_ADDRESS`, not a
+  `GetAddress` `,guid=` owner). Do not mark this leaf shipped on
+  worker JSON.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
