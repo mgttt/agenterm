@@ -480,7 +480,7 @@ agt_status agt_a11y_node_send_keys(intptr_t window_handle, const char* node_id,
 /* One-shot AT-SPI Component.ScrollTo(TopEdge) on `node_id` (NUL-terminated
  * UTF-8 child-index path). `window_handle` uses the same filter as
  * agt_a11y_tree_snapshot. ScrollTo returning false, missing, or
- * UnknownMethod → AGT_FAILED{code="a11y_scroll_unavailable"}. Never
+ * UnknownMethod -> AGT_FAILED{code="a11y_scroll_unavailable"}. Never
  * Action scroll*, XTest wheel, or GenerateMouseEvent. The bool is not
  * geometric proof; callers observe via agt_a11y_node_get_extents. */
 agt_status agt_a11y_node_scroll(intptr_t window_handle, const char* node_id);
@@ -488,8 +488,8 @@ agt_status agt_a11y_node_scroll(intptr_t window_handle, const char* node_id);
 /* Independent AT-SPI Component.GetExtents(Screen) for `node_id`.
  * Not a tree-snapshot bounds field (those stay 0,0,0,0). Single-node
  * call; never filled during a tree walk. NULL node_id or any NULL out
- * pointer → AGT_FAILED{code="bad_pointer"}. Empty extents (w/h <= 0)
- * or a failed GetExtents → AGT_FAILED{code="a11y_extents_unavailable"}. */
+ * pointer -> AGT_FAILED{code="bad_pointer"}. Empty extents (w/h <= 0)
+ * or a failed GetExtents -> AGT_FAILED{code="a11y_extents_unavailable"}. */
 agt_status agt_a11y_node_get_extents(intptr_t window_handle, const char* node_id,
                                      int32_t* out_x, int32_t* out_y,
                                      int32_t* out_width, int32_t* out_height);
