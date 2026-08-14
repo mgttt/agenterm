@@ -444,15 +444,16 @@ fn copy(
 /// showing focused node — the same innermost `Text.GetText` candidate
 /// `get-text --window` reads — so `focus --name X` then
 /// `paste --window H` (optional `--text` seed) then
-/// `get-text --window H` closes the loop on Chrome `GetTextField`,
-/// the Reasonix composer (`Message Reasonix…` under
+/// `get-text --window H` closes the loop on agenterm-con `Command`
+/// (native `EditableText`, `via=editable-text` on a second con that
+/// never steals the resident control socket), Chrome `GetTextField`,
+/// and the Reasonix composer (`Message Reasonix…` under
 /// `scripts/reasonix-desktop-a11y.sh`, eval-helper set-value,
-/// `via=text`), and agenterm-con `Command` (`via=editable-text`). Never
-/// XTest when `--window` is set. Without `--window` paste is invalid:
-/// there is no plain "paste into whatever is focused" inject verb. A
-/// miss or an ambiguous name writes nothing. `matched.text` is the
-/// resolve-time snapshot; independent `get-text --window` /
-/// `wait --text-equals` must poll `Text.GetText`.
+/// `via=text`). Never XTest when `--window` is set. Without `--window`
+/// paste is invalid: there is no plain "paste into whatever is focused"
+/// inject verb. A miss or an ambiguous name writes nothing.
+/// `matched.text` is the resolve-time snapshot; independent
+/// `get-text --window` / `wait --text-equals` must poll `Text.GetText`.
 fn paste(
     seed: Option<&str>,
     window: Option<isize>,

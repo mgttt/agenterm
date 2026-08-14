@@ -143,14 +143,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   the same node `get-text --window HANDLE` reads). Never XTest /
   `--coords` / screenshot when `--window` is set. Proof is independent
   `get-text --window HANDLE` (no `--name`) equal to the clipboard string,
-  not `paste` `matched.text`. Live hosts: Chrome `GetTextField`
-  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name` (optional
-  `--text` seeds CLIPBOARD); Reasonix composer `Message Reasonix…` after
-  `focus --name` under `scripts/reasonix-desktop-a11y.sh` (eval-helper
-  set-value, `via=text`, same as focused `send-text`); agenterm-con
-  `Command` after `focus --name` (`via=editable-text`). Without
-  `--window` paste is invalid (no plain inject paste). Do not mark this
-  leaf shipped on worker JSON.
+  not `paste` `matched.text`. Live hosts: agenterm-con named `Command`
+  (native `EditableText`, `via=editable-text` on a second con that never
+  steals the resident control socket; optional `--text` seeds CLIPBOARD);
+  Chrome `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`) after
+  `focus --name` (optional `--text` seeds CLIPBOARD); Reasonix composer
+  `Message Reasonix…` after `focus --name` under
+  `scripts/reasonix-desktop-a11y.sh` (eval-helper set-value, `via=text`,
+  same as focused `send-text`). Without `--window` paste is invalid (no
+  plain inject paste). Do not mark this leaf shipped on worker JSON.
 - [x] `send-keys` accepts that same name addressing (`--window` + `--name` +
   optional `--role`, with `--` ending flag parsing). Named chords go through
   native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`) and
