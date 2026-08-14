@@ -135,6 +135,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   not this condition.
   Never screenshot, XTest, or `--coords`. Live evidence includes Chrome
   `FixtureField` and the Reasonix composer (`Message Reasonix…`).
+- [x] `wait --window HANDLE --name PAT [--role ROLE] --text-contains SUB`
+  (alias `--node-text-contains`) polls that same independent
+  `Text.GetText` until it contains `SUB`. Success publishes `via=gettext`
+  and the full GetText (not only the substring). `send-text` / `paste` /
+  `copy` `matched.text` do not count. Timeout is typed `timeout` and
+  reports the last GetText. Never screenshot, XTest, or `--coords`.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
@@ -147,7 +153,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [~] every state transition a caller must observe is waitable with a bounded
   typed timeout. No documented workflow depends on a fixed sleep. Named
-  `send-text` / `paste` / `copy` is waitable with `--text-equals` / `--node-text-equals`.
+  `send-text` / `paste` / `copy` is waitable with `--text-equals` /
+  `--node-text-equals` / `--text-contains` / `--node-text-contains`.
 - [ ] a wait failure reports what was observed at the deadline, not only that
   the deadline passed.
 - [ ] requests, responses, enumerations and transfers are size and time bounded.
