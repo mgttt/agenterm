@@ -1342,16 +1342,18 @@ It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
 OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
 desktop work still happens on the remote side (AT-SPI via that worker's
-libagenterm). First write evidence is loopback `sshd` plus a second
-`agenterm-con` on a unique control socket: host `send-text --name Command`
-(or `paste`) plants a unique seed, then host `get-text` equals that seed.
-Do not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident
-avatar PIDs. Auth / connect failures are typed (`ssh_unavailable` /
-`ssh_transport_failed`); missing `--ssh` on `--target ssh` is
-`invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` / `AGENTERM_ABI_LIB` via
-`--ssh-env` or host env (defaults copy common desktop keys when they have
-no whitespace). Do not implement ssh as D-Bus port-forward or a second
-control protocol in this cut.
+libagenterm). Paste write evidence is loopback `sshd` plus a second
+`agenterm-con` on a unique control socket: host `paste --name Command --text
+SEED` plants a unique seed via remote native clipboard + AT-SPI EditableText,
+then host `get-text` equals that seed. The seed rides in the remote command
+JSON (ssh stdin), not the host clipboard and not a local `--target current`
+write. `send-text` over ssh remains valid (3.18). Do not steal
+`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs. Auth /
+connect failures are typed (`ssh_unavailable` / `ssh_transport_failed`);
+missing `--ssh` on `--target ssh` is `invalid_input`. Forward `DISPLAY` /
+`AT_SPI_BUS` / `AGENTERM_ABI_LIB` via `--ssh-env` or host env (defaults copy
+common desktop keys when they have no whitespace). Do not implement ssh as
+D-Bus port-forward or a second control protocol in this cut.
 
 `cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
 (`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.
