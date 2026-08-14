@@ -138,17 +138,19 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). Paste write evidence is a **gate-owned** loopback
-`x11vnc` plus a second `agenterm-con` with a unique title (never steal
+env or `--vnc-env`). Copy evidence is a **gate-owned** loopback `x11vnc`
+plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
-as the only proof): host `paste --window HANDLE --name Command --text SEED`
-plants the seed via session native clipboard + AT-SPI EditableText, then
-host independent `get-text --window HANDLE --name Command` equals that seed
-(`via=gettext`; never screenshot / `--coords` / RFB framebuffer OCR). The
-seed must travel over vnc paste (JSON to the session worker), not a local
-`--target current` write or host-only clipboard. `send-text` over vnc and
-observe-only `windows` / `get-text` / `wait` remain valid too. Connect /
-protocol failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
+as the only proof): seed already on `Command` (or planted over vnc
+`paste --text` / `send-text`), host `copy --window HANDLE --name Command`
+publishes session GetText onto the **session** native CLIPBOARD
+(`via=gettext`), then host clear/overwrite + `paste --window HANDLE --name
+Command` (no `--text`) + independent `get-text --window HANDLE --name
+Command` equals that seed via session clipboard + AT-SPI EditableText /
+GetText (never screenshot / `--coords` / RFB framebuffer OCR, never the
+host clipboard). `paste --text` and `send-text` over vnc and observe-only
+`windows` / `get-text` / `wait` remain valid too. Connect / protocol
+failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
 `vnc_auth_failed`).
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
@@ -163,10 +165,14 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Paste path: host paste --text plants the seed; host get-text equals it.
-agenterm-cu --vnc 127.0.0.1:5933 --grant observe,actuate \
+# Copy path: seed on Command → host copy → clear → paste (no --text) → get-text == seed.
+agenterm-cu --vnc 127.0.0.1:5934 --grant observe,actuate \
   paste --window HANDLE --name Command --text SEED
-agenterm-cu --vnc 127.0.0.1:5933 --grant observe \
+agenterm-cu --vnc 127.0.0.1:5934 --grant observe,actuate \
+  copy --window HANDLE --name Command
+agenterm-cu --vnc 127.0.0.1:5934 --grant observe,actuate \
+  paste --window HANDLE --name Command
+agenterm-cu --vnc 127.0.0.1:5934 --grant observe \
   get-text --window HANDLE --name Command
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
