@@ -42,7 +42,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 6
+#define AGT_ABI_MINOR 7
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -476,6 +476,23 @@ agt_status agt_a11y_node_get_text(intptr_t window_handle, const char* node_id,
  * AGT_FAILED{code="a11y_key_unavailable"}. Never injects XTest. */
 agt_status agt_a11y_node_send_keys(intptr_t window_handle, const char* node_id,
                                    const uint8_t* keys, size_t len);
+
+/* One-shot AT-SPI Component.ScrollTo(TopEdge) on `node_id` (NUL-terminated
+ * UTF-8 child-index path). `window_handle` uses the same filter as
+ * agt_a11y_tree_snapshot. ScrollTo returning false, missing, or
+ * UnknownMethod → AGT_FAILED{code="a11y_scroll_unavailable"}. Never
+ * Action scroll*, XTest wheel, or GenerateMouseEvent. The bool is not
+ * geometric proof; callers observe via agt_a11y_node_get_extents. */
+agt_status agt_a11y_node_scroll(intptr_t window_handle, const char* node_id);
+
+/* Independent AT-SPI Component.GetExtents(Screen) for `node_id`.
+ * Not a tree-snapshot bounds field (those stay 0,0,0,0). Single-node
+ * call; never filled during a tree walk. NULL node_id or any NULL out
+ * pointer → AGT_FAILED{code="bad_pointer"}. Empty extents (w/h <= 0)
+ * or a failed GetExtents → AGT_FAILED{code="a11y_extents_unavailable"}. */
+agt_status agt_a11y_node_get_extents(intptr_t window_handle, const char* node_id,
+                                     int32_t* out_x, int32_t* out_y,
+                                     int32_t* out_width, int32_t* out_height);
 
 /* Drain the accessibility event bus. No side effects on user-visible state;
  * has no failure path and returns AGT_OK when the mechanism is present.

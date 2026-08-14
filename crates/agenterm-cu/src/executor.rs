@@ -129,6 +129,12 @@ impl Executor {
                 role,
                 ..
             } => send_keys(keys, *window, name.as_deref(), role.as_deref()),
+            Command::Scroll {
+                window, name, role, ..
+            } => scroll(*window, name.as_deref(), role.as_deref()),
+            Command::GetExtents {
+                window, name, role, ..
+            } => get_extents(*window, name.as_deref(), role.as_deref()),
             Command::Wait {
                 timeout_ms,
                 condition,
@@ -448,6 +454,83 @@ fn send_keys(
         "action": "send-keys",
         "keys": keys,
         "via": "device-event",
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
+/// (`agt_a11y_node_scroll`). Missing / false / `UnknownMethod` typed-fails
+/// (`a11y_scroll_unavailable`). Never Action `scroll*`, XTest wheel,
+/// `GenerateMouseEvent`, or `--coords`. `matched.extents` / snapshot
+/// bounds do not count as proof.
+fn scroll(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "scroll requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved =
+        resolve_actuation_node(window, None, Some(name), role, "scroll")?.ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "scroll requires --window <handle> --name <pattern>",
+            )
+        })?;
+    mechanism::scroll_node(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "scroll",
+        "via": "scroll-to",
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `get-extents --name` reads independent AT-SPI `Component.GetExtents(Screen)`
+/// (`agt_a11y_node_get_extents`). Snapshot `node.bounds` do not count.
+/// Empty extents typed-fail (`a11y_extents_unavailable`).
+fn get_extents(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "get-extents requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved = resolve_actuation_node(window, None, Some(name), role, "get-extents")?
+        .ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "get-extents requires --window <handle> --name <pattern>",
+            )
+        })?;
+    let extents =
+        mechanism::get_node_extents(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "get-extents",
+        "via": "get-extents",
+        "extents": {
+            "x": extents.x,
+            "y": extents.y,
+            "width": extents.width,
+            "height": extents.height,
+        },
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -1267,6 +1350,10 @@ mod tests {
         ))
     }
 
+    fn observe_executor() -> Executor {
+        Executor::new(Authorization::new([Grant::Observe].into_iter().collect()))
+    }
+
     #[test]
     fn name_click_requires_window() {
         let command = Command::Click {
@@ -1642,5 +1729,126 @@ mod tests {
         let err = require_unique_showing_node(&nodes, "Address and search bar", None).unwrap_err();
         assert_eq!(err.code, "a11y_node_ambiguous");
         assert_eq!(err.count, Some(2));
+    }
+
+    #[test]
+    fn name_scroll_requires_name() {
+        let command = Command::Scroll {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_scroll_requires_window() {
+        let command = Command::Scroll {
+            target: TargetRef::Current,
+            window: None,
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_scroll_missing_node_is_typed_and_scrolls_nothing() {
+        let command = Command::Scroll {
+            target: TargetRef::Current,
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not scroll");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn scroll_without_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth);
+        let command = Command::Scroll {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
+    }
+
+    #[test]
+    fn name_get_extents_requires_name() {
+        let command = Command::GetExtents {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_get_extents_requires_window() {
+        let command = Command::GetExtents {
+            target: TargetRef::Current,
+            window: None,
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_get_extents_missing_node_is_typed() {
+        let command = Command::GetExtents {
+            target: TargetRef::Current,
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not invent extents");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn scroll_and_get_extents_verbs_are_named() {
+        let scroll = Command::Scroll {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let extents = Command::GetExtents {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("ScrollViewport".into()),
+            role: None,
+        };
+        assert_eq!(scroll.verb(), "scroll");
+        assert_eq!(extents.verb(), "get-extents");
+        assert_eq!(scroll.required_grant(), Grant::Actuate);
+        assert_eq!(extents.required_grant(), Grant::Observe);
     }
 }

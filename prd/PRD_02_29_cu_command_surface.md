@@ -141,6 +141,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and the full GetText (not only the substring). `send-text` / `paste` /
   `copy` `matched.text` do not count. Timeout is typed `timeout` and
   reports the last GetText. Never screenshot, XTest, or `--coords`.
+- [x] `scroll --window HANDLE --name PAT [--role ROLE]` is one-shot AT-SPI
+  `Component.ScrollTo(TopEdge)` (`agt_a11y_node_scroll`) on the unique
+  showing named node and reports `addressing=accessibility-tree` /
+  `via=scroll-to`. `--name` is required. Missing / false /
+  `UnknownMethod` typed-fails (`a11y_scroll_unavailable`). ScrollTo true
+  with no later independent geometry change is `a11y_scroll_no_effect`,
+  not `timeout`. Never Action `scroll*`, XTest wheel, `--coords`, or
+  screenshot. `matched.extents` / snapshot `node.bounds` do not count.
+- [x] `get-extents --window HANDLE --name PAT [--role ROLE]` reads
+  independent AT-SPI `Component.GetExtents(Screen)`
+  (`agt_a11y_node_get_extents`) for that unique showing named node.
+  Snapshot `node.bounds` (hardcoded `0,0,0,0` during tree walk) do not
+  count. Empty extents (w/h <= 0 or call fail) typed-fail
+  (`a11y_extents_unavailable`). Never screenshot / XTest / `--coords`.
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

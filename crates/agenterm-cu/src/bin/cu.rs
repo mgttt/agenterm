@@ -203,6 +203,34 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
+        "scroll" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("scroll requires --window <handle> --name <pattern>");
+            }
+            Command::Scroll {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
+        "get-extents" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-extents requires --window <handle> --name <pattern>");
+            }
+            Command::GetExtents {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
         "window-place" => {
             let action = flag_value(&mut args, "--action")
                 .or_else(|| args.first().cloned())
@@ -453,6 +481,16 @@ Commands:
                               (DeviceEventListener NotifyEvent); a node with no
                               key interface typed-fails (never XTest). `--`
                               ends flag parsing. e.g. ctrl+c / enter / k
+  scroll --window HANDLE --name PAT [--role ROLE]
+                              one-shot AT-SPI Component.ScrollTo(TopEdge).
+                              addressing=accessibility-tree via=scroll-to.
+                              Missing / false / UnknownMethod typed-fails
+                              (a11y_scroll_unavailable). Never Action scroll*,
+                              XTest wheel, --coords, or screenshot.
+  get-extents --window HANDLE --name PAT [--role ROLE]
+                              independent AT-SPI Component.GetExtents(Screen).
+                              Snapshot node.bounds do not count. Empty extents
+                              typed-fail (a11y_extents_unavailable).
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE

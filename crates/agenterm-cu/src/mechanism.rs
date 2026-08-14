@@ -614,6 +614,55 @@ pub fn get_node_text(window: Option<isize>, node_id: &str) -> Result<String, Mec
     })
 }
 
+/// One-shot AT-SPI `Component.ScrollTo(TopEdge)` for a resolved child-index
+/// path. Missing / false / `UnknownMethod` is `a11y_scroll_unavailable`.
+pub fn scroll_node(window: Option<isize>, node_id: &str) -> Result<(), MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeScroll>(b"agt_a11y_node_scroll")?;
+    let status = unsafe { f(handle, node_c.as_ptr()) };
+    map_status("agt_a11y_node_scroll", status)?;
+    Ok(())
+}
+
+/// Independent AT-SPI `Component.GetExtents(Screen)` for a resolved
+/// child-index path. Not a tree-snapshot `bounds` field.
+pub fn get_node_extents(
+    window: Option<isize>,
+    node_id: &str,
+) -> Result<A11yBounds, MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeGetExtents>(b"agt_a11y_node_get_extents")?;
+    let mut x = 0i32;
+    let mut y = 0i32;
+    let mut width = 0i32;
+    let mut height = 0i32;
+    let status = unsafe {
+        f(
+            handle,
+            node_c.as_ptr(),
+            &mut x,
+            &mut y,
+            &mut width,
+            &mut height,
+        )
+    };
+    map_status("agt_a11y_node_get_extents", status)?;
+    if width <= 0 || height <= 0 {
+        return Err(MechanismError::Failed {
+            code: "a11y_extents_unavailable".into(),
+            message: format!("Component.GetExtents returned empty rect {width}x{height}"),
+        });
+    }
+    Ok(A11yBounds {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
 /// Clipboard through libagenterm (`agt_clipboard_*`). Named `paste` seeds
 /// and reads here; named `copy` publishes GetText here. Neither injects
 /// Ctrl+V or XTest.
@@ -1002,6 +1051,15 @@ type NodeSetText = unsafe extern "C" fn(isize, *const std::ffi::c_char, *const u
 type NodeGetText =
     unsafe extern "C" fn(isize, *const std::ffi::c_char, *mut u8, usize, *mut usize) -> i32;
 type NodeSendKeys = unsafe extern "C" fn(isize, *const std::ffi::c_char, *const u8, usize) -> i32;
+type NodeScroll = unsafe extern "C" fn(isize, *const std::ffi::c_char) -> i32;
+type NodeGetExtents = unsafe extern "C" fn(
+    isize,
+    *const std::ffi::c_char,
+    *mut i32,
+    *mut i32,
+    *mut i32,
+    *mut i32,
+) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;

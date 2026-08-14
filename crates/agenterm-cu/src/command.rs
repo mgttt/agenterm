@@ -118,6 +118,31 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// One-shot AT-SPI `Component.ScrollTo(TopEdge)` on the unique showing
+    /// named node. Success is `via=scroll-to`. Missing / false /
+    /// `UnknownMethod` typed-fails (`a11y_scroll_unavailable`). Never
+    /// Action `scroll*`, XTest wheel, `--coords`, or screenshot.
+    Scroll {
+        target: TargetRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
+    /// Independent AT-SPI `Component.GetExtents(Screen)` for the unique
+    /// showing named node. Snapshot `node.bounds` do not count. Empty
+    /// extents typed-fail (`a11y_extents_unavailable`).
+    GetExtents {
+        target: TargetRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
     Wait {
         target: TargetRef,
         timeout_ms: u64,
@@ -201,6 +226,8 @@ impl Command {
             Self::Copy { .. } => "copy".into(),
             Self::Paste { .. } => "paste".into(),
             Self::SendKeys { .. } => "send-keys".into(),
+            Self::Scroll { .. } => "scroll".into(),
+            Self::GetExtents { .. } => "get-extents".into(),
             Self::Wait { .. } => "wait".into(),
             Self::WindowPlace { .. } => "window-place".into(),
         }
@@ -218,6 +245,8 @@ impl Command {
             | Self::Copy { target, .. }
             | Self::Paste { target, .. }
             | Self::SendKeys { target, .. }
+            | Self::Scroll { target, .. }
+            | Self::GetExtents { target, .. }
             | Self::Wait { target, .. }
             | Self::WindowPlace { target, .. } => *target,
         }
@@ -231,6 +260,7 @@ impl Command {
             | Self::Copy { .. }
             | Self::Paste { .. }
             | Self::SendKeys { .. }
+            | Self::Scroll { .. }
             | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }

@@ -192,6 +192,17 @@ Canonical host mapping (approved product vocabulary):
   `via=gettext` and the full GetText. Timeout is typed `timeout` and
   reports the last GetText. `send-text` / `paste` / `copy` `matched.text`
   do not count. Never screenshot, XTest, or `--coords`.
+- [x] `scroll --window HANDLE --name PAT [--role ROLE]` resolves through
+  that same path, then one-shot AT-SPI `Component.ScrollTo(TopEdge)`
+  (`agt_a11y_node_scroll`). Success is `via=scroll-to`. Missing / false /
+  `UnknownMethod` typed-fails (`a11y_scroll_unavailable`). Never Action
+  `scroll*`, XTest wheel, `--coords`, or screenshot. Geometric proof is
+  independent `get-extents`, not `matched.extents`.
+- [x] `get-extents --window HANDLE --name PAT [--role ROLE]` resolves
+  through that same path, then independent AT-SPI
+  `Component.GetExtents(Screen)` (`agt_a11y_node_get_extents`). Snapshot
+  `node.bounds` do not count. Empty extents typed-fail
+  (`a11y_extents_unavailable`).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

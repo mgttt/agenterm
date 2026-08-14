@@ -47,6 +47,26 @@ pub fn get_node_text(
     crate::selected::accessibility_tree::get_node_text(window_handle, node_id)
 }
 
+/// One-shot AT-SPI `Component.ScrollTo(TopEdge)` (Linux). Missing / false /
+/// `UnknownMethod` fails typed (`a11y_scroll_unavailable`). Never Action
+/// `scroll*`, XTest wheel, or `GenerateMouseEvent`.
+pub fn scroll_node(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<(), AccessibilityTreeError> {
+    crate::selected::accessibility_tree::scroll_node(window_handle, node_id)
+}
+
+/// Independent AT-SPI `Component.GetExtents(Screen)` for one resolved
+/// child-index path. Not a tree-snapshot `bounds` field. Empty extents
+/// (width/height <= 0) or a failed GetExtents fail typed.
+pub fn get_node_extents(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
+    crate::selected::accessibility_tree::get_node_extents(window_handle, node_id)
+}
+
 /// Route of the last successful `set_node_text` on this thread.
 /// Linux: `"editable-text"` or `"text"`. Other hosts: `"editable-text"`.
 pub fn last_text_write_via() -> &'static str {

@@ -156,6 +156,9 @@ type A11yNodeSetText = unsafe extern "C" fn(isize, *const c_char, *const u8, usi
 type A11yNodeGetText =
     unsafe extern "C" fn(isize, *const c_char, *mut u8, usize, *mut usize) -> i32;
 type A11yNodeSendKeys = unsafe extern "C" fn(isize, *const c_char, *const u8, usize) -> i32;
+type A11yNodeScroll = unsafe extern "C" fn(isize, *const c_char) -> i32;
+type A11yNodeGetExtents =
+    unsafe extern "C" fn(isize, *const c_char, *mut i32, *mut i32, *mut i32, *mut i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type RuntimeUserConfigDir = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
@@ -758,6 +761,32 @@ fn null_group() -> Vec<SweepCase> {
             call: Box::new(|lib| {
                 let f: Symbol<A11yNodeSendKeys> = unsafe { sym(lib, b"agt_a11y_node_send_keys") };
                 unsafe { CallResult::Status(f(0, std::ptr::null(), std::ptr::null(), 1)) }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_scroll[window_handle=0,node_id=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeScroll> = unsafe { sym(lib, b"agt_a11y_node_scroll") };
+                unsafe { CallResult::Status(f(0, std::ptr::null())) }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_get_extents[window_handle=0,node_id=NULL,outs=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeGetExtents> =
+                    unsafe { sym(lib, b"agt_a11y_node_get_extents") };
+                unsafe {
+                    CallResult::Status(f(
+                        0,
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    ))
+                }
             }),
         },
         SweepCase {

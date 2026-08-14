@@ -2,7 +2,7 @@
 
 use crate::CapabilityStatus;
 use crate::contract::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTree, AccessibilityTreeError,
+    AccessibilityBounds, AccessibilityNodeAction, AccessibilityTree, AccessibilityTreeError,
 };
 
 pub(crate) fn capability_status() -> CapabilityStatus {
@@ -59,6 +59,24 @@ pub(crate) fn send_node_keys(
     _node_id: &str,
     _keys: &str,
 ) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "accessibility-tree not wired on this unix host".into(),
+    })
+}
+
+pub(crate) fn scroll_node(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "accessibility-tree not wired on this unix host".into(),
+    })
+}
+
+pub(crate) fn get_node_extents(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
     Err(AccessibilityTreeError::Unsupported {
         reason: "accessibility-tree not wired on this unix host".into(),
     })
