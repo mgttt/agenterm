@@ -5,21 +5,26 @@
 //! `ssh` stdio. No new verbs. Observe and actuate grants both forward; the
 //! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
-//! for both read (`wait` / `get-text` / `get-selection`) and write
-//! (`send-text` / `paste` / `copy` / `send-keys` / `select`). Cut 3.19 locks
-//! the clipboard write: host `paste --text` plants the seed on the remote
-//! Command field; host `get-text` equals that seed. Cut 3.20 locks clipboard
-//! publish: seed already on Command (or planted over ssh paste/send-text),
-//! host `copy` publishes remote GetText onto the remote session CLIPBOARD,
-//! then host `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21
-//! locks key delivery: host `send-keys` types plain keys into the remote
-//! focused Command field, then host `wait` + `get-text` equals those keys.
-//! Cut 3.22 locks text selection: host `send-text` plants a seed on remote
-//! Command (`--` ends flags; not `--text`), host `select --start N --end M`
-//! runs remote AT-SPI `Text.SetSelection` (`via=set-selection`), then host
-//! independent `get-selection` returns that range (`via=get-selection`;
-//! start/end equal the selected slice of the seed). Never screenshot /
-//! `--coords` / mouse-drag / XTest.
+//! for both read (`wait` / `get-text` / `get-selection` / `get-caret`) and
+//! write (`send-text` / `paste` / `copy` / `send-keys` / `select` /
+//! `set-caret`). Cut 3.19 locks the clipboard write: host `paste --text`
+//! plants the seed on the remote Command field; host `get-text` equals that
+//! seed. Cut 3.20 locks clipboard publish: seed already on Command (or
+//! planted over ssh paste/send-text), host `copy` publishes remote GetText
+//! onto the remote session CLIPBOARD, then host `paste` (no `--text`) +
+//! `get-text` equals that seed. Cut 3.21 locks key delivery: host
+//! `send-keys` types plain keys into the remote focused Command field, then
+//! host `wait` + `get-text` equals those keys. Cut 3.22 locks text
+//! selection: host `send-text` plants a seed on remote Command (`--` ends
+//! flags; not `--text`), host `select --start N --end M` runs remote AT-SPI
+//! `Text.SetSelection` (`via=set-selection`), then host independent
+//! `get-selection` returns that range (`via=get-selection`; start/end equal
+//! the selected slice of the seed). Cut 3.23 locks caret placement: host
+//! `send-text` plants a seed on remote Command, host `set-caret --offset N`
+//! runs remote AT-SPI `Text.SetCaretOffset` (`via=set-caret-offset`), then
+//! host independent `get-caret` returns that offset (`via=get-caret-offset`)
+//! and host `get-text` still equals the seed. Never screenshot / `--coords`
+//! / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -604,6 +609,70 @@ mod tests {
         assert_eq!(remote.target(), TargetRef::Current);
         match remote {
             CuCommand::GetSelection {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_caret_offset_survives_target_rewrite() {
+        // 3.23: first ssh set-caret path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current set-caret. Circuit: host send-text
+        // plants SEED on remote Command (`--` ends flags; not --text), host
+        // set-caret --window H --name Command --offset 3 runs remote AT-SPI
+        // Text.SetCaretOffset (via=set-caret-offset), then host independent
+        // get-caret returns offset 3 (via=get-caret-offset) and get-text still
+        // equals the seed. Never screenshot / --coords / mouse-drag. Missing
+        // Text typed-fails a11y_caret_unavailable on the remote worker the
+        // same as local current; SetCaretOffset false is a11y_caret_no_effect.
+        let command = CuCommand::SetCaret {
+            target: TargetRef::Ssh,
+            offset: 3,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "set-caret");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::SetCaret {
+                offset,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(offset, 3);
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_caret_observe_survives_target_rewrite() {
+        // 3.23 observe sibling: get-caret must also rewrite target only and
+        // keep window/name/role so independent CaretOffset/GetCaretOffset
+        // proof rides the same OpenSSH exec path as set-caret.
+        let command = CuCommand::GetCaret {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "get-caret");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::GetCaret {
                 window, name, role, ..
             } => {
                 assert_eq!(window, Some(42));

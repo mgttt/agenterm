@@ -1342,16 +1342,17 @@ It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
 OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
 desktop work still happens on the remote side (AT-SPI via that worker's
-libagenterm). Select evidence is loopback `sshd` plus a second
+libagenterm). Caret evidence is loopback `sshd` plus a second
 `agenterm-con` on a unique control socket: host
 `send-text --window H --name Command -- SEED` (payload after `--`; not
 `--text`) plants the seed, host
-`select --window H --name Command --start N --end M` runs remote AT-SPI
-`Text.SetSelection` (`via=set-selection`), then host independent
-`get-selection` returns that range (`via=get-selection`; start/end equal
-the selected slice of the seed). Never screenshot, `--coords`, or
-mouse-drag. Missing Text typed-fails `a11y_selection_unavailable` on the
-remote worker the same as local `current`. `send-keys` (3.21), `copy`
+`set-caret --window H --name Command --offset N` runs remote AT-SPI
+`Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
+`get-caret` returns that offset (`via=get-caret-offset`) and host
+`get-text` still equals the seed. Never screenshot, `--coords`, or
+mouse-drag. Missing Text typed-fails `a11y_caret_unavailable` on the
+remote worker the same as local `current`; SetCaretOffset false is
+`a11y_caret_no_effect`. `select` (3.22), `send-keys` (3.21), `copy`
 (3.20), `paste --text` (3.19), and `send-text` (3.18) over ssh remain
 valid. Do not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the
 resident avatar PIDs. Auth / connect failures are typed
