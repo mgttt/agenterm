@@ -63,6 +63,14 @@ impl SigType {
             ))),
         }
     }
+
+    fn parse_arg(name: &str) -> Result<Self, DynError> {
+        let ty = Self::parse(name)?;
+        if ty == Self::Void {
+            return Err(DynError::Type("void cannot be an argument type".into()));
+        }
+        Ok(ty)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -135,6 +143,11 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
 
     let lib_name = expect_string(&args[0], "dlcall library")?;
     let sym_name = expect_string(&args[1], "dlcall symbol")?;
+    if sym_name.is_empty() {
+        return Err(DynError::DlCall("symbol name must not be empty".into()));
+    }
+    let c_name = CString::new(sym_name.as_str())
+        .map_err(|_| DynError::DlCall("symbol name contains interior NUL".into()))?;
     let ret_ty = SigType::parse(&expect_string(&args[2], "dlcall return type")?)?;
     let arg_count = args[3..].len() / 2;
     if arg_count > MAX_ARGS {
@@ -143,18 +156,22 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         )));
     }
 
-    let mut dyn_args = Vec::with_capacity(arg_count);
-    let mut i = 3;
-    while i < args.len() {
-        let ty = SigType::parse(&expect_string(&args[i], "dlcall argument type")?)?;
-        let value = crate::eval::eval_expr(env, &args[i + 1])?;
-        dyn_args.push(DynArg::from_value(ty, value)?);
-        i += 2;
-    }
+    // Validate the complete signature before evaluating any argument expression. A rejected
+    // ABI class must not leave mutations from earlier arguments behind.
+    let arg_types = args[3..]
+        .chunks_exact(2)
+        .map(|pair| SigType::parse_arg(&expect_string(&pair[0], "dlcall argument type")?))
+        .collect::<Result<Vec<_>, _>>()?;
+    let dyn_args = arg_types
+        .into_iter()
+        .zip(args[3..].chunks_exact(2).map(|pair| &pair[1]))
+        .map(|(ty, expr)| {
+            let value = crate::eval::eval_expr(env, expr)?;
+            DynArg::from_value(ty, value)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let lib = env.libs.load(&lib_name)?;
-    let c_name = CString::new(sym_name.as_str())
-        .map_err(|_| DynError::DlCall("symbol name contains interior NUL".into()))?;
     // SAFETY: the library remains cached in `env`, so the symbol address stays loaded.
     let func_ptr = unsafe {
         let sym: libloading::Symbol<*const c_void> = lib
@@ -162,6 +179,11 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
             .map_err(|e| DynError::DlCall(format!("{sym_name}: {e}")))?;
         *sym
     };
+    if func_ptr.is_null() {
+        return Err(DynError::DlCall(format!(
+            "symbol `{sym_name}` resolved to a null address"
+        )));
+    }
 
     // SAFETY: callers provide the native symbol's signature. `invoke` supports only the
     // integer/pointer C ABI class and a fixed arity, which were validated above.
@@ -188,6 +210,12 @@ unsafe fn invoke(
     args: &[DynArg],
     ret_ty: SigType,
 ) -> Result<Value, DynError> {
+    if args.len() > MAX_ARGS {
+        return Err(DynError::DlCall(format!(
+            "{} arguments exceed the fixed limit of {MAX_ARGS}",
+            args.len()
+        )));
+    }
     let value = match ret_ty {
         SigType::Void => {
             call_fixed!(func_ptr, args, ());
@@ -207,4 +235,71 @@ unsafe fn invoke(
         SigType::Ptr => Value::Ptr(call_fixed!(func_ptr, args, *mut c_void) as usize),
     };
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn sum_six(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64 {
+        a + b + c + d + e + f
+    }
+
+    #[test]
+    fn invoke_accepts_every_supported_arity() {
+        unsafe extern "C" fn forty_two() -> i32 {
+            42
+        }
+        unsafe extern "C" fn one(a: u64) -> u64 {
+            a
+        }
+        unsafe extern "C" fn two(a: u64, b: u64) -> u64 {
+            a + b
+        }
+        unsafe extern "C" fn three(a: u64, b: u64, c: u64) -> u64 {
+            a + b + c
+        }
+        unsafe extern "C" fn four(a: u64, b: u64, c: u64, d: u64) -> u64 {
+            a + b + c + d
+        }
+        unsafe extern "C" fn five(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64 {
+            a + b + c + d + e
+        }
+
+        let no_args = unsafe { invoke(forty_two as *const c_void, &[], SigType::I32) };
+        assert_eq!(no_args.expect("zero-argument call"), Value::Int(42));
+
+        let args = [
+            DynArg(1),
+            DynArg(2),
+            DynArg(3),
+            DynArg(4),
+            DynArg(5),
+            DynArg(6),
+        ];
+        for (func, arity, expected) in [
+            (one as *const c_void, 1, 1),
+            (two as *const c_void, 2, 3),
+            (three as *const c_void, 3, 6),
+            (four as *const c_void, 4, 10),
+            (five as *const c_void, 5, 15),
+        ] {
+            let result = unsafe { invoke(func, &args[..arity], SigType::U64) };
+            assert_eq!(result.expect("fixed-arity call"), Value::Int(expected));
+        }
+        let six_args = unsafe { invoke(sum_six as *const c_void, &args, SigType::U64) };
+        assert_eq!(six_args.expect("six-argument call"), Value::Int(21));
+    }
+
+    #[test]
+    fn invoke_rejects_unchecked_arity_without_calling() {
+        let args = [DynArg(0); MAX_ARGS + 1];
+        let result = unsafe { invoke(sum_six as *const c_void, &args, SigType::U64) };
+        assert_eq!(
+            result,
+            Err(DynError::DlCall(
+                "7 arguments exceed the fixed limit of 6".into()
+            ))
+        );
+    }
 }

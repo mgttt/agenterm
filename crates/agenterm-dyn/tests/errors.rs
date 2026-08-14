@@ -55,9 +55,21 @@ fn arity_if() {
 
 #[test]
 fn arity_dlcall() {
-    let mut env = Dyn::new();
-    let err = env.eval("(dlcall)").unwrap_err();
-    assert!(matches!(err, DynError::Arity { form: "dlcall", .. }));
+    for (source, got) in [
+        ("(dlcall)", 0),
+        (r#"(dlcall "lib")"#, 1),
+        (r#"(dlcall "lib" "symbol")"#, 2),
+    ] {
+        let mut env = Dyn::new();
+        assert_eq!(
+            env.eval(source).unwrap_err(),
+            DynError::Arity {
+                form: "dlcall",
+                expected: 3,
+                got,
+            }
+        );
+    }
 }
 
 #[test]
@@ -77,6 +89,43 @@ fn bad_ffi_argument_type() {
         .eval(r#"(dlcall "libc.so.6" "getpid" "i32" "float" 0)"#)
         .unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
+}
+
+#[test]
+fn dlcall_rejects_float_struct_and_varargs_types() {
+    for unsupported in ["f32", "f64", "float", "double", "struct", "..."] {
+        for script in [
+            format!(r#"(dlcall "missing-library-for-type-validation" "unused" "{unsupported}")"#),
+            format!(
+                r#"(dlcall "missing-library-for-type-validation" "unused" "i32" "{unsupported}" 0)"#
+            ),
+        ] {
+            let mut env = Dyn::new();
+            let err = env.eval(&script).unwrap_err();
+            assert!(matches!(err, DynError::Type(_)), "{unsupported}: {err}");
+            assert!(
+                err.to_string().contains(unsupported),
+                "{unsupported}: {err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dlcall_validates_entire_signature_before_evaluating_arguments() {
+    for rejected in ["struct", "void"] {
+        let mut env = Dyn::new();
+        let script = format!(
+            r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
+                "i32" (set touched 1) "{rejected}" 0)"#
+        );
+        let err = env.eval(&script).unwrap_err();
+        assert!(matches!(err, DynError::Type(_)));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
 }
 
 #[test]
@@ -100,6 +149,27 @@ fn dlcall_rejects_more_than_six_arguments() {
         .unwrap_err();
     assert!(matches!(err, DynError::DlCall(_)));
     assert!(err.to_string().contains("fixed limit of 6"));
+}
+
+#[test]
+fn dlcall_rejects_empty_symbol_before_loading_library() {
+    let mut env = Dyn::new();
+    let err = env
+        .eval(r#"(dlcall "missing-library-for-empty-symbol" "" "i32")"#)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        DynError::DlCall("symbol name must not be empty".into())
+    );
+}
+
+#[test]
+fn dlcall_rejects_symbol_with_interior_nul_before_loading_library() {
+    let mut env = Dyn::new();
+    let script = "(dlcall \"missing-library-for-nul-symbol\" \"bad\0symbol\" \"i32\")";
+    let err = env.eval(script).unwrap_err();
+    assert!(matches!(err, DynError::DlCall(_)));
+    assert!(err.to_string().contains("interior NUL"));
 }
 
 #[test]

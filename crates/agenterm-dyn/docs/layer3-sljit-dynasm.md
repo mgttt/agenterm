@@ -1,6 +1,6 @@
 # Layer 3 native codegen — SLJIT vs DynASM survey
 
-> 调研备忘：为 **未来第三层**（将本 crate 同一套 intern 列表语言 `do` / `set` / `if` / `dlcall` 降到原生机器码）选型底层 JIT/汇编后端。**未实现**；`agenterm-dyn` 今日 **无 JIT**，`eval` 仍为解释执行 + `dlcall` 经 libffi。
+> 历史调研备忘：曾为假设的第三层评估 JIT/汇编后端。**未实现，也不在当前方向中**；`agenterm-dyn` 今日无 JIT，`eval` 仍为解释执行，`dlcall` 使用有界 Rust `extern "C"` 跳板。
 
 ## 范围
 
@@ -45,7 +45,7 @@
 - **不分配**可执行页；只生成字节流。
 - **不要**照搬 LuaJIT 的 `lj_mcode.c` 整段 lifted——那是完整 VM 的 mcode 管理，与 `agenterm-dyn` 边界不符；若选用需自研薄 W^X 层。
 
-本 crate 今日 `dlcall` 走 libffi、**无可写可执行页**；第三层若引入 JIT，W^X 策略需单独设计并与现有安全叙事对齐。
+本 crate 今日 `dlcall` 走有界 Rust 跳板，**无 libffi、无可写可执行页**。以下内容仅保留历史选型背景，不描述产品计划。
 
 ## 如何接我们的 intern 列表
 
@@ -80,7 +80,7 @@
 ## 与当前 crate 的关系
 
 ```
-Layer 1（今日）: parse → eval（解释） + dlcall（libffi）
+Layer 1（今日）: parse → eval（解释） + dlcall（有界 Rust 跳板）
 Layer 3（调研）: parse → lowering → JIT/asm → 原生代码；dlcall 仍经 libffi 边界
 ```
 
