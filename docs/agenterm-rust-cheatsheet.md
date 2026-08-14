@@ -136,6 +136,9 @@ Windows checklist:
   only for descendants that must be rediscovered through the tree walker. If a
   descendant still has no RuntimeId, omit that unaddressable branch; never fail
   the whole snapshot or invent an action target that could resolve to a sibling.
+  Cross-platform command tests that pass a synthetic HWND must allow the native
+  adapter to reject that window before name lookup; prove exact not-found matcher
+  semantics with pure data and prove the integrated path with an owned window.
 - A process-global native resource needs one lock and one RAII owner across every
   adapter path. In particular, Windows console attach/detach cannot be split
   between a dependency helper and a platform guard: serialize the whole

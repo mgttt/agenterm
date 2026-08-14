@@ -1617,7 +1617,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not report success");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -1635,7 +1638,10 @@ mod tests {
         assert!(!reply.ok);
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -1736,7 +1742,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not type into the wrong place");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -1793,7 +1802,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not seed the clipboard");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -1857,7 +1869,10 @@ mod tests {
         );
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -1905,7 +1920,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not send keys somewhere else");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -1961,7 +1979,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not scroll");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -2019,7 +2040,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not invent extents");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -2103,7 +2127,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not select");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
@@ -2163,7 +2190,10 @@ mod tests {
         assert!(!reply.ok, "missing name must not invent a selection");
         let code = reply.error.as_ref().unwrap().code.as_str();
         assert!(
-            matches!(code, "a11y_node_not_found" | "unsupported"),
+            matches!(
+                code,
+                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+            ),
             "unexpected code: {code}"
         );
     }
