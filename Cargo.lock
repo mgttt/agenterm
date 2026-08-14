@@ -101,7 +101,6 @@ name = "agenterm-dyn"
 version = "0.1.16"
 dependencies = [
  "libc",
- "libffi",
  "libloading 0.8.9",
  "thiserror 2.0.19",
  "windows-sys 0.61.2",
@@ -1935,25 +1934,6 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
-
-[[package]]
-name = "libffi"
-version = "5.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed185dbb87539a100c1b36c219e16e71572c6d4d4fed3ded898140f755adeaaf"
-dependencies = [
- "libc",
- "libffi-sys",
-]
-
-[[package]]
-name = "libffi-sys"
-version = "4.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25831b230b6a90bdea9f28339c1d00d59773a1c492e8ca09b1ad80e56394c261"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "libloading"

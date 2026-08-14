@@ -254,7 +254,7 @@ pub fn cell(os: &str, arch: &str) -> Option<&'static HostCell> {
 
 /// Names of LAYER3-CANDIDATE markers in this crate (grep / registry hook). No SLJIT/DynASM
 /// dependency is linked yet; see README for portable-backend preference and W^X notes.
-pub const LAYER3_CANDIDATES: &[&str] = ["eval_special_form_match", "dlcall_rust_dispatch"];
+pub const LAYER3_CANDIDATES: &[&str] = &["eval_special_form_match", "dlcall_rust_dispatch"];
 
 /// Host OS facet for a catalog cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
