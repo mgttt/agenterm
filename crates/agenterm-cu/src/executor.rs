@@ -842,9 +842,7 @@ fn get_text_focused(window: Option<isize>) -> Result<(ResolvedNode, String), CuE
 /// path first, so an innermost real widget wins over a `focused` ancestor
 /// container. Depth is the child-index path length; the stable sort keeps
 /// snapshot pre-order between equal depths.
-fn focused_candidates_innermost_first(
-    nodes: &[mechanism::A11yNode],
-) -> Vec<&mechanism::A11yNode> {
+fn focused_candidates_innermost_first(nodes: &[mechanism::A11yNode]) -> Vec<&mechanism::A11yNode> {
     let mut candidates: Vec<&mechanism::A11yNode> = nodes
         .iter()
         .filter(|node| node_is_showing(node))
