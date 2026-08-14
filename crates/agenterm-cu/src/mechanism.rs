@@ -737,6 +737,8 @@ pub fn get_node_selection(
     let status = unsafe { f(handle, node_c.as_ptr(), &mut n, &mut start, &mut end) };
     map_status("agt_a11y_node_get_selection", status)?;
     Ok(A11ySelection { n, start, end })
+}
+
 /// Resident menu and global-shortcut host through libagenterm.
 pub mod desktop_host {
     use std::ffi::c_void;

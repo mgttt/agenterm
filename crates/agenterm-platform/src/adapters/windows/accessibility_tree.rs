@@ -57,8 +57,8 @@ use windows_sys::core::{BSTR, GUID, HRESULT};
 
 use crate::CapabilityStatus;
 use crate::contract::accessibility_tree::{
-    AccessibilityBounds, AccessibilityNode, AccessibilityNodeAction, AccessibilityTree,
-    AccessibilityTreeError,
+    AccessibilityBounds, AccessibilityNode, AccessibilityNodeAction, AccessibilitySelection,
+    AccessibilityTree, AccessibilityTreeError,
 };
 use crate::contract::input_inject::InputInjectError;
 
@@ -280,6 +280,45 @@ pub(crate) fn send_node_keys(
     let element = session.resolve_node(window_handle, node_id, &budget)?;
     session.set_focus(&element, &budget)?;
     crate::selected::input_inject::send_keys(keys).map_err(map_input_error)
+}
+
+pub(crate) fn scroll_node(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "AT-SPI Component.ScrollTo is unavailable through Windows UIA".into(),
+    })
+}
+
+pub(crate) fn get_node_extents(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "independent AT-SPI Component.GetExtents is unavailable through Windows UIA"
+            .into(),
+    })
+}
+
+pub(crate) fn set_node_selection(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+    _start: i32,
+    _end: i32,
+) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "AT-SPI Text.SetSelection is unavailable through Windows UIA".into(),
+    })
+}
+
+pub(crate) fn get_node_selection(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<AccessibilitySelection, AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "AT-SPI Text.GetSelection is unavailable through Windows UIA".into(),
+    })
 }
 
 struct Budget {
