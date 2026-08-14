@@ -1340,12 +1340,13 @@ a check of the write reply.
 `agenterm-cu --ssh <user@host>` is the first remote target tier (PRD 30).
 It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
-OpenSSH stdio (`ssh_transport`). Desktop observation still happens on the
-remote side (AT-SPI via that worker's libagenterm). First evidence is
-loopback `sshd` plus a second `agenterm-con` on a unique control socket:
-host `wait --text-contains` / `get-text` equals a unique seed. Do not
-steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar
-PIDs. Auth / connect failures are typed (`ssh_unavailable` /
+OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
+desktop work still happens on the remote side (AT-SPI via that worker's
+libagenterm). First write evidence is loopback `sshd` plus a second
+`agenterm-con` on a unique control socket: host `send-text --name Command`
+(or `paste`) plants a unique seed, then host `get-text` equals that seed.
+Do not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident
+avatar PIDs. Auth / connect failures are typed (`ssh_unavailable` /
 `ssh_transport_failed`); missing `--ssh` on `--target ssh` is
 `invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` / `AGENTERM_ABI_LIB` via
 `--ssh-env` or host env (defaults copy common desktop keys when they have
