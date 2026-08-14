@@ -790,12 +790,11 @@ Global:
 
   vnc transport handshakes RFB (security type None / x11vnc -nopw), then runs
   the same verbs (observe and actuate) on a local agenterm-cu --target current
-  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Focus
-  evidence: gate-owned loopback x11vnc + second agenterm-con, host focus
-  --name Command (AT-SPI Action focus / Component::grab_focus) then
-  independent tree shows Command focused and independent get-text --window
-  (no --name) equals that Command text (never screenshot / --coords / RFB
-  pointer / framebuffer OCR).
+  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Tree
+  evidence: gate-owned loopback x11vnc + second agenterm-con, host tree
+  --window H returns the session AT-SPI control tree
+  (addressing=accessibility-tree) with unique named nodes Command, SEND, and
+  OffscreenField (never screenshot / --coords / RFB framebuffer OCR).
 
 Commands:
   capabilities

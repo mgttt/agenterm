@@ -14,21 +14,20 @@
 //! Cut 3.35 locked key delivery via `send-keys`. Cut 3.36 locked text
 //! selection via `select` / `get-selection`. Cut 3.37 locked caret
 //! placement via `set-caret` / `get-caret`. Cut 3.38 locked named Action
-//! click. Cut 3.39 locked named scroll. Cut 3.40 locks named focus: host
-//! `focus --name Command` (or `SEND`) over `--vnc` runs session AT-SPI
-//! Action `focus` / `Component::grab_focus`
-//! (`addressing=accessibility-tree`) on a second `agenterm-con` Session
-//! child, then host independent `tree` over the same `--vnc` shows that
-//! node `focused` and host independent `get-text --window H` (no
-//! `--name`) equals that Command text (focused Text node). Native
-//! AT-SPI Action / Component via the session worker — never screenshot /
-//! `--coords` / RFB pointer / framebuffer OCR / XTest. Gate-owned
-//! dedicated loopback x11vnc; never steal
-//! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
-//! as the only proof. Observe and actuate grants both forward.
-//! `scroll` (3.39), `click` (3.38), `set-caret` (3.37), `select` (3.36),
-//! `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
-//! `send-text` (3.32) over vnc remain valid.
+//! click. Cut 3.39 locked named scroll. Cut 3.40 locked named focus.
+//! Cut 3.41 locks structured tree observe: host `tree --window H` over
+//! `--vnc` returns the session AT-SPI flattened control tree
+//! (`addressing=accessibility-tree`) from a second `agenterm-con`
+//! Session, and the unique named Session children `Command`, `SEND`,
+//! and `OffscreenField` each appear once among showing nodes. Native
+//! AT-SPI tree via the session worker — never screenshot / `--coords` /
+//! RFB framebuffer OCR. Gate-owned dedicated loopback x11vnc; never
+//! steal `unix:/tmp/run-box/agenterm-con.sock` or treat the resident
+//! `:2` x11vnc as the only proof. Observe and actuate grants both
+//! forward. `focus` (3.40), `scroll` (3.39), `click` (3.38),
+//! `set-caret` (3.37), `select` (3.36), `send-keys` (3.35), `copy`
+//! (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc remain
+//! valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -1028,6 +1027,33 @@ mod tests {
                 assert!(node.is_none());
                 assert_eq!(name.as_deref(), Some("Command"));
                 assert_eq!(role.as_deref(), Some("text"));
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tree_window_survives_target_rewrite() {
+        // 3.41: first vnc tree path reuses the same RFB + session-worker
+        // rewrite; the worker still runs target=current tree. Circuit:
+        // host tree --window H on a second agenterm-con returns the
+        // session AT-SPI flattened control tree
+        // (addressing=accessibility-tree; never screenshot / --coords /
+        // RFB framebuffer OCR). Independent proof is the returned nodes
+        // list: unique named Session children Command, SEND, and
+        // OffscreenField each appear once among showing nodes. No new
+        // verb; observe grant only. Window must survive the rewrite so
+        // the session worker scopes the tree to the intended con.
+        let command = CuCommand::Tree {
+            target: TargetRef::Vnc,
+            window: Some(42),
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "tree");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Tree { window, .. } => {
+                assert_eq!(window, Some(42));
             }
             other => panic!("unexpected command {other:?}"),
         }
