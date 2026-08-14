@@ -179,13 +179,20 @@ Canonical host mapping (approved product vocabulary):
   `send-text` (`agt_a11y_node_set_text`). `--text` only seeds the clipboard
   (`agt_clipboard_set_text`); the field write always reads
   `agt_clipboard_get_text`. On Linux X11 the seed is a native CLIPBOARD
-  selection owner, not `xclip`. `--name` is required. A named showing node
-  with no writeable text interface typed-fails (`a11y_text_unavailable`)
-  and never silently uses XTest / `--coords` / screenshot. Resolution
-  failure (miss or ambiguous name) aborts before any write or clipboard
-  seed. Reasonix composer (`Message Reasonix…`) writes through the same
-  WebKit eval-helper set-value path as named `send-text`. A prior
-  `copy --name` may seed the clipboard instead of `--text`.
+  selection owner, not `xclip`. A named showing node with no writeable
+  text interface typed-fails (`a11y_text_unavailable`) and never silently
+  uses XTest / `--coords` / screenshot. Resolution failure (miss or
+  ambiguous name) aborts before any write or clipboard seed. Reasonix
+  composer (`Message Reasonix…`) writes through the same WebKit
+  eval-helper set-value path as named `send-text`. A prior `copy --name`
+  may seed the clipboard instead of `--text`.
+- [x] `paste --window HANDLE` without `--name` writes that same clipboard
+  path on the showing focused node (innermost Text candidate). Never
+  XTest / `--coords` when `--window` is set. Proof is independent
+  `get-text --window HANDLE` (no `--name`) equal to the clipboard string.
+  Live: Chrome `GetTextField` after `focus --name`; Reasonix composer and
+  agenterm-con `Command` share the focused `send-text` write path.
+  Without `--window` paste is invalid.
 - [x] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
   resolves through that same path, then delivers the chord via AT-SPI
   `DeviceEventListener` (`NotifyEvent`, `agt_a11y_node_send_keys`). A named

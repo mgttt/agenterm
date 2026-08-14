@@ -179,8 +179,15 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             let name = flag_value(&mut args, "--name");
             let role = flag_value(&mut args, "--role");
             let text = flag_value(&mut args, "--text").or(literal_text);
-            if name.as_ref().is_none_or(|value| value.is_empty()) {
-                return usage_err("paste requires --window <handle> --name <pattern>");
+            if window.is_none() {
+                return usage_err(
+                    "paste requires --window <handle> [--name <pattern>] [--text TEXT]",
+                );
+            }
+            if name.as_ref().is_none_or(|value| value.is_empty())
+                && role.as_ref().is_some_and(|value| !value.is_empty())
+            {
+                return usage_err("paste --role requires --name <pattern>");
             }
             Command::Paste {
                 target,
@@ -564,14 +571,18 @@ Commands:
                               (no --text) then wait --text-equals; copy
                               matched.text does not count. Live: Chrome fixture
                               and Reasonix composer (Message Reasonix…)
-  paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]
-                              writes clipboard text into the unique showing named
-                              field via native AT-SPI EditableText / Text
-                              (addressing=accessibility-tree). --text only seeds
-                              the clipboard; the field write always reads the
-                              clipboard. A node with no writeable text interface
-                              typed-fails (never XTest / --coords / screenshot).
-                              Close the circuit with wait --text-equals; paste
+  paste --window HANDLE [--name PAT [--role ROLE]] [--text TEXT]
+                              writes clipboard text via native AT-SPI EditableText
+                              / Text (addressing=accessibility-tree). --text only
+                              seeds the clipboard; the field write always reads
+                              the clipboard. --name targets the unique showing
+                              named field. --window without --name writes that
+                              same path on the showing focused node (same
+                              innermost Text candidate as get-text --window).
+                              Never XTest when --window is set. A node with no
+                              writeable text interface typed-fails (never XTest
+                              / --coords / screenshot). Close the circuit with
+                              get-text --window / wait --text-equals; paste
                               matched.text does not count. `--` ends flag parsing
   send-keys [--window HANDLE [--name PAT [--role ROLE]]] [--] <keys...>
                               --name delivers AT-SPI Device/key events
