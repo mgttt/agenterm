@@ -18,8 +18,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   command set. `current` is the **local degenerate tier** — transport is
   in-process — not a temporary prototype to be replaced later. `ssh` first cut
   is OpenSSH `ssh` exec of a remote `agenterm-cu --target current` worker
-  (`--ssh <user@host>`; same verbs including actuate; no new verb). `rdp` /
-  `vnc` remain planned.
+  (`--ssh <user@host>`; same verbs including actuate; no new verb). `vnc`
+  first cut is RFB handshake to `--vnc <host[:port]>` (security type None /
+  `x11vnc -nopw`) then a local `agenterm-cu --target current` worker against
+  the shared session (`DISPLAY` / AT-SPI env; same verbs; no new verb).
+  `rdp` remains planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
   commands above it. `ssh` get-selection evidence reuses the #50 con-publish
@@ -32,6 +35,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
+  `vnc` first observe evidence reuses the same con-publish GetText path over
+  a **gate-owned** loopback `x11vnc` (not the resident `:2` listener alone)
+  against a second `agenterm-con` with a unique title: seed `Command` via
+  local `current`, then host independent `cu --vnc 127.0.0.1:<port>
+  get-text --name Command` equals that seed (`via=gettext`). Never
+  screenshot, `--coords`, RFB framebuffer OCR, or steal the resident control
+  socket.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -429,6 +439,17 @@ Canonical host mapping (approved product vocabulary):
 
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
+- [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
+  a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
+  resident `:2` listener alone) handshakes RFB then runs a local
+  `agenterm-cu --target current` session worker. Seed a unique string on a
+  second `agenterm-con` `Command` field (unique title; never steal
+  `unix:/tmp/run-box/agenterm-con.sock`), then host independent
+  `windows` / `get-text --name Command` (or `wait --text-equals`) equals that
+  seed via AT-SPI GetText (`via=gettext`; never screenshot / `--coords` /
+  RFB framebuffer OCR). Worker JSON does not count; CEO owns the official
+  gate. Connect / protocol / auth failures are typed (`vnc_unavailable` /
+  `vnc_transport_failed` / `vnc_auth_failed` / `invalid_input`).
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
   runs remote `agenterm-cu --target current`. Get-selection observe path: host
   `send-text --window HANDLE --name Command -- SEED` (payload after `--`; not

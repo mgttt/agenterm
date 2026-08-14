@@ -19,6 +19,7 @@ pub mod ssh_transport;
 #[cfg(target_os = "macos")]
 pub mod status_menu;
 pub mod target;
+pub mod vnc_transport;
 
 pub use auth::{Authorization, Grant};
 pub use command::{Command, PointerButton, WaitCondition};
@@ -26,3 +27,4 @@ pub use executor::Executor;
 pub use reply::{CuError, CuReply};
 pub use ssh_transport::SshEndpoint;
 pub use target::TargetRef;
+pub use vnc_transport::VncEndpoint;

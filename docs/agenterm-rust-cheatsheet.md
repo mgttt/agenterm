@@ -1364,6 +1364,23 @@ via `--ssh-env` or host env (defaults copy common desktop keys when they
 have no whitespace). Do not implement ssh as D-Bus port-forward or a
 second control protocol in this cut.
 
+`agenterm-cu --vnc <host[:port]>` is the first VNC target tier (PRD 30,
+cut 3.31). It does not invent verbs: the host handshakes RFB (security
+type None / `x11vnc -nopw` only in this cut), rewrites the abstract
+command to `target=current`, and runs a local `agenterm-cu exec --json -`
+session worker against the shared desktop (`vnc_transport`; `DISPLAY` /
+`AT_SPI_BUS` via host env or `--vnc-env`). Structured observe still uses
+AT-SPI GetText on that session — never RFB framebuffer OCR, screenshot,
+or `--coords`. First evidence is a **gate-owned** loopback x11vnc (not
+the resident `:2` listener alone) plus a second `agenterm-con` on a
+unique control socket and title: seed `Command` via local `current`,
+then host `windows` / `get-text --name Command` equals that seed
+(`via=gettext`). Do not steal `unix:/tmp/run-box/agenterm-con.sock` or
+kill the resident avatar PIDs. Connect / protocol / auth failures are
+typed (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed`);
+missing `--vnc` on `--target vnc` is `invalid_input`. Do not implement
+vnc as a second control protocol or D-Bus port-forward in this cut.
+
 `cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
 (`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.
 Missing / false / `UnknownMethod` typed-fails

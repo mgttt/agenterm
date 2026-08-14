@@ -4,6 +4,9 @@
 //!   library (`mechanism` + `dynlib`) only.
 //! - `ssh`: OpenSSH `ssh` exec of a remote `agenterm-cu --target current`
 //!   worker (`ssh_transport`). Same verbs; transport only.
+//! - `vnc`: RFB handshake to a VNC endpoint, then a local
+//!   `agenterm-cu --target current` worker against the shared session
+//!   (`vnc_transport`). Same verbs; transport only.
 
 use std::{
     thread,
@@ -20,20 +23,31 @@ use crate::{
     reply::{CuError, CuReply},
     ssh_transport::{self, SshEndpoint},
     target::TargetRef,
+    vnc_transport::{self, VncEndpoint},
 };
 
 pub struct Executor {
     auth: Authorization,
     ssh: Option<SshEndpoint>,
+    vnc: Option<VncEndpoint>,
 }
 
 impl Executor {
     pub fn new(auth: Authorization) -> Self {
-        Self { auth, ssh: None }
+        Self {
+            auth,
+            ssh: None,
+            vnc: None,
+        }
     }
 
     pub fn with_ssh(mut self, endpoint: SshEndpoint) -> Self {
         self.ssh = Some(endpoint);
+        self
+    }
+
+    pub fn with_vnc(mut self, endpoint: VncEndpoint) -> Self {
+        self.vnc = Some(endpoint);
         self
     }
 
@@ -61,6 +75,7 @@ impl Executor {
         let reply = match command.target() {
             TargetRef::Current => self.execute_current(command),
             TargetRef::Ssh => self.execute_ssh(command),
+            TargetRef::Vnc => self.execute_vnc(command),
         };
 
         if required == Grant::Actuate {
@@ -81,6 +96,22 @@ impl Executor {
             );
         };
         match ssh_transport::run_remote(endpoint, command, &self.auth) {
+            Ok(reply) => reply,
+            Err(error) => CuReply::err(command, error),
+        }
+    }
+
+    fn execute_vnc(&self, command: &Command) -> CuReply {
+        let Some(endpoint) = self.vnc.as_ref() else {
+            return CuReply::err(
+                command,
+                CuError::new(
+                    "invalid_input",
+                    "vnc target requires --vnc <host[:port]> (or AGENTERM_CU_VNC)",
+                ),
+            );
+        };
+        match vnc_transport::run_session(endpoint, command, &self.auth) {
             Ok(reply) => reply,
             Err(error) => CuReply::err(command, error),
         }
