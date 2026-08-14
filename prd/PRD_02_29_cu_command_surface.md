@@ -95,13 +95,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `copy --window HANDLE --name PAT [--role ROLE]` copies AT-SPI
   `Text.GetText` (`agt_a11y_node_get_text`) from the unique showing named
   node onto the native clipboard (`agt_clipboard_set_text`) and reports
-  `addressing=accessibility-tree`. On Linux X11 the seed is a native
-  CLIPBOARD selection owner (`SetSelectionOwner`), not `xclip` / `xsel`.
-  `--name` is required. A named showing node with no Text interface
-  typed-fails (`a11y_text_unavailable`) and never falls through to XTest
-  / `--coords` / screenshot. A miss or an ambiguous name copies nothing.
-  Close the circuit with `paste --name` (no `--text`) then
-  `wait --text-equals`; `copy` `matched.text` does not count.
+  `addressing=accessibility-tree` / `via=gettext`. On Linux X11 the seed
+  is a native CLIPBOARD selection owner (`SetSelectionOwner`), not
+  `xclip` / `xsel`. `--name` is required. A named showing node with no
+  Text interface typed-fails (`a11y_text_unavailable`) and never falls
+  through to XTest / `--coords` / screenshot. A miss or an ambiguous name
+  copies nothing. Close the circuit with `paste --name` (no `--text`)
+  then `wait --text-equals`; `copy` `matched.text` does not count. Live
+  evidence: Chrome fixture fields and the Reasonix composer
+  (`Message Reasonix…`) under `scripts/reasonix-desktop-a11y.sh`.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]` writes
   the clipboard into the unique showing named field through that same
   native AT-SPI `EditableText` / `Text` path (`agt_a11y_node_set_text`)

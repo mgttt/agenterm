@@ -155,19 +155,27 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
 # Copy a named field's AT-SPI GetText onto the native clipboard.
 # Linux X11 uses SetSelectionOwner (not xclip). Never XTest / --coords.
 # Close the circuit with paste --name (no --text) then wait --text-equals.
+# Chrome fixture and Reasonix composer (name contains "Message Reasonix")
+# both use the same GetText → CLIPBOARD path.
 cu --target current --grant observe,act copy --window 25165828 \
   --name FixtureSource
+cu --target current --grant observe,act copy --window 4194318 \
+  --name "Message Reasonix"
 
 # Paste clipboard text into a named field via AT-SPI EditableText / Text.
 # --text seeds the clipboard (Linux X11: native CLIPBOARD owner, not xclip);
 # the field write always reads the clipboard. Never XTest / --coords.
 # Close the circuit with wait --text-equals GetText; paste matched.text
-# does not count. Reasonix composer name contains "Message Reasonix".
+# does not count. Reasonix composer name contains "Message Reasonix"
+# (WebKit Text-without-EditableText uses the eval-helper set-value path).
+# After a prior copy --name, omit --text so ConvertSelection supplies SRC.
 cu --target current --grant observe,act paste --window 25165828 \
   --name FixtureField --text hello
+cu --target current --grant observe,act paste --window 4194318 \
+  --name "Message Reasonix"
 
-# After send-text / paste --name, wait until AT-SPI GetText equals the typed string.
-# Independent of send-text / paste matched.text, of a sidecar tree walk, and of the
+# After send-text / paste / copy --name, wait until AT-SPI GetText equals the source.
+# Independent of send-text / paste / copy matched.text, of a sidecar tree walk, and of the
 # WebKit eval helper's queued-job OK (Reasonix composer: Message Reasonix…).
 cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --name FixtureField --text-equals hello
