@@ -106,6 +106,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [current working directory via `getcwd`](examples/getcwd.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
+- [whether standard input is a terminal](examples/isatty-stdin.md)
+- [`open("/dev/null")` then `isatty` then `close`](examples/open-dev-null-isatty-close.md)
 - [terminal window size via `ioctl`](examples/ioctl-window-size.md)
 - [`DISPLAY` via `getenv`](examples/getenv-display.md)
 - [explicit missing-symbol failure](examples/failure-missing-symbol.md)
