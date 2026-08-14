@@ -159,10 +159,7 @@ mod linux {
         env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
             .expect("bind env_key");
 
-        let script = format!(
-            r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#,
-            c.pid_lib
-        );
+        let script = format!(r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#, c.pid_lib);
         env.eval(&script)
             .expect("getenv dlcall should resolve and run");
     }
@@ -308,10 +305,7 @@ mod macos {
         let key = CString::new("DISPLAY").expect("DISPLAY key");
         env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
             .expect("bind env_key");
-        let script = format!(
-            r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#,
-            c.pid_lib
-        );
+        let script = format!(r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#, c.pid_lib);
         env.eval(&script)
             .expect("getenv dlcall should resolve and run");
     }

@@ -254,10 +254,7 @@ pub fn cell(os: &str, arch: &str) -> Option<&'static HostCell> {
 
 /// Names of LAYER3-CANDIDATE markers in this crate (grep / registry hook). No SLJIT/DynASM
 /// dependency is linked yet; see README for portable-backend preference and W^X notes.
-pub const LAYER3_CANDIDATES: &[&str] = &[
-    "eval_special_form_match",
-    "dlcall_libffi_dynamic_cif",
-];
+pub const LAYER3_CANDIDATES: &[&str] = &["eval_special_form_match", "dlcall_libffi_dynamic_cif"];
 
 // LAYER3-CANDIDATE (portable codegen, deferred): prefer SLJIT (one LIR, both ISAs) over
 // DynASM (per-ISA macro assembler). If SLJIT is ever linked on Linux/Windows, pin
@@ -266,10 +263,7 @@ pub const LAYER3_CANDIDATES: &[&str] = &[
 
 /// Names of LAYER3-CANDIDATE markers in this crate (grep / registry hook). No SLJIT/DynASM
 /// dependency is linked yet; see README for portable-backend preference and W^X notes.
-pub const LAYER3_CANDIDATES: &[&str] = &[
-    "eval_special_form_match",
-    "dlcall_libffi_dynamic_cif",
-];
+pub const LAYER3_CANDIDATES: &[&str] = &["eval_special_form_match", "dlcall_libffi_dynamic_cif"];
 
 // LAYER3-CANDIDATE (portable codegen, deferred): prefer SLJIT (one LIR, both ISAs) over
 // DynASM (per-ISA macro assembler). If SLJIT is ever linked on Linux/Windows, pin
