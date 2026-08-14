@@ -138,14 +138,16 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). First write evidence is a **gate-owned** loopback
+env or `--vnc-env`). Paste write evidence is a **gate-owned** loopback
 `x11vnc` plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
-as the only proof): host `send-text --window HANDLE --name Command -- SEED`
-(payload after `--`; not `--text`) plants the seed via AT-SPI EditableText,
-then host independent `get-text --window HANDLE --name Command` equals that
-seed (`via=gettext`; never screenshot / `--coords` / RFB framebuffer OCR).
-Observe-only `windows` / `get-text` / `wait` remain valid too. Connect /
+as the only proof): host `paste --window HANDLE --name Command --text SEED`
+plants the seed via session native clipboard + AT-SPI EditableText, then
+host independent `get-text --window HANDLE --name Command` equals that seed
+(`via=gettext`; never screenshot / `--coords` / RFB framebuffer OCR). The
+seed must travel over vnc paste (JSON to the session worker), not a local
+`--target current` write or host-only clipboard. `send-text` over vnc and
+observe-only `windows` / `get-text` / `wait` remain valid too. Connect /
 protocol failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
 `vnc_auth_failed`).
 
@@ -161,10 +163,10 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Write path: host send-text plants the seed; host get-text equals it.
-agenterm-cu --vnc 127.0.0.1:5931 --grant observe,actuate \
-  send-text --window HANDLE --name Command -- SEED
-agenterm-cu --vnc 127.0.0.1:5931 --grant observe \
+# Paste path: host paste --text plants the seed; host get-text equals it.
+agenterm-cu --vnc 127.0.0.1:5933 --grant observe,actuate \
+  paste --window HANDLE --name Command --text SEED
+agenterm-cu --vnc 127.0.0.1:5933 --grant observe \
   get-text --window HANDLE --name Command
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
