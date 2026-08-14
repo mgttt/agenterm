@@ -35,15 +35,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first actuate evidence reuses the same con-publish EditableText /
-  GetText path over a **gate-owned** loopback `x11vnc` (not the resident
-  `:2` listener alone) against a second `agenterm-con` with a unique title:
-  host `cu --vnc 127.0.0.1:<port> send-text --name Command -- SEED` plants
-  the seed (payload after `--`; not `--text`), then host independent
-  `cu --vnc 127.0.0.1:<port> get-text --name Command` equals that seed
-  (`via=gettext`). Never screenshot, `--coords`, RFB framebuffer OCR, or
-  steal the resident control socket. Observe-only `get-text` / `wait`
-  still hold.
+  `vnc` first paste evidence reuses the same con-publish clipboard +
+  EditableText / GetText path over a **gate-owned** loopback `x11vnc` (not
+  the resident `:2` listener alone) against a second `agenterm-con` with a
+  unique title: host `cu --vnc 127.0.0.1:<port> paste --name Command --text
+  SEED` plants the seed via session native clipboard + AT-SPI EditableText
+  (not a local `current` write or host-only clipboard), then host
+  independent `cu --vnc 127.0.0.1:<port> get-text --name Command` equals
+  that seed (`via=gettext`). Never screenshot, `--coords`, RFB framebuffer
+  OCR, or steal the resident control socket. `send-text` over vnc (3.32)
+  and observe-only `get-text` / `wait` still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -444,13 +445,15 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Write path: host
-  `send-text --window HANDLE --name Command -- SEED` (payload after `--`;
-  not `--text`) plants a unique seed on a second `agenterm-con` `Command`
-  field (unique title; never steal `unix:/tmp/run-box/agenterm-con.sock`);
-  host independent `get-text --window HANDLE --name Command` equals that
-  seed via AT-SPI EditableText / GetText (`via=gettext`; never screenshot /
-  `--coords` / RFB framebuffer OCR). Observe-only `windows` / `get-text` /
+  `agenterm-cu --target current` session worker. Paste path: host
+  `paste --window HANDLE --name Command --text SEED` plants a unique seed
+  on a second `agenterm-con` `Command` field (unique title; never steal
+  `unix:/tmp/run-box/agenterm-con.sock`) via session native clipboard +
+  AT-SPI EditableText; host independent
+  `get-text --window HANDLE --name Command` equals that seed via AT-SPI
+  GetText (`via=gettext`; never screenshot / `--coords` / RFB framebuffer
+  OCR). Seed must go over vnc paste, not local `--target current`.
+  `send-text` over vnc and observe-only `windows` / `get-text` /
   `wait --text-equals` still hold. Worker JSON does not count; CEO owns the
   official gate. Connect / protocol / auth failures are typed
   (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed` /
