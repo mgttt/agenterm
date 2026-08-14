@@ -189,6 +189,19 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
 cu --target current --grant observe wait --timeout-ms 4000 --window 4194318 \
   --name "Message Reasonix" --text-equals hello
 
+# Select a range on a named Text node (AT-SPI SetSelection). Observe with
+# independent get-selection (GetNSelections + GetSelection), not the
+# select reply. Chrome fixture and Reasonix composer both use native
+# Text methods — no eval-helper select path, never mouse-drag / --coords.
+cu --target current --grant actuate select --window 25165828 \
+  --name SelectField --start 0 --end 4
+cu --target current --grant observe get-selection --window 25165828 \
+  --name SelectField
+cu --target current --grant actuate select --window 4194318 \
+  --name "Message Reasonix" --start 0 --end 4
+cu --target current --grant observe get-selection --window 4194318 \
+  --name "Message Reasonix"
+
 # Place the focused window (Spectacle catalog)
 cu --target current --grant actuate window-place --action left-half
 
