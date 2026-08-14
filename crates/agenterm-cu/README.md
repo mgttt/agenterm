@@ -111,9 +111,16 @@ at call time and returns `a11y_node_not_found` when the path is stale.
 
 ## Authorization and audit
 
-Every command requires an explicit `--target`. Observation commands need the
-`observe` grant; actuation commands need `actuate`. Grants come from `--grant` or
+Every command requires an explicit `--target current` or `--ssh <user@host>`
+(which implies `--target ssh`). Observation commands need the `observe` grant;
+actuation commands need `actuate`. Grants come from `--grant` or
 `AGENTERM_CU_GRANT` (comma-separated). Local `current` is not exempt.
+
+The `ssh` tier reuses the same verbs. Host `agenterm-cu --ssh` rewrites the
+command to `target=current` and runs a remote `agenterm-cu exec --json -`
+worker over OpenSSH stdio. First evidence is loopback `sshd` plus a second
+`agenterm-con`: host `wait --text-contains` / `get-text` equals a unique seed
+via AT-SPI GetText (never screenshot / `--coords`).
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -125,6 +132,13 @@ If the audit path cannot be written, actuation does not execute.
 ```bash
 # Declare capabilities (observe grant)
 agenterm-cu --target current --grant observe capabilities
+
+# Same verbs over OpenSSH (remote agenterm-cu --target current worker)
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
+  --grant observe wait --timeout-ms 8000 --window HANDLE --name Command \
+  --text-contains SEED
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
+  get-text --window HANDLE --name Command
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows

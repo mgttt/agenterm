@@ -1,16 +1,16 @@
 //! Typed machine-readable replies.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::command::Command;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CuError {
     pub code: String,
     pub message: String,
     /// Present on `a11y_node_ambiguous` so callers can see how many showing
     /// nodes matched without parsing the message.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
 }
 
@@ -29,14 +29,14 @@ impl CuError {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CuReply {
     pub ok: bool,
     pub target: String,
     pub command: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<CuError>,
 }
 

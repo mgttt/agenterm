@@ -1,5 +1,9 @@
-//! `current` transport: in-process execution through the shared libagenterm
-//! dynamic library (`mechanism` + `dynlib`) only.
+//! Transports for the abstract command set (PRD_02_30).
+//!
+//! - `current`: in-process execution through the shared libagenterm dynamic
+//!   library (`mechanism` + `dynlib`) only.
+//! - `ssh`: OpenSSH `ssh` exec of a remote `agenterm-cu --target current`
+//!   worker (`ssh_transport`). Same verbs; transport only.
 
 use std::{
     thread,
@@ -14,16 +18,23 @@ use crate::{
     command::{Command, PointerButton, WaitCondition},
     mechanism,
     reply::{CuError, CuReply},
+    ssh_transport::{self, SshEndpoint},
     target::TargetRef,
 };
 
 pub struct Executor {
     auth: Authorization,
+    ssh: Option<SshEndpoint>,
 }
 
 impl Executor {
     pub fn new(auth: Authorization) -> Self {
-        Self { auth }
+        Self { auth, ssh: None }
+    }
+
+    pub fn with_ssh(mut self, endpoint: SshEndpoint) -> Self {
+        self.ssh = Some(endpoint);
+        self
     }
 
     pub fn execute(&self, command: &Command) -> CuReply {
@@ -49,6 +60,7 @@ impl Executor {
 
         let reply = match command.target() {
             TargetRef::Current => self.execute_current(command),
+            TargetRef::Ssh => self.execute_ssh(command),
         };
 
         if required == Grant::Actuate {
@@ -56,6 +68,22 @@ impl Executor {
         }
 
         reply
+    }
+
+    fn execute_ssh(&self, command: &Command) -> CuReply {
+        let Some(endpoint) = self.ssh.as_ref() else {
+            return CuReply::err(
+                command,
+                CuError::new(
+                    "invalid_input",
+                    "ssh target requires --ssh <user@host> (or AGENTERM_CU_SSH)",
+                ),
+            );
+        };
+        match ssh_transport::run_remote(endpoint, command, &self.auth) {
+            Ok(reply) => reply,
+            Err(error) => CuReply::err(command, error),
+        }
     }
 
     fn audit_before(&self, command: &Command) -> Result<(), CuError> {
