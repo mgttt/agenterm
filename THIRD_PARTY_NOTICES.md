@@ -29,6 +29,7 @@ Copyright and license terms remain with their respective authors.
 | `softbuffer` | MIT OR Apache-2.0 |
 | `sqlparser` | Apache-2.0 |
 | `tempfile` | MIT OR Apache-2.0 |
+| `thiserror` | MIT OR Apache-2.0 |
 | `tokio` | MIT |
 | `unicode-width` | MIT OR Apache-2.0 |
 | `ureq` | MIT OR Apache-2.0 |
