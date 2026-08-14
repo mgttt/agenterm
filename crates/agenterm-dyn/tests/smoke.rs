@@ -66,6 +66,23 @@ mod linux {
     }
 
     #[test]
+    fn missing_symbol_does_not_evict_cached_libc() {
+        let c = cell();
+        let missing_symbol = "agenterm_dyn_missing_before_getpid";
+        let missing = format!(r#"(dlcall "{}" "{missing_symbol}" "i32")"#, c.pid_lib);
+        let mut env = Dyn::new();
+        let err = env.eval(&missing).unwrap_err();
+        assert!(matches!(err, DynError::DlCall(_)));
+        assert!(err.to_string().contains(missing_symbol));
+
+        let got = env
+            .eval(&getpid_script())
+            .expect("getpid after missing symbol");
+        let real = unsafe { libc::getpid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_getppid_secondary_probe() {
         let c = cell();
         let SecondaryProbe::Native {
