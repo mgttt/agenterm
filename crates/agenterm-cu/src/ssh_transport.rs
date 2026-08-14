@@ -40,8 +40,12 @@
 //! 3.27 locks structured tree observe: host `tree --window H` returns the
 //! remote AT-SPI flattened control tree (`addressing=accessibility-tree`)
 //! and the unique named Session children `Command`, `SEND`, and
-//! `OffscreenField` each appear once among showing nodes. Never screenshot /
-//! `--coords` / mouse-drag / XTest.
+//! `OffscreenField` each appear once among showing nodes. Cut 3.28 locks
+//! get-caret as its own observe path: host `send-text` plants a seed on
+//! remote Command (caret ends at seed length), host independent
+//! `get-caret --name Command` returns that offset as an int
+//! (`via=get-caret-offset`; native AT-SPI `CaretOffset` / `GetCaretOffset`).
+//! Never screenshot / `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -676,9 +680,16 @@ mod tests {
 
     #[test]
     fn get_caret_observe_survives_target_rewrite() {
-        // 3.23 observe sibling: get-caret must also rewrite target only and
-        // keep window/name/role so independent CaretOffset/GetCaretOffset
-        // proof rides the same OpenSSH exec path as set-caret.
+        // 3.28: first ssh get-caret as its own observe path reuses the same
+        // OpenSSH exec rewrite; remote worker runs target=current get-caret.
+        // Circuit: host send-text plants SEED on remote Command (`--` ends
+        // flags; not --text; caret ends at seed length), host independent
+        // get-caret --window H --name Command returns that offset as an int
+        // (via=get-caret-offset; native AT-SPI CaretOffset / GetCaretOffset).
+        // Never screenshot / --coords / mouse-drag. Missing Text typed-fails
+        // a11y_caret_unavailable on the remote worker the same as local
+        // current. No new verb; observe grant only. set-caret (3.23) remains
+        // a separate write path that may use get-caret as readback.
         let command = CuCommand::GetCaret {
             target: TargetRef::Ssh,
             window: Some(42),
