@@ -337,6 +337,45 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_access_root_f_ok_succeeds() {
+        let probe = live_system_probe("access_root");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let path = CString::new("/").expect("root path");
+        let mut env = Dyn::new();
+        env.bind("root", path.as_ptr().cast_mut().cast())
+            .expect("bind root path");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" root "i32" {})"#,
+                libc::F_OK
+            ))
+            .expect("access(\"/\", F_OK) dlcall");
+        assert_eq!(got, Value::Int(0));
+    }
+
+    #[test]
+    fn dlcall_access_missing_path_fails_after_real_call() {
+        let probe = live_system_probe("access_missing");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let path = CString::new("/proc/self/agenterm-dyn-missing-access-probe")
+            .expect("missing probe path");
+        let mut env = Dyn::new();
+        env.bind("missing", path.as_ptr().cast_mut().cast())
+            .expect("bind missing path");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" missing "i32" {})"#,
+                libc::F_OK
+            ))
+            .expect("access(missing, F_OK) dlcall");
+        assert_eq!(got, Value::Int(-1));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {

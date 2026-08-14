@@ -100,7 +100,9 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "sysconf_nprocessors_onln",
                 "getcwd",
                 "isatty_stdin",
-                "open_dev_null"
+                "open_dev_null",
+                "access_root",
+                "access_missing"
             ]
         );
         assert_eq!(
@@ -122,6 +124,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("getcwd", "libc.so.6", "getcwd"),
                 ("isatty_stdin", "libc.so.6", "isatty"),
                 ("open_dev_null", "libc.so.6", "open"),
+                ("access_root", "libc.so.6", "access"),
+                ("access_missing", "libc.so.6", "access"),
             ]
         );
     }

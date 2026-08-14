@@ -50,7 +50,7 @@ pub struct HostCell {
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates; only Linux is live in this leaf.
-    pub system_probes: [SystemProbe; 13],
+    pub system_probes: [SystemProbe; 15],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -76,7 +76,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 13] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 15] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -168,9 +168,23 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 13] = [
             symbol: "open",
         },
     },
+    SystemProbe {
+        name: "access_root",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "access",
+        },
+    },
+    SystemProbe {
+        name: "access_missing",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "access",
+        },
+    },
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 13] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 15] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -221,6 +235,14 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 13] = [
     },
     SystemProbe {
         name: "open_dev_null",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "access_root",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "access_missing",
         status: SystemProbeStatus::Placeholder,
     },
 ];
