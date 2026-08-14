@@ -690,10 +690,11 @@ Global:
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
-  worker over OpenSSH stdio (no new verb). Click evidence: loopback sshd +
-  second agenterm-con, host send-text seed into Command, host click --name
-  SEND (AT-SPI Action) then independent get-text --name Command is empty
-  (composer cleared on submit; never screenshot / --coords / XTest).
+  worker over OpenSSH stdio (no new verb). Scroll evidence: loopback sshd +
+  second agenterm-con, host get-extents before on OffscreenField, host scroll
+  --name OffscreenField (AT-SPI Component.ScrollTo) then independent
+  get-extents after proves nonzero |Δy| or |Δx| (never screenshot / --coords
+  / XTest).
 
 Commands:
   capabilities
