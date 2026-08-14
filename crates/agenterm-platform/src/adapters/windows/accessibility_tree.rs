@@ -114,7 +114,7 @@ pub(crate) fn tree_for_window(
     );
     let session = UiaSession::new(&budget)?;
     let root = session.root_element(window_handle, &budget)?;
-    let root_segment = runtime_segment(&session.runtime_id(&root, &budget)?)?;
+    let root_segment = root_segment(window_handle);
     let root_id = format!("/{root_segment}");
     budget.account_string(&root_id)?;
 
@@ -174,7 +174,14 @@ pub(crate) fn tree_for_window(
                 }
                 Err(error) => return Err(error),
             };
-            let segment = runtime_segment(&runtime_id)?;
+            let segment = match runtime_segment(&runtime_id) {
+                Ok(segment) => segment,
+                Err(error) if is_snapshot_branch_loss(&error) => {
+                    current = next;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let child_id = format!("{id}/{segment}");
             if child_id.len() > MAX_NODE_ID_BYTES {
                 return Err(limit_error(
@@ -485,12 +492,23 @@ impl UiaSession {
         element: &ComPtr,
         budget: &Budget,
     ) -> Result<Vec<i32>, AccessibilityTreeError> {
-        budget.check()?;
-        let mut raw = ptr::null_mut();
-        let hr = unsafe { ((*element_vtable(element)).get_runtime_id)(element.as_ptr(), &mut raw) };
-        hresult(hr, "IUIAutomationElement.GetRuntimeId")?;
-        let array = unsafe { OwnedSafeArray::from_raw(raw, "UIA runtime id")? };
-        array.i32_values(MAX_RUNTIME_ID_PARTS)
+        for attempt in 0..8 {
+            budget.check()?;
+            let mut raw = ptr::null_mut();
+            let hr =
+                unsafe { ((*element_vtable(element)).get_runtime_id)(element.as_ptr(), &mut raw) };
+            hresult(hr, "IUIAutomationElement.GetRuntimeId")?;
+            let array = unsafe { OwnedSafeArray::from_raw(raw, "UIA runtime id")? };
+            let values = array.i32_values(MAX_RUNTIME_ID_PARTS)?;
+            if !values.is_empty() || attempt == 7 {
+                return Ok(values);
+            }
+            // Native proxies can transiently publish an empty SAFEARRAY just
+            // after a window appears. Re-read within the snapshot deadline;
+            // never manufacture an id that cannot be resolved later.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        unreachable!("bounded UIA runtime-id loop always returns")
     }
 
     fn first_child(
@@ -556,13 +574,16 @@ impl UiaSession {
         node_id: &str,
         budget: &Budget,
     ) -> Result<ComPtr, AccessibilityTreeError> {
-        let path = parse_runtime_path(node_id)?;
+        let (root_anchor, path) = parse_runtime_path(node_id)?;
         let mut current = self.root_element(window_handle, budget)?;
-        if self.runtime_id(&current, budget)? != path[0] {
-            return Err(node_recycled(node_id));
+        match root_anchor {
+            RootAnchor::Desktop if window_handle.is_none() => {}
+            RootAnchor::Window(expected) if window_handle == Some(expected) => {}
+            RootAnchor::Runtime(expected) if self.runtime_id(&current, budget)? == expected => {}
+            _ => return Err(node_recycled(node_id)),
         }
 
-        for wanted in path.iter().skip(1) {
+        for wanted in &path {
             let mut candidate = self.first_child(&current, budget)?;
             let mut scanned = 0usize;
             let mut found = None;
@@ -1048,7 +1069,23 @@ fn runtime_segment(runtime_id: &[i32]) -> Result<String, AccessibilityTreeError>
     Ok(segment)
 }
 
-fn parse_runtime_path(node_id: &str) -> Result<Vec<Vec<i32>>, AccessibilityTreeError> {
+#[derive(Debug, PartialEq, Eq)]
+enum RootAnchor {
+    Desktop,
+    Window(isize),
+    Runtime(Vec<i32>),
+}
+
+fn root_segment(window_handle: Option<isize>) -> String {
+    window_handle.map_or_else(
+        || "d".to_owned(),
+        |handle| format!("w{:016x}", handle as u64),
+    )
+}
+
+fn parse_runtime_path(
+    node_id: &str,
+) -> Result<(RootAnchor, Vec<Vec<i32>>), AccessibilityTreeError> {
     if node_id.len() > MAX_NODE_ID_BYTES || !node_id.starts_with('/') {
         return Err(invalid_node_id(
             "node id must be a bounded slash-separated UIA runtime path",
@@ -1062,7 +1099,27 @@ fn parse_runtime_path(node_id: &str) -> Result<Vec<Vec<i32>>, AccessibilityTreeE
     if segments.len() > MAX_DEPTH + 1 {
         return Err(invalid_node_id("node id exceeds the UIA depth limit"));
     }
-    segments.into_iter().map(parse_runtime_segment).collect()
+    let root = match segments[0] {
+        "d" => RootAnchor::Desktop,
+        segment if segment.starts_with('w') => {
+            let encoded = &segment[1..];
+            if encoded.len() != 16 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(invalid_node_id(
+                    "UIA window root must contain exactly sixteen hexadecimal digits",
+                ));
+            }
+            let handle = u64::from_str_radix(encoded, 16)
+                .map_err(|_| invalid_node_id("UIA window root is invalid"))?;
+            RootAnchor::Window(handle as isize)
+        }
+        segment => RootAnchor::Runtime(parse_runtime_segment(segment)?),
+    };
+    let descendants = segments
+        .into_iter()
+        .skip(1)
+        .map(parse_runtime_segment)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((root, descendants))
 }
 
 fn parse_runtime_segment(segment: &str) -> Result<Vec<i32>, AccessibilityTreeError> {
@@ -1121,7 +1178,9 @@ fn is_snapshot_branch_loss(error: &AccessibilityTreeError) -> bool {
     matches!(
         error,
         AccessibilityTreeError::Failed { code, .. }
-            if code == "a11y_node_recycled" || code == "a11y_timeout"
+            if code == "a11y_node_recycled"
+                || code == "a11y_timeout"
+                || code == "a11y_runtime_id_invalid"
     )
 }
 
@@ -1762,7 +1821,16 @@ mod tests {
         let path = format!("/{root}/{child}");
         assert_eq!(
             parse_runtime_path(&path).unwrap(),
-            vec![vec![42, -1, i32::MIN], vec![42, 7]]
+            (
+                RootAnchor::Runtime(vec![42, -1, i32::MIN]),
+                vec![vec![42, 7]]
+            )
+        );
+        assert_eq!(root_segment(None), "d");
+        assert_eq!(root_segment(Some(0x42)), "w0000000000000042");
+        assert_eq!(
+            parse_runtime_path("/w0000000000000042/r00000007").unwrap(),
+            (RootAnchor::Window(0x42), vec![vec![7]])
         );
         assert!(matches!(
             parse_runtime_path("/0/1"),
@@ -1772,6 +1840,8 @@ mod tests {
             parse_runtime_path("/r00000001//r00000002"),
             Err(AccessibilityTreeError::Failed { code, .. }) if code == "a11y_invalid_node_id"
         ));
+        let empty_runtime_id = runtime_segment(&[]).expect_err("empty runtime id");
+        assert!(is_snapshot_branch_loss(&empty_runtime_id));
     }
 
     #[test]

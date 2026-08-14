@@ -114,7 +114,7 @@ jobs:
       - name: Run staged Windows CU smoke
         env:
           AGENTERM_NO_ACTIVATE: '1'
-        run: cargo run --locked -p agenterm --bin agenterm -- rh run scripts/rh/cu-windows-smoke.rh -- . dist/agenterm-cu.exe dist/agenterm.dll
+        run: cargo run --locked -p agenterm --bin agenterm -- rh run scripts/rh/cu-windows-smoke.rh -- . dist/agenterm-cu.exe dist/agenterm.dll examples/c/agenterm_plain_window.c
       - name: Test agenterm-cu
         run: cargo test --locked -p agenterm-cu
       - name: Clippy agenterm-cu

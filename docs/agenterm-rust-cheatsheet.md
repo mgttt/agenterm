@@ -128,6 +128,14 @@ Windows checklist:
   public black-box journey. `InvokePattern::Invoke` returning does not guarantee
   the target GUI thread has processed `WM_COMMAND`; wait on the owned observable
   effect with a deadline instead of asserting immediately or sleeping blindly.
+  A newly visible native proxy can also briefly return a successful but empty
+  RuntimeId SAFEARRAY: bounded re-read is valid, but a synthetic id is not,
+  because later node resolution must compare the provider's opaque value. A
+  window-scoped tree already has a stronger root identity in its caller-supplied
+  HWND: encode and validate that root anchor directly, then use opaque RuntimeIds
+  only for descendants that must be rediscovered through the tree walker. If a
+  descendant still has no RuntimeId, omit that unaddressable branch; never fail
+  the whole snapshot or invent an action target that could resolve to a sibling.
 - A process-global native resource needs one lock and one RAII owner across every
   adapter path. In particular, Windows console attach/detach cannot be split
   between a dependency helper and a platform guard: serialize the whole
