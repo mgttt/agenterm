@@ -190,8 +190,11 @@ Canonical host mapping (approved product vocabulary):
   path on the showing focused node (innermost Text candidate). Never
   XTest / `--coords` when `--window` is set. Proof is independent
   `get-text --window HANDLE` (no `--name`) equal to the clipboard string.
-  Live: Chrome `GetTextField` after `focus --name`; Reasonix composer and
-  agenterm-con `Command` share the focused `send-text` write path.
+  Live: Chrome `GetTextField` after `focus --name` on the host AT-SPI bus
+  (`AT_SPI_BUS` / `AT_SPI_BUS_ADDRESS`); Reasonix composer
+  `Message Reasonix…` after `focus --name` under
+  `scripts/reasonix-desktop-a11y.sh` (eval-helper set-value, `via=text`);
+  agenterm-con `Command` after `focus --name` (`via=editable-text`).
   Without `--window` paste is invalid.
 - [x] `send-keys --window HANDLE --name PAT [--role ROLE] [--] <keys...>`
   resolves through that same path, then delivers the chord via AT-SPI

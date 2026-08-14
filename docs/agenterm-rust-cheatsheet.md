@@ -1263,8 +1263,12 @@ still uses the eval-helper set-value path; `wait --text-equals` must see
 on the showing focused node — the same innermost `Text.GetText` candidate
 `get-text --window` reads. Never XTest when `--window` is set. Proof is
 independent `get-text --window HANDLE` (no `--name`) equal to the
-clipboard string after `focus --name` (Chrome `GetTextField`, Reasonix
-composer, con `Command`). Without `--window` paste is invalid.
+clipboard string after `focus --name`. Live hosts: Chrome `GetTextField`;
+Reasonix composer `Message Reasonix…` under
+`scripts/reasonix-desktop-a11y.sh` (eval-helper set-value, `via=text`,
+same as focused `send-text`); agenterm-con `Command` (`via=editable-text`).
+Optional `--text` only seeds native CLIPBOARD; the field write always
+reads the clipboard. Without `--window` paste is invalid.
 
 `agenterm-cu copy --name` is the inverse read. Resolve the unique showing node,
 read AT-SPI `Text.GetText` (`agt_a11y_node_get_text`), and publish that
