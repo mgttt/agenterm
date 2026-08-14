@@ -132,13 +132,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `copy --window HANDLE` (no `--name`), clear the field,
   `paste --window HANDLE` (no `--name` / no `--text`), then
   `get-text --window HANDLE` (no `--name`) equals the seeded string —
-  not `copy` `matched.text`. Live hosts: Chrome `GetTextField`
+  not `copy` `matched.text`. Live hosts: agenterm-con named `Command`
+  after `focus --name` (`via=gettext` on copy; paste restore
+  `via=editable-text` on a second con that never steals the resident
+  control socket); Chrome `GetTextField`
   (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name`; Reasonix
   composer `Message Reasonix…` after `focus --name` under
   `scripts/reasonix-desktop-a11y.sh` (`via=gettext`; paste restore uses
-  eval-helper set-value, `via=text`); agenterm-con `Command` after
-  `focus --name`. Without `--window` copy is invalid (no plain inject
-  copy). Do not mark this leaf shipped on worker JSON.
+  eval-helper set-value, `via=text`). Without `--window` copy is invalid
+  (no plain inject copy). Do not mark this leaf shipped on worker JSON.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]` writes
   the clipboard into the unique showing named field through that same
   native AT-SPI `EditableText` / `Text` path (`agt_a11y_node_set_text`)

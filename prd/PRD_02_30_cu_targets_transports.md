@@ -178,12 +178,14 @@ Canonical host mapping (approved product vocabulary):
   (`via=gettext`). Never XTest / `--coords` when `--window` is set. Proof
   is independent seed → focused `copy` → clear → focused `paste` →
   `get-text --window HANDLE` (no `--name`) equal to the seeded string.
-  Live: Chrome `GetTextField` after `focus --name` on the host AT-SPI bus
-  (`AT_SPI_BUS` / `AT_SPI_BUS_ADDRESS`); Reasonix composer
-  `Message Reasonix…` after `focus --name` under
-  `scripts/reasonix-desktop-a11y.sh` (`via=gettext`; paste restore uses
-  eval-helper set-value, `via=text`); agenterm-con `Command` after
-  `focus --name`. Without `--window` copy is invalid.
+  Live hosts: agenterm-con named `Command` after `focus --name`
+  (`via=gettext` on copy; paste restore `via=editable-text` on a second
+  con; never steal the resident control socket); Chrome `GetTextField`
+  after `focus --name` on the host AT-SPI bus (`AT_SPI_BUS` /
+  `AT_SPI_BUS_ADDRESS`); Reasonix composer `Message Reasonix…` after
+  `focus --name` under `scripts/reasonix-desktop-a11y.sh` (`via=gettext`;
+  paste restore uses eval-helper set-value, `via=text`). Without
+  `--window` copy is invalid.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]`
   resolves through that same path, then writes the clipboard via the same
   AT-SPI `EditableText` / `Text` + toolkit set-value path as named

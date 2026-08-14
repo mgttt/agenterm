@@ -1300,10 +1300,13 @@ candidate `get-text --window` reads — onto native CLIPBOARD
 independent host circuit after `focus --name`: seed unique string →
 `copy --window H` (no `--name`) → clear field → `paste --window H`
 (no `--name` / no `--text`) → `get-text --window H` equals the seeded
-string. Live hosts: Chrome `GetTextField`; Reasonix composer
-`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`
-(`via=gettext` on copy; paste still uses eval-helper set-value,
-`via=text`); agenterm-con `Command`. Without `--window` copy is invalid.
+string. Live hosts: agenterm-con `Command` after `focus --name`
+(`via=gettext` on copy; paste restore `via=editable-text`; second con
+only — never steal the resident control socket); Chrome `GetTextField`;
+Reasonix composer `Message Reasonix…` under
+`scripts/reasonix-desktop-a11y.sh` (`via=gettext` on copy; paste still
+uses eval-helper set-value, `via=text`). Without `--window` copy is
+invalid.
 
 `agenterm-cu wait --text-equals` / `--node-text-equals` with `--name` is the
 independent AT-SPI close-the-circuit after named `send-text` / `paste` /
