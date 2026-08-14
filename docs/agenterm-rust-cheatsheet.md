@@ -1273,27 +1273,34 @@ Without `--window` paste is invalid.
 
 `agenterm-cu copy --name` is the inverse read. Resolve the unique showing node,
 read AT-SPI `Text.GetText` (`agt_a11y_node_get_text`), and publish that
-UTF-8 through `agt_clipboard_set_text`. `--name` is required. A named
-showing node with no Text interface typed-fails
-(`a11y_text_unavailable`). Never XTest, `--coords`, or screenshot.
-`matched.text` is the resolve-time snapshot and does not count; the
-copied payload is independent GetText. A later `paste --name` with no
-`--text` must be able to `ConvertSelection` that CLIPBOARD. A CLI
-process that `SetSelectionOwner` and then exits leaves CLIPBOARD
-unowned — `copy` therefore keeps a detached `agenterm-cu` owner in the X11
-selection loop (`AGENTERM_X11_CLIPBOARD_SERVE`) until another owner
-takes it. Do not persist via `xclip` / `xsel`. A later process must
-not treat a 1-byte `get_text` probe `TooLarge` as "no clipboard
-text": `agt_clipboard_has_text` would then lie and
-`agt_clipboard_get_text` would return empty, so `paste --name`
-without `--text` writes nothing. Chrome fixture fields and the
-Reasonix composer (`Message Reasonix…` under
-`scripts/reasonix-desktop-a11y.sh`) share this path: after
-`send-text SRC`, `copy --name` reports `via=gettext`, a different
-`send-text` clears the field, `paste --name` with no `--text` rewrites
-SRC through the same WebKit eval-helper set-value path as named
-`send-text`, and `wait --text-equals SRC` must see independent
-GetText == SRC (not copy/paste/send `matched.text`).
+UTF-8 through `agt_clipboard_set_text`. A named showing node with no
+Text interface typed-fails (`a11y_text_unavailable`). Never XTest,
+`--coords`, or screenshot. `matched.text` is the resolve-time snapshot
+and does not count; the copied payload is independent GetText. A later
+`paste --name` with no `--text` must be able to `ConvertSelection` that
+CLIPBOARD. A CLI process that `SetSelectionOwner` and then exits leaves
+CLIPBOARD unowned — `copy` therefore keeps a detached `agenterm-cu`
+owner in the X11 selection loop (`AGENTERM_X11_CLIPBOARD_SERVE`) until
+another owner takes it. Do not persist via `xclip` / `xsel`. A later
+process must not treat a 1-byte `get_text` probe `TooLarge` as "no
+clipboard text": `agt_clipboard_has_text` would then lie and
+`agt_clipboard_get_text` would return empty, so `paste --name` without
+`--text` writes nothing. Chrome fixture fields and the Reasonix
+composer (`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`)
+share this path: after `send-text SRC`, `copy --name` reports
+`via=gettext`, a different `send-text` clears the field, `paste --name`
+with no `--text` rewrites SRC through the same WebKit eval-helper
+set-value path as named `send-text`, and `wait --text-equals SRC` must
+see independent GetText == SRC (not copy/paste/send `matched.text`).
+
+`copy --window HANDLE` without `--name` copies that same GetText path
+on the showing focused node — the same innermost `Text.GetText`
+candidate `get-text --window` reads — onto native CLIPBOARD. Never
+XTest when `--window` is set. Proof is independent host circuit after
+`focus --name`: seed unique string → `copy --window H` (no `--name`) →
+clear field → `paste --window H` (no `--name` / no `--text`) →
+`get-text --window H` equals the seeded string (Chrome `GetTextField`,
+Reasonix composer, con `Command`). Without `--window` copy is invalid.
 
 `agenterm-cu wait --text-equals` / `--node-text-equals` with `--name` is the
 independent AT-SPI close-the-circuit after named `send-text` / `paste` /

@@ -159,8 +159,15 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             let window = flag_isize(&mut args, "--window");
             let name = flag_value(&mut args, "--name");
             let role = flag_value(&mut args, "--role");
-            if name.as_ref().is_none_or(|value| value.is_empty()) {
-                return usage_err("copy requires --window <handle> --name <pattern>");
+            if window.is_none() {
+                return usage_err(
+                    "copy requires --window <handle> [--name <pattern>]",
+                );
+            }
+            if name.as_ref().is_none_or(|value| value.is_empty())
+                && role.as_ref().is_some_and(|value| !value.is_empty())
+            {
+                return usage_err("copy --role requires --name <pattern>");
             }
             Command::Copy {
                 target,
@@ -561,16 +568,21 @@ Commands:
                               --window is set. Without --window stays the
                               plain type-into-focused inject.
                               `--` ends flag parsing
-  copy --window HANDLE --name PAT [--role ROLE]
-                              copies AT-SPI Text.GetText from the unique showing
-                              named node onto the native clipboard (Linux X11:
-                              SetSelectionOwner, not xclip). addressing=
-                              accessibility-tree via=gettext. A node with no
-                              Text interface typed-fails (never XTest / --coords
-                              / screenshot). Close the circuit with paste --name
-                              (no --text) then wait --text-equals; copy
-                              matched.text does not count. Live: Chrome fixture
-                              and Reasonix composer (Message Reasonix…)
+  copy --window HANDLE [--name PAT [--role ROLE]]
+                              copies AT-SPI Text.GetText onto the native
+                              clipboard (Linux X11: SetSelectionOwner, not
+                              xclip). addressing=accessibility-tree via=gettext.
+                              --name targets the unique showing named node.
+                              --window without --name copies that same path on
+                              the showing focused node (same innermost Text
+                              candidate as get-text --window). Never XTest when
+                              --window is set. A node with no Text interface
+                              typed-fails (never XTest / --coords / screenshot).
+                              Close the circuit with paste --window (no --text /
+                              no --name) then get-text --window / wait
+                              --text-equals; copy matched.text does not count.
+                              Live: Chrome fixture and Reasonix composer
+                              (Message Reasonix…)
   paste --window HANDLE [--name PAT [--role ROLE]] [--text TEXT]
                               writes clipboard text via native AT-SPI EditableText
                               / Text (addressing=accessibility-tree). --text only

@@ -81,10 +81,12 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
-    /// Copy AT-SPI `Text.GetText` from the unique showing named node onto
-    /// the native clipboard (`agt_clipboard_set_text`). Never XTest /
-    /// `--coords` / screenshot. A node with no Text interface typed-fails
-    /// (`a11y_text_unavailable`).
+    /// Copy AT-SPI `Text.GetText` onto the native clipboard
+    /// (`agt_clipboard_set_text`). With `--name`, the unique showing named
+    /// node. With `--window` and no `--name`, the showing focused node
+    /// (same innermost Text candidate as `GetText` without `--name`).
+    /// Never XTest / `--coords` / screenshot when `--window` is set. A
+    /// node with no Text interface typed-fails (`a11y_text_unavailable`).
     Copy {
         target: TargetRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
