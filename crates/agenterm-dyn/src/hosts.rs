@@ -4,7 +4,7 @@
 //! default library paths, PID symbols, `TIOCGWINSZ` request codes,
 //! `GetConsoleScreenBufferInfo`, and secondary probe names. When
 //! `agenterm-platform` grows an equivalent host-facts table, move these rows
-//! there and keep `agenterm-dyn` as the eval + libffi `dlcall` door only.
+//! there and keep `agenterm-dyn` as the eval + bounded native `dlcall` door only.
 //! `Dyn::eval` must still accept OS-specific strings as opaque script data at
 //! the boundary — only this catalog of known rows is a platform concern.
 //! Search for `PLATFORM-CANDIDATE` in this crate for the full list.
@@ -254,12 +254,7 @@ pub fn cell(os: &str, arch: &str) -> Option<&'static HostCell> {
 
 /// Names of LAYER3-CANDIDATE markers in this crate (grep / registry hook). No SLJIT/DynASM
 /// dependency is linked yet; see README for portable-backend preference and W^X notes.
-pub const LAYER3_CANDIDATES: &[&str] = &["eval_special_form_match", "dlcall_libffi_dynamic_cif"];
-
-// LAYER3-CANDIDATE (portable codegen, deferred): prefer SLJIT (one LIR, both ISAs) over
-// DynASM (per-ISA macro assembler). If SLJIT is ever linked on Linux/Windows, pin
-// `SLJIT_WX_EXECUTABLE_ALLOCATOR`; Apple hosts already use MAP_JIT in-tree elsewhere.
-// Licenses for future survey only: SLJIT 2-clause BSD, DynASM MIT — not vendored here.
+pub const LAYER3_CANDIDATES: &[&str] = ["eval_special_form_match", "dlcall_rust_dispatch"];
 
 /// Host OS facet for a catalog cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -441,12 +436,6 @@ mod tests {
     fn platform_candidates_lists_catalog() {
         assert!(PLATFORM_CANDIDATES.contains(&"ALL_CELLS"));
         assert!(PLATFORM_CANDIDATES.contains(&"CU_ADJACENT_PROBE_CATALOG"));
-    }
-
-    #[test]
-    fn layer3_candidates_lists_markers() {
-        assert!(LAYER3_CANDIDATES.contains(&"eval_special_form_match"));
-        assert!(LAYER3_CANDIDATES.contains(&"dlcall_libffi_dynamic_cif"));
     }
 
     #[test]

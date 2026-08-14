@@ -1,9 +1,10 @@
 # agenterm-dyn
 
 Tiny in-process **live native door**: interned symbols, evaluation of a small
-S-expression list language (`do` / `set` / `if` / comparisons / `and` / `or` /
-fixnum `+` `-` / bounded `repeat` / `dlcall`), and one native primitive
-`dlcall` implemented with **libffi** (no writable executable pages, no DIY JIT).
+S-expression list language (`do` / `set` / `if` / comparisons / `not` / `and` /
+`or` / fixnum `+` `-` / bounded `repeat` / `dlcall`), and one native primitive.
+`dlcall` resolves symbols with `libloading` and uses bounded Rust `extern "C"`
+dispatch for integer and pointer signatures.
 
 ## What this is
 
@@ -34,15 +35,6 @@ script data in `hosts.rs` (`CU_ADJACENT_PROBE_CATALOG`, six `{linux,macos,window
 remains the live hand** and there is no import of `agenterm-platform` or
 `agenterm-cu`.
 
-## Layer 3 codegen (deferred, markers only)
-
-No SLJIT, DynASM, or JIT is linked. Grep **`LAYER3-CANDIDATE`** for future hooks:
-`eval.rs` special-form match (SLJIT `sljit_emit_*` lowering, one LIR for both ISAs),
-`native.rs` `dlcall` (stay on libffi dynamic CIF — SLJIT `sljit_emit_icall` is not a
-replacement). DynASM is per-ISA macro assembly and is **not** the first portable backend;
-if SLJIT is ever linked on Linux/Windows, pin `SLJIT_WX_EXECUTABLE_ALLOCATOR` (Apple
-MAP_JIT is already handled in-tree elsewhere). Registry: `LAYER3_CANDIDATES`.
-
 ## Integration (deferred)
 
 Cross-arch logic aggregation, libagenterm wiring, and `agenterm-platform`
@@ -53,15 +45,13 @@ Items tagged **`PLATFORM-CANDIDATE`** in `src/hosts.rs` (and listed in
 symbols, ioctl request codes, console probes, and CU-adjacent probe rows — that
 may move to `agenterm-platform` when that crate grows an equivalent contract.
 They are **not** imported from platform today. What stays in dyn: `intern` /
-`bind` / `eval`, `dlcall` + libffi, value/error/parse, and the rule that OS
-names remain opaque script data at the eval boundary.
+`bind` / `eval`, bounded native `dlcall`, value/error/parse, and the rule that
+OS names remain opaque script data at the eval boundary.
 
-## Layer 3 codegen
-
-Research for a future layer that lowers the same intern list (`do` / `set` /
-`if` / `dlcall`) to native code — **not implemented**; this crate has no JIT
-today. Survey notes (SLJIT vs DynASM, sizes, W^X, lowering sketch):
-[`docs/layer3-sljit-dynasm.md`](docs/layer3-sljit-dynasm.md).
+`dlcall` accepts fixed signatures with at most six arguments. Supported ABI
+types are `void` (return only), `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`,
+`u64`, and `ptr`. Floating-point values, aggregates, and variadic calls are not
+supported and fail explicitly.
 
 ## Public surface
 
@@ -69,7 +59,7 @@ today. Survey notes (SLJIT vs DynASM, sizes, W^X, lowering sketch):
 |-----|------|
 | `Dyn::intern` | Intern a string into a stable `Symbol` |
 | `Dyn::bind` | Hand an existing pointer/handle into the environment |
-| `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, comparisons, `and`/`or`, `+`/`-`, `repeat`, `dlcall`) |
+| `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, comparisons, `not`, `and`/`or`, `+`/`-`, `repeat`, `dlcall`) |
 | `dlcall` | Only native primitive — invoked from lists, not a verb table |
 | `hosts::*` | Six-cell host table + CU-adjacent catalog (`PLATFORM-CANDIDATE`) |
 
@@ -109,7 +99,7 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 
 | File | Coverage |
 |------|----------|
-| `language.rs` | comparisons, `and`/`or`, `+`/`-`, `repeat`, nested logic |
+| `language.rs` | comparisons, `not`, `and`/`or`, `+`/`-`, `repeat`, nested logic |
 | `errors.rs` | Bad S-exprs, unknown vars/forms, arity, overflow, repeat bounds |
 | `hosts.rs` | Six-cell matrix completeness, `live_cell()` selection, row well-formedness |
 | `smoke.rs` | Real `dlcall` into host libraries per OS (`#[cfg]`-gated) |

@@ -3,12 +3,11 @@ name = "agenterm-dyn"
 version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
-description = "In-process live native door: interned symbols, S-expr eval, libffi dlcall"
+description = "In-process live native door: interned symbols, S-expr eval, bounded native dlcall"
 license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-libffi = "5.1"
 libloading = "0.8"
 thiserror = "2"
 

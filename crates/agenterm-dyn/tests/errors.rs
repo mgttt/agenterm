@@ -89,6 +89,20 @@ fn dlcall_odd_arg_pairs() {
 }
 
 #[test]
+fn dlcall_rejects_more_than_six_arguments() {
+    let mut env = Dyn::new();
+    let err = env
+        .eval(
+            r#"(dlcall "libc.so.6" "getpid" "i32"
+                "i32" 0 "i32" 0 "i32" 0 "i32" 0
+                "i32" 0 "i32" 0 "i32" 0)"#,
+        )
+        .unwrap_err();
+    assert!(matches!(err, DynError::DlCall(_)));
+    assert!(err.to_string().contains("fixed limit of 6"));
+}
+
+#[test]
 fn missing_library() {
     let mut env = Dyn::new();
     let err = env
@@ -152,6 +166,27 @@ fn and_and_or_require_at_least_one_operand() {
             form: "or",
             expected: 1,
             got: 0
+        }
+    ));
+}
+
+#[test]
+fn not_requires_exactly_one_operand() {
+    let mut env = Dyn::new();
+    assert!(matches!(
+        env.eval("(not)").unwrap_err(),
+        DynError::Arity {
+            form: "not",
+            expected: 1,
+            got: 0
+        }
+    ));
+    assert!(matches!(
+        env.eval("(not 0 1)").unwrap_err(),
+        DynError::Arity {
+            form: "not",
+            expected: 1,
+            got: 2
         }
     ));
 }

@@ -95,6 +95,18 @@ fn comparisons_on_ints() {
     assert_eq!(env.eval("(< 5 2)").unwrap(), Value::Int(0));
     assert_eq!(env.eval("(> 9 1)").unwrap(), Value::Int(1));
     assert_eq!(env.eval("(> 1 9)").unwrap(), Value::Int(0));
+    assert_eq!(env.eval("(<= 2 2)").unwrap(), Value::Int(1));
+    assert_eq!(env.eval("(<= 3 2)").unwrap(), Value::Int(0));
+    assert_eq!(env.eval("(>= 2 2)").unwrap(), Value::Int(1));
+    assert_eq!(env.eval("(>= 2 3)").unwrap(), Value::Int(0));
+}
+
+#[test]
+fn not_inverts_truthiness() {
+    let mut env = Dyn::new();
+    assert_eq!(env.eval("(not 0)").unwrap(), Value::Int(1));
+    assert_eq!(env.eval("(not 7)").unwrap(), Value::Int(0));
+    assert_eq!(env.eval("(not (not 0))").unwrap(), Value::Int(0));
 }
 
 #[test]

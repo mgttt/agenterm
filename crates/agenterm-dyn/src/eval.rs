@@ -31,9 +31,6 @@ fn eval_list(env: &mut Dyn, items: &[SExpr]) -> Result<Value, DynError> {
             "application of non-symbol head is not supported".into(),
         ));
     };
-    // LAYER3-CANDIDATE: this special-form match is the natural lower boundary — a future
-    // layer could emit SLJIT LIR (`sljit_emit_*`) for both ISAs from the same tree walk.
-    // DynASM is per-ISA macro assembly and is not the first portable backend choice.
     match form.as_str() {
         "do" => eval_do(env, &items[1..]),
         "set" => eval_set(env, &items[1..]),
@@ -42,6 +39,9 @@ fn eval_list(env: &mut Dyn, items: &[SExpr]) -> Result<Value, DynError> {
         "=" => eval_cmp(env, "=", &items[1..], |a, b| a == b),
         "<" => eval_cmp(env, "<", &items[1..], |a, b| a < b),
         ">" => eval_cmp(env, ">", &items[1..], |a, b| a > b),
+        "<=" => eval_cmp(env, "<=", &items[1..], |a, b| a <= b),
+        ">=" => eval_cmp(env, ">=", &items[1..], |a, b| a >= b),
+        "not" => eval_not(env, &items[1..]),
         "and" => eval_and(env, &items[1..]),
         "or" => eval_or(env, &items[1..]),
         "+" => eval_add(env, &items[1..]),
@@ -153,6 +153,17 @@ fn eval_or(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
         }
     }
     Ok(last)
+}
+
+fn eval_not(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+    if args.len() != 1 {
+        return Err(DynError::Arity {
+            form: "not",
+            expected: 1,
+            got: args.len(),
+        });
+    }
+    Ok(bool_value(!eval_expr(env, &args[0])?.is_truthy()))
 }
 
 fn eval_add(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {

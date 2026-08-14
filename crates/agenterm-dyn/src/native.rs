@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::ffi::{CString, c_void};
 
-use libffi::high::CodePtr;
-use libffi::middle::{Cif, Type, arg};
 use libloading::Library;
 
 use crate::Dyn;
 use crate::error::DynError;
 use crate::parse::SExpr;
 use crate::value::Value;
+
+const MAX_ARGS: usize = 6;
 
 #[derive(Default)]
 pub(crate) struct LibraryCache {
@@ -22,7 +22,7 @@ impl LibraryCache {
 
     fn load(&mut self, path: &str) -> Result<&Library, DynError> {
         if !self.libs.contains_key(path) {
-            // SAFETY: loading a host dynamic library by path; callers supply OS-specific names as script data.
+            // SAFETY: loading a host dynamic library by path; callers supply OS-specific names.
             let lib = unsafe { Library::new(path) }
                 .map_err(|e| DynError::Library(format!("{path}: {e}")))?;
             self.libs.insert(path.to_owned(), lib);
@@ -58,113 +58,51 @@ impl SigType {
             "i64" => Ok(Self::I64),
             "u64" => Ok(Self::U64),
             "ptr" => Ok(Self::Ptr),
-            other => Err(DynError::Type(format!("unknown ffi type `{other}`"))),
-        }
-    }
-
-    fn libffi(self) -> Type {
-        match self {
-            Self::Void => Type::void(),
-            Self::I8 => Type::i8(),
-            Self::U8 => Type::u8(),
-            Self::I16 => Type::i16(),
-            Self::U16 => Type::u16(),
-            Self::I32 => Type::i32(),
-            Self::U32 => Type::u32(),
-            Self::I64 => Type::i64(),
-            Self::U64 => Type::u64(),
-            Self::Ptr => Type::pointer(),
+            other => Err(DynError::Type(format!(
+                "unsupported dlcall type `{other}`; only void/integer/pointer types are supported"
+            ))),
         }
     }
 }
 
-struct DynArg {
-    storage: ArgStorage,
-}
-
-enum ArgStorage {
-    I8(i8),
-    U8(u8),
-    I16(i16),
-    U16(u16),
-    I32(i32),
-    U32(u32),
-    I64(i64),
-    U64(u64),
-    Ptr(*mut c_void),
-}
+#[derive(Clone, Copy)]
+struct DynArg(u64);
 
 impl DynArg {
     fn from_value(sig: SigType, value: Value) -> Result<Self, DynError> {
-        let storage = match sig {
-            SigType::I8 => ArgStorage::I8(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
+        let bits = match sig {
+            SigType::I8 => i64::from(
+                i8::try_from(value.as_int().map_err(DynError::Type)?)
                     .map_err(|_| DynError::Type("i8 overflow".into()))?,
-            ),
-            SigType::U8 => ArgStorage::U8(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
+            ) as u64,
+            SigType::U8 => u64::from(
+                u8::try_from(value.as_int().map_err(DynError::Type)?)
                     .map_err(|_| DynError::Type("u8 overflow".into()))?,
             ),
-            SigType::I16 => ArgStorage::I16(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
+            SigType::I16 => i64::from(
+                i16::try_from(value.as_int().map_err(DynError::Type)?)
                     .map_err(|_| DynError::Type("i16 overflow".into()))?,
-            ),
-            SigType::U16 => ArgStorage::U16(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
+            ) as u64,
+            SigType::U16 => u64::from(
+                u16::try_from(value.as_int().map_err(DynError::Type)?)
                     .map_err(|_| DynError::Type("u16 overflow".into()))?,
             ),
-            SigType::I32 => ArgStorage::I32(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
+            SigType::I32 => i64::from(
+                i32::try_from(value.as_int().map_err(DynError::Type)?)
                     .map_err(|_| DynError::Type("i32 overflow".into()))?,
-            ),
-            SigType::U32 => ArgStorage::U32(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
+            ) as u64,
+            SigType::U32 => u64::from(
+                u32::try_from(value.as_int().map_err(DynError::Type)?)
                     .map_err(|_| DynError::Type("u32 overflow".into()))?,
             ),
-            SigType::I64 => ArgStorage::I64(value.as_int().map_err(DynError::Type)?),
-            SigType::U64 => ArgStorage::U64(
-                value
-                    .as_int()
-                    .map_err(DynError::Type)?
-                    .try_into()
-                    .map_err(|_| DynError::Type("u64 overflow".into()))?,
-            ),
-            SigType::Ptr => ArgStorage::Ptr(value.as_ptr().map_err(DynError::Type)? as *mut c_void),
+            SigType::I64 => value.as_int().map_err(DynError::Type)? as u64,
+            SigType::U64 => u64::try_from(value.as_int().map_err(DynError::Type)?)
+                .map_err(|_| DynError::Type("u64 overflow".into()))?,
+            SigType::Ptr => u64::try_from(value.as_ptr().map_err(DynError::Type)?)
+                .map_err(|_| DynError::Type("pointer does not fit in u64".into()))?,
             SigType::Void => return Err(DynError::Type("void cannot be an argument type".into())),
         };
-        Ok(Self { storage })
-    }
-
-    fn libffi_arg(&self) -> libffi::middle::Arg<'_> {
-        match &self.storage {
-            ArgStorage::I8(v) => arg(v),
-            ArgStorage::U8(v) => arg(v),
-            ArgStorage::I16(v) => arg(v),
-            ArgStorage::U16(v) => arg(v),
-            ArgStorage::I32(v) => arg(v),
-            ArgStorage::U32(v) => arg(v),
-            ArgStorage::I64(v) => arg(v),
-            ArgStorage::U64(v) => arg(v),
-            ArgStorage::Ptr(v) => arg(v),
-        }
+        Ok(Self(bits))
     }
 }
 
@@ -179,8 +117,8 @@ fn expect_string(expr: &SExpr, what: &str) -> Result<String, DynError> {
 
 /// Evaluate `(dlcall lib sym rettype [argtype arg]...)`.
 ///
-/// LAYER3-CANDIDATE: keep **libffi** + dynamic `Cif` here. SLJIT `sljit_emit_icall` is
-/// fixed-signature (≤4 args) and cannot replace script-driven CIF construction.
+/// This intentionally supports only fixed, non-variadic C ABI calls with at most six
+/// integer/pointer arguments. Floating-point and aggregate ABI classes are rejected.
 pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     if args.len() < 3 {
         return Err(DynError::Arity {
@@ -198,14 +136,18 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     let lib_name = expect_string(&args[0], "dlcall library")?;
     let sym_name = expect_string(&args[1], "dlcall symbol")?;
     let ret_ty = SigType::parse(&expect_string(&args[2], "dlcall return type")?)?;
+    let arg_count = args[3..].len() / 2;
+    if arg_count > MAX_ARGS {
+        return Err(DynError::DlCall(format!(
+            "{arg_count} arguments exceed the fixed limit of {MAX_ARGS}"
+        )));
+    }
 
-    let mut arg_types = Vec::new();
-    let mut dyn_args = Vec::new();
+    let mut dyn_args = Vec::with_capacity(arg_count);
     let mut i = 3;
     while i < args.len() {
         let ty = SigType::parse(&expect_string(&args[i], "dlcall argument type")?)?;
         let value = crate::eval::eval_expr(env, &args[i + 1])?;
-        arg_types.push(ty);
         dyn_args.push(DynArg::from_value(ty, value)?);
         i += 2;
     }
@@ -213,65 +155,56 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     let lib = env.libs.load(&lib_name)?;
     let c_name = CString::new(sym_name.as_str())
         .map_err(|_| DynError::DlCall("symbol name contains interior NUL".into()))?;
-    // SAFETY: resolving a symbol from a loaded library; pointer validity is the library's contract.
-    let func_ptr: *mut c_void = unsafe {
-        let sym: libloading::Symbol<*mut c_void> = lib
-            .get(c_name.as_bytes())
+    // SAFETY: the library remains cached in `env`, so the symbol address stays loaded.
+    let func_ptr = unsafe {
+        let sym: libloading::Symbol<*const c_void> = lib
+            .get(c_name.as_bytes_with_nul())
             .map_err(|e| DynError::DlCall(format!("{sym_name}: {e}")))?;
         *sym
     };
 
-    let arg_types_ffi: Vec<Type> = arg_types.iter().map(|t| t.libffi()).collect();
-    let cif = Cif::new(arg_types_ffi, ret_ty.libffi());
-    let ffi_args: Vec<_> = dyn_args.iter().map(DynArg::libffi_arg).collect();
+    // SAFETY: callers provide the native symbol's signature. `invoke` supports only the
+    // integer/pointer C ABI class and a fixed arity, which were validated above.
+    unsafe { invoke(func_ptr, &dyn_args, ret_ty) }
+}
 
-    // SAFETY: `func_ptr` came from the platform loader for `sym_name`; `cif` and `ffi_args`
-    // were built from the script-provided signature. Wrong signatures are UB — tests lock the
-    // happy path; callers are expected to pass correct script data.
-    let result = unsafe { invoke(&cif, func_ptr, &ffi_args, ret_ty)? };
-    Ok(result)
+macro_rules! call_fixed {
+    ($ptr:expr, $args:expr, $ret:ty) => {{
+        match $args {
+            [] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn() -> $ret>($ptr)() },
+            [a] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn(u64) -> $ret>($ptr)(a.0) },
+            [a, b] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn(u64, u64) -> $ret>($ptr)(a.0, b.0) },
+            [a, b, c] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn(u64, u64, u64) -> $ret>($ptr)(a.0, b.0, c.0) },
+            [a, b, c, d] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn(u64, u64, u64, u64) -> $ret>($ptr)(a.0, b.0, c.0, d.0) },
+            [a, b, c, d, e] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn(u64, u64, u64, u64, u64) -> $ret>($ptr)(a.0, b.0, c.0, d.0, e.0) },
+            [a, b, c, d, e, f] => unsafe { std::mem::transmute::<*const c_void, unsafe extern "C" fn(u64, u64, u64, u64, u64, u64) -> $ret>($ptr)(a.0, b.0, c.0, d.0, e.0, f.0) },
+            _ => unreachable!("arity checked before invoke"),
+        }
+    }};
 }
 
 unsafe fn invoke(
-    cif: &Cif,
-    func_ptr: *mut c_void,
-    ffi_args: &[libffi::middle::Arg<'_>],
+    func_ptr: *const c_void,
+    args: &[DynArg],
     ret_ty: SigType,
 ) -> Result<Value, DynError> {
-    let code = CodePtr(func_ptr);
-    match ret_ty {
+    let value = match ret_ty {
         SigType::Void => {
-            unsafe {
-                cif.call::<()>(code, ffi_args);
-            }
-            Ok(Value::Nil)
+            call_fixed!(func_ptr, args, ());
+            Value::Nil
         }
-        SigType::I8 => Ok(Value::Int(i64::from(unsafe {
-            cif.call::<i8>(code, ffi_args)
-        }))),
-        SigType::U8 => Ok(Value::Int(i64::from(unsafe {
-            cif.call::<u8>(code, ffi_args)
-        }))),
-        SigType::I16 => Ok(Value::Int(i64::from(unsafe {
-            cif.call::<i16>(code, ffi_args)
-        }))),
-        SigType::U16 => Ok(Value::Int(i64::from(unsafe {
-            cif.call::<u16>(code, ffi_args)
-        }))),
-        SigType::I32 => Ok(Value::Int(i64::from(unsafe {
-            cif.call::<i32>(code, ffi_args)
-        }))),
-        SigType::U32 => Ok(Value::Int(i64::from(unsafe {
-            cif.call::<u32>(code, ffi_args)
-        }))),
-        SigType::I64 => Ok(Value::Int(unsafe { cif.call::<i64>(code, ffi_args) })),
-        SigType::U64 => Ok(Value::Int(
-            i64::try_from(unsafe { cif.call::<u64>(code, ffi_args) })
+        SigType::I8 => Value::Int(i64::from(call_fixed!(func_ptr, args, i8))),
+        SigType::U8 => Value::Int(i64::from(call_fixed!(func_ptr, args, u8))),
+        SigType::I16 => Value::Int(i64::from(call_fixed!(func_ptr, args, i16))),
+        SigType::U16 => Value::Int(i64::from(call_fixed!(func_ptr, args, u16))),
+        SigType::I32 => Value::Int(i64::from(call_fixed!(func_ptr, args, i32))),
+        SigType::U32 => Value::Int(i64::from(call_fixed!(func_ptr, args, u32))),
+        SigType::I64 => Value::Int(call_fixed!(func_ptr, args, i64)),
+        SigType::U64 => Value::Int(
+            i64::try_from(call_fixed!(func_ptr, args, u64))
                 .map_err(|_| DynError::DlCall("u64 return does not fit in i64".into()))?,
-        )),
-        SigType::Ptr => {
-            let p: *mut c_void = unsafe { cif.call(code, ffi_args) };
-            Ok(Value::Ptr(p as usize))
-        }
-    }
+        ),
+        SigType::Ptr => Value::Ptr(call_fixed!(func_ptr, args, *mut c_void) as usize),
+    };
+    Ok(value)
 }
