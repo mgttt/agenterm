@@ -118,16 +118,20 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Get-extents evidence is
-loopback `sshd` plus a second `agenterm-con`: host
-`get-extents --window HANDLE --name OffscreenField` returns screen extents
-whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
-AT-SPI `Component.GetExtents(Screen)`). Snapshot `node.bounds` do not count.
-Never screenshot / `--coords` / mouse-drag / XTest. Missing / empty extents
-typed-fail `a11y_extents_unavailable` on the remote worker the same as local
-`current`. `get-caret` / `tree` / `focus` / `scroll` / `click` / `set-caret` /
-`select` / `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
-observe-only `wait` / `get-text` / `get-selection` remain valid too.
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Get-selection evidence
+is loopback `sshd` plus a second `agenterm-con`: host
+`send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
+`--text`) plants the seed, host `select --window HANDLE --name Command
+--start N --end M` runs remote AT-SPI `Text.SetSelection`, then host
+independent `get-selection --window HANDLE --name Command` returns that range
+(`via=get-selection`; start/end equal the selected slice of the seed, or the
+seed when the range is the whole field). Native AT-SPI `GetNSelections` +
+`GetSelection`. Never screenshot / `--coords` / mouse-drag / XTest. Missing
+Text typed-fails `a11y_selection_unavailable` on the remote worker the same
+as local `current`. `get-extents` / `get-caret` / `tree` / `focus` /
+`scroll` / `click` / `set-caret` / `select` / `send-keys` / `copy` /
+`paste --text` / `send-text` over ssh and observe-only `wait` / `get-text`
+remain valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -141,10 +145,14 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Get-extents observe path: get-extents x/y/width/height are ints
-# (via=get-extents; Component.GetExtents(Screen); not node.bounds).
+# Get-selection observe path: send-text SEED → select N..M → get-selection
+# start/end equals selected slice (via=get-selection; GetNSelections+GetSelection).
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe get-extents --window HANDLE --name OffscreenField
+  --grant observe,actuate send-text --window HANDLE --name Command -- SEED
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
+  --grant observe,actuate select --window HANDLE --name Command --start 0 --end 11
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
+  get-selection --window HANDLE --name Command
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows

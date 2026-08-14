@@ -22,13 +22,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` get-extents evidence reuses the #48 con-publish
-  extents observe path over loopback `sshd` against a second `agenterm-con`
+  commands above it. `ssh` get-selection evidence reuses the #50 con-publish
+  selection observe path over loopback `sshd` against a second `agenterm-con`
   (never steal the resident control socket): host
-  `cu --ssh get-extents --name OffscreenField` returns screen extents whose
-  `x` / `y` / `width` / `height` are ints (`via=get-extents`; native AT-SPI
-  `Component.GetExtents(Screen)`). Snapshot `node.bounds` do not count.
-  Never screenshot, `--coords`, or XTest.
+  `cu --ssh send-text --name Command -- SEED` (payload after `--`; not
+  `--text`) plants the seed, host `cu --ssh select --name Command --start N
+  --end M` runs remote AT-SPI `Text.SetSelection`, then host independent
+  `cu --ssh get-selection --name Command` returns that range
+  (`via=get-selection`; start/end equal the selected slice of the seed, or
+  the seed when the range is the whole field). Native AT-SPI
+  `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -427,19 +430,22 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Get-extents observe path: host
-  `get-extents --window HANDLE --name OffscreenField` on a second
-  `agenterm-con` returns screen extents whose `x` / `y` / `width` / `height`
-  are ints (`via=get-extents`; native AT-SPI `Component.GetExtents(Screen)`).
-  Snapshot `node.bounds` do not count. Never screenshot / `--coords` /
-  mouse-drag / XTest. Missing / empty extents typed-fail
-  `a11y_extents_unavailable` on the remote worker the same as local
-  `current`. `get-caret` / `tree` / `focus` / `scroll` / `click` /
-  `set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
-  `send-text` over ssh and observe-only `wait` / `get-text` /
-  `get-selection` still hold. Worker JSON does not count; CEO owns the
-  official gate. Auth failure and missing destination are typed
-  (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).
+  runs remote `agenterm-cu --target current`. Get-selection observe path: host
+  `send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
+  `--text`) plants a seed on a second `agenterm-con` `Command` field; host
+  `select --window HANDLE --name Command --start N --end M` runs remote
+  AT-SPI `Text.SetSelection`; host independent
+  `get-selection --window HANDLE --name Command` returns that range
+  (`via=get-selection`; start/end equal the selected slice of the seed, or
+  the seed when the range is the whole field). Native AT-SPI
+  `GetNSelections` + `GetSelection`. Never screenshot / `--coords` /
+  mouse-drag / XTest. Missing Text typed-fails `a11y_selection_unavailable`
+  on the remote worker the same as local `current`. `get-extents` /
+  `get-caret` / `tree` / `focus` / `scroll` / `click` / `set-caret` /
+  `select` / `send-keys` / `copy` / `paste --text` / `send-text` over ssh
+  and observe-only `wait` / `get-text` still hold. Worker JSON does not
+  count; CEO owns the official gate. Auth failure and missing destination
+  are typed (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
   actuation, audited degraded coordinate click, invalid node path failure, and
