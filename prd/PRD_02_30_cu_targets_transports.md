@@ -22,11 +22,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` paste evidence reuses the #47 con-publish
-  `paste` / `get-text` circuit over loopback `sshd` against a second
-  `agenterm-con` (never steal the resident control socket): the seed is planted
-  by host `cu --ssh paste --text`, not by a local `current` write or host
-  clipboard. `send-text` over ssh remains a valid write path (3.18).
+  commands above it. `ssh` copy evidence reuses the #47 con-publish
+  `copy` / `paste` / `get-text` circuit over loopback `sshd` against a second
+  `agenterm-con` (never steal the resident control socket): seed is already on
+  `Command` (or planted over ssh `paste --text` / `send-text`), host
+  `cu --ssh copy` publishes remote GetText onto the **remote** session
+  CLIPBOARD, then host `cu --ssh paste` (no `--text`) + `get-text` equals that
+  seed. Never host clipboard, screenshot, or `--coords`.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -425,12 +427,13 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Paste path: host
-  `paste --name Command --text SEED` plants a unique seed on a second
-  `agenterm-con` `Command` field via remote clipboard + AT-SPI EditableText;
-  host `get-text --name Command` equals that seed via AT-SPI GetText (never
-  screenshot / `--coords`). Seed must go over ssh paste, not local
-  `--target current`. `send-text` over ssh and observe-only
+  runs remote `agenterm-cu --target current`. Copy path: seed already on a
+  second `agenterm-con` `Command` field (or planted over ssh `paste --text` /
+  `send-text`); host `copy --name Command` publishes remote GetText onto the
+  remote session CLIPBOARD (`via=gettext`); host `paste --name Command` (no
+  `--text`) + `get-text --name Command` equals that seed via remote clipboard +
+  AT-SPI EditableText / GetText (never screenshot / `--coords`, never host
+  clipboard). `paste --text` / `send-text` over ssh and observe-only
   `wait --text-contains` / `get-text` still hold. Worker JSON does not count;
   CEO owns the official gate. Auth failure and missing destination are typed
   (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).

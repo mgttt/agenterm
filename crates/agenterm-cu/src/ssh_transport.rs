@@ -5,9 +5,13 @@
 //! `ssh` stdio. No new verbs. Observe and actuate grants both forward; the
 //! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
-//! for both read (`wait` / `get-text`) and write (`send-text` then `paste`).
-//! Cut 3.19 locks the clipboard write: host `paste --text` plants the seed on
-//! the remote Command field; host `get-text` equals that seed.
+//! for both read (`wait` / `get-text`) and write (`send-text` / `paste` /
+//! `copy`). Cut 3.19 locks the clipboard write: host `paste --text` plants the
+//! seed on the remote Command field; host `get-text` equals that seed. Cut
+//! 3.20 locks clipboard publish: seed already on Command (or planted over ssh
+//! paste/send-text), host `copy` publishes remote GetText onto the remote
+//! session CLIPBOARD, then host `paste` (no `--text`) + `get-text` equals that
+//! seed.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -463,6 +467,33 @@ mod tests {
                 ..
             } => {
                 assert_eq!(text.as_deref(), Some("319SSHPASTE"));
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn copy_publish_survives_target_rewrite() {
+        // 3.20: first ssh copy path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current copy (GetText → remote CLIPBOARD).
+        // Circuit: seed on Command → ssh copy → ssh paste (no --text) →
+        // ssh get-text equals seed. Clipboard is the remote session's.
+        let command = CuCommand::Copy {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "copy");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Copy {
+                window, name, role, ..
+            } => {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("Command"));
                 assert!(role.is_none());
