@@ -39,6 +39,10 @@ jobs:
         run: cargo test --locked -p agenterm-ui-core --lib
       - name: Test platform contracts
         run: cargo test --locked -p agenterm-platform --lib --all-features
+      - name: Install libffi for agenterm-dyn
+        run: sudo apt-get update && sudo apt-get install -y libffi-dev
+      - name: Test agenterm-dyn
+        run: cargo test --locked -p agenterm-dyn
       - name: Prove Rh AOT pack pipeline
         run: ./rh-check.sh
 
