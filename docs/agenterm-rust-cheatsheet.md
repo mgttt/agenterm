@@ -1336,6 +1336,16 @@ the caret to `end`. Independent `cu get-caret --name` after
 `SetCaretOffset` true as proof, and do not implement caret as
 `--coords` / XTest.
 
+Chrome named text fields expose those same `Text.SetCaretOffset` /
+`CaretOffset` methods. Zero protocol change: the ABI 1.9 verbs and
+Linux adapter already used for con work on a
+`--force-renderer-accessibility` Chrome `<input aria-label>` (live
+fixture `CaretField` / `HELLO` in `fixtures/cu/310-chrome-caret.html`).
+An unfocused field often reports `CaretOffset=-1`; after
+`set-caret --offset 2` (which grab-focuses) independent `get-caret`
+is `2`. Do not add an eval helper or CDP/`--coords` fallback. No
+`A11YCARET1` hello. The `set-caret` reply is not proof.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. An `agenterm-cu`

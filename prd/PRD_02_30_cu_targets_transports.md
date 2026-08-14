@@ -240,14 +240,17 @@ Canonical host mapping (approved product vocabulary):
   typed-fails (`a11y_caret_unavailable`). SetCaretOffset false
   typed-fails (`a11y_caret_no_effect`). Never XTest, `--coords`, or
   screenshot. Proof is independent `get-caret`, not the `set-caret`
-  reply.
+  reply. Live Chrome fixture field `CaretField`
+  (`fixtures/cu/310-chrome-caret.html`) uses that same native Text
+  path (no ABI / eval-helper change).
 - [x] `get-caret --window HANDLE --name PAT [--role ROLE]` resolves
   through that same path, then independent AT-SPI `Text.CaretOffset`
   / `GetCaretOffset` (`agt_a11y_node_get_caret_offset`). The
   `set-caret` reply payload does not count. Missing Text typed-fails
-  (`a11y_caret_unavailable`). Linux `agenterm-con` composer
-  `Command` publishes real `SetCaretOffset` / `CaretOffset` (ABI 1.9
-  verbs).
+  (`a11y_caret_unavailable`). Chrome `CaretField` unfocused
+  `CaretOffset` may be `-1`; after `set-caret --offset N` independent
+  readback equals `N`. Linux `agenterm-con` composer `Command`
+  publishes real `SetCaretOffset` / `CaretOffset` (ABI 1.9 verbs).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

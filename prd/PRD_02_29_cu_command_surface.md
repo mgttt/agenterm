@@ -194,14 +194,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`a11y_caret_unavailable`). SetCaretOffset false is
   `a11y_caret_no_effect`, not `timeout`. Miss / ambiguous keep the
   existing name codes. Never XTest, `--coords`, or screenshot. The
-  `set-caret` reply is not proof.
+  `set-caret` reply is not proof. Live Chrome fixture field
+  `CaretField` (`fixtures/cu/310-chrome-caret.html`) uses the same
+  native `Text.SetCaretOffset` path — no protocol change (unlike
+  `ScrollTo` / EditableText helpers).
 - [x] `get-caret --window HANDLE --name PAT [--role ROLE]` reads
   independent AT-SPI `Text.CaretOffset` / `GetCaretOffset`
   (`agt_a11y_node_get_caret_offset`) for that unique showing named
   node. The `set-caret` reply payload does not count. Missing Text
-  typed-fails (`a11y_caret_unavailable`). Linux `agenterm-con`
-  composer `Command` publishes those same Text methods (persistent
-  publisher caret; ABI 1.9 verbs).
+  typed-fails (`a11y_caret_unavailable`). Proof is independent
+  `get-caret` after `set-caret --offset N` on Chrome `CaretField`
+  (unfocused `CaretOffset` may be `-1`; after set it must equal `N`).
+  Linux `agenterm-con` composer `Command` publishes those same Text
+  methods (persistent publisher caret; ABI 1.9 verbs).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
