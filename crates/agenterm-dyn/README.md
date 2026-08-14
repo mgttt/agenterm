@@ -28,6 +28,13 @@ Cross-arch logic aggregation and libagenterm wiring are explicitly **out of
 scope** until `agenterm-dyn` matures on its own. Future work may pile higher
 layers on top of this crate; that integration is a separate milestone.
 
+## Layer 3 codegen
+
+Research for a future layer that lowers the same intern list (`do` / `set` /
+`if` / `dlcall`) to native code — **not implemented**; this crate has no JIT
+today. Survey notes (SLJIT vs DynASM, sizes, W^X, lowering sketch):
+[`docs/layer3-sljit-dynasm.md`](docs/layer3-sljit-dynasm.md).
+
 ## Public surface
 
 | API | Role |
