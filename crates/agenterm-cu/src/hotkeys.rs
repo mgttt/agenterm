@@ -1,4 +1,4 @@
-//! Local hotkey host that fires Spectacle-default placements.
+//! Desktop host that fires the shared placement action catalog.
 //!
 //! Registers global Carbon hotkeys, runs `window-place` in-process, and shows
 //! a menu-bar extra. Accessibility is checked only when that menu opens.
@@ -6,7 +6,12 @@
 #[cfg(target_os = "macos")]
 use crate::place::PlaceAction;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+pub fn run() -> i32 {
+    windows::run()
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn run() -> i32 {
     eprintln!("agenterm-cu host is not implemented on this platform yet");
     1
@@ -24,7 +29,8 @@ pub fn run() -> i32 {
 #[cfg(target_os = "macos")]
 mod macos {
     use super::PlaceAction;
-    use crate::{Authorization, Command, Executor, Grant, TargetRef};
+    use crate::host_actions;
+    use crate::{Authorization, Executor, Grant};
     use std::os::raw::{c_uint, c_void};
 
     const CMD: u32 = 1 << 8;
@@ -103,6 +109,7 @@ mod macos {
     }
 
     struct Bind {
+        id: u32,
         action: PlaceAction,
         key: u32,
         modifiers: u32,
@@ -111,91 +118,109 @@ mod macos {
     fn bindings() -> [Bind; 18] {
         [
             Bind {
+                id: 1,
                 action: PlaceAction::Center,
                 key: K_VK_ANSI_C,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 2,
                 action: PlaceAction::Fullscreen,
                 key: K_VK_ANSI_F,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 3,
                 action: PlaceAction::LeftHalf,
                 key: K_VK_LEFT,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 4,
                 action: PlaceAction::RightHalf,
                 key: K_VK_RIGHT,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 5,
                 action: PlaceAction::TopHalf,
                 key: K_VK_UP,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 6,
                 action: PlaceAction::BottomHalf,
                 key: K_VK_DOWN,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 7,
                 action: PlaceAction::UpperLeft,
                 key: K_VK_LEFT,
                 modifiers: CONTROL | CMD,
             },
             Bind {
+                id: 8,
                 action: PlaceAction::LowerLeft,
                 key: K_VK_LEFT,
                 modifiers: CONTROL | SHIFT | CMD,
             },
             Bind {
+                id: 9,
                 action: PlaceAction::UpperRight,
                 key: K_VK_RIGHT,
                 modifiers: CONTROL | CMD,
             },
             Bind {
+                id: 10,
                 action: PlaceAction::LowerRight,
                 key: K_VK_RIGHT,
                 modifiers: CONTROL | SHIFT | CMD,
             },
             Bind {
+                id: 11,
                 action: PlaceAction::NextDisplay,
                 key: K_VK_RIGHT,
                 modifiers: CONTROL | OPTION | CMD,
             },
             Bind {
+                id: 12,
                 action: PlaceAction::PreviousDisplay,
                 key: K_VK_LEFT,
                 modifiers: CONTROL | OPTION | CMD,
             },
             Bind {
+                id: 13,
                 action: PlaceAction::NextThird,
                 key: K_VK_RIGHT,
                 modifiers: CONTROL | OPTION,
             },
             Bind {
+                id: 14,
                 action: PlaceAction::PreviousThird,
                 key: K_VK_LEFT,
                 modifiers: CONTROL | OPTION,
             },
             Bind {
+                id: 15,
                 action: PlaceAction::Larger,
                 key: K_VK_RIGHT,
                 modifiers: CONTROL | OPTION | SHIFT,
             },
             Bind {
+                id: 16,
                 action: PlaceAction::Smaller,
                 key: K_VK_LEFT,
                 modifiers: CONTROL | OPTION | SHIFT,
             },
             Bind {
+                id: 17,
                 action: PlaceAction::Undo,
                 key: K_VK_ANSI_Z,
                 modifiers: OPTION | CMD,
             },
             Bind {
+                id: 18,
                 action: PlaceAction::Redo,
                 key: K_VK_ANSI_Z,
                 modifiers: OPTION | SHIFT | CMD,
@@ -207,19 +232,17 @@ mod macos {
 
     struct Host {
         executor: Executor,
-        actions: Vec<PlaceAction>,
     }
 
     pub fn run() -> i32 {
         if bootstrap_nsapp().is_err() {
-                eprintln!("agenterm-cu host: failed to start NSApplication");
+            eprintln!("agenterm-cu host: failed to start NSApplication");
             return 1;
         }
         crate::ax_guide::ensure_accessibility_surface();
         let auth = Authorization::new([Grant::Observe, Grant::Actuate].into_iter().collect());
         let mut host = Host {
             executor: Executor::new(auth),
-            actions: bindings().iter().map(|b| b.action).collect(),
         };
         unsafe {
             HOST = &mut host;
@@ -246,10 +269,10 @@ mod macos {
                 eprintln!("agenterm-cu host: InstallEventHandler failed ({err})");
                 return 1;
             }
-            for (index, bind) in bindings().iter().enumerate() {
+            for bind in &bindings() {
                 let id = EventHotKeyId {
                     signature: SIGNATURE,
-                    id: (index as u32) + 1,
+                    id: bind.id,
                 };
                 let mut href = std::ptr::null_mut();
                 let err = RegisterEventHotKey(bind.key, bind.modifiers, id, target, 0, &mut href);
@@ -373,14 +396,11 @@ mod macos {
         let Some(host) = host else {
             return 0;
         };
-        let index = (hot_id.id as usize).saturating_sub(1);
-        let Some(action) = host.actions.get(index).copied() else {
+        let Some(action) = host_actions::by_id(hot_id.id) else {
             return 0;
         };
-        let command = Command::WindowPlace {
-            target: TargetRef::Current,
-            action: action.kebab().to_string(),
-            window: None,
+        let Some(command) = host_actions::command(hot_id.id) else {
+            return 0;
         };
         let reply = host.executor.execute(&command);
         if !reply.ok
@@ -388,7 +408,7 @@ mod macos {
         {
             eprintln!(
                 "agenterm-cu host: {} failed: {} ({})",
-                action.kebab(),
+                action.place.kebab(),
                 error.message,
                 error.code
             );
@@ -397,5 +417,118 @@ mod macos {
             }
         }
         0
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    use crate::host_actions::{self, PLACEMENT_ACTIONS, QUIT_ACTION_ID};
+    use crate::mechanism::MechanismError;
+    use crate::mechanism::desktop_host::{ActionSpec, DesktopHost};
+    use crate::{Authorization, Executor, Grant};
+
+    pub fn run() -> i32 {
+        let actions = action_specs(true);
+        let (host, hotkeys_active) = match DesktopHost::open(&actions) {
+            Ok(host) => (host, true),
+            Err(MechanismError::Failed { code, message })
+                if code == "desktop_host_hotkey_unavailable" =>
+            {
+                eprintln!(
+                    "agenterm-cu host: global shortcuts degraded; menu remains available: {message}"
+                );
+                match DesktopHost::open(&action_specs(false)) {
+                    Ok(host) => (host, false),
+                    Err(error) => return report("open menu-only fallback", &error),
+                }
+            }
+            Err(error) => return report("open", &error),
+        };
+        if std::env::args().any(|arg| arg == "--self-test") {
+            return self_test(host, hotkeys_active);
+        }
+        event_loop(host)
+    }
+
+    fn action_specs(with_shortcuts: bool) -> Vec<ActionSpec<'static>> {
+        PLACEMENT_ACTIONS
+            .iter()
+            .map(|action| ActionSpec {
+                action_id: action.id,
+                label: action.label,
+                shortcut: with_shortcuts.then_some(action.windows_shortcut),
+            })
+            .chain(std::iter::once(ActionSpec {
+                action_id: QUIT_ACTION_ID,
+                label: "Exit AgentermCu",
+                shortcut: None,
+            }))
+            .collect()
+    }
+
+    fn self_test(host: DesktopHost, hotkeys_active: bool) -> i32 {
+        match host.close() {
+            Ok(()) => {
+                if std::env::args().any(|arg| arg == "--json") {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ok": true,
+                            "host": "windows-notification-area",
+                            "actions": PLACEMENT_ACTIONS.len() + 1,
+                            "hotkeys_active": hotkeys_active,
+                            "cleaned_up": true
+                        })
+                    );
+                } else {
+                    eprintln!("agenterm-cu host --self-test: open and cleanup ok");
+                }
+                0
+            }
+            Err(error) => report("close", &error),
+        }
+    }
+
+    fn event_loop(mut host: DesktopHost) -> i32 {
+        let auth = Authorization::new([Grant::Observe, Grant::Actuate].into_iter().collect());
+        let executor = Executor::new(auth);
+        loop {
+            let action_id = match host.poll(1_000) {
+                Ok(Some(action_id)) => action_id,
+                Ok(None) => continue,
+                Err(error) => return report("poll", &error),
+            };
+            if action_id == QUIT_ACTION_ID {
+                return match host.close() {
+                    Ok(()) => 0,
+                    Err(error) => report("close", &error),
+                };
+            }
+            let Some(command) = host_actions::command(action_id) else {
+                eprintln!("agenterm-cu host: unknown action id {action_id}");
+                continue;
+            };
+            let reply = executor.execute(&command);
+            if !reply.ok
+                && let Some(error) = reply.error
+            {
+                eprintln!(
+                    "agenterm-cu host: action {action_id} failed: {} ({})",
+                    error.message, error.code
+                );
+            }
+        }
+    }
+
+    fn report(operation: &str, error: &MechanismError) -> i32 {
+        match error {
+            MechanismError::Unsupported { reason } => {
+                eprintln!("agenterm-cu host: {operation} unsupported: {reason}");
+            }
+            MechanismError::Failed { code, message } => {
+                eprintln!("agenterm-cu host: {operation} failed: {message} ({code})");
+            }
+        }
+        1
     }
 }

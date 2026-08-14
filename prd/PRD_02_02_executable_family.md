@@ -26,13 +26,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   measured artifact history are owned by
   [`agenterm-con` package and delivery](PRD_02_27_con_delivery.md); the product
   itself by [`agenterm-con`](PRD_02_23_agenterm_con.md).
-- [ ] `agenterm-cu`: AgenTerm's own computer-use foundation. Newly accepted
-  scope under design; its executable shape, process model and any helper-process
-  requirement are not yet decided and must be registered here before delivery.
-  It supersedes the `agenterm-remote.exe` working name. Product definition,
-  boundary and gates belong to
-  [Computer-use foundation](PRD_02_28_agenterm_cu.md); it must not be delivered
-  as an undeclared background authority.
+- [~] `agenterm-cu`: AgenTerm's own computer-use foundation and its only
+  executable name. CLI commands and the desktop `host` are modes of the same
+  binary; there is no second `agenterm-cu` product executable. It is the first runtime
+  consumer of the `libagenterm` dynamic-library ABI. Windows desktop-host ABI
+  1.7 now supplies notification-area menu projection and `RegisterHotKey`;
+  local `target/abi-dev` `host --self-test --json` evidence reports 19 actions
+  (18 placements plus Quit) and `cleaned_up=true`. Formal `dist` staging,
+  Candidate qualification and release packaging remain incomplete, so this
+  executable family entry is partial rather than shipped. It supersedes the
+  `agenterm-remote.exe` working name; product definition, boundaries and gates
+  belong to [Computer-use foundation](PRD_02_28_agenterm_cu.md).
 - [x] the shipped architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory

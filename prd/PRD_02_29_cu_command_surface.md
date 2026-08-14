@@ -2,6 +2,12 @@
 
 Parent: [Computer-use foundation (`agenterm-cu`)](PRD_02_28_agenterm_cu.md)
 
+Delivery truth: the command surface and desktop host are modes of the single
+`agenterm-cu` executable. CU is the first runtime `libagenterm` consumer; this
+module owns abstract command and action meaning, while the dynamic ABI and
+platform adapters own native mechanism. Formal `dist`/Candidate qualification
+is still in progress, so implemented command leaves do not make the root
+product shipped.
 This module owns the abstract command set every target must honor, the layering
 contract that keeps it from rotting, the structured control-tree observation
 model, and the determinism rules. It does not own transports
@@ -58,7 +64,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [ ] `tree` is sourced from the host's **platform accessibility backend**
   ([30 § Platform accessibility backends](PRD_02_30_cu_targets_transports.md#platform-accessibility-backends)):
   Windows native API + UIA, macOS AX (`NSAccessibility`), Linux AT-SPI2.
-  `cu` does not implement these stacks; it consumes `agenterm-platform`.
+  `agenterm-cu` does not implement these stacks; it consumes `agenterm-platform`.
 - [ ] node identity is stable enough to be re-addressed across observations, or
   the instability is reported. An agent must never silently act on a node whose
   identity has been recycled.

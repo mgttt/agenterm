@@ -103,7 +103,8 @@ typedef enum {
     AGT_CAP_FILESYSTEM_PUBLISH,
     AGT_CAP_SHARED_MEMORY,
     AGT_CAP_PARENT_CONSOLE,
-    AGT_CAP_ACCESSIBILITY_TREE
+    AGT_CAP_ACCESSIBILITY_TREE,
+    AGT_CAP_DESKTOP_HOST
 } agt_capability;
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
@@ -700,6 +701,48 @@ agt_status agt_input_type_text(const uint8_t* text, size_t len);
  * shortcut == NULL, or a slice that is not valid UTF-8 ->
  * AGT_FAILED{code="bad_text"}. */
 agt_status agt_input_send_keys(const uint8_t* shortcut, size_t len);
+
+/* --- resident desktop action host ---------------------------------- */
+
+#define AGT_DESKTOP_HOST_NO_ACTION          0u
+#define AGT_DESKTOP_HOST_MAX_ACTIONS       64u
+#define AGT_DESKTOP_HOST_MAX_LABEL_BYTES  256u
+#define AGT_DESKTOP_HOST_MAX_SHORTCUT_BYTES 64u
+
+typedef struct agt_desktop_host* agt_desktop_host_t;
+
+/* UTF-8 strings are borrowed only for agt_desktop_host_open. action_id must
+ * be nonzero and unique. label is required and always creates a menu item.
+ * shortcut_len == 0 means no shortcut; shortcut may then be NULL. A Quit
+ * item has no special ABI meaning: the caller supplies it like any action
+ * and decides what to do when its id is returned. */
+typedef struct {
+    uint32_t       action_id;
+    const uint8_t* label;
+    size_t         label_len;
+    const uint8_t* shortcut;
+    size_t         shortcut_len;
+} agt_desktop_action;
+
+/* Opens a resident host on the calling thread. The same thread must perform
+ * every poll and close. On Windows this owns one notification-area icon,
+ * one menu item per action, and each optional RegisterHotKey registration.
+ * Non-Windows hosts return AGT_UNSUPPORTED. */
+agt_status agt_desktop_host_open(const agt_desktop_action* actions,
+                                 size_t action_count,
+                                 agt_desktop_host_t* out);
+
+/* Pumps the owning thread's desktop-host messages for at most timeout_ms.
+ * AGT_OK + *out_action_id != 0 reports one action. AGT_OK +
+ * *out_action_id == AGT_DESKTOP_HOST_NO_ACTION is the ordinary timeout
+ * result, not an error. */
+agt_status agt_desktop_host_poll(agt_desktop_host_t host, uint32_t timeout_ms,
+                                 uint32_t* out_action_id);
+
+/* Deletes the notification icon, unregisters every shortcut, destroys the
+ * hidden window and releases the opaque handle. Wrong-thread close fails and
+ * leaves the handle valid for a later close on its creating thread. */
+agt_status agt_desktop_host_close(agt_desktop_host_t host);
 
 /* --- platform contract: macOS window host ----------------------------- */
 

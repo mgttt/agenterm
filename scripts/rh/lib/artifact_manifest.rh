@@ -24,6 +24,10 @@ fn is_artifact_name(name) {
     true
 }
 
+fn is_library_name(name) {
+    name == "agenterm.dll"
+}
+
 fn validate(path) {
     let manifest_path = std::path::absolute(path).display;
     require(
@@ -47,6 +51,10 @@ fn validate(path) {
     require(
         type_of(manifest.executables) == "array",
         "artifact_manifest_executables_invalid"
+    );
+    require(
+        type_of(manifest.libraries) == "array",
+        "artifact_manifest_libraries_invalid"
     );
 
     let names = #{};
@@ -134,5 +142,37 @@ fn validate(path) {
     }
 
     require(executable_count > 0, "artifact_manifest_executables_empty");
-    executable_count
+    let library_count = 0;
+    for entry in manifest.libraries {
+        library_count += 1;
+        let name = entry.name;
+        require(
+            is_library_name(name),
+            "artifact_manifest_library_name_invalid:" + name
+        );
+        require(
+            !names.contains(name),
+            "artifact_manifest_name_duplicate:" + name
+        );
+        names[name] = true;
+        let role = entry.role;
+        role.trim();
+        require(role != "", "artifact_manifest_library_role_empty:" + name);
+        require(
+            entry.kind == "dynamic-library",
+            "artifact_manifest_library_kind_invalid:" + name
+        );
+        let documentation_role = entry.documentation_role;
+        documentation_role.trim();
+        require(
+            documentation_role != "",
+            "artifact_manifest_library_documentation_role_empty:" + name
+        );
+        require(
+            entry.release_budget_bytes > 0,
+            "artifact_manifest_library_release_budget_missing:" + name
+        );
+    }
+    require(library_count > 0, "artifact_manifest_libraries_empty");
+    executable_count + library_count
 }

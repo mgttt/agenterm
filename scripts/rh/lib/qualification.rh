@@ -609,6 +609,46 @@ fn provenance(
             sha256: hash
         });
     }
+    let libraries = [];
+    for library in artifact_spec.libraries {
+        let library_name = "" + library.name;
+        q_require(
+            !names.contains(library_name),
+            "qualification_artifact_duplicate:" + library_name
+        );
+        names[library_name] = true;
+        let path = std::path::join(
+            staged_directory,
+            library_name
+        ).display;
+        let hash = sha256(path);
+        let metadata_entry = bootstrap_timing::null_json();
+        let entry_count = 0;
+        for entry in metadata.libraries {
+            let entry_name = "" + entry.name;
+            if entry_name == library_name {
+                q_require(
+                    metadata_entry == bootstrap_timing::null_json(),
+                    "qualification_metadata_library_duplicate:" +
+                        library_name
+                );
+                metadata_entry = entry;
+                entry_count += 1;
+            }
+        }
+        q_require(
+            metadata_entry != bootstrap_timing::null_json()
+                && entry_count == 1
+                && "" + metadata_entry.kind == "dynamic-library"
+                && "" + metadata_entry.sha256 == hash,
+            "qualification_metadata_library_hash:" + library_name
+        );
+        libraries.push(#{
+            name: library_name,
+            kind: library.kind,
+            sha256: hash
+        });
+    }
     #{
         git_head: head,
         source_dirty: metadata.git_dirty,
@@ -620,7 +660,8 @@ fn provenance(
                 "agenterm-sbom.spdx.json"
             ).display
         ),
-        executables: artifacts
+        executables: artifacts,
+        libraries: libraries
     }
 }
 

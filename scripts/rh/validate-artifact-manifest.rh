@@ -7,7 +7,7 @@ fn entry() {
     let count = artifact_manifest::validate(args[0]);
     print(
         "PASS: artifact manifest schema 2 defines " +
-        count + " validated Windows executables"
+        count + " validated Windows payloads"
     );
     count
 }

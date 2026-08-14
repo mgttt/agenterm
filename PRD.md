@@ -128,7 +128,7 @@ AgenTerm — local agent & process fleet work OS
 │     ├─ 26 Control & public CLI   agenterm-con cli、ATC1 帧、JSON 契约、证据发布
 │     └─ 27 Package & delivery     独立 package、con-* profile、<1 MiB 预算、独立 CI
 │
-├─ agenterm-cu（computer-use 子树 · 全部 planned）
+├─ agenterm-cu（computer-use 子树 · partial；正式 dist/Candidate qualification 进行中）
 │  └─ 28 agenterm-cu            自有 computer-use 底座：定义、边界、不变量、晋升门
 │     ├─ 29 Command surface       抽象命令集、洋葱分层、结构化控件树、确定性等待
 │     ├─ 30 Targets & transports  current/ssh/rdp/vnc 目标族、transport、平台后端
@@ -138,7 +138,7 @@ AgenTerm — local agent & process fleet work OS
 │     │     ├─ macOS             AX (NSAccessibility)
 │     │     └─ Linux             AT-SPI2
 │     ├─ 31 Authorization & audit 高危面授权、审计、拒绝语义、交付门
-     └─ 32 Window placement     命名摆放（Spectacle 目录）→ `window-place` + macOS `cu hotkeys`
+     └─ 32 Window placement     命名摆放（Spectacle 目录）→ `agenterm-cu window-place` + `agenterm-cu host`
 │
 ├─ agenterm-mobile（reach · 全部 planned）
 │  └─ 33 Mobile reach           第三 host：连桌面 server，不跑手机 PTY
@@ -184,11 +184,11 @@ AgenTerm — local agent & process fleet work OS
 | 25 | [`agenterm-con` workspace and input](prd/PRD_02_25_con_workspace.md) | Tab 树权威、chrome、composer、滚动条/分隔条、选择与剪贴板 |
 | 26 | [`agenterm-con` control and public CLI](prd/PRD_02_26_con_control_cli.md) | 公共命令集、`ATC1` 传输、JSON 契约、快照/截图证据发布 |
 | 27 | [`agenterm-con` package and delivery](prd/PRD_02_27_con_delivery.md) | 独立 package、`con-*` unwind profile、体积预算、独立 CI、体积历史 |
-| 28 | [Computer-use foundation (`agenterm-cu`)](prd/PRD_02_28_agenterm_cu.md) | 子树根：自有 computer-use 底座的定义、边界、不变量、晋升门（全部 planned） |
+| 28 | [Computer-use foundation (`agenterm-cu`)](prd/PRD_02_28_agenterm_cu.md) | 子树根：唯一 executable、CLI/host、首个运行时 `libagenterm` 消费者；实现 partial，正式交付仍在 qualification |
 | 29 | [`agenterm-cu` command surface](prd/PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树观察、确定性等待 |
 | 30 | [`agenterm-cu` targets and transports](prd/PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2）、会话模型 |
 | 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
-| 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放与几何合同（Spectacle 收录）；macOS `window-place` + `cu hotkeys` 日用宿主 |
+| 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放与几何合同（Spectacle 收录）；macOS host 已落地，Windows desktop-host ABI 1.7 已通过本机 self-test，正式交付仍在 qualification |
 | 33 | [Mobile reach (`agenterm-mobile`)](prd/PRD_02_33_mobile_reach.md) | 手机接入端：PWA 先行（`https://agenterm.work/app`）、商店 App 占位、扫码绑定桌面；无版本承诺 |
 
 ## Non-negotiable invariants

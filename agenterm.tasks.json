@@ -553,6 +553,33 @@
         "task.control-center-smoke"
       ]
     },
+    "cu-windows-smoke": {
+      "inputs": [
+        "staged-agenterm-cu",
+        "staged-libagenterm",
+        "windows-uia-fixture-source",
+        "msvc-c-toolchain",
+        "isolated-test-harness",
+        "windows-desktop-session"
+      ],
+      "outputs": [
+        "cu-windows-host-evidence",
+        "cu-windows-uia-window-identity-evidence",
+        "cu-windows-uia-tree-evidence",
+        "cu-windows-uia-name-actuation-evidence",
+        "cu-windows-uia-value-wait-evidence",
+        "cu-windows-cleanup-receipt"
+      ],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576
+      },
+      "network": [],
+      "evidence": [
+        "task.cu-windows-smoke"
+      ]
+    },
     "control-center-macos-smoke": {
       "inputs": [
         "staged-control-center",
@@ -1863,6 +1890,28 @@
       ]
     },
     {
+      "id": "cu-windows-smoke",
+      "description": "Prove staged agenterm-cu loads colocated libagenterm, opens its no-activate Windows desktop host, and drives an owned Win32 fixture through public UIA tree, ValuePattern, GetText, and Invoke paths with bounded cleanup",
+      "entry": "scripts/rh/cu-windows-smoke.rh",
+      "profile": "local",
+      "cwd": ".",
+      "args": [
+        ".",
+        "dist/agenterm-cu.exe",
+        "dist/agenterm.dll",
+        "examples/c/agenterm_plain_window.c"
+      ],
+      "dependencies": [],
+      "platforms": [
+        "windows"
+      ],
+      "side_effects": [
+        "artifact_write",
+        "process_spawn",
+        "gui_spawn"
+      ]
+    },
+    {
       "id": "control-center-macos-smoke",
       "description": "Prove caller-selected native IPC, renderer-owned Retina evidence, no-activate/focus reuse, server epochs, and process isolation on macOS",
       "entry": "scripts/rh/control-center-macos-smoke.rh",
@@ -2335,7 +2384,9 @@
       "entry": "scripts/rh/prune-target-incremental.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [],
+      "args": [
+        "."
+      ],
       "dependencies": [],
       "platforms": [
         "windows",

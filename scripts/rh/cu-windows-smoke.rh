@@ -1,0 +1,423 @@
+// Prove staged Windows agenterm-cu host and public UIA journeys through libagenterm.
+//
+// Args: REPO AGENTERM_CU_EXE AGENTERM_DLL FIXTURE_SOURCE
+
+fn ensure(condition, message) {
+    if condition == 0 {
+        throw message;
+    }
+    0
+}
+
+fn direct_file(path) {
+    if !std::fs::exists(path) {
+        return 0;
+    }
+    let metadata = std::fs::symlink_metadata(path);
+    metadata.is_file && !metadata.is_symlink && !metadata.is_reparse_point
+}
+
+fn run_cu_json(run_directory, executable, arguments) {
+    let command = std::process::command(executable);
+    command.args(arguments);
+    command.current_dir(run_directory);
+    command.timeout(std::time::Duration::from_secs(30));
+    command.capture_limit(262144);
+    let output = command.output();
+    let stdout = output.stdout_text();
+    let stderr = output.stderr_text();
+    ensure(
+        output.success != 0,
+        "cu_windows_smoke_cli_process:" + stdout + stderr
+    );
+    stdout.trim();
+    ensure(stdout != "", "cu_windows_smoke_cli_empty");
+    let document = rh::json::parse(stdout);
+    ensure(
+        document.ok != 0,
+        "cu_windows_smoke_cli_reply:" + rh::json::stringify(document)
+    );
+    document
+}
+
+fn compile_fixture(run_directory, repo, source) {
+    ensure(
+        std::env::has("ProgramFiles(x86)") != 0,
+        "cu_windows_smoke_program_files_x86_missing"
+    );
+    let installer_root = std::env::get("ProgramFiles(x86)");
+    let vswhere = std::path::join(
+        installer_root,
+        "Microsoft Visual Studio/Installer/vswhere.exe"
+    ).display;
+    ensure(
+        direct_file(vswhere) != 0,
+        "cu_windows_smoke_vswhere_missing"
+    );
+
+    let discovery = std::process::command(vswhere);
+    discovery.args([
+        "-latest", "-products", "*", "-property", "installationPath"
+    ]);
+    discovery.current_dir(repo);
+    discovery.timeout(std::time::Duration::from_secs(15));
+    discovery.capture_limit(65536);
+    let discovered = discovery.output();
+    let installation = discovered.stdout_text();
+    installation.trim();
+    ensure(
+        discovered.success != 0 && installation != "",
+        "cu_windows_smoke_visual_studio_missing:" +
+            discovered.stderr_text()
+    );
+    let vsdevcmd = std::path::join(
+        installation,
+        "Common7/Tools/VsDevCmd.bat"
+    ).display;
+    ensure(
+        direct_file(vsdevcmd) != 0,
+        "cu_windows_smoke_vsdevcmd_missing"
+    );
+
+    let fixture_executable = std::path::join(
+        run_directory,
+        "agenterm-plain-window-fixture.exe"
+    ).display;
+    let fixture_object = std::path::join(
+        run_directory,
+        "agenterm-plain-window-fixture.obj"
+    ).display;
+    let object_argument = "/Fo:" + fixture_object;
+    let executable_argument = "/Fe:" + fixture_executable;
+    let compile = std::process::command("cmd.exe");
+    compile.args([
+        "/d", "/s", "/c", "call", vsdevcmd,
+        "-no_logo", "-arch=x64", "-host_arch=x64", "&&",
+        "cl.exe", "/nologo", "/W4", "/WX",
+        "/DUNICODE", "/D_UNICODE", object_argument,
+        executable_argument, source, "user32.lib"
+    ]);
+    compile.current_dir(run_directory);
+    compile.timeout(std::time::Duration::from_secs(45));
+    compile.capture_limit(262144);
+    let compiled = compile.output();
+    ensure(
+        compiled.success != 0 && direct_file(fixture_executable) != 0,
+        "cu_windows_smoke_fixture_compile:" + compiled.stdout_text() +
+            compiled.stderr_text()
+    );
+    fixture_executable
+}
+
+fn entry() {
+    if args.len == 1 && args[0] == "--list-evidence" {
+        print("cu.windows-host-self-test");
+        print("cu.libagenterm-load-cleanup");
+        print("cu.windows-uia-window-identity");
+        print("cu.windows-uia-tree");
+        print("cu.windows-uia-name-actuation");
+        print("cu.windows-uia-value-wait");
+        print("cu.windows-uia-cleanup");
+        return 0;
+    }
+    if args.len != 4 {
+        return rh::fail(
+            "expected: REPO AGENTERM_CU_EXE AGENTERM_DLL FIXTURE_SOURCE"
+        );
+    }
+    let repo = std::path::absolute(args[0]).display;
+    let executable = std::path::absolute(args[1]).display;
+    let library = std::path::absolute(args[2]).display;
+    let fixture_source = std::path::absolute(args[3]).display;
+    ensure(
+        direct_file(executable) != 0,
+        "cu_windows_smoke_executable_missing"
+    );
+    ensure(
+        direct_file(library) != 0,
+        "cu_windows_smoke_library_missing"
+    );
+    ensure(
+        direct_file(fixture_source) != 0,
+        "cu_windows_smoke_fixture_source_missing"
+    );
+    ensure(
+        std::path::parent(executable).display
+            == std::path::parent(library).display,
+        "cu_windows_smoke_payload_not_colocated"
+    );
+    ensure(
+        std::path::PathBuf::from(executable).file_name == "agenterm-cu.exe"
+            && std::path::PathBuf::from(library).file_name == "agenterm.dll",
+        "cu_windows_smoke_payload_names"
+    );
+
+    let run_directory = std::path::join(
+        repo,
+        "target/cu-windows-smoke-run"
+    ).display;
+    if std::fs::exists(run_directory) {
+        std::fs::remove_dir_all(run_directory);
+    }
+    std::fs::create_dir_all(run_directory);
+    let succeeded = 0;
+    let failure = "";
+    let fixture_pid = 0;
+
+    try {
+        print("STEP staged version and no-activate desktop host self-test");
+        let version_command = std::process::command(executable);
+        version_command.args(["--version"]);
+        version_command.current_dir(run_directory);
+        version_command.timeout(std::time::Duration::from_secs(30));
+        version_command.capture_limit(65536);
+        let version_output = version_command.output();
+        ensure(
+            version_output.success != 0,
+            "cu_windows_smoke_version:" + version_output.stderr_text()
+        );
+        let version = version_output.stdout_text();
+        version.trim();
+        ensure(
+            version.starts_with("agenterm-cu "),
+            "cu_windows_smoke_version_output:" + version
+        );
+
+        let host_command = std::process::command(executable);
+        host_command.args(["host", "--self-test", "--json"]);
+        host_command.current_dir(run_directory);
+        host_command.timeout(std::time::Duration::from_secs(30));
+        host_command.capture_limit(262144);
+        let host_output = host_command.output();
+        ensure(
+            host_output.success != 0,
+            "cu_windows_smoke_host:" + host_output.stdout_text() +
+                host_output.stderr_text()
+        );
+        let host_text = host_output.stdout_text();
+        host_text.trim();
+        ensure(host_text != "", "cu_windows_smoke_host_empty");
+        let host = rh::json::parse(host_text);
+        ensure(
+            host.ok != 0
+                && ("" + host.host) == "windows-notification-area"
+                && host.actions > 1
+                && host.cleaned_up != 0,
+            "cu_windows_smoke_host_contract:" + host_text
+        );
+
+        print("STEP compile and start owned no-activate Win32 UIA fixture");
+        let fixture_executable = compile_fixture(
+            run_directory,
+            repo,
+            fixture_source
+        );
+        ensure(
+            direct_file(fixture_executable) != 0,
+            "cu_windows_smoke_fixture_compile_failed"
+        );
+        let fixture_command = std::process::command(fixture_executable);
+        fixture_command.current_dir(run_directory);
+        fixture_command.timeout(std::time::Duration::from_secs(30));
+        fixture_command.capture_limit(65536);
+        let fixture = fixture_command.start();
+        fixture_pid = 0 + fixture.id;
+        let fixture_title =
+            "agenterm-plain-window-probe-" + fixture_pid;
+
+        print("STEP public wait and windows prove PID title HWND identity");
+        let window_wait = run_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant", "observe", "wait",
+                "--timeout-ms", "4000",
+                "--window-title-contains", fixture_title
+            ]
+        );
+        ensure(
+            window_wait.data.met != 0,
+            "cu_windows_smoke_window_wait_not_met"
+        );
+        let windows = run_cu_json(
+            run_directory,
+            executable,
+            ["--target", "current", "--grant", "observe", "windows"]
+        );
+        let identity_matches = 0;
+        let fixture_handle = 0;
+        for row in windows.data {
+            let row_pid = 0 + row.process_id;
+            let row_title = "" + row.title;
+            if row_pid == fixture_pid && row_title == fixture_title {
+                identity_matches += 1;
+                fixture_handle = 0 + row.handle;
+            }
+        }
+        ensure(
+            identity_matches == 1 && fixture_handle != 0,
+            "cu_windows_smoke_window_identity"
+        );
+        let handle_text = "" + fixture_handle;
+
+        print("STEP public tree proves unique UIA edit and button");
+        let tree = run_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant", "observe", "tree",
+                "--window", handle_text
+            ]
+        );
+        ensure(
+            ("" + tree.data.backend) == "uia"
+                && ("" + tree.data.addressing) == "accessibility-tree"
+                && ("" + tree.data.mechanism) == "libagenterm",
+            "cu_windows_smoke_tree_backend:" + rh::json::stringify(tree)
+        );
+        let edit_matches = 0;
+        let button_matches = 0;
+        for node in tree.data.nodes {
+            let node_name = "" + node.name;
+            let node_role = "" + node.role;
+            let visible = node.states.contains("showing") != 0
+                || node.states.contains("visible") != 0;
+            if node_name == "Fixture Field" && node_role == "edit"
+                    && visible {
+                edit_matches += 1;
+            }
+            if node_name == "Fixture Close" && node_role == "button"
+                    && visible && node.actions.contains("click") != 0 {
+                button_matches += 1;
+            }
+        }
+        ensure(
+            edit_matches == 1 && button_matches == 1,
+            "cu_windows_smoke_tree_unique_controls"
+        );
+
+        print("STEP public name-addressed ValuePattern write and GetText wait");
+        let roundtrip_text = "uia-value-roundtrip";
+        let sent = run_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant", "observe,actuate",
+                "send-text", "--window", handle_text,
+                "--name", "Fixture Field", "--role", "edit", "--",
+                roundtrip_text
+            ]
+        );
+        ensure(
+            ("" + sent.data.addressing) == "accessibility-tree"
+                && ("" + sent.data.mechanism) == "libagenterm"
+                && ("" + sent.data.via) == "value-pattern",
+            "cu_windows_smoke_value_pattern:" + rh::json::stringify(sent)
+        );
+        let text_wait = run_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant", "observe", "wait",
+                "--timeout-ms", "4000", "--window", handle_text,
+                "--text-equals", roundtrip_text,
+                "--name", "Fixture Field", "--role", "edit"
+            ]
+        );
+        ensure(
+            text_wait.data.met != 0
+                && ("" + text_wait.data.addressing) == "accessibility-tree"
+                && ("" + text_wait.data.via) == "gettext"
+                && ("" + text_wait.data.text) == roundtrip_text,
+            "cu_windows_smoke_gettext_wait:" +
+                rh::json::stringify(text_wait)
+        );
+
+        print("STEP public name-addressed Invoke closes only owned fixture");
+        let clicked = run_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant", "observe,actuate",
+                "click", "--window", handle_text,
+                "--name", "Fixture Close", "--role", "button"
+            ]
+        );
+        ensure(
+            ("" + clicked.data.addressing) == "accessibility-tree"
+                && ("" + clicked.data.mechanism) == "libagenterm",
+            "cu_windows_smoke_invoke_addressing:" +
+                rh::json::stringify(clicked)
+        );
+        let fixture_exited = 0;
+        for attempt in 0..200 {
+            if fixture.state == "exited" {
+                fixture_exited = 1;
+                break;
+            }
+            rh::task::sleep(std::time::Duration::from_millis(25));
+        }
+        ensure(fixture_exited != 0, "cu_windows_smoke_invoke_exit_timeout");
+        let fixture_output = fixture.wait_with_output(
+            std::time::Duration::from_secs(2)
+        );
+        let fixture_stdout = fixture_output.stdout_text();
+        let fixture_stderr = fixture_output.stderr_text();
+        ensure(
+            fixture_output.success != 0,
+            "cu_windows_smoke_fixture_exit:" + fixture_stdout +
+                fixture_stderr
+        );
+        fixture_stdout.trim();
+        let ready_parts = fixture_stdout.split(" ");
+        ensure(
+            ready_parts.len == 2 && ready_parts[0] == "ready",
+            "cu_windows_smoke_fixture_ready:" + fixture_stdout
+        );
+        let reported_handle_text = "" + ready_parts[1];
+        let reported_handle = reported_handle_text.parse_int();
+        ensure(
+            reported_handle == fixture_handle,
+            "cu_windows_smoke_reported_hwnd_mismatch"
+        );
+        succeeded = 1;
+    } catch (error) {
+        failure = "" + error;
+    }
+
+    if succeeded == 0 && fixture_pid != 0 {
+        let fixture_pid_text = "" + fixture_pid;
+        let cleanup = std::process::command("taskkill.exe");
+        cleanup.args(["/PID", fixture_pid_text, "/T", "/F"]);
+        cleanup.timeout(std::time::Duration::from_secs(5));
+        cleanup.capture_limit(65536);
+        cleanup.output();
+    }
+    if succeeded == 0 {
+        std::fs::remove_dir_all(run_directory);
+        return rh::fail(failure);
+    }
+
+    print("EVIDENCE cu.windows-host-self-test");
+    print("EVIDENCE cu.libagenterm-load-cleanup");
+    print("EVIDENCE cu.windows-uia-window-identity");
+    print("EVIDENCE cu.windows-uia-tree");
+    print("EVIDENCE cu.windows-uia-name-actuation");
+    print("EVIDENCE cu.windows-uia-value-wait");
+    print("EVIDENCE cu.windows-uia-cleanup");
+    std::fs::remove_dir_all(run_directory);
+    print(
+        "PASS: staged agenterm-cu host and public Windows UIA journey"
+    );
+    0
+}
+
+fn cc_lines() {
+    [
+        "staged agenterm-cu and agenterm.dll are colocated",
+        "Windows desktop host self-test closes registered resources",
+        "public UIA tree exposes unique named edit and button controls",
+        "public name addressing uses ValuePattern, GetText, and Invoke",
+        "owned no-activate fixture exits normally with bounded cleanup proof"
+    ]
+}

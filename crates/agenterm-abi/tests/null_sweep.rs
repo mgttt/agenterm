@@ -121,6 +121,9 @@ struct agt_window_info;
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct agt_screen_info;
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct agt_desktop_action;
 
 // --- export fn types -----------------------------------------------------
 
@@ -182,6 +185,10 @@ type NativeWindowClose = unsafe extern "C" fn(isize) -> i32;
 type InputPointerMove = unsafe extern "C" fn(i32, i32) -> i32;
 type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
 type InputText = unsafe extern "C" fn(*const u8, usize) -> i32;
+type DesktopHostOpen =
+    unsafe extern "C" fn(*const agt_desktop_action, usize, *mut *mut std::ffi::c_void) -> i32;
+type DesktopHostPoll = unsafe extern "C" fn(*mut std::ffi::c_void, u32, *mut u32) -> i32;
+type DesktopHostClose = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
 
 // --- dylib loading (same pattern as tests/dylib_load.rs) -----------------
 
@@ -467,6 +474,23 @@ fn input_type_text_null(lib: &Library) -> i32 {
 fn input_send_keys_null(lib: &Library) -> i32 {
     let f: Symbol<InputText> = unsafe { sym(lib, b"agt_input_send_keys") };
     unsafe { f(std::ptr::null(), 1) }
+}
+
+fn desktop_host_open_null(lib: &Library) -> i32 {
+    let f: Symbol<DesktopHostOpen> = unsafe { sym(lib, b"agt_desktop_host_open") };
+    let mut out = std::ptr::null_mut();
+    unsafe { f(std::ptr::null(), 1, &mut out) }
+}
+
+fn desktop_host_poll_null(lib: &Library) -> i32 {
+    let f: Symbol<DesktopHostPoll> = unsafe { sym(lib, b"agt_desktop_host_poll") };
+    let mut action_id = 99;
+    unsafe { f(std::ptr::null_mut(), 0, &mut action_id) }
+}
+
+fn desktop_host_close_null(lib: &Library) -> i32 {
+    let f: Symbol<DesktopHostClose> = unsafe { sym(lib, b"agt_desktop_host_close") };
+    unsafe { f(std::ptr::null_mut()) }
 }
 
 /// Group 1 — every pointer-taking export with all pointer parameters NULL.
@@ -929,6 +953,21 @@ fn null_group() -> Vec<SweepCase> {
             label: "agt_input_send_keys[shortcut=NULL,len=1]",
             kind: Kind::MustFail,
             call: Box::new(|lib| CallResult::Status(input_send_keys_null(lib))),
+        },
+        SweepCase {
+            label: "agt_desktop_host_open[actions=NULL,count=1]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(desktop_host_open_null(lib))),
+        },
+        SweepCase {
+            label: "agt_desktop_host_poll[host=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(desktop_host_poll_null(lib))),
+        },
+        SweepCase {
+            label: "agt_desktop_host_close[host=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(desktop_host_close_null(lib))),
         },
     ]
 }

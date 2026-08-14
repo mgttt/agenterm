@@ -50,7 +50,8 @@ fn entry() {
     let manifest = rh::json::parse(text);
     require(
         manifest.schema_version == 2
-            && type_of(manifest.executables) == "array",
+            && type_of(manifest.executables) == "array"
+            && type_of(manifest.libraries) == "array",
         "stage_build_artifact_manifest_invalid"
     );
 
@@ -95,6 +96,13 @@ fn entry() {
             );
         }
     }
+    for library in manifest.libraries {
+        let _staged_library = artifact_files::stage(
+            source_directory,
+            destination_directory,
+            library.name
+        );
+    }
 
     let output_manifest =
         std::path::join(destination_directory, "agenterm.json").display;
@@ -118,6 +126,7 @@ fn entry() {
         git_dirty: metadata.git_dirty,
         profile: metadata.profile,
         executables: metadata.executables,
+        libraries: metadata.libraries,
     };
     let history_path =
         std::path::join(destination_directory, "size-history.jsonl").display;

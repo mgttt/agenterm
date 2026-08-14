@@ -92,6 +92,10 @@ use agenterm_platform::accessibility_tree::{
     send_node_keys, set_node_selection, set_node_text, tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
+use agenterm_platform::desktop_host::{
+    DesktopActionSpec, DesktopHost, DesktopHostError, MAX_DESKTOP_ACTIONS, MAX_DESKTOP_LABEL_BYTES,
+    MAX_DESKTOP_SHORTCUT_BYTES,
+};
 use agenterm_platform::ime::ImeEvent;
 use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
@@ -237,6 +241,7 @@ pub enum agt_capability {
     AGT_CAP_SHARED_MEMORY,
     AGT_CAP_PARENT_CONSOLE,
     AGT_CAP_ACCESSIBILITY_TREE,
+    AGT_CAP_DESKTOP_HOST,
 }
 
 /// ABI versioning: the numeric constants and the build-identity string are
@@ -389,6 +394,7 @@ pub extern "C" fn agt_capability_query(cap: u32) -> agt_status {
     const AGT_CAP_SHARED_MEMORY: u32 = agt_capability::AGT_CAP_SHARED_MEMORY as u32;
     const AGT_CAP_PARENT_CONSOLE: u32 = agt_capability::AGT_CAP_PARENT_CONSOLE as u32;
     const AGT_CAP_ACCESSIBILITY_TREE: u32 = agt_capability::AGT_CAP_ACCESSIBILITY_TREE as u32;
+    const AGT_CAP_DESKTOP_HOST: u32 = agt_capability::AGT_CAP_DESKTOP_HOST as u32;
 
     fn capability_ok(status: CapabilityStatus) -> agt_status {
         if matches!(status, CapabilityStatus::Available) {
@@ -438,6 +444,7 @@ pub extern "C" fn agt_capability_query(cap: u32) -> agt_status {
         }
         AGT_CAP_WINDOW_OP => capability_ok(agenterm_platform::window_op::capability_status()),
         AGT_CAP_INPUT_INJECT => capability_ok(agenterm_platform::input_inject::capability_status()),
+        AGT_CAP_DESKTOP_HOST => capability_ok(agenterm_platform::desktop_host::capability_status()),
         // Every value not listed above — including any out-of-range int a C
         // caller can pass (0, negatives, > 16) — maps to AGT_UNSUPPORTED.
         // With an integer parameter this arm is reachable for arbitrary
@@ -447,6 +454,248 @@ pub extern "C" fn agt_capability_query(cap: u32) -> agt_status {
     }
     // Pure match — no panic surface; the fence is kept for uniformity.
     // (catch_unwind is unnecessary on a non-panicking arm, so no wrapper.)
+}
+
+// --- resident desktop action host -----------------------------------
+
+#[repr(C)]
+pub struct agt_desktop_host {
+    _private: [u8; 0],
+}
+
+#[allow(non_camel_case_types)]
+pub type agt_desktop_host_t = *mut agt_desktop_host;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct agt_desktop_action {
+    pub action_id: u32,
+    pub label: *const u8,
+    pub label_len: usize,
+    pub shortcut: *const u8,
+    pub shortcut_len: usize,
+}
+
+struct DesktopHostHandle {
+    host: DesktopHost,
+}
+
+fn desktop_host_error(operation: &'static CStr, error: DesktopHostError) -> agt_status {
+    match error {
+        DesktopHostError::Unsupported { .. } => agt_status::AGT_UNSUPPORTED,
+        DesktopHostError::Failed { code, message } => {
+            let static_code = match code.as_ref() {
+                "desktop_host_bad_action_count" => c"desktop_host_bad_action_count",
+                "desktop_host_bad_action_id" => c"desktop_host_bad_action_id",
+                "desktop_host_duplicate_action_id" => c"desktop_host_duplicate_action_id",
+                "desktop_host_bad_label" => c"desktop_host_bad_label",
+                "desktop_host_bad_shortcut" => c"desktop_host_bad_shortcut",
+                "desktop_host_duplicate_hotkey" => c"desktop_host_duplicate_hotkey",
+                "desktop_host_hotkey_unavailable" => c"desktop_host_hotkey_unavailable",
+                "desktop_host_wrong_thread" => c"desktop_host_wrong_thread",
+                "desktop_host_closed" => c"desktop_host_closed",
+                _ => c"desktop_host_failed",
+            };
+            record_error(operation, static_code, message);
+            agt_status::AGT_FAILED
+        }
+        _ => {
+            record_error(
+                operation,
+                c"desktop_host_failed",
+                "unrecognized desktop host failure",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_desktop_host_open(
+    actions: *const agt_desktop_action,
+    action_count: usize,
+    out: *mut agt_desktop_host_t,
+) -> agt_status {
+    fn inner(
+        actions: *const agt_desktop_action,
+        action_count: usize,
+        out: *mut agt_desktop_host_t,
+    ) -> agt_status {
+        if out.is_null() {
+            record_error(
+                c"agt_desktop_host_open",
+                c"bad_pointer",
+                "out pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe { *out = std::ptr::null_mut() };
+        if action_count == 0 || action_count > MAX_DESKTOP_ACTIONS {
+            record_error(
+                c"agt_desktop_host_open",
+                c"desktop_host_bad_action_count",
+                format!("action count must be in 1..={MAX_DESKTOP_ACTIONS}"),
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if actions.is_null() {
+            record_error(
+                c"agt_desktop_host_open",
+                c"bad_pointer",
+                "actions pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let records = unsafe { std::slice::from_raw_parts(actions, action_count) };
+        let mut copied = Vec::with_capacity(action_count);
+        for record in records {
+            if record.label.is_null() {
+                record_error(
+                    c"agt_desktop_host_open",
+                    c"bad_pointer",
+                    "label pointer is null",
+                );
+                return agt_status::AGT_FAILED;
+            }
+            if record.label_len > MAX_DESKTOP_LABEL_BYTES {
+                record_error(
+                    c"agt_desktop_host_open",
+                    c"desktop_host_bad_label",
+                    "label is too long",
+                );
+                return agt_status::AGT_FAILED;
+            }
+            let label_bytes = unsafe { std::slice::from_raw_parts(record.label, record.label_len) };
+            let Ok(label) = std::str::from_utf8(label_bytes) else {
+                record_error(
+                    c"agt_desktop_host_open",
+                    c"bad_encoding",
+                    "label is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            };
+            let shortcut = if record.shortcut_len == 0 {
+                None
+            } else {
+                if record.shortcut.is_null() {
+                    record_error(
+                        c"agt_desktop_host_open",
+                        c"bad_pointer",
+                        "shortcut pointer is null",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+                if record.shortcut_len > MAX_DESKTOP_SHORTCUT_BYTES {
+                    record_error(
+                        c"agt_desktop_host_open",
+                        c"desktop_host_bad_shortcut",
+                        "shortcut is too long",
+                    );
+                    return agt_status::AGT_FAILED;
+                }
+                let bytes =
+                    unsafe { std::slice::from_raw_parts(record.shortcut, record.shortcut_len) };
+                let Ok(text) = std::str::from_utf8(bytes) else {
+                    record_error(
+                        c"agt_desktop_host_open",
+                        c"bad_encoding",
+                        "shortcut is not UTF-8",
+                    );
+                    return agt_status::AGT_FAILED;
+                };
+                Some(text.to_owned())
+            };
+            copied.push(DesktopActionSpec {
+                action_id: record.action_id,
+                label: label.to_owned(),
+                shortcut,
+            });
+        }
+        match DesktopHost::open(copied) {
+            Ok(host) => {
+                let raw = Box::into_raw(Box::new(DesktopHostHandle { host }));
+                unsafe { *out = raw.cast::<agt_desktop_host>() };
+                agt_status::AGT_OK
+            }
+            Err(error) => desktop_host_error(c"agt_desktop_host_open", error),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(actions, action_count, out))) {
+        Ok(status) => status,
+        Err(_) => {
+            record_error(c"agt_desktop_host_open", c"panic", "panic");
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_desktop_host_poll(
+    host: agt_desktop_host_t,
+    timeout_ms: u32,
+    out_action_id: *mut u32,
+) -> agt_status {
+    fn inner(host: agt_desktop_host_t, timeout_ms: u32, out_action_id: *mut u32) -> agt_status {
+        if host.is_null() || out_action_id.is_null() {
+            record_error(
+                c"agt_desktop_host_poll",
+                c"bad_pointer",
+                "host or output pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        unsafe { *out_action_id = 0 };
+        let handle = unsafe { &mut *host.cast::<DesktopHostHandle>() };
+        match handle
+            .host
+            .poll_action(Duration::from_millis(timeout_ms.into()))
+        {
+            Ok(action) => {
+                unsafe { *out_action_id = action.unwrap_or(0) };
+                agt_status::AGT_OK
+            }
+            Err(error) => desktop_host_error(c"agt_desktop_host_poll", error),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(host, timeout_ms, out_action_id))) {
+        Ok(status) => status,
+        Err(_) => {
+            record_error(c"agt_desktop_host_poll", c"panic", "panic");
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_desktop_host_close(host: agt_desktop_host_t) -> agt_status {
+    fn inner(host: agt_desktop_host_t) -> agt_status {
+        if host.is_null() {
+            record_error(
+                c"agt_desktop_host_close",
+                c"bad_pointer",
+                "host pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let handle = unsafe { &mut *host.cast::<DesktopHostHandle>() };
+        match handle.host.close() {
+            Ok(()) => {
+                unsafe { drop(Box::from_raw(host.cast::<DesktopHostHandle>())) };
+                agt_status::AGT_OK
+            }
+            Err(error) => desktop_host_error(c"agt_desktop_host_close", error),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(host))) {
+        Ok(status) => status,
+        Err(_) => {
+            record_error(c"agt_desktop_host_close", c"panic", "panic");
+            agt_status::AGT_FAILED
+        }
+    }
 }
 
 // --- PTY -------------------------------------------------------------

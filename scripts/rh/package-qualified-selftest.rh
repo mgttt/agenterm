@@ -223,6 +223,22 @@ fn entry() {
             sha256: file_hash
         });
     }
+    let library_records = [];
+    for library in artifact_spec.libraries {
+        let library_name = "" + library.name;
+        let path = std::path::join(fixture_dist, library_name).display;
+        rh::runtime::atomic_write(
+            path,
+            "fixture " + library_name + "\n"
+        );
+        library_records.push(#{
+            name: library_name,
+            role: library.role,
+            kind: library.kind,
+            size: file_size(path, "package_selftest_library"),
+            sha256: rh::crypto::sha256_file(path)
+        });
+    }
     let cargo_hash = rh::crypto::sha256_file(cargo_path);
     let artifact_hash = rh::crypto::sha256_file(artifact_path);
     let sbom_path = std::path::join(
@@ -247,7 +263,8 @@ fn entry() {
         git_dirty: false,
         cargo_lock_sha256: cargo_hash,
         artifact_manifest_sha256: artifact_hash,
-        executables: executable_records
+        executables: executable_records,
+        libraries: library_records
     };
     rh::runtime::atomic_write(
         agenterm_json_path,
@@ -257,6 +274,14 @@ fn entry() {
     for record in executable_records {
         receipt_executables.push(#{
             name: record.name,
+            sha256: record.sha256
+        });
+    }
+    let receipt_libraries = [];
+    for record in library_records {
+        receipt_libraries.push(#{
+            name: record.name,
+            kind: record.kind,
             sha256: record.sha256
         });
     }
@@ -276,7 +301,8 @@ fn entry() {
             cargo_lock_sha256: cargo_hash,
             artifact_manifest_sha256: artifact_hash,
             sbom_sha256: sbom_hash,
-            executables: receipt_executables
+            executables: receipt_executables,
+            libraries: receipt_libraries
         },
         gates: gates
     };
@@ -350,6 +376,9 @@ fn entry() {
     let expected_names = [];
     for artifact in artifact_spec.executables {
         expected_names.push("" + artifact.name);
+    }
+    for library in artifact_spec.libraries {
+        expected_names.push("" + library.name);
     }
     expected_names.push("agenterm.json");
     expected_names.push("artifacts.json");
@@ -427,7 +456,8 @@ fn entry() {
             cargo_lock_sha256: bad_cargo_hash,
             artifact_manifest_sha256: artifact_hash,
             sbom_sha256: sbom_hash,
-            executables: receipt_executables
+            executables: receipt_executables,
+            libraries: receipt_libraries
         },
         gates: gates
     };
@@ -456,7 +486,8 @@ fn entry() {
             cargo_lock_sha256: cargo_hash,
             artifact_manifest_sha256: bad_manifest_hash,
             sbom_sha256: sbom_hash,
-            executables: receipt_executables
+            executables: receipt_executables,
+            libraries: receipt_libraries
         },
         gates: gates
     };
@@ -503,7 +534,8 @@ fn entry() {
             cargo_lock_sha256: cargo_hash,
             artifact_manifest_sha256: artifact_hash,
             sbom_sha256: sbom_hash,
-            executables: receipt_executables
+            executables: receipt_executables,
+            libraries: receipt_libraries
         },
         gates: gates
     };

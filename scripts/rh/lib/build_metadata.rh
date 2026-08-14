@@ -242,6 +242,25 @@ fn write_for_artifacts(
             sha256: rh::crypto::sha256_file(path)
         });
     }
+    let library_metadata = [];
+    for artifact in artifacts.libraries {
+        let path =
+            std::path::join(staged_directory, artifact.name).display;
+        let metadata = std::fs::symlink_metadata(path);
+        require(
+            metadata.is_file
+                && !metadata.is_symlink
+                && !metadata.is_reparse_point,
+            "build_metadata_library_invalid:" + artifact.name
+        );
+        library_metadata.push(#{
+            name: artifact.name,
+            role: artifact.role,
+            kind: artifact.kind,
+            size: metadata.len,
+            sha256: rh::crypto::sha256_file(path)
+        });
+    }
 
     let build_time = std::time::SystemTime::now().rfc3339;
     let build_time_parts = build_time.split(".");
@@ -274,7 +293,8 @@ fn write_for_artifacts(
             "safe-scripting",
             "tab-environment"
         ],
-        executables: executable_metadata
+        executables: executable_metadata,
+        libraries: library_metadata
     };
     // atomic_write returns 0 on success and on typed failure (fail-on-error).
     rh::runtime::atomic_write(
@@ -334,12 +354,16 @@ fn write_platform(
         "build_metadata_platform_manifest_invalid"
     );
     let executables = [];
+    let libraries = [];
     let matches = 0;
     for platform in manifest.platforms {
         if platform.os == os_name && platform.arch == arch {
             matches += 1;
             for executable in platform.executables {
                 executables.push(executable);
+            }
+            for library in platform.libraries {
+                libraries.push(library);
             }
         }
     }
@@ -353,7 +377,7 @@ fn write_platform(
         "build_metadata_platform_executables_empty:" +
             os_name + "-" + arch
     );
-    let artifacts = #{ executables: executables };
+    let artifacts = #{ executables: executables, libraries: libraries };
     write_for_artifacts(
         repo_value,
         output_manifest_value,

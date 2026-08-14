@@ -112,7 +112,7 @@ agenterm-cu (28)
   ideal rect but must not report success with a fabricated frame.
 
 `undo` / `redo` are **deferred leaves**. They need per-application history
-that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
+that `agenterm-cu` does not yet own. The ids stay reserved; v0.1.19 may return
 `unsupported` with that reason rather than invent a second history model.
 
 ## Layering
@@ -121,7 +121,7 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
   and has no OS imports. Fixture tests are the promotion evidence for the
   math.
 - [ ] applying a rect is an `agenterm-platform` mechanism (AX / UIA /
-  `_NET_WM` as each backend grows). `cu` must not call AX directly.
+  `_NET_WM` as each backend grows). `agenterm-cu` must not call AX directly.
 - [ ] macOS is the first apply backend because that is where the catalog was
   proven. Linux/Windows placement is the same verb on a later backend; the
   command set does not fork.
@@ -142,7 +142,7 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
   Settings label alone, and not a Terminal-spawned CLI place. Install story
   and evidence: `scripts/install-cu-hotkeys.sh`,
   `docs/agenterm-rust-cheatsheet.md` (macOS Accessibility trust).
-- [ ] Windows daily-driver host uses the same `agenterm-cu host` mode and
+- [~] Windows daily-driver host uses the same `agenterm-cu host` mode and
   placement action catalog, presented as a notification-area menu plus global
   shortcuts. It calls the same `Command` / `Executor` path as CLI and macOS;
   Win32 window, input, screenshot, and accessibility mechanisms remain behind
@@ -180,3 +180,19 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
 - [ ] black-box: real `agenterm-cu` on a real macOS session places a visible window
   and a subsequent `windows` / `wait` observation shows the new bounds.
 - [ ] unauthorized call is `refused` and does not move the window.
+
+## Windows desktop-host checkpoint
+
+- [x] `libagenterm` ABI 1.7 exposes the cross-platform desktop-host contract;
+  Windows implements notification-area icon/menu projection, `RegisterHotKey`,
+  event polling and deterministic close cleanup.
+- [x] CU projects one product-owned catalog containing 18 placement actions and
+  Quit. The platform/ABI layer transports numeric actions but does not assign
+  their product meaning.
+- [x] Native `target/abi-dev` `agenterm-cu host --self-test --json` evidence
+  reports `actions=19` and `cleaned_up=true`.
+- [x] The staged `dist/agenterm-cu.exe` beside its exact `dist/agenterm.dll`
+  passes `cu-windows-smoke`: version probe, dynamic load, 19 actions and
+  deterministic host cleanup.
+- [ ] Candidate qualification and Windows ARM64 evidence remain open. Until
+  those gates close, Windows host and this subtree remain partial.

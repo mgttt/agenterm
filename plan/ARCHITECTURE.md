@@ -740,3 +740,51 @@ removes the 1,043-byte `u128` formatter and changes the measured same-profile
 custom-std PE from 533,504 to 531,968 bytes. Focused exact/saturation tests and
 con Clippy own the boundary; this is shared platform logic, not a con-only
 formatting workaround.
+
+## `agenterm-cu` executable and runtime boundary
+
+`agenterm-cu` is the sole computer-use executable. Its CLI and resident
+desktop-host mode are entry modes of the same binary; `cu` is not a second
+binary, alias, helper, or release artifact. CU is the first runtime consumer of
+the `libagenterm` dynamic library and is the proving ground before the same ABI
+is adopted by `agenterm` and `agenterm-con`.
+
+Product code owns target selection, command semantics, the 18-action placement
+catalog and Quit. `libagenterm`/`agenterm-platform` own native mechanisms. ABI
+1.7 carries desktop-host action descriptors and action IDs without knowing
+their product meaning. On Windows that mechanism is a notification-area menu,
+`RegisterHotKey`, same-thread polling and deterministic cleanup. Native
+`target/abi-dev` and colocated `dist/agenterm-cu.exe` + `agenterm.dll` self-test
+evidence is available; Candidate qualification remains incomplete, so
+architecture status is partial.
+
+The Windows accessibility call chain follows the same boundary:
+
+```text
+agenterm-cu Command -> Executor -> runtime agenterm.dll ABI
+  -> agenterm-platform accessibility_tree facade -> Windows UIA adapter
+```
+
+`Command` and `Executor` own target selection, matching, product action meaning
+and public results. The runtime ABI transports typed requests and failures;
+`agenterm-platform` owns COM/UIA mechanics. The UIA adapter creates an
+MTA-capable operation-local session, sets `SetAutoSetFocus(FALSE)` plus bounded
+connection/transaction and wall-clock deadlines, and releases every interface,
+BSTR, SAFEARRAY and VARIANT before the apartment scope ends. RuntimeId paths are
+stable serialized node identities, not cached COM pointers: every Value,
+Invoke, Focus or key operation re-resolves the path from its HWND/desktop root
+and detects recycled nodes. Structured clicks use UIA patterns only and never
+silently fall back to coordinates.
+
+Windows window enumeration is a two-stage ABI: query `required`, allocate
+`capacity`, then fill. The desktop may change between those calls. A fill result
+with `required > capacity` is therefore a retryable churn observation, not a
+successful truncated snapshot or permission to write beyond the caller's
+buffer. The runtime consumer retries from a fresh size query under a hard bound
+and returns a typed failure when that bound is exhausted.
+
+Five pure tests and two real Win32 UIA fixture tests prove the adapter slice.
+The staged public `cu-windows-smoke` also passes its seven declared receipts:
+host self-test, DLL load cleanup, exact window identity, UIA tree,
+name-addressed actuation, Value/GetText wait and owned UIA fixture cleanup.
+Candidate qualification and release are not claimed.

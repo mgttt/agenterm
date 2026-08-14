@@ -31,6 +31,22 @@ agenterm rh eval scripts/rh/your-script.rh                       # check + pack 
 agenterm rh task run <task-id> --manifest agenterm.tasks.json    # as the gates run it
 ```
 
+`mode=native host_eval_int=0` is necessary but **not sufficient** evidence for
+the complete task. `mode_probe` proves that its probe path selected native mode
+without host integer evaluation; it does not prove that the full imported
+module graph and every inferred call can be lowered, compiled and executed as
+one AOT native pack. The owning task gate must actually compile **and run** the
+real task entry with its production manifest and arguments.
+
+Failures that can appear only at that complete native-pack stage include:
+
+- calls reached through imported modules that the isolated probe did not lower;
+- `throw` lowering inside a `try` body;
+- mutable calls on `Child` values obtained from a list.
+
+Do not promote a successful `mode_probe` to task evidence when the actual
+native pack was never compiled and run.
+
 When a task fails without useful output, the worker's stderr is `Stdio::null()`
 by default. Set `AGENTERM_SCRIPT_WORKER_STDERR=inherit` or you lose the whole
 `STEP` trail.
@@ -327,12 +343,14 @@ fall back to host evaluation for that call. Prefer them for best-effort cleanup
 ## 9. Debug checklist when a task fails
 
 1. `AGENTERM_SCRIPT_WORKER_STDERR=inherit` — recover the `STEP` trail.
-2. `mode_probe` — confirm `mode=native host_eval_int=0`.
-3. Read the *first* recorded failure, not the last line of output (§5).
-4. Gate runs redirect each child to
+2. `mode_probe` — confirm the necessary `mode=native host_eval_int=0` signal.
+3. Compile and run the real task native pack; the probe does not cover the full
+   import graph, `try`/`throw` lowering or mutable `Child` list calls.
+4. Read the *first* recorded failure, not the last line of output (§5).
+5. Gate runs redirect each child to
    `target/qualification/scratch/command-<n>.{stdout,stderr}`; the gate itself
    only prints a PASS/FAIL summary. Read those files.
-5. Ask when this gate last actually ran green. A gate that never ran is more
+6. Ask when this gate last actually ran green. A gate that never ran is more
    likely to contain an assertion that was **never** satisfiable than a
    regression.
 

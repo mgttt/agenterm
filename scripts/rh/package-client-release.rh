@@ -217,6 +217,24 @@ fn entry() {
             }
         }
     }
+    for candidate in artifact_manifest.platforms {
+        let candidate_os = "" + candidate.os;
+        let candidate_arch = "" + candidate.arch;
+        if candidate_os == os_name && candidate_arch == arch {
+            for library in candidate.libraries {
+                let name = "" + library.name;
+                let source =
+                    std::path::join(binary_directory, name).display;
+                let staged_library =
+                    std::path::join(staging, name).display;
+                copy_required(
+                    source,
+                    staged_library,
+                    "package_client_library_missing"
+                );
+            }
+        }
+    }
     if os_name != "windows" && host_os != "windows" {
         for name in executable_names {
             let name_text = "" + name;

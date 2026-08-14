@@ -6,10 +6,11 @@ use agenterm_cu::{Authorization, Command, Executor, PointerButton, TargetRef, Wa
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if matches!(
-        args.first().map(String::as_str),
-        Some("host" | "hotkeys")
-    ) {
+    if matches!(args.as_slice(), [arg] if arg == "--version" || arg == "-V") {
+        println!("agenterm-cu {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if matches!(args.first().map(String::as_str), Some("host" | "hotkeys")) {
         std::process::exit(agenterm_cu::hotkeys::run());
     }
     if args.first().map(String::as_str)

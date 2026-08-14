@@ -57,3 +57,6 @@ agt_input_pointer_move
 agt_input_pointer_click
 agt_input_type_text
 agt_input_send_keys
+agt_desktop_host_open
+agt_desktop_host_poll
+agt_desktop_host_close

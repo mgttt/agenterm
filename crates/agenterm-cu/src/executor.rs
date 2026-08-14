@@ -174,6 +174,7 @@ fn capabilities_payload() -> serde_json::Value {
             "screenshot": status(mechanism::Capability::Screenshot),
             "input": status(mechanism::Capability::InputInject),
             "window_place": status(mechanism::Capability::WindowOp),
+            "desktop_host": status(mechanism::Capability::DesktopHost),
         },
         "mapping": {
             "windows": "libagenterm agt_window_enumerate",

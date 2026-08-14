@@ -632,10 +632,11 @@ pub mod capabilities {
     pub const AGT_CAP_SHARED_MEMORY: i32 = 14;
     pub const AGT_CAP_PARENT_CONSOLE: i32 = 15;
     pub const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
+    pub const AGT_CAP_DESKTOP_HOST: i32 = 17;
 
     /// All 16 discriminants in declaration order, derived from the constants
     /// above so it can never drift from them.
-    pub const ALL: [i32; 16] = [
+    pub const ALL: [i32; 17] = [
         AGT_CAP_PTY,
         AGT_CAP_PROCESS_SPAWN,
         AGT_CAP_PROCESS_OBSERVE,
@@ -652,5 +653,6 @@ pub mod capabilities {
         AGT_CAP_SHARED_MEMORY,
         AGT_CAP_PARENT_CONSOLE,
         AGT_CAP_ACCESSIBILITY_TREE,
+        AGT_CAP_DESKTOP_HOST,
     ];
 }

@@ -2,6 +2,10 @@
 
 Parent: [Computer-use foundation (`agenterm-cu`)](PRD_02_28_agenterm_cu.md)
 
+Delivery truth: `agenterm-cu` is the sole executable and the first runtime
+consumer of `libagenterm`. Target selection and transport policy remain product
+semantics here; native window, accessibility, input and desktop-host mechanisms
+remain behind the ABI/platform boundary.
 This module owns the target family, transport selection, and the per-platform
 backends that realize the abstract command set from
 [29](PRD_02_29_cu_command_surface.md).
@@ -46,7 +50,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 This branch is the **native accessibility stack** that backs structured
 `tree` observation and `click` / `focus` by node identity. It lives in
-`agenterm-platform` (`a11y-tree` and related contracts); `cu` selects the stack
+`agenterm-platform` (`a11y-tree` and related contracts); `agenterm-cu` selects the stack
 for the host OS and target tier. Screenshot capture and coordinate pointer
 injection are separate platform mechanisms and remain **degraded fallbacks**
 only — never silent replacements when the a11y tree is unavailable.
@@ -78,7 +82,7 @@ Canonical host mapping (approved product vocabulary):
 
 - [ ] `agenterm-platform` exposes one typed `accessibility_tree` contract:
   flattened nodes with path id, role, name, states, exact bounds, and action
-  names. `cu` maps this contract to its public JSON without host-specific
+  names. `agenterm-cu` maps this contract to its public JSON without host-specific
   fields leaking upward.
 - [ ] when the a11y bus / API is missing (headless without a11y, no registry,
   denied permission), `tree` and node actuation return typed `Unsupported` or
@@ -90,7 +94,7 @@ Canonical host mapping (approved product vocabulary):
 **Linux — AT-SPI2 (`current` first evidence)**
 
 - [~] `current` on Linux/X11 enumerates a control tree through AT-SPI2:
-  `agenterm-platform` (`a11y-tree`) implements the host stack; `cu` consumes
+  `agenterm-platform` (`a11y-tree`) implements the host stack; `agenterm-cu` consumes
   libagenterm milestone 6 (`agt_a11y_tree_snapshot` / `agt_a11y_node_perform`)
   rather than calling platform accessibility APIs directly. Nodes carry role,
   name, states, screen bounds, and action names; node ids are child-index paths
@@ -182,7 +186,7 @@ Canonical host mapping (approved product vocabulary):
   (alias `--node-text-equals`) polls `agt_a11y_node_get_text` (`Text.GetText`)
   on that unique showing node until the independent text equals `TEXT`.
   Timeout is typed `timeout`. This is not `send-text` / `paste` / `copy`
-  `matched.text`, not a sidecar walk of `cu tree` snapshot `text` fields,
+  `matched.text`, not a sidecar walk of `agenterm-cu tree` snapshot `text` fields,
   and not the WebKit eval helper's queued-job `OK` (Reasonix composer
   `Message Reasonix…`).
   Never screenshot, XTest, or `--coords`.
@@ -230,15 +234,44 @@ Canonical host mapping (approved product vocabulary):
   `agt_input_inject` milestones ship; capability JSON documents the gap.
 - [ ] AT-SPI unavailable at runtime (no session bus, registry absent) → typed
   `Unsupported` / `Failed`; no silent fallback to XTest coordinates.
-- [ ] black-box evidence: `scripts/cu-linux-smoke.sh` against the real `cu`
+- [ ] black-box evidence: `scripts/cu-linux-smoke.sh` against the real `agenterm-cu`
   binary on a host with `DISPLAY` and `at-spi2-registryd`.
 
 **Windows — native API + UIA**
 
-- [ ] UIA-backed `tree` and structured `click` / `focus` on `current` through
-  `agenterm-platform`. Not claimed in the Linux-first slice.
-- [ ] Win32 window enumeration and input injection remain separate platform
-  contracts consumed by `cu`; UIA is the structured control-tree authority.
+- [~] Windows `current` now reaches the UIA accessibility facade through the
+  runtime `agenterm.dll` boundary: `agenterm-cu` `Command`/`Executor` owns
+  target resolution and product meaning, while the ABI and
+  `agenterm-platform` own UIA tree, Value, Invoke and Focus mechanisms. The
+  owning evidence is five pure tests plus two real Win32 UIA fixture tests.
+  The staged public `cu-windows-smoke` also passes all seven declared evidence
+  checks through the colocated `agenterm-cu.exe` + `agenterm.dll`; Candidate
+  qualification and release remain open.
+- [x] `tree` uses the UIA Control View and returns bounded node identity,
+  parent relationships, role, name, text, state, bounds and actions. Node IDs
+  encode UIA RuntimeId paths, but every Value, Invoke, Focus or key operation
+  resolves that path again from the requested HWND (or the bounded desktop
+  root for `None`). A RuntimeId is never treated as a retained COM object, and
+  no COM interface pointer is cached across calls or apartments.
+- [x] Each UIA operation initializes an MTA-capable COM session with owned RAII
+  for interfaces, BSTR, SAFEARRAY and VARIANT values, configures
+  `SetAutoSetFocus(FALSE)`, a 500 ms connection timeout and a 250 ms transaction
+  timeout, and also enforces 5 s snapshot / 2 s action wall-clock budgets plus
+  strict node, depth and string limits. Window loss, access denial, timeout and
+  recycled nodes are typed failures.
+- [x] Structured Focus calls UIA `SetFocus`; text writes use Value and reads use
+  Value/Text patterns; click prefers Invoke, SelectionItem, Toggle and the
+  legacy default action. Missing patterns fail typed. No UIA node operation
+  silently degrades to coordinates; node key delivery is explicitly reported
+  as `uia-focus+send-input` after UIA focus.
+- [x] Win32 window enumeration uses the runtime library's two-stage
+  required-size/fill contract. Desktop churn can increase `required` after the
+  caller allocated `capacity`; `required > capacity` triggers a bounded retry
+  with a fresh capacity instead of truncation, out-of-bounds writes, false
+  success or an unbounded loop. Exhaustion is typed failure.
+- [~] Screenshot and coordinate/input injection remain separate platform
+  contracts consumed through the runtime library; they do not replace UIA
+  structured success.
 
 **macOS — AX (NSAccessibility)**
 
@@ -281,10 +314,18 @@ Canonical host mapping (approved product vocabulary):
 
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
-- [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `cu`, X11
+- [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
   actuation, audited degraded coordinate click, invalid node path failure, and
   structured AT-SPI click when a clickable node exists.
+- [x] Windows `current` staged public `cu-windows-smoke` passes its seven
+  declared receipts: `cu.windows-host-self-test`,
+  `cu.libagenterm-load-cleanup`, `cu.windows-uia-window-identity`,
+  `cu.windows-uia-tree`, `cu.windows-uia-name-actuation`,
+  `cu.windows-uia-value-wait`, and `cu.windows-uia-cleanup`. This proves the
+  staged host/DLL load and cleanup, exact window identity, public UIA tree,
+  name-addressed Value/GetText/Invoke journeys and bounded fixture cleanup; it
+  does not prove Candidate qualification or release.
 - [ ] a cross-tier conformance test proves the same abstract command produces
   equivalent observable results on every tier that declares support for it.
 - [ ] capability declaration is tested against reality: a target that declares

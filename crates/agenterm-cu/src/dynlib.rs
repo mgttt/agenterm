@@ -108,6 +108,18 @@ pub struct agt_screen_info {
     pub primary: i32,
 }
 
+/// C-compatible resident desktop-host action specification.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+#[allow(non_camel_case_types)]
+pub struct agt_desktop_action {
+    pub action_id: u32,
+    pub label: *const u8,
+    pub label_len: usize,
+    pub shortcut: *const u8,
+    pub shortcut_len: usize,
+}
+
 // ---------------------------------------------------------------------------
 // ABI constants — values are part of the ABI contract (include/agenterm.h).
 // ---------------------------------------------------------------------------
@@ -126,6 +138,7 @@ pub const AGT_CAP_CLIPBOARD: i32 = 8;
 pub const AGT_CAP_INPUT_INJECT: i32 = 10;
 pub const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 pub const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
+pub const AGT_CAP_DESKTOP_HOST: i32 = 17;
 
 /// `agt_a11y_tree_meta_string` fields.
 pub const AGT_A11Y_META_BACKEND: i32 = 0;

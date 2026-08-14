@@ -249,6 +249,18 @@
         "control-center.renderer-failure-isolation",
         "control-center.cross-process-detach"
       ]
+    },
+    {
+      "id": "cu-windows-smoke",
+      "evidence": [
+        "cu.windows-host-self-test",
+        "cu.libagenterm-load-cleanup",
+        "cu.windows-uia-window-identity",
+        "cu.windows-uia-tree",
+        "cu.windows-uia-name-actuation",
+        "cu.windows-uia-value-wait",
+        "cu.windows-uia-cleanup"
+      ]
     }
   ]
 }

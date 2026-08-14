@@ -613,7 +613,8 @@ fn entry() {
         artifact_passed = 0;
     }
     if artifact_passed != 0 {
-        if type_of(manifest.executables) != "array" {
+        if type_of(manifest.executables) != "array"
+                || type_of(manifest.libraries) != "array" {
             artifact_passed = 0;
         }
     }
@@ -635,12 +636,21 @@ fn entry() {
             "agenterm.com",
             "agenterm-cc.exe",
             "agenterm-con.exe",
+            "agenterm-cu.exe",
         ];
         let names = #{};
         for artifact_entry in manifest.executables {
             names[artifact_entry.name] = true;
         }
         if names.keys().len != expected.len {
+            artifact_passed = 0;
+        }
+        let library_names = #{};
+        for library_entry in manifest.libraries {
+            library_names[library_entry.name] = true;
+        }
+        if library_names.keys().len != 1
+                || library_names.contains("agenterm.dll") == 0 {
             artifact_passed = 0;
         }
         if artifact_passed != 0 {
@@ -654,13 +664,14 @@ fn entry() {
             gates.push(#{
                 id: "artifact-manifest",
                 passed: 1,
-                detail: "executables=" + names.keys().len
+                detail: "executables=" + names.keys().len +
+                    ",libraries=" + library_names.keys().len
             });
         } else {
             gates.push(#{
                 id: "artifact-manifest",
                 passed: 0,
-                detail: "Artifact manifest schema or executable set is invalid."
+                detail: "Artifact manifest schema or typed payload set is invalid."
             });
         }
     } else {

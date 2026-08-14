@@ -74,6 +74,7 @@ pub enum Capability {
     Screenshot,
     Font,
     WebView,
+    DesktopHost,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,6 +146,10 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Screenshot => (cfg!(feature = "screenshot"), true),
         Capability::Font => (cfg!(feature = "font"), true),
         Capability::WebView => (cfg!(feature = "webview"), true),
+        Capability::DesktopHost => (
+            cfg!(feature = "desktop-host"),
+            crate::selected::desktop_host_supported(),
+        ),
     };
     if enabled && implemented {
         CapabilityStatus::Available
@@ -160,6 +165,9 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
 }
 
 pub mod contract;
+
+#[cfg(feature = "desktop-host")]
+pub mod desktop_host;
 
 #[cfg(feature = "activation")]
 pub mod activation;

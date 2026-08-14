@@ -1613,6 +1613,9 @@ if skip_smoke != 0 {
     timing = wrap_timing_set_gate(
         timing, "control-center-smoke", "skipped", 0, 0, 0
     );
+    timing = wrap_timing_set_gate(
+        timing, "cu-windows-smoke", "skipped", 0, 0, 0
+    );
 }
 let full_started = std::time::SystemTime::now().unix_millis;
 let gate = run_gate(
@@ -2099,6 +2102,7 @@ if skip_smoke == 0 {
     smoke_ids.push("working-context-smoke");
     smoke_ids.push("workbench-smoke");
     smoke_ids.push("control-center-smoke");
+    smoke_ids.push("cu-windows-smoke");
     let smoke_index = 0;
     while smoke_index < smoke_ids.len {
         let id = smoke_ids[smoke_index];

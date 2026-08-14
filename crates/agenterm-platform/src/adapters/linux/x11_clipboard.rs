@@ -5,10 +5,10 @@
 //! `ConvertSelection`. No helper binary.
 //!
 //! A CLI process that exits after `SetSelectionOwner` leaves CLIPBOARD
-//! unowned. When `AGENTERM_X11_CLIPBOARD_SERVE` is set, `set_text` stays in
+//! unowned. When `PLATFORM_X11_CLIPBOARD_SERVE` is set, `set_text` stays in
 //! the X11 event loop and answers `SelectionRequest` until `SelectionClear`
-//! (another owner). That is how `cu copy` keeps the native selection alive
-//! for a later `cu paste` process.
+//! (another owner). That is how a CLI consumer keeps the native selection
+//! alive for a later process.
 
 use std::sync::Mutex;
 use std::thread;
@@ -360,7 +360,7 @@ fn with_state<T>(
 }
 
 fn serve_owned_selection() -> bool {
-    match std::env::var("AGENTERM_X11_CLIPBOARD_SERVE") {
+    match std::env::var("PLATFORM_X11_CLIPBOARD_SERVE") {
         Ok(value) => !value.is_empty() && value != "0",
         Err(_) => false,
     }

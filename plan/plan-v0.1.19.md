@@ -21,8 +21,8 @@
 ## D+ 用户问题
 
 agent 已经能 `windows` / `tree` / `click`，还需要像人按热键那样把窗口甩到
-左半 / 全屏 / 另一块屏。编排器用 `cu window-place`；人机日用走
-`cu hotkeys` / `AgentermCu.app`（Spectacle 默认键位），不再依赖本机 Spectacle.app。
+左半 / 全屏 / 另一块屏。编排器用 `agenterm-cu window-place`；人机日用走
+`agenterm-cu host` / `AgentermCu.app`（Spectacle 默认键位），不再依赖本机 Spectacle.app。
 
 ## 不变量
 
@@ -43,8 +43,8 @@ agent 已经能 `windows` / `tree` / `click`，还需要像人按热键那样把
   Spectacle `docs/FEATURE-CATALOG.md` 动作 ID 对上。
 - [~] **几何核** — 18 动作纯函数 + fixture（half 循环、thirds、跨屏、量化等）；
   以 crate 测试为据，继续对齐边缘案例。
-- [~] **`cu window-place` 竖线** — `current` + macOS AX set-rect；Windows 接
-  既有 move；Linux 写框仍可 typed unsupported。证据：真实 `cu` 移动可见窗。
+- [~] **`agenterm-cu window-place` 竖线** — `current` + macOS AX set-rect；Windows 接
+  既有 move；Linux 写框仍可 typed unsupported。证据：真实 `agenterm-cu` 移动可见窗。
 - [~] **授权/审计** — 无 `actuate` → `refused`；审计走 cu 既有模型。
 - [~] **日用宿主** — `scripts/install-cu-hotkeys.sh` → `~/Applications/AgentermCu.app`
   + launchd + 菜单栏；Carbon 默认键位。TCC 安装诚实（重签 reset）。
@@ -56,7 +56,7 @@ agent 已经能 `windows` / `tree` / `click`，还需要像人按热键那样把
 | Gate | 必须证明 | 不通过时 |
 |------|----------|----------|
 | **G-WP-math** | 几何 fixture 全绿 | 不宣称「行为等于 Spectacle」 |
-| **G-WP-mac** | macOS `cu window-place` + grant 黑盒 | 不得把 32 标 shipped |
+| **G-WP-mac** | macOS `agenterm-cu window-place` + grant 黑盒 | 不得把 32 标 shipped |
 | **G-WP-host** | launchd `ax-status` `trusted=1` 且热键能改窗 | 不得说「已取代 Spectacle」而不带 TCC 说明 |
 
 ## 非目标
@@ -71,3 +71,14 @@ agent 已经能 `windows` / `tree` / `click`，还需要像人按热键那样把
 1. D+ 已提前实现的部分不回滚；0.1.18 关闭时把本文件的勾选与 PRD 32 对齐一次。
 2. 轨 A（CC Phase 1）不在此重写。两轨抢人时：几何与 platform set-rect 已分文件，
    继续避免与 0.1.18 轨 D 原型抢同一热文件。
+
+## CU Windows desktop-host checkpoint
+
+- [x] 唯一 executable 为 `agenterm-cu`；CLI 与 `host` 共用一个 binary。
+- [x] CU 是首个运行时 `libagenterm` 消费者。Windows desktop-host ABI 1.7
+  已实现 notification area/menu/`RegisterHotKey`，CU 目录为 18 个 placement
+  action 加 Quit。
+- [x] 本机 `target/abi-dev` `host --self-test --json` 已报告
+  `actions=19`、`cleaned_up=true`。
+- [ ] 正式 `dist`、Candidate、qualification 尚未闭环；本 checkpoint 只能
+  支持 `[~]`，不得把 CU 根或 Windows 正式交付标为 shipped。

@@ -44,12 +44,22 @@
 #endif
 
 #define CLASS_NAME L"AgentermPlainWindowProbeClass"
+#define ID_FIXTURE_LABEL 1001
+#define ID_FIXTURE_EDIT 1002
+#define ID_FIXTURE_CLOSE 1003
 
 /* WM_CLOSE (posted by agt_native_window_close) or WM_DESTROY ends the
  * message loop; exit code 0 is the expected terminal state for the parent
  * test. */
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_FIXTURE_CLOSE &&
+                HIWORD(wParam) == BN_CLICKED) {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
@@ -93,6 +103,28 @@ int main(void) {
     if (hwnd == NULL) {
         fprintf(stderr, "agenterm_plain_window: CreateWindowExW failed (%lu)\n",
                 (unsigned long)GetLastError());
+        return 1;
+    }
+
+    /* Keep the STATIC immediately before the EDIT in creation/tab order.
+     * The standard Win32 accessibility proxy uses that label as the edit's
+     * stable accessible Name while the edit contents remain its Value. */
+    HWND label = CreateWindowExW(
+        0, L"STATIC", L"Fixture Field", WS_CHILD | WS_VISIBLE | SS_LEFT,
+        20, 20, 260, 20, hwnd, (HMENU)(INT_PTR)ID_FIXTURE_LABEL, inst, NULL);
+    HWND edit = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"fixture-initial",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+        20, 44, 260, 24, hwnd, (HMENU)(INT_PTR)ID_FIXTURE_EDIT, inst, NULL);
+    HWND close_button = CreateWindowExW(
+        0, L"BUTTON", L"Fixture Close",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        20, 84, 120, 28, hwnd, (HMENU)(INT_PTR)ID_FIXTURE_CLOSE, inst, NULL);
+    if (label == NULL || edit == NULL || close_button == NULL) {
+        fprintf(stderr,
+                "agenterm_plain_window: child control creation failed (%lu)\n",
+                (unsigned long)GetLastError());
+        DestroyWindow(hwnd);
         return 1;
     }
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);

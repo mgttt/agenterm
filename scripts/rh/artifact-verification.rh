@@ -109,6 +109,50 @@ fn entry() {
             "artifact_metadata_hash:" + artifact_name
         );
     }
+    let expected_library_names = #{};
+    let expected_library_count = 0;
+    for library in manifest.libraries {
+        let library_name = "" + library.name;
+        require(
+            !expected_names.contains(library_name)
+                && !expected_library_names.contains(library_name),
+            "artifact_manifest_name_duplicate:" + library_name
+        );
+        expected_library_names[library_name] = true;
+        expected_library_count += 1;
+        let path = std::path::join(dist, library_name).display;
+        require(std::fs::exists(path), "artifact_library_missing:" + library_name);
+        if release == 1 {
+            let actual_bytes = std::fs::metadata(path).len;
+            let budget_bytes = 0 + library.release_budget_bytes;
+            require(
+                actual_bytes <= budget_bytes,
+                "artifact_library_release_budget:" + library_name +
+                    ":actual=" + actual_bytes +
+                    ":budget=" + budget_bytes
+            );
+        }
+        let metadata_matches = 0;
+        for meta_entry in metadata.libraries {
+            if ("" + meta_entry.name) == library_name {
+                require(
+                    metadata_matches == 0,
+                    "artifact_library_metadata_duplicate:" + library_name
+                );
+                metadata_matches = 1;
+                require(
+                    ("" + meta_entry.kind) == "dynamic-library"
+                        && ("" + meta_entry.sha256)
+                            == rh::crypto::sha256_file(path),
+                    "artifact_library_metadata_hash:" + library_name
+                );
+            }
+        }
+        require(
+            metadata_matches == 1,
+            "artifact_library_metadata_hash:" + library_name
+        );
+    }
 
     for dir_entry in std::fs::read_dir(dist) {
         let file_name = "" + dir_entry.file_name;
@@ -127,11 +171,22 @@ fn entry() {
         metadata.executables.len == expected_count,
         "artifact_metadata_count"
     );
+    require(
+        metadata.libraries.len == expected_library_count,
+        "artifact_library_metadata_count"
+    );
     for meta_entry in metadata.executables {
         let entry_name = "" + meta_entry.name;
         require(
             expected_names.contains(entry_name),
             "artifact_metadata_unexpected:" + entry_name
+        );
+    }
+    for meta_entry in metadata.libraries {
+        let entry_name = "" + meta_entry.name;
+        require(
+            expected_library_names.contains(entry_name),
+            "artifact_library_metadata_unexpected:" + entry_name
         );
     }
     require(
@@ -188,6 +243,8 @@ fn entry() {
     let cli = std::path::join(dist, "agenterm.exe").display;
     let control_center =
         std::path::join(dist, "agenterm-cc.exe").display;
+    let computer_use =
+        std::path::join(dist, "agenterm-cu.exe").display;
     let metadata_version = "" + metadata.version;
 
     let cli_version_code = std::process::command_stdout_file(
@@ -250,6 +307,21 @@ fn entry() {
     require(
         cc_version == "agenterm-cc " + metadata_version,
         "artifact_control_center_version_mismatch"
+    );
+
+    let cu_version_code = std::process::command_stdout_file(
+        computer_use,
+        ["--version"],
+        30000,
+        stdout_path,
+        probe_options
+    );
+    require(cu_version_code == 0, "artifact_computer_use_version");
+    let cu_version = std::fs::read_to_string(stdout_path);
+    cu_version.trim();
+    require(
+        cu_version == "agenterm-cu " + metadata_version,
+        "artifact_computer_use_version_mismatch"
     );
 
     let cc_cap_code = std::process::command_stdout_file(
@@ -326,8 +398,9 @@ fn entry() {
     std::fs::try_remove_file(stdout_path);
 
     print(
-        "PASS: verified " + expected_count +
-            " staged executable roles, hashes, budgets, and offline catalogs"
+        "PASS: verified " + expected_count + " staged executables and " +
+            expected_library_count +
+            " typed libraries, hashes, budgets, and offline catalogs"
     );
     0
 }

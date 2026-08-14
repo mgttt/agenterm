@@ -10,6 +10,7 @@ pub mod ax_guide;
 pub mod command;
 pub mod dynlib;
 pub mod executor;
+pub mod host_actions;
 pub mod hotkeys;
 pub mod mechanism;
 pub mod place;

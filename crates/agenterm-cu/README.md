@@ -16,7 +16,7 @@ loop until goal:
   wait on observable conditions with bounded timeouts — never sleep
 ```
 
-`cu` is capability, not judgment: no planner, model, or agent loop ships here.
+`agenterm-cu` is capability, not judgment: no planner, model, or agent loop ships here.
 
 Named window placement (`window-place`) is in the command enum. Geometry
 follows the Spectacle catalog
@@ -43,7 +43,7 @@ On this Linux box, start Chrome with `scripts/box-chrome-a11y.sh` so
 Start Reasonix with `scripts/reasonix-desktop-a11y.sh` so WebKit keeps an
 AT-SPI subtree (`WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`) and the eval
 helper can implement the missing `EditableText` set-value; otherwise the
-web process aborts and `cu tree` is only unnamed GTK fillers.
+web process aborts and `agenterm-cu tree` is only unnamed GTK fillers.
 `agenterm-con` registers as an AT-SPI toolkit and publishes inner chrome
 (`Command`, `SEND`, `Tabs`, `Session`); do not treat the one-node X11 title
 frame as its success path.
@@ -116,44 +116,44 @@ If the audit path cannot be written, actuation does not execute.
 
 ```bash
 # Declare capabilities (observe grant)
-cu --target current --grant observe capabilities
+agenterm-cu --target current --grant observe capabilities
 
 # List top-level windows
-cu --target current --grant observe windows
+agenterm-cu --target current --grant observe windows
 
 # AT-SPI control tree (all application roots)
-cu --target current --grant observe tree
+agenterm-cu --target current --grant observe tree
 
 # Scoped tree for one X11 window handle
-cu --target current --grant observe tree --window 0x3c00007
+agenterm-cu --target current --grant observe tree --window 0x3c00007
 
 # Structured click by node path (AT-SPI)
-cu --target current --grant actuate click --node /3/0/0/1/0
+agenterm-cu --target current --grant actuate click --node /3/0/0/1/0
 
 # Structured click / focus by accessible name — no tree-dump parsing, no --coords.
 # Two or more showing hits fail typed (`a11y_node_ambiguous`) instead of picking the first.
-cu --target current --grant observe,act click --window 25165828 --name Reload
-cu --target current --grant observe,act focus --window 25165828 --name Reload --role button
+agenterm-cu --target current --grant observe,act click --window 25165828 --name Reload
+agenterm-cu --target current --grant observe,act focus --window 25165828 --name Reload --role button
 
 # Structured focus
-cu --target current --grant actuate focus --node /3/0/0/1/0
+agenterm-cu --target current --grant actuate focus --node /3/0/0/1/0
 
 # Type into a control by accessible name — focuses that node first, then types.
 # `--` ends flag parsing so the text may start with a dash.
-cu --target current --grant observe,act send-text --window 25165828 \
+agenterm-cu --target current --grant observe,act send-text --window 25165828 \
   --name "Address and search bar" -- hello
 
 # Send a chord to a control by accessible name — same matcher, focus, then keys.
-cu --target current --grant observe,act send-keys --window 25165828 \
+agenterm-cu --target current --grant observe,act send-keys --window 25165828 \
   --name "Address and search bar" -- enter
 
 # Wait for at least one window, 3s max
-cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
+agenterm-cu --target current --grant observe wait --timeout-ms 3000 --window-count-gte 1
 
 # Wait for a control to appear in one window's accessibility tree (no screenshot).
-# The handle is the decimal `handle` from `cu windows`; a match needs a showing
+# The handle is the decimal `handle` from `agenterm-cu windows`; a match needs a showing
 # (or visible) node, and a timeout is a typed `ok:false` / `error.code=timeout`.
-cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
+agenterm-cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --node-name-contains Reload --node-role button
 
 # Copy a named field's AT-SPI GetText onto the native clipboard.
@@ -161,9 +161,9 @@ cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
 # Close the circuit with paste --name (no --text) then wait --text-equals.
 # Chrome fixture and Reasonix composer (name contains "Message Reasonix")
 # both use the same GetText → CLIPBOARD path.
-cu --target current --grant observe,act copy --window 25165828 \
+agenterm-cu --target current --grant observe,act copy --window 25165828 \
   --name FixtureSource
-cu --target current --grant observe,act copy --window 4194318 \
+agenterm-cu --target current --grant observe,act copy --window 4194318 \
   --name "Message Reasonix"
 
 # Paste clipboard text into a named field via AT-SPI EditableText / Text.
@@ -173,20 +173,20 @@ cu --target current --grant observe,act copy --window 4194318 \
 # does not count. Reasonix composer name contains "Message Reasonix"
 # (WebKit Text-without-EditableText uses the eval-helper set-value path).
 # After a prior copy --name, omit --text so ConvertSelection supplies SRC.
-cu --target current --grant observe,act paste --window 25165828 \
+agenterm-cu --target current --grant observe,act paste --window 25165828 \
   --name FixtureField --text hello
-cu --target current --grant observe,act paste --window 4194318 \
+agenterm-cu --target current --grant observe,act paste --window 4194318 \
   --name "Message Reasonix"
 
 # After send-text / paste / copy --name, wait until AT-SPI GetText equals the source
 # or contains a substring. Independent of send-text / paste / copy matched.text, of
 # a sidecar tree walk, and of the WebKit eval helper's queued-job OK
 # (Reasonix composer: Message Reasonix…).
-cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
+agenterm-cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --name FixtureField --text-equals hello
-cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
+agenterm-cu --target current --grant observe wait --timeout-ms 4000 --window 25165828 \
   --name FixtureField --text-contains GATE
-cu --target current --grant observe wait --timeout-ms 4000 --window 4194318 \
+agenterm-cu --target current --grant observe wait --timeout-ms 4000 --window 4194318 \
   --name "Message Reasonix" --text-equals hello
 
 # Select a range on a named Text node (AT-SPI SetSelection). Observe with
@@ -203,16 +203,16 @@ cu --target current --grant observe get-selection --window 4194318 \
   --name "Message Reasonix"
 
 # Place the focused window (Spectacle catalog)
-cu --target current --grant actuate window-place --action left-half
+agenterm-cu --target current --grant actuate window-place --action left-half
 
 # Refused without actuate grant
-cu --target current --grant observe send-text hello
+agenterm-cu --target current --grant observe send-text hello
 
 # Audited coordinate click (explicit degraded mode only)
-cu --target current --grant actuate click --coords 100,200 --degraded
+agenterm-cu --target current --grant actuate click --coords 100,200 --degraded
 
 # JSON command envelope
-cu exec --grant observe,actuate --json '{"verb":"windows","target":"current"}'
+agenterm-cu exec --grant observe,actuate --json '{"verb":"windows","target":"current"}'
 ```
 
 ## macOS hotkeys host (`AgentermCu`)
@@ -231,7 +231,7 @@ through `window-place` + platform AX set-rect.
   `tccutil reset Accessibility com.agenterm.cu` so a stale ON cannot outlive
   a new signature. Enable **AgentermCu** once after each reinstall. Prefer that
   row over a legacy path entry named `agenterm-cu`.
-- A successful `cu window-place` from Terminal does **not** prove hotkeys work:
+- A successful `agenterm-cu window-place` from Terminal does **not** prove hotkeys work:
   the CLI may borrow Terminal’s Accessibility grant. Check the host:
 
 ```bash
@@ -273,9 +273,22 @@ abstract command     agenterm-cu library (`Command`, typed `CuReply`)
     ↑
 current transport    in-process `Executor` for target `current`
     ↑
-shell command        `cu` binary
+shell + host         single `agenterm-cu` binary
 ```
 
-`cu` never opens raw OS APIs. Every call goes through the shared
+`agenterm-cu` never opens raw OS APIs. Every call goes through the shared
 libagenterm dynamic library; mechanisms report typed `Available` /
 `Unsupported` / `Failed`.
+
+## Executable and desktop host
+
+`agenterm-cu` is the only executable. CLI commands and `agenterm-cu host` are
+modes of that binary; there is no separate `cu` product surface. CU is the first
+runtime consumer of the `libagenterm` dynamic library.
+
+macOS hosts the placement catalog in `AgentermCu.app`. Windows desktop-host ABI
+1.7 now implements a notification-area menu, `RegisterHotKey`, event polling
+and cleanup for 18 placement actions plus Quit. Native `target/abi-dev`
+`host --self-test --json` reports `actions=19` and `cleaned_up=true`. Formal
+`dist` staging and Candidate qualification are still in progress, so Windows
+delivery remains partial.

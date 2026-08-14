@@ -1,5 +1,11 @@
 # Phase 0 迁移前实测基线（里程碑 14）
 
+> Historical snapshot: this document preserves the artifact names, paths,
+> hashes and linkage observations measured at that time. The row named
+> `target/release/cu.exe` is the old binary path and its hash meaning must not be
+> rewritten. Current product truth is one executable named `agenterm-cu`, with
+> CLI and host modes in that binary, and CU as the first runtime
+> `libagenterm` consumer.
 > 本文档是 `plan/plan-v0.1.18.md` §14.6 Phase 0 判据的**"迁移前"实测基线**。
 > 本轮只钉死前两条判据的"迁移前"列（独立产物预算、共享收益的静态链接侧），
 > 后两条（渲染性能、行为等价）与"迁移后"列需要 con 的 dylib 消费变体，不在本轮范围。
@@ -28,7 +34,7 @@
 | `libagenterm`（cdylib） | `cargo build -p agenterm-abi --profile abi-release` → `target/abi-release/agenterm_abi.dll` | **400,896** | **是** |
 | `agenterm-con`（EXE） | `build.bat`（`con-release-fast` + build-std `panic-unwind,backtrace-trace-only`）→ `dist/agenterm-con.exe` | **629,760** | **是** |
 | `agenterm`（主 EXE） | `cargo build --release --bin agenterm` → `target/release/agenterm.exe` | **4,224,512** | **否**（判据 1 不约束主 EXE，仅报告） |
-| `agenterm-cu`（EXE） | `cargo build -p agenterm-cu --release` → `target/release/cu.exe` | **351,232** | **是**（判据 1 不约束 cu，仅报告） |
+| `agenterm-cu`（EXE） | `cargo build -p agenterm-cu --release` → `target/release/cu.exe`（历史路径；现正式名为 `agenterm-cu`） | **351,232** | **是**（判据 1 不约束 cu，仅报告） |
 
 > 判据 1（独立产物预算）只约束 `libagenterm.{dll,so,dylib}` 与迁移后的 con EXE。
 > 主 EXE 与 cu 的 `<= 1,048,575 B` 列仅如实报告，不代表它们承诺满足该预算。
@@ -386,4 +392,4 @@ size-probe 探针结论为「档 2：很可能不成立」，足以支撑"继续
 | `target/abi-release/agenterm_abi.dll` | `99d9119c931ae6b4101acc227542a5d2903a09fe38bab2070e9d1397230dc374` |
 | `dist/agenterm-con.exe` | `842bf55235fe8971e06f5462fbe1f8121bf10a858a4e1b27c4a05683a18df9c4` |
 | `target/release/agenterm.exe` | `bd32dbe5d7e7e8cd0b0e40678da9aadb2c87e49bbf950c353f98b2ab92184b2e` |
-| `target/release/cu.exe` | `55aa35c967223b18819bf63fbfe5fc102e05b630a840a4c416ed78d86d36cd63` |
+| `target/release/cu.exe`（历史路径；保留原测量含义） | `55aa35c967223b18819bf63fbfe5fc102e05b630a840a4c416ed78d86d36cd63` |

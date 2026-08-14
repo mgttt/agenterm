@@ -54,12 +54,29 @@ pub(crate) fn pointer_click(
 }
 
 pub(crate) fn type_text(text: &str) -> Result<(), InputInjectError> {
+    let inputs = type_text_inputs(text);
+    send_batch(&inputs)
+}
+
+/// Build the keyboard INPUT sequence for `text` as Unicode events
+/// (KEYEVENTF_UNICODE via `wScan`). A VK-mode down/up would treat each
+/// character code as a *virtual key*: the lowercase letter codes 0x61..0x7A
+/// collide with the VK_NUMPAD1..VK_NUMPAD9 / VK_DECIMAL range, so
+/// TranslateMessage would map them through the keyboard layout to the wrong
+/// WM_CHAR (e.g. 'a' -> '1'). Unicode mode delivers the character verbatim;
+/// non-BMP characters are expanded to their UTF-16 surrogate pair, one
+/// key-down/key-up pair per code unit.
+fn type_text_inputs(text: &str) -> Vec<INPUT> {
     let mut inputs: Vec<INPUT> = Vec::with_capacity(text.chars().count() * 2);
     for ch in text.chars() {
-        inputs.push(key_input(ch as u16, 0));
-        inputs.push(key_input(ch as u16, KEYEVENTF_KEYUP));
+        let mut buf = [0u16; 2];
+        let units = ch.encode_utf16(&mut buf);
+        for &unit in &*units {
+            inputs.push(key_input(unit, KEYEVENTF_UNICODE));
+            inputs.push(key_input(unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+        }
     }
-    send_batch(&inputs)
+    inputs
 }
 
 pub(crate) fn send_keys(shortcut: &str) -> Result<(), InputInjectError> {
@@ -201,7 +218,7 @@ fn send_batch(inputs: &[INPUT]) -> Result<(), InputInjectError> {
 
 #[cfg(test)]
 mod tests {
-    use super::virtual_key_for_character;
+    use super::{KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, type_text_inputs, virtual_key_for_character};
 
     #[test]
     fn physical_ascii_keys_map_to_windows_virtual_keys() {
@@ -210,5 +227,49 @@ mod tests {
         assert_eq!(virtual_key_for_character('5'), Some(u16::from(b'5')));
         assert_eq!(virtual_key_for_character('?'), None);
         assert_eq!(virtual_key_for_character('中'), None);
+    }
+
+    /// Milestone 72 regression: `type_text` must inject Unicode events
+    /// (wVk = 0, wScan = code unit, KEYEVENTF_UNICODE). Sending the raw
+    /// character code as wVk maps lowercase letters onto the VK_NUMPAD1..9 /
+    /// VK_DECIMAL range and TranslateMessage turns 'a' into '1'.
+    #[test]
+    fn type_text_injects_unicode_events_never_vk_events() {
+        let inputs = type_text_inputs("a");
+        assert_eq!(inputs.len(), 2, "one down + one up per character");
+        assert_eq!(inputs[0].r#type, super::INPUT_KEYBOARD);
+        assert_eq!(inputs[1].r#type, super::INPUT_KEYBOARD);
+        let down = unsafe { inputs[0].Anonymous.ki };
+        let up = unsafe { inputs[1].Anonymous.ki };
+        assert_eq!(down.wVk, 0, "Unicode mode must not carry a virtual key");
+        assert_eq!(down.wScan, u16::from(b'a'), "the code unit rides in wScan");
+        assert_eq!(down.dwFlags & KEYEVENTF_UNICODE, KEYEVENTF_UNICODE);
+        assert_eq!(up.dwFlags & KEYEVENTF_UNICODE, KEYEVENTF_UNICODE);
+        assert_eq!(up.dwFlags & KEYEVENTF_KEYUP, KEYEVENTF_KEYUP);
+    }
+
+    /// A non-BMP character must be expanded to its UTF-16 surrogate pair,
+    /// not truncated by a plain `char as u16` cast.
+    #[test]
+    fn type_text_expands_surrogate_pairs() {
+        let inputs = type_text_inputs("\u{1F600}"); // U+1F600 GRINNING FACE
+        assert_eq!(inputs.len(), 4, "two code units x down+up");
+        let mut scans: Vec<u16> = inputs
+            .iter()
+            .filter(|i| {
+                let ki = unsafe { i.Anonymous.ki };
+                ki.dwFlags & KEYEVENTF_UNICODE != 0 && ki.dwFlags & KEYEVENTF_KEYUP == 0
+            })
+            .map(|i| unsafe { i.Anonymous.ki.wScan })
+            .collect();
+        let mut expected = "\u{1F600}".encode_utf16();
+        let e1 = expected.next().expect("high surrogate");
+        let e2 = expected.next().expect("low surrogate");
+        let got = scans.as_mut_slice();
+        assert_eq!(
+            (got[0], got[1]),
+            (e1, e2),
+            "surrogate pair must be injected in order"
+        );
     }
 }

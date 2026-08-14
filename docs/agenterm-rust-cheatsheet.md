@@ -1141,7 +1141,7 @@ Action interface is missing.
 
 ## Name addressing is wait-matching then the node path
 
-`cu click --name` / `cu focus --name` must not grow a second actuation
+`agenterm-cu click --name` / `agenterm-cu focus --name` must not grow a second actuation
 backend. Resolve with the same showing/visible + case-insensitive
 substring matcher as `wait --node-name-contains`, then call the existing
 `--node` AT-SPI path. Require `--window`, reject `--name` combined with
@@ -1151,13 +1151,13 @@ with the match count — never silently pick the first. The same uniqueness
 rule applies to `wait --node-name-contains`. Never satisfy a name click
 with a screenshot or degraded coordinates.
 
-`cu send-keys --name` is the same rule plus a native Device/key delivery:
+`agenterm-cu send-keys --name` is the same rule plus a native Device/key delivery:
 resolve the unique showing node, then send the chord through AT-SPI
 `DeviceEventListener.NotifyEvent`. A named showing node with no key
 interface typed-fails (`a11y_key_unavailable`). That path never falls
 through to XTest / `input_inject::send_keys`. A miss types nothing.
 
-`cu send-text --name` resolves the same unique showing node, then writes
+`agenterm-cu send-text --name` resolves the same unique showing node, then writes
 through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`)
 when present. Chrome and WebKitGTK named fields expose `Text` (read) but
 not `EditableText`. Chrome writes through AT-SPI `Text` plus the renderer
@@ -1173,7 +1173,7 @@ through to XTest / `input_inject::type_text`. Explicit `--coords` or no
 `--` as the end of flags — otherwise text (or a chord) that starts with a
 dash is eaten as a flag.
 
-`cu paste --name` is the clipboard form of that write. Resolve the unique
+`agenterm-cu paste --name` is the clipboard form of that write. Resolve the unique
 showing node, optionally seed the clipboard with `--text`
 (`agt_clipboard_set_text`), then always read `agt_clipboard_get_text` and
 write through the same AT-SPI `EditableText` / `Text` path. `--name` is
@@ -1188,7 +1188,7 @@ is set. Do not drop a one-off `/tmp/xclip` binary to unblock
 path; `wait --text-equals` must see `GetText ==` the clipboard/typed
 string.
 
-`cu copy --name` is the inverse read. Resolve the unique showing node,
+`agenterm-cu copy --name` is the inverse read. Resolve the unique showing node,
 read AT-SPI `Text.GetText` (`agt_a11y_node_get_text`), and publish that
 UTF-8 through `agt_clipboard_set_text`. `--name` is required. A named
 showing node with no Text interface typed-fails
@@ -1197,7 +1197,7 @@ showing node with no Text interface typed-fails
 copied payload is independent GetText. A later `paste --name` with no
 `--text` must be able to `ConvertSelection` that CLIPBOARD. A CLI
 process that `SetSelectionOwner` and then exits leaves CLIPBOARD
-unowned — `copy` therefore keeps a detached `cu` owner in the X11
+unowned — `copy` therefore keeps a detached `agenterm-cu` owner in the X11
 selection loop (`AGENTERM_X11_CLIPBOARD_SERVE`) until another owner
 takes it. Do not persist via `xclip` / `xsel`. A later process must
 not treat a 1-byte `get_text` probe `TooLarge` as "no clipboard
@@ -1212,13 +1212,13 @@ SRC through the same WebKit eval-helper set-value path as named
 `send-text`, and `wait --text-equals SRC` must see independent
 GetText == SRC (not copy/paste/send `matched.text`).
 
-`cu wait --text-equals` / `--node-text-equals` with `--name` is the
+`agenterm-cu wait --text-equals` / `--node-text-equals` with `--name` is the
 independent AT-SPI close-the-circuit after named `send-text` / `paste` /
 `copy`.
 Resolve the unique showing node, then call `Text.GetText`
 (`agt_a11y_node_get_text`). Success is `ok:true` only when that GetText
 equals the typed string. The `send-text` / `paste` reply's `matched.text`
-is the resolve-time snapshot and does not count. A sidecar `cu tree` walk
+is the resolve-time snapshot and does not count. A sidecar `agenterm-cu tree` walk
 of snapshot `text` fields does not count. Timeout is typed `timeout` and
 reports the last GetText. Never
 screenshot, XTest, or `--coords`. Chrome AX set-value rides the window
@@ -1232,7 +1232,7 @@ the showing composer (`Message Reasonix…`) equals the typed string. Do
 not treat helper `OK`, `last_text_write_via`, `send-text` / `paste`
 `via=text`, or worker self-report as the wait hit.
 
-`cu wait --text-contains` / `--node-text-contains` with `--name` is the
+`agenterm-cu wait --text-contains` / `--node-text-contains` with `--name` is the
 same independent GetText poll with a substring predicate. Success is
 `ok:true` only when that GetText contains `SUB`; published `text` /
 `via=gettext` is still the full GetText, not the substring.
@@ -1300,7 +1300,7 @@ get-selection need no eval-helper glue and must not grow an
 
 ## Do not drop the AT-SPI bus between resolve and keys
 
-Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`
+Linux `AccessibilityConnection::new()` is not a cheap handle. An `agenterm-cu`
 process that opens one connection for the tree snapshot, drops it, opens
 another for `grab_focus`, drops that, then injects XTest `Home` into
 Chrome's omnibox leaves the renderer accessibility tree empty (and can
@@ -1331,7 +1331,7 @@ resolve well-known names with `GetNameOwner`, and keep walking.
 
 Do not open that tree through `AccessibilityConnection::new()`. atspi
 0.30's default P2P path (`GetApplicationBusAddress` plus a unix-socket
-handshake per registry child) hangs on WebKit/Wails sockets, so `cu tree`
+handshake per registry child) hangs on WebKit/Wails sockets, so `agenterm-cu tree`
 dies with `a11y_tree_timeout` and never reaches named document widgets.
 Connect to the a11y bus only. Skip dests with no owner (a dead web
 process leaves a filler stub). WebKit `GetRoleName` is often empty —
@@ -1347,7 +1347,7 @@ Chrome into an unrelated window).
 
 A custom-raster toolkit (winit/softbuffer `agenterm-con`) is not GTK and
 does not load `atk-bridge`, so the AT-SPI registry never sees it as an
-application. `cu tree --window` then used to emit only a one-node X11
+application. `agenterm-cu tree --window` then used to emit only a one-node X11
 title `frame`. That fallback is window identity, not a widget tree: named
 `click`/`focus`/`send-text` cannot address the composer, SEND button, or
 session. Linux `agenterm-con` now publishes those children through the
@@ -1518,8 +1518,6 @@ branches when one target has a provably infallible conversion and another
 requires a checked conversion, then compile both target cells. This avoids
 both silent narrowing and a Clippy fix that fails to type-check elsewhere.
 
-## macOS Accessibility trust is signature + process, not the Settings label
-
 ## Product executable names must not be occupied by ABI demos
 
 When a package has one accepted product executable, its real command shell and
@@ -1529,9 +1527,65 @@ binary or take the formal executable name while the real product ships under a
 short alias. Build scripts and black-box tests must name the formal executable
 explicitly so an accidental extra `[[bin]]` cannot become a release artifact.
 
+## Desktop-host ABI keeps mechanism and product meaning separate
+
+The platform/dynamic-library boundary owns registration, event transport and
+resource cleanup; the product owns action IDs, labels, shortcut choices and
+what each action means. Keep these recurring rules together:
+
+- `action_id == 0` means no event. Product actions must use nonzero IDs.
+- Open, poll and close execute on the same owning thread. A native message loop
+  or registration handle is not safely transferable merely because its Rust
+  wrapper is movable.
+- One shortcut conflict or duplicate action must return a typed failure without
+  corrupting cleanup. Track each successfully acquired icon, window and hotkey
+  independently, and release exactly that acquired subset on rollback/close.
+- The ABI must not embed a placement catalog, Quit policy or other product
+  semantics. It transports opaque numeric action IDs; `agenterm-cu` assigns
+  their meaning.
+
+## Windows UIA clients keep identity, apartments and actuation separate
+
+The Windows accessibility adapter established a reusable native-FFI rule set.
+Five pure tests and two real Win32 UIA fixture tests cover the adapter. The
+staged public `cu-windows-smoke` also passes all seven declared host, DLL,
+window-identity, tree, name-actuation, value-wait and cleanup receipts;
+Candidate and release status remain separate and are not implied.
+
+- Initialize COM at the operation boundary with
+  `CoInitializeEx(COINIT_MULTITHREADED)`. If the calling thread already owns a
+  different apartment (`RPC_E_CHANGED_MODE`), borrow that apartment without an
+  unmatched `CoUninitialize`. Keep every COM interface, BSTR, SAFEARRAY and
+  VARIANT operation-local and RAII-owned; never cache a COM pointer across
+  threads, calls or apartments.
+- Configure `IUIAutomation2.SetAutoSetFocus(FALSE)`, connection timeout and
+  transaction timeout before traversal, then enforce an independent wall-clock
+  budget and hard node, depth, sibling, RuntimeId and string limits. COM's own
+  timeout is not a substitute for a bounded caller.
+- Serialize a node's RuntimeId path as identity, not ownership. For every
+  Value, Invoke, Focus, text or key request, start from the supplied HWND (or a
+  deliberately bounded desktop root), walk again and compare every RuntimeId
+  segment. A missing window, denied call, timeout or changed/recycled node must
+  become a typed failure instead of using a stale interface.
+- Keep product `Command`/`Executor` semantics above the dynamic-library and
+  platform boundary. The platform adapter owns UIA `SetFocus`, Value/Text and
+  Invoke/SelectionItem/Toggle/legacy patterns; it must not choose targets or
+  reinterpret actions for the product.
+- Structured actuation must remain structured. If the required UIA pattern is
+  absent, fail typed; never hide a coordinate click behind UIA success. Key
+  delivery may focus through UIA and then call the platform input mechanism,
+  but its result must state that route explicitly, such as
+  `uia-focus+send-input`.
+- A two-stage native enumeration is not a stable snapshot. After querying
+  `required` and allocating `capacity`, the desktop can gain windows before the
+  fill call. Treat `required > capacity` as bounded-retry churn: discard the
+  partial result, query/allocate again, cap attempts and return typed failure on
+  exhaustion. Never truncate while claiming success, write past capacity or
+  retry forever.
+
 ## macOS Accessibility trust is signature + process, not the Settings label
 
-Proven on the `cu hotkeys` / `AgentermCu.app` host (`scripts/install-cu-hotkeys.sh`,
+Proven on the `agenterm-cu host` / `AgentermCu.app` host (`scripts/install-cu-hotkeys.sh`,
 `crates/agenterm-cu` ax_guide / status_menu / hotkeys).
 
 ### What actually gates AX
@@ -1551,7 +1605,7 @@ Proven on the `cu hotkeys` / `AgentermCu.app` host (`scripts/install-cu-hotkeys.
 
 ### CLI success is not host success
 
-- Terminal/IDE-spawned `cu window-place` can succeed while the LaunchAgent is
+- Terminal/IDE-spawned `agenterm-cu window-place` can succeed while the LaunchAgent is
   untrusted. TCC **responsible process** lets the CLI borrow Terminal's grant.
 - The LaunchAgent is responsible for **itself**. Accept only evidence from the
   launchd-hosted process: `~/.local/share/agenterm/ax-status` (`trusted=1`),
@@ -1595,21 +1649,3 @@ codesign -d -r- ~/Applications/AgentermCu.app
 cat ~/.local/share/agenterm/ax-status
 tail ~/.local/share/agenterm/cu-hotkeys.log
 ```
-
-## A TCC card must not steal the Settings click
-
-macOS Accessibility onboarding (`AXIsProcessTrusted` / Settings
-`Privacy_Accessibility`) fails if the helper activates itself on a timer.
-`activateIgnoringOtherApps` or `makeKeyAndOrderFront` every poll makes System
-Settings lose key status, so the user cannot flip **AgentermCu**. Detect trust
-loss on a short poll, but: open the pane at most once per cooldown unless
-trust was revoked; skip reopen while Settings is frontmost; `orderFrontRegardless`
-the instruction card without becoming key; put the exact bundle name on a
-highlighted field. Prove the reopen policy with a clock + flags unit test, not
-a live Settings session.
-
-`AXIsProcessTrustedWithOptions` must receive a real CF/NSDictionary. A
-function-local `extern static kCFBooleanTrue` plus `CFDictionaryCreate` with
-null callbacks produced `CFGetTypeID` at address `0x8` and SIGSEGV'd the
-launchd host. Build the `{AXTrustedCheckOptionPrompt: true}` dictionary with
-`NSDictionary` / `NSNumber`, and never let onboarding crash the hotkey process.

@@ -31,7 +31,7 @@
       "offline_probe": [
         "--version"
       ],
-      "release_budget_bytes": 4194304
+      "release_budget_bytes": 1048575
     },
     {
       "name": "agenterm-con.exe",
@@ -41,6 +41,25 @@
       "offline_probe": [
         "--version"
       ],
+      "release_budget_bytes": 1048575
+    },
+    {
+      "name": "agenterm-cu.exe",
+      "role": "computer-use-host",
+      "pe_subsystem": 3,
+      "documentation_role": "computer-use CLI and Windows notification-area host",
+      "offline_probe": [
+        "--version"
+      ],
+      "release_budget_bytes": 1048575
+    }
+  ],
+  "libraries": [
+    {
+      "name": "agenterm.dll",
+      "role": "libagenterm-c-abi",
+      "kind": "dynamic-library",
+      "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
       "release_budget_bytes": 1048575
     }
   ],
@@ -80,7 +99,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 1048575
         },
         {
           "name": "agenterm-con.exe",
@@ -90,6 +109,25 @@
           "offline_probe": [
             "--version"
           ],
+          "release_budget_bytes": 1048575
+        },
+        {
+          "name": "agenterm-cu.exe",
+          "role": "computer-use-host",
+          "pe_subsystem": 3,
+          "documentation_role": "computer-use CLI and Windows notification-area host",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1048575
+        }
+      ],
+      "libraries": [
+        {
+          "name": "agenterm.dll",
+          "role": "libagenterm-c-abi",
+          "kind": "dynamic-library",
+          "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
           "release_budget_bytes": 1048575
         }
       ]
@@ -129,7 +167,7 @@
           "offline_probe": [
             "--version"
           ],
-          "release_budget_bytes": 4194304
+          "release_budget_bytes": 1048575
         },
         {
           "name": "agenterm-con.exe",
@@ -140,6 +178,25 @@
             "--version"
           ],
           "release_budget_bytes": 1048575
+        },
+        {
+          "name": "agenterm-cu.exe",
+          "role": "computer-use-host",
+          "pe_subsystem": 3,
+          "documentation_role": "computer-use CLI and Windows notification-area host",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 1048575
+        }
+      ],
+      "libraries": [
+        {
+          "name": "agenterm.dll",
+          "role": "libagenterm-c-abi",
+          "kind": "dynamic-library",
+          "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
+          "release_budget_bytes": 1048575
         }
       ]
     },
@@ -176,7 +233,8 @@
           ],
           "release_budget_bytes": 1048575
         }
-      ]
+      ],
+      "libraries": []
     },
     {
       "os": "linux",
@@ -211,7 +269,8 @@
           ],
           "release_budget_bytes": 1048575
         }
-      ]
+      ],
+      "libraries": []
     },
     {
       "os": "macos",
@@ -246,7 +305,8 @@
           ],
           "release_budget_bytes": 1048575
         }
-      ]
+      ],
+      "libraries": []
     },
     {
       "os": "macos",
@@ -281,7 +341,8 @@
           ],
           "release_budget_bytes": 1048575
         }
-      ]
+      ],
+      "libraries": []
     }
   ]
 }

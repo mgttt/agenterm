@@ -293,6 +293,17 @@ parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面
 - `tests/dylib_load.rs`：用 `libloading` 加载真实 cdylib，调用导出并断言
   返回的 `const char*` 均为合法 NUL 结尾 C 字符串（缺陷回归闸）。找不到
   cdylib 时该测试直接失败（先执行上面的 build 命令）。
+- `tests/input_inject_success.rs`：`agt_input_pointer_move` /
+  `agt_input_pointer_click` / `agt_input_type_text` / `agt_input_send_keys`
+  四个导出的 **Windows 成功路径**黑盒证据（子进程开窗回报 `WM_CHAR` /
+  `WM_LBUTTONDOWN` / `WM_MOUSEMOVE` / `WM_KEYDOWN`）。**默认关闭**：
+  `agt_input_*` 会移动真实光标、把按键送进当前焦点窗口，测试绝不在
+  开发者桌面上默认注入——环境变量 `AGENTERM_ALLOW_INPUT_INJECTION` 不等于
+  `1` 就打印 `SKIP: input injection is opt-in; ...` 并直接通过，只有 CI 的
+  windows job 显式设置它（linux/macos job 一律不设）。注入只发生在本测试
+  自己 spawn 的子进程窗口上（标题含 pid + `process_id` 双匹配，每次注入前
+  都确认前台窗口就是该子窗口），测试结束（含失败路径）都会把光标还原到
+  注入前的位置。
 
 ## 平台契约：macOS 窗口宿主（里程碑 22 定为契约）
 

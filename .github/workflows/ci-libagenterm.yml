@@ -2,36 +2,11 @@ name: CI / libagenterm
 
 on:
   workflow_dispatch:
+  # Candidate requires a successful run for its exact immutable SHA. Keep this
+  # workflow unfiltered so an otherwise-unrelated release commit cannot make
+  # that authority check impossible to satisfy.
   push:
-    paths:
-      - 'crates/agenterm-abi/**'
-      - 'crates/agenterm-cu/**'
-      - 'crates/agenterm-platform/**'
-      - 'include/**'
-      - 'examples/c/**'
-      - 'examples/cpp/**'
-      - 'examples/size-probe/**'
-      # The four-way system-library drift gate parses these, and
-      # install_consume.rs runs install.sh; editing them must re-run the gates.
-      - 'packaging/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/ci-libagenterm.yml'
   pull_request:
-    paths:
-      - 'crates/agenterm-abi/**'
-      - 'crates/agenterm-cu/**'
-      - 'crates/agenterm-platform/**'
-      - 'include/**'
-      - 'examples/c/**'
-      - 'examples/cpp/**'
-      - 'examples/size-probe/**'
-      # The four-way system-library drift gate parses these, and
-      # install_consume.rs runs install.sh; editing them must re-run the gates.
-      - 'packaging/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/ci-libagenterm.yml'
 
 concurrency:
   group: ci-libagenterm-${{ github.event.pull_request.number || github.ref }}
@@ -109,6 +84,17 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_consume_windows -- --nocapture
+      - name: Input injection success path on a child-owned window (abi-release artifacts)
+        # Milestone 72: the four agt_input_* exports finally get success-path
+        # evidence. Injection is GLOBAL (real cursor + focused window), so the
+        # test is opt-in: it SKIPs unless AGENTERM_ALLOW_INPUT_INJECTION=1 is
+        # set, and this step is the ONLY place that sets it. Deliberately NOT
+        # added to the linux/macos jobs (their stacks are another round and
+        # their runners are headless anyway).
+        env:
+          AGENTERM_ABI_PROFILE_DIR: target/abi-release
+          AGENTERM_ALLOW_INPUT_INJECTION: '1'
+        run: cargo test --locked -p agenterm-abi --profile abi-dev --test input_inject_success -- --nocapture
       - name: Clippy libagenterm ABI (abi-dev)
         run: cargo clippy --locked -p agenterm-abi --profile abi-dev --all-targets --no-deps -- -D warnings
       - name: Test agenterm-platform (all test targets)
@@ -117,10 +103,43 @@ jobs:
         run: cargo clippy --locked -p agenterm-platform --all-features --all-targets --no-deps -- -D warnings
       - name: Build agenterm-cu
         run: cargo build --locked -p agenterm-cu --release
+      - name: Stage Windows CU delivery pair
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/agenterm-cu.exe dist/agenterm-cu.exe -Force
+          Copy-Item target/abi-release/agenterm.dll dist/agenterm.dll -Force
+      - name: Prove CU smoke remains a native Rh pack
+        run: cargo run --locked -p agenterm-rh --example mode_probe -- --root . scripts/rh/cu-windows-smoke.rh
+      - name: Run staged Windows CU smoke
+        env:
+          AGENTERM_NO_ACTIVATE: '1'
+        run: cargo run --locked -p agenterm --bin agenterm -- rh run scripts/rh/cu-windows-smoke.rh -- . dist/agenterm-cu.exe dist/agenterm.dll
       - name: Test agenterm-cu
         run: cargo test --locked -p agenterm-cu
       - name: Clippy agenterm-cu
         run: cargo clippy --locked -p agenterm-cu --all-targets --no-deps -- -D warnings
+
+  libagenterm-windows-aarch64-build:
+    name: libagenterm + cu (windows aarch64 build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install Windows ARM64 target and cargo-xwin
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          cargo install cargo-xwin --locked
+      - name: Build agenterm-cu for Windows ARM64
+        run: cargo xwin build --locked -p agenterm-cu --release --target aarch64-pc-windows-msvc
+      - name: Build libagenterm for Windows ARM64
+        run: cargo xwin build --locked -p agenterm-abi --profile abi-release --target aarch64-pc-windows-msvc
+      - name: Verify Windows ARM64 delivery pair exists
+        run: |
+          test -f target/aarch64-pc-windows-msvc/release/agenterm-cu.exe
+          test -f target/aarch64-pc-windows-msvc/abi-release/agenterm.dll
 
   libagenterm-abi-macos:
     name: libagenterm + cu (macos)

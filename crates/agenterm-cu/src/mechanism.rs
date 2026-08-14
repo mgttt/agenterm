@@ -70,6 +70,7 @@ pub enum Capability {
     Screenshot,
     InputInject,
     AccessibilityTree,
+    DesktopHost,
 }
 
 impl Capability {
@@ -80,12 +81,13 @@ impl Capability {
             Capability::Screenshot => dynlib::AGT_CAP_SCREENSHOT,
             Capability::InputInject => dynlib::AGT_CAP_INPUT_INJECT,
             Capability::AccessibilityTree => dynlib::AGT_CAP_ACCESSIBILITY_TREE,
+            Capability::DesktopHost => dynlib::AGT_CAP_DESKTOP_HOST,
         }
     }
 }
 
 /// Debug shape matches the old `agenterm-platform` `CapabilityStatus` so
-/// `cu capabilities` output stays stable.
+/// `agenterm-cu capabilities` output stays stable.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CapabilityStatus {
     Available,
@@ -96,7 +98,7 @@ pub enum CapabilityStatus {
 /// Query one capability through `agt_capability_query`. `AGT_UNSUPPORTED`
 /// becomes `Unsupported` with a stable reason (the ABI carries no reason
 /// text); any unexpected status becomes `Failed`; a library load / symbol
-/// resolution failure is reported verbatim so `cu capabilities` stays
+/// resolution failure is reported verbatim so `agenterm-cu capabilities` stays
 /// truthful when the dynamic library is missing.
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let query = match call_sym::<CapabilityQuery>(b"agt_capability_query") {
@@ -192,12 +194,25 @@ pub mod window_enumerate {
             }),
             dynlib::AGT_FAILED if needed == 0 => Ok(Vec::new()),
             dynlib::AGT_FAILED => {
-                let mut buf = vec![dynlib::agt_window_info::default(); needed];
-                let mut got = 0usize;
-                let status = unsafe { f(buf.as_mut_ptr(), needed, &mut got) };
-                map_status("agt_window_enumerate fetch", status)?;
-                buf.truncate(got);
-                Ok(buf.iter().map(record_to_info).collect())
+                let mut capacity = needed;
+                for _ in 0..4 {
+                    let mut buf = vec![dynlib::agt_window_info::default(); capacity];
+                    let mut got = 0usize;
+                    let status = unsafe { f(buf.as_mut_ptr(), capacity, &mut got) };
+                    if status == dynlib::AGT_OK {
+                        buf.truncate(got);
+                        return Ok(buf.iter().map(record_to_info).collect());
+                    }
+                    if let Some(grown) = retry_capacity(status, capacity, got) {
+                        capacity = grown;
+                        continue;
+                    }
+                    map_status("agt_window_enumerate fetch", status)?;
+                }
+                Err(MechanismError::Failed {
+                    code: "window_churn".to_owned(),
+                    message: "window count did not stabilize after bounded retries".to_owned(),
+                })
             }
             other => Err(MechanismError::Failed {
                 code: "unexpected_status".to_owned(),
@@ -219,12 +234,25 @@ pub mod window_enumerate {
             }),
             dynlib::AGT_FAILED if needed == 0 => Ok(Vec::new()),
             dynlib::AGT_FAILED => {
-                let mut buf = vec![dynlib::agt_screen_info::default(); needed];
-                let mut got = 0usize;
-                let status = unsafe { f(buf.as_mut_ptr(), needed, &mut got) };
-                map_status("agt_screen_list fetch", status)?;
-                buf.truncate(got);
-                Ok(buf.iter().map(record_to_screen).collect())
+                let mut capacity = needed;
+                for _ in 0..4 {
+                    let mut buf = vec![dynlib::agt_screen_info::default(); capacity];
+                    let mut got = 0usize;
+                    let status = unsafe { f(buf.as_mut_ptr(), capacity, &mut got) };
+                    if status == dynlib::AGT_OK {
+                        buf.truncate(got);
+                        return Ok(buf.iter().map(record_to_screen).collect());
+                    }
+                    if let Some(grown) = retry_capacity(status, capacity, got) {
+                        capacity = grown;
+                        continue;
+                    }
+                    map_status("agt_screen_list fetch", status)?;
+                }
+                Err(MechanismError::Failed {
+                    code: "screen_churn".to_owned(),
+                    message: "screen count did not stabilize after bounded retries".to_owned(),
+                })
             }
             other => Err(MechanismError::Failed {
                 code: "unexpected_status".to_owned(),
@@ -233,6 +261,10 @@ pub mod window_enumerate {
                 ),
             }),
         }
+    }
+
+    pub(super) fn retry_capacity(status: i32, capacity: usize, required: usize) -> Option<usize> {
+        (status == dynlib::AGT_FAILED && required > capacity).then_some(required)
     }
 
     fn record_to_info(record: &dynlib::agt_window_info) -> WindowInfo {
@@ -705,6 +737,82 @@ pub fn get_node_selection(
     let status = unsafe { f(handle, node_c.as_ptr(), &mut n, &mut start, &mut end) };
     map_status("agt_a11y_node_get_selection", status)?;
     Ok(A11ySelection { n, start, end })
+/// Resident menu and global-shortcut host through libagenterm.
+pub mod desktop_host {
+    use std::ffi::c_void;
+    use std::ptr::null;
+
+    use super::{MechanismError, call_sym, map_status};
+    use crate::dynlib;
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct ActionSpec<'a> {
+        pub action_id: u32,
+        pub label: &'a str,
+        pub shortcut: Option<&'a str>,
+    }
+
+    pub struct DesktopHost {
+        raw: *mut c_void,
+    }
+
+    impl DesktopHost {
+        pub fn open(actions: &[ActionSpec<'_>]) -> Result<Self, MechanismError> {
+            let records: Vec<_> = actions
+                .iter()
+                .map(|action| dynlib::agt_desktop_action {
+                    action_id: action.action_id,
+                    label: action.label.as_ptr(),
+                    label_len: action.label.len(),
+                    shortcut: action.shortcut.map_or(null(), str::as_ptr),
+                    shortcut_len: action.shortcut.map_or(0, str::len),
+                })
+                .collect();
+            let open = call_sym::<super::DesktopHostOpen>(b"agt_desktop_host_open")?;
+            let mut raw = std::ptr::null_mut();
+            let status = unsafe { open(records.as_ptr(), records.len(), &mut raw) };
+            map_status("agt_desktop_host_open", status)?;
+            if raw.is_null() {
+                return Err(MechanismError::Failed {
+                    code: "desktop_host_null".into(),
+                    message: "agt_desktop_host_open succeeded without a host".into(),
+                });
+            }
+            Ok(Self { raw })
+        }
+
+        pub fn poll(&mut self, timeout_ms: u32) -> Result<Option<u32>, MechanismError> {
+            let poll = call_sym::<super::DesktopHostPoll>(b"agt_desktop_host_poll")?;
+            let mut action_id = 0;
+            let status = unsafe { poll(self.raw, timeout_ms, &mut action_id) };
+            map_status("agt_desktop_host_poll", status)?;
+            Ok((action_id != 0).then_some(action_id))
+        }
+
+        pub fn close(mut self) -> Result<(), MechanismError> {
+            let result = self.close_inner();
+            if result.is_ok() {
+                self.raw = std::ptr::null_mut();
+            }
+            result
+        }
+
+        fn close_inner(&mut self) -> Result<(), MechanismError> {
+            if self.raw.is_null() {
+                return Ok(());
+            }
+            let close = call_sym::<super::DesktopHostClose>(b"agt_desktop_host_close")?;
+            map_status("agt_desktop_host_close", unsafe { close(self.raw) })
+        }
+    }
+
+    impl Drop for DesktopHost {
+        fn drop(&mut self) {
+            if self.close_inner().is_ok() {
+                self.raw = std::ptr::null_mut();
+            }
+        }
+    }
 }
 
 /// Clipboard through libagenterm (`agt_clipboard_*`). Named `paste` seeds
@@ -720,7 +828,7 @@ pub mod clipboard {
 
     /// Env the owner process sets so `agt_clipboard_set_text` stays in the
     /// X11 selection event loop instead of returning and dropping the owner.
-    pub const X11_CLIPBOARD_SERVE_ENV: &str = "AGENTERM_X11_CLIPBOARD_SERVE";
+    pub const X11_CLIPBOARD_SERVE_ENV: &str = "PLATFORM_X11_CLIPBOARD_SERVE";
 
     pub fn set_text(text: &str) -> Result<(), MechanismError> {
         let f = call_sym::<super::ClipboardSetText>(b"agt_clipboard_set_text")?;
@@ -750,10 +858,10 @@ pub mod clipboard {
 
         let exe = std::env::current_exe().map_err(|error| MechanismError::Failed {
             code: "clipboard_failed".into(),
-            message: format!("could not locate cu to persist CLIPBOARD: {error}"),
+            message: format!("could not locate agenterm-cu to persist CLIPBOARD: {error}"),
         })?;
         let exe_name = exe.file_name().and_then(|name| name.to_str()).unwrap_or("");
-        if exe_name != "cu" && exe_name != "cu.exe" {
+        if exe_name != "agenterm-cu" && exe_name != "agenterm-cu.exe" {
             return set_text(text);
         }
         let mut child = Command::new(&exe);
@@ -1070,6 +1178,13 @@ impl CStringOrStack {
 // ---------------------------------------------------------------------------
 
 type CapabilityQuery = unsafe extern "C" fn(i32) -> i32;
+type DesktopHostOpen = unsafe extern "C" fn(
+    *const dynlib::agt_desktop_action,
+    usize,
+    *mut *mut std::ffi::c_void,
+) -> i32;
+type DesktopHostPoll = unsafe extern "C" fn(*mut std::ffi::c_void, u32, *mut u32) -> i32;
+type DesktopHostClose = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
 type WindowEnumerate = unsafe extern "C" fn(*mut dynlib::agt_window_info, usize, *mut usize) -> i32;
 type ScreenList = unsafe extern "C" fn(*mut dynlib::agt_screen_info, usize, *mut usize) -> i32;
 type WindowShow = unsafe extern "C" fn(isize, i32) -> i32;
@@ -1129,5 +1244,21 @@ mod tests {
         .expect("empty two-stage probe should succeed");
         assert!(bytes.is_empty());
         assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn two_stage_record_fetch_retries_only_for_observed_growth() {
+        assert_eq!(
+            window_enumerate::retry_capacity(dynlib::AGT_FAILED, 8, 11),
+            Some(11)
+        );
+        assert_eq!(
+            window_enumerate::retry_capacity(dynlib::AGT_FAILED, 8, 8),
+            None
+        );
+        assert_eq!(
+            window_enumerate::retry_capacity(dynlib::AGT_OK, 8, 11),
+            None
+        );
     }
 }

@@ -7,9 +7,14 @@ product definition, the boundary against every existing observation/control
 surface, the governing invariants, and the promotion gates. Its four child
 modules own third-level requirements.
 
-`agenterm-cu` is newly opened scope. Design and implementation are in progress;
-**every requirement below is `[ ]` planned.** Nothing in this subtree may be
-marked `[x]` or `[~]` without the evidence its owning child module names.
+`agenterm-cu` is in active partial delivery. Its executable identity, command
+shell, macOS host, runtime `libagenterm` boundary, Windows desktop-host ABI 1.7,
+and Windows UIA backend have owning implementation evidence. The UIA claim is
+backed by five pure tests, two real Win32 UIA fixture tests, and the passing
+staged public `cu-windows-smoke` with all seven declared evidence receipts.
+Candidate qualification and release are not claimed. This subtree root remains
+partial, and each child marks only the capability supported by its own named
+evidence.
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
@@ -48,11 +53,43 @@ boundary; it does not open raw OS APIs or fork a fifth screenshot stack.
 | 29 | [Command surface and layering](PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树与确定性等待 |
 | 30 | [Targets and transports](PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport 抽象、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2） |
 | 31 | [Authorization, safety and audit](PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义与证据 |
-| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放（Spectacle 目录）：几何核 + `window-place` + 桌面常驻 `agenterm-cu host` 宿主 |
+| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放（Spectacle 目录）：几何核 + `agenterm-cu window-place` + 桌面常驻 `agenterm-cu host` 宿主 |
 
+## Current delivery truth
+
+- [x] `agenterm-cu` is the only product executable. CLI and desktop-host modes
+  share that binary; an executable named `cu` is not a compatibility surface.
+- [x] CU is the first runtime consumer of the `libagenterm` dynamic library.
+  Product code owns command and action meaning while ABI/platform layers own
+  native mechanisms.
+- [~] On Windows, the product `Command`/`Executor` path consumes UIA tree,
+  Value, Invoke and Focus through the runtime `agenterm.dll`; it neither opens
+  COM/UIA directly nor caches native interfaces. The platform backend uses an
+  MTA-capable per-operation session, bounded UIA and wall-clock timeouts,
+  `SetAutoSetFocus(FALSE)`, and RuntimeId re-resolution for every node action.
+  Structured UIA failure is typed and never silently becomes a coordinate
+  click. Five pure and two real fixture tests own the adapter evidence; staged
+  `cu-windows-smoke` owns the public DLL-backed journey.
+- [x] Windows runtime window enumeration follows a two-stage
+  required-size/fill ABI. If desktop churn makes the fill call report
+  `required > capacity`, the caller retries with a fresh capacity under a hard
+  attempt bound; it never truncates, writes beyond capacity or spins forever.
+- [~] Windows desktop-host ABI 1.7 implements notification-area menu projection,
+  `RegisterHotKey`, polling and cleanup for the CU host's 18 placement actions
+  plus Quit. A native `target/abi-dev` `host --self-test --json` run reported
+  `actions=19` and `cleaned_up=true`.
+- [x] Local `dist` staging colocates `agenterm-cu.exe` and `agenterm.dll`; the
+  staged `cu-windows-smoke` proves version, dynamic-library load, 19 desktop
+  actions and deterministic cleanup. Both artifacts remain below 1 MiB.
+- [x] Staged public `cu-windows-smoke` passes all seven declared evidence
+  receipts: host self-test, DLL load cleanup, window identity, UIA tree,
+  name-addressed actuation, Value/GetText wait and UIA fixture cleanup.
+- [ ] Candidate and six-cell qualification and release evidence remain open.
+  Passing local fixtures and staged public smoke does not promote this subtree
+  root to shipped.
 ## Product outcome
 
-- [ ] `agenterm-cu` is AgenTerm's own computer-use foundation: one abstract
+- [~] `agenterm-cu` is AgenTerm's own computer-use foundation: one abstract
   command set for observing and controlling a machine — screenshot, window and
   control-tree enumeration, pointer, keyboard, clipboard, file transfer — that
   behaves identically whether the target is this machine or a remote one.
@@ -76,13 +113,13 @@ boundary; it does not open raw OS APIs or fork a fifth screenshot stack.
 
 ## Naming
 
-- [ ] `agenterm-cu` is the accepted product name. It supersedes the
+- [x] `agenterm-cu` is the accepted product name. It supersedes the
   `agenterm-remote.exe` working name used in
   [`plan/plan-v0.1.15.md`](../plan/plan-v0.1.15.md) §5.6.1. Remote protocol
   support is a transport axis inside this product, not a separate product.
-- [ ] `agenterm-cu` is also the only executable name. ABI diagnostics,
+- [x] `agenterm-cu` is also the only executable name. ABI diagnostics,
   command mode, and the desktop host are modes of that executable; a second
-  `cu` binary is not a product or compatibility surface.
+  `agenterm-cu` binary is not a product or compatibility surface.
 
 ## Product boundary
 

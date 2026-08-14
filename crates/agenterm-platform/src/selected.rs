@@ -454,7 +454,11 @@ pub(crate) mod window_enumerate;
 #[path = "adapters/linux/accessibility_tree.rs"]
 pub(crate) mod accessibility_tree;
 
-#[cfg(all(feature = "a11y-tree", not(target_os = "linux")))]
+#[cfg(all(feature = "a11y-tree", windows))]
+#[path = "adapters/windows/accessibility_tree.rs"]
+pub(crate) mod accessibility_tree;
+
+#[cfg(all(feature = "a11y-tree", not(any(windows, target_os = "linux"))))]
 #[path = "adapters/unix/accessibility_tree.rs"]
 pub(crate) mod accessibility_tree;
 
@@ -511,6 +515,18 @@ pub(crate) mod input_inject;
 #[cfg(all(feature = "input-inject", not(any(windows, target_os = "linux"))))]
 #[path = "adapters/unix/input_inject.rs"]
 pub(crate) mod input_inject;
+
+#[cfg(all(feature = "desktop-host", windows))]
+#[path = "adapters/windows/desktop_host.rs"]
+pub(crate) mod desktop_host;
+
+#[cfg(all(feature = "desktop-host", not(windows)))]
+#[path = "adapters/unix/desktop_host.rs"]
+pub(crate) mod desktop_host;
+
+pub(crate) const fn desktop_host_supported() -> bool {
+    cfg!(all(feature = "desktop-host", windows))
+}
 
 #[cfg(all(feature = "activation", windows))]
 #[path = "adapters/windows/activation.rs"]

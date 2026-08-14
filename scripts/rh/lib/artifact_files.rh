@@ -13,11 +13,15 @@ fn clean_locked(directory_value, manifest_path_value) {
     let removed = 0;
     for entry in std::fs::read_dir(directory) {
         let name = "" + entry.file_name;
-        // Any parked AgenTerm executable: `<stem>.locked-<millis>.exe`.
-        let locked_exe = name.starts_with("agenterm")
+        // Any parked AgenTerm executable/library: `<stem>.locked-<millis>.<ext>`.
+        let locked_artifact = name.starts_with("agenterm")
             && name.contains(".locked-")
-            && (name.ends_with(".exe") || name.ends_with(".com"));
-        if entry.is_file && locked_exe {
+            && (
+                name.ends_with(".exe")
+                    || name.ends_with(".com")
+                    || name.ends_with(".dll")
+            );
+        if entry.is_file && locked_artifact {
             std::fs::try_remove_file(entry.path.display);
             removed += 1;
         }
@@ -115,6 +119,8 @@ fn stage(source_directory_value, destination_directory_value, name_value) {
             || name == "agenterm.com"
             || name == "agenterm-cc.exe"
             || name == "agenterm-con.exe"
+            || name == "agenterm-cu.exe"
+            || name == "agenterm.dll"
             || name == "agenterm-rh.exe",
         "stage_artifact_name_invalid:" + name
     );
@@ -148,6 +154,9 @@ fn stage(source_directory_value, destination_directory_value, name_value) {
         if name.ends_with(".com") {
             stem.replace(".com", "");
             extension = ".com";
+        } else if name.ends_with(".dll") {
+            stem.replace(".dll", "");
+            extension = ".dll";
         }
         let parked_name = stem + ".locked-" +
             std::time::SystemTime::now().unix_millis + extension;

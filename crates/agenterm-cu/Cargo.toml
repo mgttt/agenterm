@@ -1,6 +1,6 @@
 [package]
 name = "agenterm-cu"
-version = "0.1.0"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
 description = "Agenterm computer-use foundation: abstract command surface over the shared libagenterm dynamic library"

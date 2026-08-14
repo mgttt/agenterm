@@ -237,6 +237,20 @@ fn entry() {
                 }
             }
         }
+        for library in platform.libraries {
+            let library_name = "" + library.name;
+            let library_path =
+                std::path::join(binary_directory, library_name).display;
+            require(
+                std::fs::exists(library_path),
+                "client_smoke_library_missing:" + library_name
+            );
+            let library_metadata = std::fs::metadata(library_path);
+            require(
+                library_metadata.is_file && library_metadata.len > 0,
+                "client_smoke_library_invalid:" + library_name
+            );
+        }
     }
 
     require(

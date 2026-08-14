@@ -179,6 +179,32 @@ fn platform_executables(repo, os_name, target_arch_name) {
     executables
 }
 
+fn platform_libraries(repo, os_name, target_arch_name) {
+    let arch_label = "" + target_arch_name;
+    let manifest_path =
+        std::path::join(repo, "scripts/artifacts.json").display;
+    let manifest = rh::json::parse_file(manifest_path);
+    let libraries = [];
+    let found = 0;
+    for platform in manifest.platforms {
+        if platform.os == os_name && platform.arch == arch_label {
+            require(
+                found == 0,
+                "build_platform_library_match:" + os_name + "-" + arch_label
+            );
+            found += 1;
+            for library in platform.libraries {
+                libraries.push(library);
+            }
+        }
+    }
+    require(
+        found == 1,
+        "build_platform_library_match:" + os_name + "-" + arch_label
+    );
+    libraries
+}
+
 fn cargo_binary(name) {
     if name == "agenterm.com" {
         return "agenterm-com";
@@ -522,8 +548,10 @@ fn entry() {
         cargo_args.push(target);
     }
     let executable_entries = [];
+    let library_entries = [];
     if cross_client != 0 || unix_bootstrap != 0 {
         executable_entries = platform_executables(repo, os_name, arch);
+        library_entries = platform_libraries(repo, os_name, arch);
         // Both owning packages. `agenterm-con` is its own workspace package, so
         // it is excluded from the `--bin` list below (a bare `--bin agenterm-con`
         // resolves only within the selected packages) -- but it still has to be
@@ -537,6 +565,10 @@ fn entry() {
         cargo_args.push("agenterm");
         cargo_args.push("--package");
         cargo_args.push("agenterm-con");
+        if os_name == "windows" {
+            cargo_args.push("--package");
+            cargo_args.push("agenterm-cu");
+        }
         for executable in executable_entries {
             let executable_name = "" + executable.name;
             if executable_name != "agenterm-con"
@@ -548,6 +580,10 @@ fn entry() {
     } else {
         cargo_args.push("--package");
         cargo_args.push("agenterm");
+        if os_name == "windows" {
+            cargo_args.push("--package");
+            cargo_args.push("agenterm-cu");
+        }
     }
     if action == "clippy" {
         cargo_args.push("--");
@@ -752,6 +788,71 @@ fn entry() {
         );
     }
 
+    // libagenterm is a C ABI boundary and must retain unwind support. Build it
+    // under the dedicated ABI profile, then merge only the DLL into the normal
+    // profile directory consumed by staging and cross-platform packaging.
+    if action == "build" && os_name == "windows" {
+        let abi_profile_name = "abi-release";
+        if profile == "dev" {
+            abi_profile_name = "abi-dev";
+        }
+        let abi_args = [];
+        if driver == "cargo-xwin" {
+            abi_args.push("xwin");
+        }
+        abi_args.push("build");
+        abi_args.push("--locked");
+        abi_args.push("--profile");
+        abi_args.push(abi_profile_name);
+        abi_args.push("--target");
+        abi_args.push(con_target);
+        abi_args.push("--package");
+        abi_args.push("agenterm-abi");
+        let abi_command = std::process::command("cargo");
+        abi_command.args(abi_args);
+        abi_command.current_dir(repo);
+        abi_command.timeout(std::time::Duration::from_millis(3600000));
+        if stream_stderr != 0 {
+            abi_command.stderr_inherit();
+        }
+        if environment_text.contains("\"AGENTERM_BUILD_IDENTITY_VERSION\":") != 0 {
+            abi_command.env("AGENTERM_BUILD_IDENTITY_VERSION", "" + environment.AGENTERM_BUILD_IDENTITY_VERSION);
+            abi_command.env("AGENTERM_BUILD_GIT_COMMIT", "" + environment.AGENTERM_BUILD_GIT_COMMIT);
+            abi_command.env("AGENTERM_BUILD_GIT_DIRTY", "" + environment.AGENTERM_BUILD_GIT_DIRTY);
+            abi_command.env("AGENTERM_BUILD_CARGO_LOCK_SHA256", "" + environment.AGENTERM_BUILD_CARGO_LOCK_SHA256);
+            abi_command.env("AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256", "" + environment.AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256);
+            abi_command.env("AGENTERM_BUILD_PROFILE", "" + environment.AGENTERM_BUILD_PROFILE);
+        }
+        if environment_text.contains("\"CARGO_TARGET_DIR\":") != 0 {
+            abi_command.env("CARGO_TARGET_DIR", "" + environment.CARGO_TARGET_DIR);
+        }
+        let abi_output = abi_command.output();
+        require(
+            abi_output.success != 0,
+            "build_abi_cargo:" + abi_output.stdout_text() + abi_output.stderr_text()
+        );
+        let abi_root = std::path::join(cargo_output, con_target).display;
+        let abi_directory =
+            std::path::join(abi_root, abi_profile_name).display;
+        let abi_source =
+            std::path::join(abi_directory, "agenterm.dll").display;
+        let abi_destination =
+            std::path::join(profile_directory, "agenterm.dll").display;
+        require(
+            direct_file(abi_source) != 0,
+            "build_abi_artifact_source:" + abi_source
+        );
+        std::fs::try_remove_file(abi_destination);
+        require(
+            std::fs::try_copy(abi_source, abi_destination) == 1,
+            "build_abi_artifact_copy:" + abi_source
+        );
+        require(
+            direct_file(abi_destination) != 0,
+            "build_abi_artifact_destination:" + abi_destination
+        );
+    }
+
     if action == "build" && external_target == 0 && cross_client == 0 {
         let bootstrap_name = "agenterm";
         if os_name == "windows" {
@@ -802,6 +903,15 @@ fn entry() {
                     std::path::join(
                         profile_directory,
                         executable.name
+                    ).display
+            );
+        }
+        for library in library_entries {
+            print(
+                "  " +
+                    std::path::join(
+                        profile_directory,
+                        library.name
                     ).display
             );
         }

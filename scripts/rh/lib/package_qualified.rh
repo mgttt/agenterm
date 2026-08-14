@@ -179,6 +179,11 @@ fn build_package_mode(
         let executable_name = "" + executable.name;
         artifact_names.push(executable_name);
     }
+    let library_names = [];
+    for library in artifact_spec.libraries {
+        let library_name = "" + library.name;
+        library_names.push(library_name);
+    }
     require(
         artifact_names.len > 0,
         "package_artifact_manifest_empty"
@@ -192,6 +197,14 @@ fn build_package_mode(
         );
         unique[executable_name] = true;
     }
+    for library in artifact_spec.libraries {
+        let library_name = "" + library.name;
+        require(
+            !unique.contains(library_name),
+            "package_artifact_duplicate:" + library_name
+        );
+        unique[library_name] = true;
+    }
     let receipt_artifact_names = [];
     for executable in receipt.provenance.executables {
         let executable_name = "" + executable.name;
@@ -200,6 +213,14 @@ fn build_package_mode(
     require(
         exact_values(artifact_names, receipt_artifact_names),
         "package_receipt_artifact_set"
+    );
+    let receipt_library_names = [];
+    for library in receipt.provenance.libraries {
+        receipt_library_names.push("" + library.name);
+    }
+    require(
+        exact_values(library_names, receipt_library_names),
+        "package_receipt_library_set"
     );
 
     let metadata_path =
@@ -221,6 +242,14 @@ fn build_package_mode(
     require(
         exact_values(artifact_names, metadata_artifact_names),
         "package_metadata_artifact_set"
+    );
+    let metadata_library_names = [];
+    for library in metadata.libraries {
+        metadata_library_names.push("" + library.name);
+    }
+    require(
+        exact_values(library_names, metadata_library_names),
+        "package_metadata_library_set"
     );
 
     let dist_root = std::path::join(repo, "dist").display;
@@ -262,6 +291,44 @@ fn build_package_mode(
         require(
             receipt_hash == hash && metadata_hash == hash,
             "package_executable_hash:" + name
+        );
+        payload.push(#{ name: name, sha256: hash, path: source });
+    }
+    for library in artifact_spec.libraries {
+        let name = "" + library.name;
+        let source = std::path::join(dist_root, name).display;
+        require(
+            std::fs::exists(source) && std::fs::metadata(source).is_file,
+            "package_input_missing:" + source
+        );
+        let hash = rh::crypto::sha256_file(source);
+        let receipt_hash = "";
+        let receipt_count = 0;
+        for receipt_library in receipt.provenance.libraries {
+            if ("" + receipt_library.name) == name {
+                receipt_count += 1;
+                receipt_hash = "" + receipt_library.sha256;
+            }
+        }
+        require(
+            receipt_count == 1,
+            "package_receipt_library_duplicate:" + name
+        );
+        let metadata_hash = "";
+        let metadata_count = 0;
+        for metadata_library in metadata.libraries {
+            if ("" + metadata_library.name) == name {
+                metadata_count += 1;
+                metadata_hash = "" + metadata_library.sha256;
+            }
+        }
+        require(
+            metadata_count == 1,
+            "package_metadata_library_duplicate:" + name
+        );
+        require(
+            receipt_hash == hash && metadata_hash == hash,
+            "package_library_hash:" + name
         );
         payload.push(#{ name: name, sha256: hash, path: source });
     }
