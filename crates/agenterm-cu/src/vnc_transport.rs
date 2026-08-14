@@ -15,17 +15,17 @@
 //! selection via `select` / `get-selection`. Cut 3.37 locked caret
 //! placement via `set-caret` / `get-caret`. Cut 3.38 locked named Action
 //! click. Cut 3.39 locked named scroll. Cut 3.40 locked named focus.
-//! Cut 3.41 locked structured tree observe. Cut 3.42 locks get-caret as
-//! its own observe path: host `get-caret --window H --name Command` over
-//! `--vnc` returns the session AT-SPI caret offset as an int
-//! (`via=get-caret-offset`; native `CaretOffset` / `GetCaretOffset`) from
-//! a second `agenterm-con` `Command` field. Gate precondition (not this
-//! cut's verb): `Command` holds a known ASCII seed and the caret is at
-//! seed end so `offset == seed_len`. Never screenshot / `--coords` /
-//! RFB framebuffer OCR / inferred string length. Gate-owned dedicated
-//! loopback x11vnc; never steal `unix:/tmp/run-box/agenterm-con.sock` or
-//! treat the resident `:2` x11vnc as the only proof. Observe and actuate
-//! grants both forward. `tree` (3.41), `focus` (3.40), `scroll` (3.39),
+//! Cut 3.41 locked structured tree observe. Cut 3.42 locked get-caret as
+//! its own observe path. Cut 3.43 locks get-extents as its own observe
+//! path: host `get-extents --window H --name OffscreenField` over `--vnc`
+//! returns screen extents whose `x` / `y` / `width` / `height` are ints
+//! (`via=get-extents`; native AT-SPI `Component.GetExtents(Screen)`) from
+//! a second `agenterm-con` Session child. Snapshot `node.bounds` / copied
+//! `matched.bounds` do not count. Never screenshot / `--coords` / RFB
+//! framebuffer OCR. Gate-owned dedicated loopback x11vnc; never steal
+//! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
+//! as the only proof. Observe and actuate grants both forward.
+//! `get-caret` (3.42), `tree` (3.41), `focus` (3.40), `scroll` (3.39),
 //! `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
 //! (3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
 //! over vnc remain valid.
@@ -977,12 +977,20 @@ mod tests {
 
     #[test]
     fn get_extents_observe_survives_target_rewrite() {
-        // 3.39 observe sibling: get-extents must also rewrite target only
-        // and keep window/name/role so independent Component.GetExtents
-        // (Screen) proof rides the same RFB + session-worker path as scroll.
-        // Snapshot node.bounds do not count. Missing / empty extents
-        // typed-fails a11y_extents_unavailable on the session worker the
-        // same as local current.
+        // 3.43: first vnc get-extents as its own observe path reuses the same
+        // RFB + session-worker rewrite; the worker still runs
+        // target=current get-extents. Circuit: host get-extents --window H
+        // --name OffscreenField returns screen extents whose
+        // x/y/width/height are ints (via=get-extents; native AT-SPI
+        // Component.GetExtents(Screen); width/height >= 0). Snapshot
+        // node.bounds / copied matched.bounds do not count. Never
+        // screenshot / --coords / RFB framebuffer OCR. Missing / empty
+        // extents typed-fails a11y_extents_unavailable on the session
+        // worker the same as local current. No new verb; observe grant
+        // only. scroll (3.39) remains a separate write path that may use
+        // get-extents as independent before/after geometry proof.
+        // Window/name/role must survive the rewrite so the session worker
+        // scopes GetExtents to the node.
         let command = CuCommand::GetExtents {
             target: TargetRef::Vnc,
             window: Some(42),

@@ -35,19 +35,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first get-caret evidence reuses the #54 con-publish caret observe
-  path over a **gate-owned** loopback `x11vnc` (not the resident `:2`
-  listener alone) against a second `agenterm-con` with a unique title:
-  gate precondition places a known ASCII seed on `Command` with caret at
-  seed end (seed/caret state is not this cut's verb); host independent
-  `cu --vnc 127.0.0.1:<port> get-caret --window HANDLE --name Command`
-  returns that offset as an int (`via=get-caret-offset`; native AT-SPI
-  `CaretOffset` / `GetCaretOffset`; `offset == seed_len`). Never
-  screenshot, `--coords`, RFB framebuffer OCR, inferred string length, or
-  steal the resident control socket. `tree` (3.41), `focus` (3.40),
-  `scroll` (3.39), `click` (3.38), `set-caret` (3.37), `select` (3.36),
-  `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
-  `send-text` (3.32) over vnc still hold.
+  `vnc` first get-extents evidence reuses the #48 con-publish extents
+  observe path over a **gate-owned** loopback `x11vnc` (not the resident
+  `:2` listener alone) against a second `agenterm-con` with a unique
+  title: host
+  `cu --vnc 127.0.0.1:<port> get-extents --window HANDLE --name OffscreenField`
+  returns screen extents whose `x` / `y` / `width` / `height` are ints
+  (`via=get-extents`; native AT-SPI `Component.GetExtents(Screen)`;
+  `width` / `height` >= 0). Snapshot `node.bounds` / copied
+  `matched.bounds` do not count. Never screenshot, `--coords`, RFB
+  framebuffer OCR, or steal the resident control socket. `get-caret`
+  (3.42), `tree` (3.41), `focus` (3.40), `scroll` (3.39), `click`
+  (3.38), `set-caret` (3.37), `select` (3.36), `send-keys` (3.35),
+  `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc
+  still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -448,20 +449,19 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Get-caret observe path:
-  second `agenterm-con` named Session child `Command` (unique title; never
-  steal `unix:/tmp/run-box/agenterm-con.sock`); gate precondition places a
-  known ASCII seed on `Command` with caret at seed end (seed/caret state is
-  not this cut's verb); host independent
-  `get-caret --window HANDLE --name Command` returns that offset as an int
-  (`via=get-caret-offset`; native AT-SPI `CaretOffset` / `GetCaretOffset`;
-  `offset == seed_len`). Never screenshot / `--coords` / RFB framebuffer
-  OCR / inferred string length. Missing Text typed-fails
-  `a11y_caret_unavailable` on the session worker the same as local
-  `current`. `tree` / `focus` / `scroll` / `click` / `set-caret` /
-  `select` / `send-keys` / `copy` / `paste --text` / `send-text` over vnc
-  and observe-only `windows` / `get-text` / `wait --text-equals` /
-  `get-extents` still hold. Worker JSON does not count; CEO owns the
+  `agenterm-cu --target current` session worker. Get-extents observe path:
+  second `agenterm-con` named Session child `OffscreenField` (unique title;
+  never steal `unix:/tmp/run-box/agenterm-con.sock`); host
+  `get-extents --window HANDLE --name OffscreenField` returns screen extents
+  whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
+  AT-SPI `Component.GetExtents(Screen)`; `width` / `height` >= 0). Snapshot
+  `node.bounds` / copied `matched.bounds` do not count. Never screenshot /
+  `--coords` / RFB framebuffer OCR. Missing / empty extents typed-fail
+  `a11y_extents_unavailable` on the session worker the same as local
+  `current`. `get-caret` / `tree` / `focus` / `scroll` / `click` /
+  `set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
+  `send-text` over vnc and observe-only `windows` / `get-text` /
+  `wait --text-equals` still hold. Worker JSON does not count; CEO owns the
   official gate. Connect / protocol / auth failures are typed
   (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed` /
   `invalid_input`).

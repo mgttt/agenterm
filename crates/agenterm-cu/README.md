@@ -138,20 +138,20 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). Get-caret evidence is a **gate-owned** loopback
+env or `--vnc-env`). Get-extents evidence is a **gate-owned** loopback
 `x11vnc` plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
-as the only proof): gate precondition places a known ASCII seed on
-`Command` with caret at seed end (seed/caret state is not this cut's verb),
-host independent `get-caret --window HANDLE --name Command` returns that
-offset as an int (`via=get-caret-offset`; native AT-SPI `CaretOffset` /
-`GetCaretOffset`; `offset == seed_len`). Never screenshot / `--coords` /
-RFB framebuffer OCR / inferred string length. Missing Text typed-fails
-`a11y_caret_unavailable` on the session worker the same as local
-`current`. `tree` / `focus` / `scroll` / `click` / `set-caret` / `select` /
-`send-keys` / `copy` / `paste --text` / `send-text` over vnc and
-observe-only `windows` / `get-text` / `wait` / `get-extents` remain valid
-too. Connect / protocol failures are typed (`vnc_unavailable` /
+as the only proof): host
+`get-extents --window HANDLE --name OffscreenField` returns screen extents
+whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
+AT-SPI `Component.GetExtents(Screen)`; `width` / `height` >= 0). Snapshot
+`node.bounds` / copied `matched.bounds` do not count. Never screenshot /
+`--coords` / RFB framebuffer OCR. Missing / empty extents typed-fail
+`a11y_extents_unavailable` on the session worker the same as local
+`current`. `get-caret` / `tree` / `focus` / `scroll` / `click` /
+`set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
+`send-text` over vnc and observe-only `windows` / `get-text` / `wait`
+remain valid too. Connect / protocol failures are typed (`vnc_unavailable` /
 `vnc_transport_failed` / `vnc_auth_failed`).
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
@@ -166,11 +166,10 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Get-caret observe path: Command holds known ASCII SEED with caret at
-# seed end (gate precondition) → get-caret offset is an int equal to
-# seed_len (via=get-caret-offset; native CaretOffset / GetCaretOffset).
-agenterm-cu --vnc 127.0.0.1:5942 --grant observe \
-  get-caret --window HANDLE --name Command
+# Get-extents observe path: get-extents x/y/width/height are ints
+# (via=get-extents; Component.GetExtents(Screen); not node.bounds).
+agenterm-cu --vnc 127.0.0.1:5943 --grant observe \
+  get-extents --window HANDLE --name OffscreenField
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
 # Get-selection observe path: send-text SEED → select N..M → get-selection
