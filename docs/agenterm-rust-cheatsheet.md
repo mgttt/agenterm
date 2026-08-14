@@ -1253,8 +1253,11 @@ observe sibling (`agt_a11y_node_get_extents`, same `CoordType::Screen`
 as `invoke_component_click`). Empty extents (w/h <= 0 or call fail)
 typed-fail (`a11y_extents_unavailable`). Both verbs are single-node
 `NODE_TIMEOUT` calls. Never fill snapshot bounds during a tree walk —
-WebKitGTK hangs Component on walk. con publish `scroll_to` stays
-`false` until a later 合闸; do not close that loop here.
+WebKitGTK hangs Component on walk. con publish implements
+`Component.ScrollTo(TopEdge)` by applying a persistent y offset to the
+named `OffscreenField` Session child (layout snapshots stay
+unscrolled). Independent `GetExtents` is the proof; do not treat
+snapshot `node.bounds` as movement.
 
 WebKitGTK `Component.GetExtents(Screen)` works as a single-node call
 (snapshot `bounds` stay `0,0,0,0`). `Component.ScrollTo` returns true
@@ -1352,7 +1355,9 @@ title `frame`. That fallback is window identity, not a widget tree: named
 `click`/`focus`/`send-text` cannot address the composer, SEND button, or
 session. Linux `agenterm-con` now publishes those children through the
 platform `a11y-publish` AT-SPI server (Accessible + Component + Action,
-registered with `Socket.Embed`). The one-node X11 frame remains only for
+plus Text/EditableText on the composer and a named `OffscreenField`
+Session child whose `Component.ScrollTo` moves `GetExtents`).
+Registered with `Socket.Embed`. The one-node X11 frame remains only for
 toolkits that still do not register (`xfce4-terminal` without
 atk-bridge). Unit-test the published chrome snapshot without a bus;
 prove `tree --window` `n>=5` and named actuation on a live `DISPLAY`

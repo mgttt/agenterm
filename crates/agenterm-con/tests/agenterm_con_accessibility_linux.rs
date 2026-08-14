@@ -7,7 +7,8 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNode, AccessibilityNodeAction, perform_node_action, set_node_text, tree_for_window,
+    AccessibilityNode, AccessibilityNodeAction, get_node_extents, perform_node_action, scroll_node,
+    set_node_text, tree_for_window,
 };
 
 const DEADLINE: Duration = Duration::from_secs(20);
@@ -109,7 +110,7 @@ fn real_atspi_tree_edits_command_and_activates_send() {
 
     let tree = wait_for(&mut running, "published AT-SPI chrome", |_| {
         let tree = tree_for_window(None).ok()?;
-        ["Tabs", "Session", "Command", "SEND"]
+        ["Tabs", "Session", "Command", "SEND", "OffscreenField"]
             .iter()
             .all(|name| named(&tree.nodes, name).is_some())
             .then_some(tree)
@@ -117,9 +118,11 @@ fn real_atspi_tree_edits_command_and_activates_send() {
     assert_eq!(tree.backend, "at-spi2");
     let command = named(&tree.nodes, "Command").expect("Command node");
     let send = named(&tree.nodes, "SEND").expect("SEND node");
+    let field = named(&tree.nodes, "OffscreenField").expect("OffscreenField node");
 
     let command_id = command.id.clone();
     let send_id = send.id.clone();
+    let field_id = field.id.clone();
     perform_node_action(None, &command_id, AccessibilityNodeAction::Focus)
         .expect("AT-SPI Command focus");
     wait_for(&mut running, "composer focus", |_| {
@@ -140,6 +143,19 @@ fn real_atspi_tree_edits_command_and_activates_send() {
         &["wait-text", "--timeout-ms", "10000", "ATSPI_OK"],
     );
     assert_eq!(matched["matched"], true);
+
+    let before = get_node_extents(None, &field_id).expect("GetExtents before ScrollTo");
+    assert!(
+        before.width > 0 && before.height > 0,
+        "OffscreenField extents must be non-empty: {before:?}"
+    );
+    scroll_node(None, &field_id).expect("AT-SPI Component.ScrollTo");
+    let after = get_node_extents(None, &field_id).expect("GetExtents after ScrollTo");
+    let delta_y = after.y.abs_diff(before.y);
+    assert!(
+        delta_y >= 20,
+        "ScrollTo must move OffscreenField |Δy|>=20, before={before:?} after={after:?}"
+    );
 
     let closed = cli_json(executable, &endpoint, &["close-window"]);
     assert_eq!(closed["closing"], true);

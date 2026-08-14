@@ -8,8 +8,9 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use agenterm_platform::accessibility_publish::{
-    AccessibilityBounds, NODE_APPLICATION, NODE_COMMAND, NODE_FRAME, NODE_SEND, NODE_SESSION,
-    NODE_TABS, PublishedAction, PublishedNode, PublishedRole, PublishedTree,
+    AccessibilityBounds, NODE_APPLICATION, NODE_COMMAND, NODE_FRAME, NODE_OFFSCREEN_FIELD,
+    NODE_SEND, NODE_SESSION, NODE_TABS, PublishedAction, PublishedNode, PublishedRole,
+    PublishedTree,
 };
 
 use crate::ui::{Layout, Rect};
@@ -18,6 +19,9 @@ pub const COMMAND_NAME: &str = "Command";
 pub const SEND_NAME: &str = "SEND";
 pub const TABS_NAME: &str = "Tabs";
 pub const SESSION_NAME: &str = "Session";
+pub const OFFSCREEN_FIELD_NAME: &str = "OffscreenField";
+const OFFSCREEN_FIELD_GAP: u32 = 2000;
+const OFFSCREEN_FIELD_HEIGHT: u32 = 24;
 const ACTION_QUEUE_CAPACITY: usize = 64;
 const ACTION_QUEUE_MAX_BYTES: usize = 256 * 1024;
 pub const ACTION_DRAIN_BUDGET: usize = 32;
@@ -121,6 +125,7 @@ pub fn tree(
         width: frame_width,
         height: frame_height,
     };
+    let session = session_rect(layout, frame_width, frame_height);
     PublishedTree {
         app_name: app_name.to_owned(),
         nodes: vec![
@@ -157,13 +162,22 @@ pub fn tree(
                 PublishedRole::Terminal,
                 SESSION_NAME,
                 "",
-                session_rect(layout, frame_width, frame_height),
+                session,
                 Flags {
                     focusable: true,
                     focused: !composer_focused,
                     editable: false,
                     clickable: false,
                 },
+            ),
+            published(
+                NODE_OFFSCREEN_FIELD,
+                Some(NODE_SESSION),
+                PublishedRole::Label,
+                OFFSCREEN_FIELD_NAME,
+                "",
+                offscreen_field_rect(session),
+                Flags::CONTAINER,
             ),
             published(
                 NODE_COMMAND,
@@ -233,6 +247,18 @@ fn session_rect(layout: Layout, frame_width: u32, frame_height: u32) -> Rect {
     }
 }
 
+fn offscreen_field_rect(session: Rect) -> Rect {
+    Rect {
+        x: session.x,
+        y: session
+            .y
+            .saturating_add(session.height)
+            .saturating_add(OFFSCREEN_FIELD_GAP),
+        width: session.width.max(1),
+        height: OFFSCREEN_FIELD_HEIGHT,
+    }
+}
+
 fn published(
     id: u32,
     parent: Option<u32>,
@@ -294,6 +320,16 @@ mod tests {
         assert_ne!(send.role.as_str(), "frame");
         assert_ne!(send.role.as_str(), "application");
         assert_eq!(tree.children_of(NODE_FRAME).len(), 4);
+        let field = tree
+            .node(NODE_OFFSCREEN_FIELD)
+            .expect("offscreen field is published");
+        assert_eq!(field.name, OFFSCREEN_FIELD_NAME);
+        assert_eq!(field.parent, Some(NODE_SESSION));
+        assert!(field.bounds.width > 0);
+        assert!(field.bounds.height > 0);
+        let session = tree.node(NODE_SESSION).expect("session is published");
+        assert!(field.bounds.y >= session.bounds.y.saturating_add(session.bounds.height));
+        assert_eq!(tree.children_of(NODE_SESSION), vec![NODE_OFFSCREEN_FIELD]);
     }
 
     #[test]

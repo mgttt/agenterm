@@ -12,6 +12,9 @@ pub const NODE_TABS: u32 = 2;
 pub const NODE_SESSION: u32 = 3;
 pub const NODE_COMMAND: u32 = 4;
 pub const NODE_SEND: u32 = 5;
+/// Named inner widget of `Session`. `Component.ScrollTo` moves it so
+/// independent `GetExtents` can prove a geometry change.
+pub const NODE_OFFSCREEN_FIELD: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublishedRole {

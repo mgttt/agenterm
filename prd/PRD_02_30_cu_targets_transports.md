@@ -202,7 +202,8 @@ Canonical host mapping (approved product vocabulary):
   sibling; `ScrollTo` is a no-op true, so Reasonix launched via
   `scripts/reasonix-desktop-a11y.sh` applies `scrollIntoView` through
   the same eval helper as named set-value (hello `A11YSCROLL1`, no ABI
-  change).
+  change). Linux `agenterm-con` publishes a real `ScrollTo` that moves
+  named `OffscreenField` (Session child); same verbs, no ABI change.
 - [x] `get-extents --window HANDLE --name PAT [--role ROLE]` resolves
   through that same path, then independent AT-SPI
   `Component.GetExtents(Screen)` (`agt_a11y_node_get_extents`). Snapshot
