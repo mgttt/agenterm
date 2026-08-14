@@ -1357,6 +1357,16 @@ independent `get-caret` is `2`. Unlike `ScrollTo` (true-no-op) and
 `EditableText` (absent), caret needs no eval-helper glue and must not
 grow an `A11YCARET1` hello. The `set-caret` reply is not proof.
 
+`Text.GetText` is the same native-Text story: con `Command`, Chrome
+`GetTextField`, and the Reasonix composer all expose real GetText
+(ABI 1.9 `agt_a11y_node_get_text`), so one-shot `get-text --name`
+reads it independently of any write — `send-text` / `paste` / `copy`
+`matched.text`, `last_text_write_via`, the WebKit eval helper queued-job
+`OK`, and tree snapshot `text` are not proof. After the field holds
+`HELLO`, independent `get-text` must equal `HELLO` (`via=gettext`).
+Do not add an eval helper or CDP/`--coords`/XTest get-text path. No
+`A11YGETTEXT1` hello.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. An `agenterm-cu`

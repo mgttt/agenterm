@@ -73,6 +73,7 @@ audited separately from AT-SPI actuation.
 | `get-selection --window --name PAT [--role ROLE]` | same unique-name matcher, then independent AT-SPI `GetNSelections` + `GetSelection(0)`; `select` reply does not count; missing Text → typed `a11y_selection_unavailable`; `n==0` is empty success |
 | `set-caret --window --name PAT --offset N [--role ROLE]` | same unique-name matcher, then one-shot AT-SPI `Text.SetCaretOffset`; missing Text/`UnknownMethod` → typed `a11y_caret_unavailable`; SetCaretOffset false → typed `a11y_caret_no_effect`; never XTest / `--coords` |
 | `get-caret --window --name PAT [--role ROLE]` | same unique-name matcher, then independent AT-SPI `CaretOffset` / `GetCaretOffset`; `set-caret` reply does not count; missing Text → typed `a11y_caret_unavailable` |
+| `get-text --window --name PAT [--role ROLE]` | same unique-name matcher, then one-shot independent AT-SPI `Text.GetText` — the same authority `wait --text-equals` polls, without a timeout; `send-text` / `paste` / `copy` `matched.text`, `last_text_write_via`, the WebKit eval helper queued-job `OK`, and tree snapshot `text` do not count; missing Text → typed `a11y_text_unavailable` (never XTest / `--coords` / screenshot) |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` / `--text-contains` / `--node-text-contains` with `--name` (not `send-text` / `paste` / `copy` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 
@@ -215,6 +216,16 @@ cu --target current --grant observe get-caret --window 25165828 \
 cu --target current --grant actuate set-caret --window 4194318 \
   --name "Message Reasonix" --offset 2
 cu --target current --grant observe get-caret --window 4194318 \
+  --name "Message Reasonix"
+
+# One-shot independent readback of a named Text node (AT-SPI GetText) —
+# the same authority wait --text-equals polls, without a timeout.
+# send-text / paste / copy matched.text and tree snapshot text do not
+# count. Chrome fixture and Reasonix composer both use native Text
+# GetText — no eval-helper get-text path, never XTest / --coords.
+cu --target current --grant observe get-text --window 25165828 \
+  --name GetTextField
+cu --target current --grant observe get-text --window 4194318 \
   --name "Message Reasonix"
 
 # Place the focused window (Spectacle catalog)
