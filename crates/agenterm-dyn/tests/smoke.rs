@@ -158,6 +158,34 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_geteuid_matches_libc() {
+        let probe = live_system_probe("geteuid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+            .expect("geteuid dlcall");
+        let real = unsafe { libc::geteuid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_getegid_matches_libc() {
+        let probe = live_system_probe("getegid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+            .expect("getegid dlcall");
+        let real = unsafe { libc::getegid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_sysconf_pagesize_matches_libc() {
         let probe = live_system_probe("sysconf_pagesize");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {

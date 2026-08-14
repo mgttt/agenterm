@@ -93,6 +93,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "uname",
                 "getuid",
                 "getgid",
+                "geteuid",
+                "getegid",
                 "sysconf_pagesize",
                 "getcwd"
             ]
@@ -108,6 +110,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("uname", "libc.so.6", "uname"),
                 ("getuid", "libc.so.6", "getuid"),
                 ("getgid", "libc.so.6", "getgid"),
+                ("geteuid", "libc.so.6", "geteuid"),
+                ("getegid", "libc.so.6", "getegid"),
                 ("sysconf_pagesize", "libc.so.6", "sysconf"),
                 ("getcwd", "libc.so.6", "getcwd"),
             ]
