@@ -138,22 +138,23 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). Scroll evidence is a **gate-owned** loopback
+env or `--vnc-env`). Focus evidence is a **gate-owned** loopback
 `x11vnc` plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
-as the only proof): host independent
-`get-extents --window HANDLE --name OffscreenField` records before extents,
-host `scroll --window HANDLE --name OffscreenField` runs session AT-SPI
-`Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host independent
-`get-extents` after proves nonzero `|Δy|` or `|Δx|` (snapshot `node.bounds`
-do not count). Native AT-SPI Component via the session worker — never
-screenshot / `--coords` / RFB pointer / wheel / framebuffer OCR / Action
-`scroll*` / XTest. Missing / false / `UnknownMethod` typed-fails
-`a11y_scroll_unavailable` on the session worker the same as local
-`current`. `click` / `set-caret` / `select` / `send-keys` / `copy` /
+as the only proof): host
+`focus --window HANDLE --name Command` (or `SEND`) runs session AT-SPI
+Action `focus` / `Component::grab_focus`
+(`addressing=accessibility-tree`), then host independent
+`tree --window HANDLE` shows that node `focused` and host independent
+`get-text --window HANDLE` (no `--name`) equals that Command text
+(focused Text node). Native AT-SPI Action / Component via the session
+worker — never screenshot / `--coords` / RFB pointer / framebuffer OCR /
+XTest. Missing or ambiguous name typed-fails `a11y_node_not_found` /
+`a11y_node_ambiguous` on the session worker the same as local `current`.
+`scroll` / `click` / `set-caret` / `select` / `send-keys` / `copy` /
 `paste --text` / `send-text` over vnc and observe-only `windows` /
-`get-text` / `wait` / `get-caret` / `get-extents` remain valid too.
-Connect / protocol failures are typed (`vnc_unavailable` /
+`get-text` / `wait` / `get-caret` / `get-extents` / `tree` remain valid
+too. Connect / protocol failures are typed (`vnc_unavailable` /
 `vnc_transport_failed` / `vnc_auth_failed`).
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
@@ -168,14 +169,14 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Scroll path: get-extents before → scroll --name OffscreenField → get-extents
-# after with nonzero |Δy| or |Δx|.
-agenterm-cu --vnc 127.0.0.1:5939 --grant observe \
-  get-extents --window HANDLE --name OffscreenField
-agenterm-cu --vnc 127.0.0.1:5939 --grant actuate \
-  scroll --window HANDLE --name OffscreenField
-agenterm-cu --vnc 127.0.0.1:5939 --grant observe \
-  get-extents --window HANDLE --name OffscreenField
+# Focus path: focus --name Command → tree shows focused → get-text --window
+# (no --name) equals that Command text.
+agenterm-cu --vnc 127.0.0.1:5940 --grant actuate \
+  focus --window HANDLE --name Command
+agenterm-cu --vnc 127.0.0.1:5940 --grant observe \
+  tree --window HANDLE
+agenterm-cu --vnc 127.0.0.1:5940 --grant observe \
+  get-text --window HANDLE
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
 # Get-selection observe path: send-text SEED → select N..M → get-selection

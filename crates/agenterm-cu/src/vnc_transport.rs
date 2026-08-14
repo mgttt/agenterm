@@ -14,21 +14,21 @@
 //! Cut 3.35 locked key delivery via `send-keys`. Cut 3.36 locked text
 //! selection via `select` / `get-selection`. Cut 3.37 locked caret
 //! placement via `set-caret` / `get-caret`. Cut 3.38 locked named Action
-//! click. Cut 3.39 locks named scroll: host independent
-//! `get-extents --name OffscreenField` over `--vnc` records before
-//! extents on a second `agenterm-con` Session child, host
-//! `scroll --name OffscreenField` over `--vnc` runs session AT-SPI
-//! `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host
-//! independent `get-extents` after proves nonzero `|Δy|` or `|Δx|`
-//! (snapshot `node.bounds` do not count). Native AT-SPI Component via
-//! the session worker — never screenshot / `--coords` / RFB pointer /
-//! wheel / framebuffer OCR / Action `scroll*` / XTest. Gate-owned
+//! click. Cut 3.39 locked named scroll. Cut 3.40 locks named focus: host
+//! `focus --name Command` (or `SEND`) over `--vnc` runs session AT-SPI
+//! Action `focus` / `Component::grab_focus`
+//! (`addressing=accessibility-tree`) on a second `agenterm-con` Session
+//! child, then host independent `tree` over the same `--vnc` shows that
+//! node `focused` and host independent `get-text --window H` (no
+//! `--name`) equals that Command text (focused Text node). Native
+//! AT-SPI Action / Component via the session worker — never screenshot /
+//! `--coords` / RFB pointer / framebuffer OCR / XTest. Gate-owned
 //! dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
 //! as the only proof. Observe and actuate grants both forward.
-//! `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
-//! (3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
-//! over vnc remain valid.
+//! `scroll` (3.39), `click` (3.38), `set-caret` (3.37), `select` (3.36),
+//! `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
+//! `send-text` (3.32) over vnc remain valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -987,6 +987,47 @@ mod tests {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("OffscreenField"));
                 assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn focus_name_survives_target_rewrite() {
+        // 3.40: first vnc focus path reuses the same RFB + session-worker
+        // rewrite; the worker still runs target=current focus. Circuit:
+        // host focus --window H --name Command (or SEND) runs session
+        // AT-SPI Action focus / Component::grab_focus
+        // (addressing=accessibility-tree; never --coords / RFB pointer /
+        // screenshot / XTest), then host independent tree shows that node
+        // focused and host independent get-text --window H (no --name)
+        // equals that Command text (focused Text node). Missing /
+        // ambiguous name typed-fails a11y_node_not_found /
+        // a11y_node_ambiguous on the session worker the same as local
+        // current. Selector (window/name/role/node) must survive the
+        // rewrite.
+        let command = CuCommand::Focus {
+            target: TargetRef::Vnc,
+            window: Some(42),
+            node: None,
+            name: Some("Command".into()),
+            role: Some("text".into()),
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "focus");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Focus {
+                window,
+                node,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert!(node.is_none());
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert_eq!(role.as_deref(), Some("text"));
             }
             other => panic!("unexpected command {other:?}"),
         }
