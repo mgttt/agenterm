@@ -14,8 +14,8 @@ pub use eval::REPEAT_MAX;
 pub use hosts::{
     ALL_CELLS, CU_ADJACENT_PROBE_CATALOG, CuAdjacentProbeCell, HostArch, HostCell, HostOs,
     LAYER3_CANDIDATES, LINUX_AARCH64, LINUX_ATSPI_EXISTENCE_LIBS, LINUX_X86_64, MACOS_AARCH64,
-    MACOS_X86_64, PLATFORM_CANDIDATES, ProbeFact, SecondaryProbe, SizeProbe, WINDOWS_AARCH64,
-    WINDOWS_X86_64, cell, cu_adjacent_probe, live_cell,
+    MACOS_X86_64, PLATFORM_CANDIDATES, ProbeFact, SecondaryProbe, SizeProbe, SystemProbe,
+    SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, cu_adjacent_probe, live_cell,
 };
 pub use sym::Symbol;
 pub use value::Value;

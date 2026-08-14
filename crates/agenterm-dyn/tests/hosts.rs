@@ -2,13 +2,14 @@
 
 use agenterm_dyn::{
     ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
-    SizeProbe, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
+    SizeProbe, SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
 };
 
 #[test]
 fn platform_candidates_index_lists_host_table_items() {
     use agenterm_dyn::PLATFORM_CANDIDATES;
     assert!(PLATFORM_CANDIDATES.contains(&"HostCell"));
+    assert!(PLATFORM_CANDIDATES.contains(&"SystemProbe"));
     assert!(PLATFORM_CANDIDATES.contains(&"ALL_CELLS"));
     assert!(PLATFORM_CANDIDATES.contains(&"live_cell"));
     assert!(PLATFORM_CANDIDATES.contains(&"LINUX_X86_64"));
@@ -82,6 +83,27 @@ fn windows_cells_share_kernel32_names() {
 }
 
 #[test]
+fn additional_system_probes_are_live_only_on_linux() {
+    for c in [LINUX_X86_64, LINUX_AARCH64] {
+        assert_eq!(
+            c.system_probes.map(|probe| probe.name),
+            ["time", "clock_gettime", "uname"]
+        );
+        assert!(c.system_probes.iter().all(|probe| matches!(
+            probe.status,
+            SystemProbeStatus::LiveDlcall { lib: "libc.so.6", symbol } if symbol == probe.name
+        )));
+    }
+    for c in [MACOS_X86_64, MACOS_AARCH64, WINDOWS_X86_64, WINDOWS_AARCH64] {
+        assert!(
+            c.system_probes
+                .iter()
+                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
+        );
+    }
+}
+
+#[test]
 fn live_cell_matches_compile_target() {
     let live = match live_cell() {
         Some(c) => c,
@@ -124,6 +146,7 @@ fn every_cell_is_well_formed() {
 }
 
 fn assert_cell_probe_fields(c: HostCell) {
+    assert!(c.system_probes.iter().all(|probe| !probe.name.is_empty()));
     match c.size_probe {
         SizeProbe::IoctlTiocgwinsz {
             lib,

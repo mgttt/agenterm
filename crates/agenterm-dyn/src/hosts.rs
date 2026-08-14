@@ -18,6 +18,8 @@
 /// Names of items marked `PLATFORM-CANDIDATE` in this module (migration index).
 pub const PLATFORM_CANDIDATES: &[&str] = &[
     "HostCell",
+    "SystemProbe",
+    "SystemProbeStatus",
     "SizeProbe",
     "SecondaryProbe",
     "LINUX_X86_64",
@@ -47,7 +49,71 @@ pub struct HostCell {
     pub size_probe: SizeProbe,
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
+    /// Headless system-call smoke candidates; only Linux is live in this leaf.
+    pub system_probes: [SystemProbe; 3],
 }
+
+// PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
+/// One additional headless system probe represented as host script data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(alias = "platform-candidate")]
+pub struct SystemProbe {
+    pub name: &'static str,
+    pub status: SystemProbeStatus,
+}
+
+// PLATFORM-CANDIDATE: honest live/placeholder state for each host row.
+/// Whether this crate executes the probe on the matching host today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(alias = "platform-candidate")]
+pub enum SystemProbeStatus {
+    /// A matching-host smoke performs the real `dlcall`.
+    LiveDlcall {
+        lib: &'static str,
+        symbol: &'static str,
+    },
+    /// Matrix placeholder only; no behavior or successful result is claimed.
+    Placeholder,
+}
+
+const LINUX_SYSTEM_PROBES: [SystemProbe; 3] = [
+    SystemProbe {
+        name: "time",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "time",
+        },
+    },
+    SystemProbe {
+        name: "clock_gettime",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "clock_gettime",
+        },
+    },
+    SystemProbe {
+        name: "uname",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "uname",
+        },
+    },
+];
+
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 3] = [
+    SystemProbe {
+        name: "time",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "clock_gettime",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "uname",
+        status: SystemProbeStatus::Placeholder,
+    },
+];
 
 // PLATFORM-CANDIDATE: terminal/console size probe contract per OS.
 /// Planned terminal / console size probe for a cell.
@@ -105,6 +171,7 @@ pub const LINUX_X86_64: HostCell = HostCell {
         symbol: "getppid",
         ret_type: "i32",
     },
+    system_probes: LINUX_SYSTEM_PROBES,
 };
 
 // PLATFORM-CANDIDATE: linux × aarch64 host row.
@@ -124,6 +191,7 @@ pub const LINUX_AARCH64: HostCell = HostCell {
         symbol: "getppid",
         ret_type: "i32",
     },
+    system_probes: LINUX_SYSTEM_PROBES,
 };
 
 // --- macOS × {x86_64, aarch64} ------------------------------------------------
@@ -144,6 +212,7 @@ pub const MACOS_X86_64: HostCell = HostCell {
         lib: "libSystem.B.dylib",
         symbol: "time",
     },
+    system_probes: PLACEHOLDER_SYSTEM_PROBES,
 };
 
 // PLATFORM-CANDIDATE: macos × aarch64 host row.
@@ -162,6 +231,7 @@ pub const MACOS_AARCH64: HostCell = HostCell {
         lib: "libSystem.B.dylib",
         symbol: "time",
     },
+    system_probes: PLACEHOLDER_SYSTEM_PROBES,
 };
 
 // --- Windows × {x86_64, aarch64} ----------------------------------------------
@@ -182,6 +252,7 @@ pub const WINDOWS_X86_64: HostCell = HostCell {
         symbol: "GetCurrentThreadId",
         ret_type: "u32",
     },
+    system_probes: PLACEHOLDER_SYSTEM_PROBES,
 };
 
 // PLATFORM-CANDIDATE: windows × aarch64 host row.
@@ -200,6 +271,7 @@ pub const WINDOWS_AARCH64: HostCell = HostCell {
         symbol: "GetCurrentThreadId",
         ret_type: "u32",
     },
+    system_probes: PLACEHOLDER_SYSTEM_PROBES,
 };
 
 // PLATFORM-CANDIDATE: full six-cell matrix.

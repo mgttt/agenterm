@@ -68,11 +68,11 @@ supported and fail explicitly.
 `src/hosts.rs` records explicit rows for every `{linux, macos, windows} ×
 {x86_64, aarch64}` cell:
 
-| Cell | PID library | PID symbol | Size probe | Secondary probe |
-|------|-------------|------------|------------|-----------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` | `time` |
-| windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` |
+| Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
+|------|-------------|------------|------------|-----------------|----------------------------|
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname` dlcalls |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` | `time` | placeholders only |
+| windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
 matching `cfg(target_os)` × `cfg(target_arch)`; the other five are
@@ -123,7 +123,8 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 cargo test -p agenterm-dyn
 ```
 
-**Linux** (CI): `getpid` + `getppid` cross-checked with libc; `ioctl(TIOCGWINSZ)`
+**Linux** (CI): `getpid` + `getppid` cross-checked with libc; real headless
+`time(NULL)`, `clock_gettime(CLOCK_MONOTONIC)`, and `uname` dlcalls; `ioctl(TIOCGWINSZ)`
 on a 24×80 pty when `openpty` succeeds; `getenv("DISPLAY")`; honest `libX11`
 `XOpenDisplay` and AT-SPI library existence probes (no session a11y bus).
 

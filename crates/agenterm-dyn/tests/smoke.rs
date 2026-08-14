@@ -71,6 +71,53 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_time_matches_libc() {
+        let mut env = Dyn::new();
+        let got = env
+            .eval(r#"(dlcall "libc.so.6" "time" "i64" "ptr" 0)"#)
+            .expect("time dlcall")
+            .as_int()
+            .expect("time return value");
+        let real = unsafe { libc::time(std::ptr::null_mut()) };
+        assert!(
+            (got - real).abs() <= 1,
+            "dlcall and libc time should be adjacent"
+        );
+    }
+
+    #[test]
+    fn dlcall_clock_gettime_writes_timespec() {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut env = Dyn::new();
+        env.bind("ts", (&mut ts as *mut libc::timespec).cast())
+            .expect("bind timespec");
+        let got = env
+            .eval(r#"(dlcall "libc.so.6" "clock_gettime" "i32" "i32" 1 "ptr" ts)"#)
+            .expect("clock_gettime dlcall");
+        assert_eq!(got, Value::Int(0));
+        assert!(ts.tv_sec > 0);
+        assert!((0..1_000_000_000).contains(&ts.tv_nsec));
+    }
+
+    #[test]
+    fn dlcall_uname_writes_linux_identity() {
+        let mut uts = std::mem::MaybeUninit::<libc::utsname>::zeroed();
+        let mut env = Dyn::new();
+        env.bind("uts", uts.as_mut_ptr().cast())
+            .expect("bind utsname");
+        let got = env
+            .eval(r#"(dlcall "libc.so.6" "uname" "i32" "ptr" uts)"#)
+            .expect("uname dlcall");
+        assert_eq!(got, Value::Int(0));
+        let uts = unsafe { uts.assume_init() };
+        let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()) };
+        assert_eq!(sysname.to_bytes(), b"Linux");
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
