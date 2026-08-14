@@ -31,6 +31,8 @@ jobs:
         run: cargo build --locked -p agenterm --bin agenterm
       - name: Test workbench library
         run: cargo test --locked -p agenterm --lib
+      - name: Test workflow policy
+        run: cargo test --locked -p agenterm --test ci_workflow_policy
       - name: Test shared UI core
         run: cargo test --locked -p agenterm-ui-core --lib
       - name: Test platform contracts
@@ -90,4 +92,3 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo check --locked -p agenterm --all-targets --target ${{ matrix.target }}
-

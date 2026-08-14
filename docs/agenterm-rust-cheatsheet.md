@@ -1116,6 +1116,16 @@ and missing values. Keep live service discovery best-effort in the adapter and
 prove actual desktop integration only in a matching-host smoke environment that
 explicitly owns that service.
 
+## Ordinary CI must own Candidate's static workflow contracts
+
+Do not let a release Candidate be the first lane that runs an integration test
+which only parses workflow or release-policy source. Candidate may repeat that
+contract, but the ordinary push quality job must run its named integration test
+first. Keep command assertions exact enough to preserve semantic switches such
+as `--ignored`; updating the production workflow and its parser assertion is one
+coherent change. This prevents a cheap deterministic mismatch from wasting the
+stress-inclusive qualification lane before failing.
+
 ## Linux AT-SPI publish must reconnect
 
 A one-shot `serve()` then `pending()` dies with the first bus. If

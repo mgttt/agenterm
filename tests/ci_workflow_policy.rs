@@ -63,5 +63,5 @@ fn con_windows_job_uses_release_equivalent_unwind_graph_and_blackbox_package() {
     assert!(CON.contains("Validate con capability and evidence contract"));
     assert!(CON.contains("--test agenterm_con_alignment"));
     assert!(CON.contains("Qualify con sustained long output"));
-    assert!(CON.contains("--test agenterm_con_throughput -- --nocapture"));
+    assert!(CON.contains("--test agenterm_con_throughput -- --ignored --nocapture"));
 }
