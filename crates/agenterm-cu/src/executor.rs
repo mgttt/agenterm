@@ -491,14 +491,16 @@ fn paste(
 /// `--window` without `--name` targets the showing focused node — the
 /// same innermost `Text.GetText` candidate `get-text --window` reads —
 /// so `focus --name X` then `send-keys --window H KEYS` then
-/// `get-text --window H` closes the loop. Prefer
+/// `get-text --window H` closes the loop on Chrome `GetTextField` and
+/// the Reasonix composer (`Message Reasonix…` under
+/// `scripts/reasonix-desktop-a11y.sh`). Prefer
 /// `DeviceEventListener.NotifyEvent`. When that interface is absent
-/// (Chrome renderer entry) and `KEYS` is plain typeable text, write
-/// through the same AT-SPI `EditableText` / `Text` path as focused
-/// `send-text` (`via=text`) so the typed string is still native AT-SPI
-/// and never XTest. Special chords (`enter`, `ctrl+a`, …) without a key
-/// interface still typed-fail. Without `--window` it stays the plain
-/// "send to whatever is focused" inject.
+/// (Chrome renderer entry; WebKitGTK textarea) and `KEYS` is plain
+/// typeable text, write through the same AT-SPI `EditableText` /
+/// `Text` path as focused `send-text` (`via=text`) so the typed string
+/// is still native AT-SPI and never XTest. Special chords (`enter`,
+/// `ctrl+a`, …) without a key interface still typed-fail. Without
+/// `--window` it stays the plain "send to whatever is focused" inject.
 fn send_keys(
     keys: &str,
     window: Option<isize>,
