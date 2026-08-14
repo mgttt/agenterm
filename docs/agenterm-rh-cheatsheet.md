@@ -31,6 +31,13 @@ agenterm rh eval scripts/rh/your-script.rh                       # check + pack 
 agenterm rh task run <task-id> --manifest agenterm.tasks.json    # as the gates run it
 ```
 
+Task execution prepends the manifest task's `args` and then appends values
+after the CLI `--`. A manifest default such as `args: ["."]` is therefore not
+overridden by `-- REPO TARGET`; the script receives all three values. For tasks
+whose callers supply an exact repository or target, omit manifest defaults and
+make every caller explicit. Test the real manifest-owned task path, not only a
+direct script invocation.
+
 `mode=native host_eval_int=0` is necessary but **not sufficient** evidence for
 the complete task. `mode_probe` proves that its probe path selected native mode
 without host integer evaluation; it does not prove that the full imported

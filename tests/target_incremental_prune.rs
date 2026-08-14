@@ -204,7 +204,9 @@ fn open_locked(path: &Path) -> File {
 
 #[test]
 fn development_build_prunes_only_after_successful_artifact_staging() {
-    let stage = BUILD_TASK.find("\"build_stage\"").expect("stage call");
+    let stage = BUILD_TASK
+        .find("\"rh\", \"task\", \"run\", \"stage-build\"")
+        .expect("stage call");
     let prune = BUILD_TASK
         .find("\"build_incremental_prune")
         .expect("prune call");

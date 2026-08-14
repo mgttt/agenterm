@@ -2384,9 +2384,6 @@
       "entry": "scripts/rh/prune-target-incremental.rh",
       "profile": "local",
       "cwd": ".",
-      "args": [
-        "."
-      ],
       "dependencies": [],
       "platforms": [
         "windows",

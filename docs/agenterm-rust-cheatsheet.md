@@ -1121,10 +1121,12 @@ explicitly owns that service.
 Do not let a release Candidate be the first lane that runs an integration test
 which only parses workflow or release-policy source. Candidate may repeat that
 contract, but the ordinary push quality job must run its named integration test
-first. Keep command assertions exact enough to preserve semantic switches such
-as `--ignored`; updating the production workflow and its parser assertion is one
-coherent change. This prevents a cheap deterministic mismatch from wasting the
-stress-inclusive qualification lane before failing.
+first. The same rule applies to deterministic build/task contract tests that
+need no release artifact, such as target-pruning argument and source-order
+checks. Keep command assertions exact enough to preserve semantic switches such
+as `--ignored`; updating the production workflow and its parser assertion is
+one coherent change. This prevents a cheap deterministic mismatch from wasting
+the stress-inclusive qualification lane before failing.
 
 ## Linux AT-SPI publish must reconnect
 
