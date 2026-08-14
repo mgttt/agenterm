@@ -35,19 +35,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first click evidence reuses the same con-publish named `SEND`
-  Action over a **gate-owned** loopback `x11vnc` (not the resident `:2`
-  listener alone) against a second `agenterm-con` with a unique title:
-  host `cu --vnc 127.0.0.1:<port> send-text --name Command -- SEED`
-  (payload after `--`; not `--text`) plants the seed, host
-  `cu --vnc click --name SEND` runs session AT-SPI Action `DoAction`
-  (`addressing=accessibility-tree`), then host independent
-  `cu --vnc get-text --name Command` returns empty (composer cleared on
-  SEND submit). Native AT-SPI Action via the session worker. Never
-  screenshot, `--coords`, RFB pointer, framebuffer OCR, or steal the
-  resident control socket. `set-caret` (3.37), `select` (3.36),
-  `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
-  `send-text` (3.32) over vnc still hold.
+  `vnc` first scroll evidence reuses the same con-publish named
+  `OffscreenField` `Component.ScrollTo` over a **gate-owned** loopback
+  `x11vnc` (not the resident `:2` listener alone) against a second
+  `agenterm-con` with a unique title: host
+  `cu --vnc 127.0.0.1:<port> get-extents --name OffscreenField` records
+  before extents, host `cu --vnc scroll --name OffscreenField` runs
+  session AT-SPI `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then
+  host independent `cu --vnc get-extents` after proves nonzero `|Δy|` or
+  `|Δx|` (snapshot `node.bounds` do not count). Native AT-SPI Component
+  via the session worker. Never screenshot, `--coords`, RFB
+  pointer/wheel, framebuffer OCR, Action `scroll*`, XTest, or steal the
+  resident control socket. `click` (3.38), `set-caret` (3.37),
+  `select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
+  (3.33), and `send-text` (3.32) over vnc still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -448,22 +449,22 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Click path: second
-  `agenterm-con` (unique title; never steal
-  `unix:/tmp/run-box/agenterm-con.sock`); host
-  `send-text --window HANDLE --name Command -- SEED` (payload after `--`;
-  not `--text`) plants the seed; host
-  `click --window HANDLE --name SEND` runs session AT-SPI Action `DoAction`
-  (`addressing=accessibility-tree`); host independent
-  `get-text --window HANDLE --name Command` returns empty (composer cleared
-  on SEND submit). Native AT-SPI Action via the session worker (never
-  screenshot / `--coords` / RFB pointer / framebuffer OCR). Missing or
-  ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous`
-  on the session worker the same as local `current`. `set-caret` /
-  `select` / `send-keys` / `copy` / `paste --text` / `send-text` over vnc
-  and observe-only `windows` / `get-text` / `wait --text-equals` /
-  `get-caret` still hold. Worker JSON does not count; CEO owns the
-  official gate. Connect / protocol / auth failures are typed
+  `agenterm-cu --target current` session worker. Scroll path: second
+  `agenterm-con` named Session child `OffscreenField` (unique title; never
+  steal `unix:/tmp/run-box/agenterm-con.sock`); host independent
+  `get-extents --window HANDLE --name OffscreenField` records before
+  extents; host `scroll --window HANDLE --name OffscreenField` runs
+  session AT-SPI `Component.ScrollTo(TopEdge)` (`via=scroll-to`); host
+  independent `get-extents` after proves nonzero `|Δy|` or `|Δx|`
+  (snapshot `node.bounds` do not count). Native AT-SPI Component via the
+  session worker (never screenshot / `--coords` / RFB pointer / wheel /
+  framebuffer OCR / Action `scroll*` / XTest). Missing / false /
+  `UnknownMethod` typed-fails `a11y_scroll_unavailable` on the session
+  worker the same as local `current`. `click` / `set-caret` / `select` /
+  `send-keys` / `copy` / `paste --text` / `send-text` over vnc and
+  observe-only `windows` / `get-text` / `wait --text-equals` /
+  `get-caret` / `get-extents` still hold. Worker JSON does not count; CEO
+  owns the official gate. Connect / protocol / auth failures are typed
   (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed` /
   `invalid_input`).
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
