@@ -393,30 +393,43 @@ fn send_text_to_node(
 /// process stays in the `SetSelectionOwner` event loop so a later
 /// `paste --name` (no `--text`) can `ConvertSelection`. A named showing
 /// node with no Text interface typed-fails (`a11y_text_unavailable`) and
-/// never falls through to XTest / `--coords` / screenshot. `--name` is
-/// required. `matched.text` is the resolve-time snapshot; the copied
-/// payload is independent GetText. Live close-the-circuit includes Chrome
-/// fixture fields and the Reasonix composer (`Message Reasonix…`): paste
-/// after copy still uses the WebKit eval-helper set-value path; only
-/// `wait --text-equals` GetText proves the restore.
+/// never falls through to XTest / `--coords` / screenshot.
+///
+/// `--window` without `--name` copies that same GetText path on the
+/// showing focused node — the same innermost `Text.GetText` candidate
+/// `get-text --window` reads — so `focus --name X` then
+/// `copy --window H` then `paste --window H` / `get-text --window H`
+/// closes the loop on Chrome `GetTextField`, Reasonix composer, and
+/// agenterm-con `Command`. Never XTest when `--window` is set. Without
+/// `--window` copy is invalid: there is no plain "copy whatever is
+/// focused" inject verb. `matched.text` is the resolve-time snapshot;
+/// the copied payload is independent GetText. Live close-the-circuit
+/// includes Chrome fixture fields and the Reasonix composer
+/// (`Message Reasonix…`): paste after copy still uses the WebKit
+/// eval-helper set-value path; only independent GetText proves the
+/// restore.
 fn copy(
     window: Option<isize>,
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
-    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
-        CuError::new(
-            "invalid_input",
-            "copy requires --window <handle> --name <pattern>",
-        )
-    })?;
     let resolved =
-        resolve_actuation_node(window, None, Some(name), role, "copy")?.ok_or_else(|| {
-            CuError::new(
+        if let Some(resolved) = resolve_actuation_node(window, None, name, role, "copy")? {
+            resolved
+        } else if role.filter(|value| !value.is_empty()).is_some() {
+            return Err(CuError::new(
                 "invalid_input",
-                "copy requires --window <handle> --name <pattern>",
-            )
-        })?;
+                "copy --role requires --name <pattern>",
+            ));
+        } else if window.is_some() {
+            let (resolved, _current) = get_text_focused(window)?;
+            resolved
+        } else {
+            return Err(CuError::new(
+                "invalid_input",
+                "copy requires --window <handle> [--name <pattern>]",
+            ));
+        };
     let text = mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
     mechanism::clipboard::publish_text(&text).map_err(map_mechanism_err)?;
     let mut payload = serde_json::json!({
@@ -2146,12 +2159,39 @@ mod tests {
     }
 
     #[test]
-    fn name_copy_requires_name() {
+    fn focused_copy_without_live_focus_fails_typed() {
+        // --window without --name is focused copy, not a missing-name usage
+        // error. Without a real tree/focus it typed-fails on the a11y path.
         let command = Command::Copy {
             target: TargetRef::Current,
             window: Some(1),
             name: None,
             role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(
+                code,
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_text_unavailable"
+                    | "a11y_backend_failed"
+                    | "dylib_load"
+                    | "unsupported"
+            ),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn copy_role_requires_name() {
+        let command = Command::Copy {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: Some("entry".into()),
         };
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);

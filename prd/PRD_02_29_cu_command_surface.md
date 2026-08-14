@@ -117,13 +117,25 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   node onto the native clipboard (`agt_clipboard_set_text`) and reports
   `addressing=accessibility-tree` / `via=gettext`. On Linux X11 the seed
   is a native CLIPBOARD selection owner (`SetSelectionOwner`), not
-  `xclip` / `xsel`. `--name` is required. A named showing node with no
-  Text interface typed-fails (`a11y_text_unavailable`) and never falls
-  through to XTest / `--coords` / screenshot. A miss or an ambiguous name
-  copies nothing. Close the circuit with `paste --name` (no `--text`)
-  then `wait --text-equals`; `copy` `matched.text` does not count. Live
+  `xclip` / `xsel`. A named showing node with no Text interface
+  typed-fails (`a11y_text_unavailable`) and never falls through to XTest
+  / `--coords` / screenshot. A miss or an ambiguous name copies nothing.
+  Close the circuit with `paste --name` (no `--text`) then
+  `wait --text-equals`; `copy` `matched.text` does not count. Live
   evidence: Chrome fixture fields and the Reasonix composer
   (`Message Reasonix…`) under `scripts/reasonix-desktop-a11y.sh`.
+- [x] `copy --window HANDLE` without `--name` copies that same GetText
+  path on the showing focused node (innermost `Text.GetText` candidate —
+  the same node `get-text --window HANDLE` reads) onto native CLIPBOARD.
+  Never XTest / `--coords` / screenshot when `--window` is set. Proof is
+  independent host circuit: seed a unique string, `copy --window HANDLE`
+  (no `--name`), clear the field, `paste --window HANDLE` (no `--name` /
+  no `--text`), then `get-text --window HANDLE` (no `--name`) equals the
+  seeded string — not `copy` `matched.text`. Live hosts: Chrome
+  `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`) after
+  `focus --name`; Reasonix composer and agenterm-con `Command` share the
+  focused path. Without `--window` copy is invalid (no plain inject
+  copy). Do not mark this leaf shipped on worker JSON.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]` writes
   the clipboard into the unique showing named field through that same
   native AT-SPI `EditableText` / `Text` path (`agt_a11y_node_set_text`)
