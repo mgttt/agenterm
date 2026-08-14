@@ -198,17 +198,20 @@ Canonical host mapping (approved product vocabulary):
 - [x] `send-keys --window HANDLE` without `--name` targets the showing
   focused node (innermost Text candidate). Prefers
   `DeviceEventListener.NotifyEvent` (`via=device-event`). When that
-  interface is absent (Chrome renderer entry; WebKitGTK textarea) and
-  the payload is plain typeable text, writes through AT-SPI
-  `EditableText` / `Text` + toolkit set-value (`via=text`, same path as
+  interface is absent (con `Command`; Chrome renderer entry; WebKitGTK
+  textarea) and the payload is plain typeable text, writes through
+  AT-SPI `EditableText` / `Text` + toolkit set-value (same path as
   focused `send-text`). Never XTest / `input_inject::send_keys` when
   `--window` is set. Independent `get-text --window HANDLE` (no
-  `--name`) must equal the typed string. Live: Chrome `GetTextField`
-  after `focus --name` on the host AT-SPI bus (`AT_SPI_BUS` /
-  `AT_SPI_BUS_ADDRESS`); Reasonix composer `Message Reasonix…` after
-  `focus --name` under `scripts/reasonix-desktop-a11y.sh`. Special
-  chords without a key interface still typed-fail. Do not mark this
-  leaf shipped on worker JSON.
+  `--name`) must equal the typed string. Live hosts: agenterm-con named
+  `Command` (native `EditableText`, `via=editable-text` on a second con;
+  never steal the resident control socket), Chrome `GetTextField` after
+  `focus --name` on the host AT-SPI bus (`AT_SPI_BUS` /
+  `AT_SPI_BUS_ADDRESS`, `via=text`); Reasonix composer
+  `Message Reasonix…` after `focus --name` under
+  `scripts/reasonix-desktop-a11y.sh` (`via=text`). Special chords
+  without a key interface still typed-fail. Do not mark this leaf
+  shipped on worker JSON.
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls `agt_a11y_node_get_text` (`Text.GetText`)
   on that unique showing node until the independent text equals `TEXT`.

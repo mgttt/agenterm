@@ -1188,17 +1188,19 @@ interface typed-fails (`a11y_key_unavailable`). That path never falls
 through to XTest / `input_inject::send_keys`. A miss types nothing.
 `send-keys --window HANDLE` without `--name` targets the same innermost
 focused Text node `get-text --window` reads. Prefer
-`DeviceEventListener.NotifyEvent` (`via=device-event`). Chrome renderer
-entries and WebKitGTK textareas do not expose that interface; plain
-typeable text (`314GATE…` / `314bGATE…`, single letters) then uses the
-AT-SPI `EditableText` / `Text` + toolkit set-value path (`via=text`,
-same as focused `send-text`) so `focus --name X` →
-`send-keys --window H TEXT` → `get-text --window H` closes without
-XTest. Live hosts: Chrome `GetTextField`; Reasonix composer
-`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh` (eval
-helper). Special chords (`enter`, `ctrl+a`) without a key interface
-still typed-fail. A synthetic `--window` with no focused Text node
-typed-fails; it must not spray XTest.
+`DeviceEventListener.NotifyEvent` (`via=device-event`). con `Command`,
+Chrome renderer entries, and WebKitGTK textareas do not close plain
+typeable chords that way; plain typeable text (`314cGATE…` / `314GATE…`
+/ `314bGATE…`, single letters) then uses the AT-SPI `EditableText` /
+`Text` + toolkit set-value path (same as focused `send-text`) so
+`focus --name X` → `send-keys --window H TEXT` → `get-text --window H`
+closes without XTest. Live hosts: agenterm-con `Command` after
+`focus --name` (`via=editable-text`, second con only — never steal the
+resident control socket); Chrome `GetTextField` (`via=text`); Reasonix
+composer `Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`
+(eval helper, `via=text`). Special chords (`enter`, `ctrl+a`) without a
+key interface still typed-fail. A synthetic `--window` with no focused
+Text node typed-fails; it must not spray XTest.
 
 `agenterm-cu send-text --name` resolves the same unique showing node, then writes
 through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`)

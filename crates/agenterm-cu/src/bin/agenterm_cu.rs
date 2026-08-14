@@ -581,8 +581,9 @@ Commands:
                               focused node (same innermost Text candidate as
                               get-text --window). Prefers DeviceEventListener;
                               plain typeable text falls back to the AT-SPI
-                              Text write path when that interface is absent
-                              (Chrome). Never XTest when --window is set.
+                              EditableText/Text write path when that interface
+                              is absent (con Command; Chrome; Reasonix).
+                              Never XTest when --window is set.
                               Without --window stays the plain focused inject.
                               `--` ends flag parsing. e.g. ctrl+c / enter / k
   scroll --window HANDLE --name PAT [--role ROLE]
