@@ -11,6 +11,9 @@ on:
       - 'examples/c/**'
       - 'examples/cpp/**'
       - 'examples/size-probe/**'
+      # The four-way system-library drift gate parses these, and
+      # install_consume.rs runs install.sh; editing them must re-run the gates.
+      - 'packaging/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-libagenterm.yml'
@@ -23,6 +26,9 @@ on:
       - 'examples/c/**'
       - 'examples/cpp/**'
       - 'examples/size-probe/**'
+      # The four-way system-library drift gate parses these, and
+      # install_consume.rs runs install.sh; editing them must re-run the gates.
+      - 'packaging/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-libagenterm.yml'
