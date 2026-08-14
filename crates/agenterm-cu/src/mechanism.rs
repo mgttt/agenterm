@@ -663,6 +663,50 @@ pub fn get_node_extents(
     })
 }
 
+/// Independent AT-SPI `Text` selection (`GetNSelections` + `GetSelection`).
+/// `n == 0` is empty (start/end stay 0).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct A11ySelection {
+    pub n: i32,
+    pub start: i32,
+    pub end: i32,
+}
+
+/// One-shot AT-SPI `Text.SetSelection(0, start, end)` for a resolved
+/// child-index path. Missing Text / `UnknownMethod` is
+/// `a11y_selection_unavailable`. SetSelection false is
+/// `a11y_selection_no_effect`.
+pub fn set_node_selection(
+    window: Option<isize>,
+    node_id: &str,
+    start: i32,
+    end: i32,
+) -> Result<(), MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeSetSelection>(b"agt_a11y_node_set_selection")?;
+    let status = unsafe { f(handle, node_c.as_ptr(), start, end) };
+    map_status("agt_a11y_node_set_selection", status)?;
+    Ok(())
+}
+
+/// Independent AT-SPI `Text.GetNSelections` + `GetSelection(0)` for a
+/// resolved child-index path. Not the set-selection reply payload.
+pub fn get_node_selection(
+    window: Option<isize>,
+    node_id: &str,
+) -> Result<A11ySelection, MechanismError> {
+    let handle = window.unwrap_or(0);
+    let node_c = CStringOrStack::new(node_id)?;
+    let f = call_sym::<NodeGetSelection>(b"agt_a11y_node_get_selection")?;
+    let mut n = 0i32;
+    let mut start = 0i32;
+    let mut end = 0i32;
+    let status = unsafe { f(handle, node_c.as_ptr(), &mut n, &mut start, &mut end) };
+    map_status("agt_a11y_node_get_selection", status)?;
+    Ok(A11ySelection { n, start, end })
+}
+
 /// Clipboard through libagenterm (`agt_clipboard_*`). Named `paste` seeds
 /// and reads here; named `copy` publishes GetText here. Neither injects
 /// Ctrl+V or XTest.
@@ -1060,6 +1104,9 @@ type NodeGetExtents = unsafe extern "C" fn(
     *mut i32,
     *mut i32,
 ) -> i32;
+type NodeSetSelection = unsafe extern "C" fn(isize, *const std::ffi::c_char, i32, i32) -> i32;
+type NodeGetSelection =
+    unsafe extern "C" fn(isize, *const std::ffi::c_char, *mut i32, *mut i32, *mut i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;

@@ -42,7 +42,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 7
+#define AGT_ABI_MINOR 8
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -493,6 +493,26 @@ agt_status agt_a11y_node_scroll(intptr_t window_handle, const char* node_id);
 agt_status agt_a11y_node_get_extents(intptr_t window_handle, const char* node_id,
                                      int32_t* out_x, int32_t* out_y,
                                      int32_t* out_width, int32_t* out_height);
+
+/* One-shot AT-SPI Text.SetSelection(0, start, end) on `node_id`
+ * (NUL-terminated UTF-8 child-index path). `window_handle` uses the same
+ * filter as agt_a11y_tree_snapshot. Missing Text / UnknownMethod ->
+ * AGT_FAILED{code="a11y_selection_unavailable"}. SetSelection false (or
+ * no later independent GetSelection match) ->
+ * AGT_FAILED{code="a11y_selection_no_effect"}. Never XTest, mouse-drag,
+ * or --coords. The reply is not proof; callers observe via
+ * agt_a11y_node_get_selection. */
+agt_status agt_a11y_node_set_selection(intptr_t window_handle, const char* node_id,
+                                       int32_t start, int32_t end);
+
+/* Independent AT-SPI Text.GetNSelections + GetSelection(0) for `node_id`.
+ * Not the set-selection reply payload. NULL node_id or any NULL out
+ * pointer -> AGT_FAILED{code="bad_pointer"}. Missing Text / UnknownMethod
+ * -> AGT_FAILED{code="a11y_selection_unavailable"}. n == 0 is an empty
+ * success (out_n=0, out_start=0, out_end=0), not a failure. */
+agt_status agt_a11y_node_get_selection(intptr_t window_handle, const char* node_id,
+                                       int32_t* out_n, int32_t* out_start,
+                                       int32_t* out_end);
 
 /* Drain the accessibility event bus. No side effects on user-visible state;
  * has no failure path and returns AGT_OK when the mechanism is present.

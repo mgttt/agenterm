@@ -1270,6 +1270,26 @@ that well-known name, or toolkit `WebKitGTK`. When
 Do not treat helper `OK` as geometric proof — only a later independent
 `get-extents` `|Δy|`.
 
+`cu select --name --start N --end M` is one-shot AT-SPI
+`Text.SetSelection(0, start, end)` (`agt_a11y_node_set_selection`).
+Success is `ok:true` / `via=set-selection`. Missing Text /
+`UnknownMethod` typed-fails (`a11y_selection_unavailable`).
+SetSelection false is `a11y_selection_no_effect`, not `timeout` — this
+is not a wait poll. Never XTest, mouse-drag, `GenerateMouseEvent`, or
+`--coords`. The `select` reply (including echoed `start`/`end`) is not
+proof. `cu get-selection --name` is the independent
+`GetNSelections` + `GetSelection(0)` observe sibling
+(`agt_a11y_node_get_selection`). `n == 0` is empty success. Do not
+implement select as a coordinate drag or a screenshot crop.
+
+Chrome text fields expose `Text.SetSelection`. A range such as `0..4`
+on a named field with known contents (`SelectField` / `HELLO`) is the
+live check: independent `get-selection` before is empty or not that
+range; after `select` it must be `start=0,end=4`. Unfocused fields
+often report `n==0`; grab-focus then `SetSelection(0,…)`, and only if
+that returns false with `n==0` use `AddSelection` to create selection
+0. Still AT-SPI Text, never a mouse drag.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`

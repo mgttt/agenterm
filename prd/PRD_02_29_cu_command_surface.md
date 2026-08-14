@@ -158,6 +158,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Snapshot `node.bounds` (hardcoded `0,0,0,0` during tree walk) do not
   count. Empty extents (w/h <= 0 or call fail) typed-fail
   (`a11y_extents_unavailable`). Never screenshot / XTest / `--coords`.
+- [x] `select --window HANDLE --name PAT --start N --end M [--role ROLE]`
+  is one-shot AT-SPI `Text.SetSelection(0, start, end)`
+  (`agt_a11y_node_set_selection`) on the unique showing named node and
+  reports `addressing=accessibility-tree` / `via=set-selection`.
+  `--name` is required. Missing Text / `UnknownMethod` typed-fails
+  (`a11y_selection_unavailable`). SetSelection false is
+  `a11y_selection_no_effect`, not `timeout`. Miss / ambiguous keep the
+  existing name codes. Never XTest, mouse-drag, `--coords`, or
+  screenshot. The `select` reply is not proof.
+- [x] `get-selection --window HANDLE --name PAT [--role ROLE]` reads
+  independent AT-SPI `Text.GetNSelections` + `GetSelection(0)`
+  (`agt_a11y_node_get_selection`) for that unique showing named node.
+  The `select` reply payload does not count. Missing Text typed-fails
+  (`a11y_selection_unavailable`). `n == 0` is empty success. Never
+  screenshot / XTest / `--coords`. Live Chrome fixture field
+  `SelectField` (`fixtures/cu/36-chrome-select.html`).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
