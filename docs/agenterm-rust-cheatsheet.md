@@ -1366,32 +1366,32 @@ second control protocol in this cut.
 
 `agenterm-cu --vnc <host[:port]>` is the first VNC target tier (PRD 30,
 cuts 3.31 observe / 3.32 send-text / 3.33 paste / 3.34 copy / 3.35
-send-keys / 3.36 select / 3.37 set-caret). It does not invent verbs: the
-host handshakes RFB (security type None / `x11vnc -nopw` only in this
-cut), rewrites the abstract command to `target=current`, and runs a local
-`agenterm-cu exec --json -` session worker against the shared desktop
-(`vnc_transport`; `DISPLAY` / `AT_SPI_BUS` via host env or `--vnc-env`).
-Observe and actuate grants both forward; structured work still uses
-AT-SPI / native clipboard on that session — never RFB framebuffer OCR,
-screenshot, or `--coords`. Caret evidence is a **gate-owned** loopback
-x11vnc (not the resident `:2` listener alone) plus a second
-`agenterm-con` on a unique control socket and title: host
+send-keys / 3.36 select / 3.37 set-caret / 3.38 click). It does not invent
+verbs: the host handshakes RFB (security type None / `x11vnc -nopw` only
+in this cut), rewrites the abstract command to `target=current`, and runs
+a local `agenterm-cu exec --json -` session worker against the shared
+desktop (`vnc_transport`; `DISPLAY` / `AT_SPI_BUS` via host env or
+`--vnc-env`). Observe and actuate grants both forward; structured work
+still uses AT-SPI / native clipboard on that session — never RFB
+framebuffer OCR, screenshot, or `--coords`. Click evidence is a
+**gate-owned** loopback x11vnc (not the resident `:2` listener alone)
+plus a second `agenterm-con` on a unique control socket and title: host
 `send-text --window H --name Command -- SEED` (payload after `--`; not
 `--text`) plants the seed, host
-`set-caret --window H --name Command --offset N` runs session AT-SPI
-`Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
-`get-caret` returns that offset (`via=get-caret-offset`) and host
-`get-text` still equals the seed. Native AT-SPI `CaretOffset` /
-`GetCaretOffset` / `SetCaretOffset` via the session worker. Never
-screenshot, `--coords`, or mouse-drag. Missing Text typed-fails
-`a11y_caret_unavailable` on the session worker the same as local
-`current`. `select` (3.36), `send-keys` (3.35), `copy` (3.34),
-`paste --text` (3.33), and `send-text` (3.32) over vnc remain valid. Do
-not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident
-avatar PIDs. Connect / protocol / auth failures are typed
-(`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed`);
-missing `--vnc` on `--target vnc` is `invalid_input`. Do not implement
-vnc as a second control protocol or D-Bus port-forward in this cut.
+`click --window H --name SEND` runs session AT-SPI Action `DoAction`
+(`addressing=accessibility-tree`), then host independent
+`get-text --window H --name Command` returns empty (composer cleared on
+SEND submit). Native AT-SPI Action via the session worker. Never
+screenshot, `--coords`, RFB pointer, or framebuffer OCR. Missing or
+ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous`
+on the session worker the same as local `current`. `set-caret` (3.37),
+`select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
+(3.33), and `send-text` (3.32) over vnc remain valid. Do not steal
+`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
+Connect / protocol / auth failures are typed (`vnc_unavailable` /
+`vnc_transport_failed` / `vnc_auth_failed`); missing `--vnc` on
+`--target vnc` is `invalid_input`. Do not implement vnc as a second
+control protocol or D-Bus port-forward in this cut.
 
 `cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
 (`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.

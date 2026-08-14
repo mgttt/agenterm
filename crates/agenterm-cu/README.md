@@ -138,24 +138,22 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). Caret evidence is a **gate-owned** loopback
+env or `--vnc-env`). Click evidence is a **gate-owned** loopback
 `x11vnc` plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
 as the only proof): host `send-text --window HANDLE --name Command -- SEED`
 (payload after `--`; not `--text`) plants the seed, host
-`set-caret --window HANDLE --name Command --offset N` runs session
-AT-SPI `Text.SetCaretOffset` (`via=set-caret-offset`), then host
-independent `get-caret --window HANDLE --name Command` returns that
-offset (`via=get-caret-offset`) and host
-`get-text --window HANDLE --name Command` still equals the seed. Native
-AT-SPI `CaretOffset` / `GetCaretOffset` / `SetCaretOffset` via the
-session worker — never screenshot / `--coords` / mouse-drag / RFB
-framebuffer OCR. Missing Text typed-fails `a11y_caret_unavailable` on the
-session worker the same as local `current`. `select` / `send-keys` /
-`copy` / `paste --text` / `send-text` over vnc and observe-only
-`windows` / `get-text` / `wait` remain valid too. Connect / protocol
-failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
-`vnc_auth_failed`).
+`click --window HANDLE --name SEND` runs session AT-SPI Action `DoAction`
+(`addressing=accessibility-tree`), then host independent
+`get-text --window HANDLE --name Command` returns empty (composer cleared on
+SEND submit). Native AT-SPI Action via the session worker — never
+screenshot / `--coords` / RFB pointer / framebuffer OCR. Missing or
+ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous` on
+the session worker the same as local `current`. `set-caret` / `select` /
+`send-keys` / `copy` / `paste --text` / `send-text` over vnc and
+observe-only `windows` / `get-text` / `wait` / `get-caret` remain valid
+too. Connect / protocol failures are typed (`vnc_unavailable` /
+`vnc_transport_failed` / `vnc_auth_failed`).
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -169,14 +167,12 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Caret path: send-text SEED → set-caret --offset 3 → get-caret == 3, get-text == SEED.
-agenterm-cu --vnc 127.0.0.1:5937 --grant observe,actuate \
+# Click path: send-text SEED → click --name SEND → get-text --name Command == "".
+agenterm-cu --vnc 127.0.0.1:5938 --grant observe,actuate \
   send-text --window HANDLE --name Command -- SEED
-agenterm-cu --vnc 127.0.0.1:5937 --grant observe,actuate \
-  set-caret --window HANDLE --name Command --offset 3
-agenterm-cu --vnc 127.0.0.1:5937 --grant observe \
-  get-caret --window HANDLE --name Command
-agenterm-cu --vnc 127.0.0.1:5937 --grant observe \
+agenterm-cu --vnc 127.0.0.1:5938 --grant actuate \
+  click --window HANDLE --name SEND
+agenterm-cu --vnc 127.0.0.1:5938 --grant observe \
   get-text --window HANDLE --name Command
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
