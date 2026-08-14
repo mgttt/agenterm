@@ -125,7 +125,9 @@ Windows checklist:
   evidence: unrelated providers can recycle, reject calls, or exceed the bounded
   deadline. Let desktop-wide ABI probes typed-fail when a provider is unavailable,
   and own success semantics with a child-owned native window fixture plus the
-  public black-box journey.
+  public black-box journey. `InvokePattern::Invoke` returning does not guarantee
+  the target GUI thread has processed `WM_COMMAND`; wait on the owned observable
+  effect with a deadline instead of asserting immediately or sleeping blindly.
 - A process-global native resource needs one lock and one RAII owner across every
   adapter path. In particular, Windows console attach/detach cannot be split
   between a dependency helper and a platform guard: serialize the whole

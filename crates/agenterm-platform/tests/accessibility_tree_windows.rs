@@ -5,6 +5,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
@@ -187,6 +188,7 @@ fn wide(value: &str) -> Vec<u16> {
 
 #[test]
 fn native_fixture_exposes_tree_patterns_text_focus_and_recycling() {
+    BUTTON_CLICKS.store(0, Ordering::SeqCst);
     assert_eq!(capability_status(), CapabilityStatus::Available);
     let fixture = Fixture::start();
     let tree = tree_for_window(Some(fixture.hwnd)).expect("UIA fixture tree");
@@ -222,6 +224,10 @@ fn native_fixture_exposes_tree_patterns_text_focus_and_recycling() {
         AccessibilityNodeAction::Click,
     )
     .expect("UIA Invoke");
+    let invoke_deadline = Instant::now() + Duration::from_secs(1);
+    while BUTTON_CLICKS.load(Ordering::SeqCst) == 0 && Instant::now() < invoke_deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
     assert_eq!(BUTTON_CLICKS.load(Ordering::SeqCst), 1);
 
     fixture.remove_button();
