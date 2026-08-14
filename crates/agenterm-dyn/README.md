@@ -56,6 +56,13 @@ They are **not** imported from platform today. What stays in dyn: `intern` /
 `bind` / `eval`, `dlcall` + libffi, value/error/parse, and the rule that OS
 names remain opaque script data at the eval boundary.
 
+## Layer 3 codegen
+
+Research for a future layer that lowers the same intern list (`do` / `set` /
+`if` / `dlcall`) to native code — **not implemented**; this crate has no JIT
+today. Survey notes (SLJIT vs DynASM, sizes, W^X, lowering sketch):
+[`docs/layer3-sljit-dynasm.md`](docs/layer3-sljit-dynasm.md).
+
 ## Public surface
 
 | API | Role |
