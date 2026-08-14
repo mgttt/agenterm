@@ -118,18 +118,15 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Focus evidence is
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Tree evidence is
 loopback `sshd` plus a second `agenterm-con`: host
-`focus --window HANDLE --name Command` (or `SEND`) runs remote AT-SPI Action
-`focus` / `Component::grab_focus` (`addressing=accessibility-tree`), then host
-independent `tree --window HANDLE` shows that node `focused` and/or host
-`get-text --window HANDLE` (no `--name`) reads the focused Text node. Never
-screenshot / `--coords` / mouse-drag / XTest. Missing or ambiguous name
-typed-fails `a11y_node_not_found` / `a11y_node_ambiguous` on the remote worker
-the same as local `current`. `scroll` / `click` / `set-caret` / `select` /
-`send-keys` / `copy` / `paste --text` / `send-text` over ssh and observe-only
-`wait` / `get-text` / `get-selection` / `get-caret` / `get-extents` remain
-valid too.
+`tree --window HANDLE` returns the remote AT-SPI flattened control tree
+(`addressing=accessibility-tree`) and the unique named Session children
+`Command`, `SEND`, and `OffscreenField` each appear once among showing nodes.
+Never screenshot / `--coords` / mouse-drag / XTest. `focus` / `scroll` /
+`click` / `set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
+`send-text` over ssh and observe-only `wait` / `get-text` / `get-selection` /
+`get-caret` / `get-extents` remain valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -143,14 +140,10 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Focus path: focus --name Command → tree shows focused and/or get-text
-# --window HANDLE (no --name) reads the focused node.
+# Tree path: tree --window HANDLE returns nodes named Command, SEND,
+# and OffscreenField (unique among showing nodes).
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant actuate focus --window HANDLE --name Command
-agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
-  tree --window HANDLE
-agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
-  get-text --window HANDLE
+  --grant observe tree --window HANDLE
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows

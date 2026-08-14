@@ -5,38 +5,43 @@
 //! `ssh` stdio. No new verbs. Observe and actuate grants both forward; the
 //! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
-//! for both read (`wait` / `get-text` / `get-selection` / `get-caret`) and
-//! write (`send-text` / `paste` / `copy` / `send-keys` / `select` /
-//! `set-caret` / `click` / `scroll` / `focus`). Cut 3.19 locks the clipboard
-//! write: host `paste --text` plants the seed on the remote Command field;
-//! host `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
-//! already on Command (or planted over ssh paste/send-text), host `copy`
-//! publishes remote GetText onto the remote session CLIPBOARD, then host
-//! `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21 locks key
-//! delivery: host `send-keys` types plain keys into the remote focused
-//! Command field, then host `wait` + `get-text` equals those keys. Cut 3.22
-//! locks text selection: host `send-text` plants a seed on remote Command
-//! (`--` ends flags; not `--text`), host `select --start N --end M` runs
-//! remote AT-SPI `Text.SetSelection` (`via=set-selection`), then host
-//! independent `get-selection` returns that range (`via=get-selection`;
-//! start/end equal the selected slice of the seed). Cut 3.23 locks caret
-//! placement: host `send-text` plants a seed on remote Command, host
-//! `set-caret --offset N` runs remote AT-SPI `Text.SetCaretOffset`
-//! (`via=set-caret-offset`), then host independent `get-caret` returns that
-//! offset (`via=get-caret-offset`) and host `get-text` still equals the
-//! seed. Cut 3.24 locks named Action click: host `send-text` plants a seed
-//! on remote Command, host `click --name SEND` runs remote AT-SPI Action
-//! `DoAction` (`addressing=accessibility-tree`), then host independent
-//! `get-text --name Command` returns empty (composer cleared on submit).
-//! Cut 3.25 locks named scroll: host `scroll --name OffscreenField` runs
-//! remote AT-SPI `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host
-//! independent `get-extents` before/after proves nonzero `|Δy|` or `|Δx|`
-//! (snapshot `node.bounds` do not count). Cut 3.26 locks named focus: host
+//! for both read (`tree` / `wait` / `get-text` / `get-selection` /
+//! `get-caret` / `get-extents`) and write (`send-text` / `paste` / `copy` /
+//! `send-keys` / `select` / `set-caret` / `click` / `scroll` / `focus`).
+//! Cut 3.19 locks the clipboard write: host `paste --text` plants the seed
+//! on the remote Command field; host `get-text` equals that seed. Cut 3.20
+//! locks clipboard publish: seed already on Command (or planted over ssh
+//! paste/send-text), host `copy` publishes remote GetText onto the remote
+//! session CLIPBOARD, then host `paste` (no `--text`) + `get-text` equals
+//! that seed. Cut 3.21 locks key delivery: host `send-keys` types plain keys
+//! into the remote focused Command field, then host `wait` + `get-text`
+//! equals those keys. Cut 3.22 locks text selection: host `send-text` plants
+//! a seed on remote Command (`--` ends flags; not `--text`), host
+//! `select --start N --end M` runs remote AT-SPI `Text.SetSelection`
+//! (`via=set-selection`), then host independent `get-selection` returns that
+//! range (`via=get-selection`; start/end equal the selected slice of the
+//! seed). Cut 3.23 locks caret placement: host `send-text` plants a seed on
+//! remote Command, host `set-caret --offset N` runs remote AT-SPI
+//! `Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
+//! `get-caret` returns that offset (`via=get-caret-offset`) and host
+//! `get-text` still equals the seed. Cut 3.24 locks named Action click: host
+//! `send-text` plants a seed on remote Command, host `click --name SEND`
+//! runs remote AT-SPI Action `DoAction` (`addressing=accessibility-tree`),
+//! then host independent `get-text --name Command` returns empty (composer
+//! cleared on submit). Cut 3.25 locks named scroll: host
+//! `scroll --name OffscreenField` runs remote AT-SPI
+//! `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host independent
+//! `get-extents` before/after proves nonzero `|Δy|` or `|Δx|` (snapshot
+//! `node.bounds` do not count). Cut 3.26 locks named focus: host
 //! `focus --name Command` (or `SEND`) runs remote AT-SPI Action `focus` /
 //! `Component::grab_focus` (`addressing=accessibility-tree`), then host
 //! independent `tree` shows that node `focused` and/or host
-//! `get-text --window H` (no `--name`) reads the focused Text node. Never
-//! screenshot / `--coords` / mouse-drag / XTest.
+//! `get-text --window H` (no `--name`) reads the focused Text node. Cut
+//! 3.27 locks structured tree observe: host `tree --window H` returns the
+//! remote AT-SPI flattened control tree (`addressing=accessibility-tree`)
+//! and the unique named Session children `Command`, `SEND`, and
+//! `OffscreenField` each appear once among showing nodes. Never screenshot /
+//! `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -838,6 +843,31 @@ mod tests {
                 assert!(node.is_none());
                 assert_eq!(name.as_deref(), Some("Command"));
                 assert_eq!(role.as_deref(), Some("text"));
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tree_window_survives_target_rewrite() {
+        // 3.27: first ssh tree path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current tree. Circuit: host
+        // tree --window H on a second agenterm-con returns the remote AT-SPI
+        // flattened control tree (addressing=accessibility-tree; never
+        // screenshot / --coords / XTest). Independent proof is the returned
+        // nodes list: unique named Session children Command, SEND, and
+        // OffscreenField each appear once among showing nodes. No new verb;
+        // observe grant only.
+        let command = CuCommand::Tree {
+            target: TargetRef::Ssh,
+            window: Some(42),
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "tree");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Tree { window, .. } => {
+                assert_eq!(window, Some(42));
             }
             other => panic!("unexpected command {other:?}"),
         }
