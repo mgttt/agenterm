@@ -1,0 +1,19 @@
+[package]
+name = "agenterm-dyn"
+version = "0.1.16"
+edition = "2024"
+rust-version = "1.97"
+description = "In-process live native door: interned symbols, S-expr eval, libffi dlcall"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+libffi = "5.1"
+libloading = "0.8"
+thiserror = "2"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
