@@ -296,8 +296,7 @@ pub(crate) fn get_node_extents(
     _node_id: &str,
 ) -> Result<AccessibilityBounds, AccessibilityTreeError> {
     Err(AccessibilityTreeError::Unsupported {
-        reason: "independent AT-SPI Component.GetExtents is unavailable through Windows UIA"
-            .into(),
+        reason: "independent AT-SPI Component.GetExtents is unavailable through Windows UIA".into(),
     })
 }
 
