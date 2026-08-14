@@ -229,7 +229,10 @@ Canonical host mapping (approved product vocabulary):
   Reasonix composer (`Message Reasonix…` under
   `scripts/reasonix-desktop-a11y.sh`) uses that same native Text
   path; WebKit 2.52 already implements SetSelection/GetSelection
-  (no `A11YSELECT1` eval helper — unlike ScrollTo).
+  (no `A11YSELECT1` eval helper — unlike ScrollTo). Linux
+  `agenterm-con` composer `Command` publishes real
+  `SetSelection` / `GetNSelections` / `GetSelection` (same verbs,
+  no ABI change).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

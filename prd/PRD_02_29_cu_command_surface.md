@@ -183,7 +183,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   composer (`Message Reasonix…` under
   `scripts/reasonix-desktop-a11y.sh`) uses the same native
   `Text.SetSelection` / `GetNSelections` / `GetSelection` path — no
-  eval-helper select glue (unlike `ScrollTo` / EditableText).
+  eval-helper select glue (unlike `ScrollTo` / EditableText). Linux
+  `agenterm-con` composer `Command` publishes those same Text methods
+  (persistent publisher range; same ABI 1.8 verbs, no protocol change).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
