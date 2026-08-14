@@ -23,7 +23,7 @@
 | 能力枚举编号三处一致 | `capability_enum_gate.rs` | 比名字**和**数值、按声明顺序（只比名字集合会漏掉对调） |
 | pkg-config 元数据可用 | `pkgconfig_libs.rs` / `pkgconfig_consume.rs` | 四方防漂移（见 §2）+ 端到端真链真跑 |
 | 安装布局正确（Unix） | `install_consume.rs` | 跑真实 `install.sh`，**运行时只指向安装目录，不许回落 `target/`** |
-| 安装布局正确（**Windows**） | `install_consume_windows.rs` | 跑真实 `install.ps1`；装出 `lib\agenterm.lib`（静态）+ `lib\agenterm.dll.lib`（导入库）+ `bin\agenterm.dll` + 头文件，`.exp`/`.pdb` 不装。静态与动态各消费一次，**且负对照判决**：`bin\` 不在 PATH 时动态探针必须失败（实测 `-1073741515` = `0xC0000135`），静态探针在同环境必须成功。两半缺一，"静态"就只是自称 |
+| 安装布局正确（**Windows**） | `install_consume_windows.rs` | 跑真实 `install-libagenterm` Rh task；装出 `lib\agenterm.lib`（静态）+ `lib\agenterm.dll.lib`（导入库）+ `bin\agenterm.dll` + 头文件，`.exp`/`.pdb` 不装。静态与动态各消费一次，**且负对照判决**：`bin\` 不在 PATH 时动态探针必须失败（实测 `-1073741515` = `0xC0000135`），静态探针在同环境必须成功。两半缺一，"静态"就只是自称 |
 | 共享库有安装身份 | `install_identity.rs` | Linux `DT_SONAME`、macOS `@rpath` install name |
 | 消费者拒绝 ABI major 不匹配 | `agenterm-cu` 单测 + 真实产物门控 | 校验在 `load()` 一处，不匹配的库根本没机会被调用 |
 | 一个进程只选一种链接形态 | `mixed_linkage.rs` | 三平台实测两份错误状态独立；规则写进头文件 |

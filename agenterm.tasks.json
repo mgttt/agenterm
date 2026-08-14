@@ -992,6 +992,24 @@
         "task.migration-audit"
       ]
     },
+    "install-libagenterm": {
+      "inputs": [
+        "libagenterm-windows-artifacts",
+        "install-prefix"
+      ],
+      "outputs": [
+        "libagenterm-windows-install-tree"
+      ],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576
+      },
+      "network": [],
+      "evidence": [
+        "task.install-libagenterm"
+      ]
+    },
     "lint": {
       "inputs": [
         "source-tree",
@@ -2338,6 +2356,20 @@
       ],
       "side_effects": [
         "process_spawn"
+      ]
+    },
+    {
+      "id": "install-libagenterm",
+      "description": "Install Windows libagenterm artifacts into an MSVC-style prefix",
+      "entry": "scripts/rh/install-libagenterm.rh",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": [
+        "windows"
+      ],
+      "side_effects": [
+        "artifact_write"
       ]
     },
     {

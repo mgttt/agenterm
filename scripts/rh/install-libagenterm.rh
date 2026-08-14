@@ -1,0 +1,79 @@
+// Install Windows libagenterm artifacts into an MSVC-style prefix.
+//
+// Args: REPO PREFIX ARTIFACTS [LIBDIR INCLUDEDIR BINDIR]
+
+fn require(condition, message) {
+    if condition == 0 {
+        throw message;
+    }
+    0
+}
+
+fn require_nonempty_file(path, code) {
+    require(std::fs::exists(path), code + "_missing:" + path);
+    let metadata = std::fs::metadata(path);
+    require(metadata.is_file, code + "_not_file:" + path);
+    require(metadata.len > 0, code + "_empty:" + path);
+    0
+}
+
+fn entry() {
+    require(
+        args.len == 3 || args.len == 6,
+        "expected: REPO PREFIX ARTIFACTS [LIBDIR INCLUDEDIR BINDIR]"
+    );
+
+    let repo = std::path::absolute(args[0]).display;
+    let prefix = std::path::absolute(args[1]).display;
+    let artifacts = std::path::absolute(args[2]).display;
+    let libdir = std::path::join(prefix, "lib").display;
+    let includedir = std::path::join(prefix, "include").display;
+    let bindir = std::path::join(prefix, "bin").display;
+    if args.len == 6 {
+        libdir = std::path::absolute(args[3]).display;
+        includedir = std::path::absolute(args[4]).display;
+        bindir = std::path::absolute(args[5]).display;
+    }
+
+    let header = std::path::join(repo, "include/agenterm.h").display;
+    let static_library = std::path::join(artifacts, "agenterm.lib").display;
+    let dll_import_library =
+        std::path::join(artifacts, "agenterm.dll.lib").display;
+    let dynamic_library = std::path::join(artifacts, "agenterm.dll").display;
+
+    // Validate every source before creating or changing the destination.
+    require_nonempty_file(header, "libagenterm_install_header");
+    require_nonempty_file(static_library, "libagenterm_install_static");
+    require_nonempty_file(dll_import_library, "libagenterm_install_import");
+    require_nonempty_file(dynamic_library, "libagenterm_install_dynamic");
+
+    std::fs::create_dir_all(includedir);
+    std::fs::create_dir_all(libdir);
+    std::fs::create_dir_all(bindir);
+
+    let installed_header =
+        std::path::join(includedir, "agenterm.h").display;
+    let installed_static =
+        std::path::join(libdir, "agenterm.lib").display;
+    let installed_link_library =
+        std::path::join(libdir, "agenterm.dll.lib").display;
+    let installed_dynamic =
+        std::path::join(bindir, "agenterm.dll").display;
+
+    std::fs::copy(header, installed_header);
+    std::fs::copy(static_library, installed_static);
+    std::fs::copy(dll_import_library, installed_link_library);
+    std::fs::copy(dynamic_library, installed_dynamic);
+
+    require_nonempty_file(installed_header, "libagenterm_installed_header");
+    require_nonempty_file(installed_static, "libagenterm_installed_static");
+    require_nonempty_file(installed_link_library, "libagenterm_installed_import");
+    require_nonempty_file(installed_dynamic, "libagenterm_installed_dynamic");
+
+    print("install-libagenterm: installed Windows/MSVC layout into " + prefix);
+    print("install-libagenterm: include=" + installed_header);
+    print("install-libagenterm: static=" + installed_static);
+    print("install-libagenterm: import=" + installed_link_library);
+    print("install-libagenterm: runtime=" + installed_dynamic);
+    0
+}

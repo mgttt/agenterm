@@ -80,9 +80,12 @@ jobs:
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_identity -- --nocapture
+      - name: Build Windows libagenterm installer task host
+        run: cargo build --locked -p agenterm --bin agenterm
       - name: Install and consume from the installed tree (Windows, abi-release)
         env:
           AGENTERM_ABI_PROFILE_DIR: target/abi-release
+          AGENTERM_INSTALL_TASK_HOST: target/debug/agenterm.exe
         run: cargo test --locked -p agenterm-abi --profile abi-dev --test install_consume_windows -- --nocapture
       - name: Input injection success path on a child-owned window (abi-release artifacts)
         # Milestone 72: the four agt_input_* exports finally get success-path

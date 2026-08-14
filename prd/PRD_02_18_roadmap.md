@@ -638,8 +638,8 @@ track remains planned, but every declared dependency must still pass.
     `releases.json` index derived from the existing per-artifact
     `.provenance.json` and the sealed candidate manifest; no second source of
     release truth and no proxying of Release bytes
-  - [ ] the installer surface reaches platform parity: `install.sh` and a new
-    `install.ps1` share one channel model (`stable` / `preview`), one
+  - [ ] the installer surface reaches platform parity: `install.sh` and the
+    `install-libagenterm` Rh task share one channel model (`stable` / `preview`), one
     versioned `releases/<version>` + `current` layout, one SHA-256 gate and
     one `installed.json` record; Windows stays a portable no-admin payload and
     does not acquire an MSI or registry footprint

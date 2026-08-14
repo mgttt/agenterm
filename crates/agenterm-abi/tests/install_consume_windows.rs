@@ -1,12 +1,12 @@
 //! Milestone 71 end-to-end gate (Windows delivery): install libagenterm
-//! into a fresh prefix with the REAL `packaging/install.ps1`, then consume
+//! into a fresh prefix with the REAL `install-libagenterm` Rh task, then consume
 //! ONLY the installed tree -- never the build tree. Windows counterpart of
 //! `install_consume.rs` (which serves the Unix channel via install.sh +
 //! pkg-config).
 //!
 //! What this gate proves, in order:
 //!
-//!   1. install.ps1 lays out exactly the four MSVC/vcpkg files
+//!   1. the install task lays out exactly the four MSVC/vcpkg files
 //!      (include\agenterm.h, lib\agenterm.lib, lib\agenterm.dll.lib,
 //!      bin\agenterm.dll) and NOT the .exp/.pdb byproducts;
 //!   2. STATIC consumption: link examples/c/agenterm_probe.c against
@@ -31,7 +31,7 @@
 //! and every full command line is eprintln'd.
 //!
 //! SKIP policy is STRICT by design: non-Windows -> SKIP with a reason
-//! (install.ps1 is the Windows delivery path); Windows MUST run for real
+//! (the Rh task is the Windows delivery path); Windows MUST run for real
 //! unless `find_c_compiler` finds no MSVC toolchain -- then SKIP with a
 //! reason, exactly the c_static_link.rs policy (a mingw gcc on PATH must
 //! never be chosen to link an MSVC-ABI .lib).
@@ -75,7 +75,7 @@ fn assert_no_dll(dir: &Path, label: &str) {
 }
 
 /// Walk `dir` recursively collecting any .exp / .pdb file (the build
-/// byproducts install.ps1 must NOT install).
+/// byproducts the install task must NOT install).
 fn collect_uninstalled_byproducts(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -94,11 +94,11 @@ fn collect_uninstalled_byproducts(dir: &Path, out: &mut Vec<PathBuf>) {
 
 #[test]
 fn install_then_consume_dynamic_and_static_windows() {
-    // Non-Windows: install.ps1 is the Windows delivery path -- explicit
+    // Non-Windows: the Rh task is the Windows delivery path -- explicit
     // SKIP with a reason, never a run (green must not look like a run).
     if !cfg!(windows) {
         eprintln!(
-            "SKIP: install.ps1 is the Windows delivery path; target_os={}",
+            "SKIP: install-libagenterm is the Windows delivery path; target_os={}",
             std::env::consts::OS
         );
         return;
@@ -129,12 +129,11 @@ fn install_then_consume_dynamic_and_static_windows() {
     let bindir = prefix.join("bin");
     let _cleanup = Cleanup(prefix.clone());
 
-    // ---- run the REAL install.ps1 into the prefix ------------------------
-    // -Artifacts is pointed at the profile that was actually built
+    // ---- run the REAL install-libagenterm task into the prefix ------------
+    // ARTIFACTS is pointed at the profile that was actually built
     // (AGENTERM_ABI_PROFILE_DIR on CI, the test binary's own profile tree
     // locally) -- the same decision install_consume.rs makes via
     // locate_cdylib().
-    let install_ps1 = root.join("packaging/install.ps1");
     let cdylib = locate_cdylib();
     let artifacts = cdylib
         .parent()
@@ -145,19 +144,37 @@ fn install_then_consume_dynamic_and_static_windows() {
         artifacts.display(),
         prefix.display()
     );
-    let mut install = Command::new("powershell");
+    let configured_task_host = std::env::var_os("AGENTERM_INSTALL_TASK_HOST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("target/debug/agenterm.exe"));
+    let task_host = if configured_task_host.is_absolute() {
+        configured_task_host
+    } else {
+        root.join(configured_task_host)
+    };
+    assert!(
+        task_host.is_file(),
+        "install-libagenterm task host missing at {}",
+        task_host.display()
+    );
+    let mut install = Command::new(&task_host);
     install
-        .arg("-NoProfile")
-        .arg("-ExecutionPolicy")
-        .arg("Bypass")
-        .arg("-File")
-        .arg(&install_ps1)
-        .arg("-Prefix")
+        .args(["__agenterm-internal-engine", "rh"])
+        .args(["task", "run", "install-libagenterm", "--manifest"])
+        .arg(root.join("agenterm.tasks.json"))
+        .args([
+            "--timeout-ms",
+            "30000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(&root)
         .arg(&prefix)
-        .arg("-Artifacts")
         .arg(&artifacts);
-    eprint_cmd("install.ps1", &install);
-    run_or_panic("install.ps1", &mut install);
+    install.env("AGENTERM_NO_ACTIVATE", "1");
+    eprint_cmd("install-libagenterm", &install);
+    run_or_panic("install-libagenterm", &mut install);
 
     // ---- the installed layout must be exactly the four promised files ----
     let expected = [
@@ -189,7 +206,7 @@ fn install_then_consume_dynamic_and_static_windows() {
     collect_uninstalled_byproducts(&prefix, &mut byproducts);
     assert!(
         byproducts.is_empty(),
-        "install.ps1 must not install byproducts, found: {:?}",
+        "install-libagenterm must not install byproducts, found: {:?}",
         byproducts
     );
     eprintln!("install_consume_windows: no .exp/.pdb byproducts in the installed tree");

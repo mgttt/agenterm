@@ -51,6 +51,12 @@ Failures that can appear only at that complete native-pack stage include:
 - `throw` lowering inside a `try` body;
 - mutable calls on `Child` values obtained from a list.
 
+The module bundler currently recognizes `import` without checking the token's
+left boundary. An identifier ending in `import`, such as `installed_import`,
+can therefore raise `script_module_import_path` when punctuation follows it.
+Do not use `import` as a whole identifier segment; choose a semantic name such
+as `installed_link_library` until the bundler boundary is corrected.
+
 Do not promote a successful `mode_probe` to task evidence when the actual
 native pack was never compiled and run.
 
