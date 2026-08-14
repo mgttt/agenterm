@@ -151,12 +151,14 @@ Canonical host mapping (approved product vocabulary):
   showing focused node (innermost Text candidate). Never XTest /
   `input_inject::type_text` when `--window` is set. Independent
   `get-text --window HANDLE` (no `--name`) must equal the typed
-  string. Chrome `GetTextField` after `focus --name` still needs the
-  renderer on the same host AT-SPI bus (`AT_SPI_BUS` /
-  `AT_SPI_BUS_ADDRESS`). Reasonix composer `Message Reasonix…`
-  under `scripts/reasonix-desktop-a11y.sh` uses the same verb; the
-  write is AT-SPI `Text` plus the eval-helper set-value (no protocol
-  change). Do not mark this leaf shipped on worker JSON.
+  string. Live hosts: agenterm-con named `Command` (native
+  `EditableText` on a second con; never steal the resident control
+  socket), Chrome `GetTextField` after `focus --name` (renderer on the
+  same host AT-SPI bus: `AT_SPI_BUS` / `AT_SPI_BUS_ADDRESS`), and
+  Reasonix composer `Message Reasonix…` under
+  `scripts/reasonix-desktop-a11y.sh` (AT-SPI `Text` plus the
+  eval-helper set-value; no protocol change). Do not mark this leaf
+  shipped on worker JSON.
 - [x] `copy --window HANDLE --name PAT [--role ROLE]` resolves through
   that same path, then publishes AT-SPI `Text.GetText`
   (`agt_a11y_node_get_text`) onto the native clipboard
