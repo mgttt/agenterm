@@ -93,6 +93,21 @@ dyn_env.bind("ws", ws_ptr)?;
 dyn_env.eval(r#"(dlcall "libc.so.6" "ioctl" "i32" "i32" 0 "u64" 21523 "ptr" ws)"#)?;
 ```
 
+## CU-adjacent script examples
+
+These commented examples stay at the script-data boundary: they exercise the
+same native facts that cu's windows, focus, and get-text hands may consume,
+without wiring dyn into cu, platform, or the ABI:
+
+- [current PID](examples/getpid.md)
+- [terminal window size via `ioctl`](examples/ioctl-window-size.md)
+- [`DISPLAY` via `getenv`](examples/getenv-display.md)
+- [explicit missing-symbol failure](examples/failure-missing-symbol.md)
+
+The fenced forms contain only the currently shipped list language. Where C
+requires a pointer or writable structure, the example names the value that the
+embedding Rust host must bind before calling `Dyn::eval`.
+
 ## Test suite
 
 Independent integration tests live under `crates/agenterm-dyn/tests/`:
