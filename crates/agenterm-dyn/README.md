@@ -104,6 +104,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [effective user ID via `geteuid`](examples/geteuid.md)
 - [effective group ID via `getegid`](examples/getegid.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
+- [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
+- [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [terminal window size via `ioctl`](examples/ioctl-window-size.md)
 - [`DISPLAY` via `getenv`](examples/getenv-display.md)
 - [explicit missing-symbol failure](examples/failure-missing-symbol.md)
