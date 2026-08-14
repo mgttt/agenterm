@@ -120,3 +120,7 @@ on a 24×80 pty when `openpty` succeeds; `getenv("DISPLAY")`; honest `libX11`
 
 Non-live cells are never faked on the wrong OS — only data rows and
 compile-only gates.
+
+## Layer 3 (deferred)
+
+Survey notes: [SLJIT vs DynASM](docs/layer3-sljit-dynasm.md). Not linked. `dlcall` is Rust dispatch, not libffi.
