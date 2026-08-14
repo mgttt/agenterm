@@ -573,15 +573,17 @@ Commands:
                               --name targets the unique showing named node.
                               --window without --name copies that same path on
                               the showing focused node (same innermost Text
-                              candidate as get-text --window; Chrome GetTextField;
+                              candidate as get-text --window; con Command
+                              via=gettext on a second con that never steals the
+                              resident control socket; Chrome GetTextField;
                               Reasonix Message Reasonix… under
-                              scripts/reasonix-desktop-a11y.sh; con Command).
-                              Never XTest when --window is set. A node with no
-                              Text interface typed-fails (never XTest / --coords
-                              / screenshot). Close the circuit with paste
-                              --window (no --text / no --name) then get-text
-                              --window / wait --text-equals; copy matched.text
-                              does not count.
+                              scripts/reasonix-desktop-a11y.sh). Never XTest when
+                              --window is set. A node with no Text interface
+                              typed-fails (never XTest / --coords / screenshot).
+                              Close the circuit with paste --window (no --text /
+                              no --name) then get-text --window /
+                              wait --text-equals; copy matched.text does not
+                              count.
   paste --window HANDLE [--name PAT [--role ROLE]] [--text TEXT]
                               writes clipboard text via native AT-SPI EditableText
                               / Text (addressing=accessibility-tree). --text only
