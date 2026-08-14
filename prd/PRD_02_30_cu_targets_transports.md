@@ -22,13 +22,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` copy evidence reuses the #47 con-publish
-  `copy` / `paste` / `get-text` circuit over loopback `sshd` against a second
-  `agenterm-con` (never steal the resident control socket): seed is already on
-  `Command` (or planted over ssh `paste --text` / `send-text`), host
-  `cu --ssh copy` publishes remote GetText onto the **remote** session
-  CLIPBOARD, then host `cu --ssh paste` (no `--text`) + `get-text` equals that
-  seed. Never host clipboard, screenshot, or `--coords`.
+  commands above it. `ssh` send-keys evidence reuses the #47 con-publish
+  focused `send-keys` / `wait` / `get-text` circuit over loopback `sshd`
+  against a second `agenterm-con` (never steal the resident control socket):
+  host `cu --ssh focus --name Command` then `cu --ssh send-keys --window H --
+  KEYS` (no `--name`; plain typeable text uses remote AT-SPI EditableText /
+  Text when Device/key is absent), then host `cu --ssh wait` + `get-text`
+  equals those keys. Never screenshot or `--coords`. Keys ride in the remote
+  command JSON (`--` ends flags).
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -427,15 +428,17 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Copy path: seed already on a
-  second `agenterm-con` `Command` field (or planted over ssh `paste --text` /
-  `send-text`); host `copy --name Command` publishes remote GetText onto the
-  remote session CLIPBOARD (`via=gettext`); host `paste --name Command` (no
-  `--text`) + `get-text --name Command` equals that seed via remote clipboard +
-  AT-SPI EditableText / GetText (never screenshot / `--coords`, never host
-  clipboard). `paste --text` / `send-text` over ssh and observe-only
-  `wait --text-contains` / `get-text` still hold. Worker JSON does not count;
-  CEO owns the official gate. Auth failure and missing destination are typed
+  runs remote `agenterm-cu --target current`. Send-keys path: host
+  `focus --name Command` then `send-keys --window HANDLE -- KEYS` (no
+  `--name`; same focused path as local con send-keys) on a second
+  `agenterm-con` plants plain keys via remote AT-SPI Device/key or EditableText
+  / Text fallback; host `wait --text-equals` / `get-text --name Command`
+  equals those keys via AT-SPI GetText (never screenshot / `--coords`). Keys
+  ride in remote command JSON (`--` ends flags; leftover argv joined with
+  `+`). No focused field typed-fails on the remote worker the same as local
+  `current`. `copy` / `paste --text` / `send-text` over ssh and observe-only
+  `wait` / `get-text` still hold. Worker JSON does not count; CEO owns the
+  official gate. Auth failure and missing destination are typed
   (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
