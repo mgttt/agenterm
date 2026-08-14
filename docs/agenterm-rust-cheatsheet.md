@@ -1187,7 +1187,20 @@ AT-SPI `id` / name attributes plus the eval helper loaded by
 fallback. A named showing node that does not expose a writeable text
 interface typed-fails (`a11y_text_unavailable`). That path never falls
 through to XTest / `input_inject::type_text`. Explicit `--coords` or no
-`--name` may still inject. Their payload argument is positional, so parse
+`--window` may still inject. `send-text --window HANDLE` without `--name`
+is not that inject: it writes the same innermost focused Text node
+`get-text --window HANDLE` reads, through `agt_a11y_node_set_text`.
+`focus --name X` then `send-text --window H TEXT` then
+`get-text --window H` must close the loop (`GetText == TEXT`). A
+synthetic `--window` with no focused Text node typed-fails; it must
+not spray XTest. Chrome 151 still has no `EditableText`; the write is
+AT-SPI `Text` plus the existing renderer AX set-value over that
+Chrome's own `--remote-debugging-port`. `DISPLAY=:2` box-chrome
+defaults to 9224, which standing `chrome-profile-2` already owns on
+`127.0.0.1` — a second window whose cmdline still says 9224 then
+writes the wrong CDP tree (`no writable node named …`). Launch the
+gate Chrome with `SAND_CHROME_REMOTE_DEBUG_PORT` on a free port.
+Their payload argument is positional, so parse
 `--` as the end of flags — otherwise text (or a chord) that starts with a
 dash is eaten as a flag.
 
