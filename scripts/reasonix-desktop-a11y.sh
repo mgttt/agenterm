@@ -25,6 +25,11 @@
 # focused send-text path (via=text / eval-helper). Independent
 # get-text --window must equal the clipboard string. Do not add a
 # second focused-paste protocol, Ctrl+V, or XTest when --window is set.
+# copy --window without --name publishes that same focused Text.GetText
+# onto native CLIPBOARD (via=gettext / SetSelectionOwner). Close the
+# circuit: seed → copy --window → clear → paste --window →
+# get-text --window equals seed. Do not add a second focused-copy
+# protocol, Ctrl+C, or XTest when --window is set.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1

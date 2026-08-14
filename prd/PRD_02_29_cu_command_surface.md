@@ -126,15 +126,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`Message Reasonix…`) under `scripts/reasonix-desktop-a11y.sh`.
 - [x] `copy --window HANDLE` without `--name` copies that same GetText
   path on the showing focused node (innermost `Text.GetText` candidate —
-  the same node `get-text --window HANDLE` reads) onto native CLIPBOARD.
-  Never XTest / `--coords` / screenshot when `--window` is set. Proof is
-  independent host circuit: seed a unique string, `copy --window HANDLE`
-  (no `--name`), clear the field, `paste --window HANDLE` (no `--name` /
-  no `--text`), then `get-text --window HANDLE` (no `--name`) equals the
-  seeded string — not `copy` `matched.text`. Live hosts: Chrome
-  `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`) after
-  `focus --name`; Reasonix composer and agenterm-con `Command` share the
-  focused path. Without `--window` copy is invalid (no plain inject
+  the same node `get-text --window HANDLE` reads) onto native CLIPBOARD
+  (`via=gettext`). Never XTest / `--coords` / screenshot when `--window`
+  is set. Proof is independent host circuit: seed a unique string,
+  `copy --window HANDLE` (no `--name`), clear the field,
+  `paste --window HANDLE` (no `--name` / no `--text`), then
+  `get-text --window HANDLE` (no `--name`) equals the seeded string —
+  not `copy` `matched.text`. Live hosts: Chrome `GetTextField`
+  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name`; Reasonix
+  composer `Message Reasonix…` after `focus --name` under
+  `scripts/reasonix-desktop-a11y.sh` (`via=gettext`; paste restore uses
+  eval-helper set-value, `via=text`); agenterm-con `Command` after
+  `focus --name`. Without `--window` copy is invalid (no plain inject
   copy). Do not mark this leaf shipped on worker JSON.
 - [x] `paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]` writes
   the clipboard into the unique showing named field through that same

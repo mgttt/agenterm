@@ -1295,12 +1295,15 @@ see independent GetText == SRC (not copy/paste/send `matched.text`).
 
 `copy --window HANDLE` without `--name` copies that same GetText path
 on the showing focused node — the same innermost `Text.GetText`
-candidate `get-text --window` reads — onto native CLIPBOARD. Never
-XTest when `--window` is set. Proof is independent host circuit after
-`focus --name`: seed unique string → `copy --window H` (no `--name`) →
-clear field → `paste --window H` (no `--name` / no `--text`) →
-`get-text --window H` equals the seeded string (Chrome `GetTextField`,
-Reasonix composer, con `Command`). Without `--window` copy is invalid.
+candidate `get-text --window` reads — onto native CLIPBOARD
+(`via=gettext`). Never XTest when `--window` is set. Proof is
+independent host circuit after `focus --name`: seed unique string →
+`copy --window H` (no `--name`) → clear field → `paste --window H`
+(no `--name` / no `--text`) → `get-text --window H` equals the seeded
+string. Live hosts: Chrome `GetTextField`; Reasonix composer
+`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`
+(`via=gettext` on copy; paste still uses eval-helper set-value,
+`via=text`); agenterm-con `Command`. Without `--window` copy is invalid.
 
 `agenterm-cu wait --text-equals` / `--node-text-equals` with `--name` is the
 independent AT-SPI close-the-circuit after named `send-text` / `paste` /

@@ -399,15 +399,16 @@ fn send_text_to_node(
 /// showing focused node — the same innermost `Text.GetText` candidate
 /// `get-text --window` reads — so `focus --name X` then
 /// `copy --window H` then `paste --window H` / `get-text --window H`
-/// closes the loop on Chrome `GetTextField`, Reasonix composer, and
-/// agenterm-con `Command`. Never XTest when `--window` is set. Without
-/// `--window` copy is invalid: there is no plain "copy whatever is
-/// focused" inject verb. `matched.text` is the resolve-time snapshot;
-/// the copied payload is independent GetText. Live close-the-circuit
-/// includes Chrome fixture fields and the Reasonix composer
-/// (`Message Reasonix…`): paste after copy still uses the WebKit
-/// eval-helper set-value path; only independent GetText proves the
-/// restore.
+/// closes the loop on Chrome `GetTextField`, the Reasonix composer
+/// (`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`,
+/// `via=gettext`), and agenterm-con `Command`. Never XTest when
+/// `--window` is set. Without `--window` copy is invalid: there is no
+/// plain "copy whatever is focused" inject verb. `matched.text` is the
+/// resolve-time snapshot; the copied payload is independent GetText.
+/// Live close-the-circuit: seed unique string → focused copy → clear →
+/// focused paste → independent GetText equals seed. Paste after copy on
+/// Reasonix still uses the WebKit eval-helper set-value path; only
+/// independent GetText proves the restore.
 fn copy(
     window: Option<isize>,
     name: Option<&str>,
