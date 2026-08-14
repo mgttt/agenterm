@@ -1,9 +1,11 @@
-/* LD_PRELOAD helper for WebKitGTK AT-SPI Text writes.
+/* LD_PRELOAD helper for WebKitGTK AT-SPI Text writes and ScrollTo.
  *
  * WebKit 2.52 registers AT-SPI Text on <textarea> but never EditableText.
- * This interposes the Wails WebView constructor, then evaluates a value
- * setter on the GTK thread. cu confirms the write with Text.GetText.
- * Never XTest / coordinates.
+ * Component.ScrollTo returns true without moving geometry. This interposes
+ * the Wails WebView constructor, then evaluates a value setter or
+ * scrollIntoView on the GTK thread. cu confirms writes with Text.GetText
+ * and scrolls with independent Component.GetExtents. Never XTest /
+ * coordinates / Action scroll* / wheel.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -13,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -28,9 +31,19 @@ static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 static guint (*g_idle_add)(GSourceFunc, gpointer);
 static void (*g_run_js)(void *, const char *, void *, void *, gpointer);
+static void *(*g_run_js_finish)(void *, void *, void **);
+static void *(*g_js_get_value)(void *);
+static char *(*g_jsc_to_string)(void *);
+static void (*g_js_unref)(void *);
+static void (*g_free)(void *);
+static void (*g_error_free)(void *);
 
 struct Job {
     char *script;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    int done;
+    char reply[160];
 };
 
 static char *sock_path(void)
@@ -50,16 +63,57 @@ static char *sock_path(void)
     return strdup("/tmp/agenterm-webkit-eval.sock");
 }
 
+static void finish_job(struct Job *job, const char *reply)
+{
+    pthread_mutex_lock(&job->mu);
+    if (!job->done) {
+        snprintf(job->reply, sizeof job->reply, "%s", reply ? reply : "queued");
+        job->done = 1;
+        pthread_cond_signal(&job->cv);
+    }
+    pthread_mutex_unlock(&job->mu);
+}
+
+static void js_done(void *source, void *result, void *data)
+{
+    struct Job *job = data;
+    char *text = NULL;
+    void *err = NULL;
+    if (g_run_js_finish && source) {
+        void *js = g_run_js_finish(source, result, &err);
+        if (js && g_js_get_value && g_jsc_to_string) {
+            void *val = g_js_get_value(js);
+            if (val)
+                text = g_jsc_to_string(val);
+        }
+        if (js && g_js_unref)
+            g_js_unref(js);
+        if (err && g_error_free)
+            g_error_free(err);
+    }
+    finish_job(job, text ? text : "queued");
+    if (text && g_free)
+        g_free(text);
+}
+
 static gboolean run_job(gpointer data)
 {
     struct Job *job = data;
     pthread_mutex_lock(&g_mu);
     void *view = g_view;
     pthread_mutex_unlock(&g_mu);
-    if (view && g_run_js && job->script)
-        g_run_js(view, job->script, NULL, NULL, NULL);
+    if (view && g_run_js && job->script) {
+        if (g_run_js_finish)
+            g_run_js(view, job->script, NULL, js_done, job);
+        else {
+            g_run_js(view, job->script, NULL, NULL, NULL);
+            finish_job(job, "queued");
+        }
+    } else {
+        finish_job(job, "no-webview");
+    }
     free(job->script);
-    free(job);
+    job->script = NULL;
     return 0;
 }
 
@@ -197,6 +251,86 @@ static char *build_script(const char *id, size_t id_len, const char *name, size_
     return script;
 }
 
+static char *build_scroll_script(const char *id, size_t id_len, const char *name, size_t name_len)
+{
+    char *eid = js_escape(id ? id : "", id_len);
+    char *ename = js_escape(name ? name : "", name_len);
+    if (!eid || !ename) {
+        free(eid);
+        free(ename);
+        return NULL;
+    }
+    const char *fmt =
+        "(function(){"
+        "var id=\"%s\";"
+        "var name=\"%s\";"
+        "function labels(n){"
+        "var out=[];"
+        "var a=n.getAttribute&&n.getAttribute('aria-label');if(a)out.push(a);"
+        "var p=n.getAttribute&&n.getAttribute('placeholder');if(p)out.push(p);"
+        "var t=n.getAttribute&&n.getAttribute('title');if(t)out.push(t);"
+        "if(n.id)out.push(n.id);"
+        "var c=(n.textContent||'').replace(/\\s+/g,' ').trim();"
+        "if(c&&c.length<200)out.push(c);"
+        "return out;"
+        "}"
+        "function match(n){"
+        "if(id&&n.id===id)return true;"
+        "if(!name)return false;"
+        "var ls=labels(n);"
+        "for(var i=0;i<ls.length;i++){"
+        "if(ls[i].indexOf(name)!==-1||name.indexOf(ls[i])!==-1)return true;"
+        "}"
+        "return false;"
+        "}"
+        "function walk(root,acc){"
+        "if(!root)return;"
+        "if(root.querySelectorAll){"
+        "var nodes=root.querySelectorAll('*');"
+        "for(var i=0;i<nodes.length;i++){"
+        "acc.push(nodes[i]);"
+        "if(nodes[i].shadowRoot)walk(nodes[i].shadowRoot,acc);"
+        "}"
+        "}"
+        "}"
+        "var el=id?document.getElementById(id):null;"
+        "if(!el){"
+        "var acc=[];walk(document,acc);"
+        "for(var i=0;i<acc.length;i++){if(match(acc[i])){el=acc[i];break;}}"
+        "}"
+        "if(!el)return 'missing';"
+        "if(el.focus)try{el.focus({preventScroll:false});}catch(e0){try{el.focus();}catch(e00){}}"
+        "var before=el.getBoundingClientRect?el.getBoundingClientRect():null;"
+        "try{el.scrollIntoView({block:'start',inline:'nearest',behavior:'instant'});}"
+        "catch(e1){try{el.scrollIntoView(true);}catch(e2){}}"
+        "function align(node){"
+        "var p=node.parentElement;"
+        "while(p){"
+        "if(p.scrollHeight>p.clientHeight+4||p.scrollWidth>p.clientWidth+4){"
+        "var pr=p.getBoundingClientRect();"
+        "var nr=node.getBoundingClientRect();"
+        "p.scrollTop+=nr.top-pr.top;"
+        "}"
+        "p=p.parentElement;"
+        "}"
+        "var se=document.scrollingElement||document.documentElement;"
+        "if(se){var r=node.getBoundingClientRect();if(Math.abs(r.top)>1)se.scrollTop+=r.top;}"
+        "}"
+        "align(el);"
+        "var after=el.getBoundingClientRect?el.getBoundingClientRect():null;"
+        "var bt=before?Math.round(before.top):0;"
+        "var at=after?Math.round(after.top):0;"
+        "return 'ok:'+bt+':'+at;"
+        "})()";
+    size_t n = strlen(fmt) + strlen(eid) + strlen(ename) + 8;
+    char *script = malloc(n);
+    if (script)
+        snprintf(script, n, fmt, eid, ename);
+    free(eid);
+    free(ename);
+    return script;
+}
+
 static int read_prefixed(int fd, char **out, size_t *out_len)
 {
     char line[64];
@@ -218,17 +352,60 @@ static int read_prefixed(int fd, char **out, size_t *out_len)
     return 0;
 }
 
+static struct Job *queue_script(char *script)
+{
+    if (!script)
+        return NULL;
+    struct Job *job = calloc(1, sizeof *job);
+    if (!job) {
+        free(script);
+        return NULL;
+    }
+    job->script = script;
+    pthread_mutex_init(&job->mu, NULL);
+    pthread_cond_init(&job->cv, NULL);
+    g_idle_add(run_job, job);
+    return job;
+}
+
+static int wait_job(struct Job *job, char *out, size_t out_len)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 1;
+    pthread_mutex_lock(&job->mu);
+    while (!job->done) {
+        if (pthread_cond_timedwait(&job->cv, &job->mu, &ts) != 0)
+            break;
+    }
+    int done = job->done;
+    snprintf(out, out_len, "%s", done ? job->reply : "timeout");
+    pthread_mutex_unlock(&job->mu);
+    return done;
+}
+
 static void handle_client(int fd)
 {
     char hello[32];
-    if (read_line(fd, hello, sizeof hello) != 0 || strcmp(hello, "A11YEVAL1") != 0) {
+    if (read_line(fd, hello, sizeof hello) != 0) {
+        dprintf(fd, "ERR bad-hello\n");
+        return;
+    }
+    int is_eval = strcmp(hello, "A11YEVAL1") == 0;
+    int is_scroll = strcmp(hello, "A11YSCROLL1") == 0;
+    if (!is_eval && !is_scroll) {
         dprintf(fd, "ERR bad-hello\n");
         return;
     }
     char *id = NULL, *name = NULL, *text = NULL;
     size_t id_len = 0, name_len = 0, text_len = 0;
-    if (read_prefixed(fd, &id, &id_len) != 0 || read_prefixed(fd, &name, &name_len) != 0 ||
-        read_prefixed(fd, &text, &text_len) != 0) {
+    if (read_prefixed(fd, &id, &id_len) != 0 || read_prefixed(fd, &name, &name_len) != 0) {
+        dprintf(fd, "ERR bad-frame\n");
+        free(id);
+        free(name);
+        return;
+    }
+    if (is_eval && read_prefixed(fd, &text, &text_len) != 0) {
         dprintf(fd, "ERR bad-frame\n");
         free(id);
         free(name);
@@ -245,7 +422,8 @@ static void handle_client(int fd)
         free(text);
         return;
     }
-    char *script = build_script(id, id_len, name, name_len, text, text_len);
+    char *script = is_scroll ? build_scroll_script(id, id_len, name, name_len)
+                             : build_script(id, id_len, name, name_len, text, text_len);
     free(id);
     free(name);
     free(text);
@@ -253,15 +431,29 @@ static void handle_client(int fd)
         dprintf(fd, "ERR oom\n");
         return;
     }
-    struct Job *job = calloc(1, sizeof *job);
+    struct Job *job = queue_script(script);
     if (!job) {
-        free(script);
         dprintf(fd, "ERR oom\n");
         return;
     }
-    job->script = script;
-    g_idle_add(run_job, job);
-    dprintf(fd, "OK\n");
+    char js_reply[160];
+    int done = wait_job(job, js_reply, sizeof js_reply);
+    if (!done) {
+        dprintf(fd, "OK queued\n");
+        return;
+    }
+    pthread_mutex_destroy(&job->mu);
+    pthread_cond_destroy(&job->cv);
+    free(job);
+    if (strncmp(js_reply, "missing", 7) == 0) {
+        dprintf(fd, "ERR missing\n");
+        return;
+    }
+    if (strncmp(js_reply, "no-webview", 10) == 0) {
+        dprintf(fd, "ERR no-webview\n");
+        return;
+    }
+    dprintf(fd, "OK %s\n", js_reply);
 }
 
 static void *server_thread(void *arg)
@@ -315,6 +507,14 @@ static void resolve_syms(void)
     g_idle_add = (guint(*)(GSourceFunc, gpointer))dlsym(RTLD_DEFAULT, "g_idle_add");
     g_run_js = (void (*)(void *, const char *, void *, void *, gpointer))dlsym(
         RTLD_DEFAULT, "webkit_web_view_run_javascript");
+    g_run_js_finish = (void *(*)(void *, void *, void **))dlsym(
+        RTLD_DEFAULT, "webkit_web_view_run_javascript_finish");
+    g_js_get_value =
+        (void *(*)(void *))dlsym(RTLD_DEFAULT, "webkit_javascript_result_get_js_value");
+    g_jsc_to_string = (char *(*)(void *))dlsym(RTLD_DEFAULT, "jsc_value_to_string");
+    g_js_unref = (void (*)(void *))dlsym(RTLD_DEFAULT, "webkit_javascript_result_unref");
+    g_free = (void (*)(void *))dlsym(RTLD_DEFAULT, "g_free");
+    g_error_free = (void (*)(void *))dlsym(RTLD_DEFAULT, "g_error_free");
 }
 
 static void start_server(void)

@@ -149,6 +149,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   with no later independent geometry change is `a11y_scroll_no_effect`,
   not `timeout`. Never Action `scroll*`, XTest wheel, `--coords`, or
   screenshot. `matched.extents` / snapshot `node.bounds` do not count.
+  WebKitGTK `ScrollTo` returns true without moving geometry; when the
+  Reasonix eval helper is present the same verb applies
+  `scrollIntoView({block:'start'})` (no ABI change).
 - [x] `get-extents --window HANDLE --name PAT [--role ROLE]` reads
   independent AT-SPI `Component.GetExtents(Screen)`
   (`agt_a11y_node_get_extents`) for that unique showing named node.

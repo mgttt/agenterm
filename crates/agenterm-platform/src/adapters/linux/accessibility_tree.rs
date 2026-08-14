@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 mod chrome_ax_set_value;
+mod webkit_ax_scroll;
 mod webkit_ax_set_value;
 
 use atspi::proxy::accessible::AccessibleProxy;
@@ -446,7 +447,11 @@ async fn scroll_node_async(
     }
     let object = resolve_path(&conn, &selected, &indices).await?;
     let proxy = open_bus_object(&conn, &object).await?;
-    invoke_component_scroll_to(&proxy).await
+    // open_bus_object resolves well-known dests via GetNameOwner, so the
+    // proxy destination is often `:1.N`. Keep the pre-resolve dest so
+    // WebKit embeds (`org.webkit.*.Sandboxed.WebProcess-*`) still take
+    // the scrollIntoView helper instead of the no-op native ScrollTo.
+    invoke_component_scroll_to(&proxy, &object.dest).await
 }
 
 async fn get_node_extents_async(
@@ -470,6 +475,74 @@ async fn get_node_extents_async(
 }
 
 async fn invoke_component_scroll_to(
+    proxy: &AccessibleProxy<'_>,
+    original_dest: &str,
+) -> Result<(), AccessibilityTreeError> {
+    // WebKitGTK ScrollTo returns true without moving geometry. When the
+    // Reasonix eval helper is present, scrollIntoView is the real TopEdge.
+    // Dest may already be a unique name after GetNameOwner, so trust the
+    // pre-resolve dest and, if that is also unique, the toolkit attribute.
+    // Chrome stays on native ScrollTo (no helper socket, toolkit!=webkit).
+    let proxy_dest = proxy.inner().destination().as_str().to_owned();
+    if dest_looks_like_webkit(original_dest, &proxy_dest, "") {
+        return apply_webkit_scroll(proxy).await;
+    }
+    // GetChildren under the WebKit embed already returns the unique
+    // owner (`:1.185`), not `org.webkit.*.Sandboxed.WebProcess-*`.
+    // Reverse-lookup that well-known name before trusting toolkit.
+    if unique_dest_owns_webkit(proxy.inner().connection(), original_dest).await
+        || unique_dest_owns_webkit(proxy.inner().connection(), &proxy_dest).await
+    {
+        return apply_webkit_scroll(proxy).await;
+    }
+    let attributes = node_object_attributes(proxy).await;
+    let toolkit = attributes.get("toolkit").map(String::as_str).unwrap_or("");
+    if dest_looks_like_webkit(original_dest, &proxy_dest, toolkit) {
+        return apply_webkit_scroll_with(proxy, &attributes).await;
+    }
+    invoke_atspi_component_scroll_to(proxy).await
+}
+
+fn dest_looks_like_webkit(original_dest: &str, proxy_dest: &str, toolkit: &str) -> bool {
+    is_webkit_embed_dest(original_dest)
+        || is_webkit_embed_dest(proxy_dest)
+        || toolkit_is_webkit(toolkit)
+}
+
+async fn unique_dest_owns_webkit(conn: &zbus::Connection, dest: &str) -> bool {
+    if !is_unique_bus_name(dest) || dest.is_empty() {
+        return false;
+    }
+    let Ok(dbus) = DBusProxy::new(conn).await else {
+        return false;
+    };
+    let Ok(names) = dbus.list_names().await else {
+        return false;
+    };
+    for name in names {
+        let candidate = name.as_str();
+        if !is_webkit_embed_dest(candidate) {
+            continue;
+        }
+        let Ok(bus_name) = BusName::try_from(candidate.to_owned()) else {
+            continue;
+        };
+        if dbus
+            .get_name_owner(bus_name)
+            .await
+            .is_ok_and(|owner| owner.as_str() == dest)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn toolkit_is_webkit(toolkit: &str) -> bool {
+    toolkit.to_ascii_lowercase().contains("webkit")
+}
+
+async fn invoke_atspi_component_scroll_to(
     proxy: &AccessibleProxy<'_>,
 ) -> Result<(), AccessibilityTreeError> {
     let component = match component_proxy_for(proxy).await {
@@ -507,6 +580,40 @@ async fn invoke_component_scroll_to(
             "AT-SPI Component.ScrollTo returned false",
         ));
     }
+    Ok(())
+}
+
+async fn apply_webkit_scroll(proxy: &AccessibleProxy<'_>) -> Result<(), AccessibilityTreeError> {
+    let attributes = node_object_attributes(proxy).await;
+    apply_webkit_scroll_with(proxy, &attributes).await
+}
+
+async fn apply_webkit_scroll_with(
+    proxy: &AccessibleProxy<'_>,
+    attributes: &HashMap<String, String>,
+) -> Result<(), AccessibilityTreeError> {
+    let name = timeout(ACTION_TIMEOUT, proxy.name())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    let html_id = attributes
+        .get("id")
+        .map(String::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    // Missing helper is a typed fail (scroll_named_node), never a lying
+    // native ScrollTo true on WebKit 2.52.
+    if !webkit_ax_scroll::helper_present() {
+        return webkit_ax_scroll::scroll_named_node(&html_id, name.trim());
+    }
+    webkit_ax_scroll::scroll_named_node(&html_id, name.trim())?;
+    // The helper queues scrollIntoView on the GTK idle and replies OK
+    // immediately. A short settle lets the renderer move before the
+    // next independent GetExtents in this process. CEO still confirms
+    // with a later `cu get-extents`.
+    tokio::time::sleep(Duration::from_millis(180)).await;
     Ok(())
 }
 
@@ -2788,6 +2895,22 @@ mod tests {
         assert!(is_webkit_embed_dest("org.webkit.Something"));
         assert!(!is_webkit_embed_dest(":1.47"));
         assert!(!is_webkit_embed_dest("org.a11y.atspi.Registry"));
+    }
+
+    #[test]
+    fn webkit_scroll_route_survives_get_name_owner() {
+        // After open_bus_object, proxy dest is unique. The pre-resolve
+        // well-known dest (or toolkit attribute) still selects WebKit.
+        assert!(dest_looks_like_webkit(
+            "org.webkit.app-deadbeef.Sandboxed.WebProcess-uuid",
+            ":1.47",
+            ""
+        ));
+        assert!(dest_looks_like_webkit(":1.47", ":1.47", "WebKitGTK"));
+        assert!(!dest_looks_like_webkit(":1.47", ":1.47", "Chromium"));
+        assert!(!dest_looks_like_webkit(":1.47", ":1.47", ""));
+        assert!(toolkit_is_webkit("WebKitGTK"));
+        assert!(!toolkit_is_webkit("Chrome"));
     }
 
     #[test]

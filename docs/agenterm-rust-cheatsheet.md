@@ -1256,6 +1256,20 @@ typed-fail (`a11y_extents_unavailable`). Both verbs are single-node
 WebKitGTK hangs Component on walk. con publish `scroll_to` stays
 `false` until a later 合闸; do not close that loop here.
 
+WebKitGTK `Component.GetExtents(Screen)` works as a single-node call
+(snapshot `bounds` stay `0,0,0,0`). `Component.ScrollTo` returns true
+without changing those extents. GetChildren under the embed already
+returns the unique owner (`:1.N`), not
+`org.webkit.*.Sandboxed.WebProcess-*` — `open_bus_object` GetNameOwner
+does the same. Route scroll by: well-known dest, unique dest that owns
+that well-known name, or toolkit `WebKitGTK`. When
+`scripts/reasonix-desktop-a11y.sh` loaded the eval helper, `scroll
+--name` applies `scrollIntoView({block:'start'})` on the GTK thread
+(AT-SPI `id` + accessible name; same socket as set-value, hello
+`A11YSCROLL1`). Chrome has no helper socket and keeps native ScrollTo.
+Do not treat helper `OK` as geometric proof — only a later independent
+`get-extents` `|Δy|`.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`
