@@ -13,20 +13,22 @@
 //! via `paste --text`. Cut 3.34 locked clipboard publish via `copy`.
 //! Cut 3.35 locked key delivery via `send-keys`. Cut 3.36 locked text
 //! selection via `select` / `get-selection`. Cut 3.37 locked caret
-//! placement via `set-caret` / `get-caret`. Cut 3.38 locks named Action
-//! click: host `send-text` plants a seed on a second `agenterm-con`
-//! `Command` field (payload after `--`; not `--text`), host
-//! `click --name SEND` over `--vnc` runs session AT-SPI Action `DoAction`
-//! (`addressing=accessibility-tree`), then host independent
-//! `get-text --name Command` over the same `--vnc` returns empty
-//! (composer cleared on SEND submit). Native AT-SPI Action via the
-//! session worker — never screenshot / `--coords` / RFB pointer /
-//! framebuffer OCR. Gate-owned dedicated loopback x11vnc; never steal
+//! placement via `set-caret` / `get-caret`. Cut 3.38 locked named Action
+//! click. Cut 3.39 locks named scroll: host independent
+//! `get-extents --name OffscreenField` over `--vnc` records before
+//! extents on a second `agenterm-con` Session child, host
+//! `scroll --name OffscreenField` over `--vnc` runs session AT-SPI
+//! `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host
+//! independent `get-extents` after proves nonzero `|Δy|` or `|Δx|`
+//! (snapshot `node.bounds` do not count). Native AT-SPI Component via
+//! the session worker — never screenshot / `--coords` / RFB pointer /
+//! wheel / framebuffer OCR / Action `scroll*` / XTest. Gate-owned
+//! dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
 //! as the only proof. Observe and actuate grants both forward.
-//! `set-caret` (3.37), `select` (3.36), `send-keys` (3.35), `copy`
-//! (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc remain
-//! valid.
+//! `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
+//! (3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
+//! over vnc remain valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -921,6 +923,70 @@ mod tests {
                 assert!(!degraded);
                 assert_eq!(clicks, 1);
                 assert_eq!(button, crate::command::PointerButton::Left);
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scroll_name_survives_target_rewrite() {
+        // 3.39: first vnc scroll path reuses the same RFB + session-worker
+        // rewrite; the worker still runs target=current scroll. Circuit:
+        // host get-extents --window H --name OffscreenField records before
+        // extents, host scroll --window H --name OffscreenField runs
+        // session AT-SPI Component.ScrollTo(TopEdge) (via=scroll-to; never
+        // --coords / RFB pointer/wheel / screenshot / Action scroll* /
+        // XTest), then host independent get-extents after proves nonzero
+        // |Δy| or |Δx| (snapshot node.bounds do not count). Missing /
+        // false / UnknownMethod typed-fails a11y_scroll_unavailable on the
+        // session worker the same as local current; ScrollTo true with no
+        // later independent geometry change is a11y_scroll_no_effect (CEO
+        // gate, not this rewrite test). Selector must survive the rewrite.
+        let command = CuCommand::Scroll {
+            target: TargetRef::Vnc,
+            window: Some(42),
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "scroll");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Scroll {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("OffscreenField"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_extents_observe_survives_target_rewrite() {
+        // 3.39 observe sibling: get-extents must also rewrite target only
+        // and keep window/name/role so independent Component.GetExtents
+        // (Screen) proof rides the same RFB + session-worker path as scroll.
+        // Snapshot node.bounds do not count. Missing / empty extents
+        // typed-fails a11y_extents_unavailable on the session worker the
+        // same as local current.
+        let command = CuCommand::GetExtents {
+            target: TargetRef::Vnc,
+            window: Some(42),
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "get-extents");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::GetExtents {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("OffscreenField"));
+                assert!(role.is_none());
             }
             other => panic!("unexpected command {other:?}"),
         }
