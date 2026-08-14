@@ -64,6 +64,21 @@ rustc 必然自带 `-exported_symbols_list` 且 ld64 取并集；`-unexported_sy
    resize 一个空闲终端本就不产生渲染工作）。要提高样本量必须让它真渲染或换指标。
    在此之前，**建出 con 的 dylib 变体也判不出结果**。
 3. **要不要投 con 的 dylib 变体。** 直接受第 2 条影响：现在投下去换不来判据 3 的结论。
+4. **`agt_input_*` 的成功路径要不要测、怎么测。**
+   `agt_input_pointer_move` / `pointer_click` / `type_text` / `send_keys`
+   目前**只有失败路径覆盖**（`null_sweep.rs`；`pointer_move` 连空扫都无从下手，
+   它不收指针，已在豁免清单里注明）。成功路径零证据，而
+   `agenterm-cu` 的 `executor.rs` 有 7 处在用它们。
+
+   难点不是技术，是**输入注入是全局的**：即便目标是我们自己子进程的窗口，
+   `SendInput` 也会移动真实光标、把按键送进当前焦点窗口。本仓一贯的安全约束
+   是"测试绝不注入鼠标点击或按键"，在有人正在使用的桌面上这条应当保持。
+
+   可行方案（未采纳，待定）：测试第一步检查
+   `AGENTERM_ALLOW_INPUT_INJECTION=1`，未设置即 `SKIP:`，只有 CI 的 workflow
+   设它；注入目标是子进程自己的窗口，由子进程回报收到的
+   `WM_CHAR` / `WM_LBUTTONDOWN`。**本轮未实施** —— 是否引入任何会注入输入的
+   代码，由人决定。
 
 ## 5. 范围外、已测量、未动
 
