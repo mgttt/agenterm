@@ -11,8 +11,9 @@ mod value;
 
 pub use error::DynError;
 pub use hosts::{
-    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
-    SizeProbe, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
+    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64,
+    PLATFORM_CANDIDATES, SecondaryProbe, SizeProbe, WINDOWS_AARCH64, WINDOWS_X86_64, cell,
+    live_cell,
 };
 pub use sym::Symbol;
 pub use value::Value;

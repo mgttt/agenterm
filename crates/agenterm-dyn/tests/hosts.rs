@@ -6,6 +6,16 @@ use agenterm_dyn::{
 };
 
 #[test]
+fn platform_candidates_index_lists_host_table_items() {
+    use agenterm_dyn::PLATFORM_CANDIDATES;
+    assert!(PLATFORM_CANDIDATES.contains(&"HostCell"));
+    assert!(PLATFORM_CANDIDATES.contains(&"ALL_CELLS"));
+    assert!(PLATFORM_CANDIDATES.contains(&"live_cell"));
+    assert!(PLATFORM_CANDIDATES.contains(&"LINUX_X86_64"));
+    assert!(PLATFORM_CANDIDATES.contains(&"WINDOWS_AARCH64"));
+}
+
+#[test]
 fn all_six_cells_present() {
     assert_eq!(ALL_CELLS.len(), 6);
     let keys: Vec<_> = ALL_CELLS.iter().map(|c| (c.os, c.arch)).collect();

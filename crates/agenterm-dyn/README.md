@@ -29,6 +29,14 @@ S-expression list language (`do` / `set` / `if`), and one native primitive
 Cross-arch logic aggregation, libagenterm wiring, and `agenterm-platform`
 facades are **out of scope** until `agenterm-dyn` matures on its own.
 
+Items tagged **`PLATFORM-CANDIDATE`** in `src/hosts.rs` (and listed in
+`hosts::PLATFORM_CANDIDATES`) are OS/host-facts tables — library paths, PID
+symbols, ioctl request codes, console probes — that may move to
+`agenterm-platform` when that crate grows an equivalent contract. They are
+**not** imported from platform today. What stays in dyn: `intern` / `bind` /
+`eval`, `dlcall` + libffi, value/error/parse, and the rule that OS names
+remain opaque script data at the eval boundary.
+
 ## Public surface
 
 | API | Role |
@@ -37,7 +45,7 @@ facades are **out of scope** until `agenterm-dyn` matures on its own.
 | `Dyn::bind` | Hand an existing pointer/handle into the environment |
 | `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, `dlcall`) |
 | `dlcall` | Only native primitive — invoked from lists, not a verb table |
-| `hosts::*` | Six-cell host table (script data for native smoke / future packs) |
+| `hosts::*` | Six-cell host table (`PLATFORM-CANDIDATE` — may move to platform later) |
 
 ## Six-cell host table
 

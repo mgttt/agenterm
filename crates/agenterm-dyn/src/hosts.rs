@@ -1,12 +1,37 @@
 //! Host script data for ISA×2 / OS×3 cells.
 //!
-//! Library paths, symbol names, and planned native probes are **script data**
-//! consumed by `dlcall` — not a verb API. Every cell is written explicitly so
-//! the full matrix compiles on any host; `live_cell()` selects the row that
-//! matches `cfg(target_os)` × `cfg(target_arch)`.
+//! **PLATFORM-CANDIDATE module.** This file is typed OS/host contract data:
+//! default library paths, PID symbols, `TIOCGWINSZ` request codes,
+//! `GetConsoleScreenBufferInfo`, and secondary probe names. When
+//! `agenterm-platform` grows an equivalent host-facts table, move these rows
+//! there and keep `agenterm-dyn` as the eval + libffi `dlcall` door only.
+//! `Dyn::eval` must still accept OS-specific strings as opaque script data at
+//! the boundary — only this catalog of known rows is a platform concern.
+//! Search for `PLATFORM-CANDIDATE` in this crate for the full list.
+//!
+//! Every cell is written explicitly so the full matrix compiles on any host;
+//! `live_cell()` selects the row matching `cfg(target_os)` × `cfg(target_arch)`.
 
+/// Names of items marked `PLATFORM-CANDIDATE` in this module (migration index).
+pub const PLATFORM_CANDIDATES: &[&str] = &[
+    "HostCell",
+    "SizeProbe",
+    "SecondaryProbe",
+    "LINUX_X86_64",
+    "LINUX_AARCH64",
+    "MACOS_X86_64",
+    "MACOS_AARCH64",
+    "WINDOWS_X86_64",
+    "WINDOWS_AARCH64",
+    "ALL_CELLS",
+    "live_cell",
+    "cell",
+];
+
+// PLATFORM-CANDIDATE: one OS×ISA row — default libs, symbols, and probe script data.
 /// One OS×ISA cell: default libraries and probe symbols for native smoke tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(alias = "platform-candidate")]
 pub struct HostCell {
     pub os: &'static str,
     pub arch: &'static str,
@@ -20,8 +45,10 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
 }
 
+// PLATFORM-CANDIDATE: terminal/console size probe contract per OS.
 /// Planned terminal / console size probe for a cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(alias = "platform-candidate")]
 pub enum SizeProbe {
     /// `ioctl(fd, request, &winsize)` — Linux and macOS tty paths.
     IoctlTiocgwinsz {
@@ -37,8 +64,10 @@ pub enum SizeProbe {
     },
 }
 
+// PLATFORM-CANDIDATE: secondary native probe contract per OS.
 /// Second real native call for cross-check smoke tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(alias = "platform-candidate")]
 pub enum SecondaryProbe {
     /// Another PID-family symbol (e.g. `getppid`, `GetCurrentThreadId`).
     Native {
@@ -55,6 +84,7 @@ pub enum SecondaryProbe {
 
 // --- Linux × {x86_64, aarch64} ------------------------------------------------
 
+// PLATFORM-CANDIDATE: linux × x86_64 host row.
 pub const LINUX_X86_64: HostCell = HostCell {
     os: "linux",
     arch: "x86_64",
@@ -73,6 +103,7 @@ pub const LINUX_X86_64: HostCell = HostCell {
     },
 };
 
+// PLATFORM-CANDIDATE: linux × aarch64 host row.
 pub const LINUX_AARCH64: HostCell = HostCell {
     os: "linux",
     arch: "aarch64",
@@ -93,6 +124,7 @@ pub const LINUX_AARCH64: HostCell = HostCell {
 
 // --- macOS × {x86_64, aarch64} ------------------------------------------------
 
+// PLATFORM-CANDIDATE: macos × x86_64 host row.
 pub const MACOS_X86_64: HostCell = HostCell {
     os: "macos",
     arch: "x86_64",
@@ -110,6 +142,7 @@ pub const MACOS_X86_64: HostCell = HostCell {
     },
 };
 
+// PLATFORM-CANDIDATE: macos × aarch64 host row.
 pub const MACOS_AARCH64: HostCell = HostCell {
     os: "macos",
     arch: "aarch64",
@@ -129,6 +162,7 @@ pub const MACOS_AARCH64: HostCell = HostCell {
 
 // --- Windows × {x86_64, aarch64} ----------------------------------------------
 
+// PLATFORM-CANDIDATE: windows × x86_64 host row.
 pub const WINDOWS_X86_64: HostCell = HostCell {
     os: "windows",
     arch: "x86_64",
@@ -146,6 +180,7 @@ pub const WINDOWS_X86_64: HostCell = HostCell {
     },
 };
 
+// PLATFORM-CANDIDATE: windows × aarch64 host row.
 pub const WINDOWS_AARCH64: HostCell = HostCell {
     os: "windows",
     arch: "aarch64",
@@ -163,6 +198,7 @@ pub const WINDOWS_AARCH64: HostCell = HostCell {
     },
 };
 
+// PLATFORM-CANDIDATE: full six-cell matrix.
 /// All six cells — always available as compile-time data.
 pub const ALL_CELLS: [HostCell; 6] = [
     LINUX_X86_64,
@@ -173,8 +209,10 @@ pub const ALL_CELLS: [HostCell; 6] = [
     WINDOWS_AARCH64,
 ];
 
+// PLATFORM-CANDIDATE: cfg-selected live row lookup.
 /// Return the cell matching the **current** compile target, if it is one of the
 /// six supported cells.
+#[doc(alias = "platform-candidate")]
 pub fn live_cell() -> Option<&'static HostCell> {
     Some(match () {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -201,7 +239,9 @@ pub fn live_cell() -> Option<&'static HostCell> {
     })
 }
 
+// PLATFORM-CANDIDATE: named row lookup into the host matrix.
 /// Look up a cell by `(os, arch)` name — used by matrix completeness tests.
+#[doc(alias = "platform-candidate")]
 pub fn cell(os: &str, arch: &str) -> Option<&'static HostCell> {
     ALL_CELLS.iter().find(|c| c.os == os && c.arch == arch)
 }
