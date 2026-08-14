@@ -7,24 +7,28 @@
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
 //! for both read (`wait` / `get-text` / `get-selection` / `get-caret`) and
 //! write (`send-text` / `paste` / `copy` / `send-keys` / `select` /
-//! `set-caret`). Cut 3.19 locks the clipboard write: host `paste --text`
-//! plants the seed on the remote Command field; host `get-text` equals that
-//! seed. Cut 3.20 locks clipboard publish: seed already on Command (or
-//! planted over ssh paste/send-text), host `copy` publishes remote GetText
-//! onto the remote session CLIPBOARD, then host `paste` (no `--text`) +
-//! `get-text` equals that seed. Cut 3.21 locks key delivery: host
-//! `send-keys` types plain keys into the remote focused Command field, then
-//! host `wait` + `get-text` equals those keys. Cut 3.22 locks text
-//! selection: host `send-text` plants a seed on remote Command (`--` ends
-//! flags; not `--text`), host `select --start N --end M` runs remote AT-SPI
-//! `Text.SetSelection` (`via=set-selection`), then host independent
-//! `get-selection` returns that range (`via=get-selection`; start/end equal
-//! the selected slice of the seed). Cut 3.23 locks caret placement: host
-//! `send-text` plants a seed on remote Command, host `set-caret --offset N`
-//! runs remote AT-SPI `Text.SetCaretOffset` (`via=set-caret-offset`), then
-//! host independent `get-caret` returns that offset (`via=get-caret-offset`)
-//! and host `get-text` still equals the seed. Never screenshot / `--coords`
-//! / mouse-drag / XTest.
+//! `set-caret` / `click`). Cut 3.19 locks the clipboard write: host
+//! `paste --text` plants the seed on the remote Command field; host
+//! `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
+//! already on Command (or planted over ssh paste/send-text), host `copy`
+//! publishes remote GetText onto the remote session CLIPBOARD, then host
+//! `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21 locks key
+//! delivery: host `send-keys` types plain keys into the remote focused
+//! Command field, then host `wait` + `get-text` equals those keys. Cut 3.22
+//! locks text selection: host `send-text` plants a seed on remote Command
+//! (`--` ends flags; not `--text`), host `select --start N --end M` runs
+//! remote AT-SPI `Text.SetSelection` (`via=set-selection`), then host
+//! independent `get-selection` returns that range (`via=get-selection`;
+//! start/end equal the selected slice of the seed). Cut 3.23 locks caret
+//! placement: host `send-text` plants a seed on remote Command, host
+//! `set-caret --offset N` runs remote AT-SPI `Text.SetCaretOffset`
+//! (`via=set-caret-offset`), then host independent `get-caret` returns that
+//! offset (`via=get-caret-offset`) and host `get-text` still equals the
+//! seed. Cut 3.24 locks named Action click: host `send-text` plants a seed
+//! on remote Command, host `click --name SEND` runs remote AT-SPI Action
+//! `DoAction` (`addressing=accessibility-tree`), then host independent
+//! `get-text --name Command` returns empty (composer cleared on submit).
+//! Never screenshot / `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -678,6 +682,56 @@ mod tests {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("Command"));
                 assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn click_name_survives_target_rewrite() {
+        // 3.24: first ssh click path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current click. Circuit: host send-text
+        // plants SEED on remote Command (`--` ends flags; not --text), host
+        // click --window H --name SEND runs remote AT-SPI Action DoAction
+        // (addressing=accessibility-tree; never --coords / XTest /
+        // screenshot), then host independent get-text --name Command returns
+        // empty (composer cleared on SEND submit). Missing / ambiguous name
+        // typed-fails a11y_node_not_found / a11y_node_ambiguous on the remote
+        // worker the same as local current.
+        let command = CuCommand::Click {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            node: None,
+            name: Some("SEND".into()),
+            role: Some("button".into()),
+            coords: None,
+            degraded: false,
+            clicks: 1,
+            button: crate::command::PointerButton::Left,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "click");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Click {
+                window,
+                node,
+                name,
+                role,
+                coords,
+                degraded,
+                clicks,
+                button,
+                ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert!(node.is_none());
+                assert_eq!(name.as_deref(), Some("SEND"));
+                assert_eq!(role.as_deref(), Some("button"));
+                assert!(coords.is_none());
+                assert!(!degraded);
+                assert_eq!(clicks, 1);
+                assert_eq!(button, crate::command::PointerButton::Left);
             }
             other => panic!("unexpected command {other:?}"),
         }
