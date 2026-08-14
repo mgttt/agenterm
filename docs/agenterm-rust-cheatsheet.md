@@ -1349,6 +1349,14 @@ An unfocused field often reports `CaretOffset=-1`; after
 is `2`. Do not add an eval helper or CDP/`--coords` fallback. No
 `A11YCARET1` hello. The `set-caret` reply is not proof.
 
+WebKitGTK 2.52 / Reasonix composer (`Message Reasonix…` under
+`scripts/reasonix-desktop-a11y.sh`) already implements those same
+`Text.SetCaretOffset` / `CaretOffset` methods. After `send-text HELLO`
+independent `get-caret` is `5`; after `set-caret --offset 2`
+independent `get-caret` is `2`. Unlike `ScrollTo` (true-no-op) and
+`EditableText` (absent), caret needs no eval-helper glue and must not
+grow an `A11YCARET1` hello. The `set-caret` reply is not proof.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. An `agenterm-cu`

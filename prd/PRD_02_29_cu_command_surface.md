@@ -197,7 +197,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `set-caret` reply is not proof. Live Chrome fixture field
   `CaretField` (`fixtures/cu/310-chrome-caret.html`) uses the same
   native `Text.SetCaretOffset` path — no protocol change (unlike
-  `ScrollTo` / EditableText helpers).
+  `ScrollTo` / EditableText helpers). Reasonix composer
+  (`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`)
+  uses that same native path — no eval-helper caret glue.
 - [x] `get-caret --window HANDLE --name PAT [--role ROLE]` reads
   independent AT-SPI `Text.CaretOffset` / `GetCaretOffset`
   (`agt_a11y_node_get_caret_offset`) for that unique showing named
@@ -205,6 +207,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   typed-fails (`a11y_caret_unavailable`). Proof is independent
   `get-caret` after `set-caret --offset N` on Chrome `CaretField`
   (unfocused `CaretOffset` may be `-1`; after set it must equal `N`).
+  Reasonix composer after `send-text HELLO` reports `CaretOffset=5`;
+  after `set-caret --offset 2` independent `get-caret` is `2`.
   Linux `agenterm-con` composer `Command` publishes those same Text
   methods (persistent publisher caret; ABI 1.9 verbs).
 - [ ] screenshot, control tree and action results are causally identifiable
