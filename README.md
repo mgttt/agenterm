@@ -159,9 +159,8 @@ stays in `target/debug/` (`cargo build` or `.\build.bat dev`). Use
 `.\build.bat release` only for a distributable build; it applies the
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch
-cache while preserving the incremental development `target/`. All modes
-produce three ignored executables plus
-build metadata under `dist/`:
+cache while preserving the incremental development `target/`. All modes stage
+the ignored executable set, runtime library, and build metadata under `dist/`:
 
 The thin `build.bat` / `build.sh` stage-0 reuses a content-validated,
 last-known-good copy of the main `agenterm` outside Cargo output and runs the
@@ -189,6 +188,11 @@ policy.
 - `dist/agenterm-con.exe` — standalone multi-terminal tree without server or
   script runtime, built from its own workspace package (`crates/agenterm-con`);
   `--version` and `--help` are synchronous and never open a window.
+- `dist/agenterm-cu.exe` — computer-use CLI and Windows notification-area
+  host. It is the sole computer-use executable; CLI, menu, and global placement
+  shortcuts share one command executor.
+- `dist/agenterm.dll` — shared native mechanism ABI loaded by agenterm-cu for
+  window, input, screenshot, and accessibility operations.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
