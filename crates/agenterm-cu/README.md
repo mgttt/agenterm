@@ -71,6 +71,8 @@ audited separately from AT-SPI actuation.
 | `get-extents --window --name PAT [--role ROLE]` | same unique-name matcher, then independent AT-SPI `Component.GetExtents(Screen)`; snapshot `node.bounds` do not count; empty extents → typed `a11y_extents_unavailable` |
 | `select --window --name PAT --start N --end M [--role ROLE]` | same unique-name matcher, then one-shot AT-SPI `Text.SetSelection`; missing Text/`UnknownMethod` → typed `a11y_selection_unavailable`; SetSelection false → typed `a11y_selection_no_effect`; never XTest / mouse-drag / `--coords` |
 | `get-selection --window --name PAT [--role ROLE]` | same unique-name matcher, then independent AT-SPI `GetNSelections` + `GetSelection(0)`; `select` reply does not count; missing Text → typed `a11y_selection_unavailable`; `n==0` is empty success |
+| `set-caret --window --name PAT --offset N [--role ROLE]` | same unique-name matcher, then one-shot AT-SPI `Text.SetCaretOffset`; missing Text/`UnknownMethod` → typed `a11y_caret_unavailable`; SetCaretOffset false → typed `a11y_caret_no_effect`; never XTest / `--coords` |
+| `get-caret --window --name PAT [--role ROLE]` | same unique-name matcher, then independent AT-SPI `CaretOffset` / `GetCaretOffset`; `set-caret` reply does not count; missing Text → typed `a11y_caret_unavailable` |
 | `screenshot` | typed `unsupported` on Linux native capture |
 | `wait` | polls window state, or the AT-SPI tree for `--node-name-contains` (2+ showing hits → `a11y_node_ambiguous`), or AT-SPI `Text.GetText` for `--text-equals` / `--node-text-equals` / `--text-contains` / `--node-text-contains` with `--name` (not `send-text` / `paste` / `copy` `matched.text`, not a sidecar tree `text`, not the WebKit eval helper `OK`) |
 
@@ -200,6 +202,19 @@ cu --target current --grant observe get-selection --window 25165828 \
 cu --target current --grant actuate select --window 4194318 \
   --name "Message Reasonix" --start 0 --end 4
 cu --target current --grant observe get-selection --window 4194318 \
+  --name "Message Reasonix"
+
+# Place the caret on a named Text node (AT-SPI SetCaretOffset). Observe
+# with independent get-caret (CaretOffset / GetCaretOffset), not the
+# set-caret reply. Chrome fixture and Reasonix composer both use native
+# Text methods — no eval-helper caret path, never --coords / XTest.
+cu --target current --grant actuate set-caret --window 25165828 \
+  --name CaretField --offset 2
+cu --target current --grant observe get-caret --window 25165828 \
+  --name CaretField
+cu --target current --grant actuate set-caret --window 4194318 \
+  --name "Message Reasonix" --offset 2
+cu --target current --grant observe get-caret --window 4194318 \
   --name "Message Reasonix"
 
 # Place the focused window (Spectacle catalog)

@@ -9,6 +9,8 @@
 # cu scroll --name can confirm via independent Component.GetExtents.
 # Text.SetSelection / GetNSelections / GetSelection already work on that
 # textarea — do not add an eval-helper select path.
+# Text.SetCaretOffset / CaretOffset (GetCaretOffset) already work too —
+# do not add an eval-helper caret path.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1

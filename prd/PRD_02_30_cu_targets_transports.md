@@ -242,14 +242,19 @@ Canonical host mapping (approved product vocabulary):
   screenshot. Proof is independent `get-caret`, not the `set-caret`
   reply. Live Chrome fixture field `CaretField`
   (`fixtures/cu/310-chrome-caret.html`) uses that same native Text
-  path (no ABI / eval-helper change).
+  path (no ABI / eval-helper change). Reasonix composer
+  (`Message Reasonix…` under `scripts/reasonix-desktop-a11y.sh`)
+  uses that same native path; WebKit 2.52 already implements
+  SetCaretOffset / CaretOffset (no `A11YCARET1` eval helper).
 - [x] `get-caret --window HANDLE --name PAT [--role ROLE]` resolves
   through that same path, then independent AT-SPI `Text.CaretOffset`
   / `GetCaretOffset` (`agt_a11y_node_get_caret_offset`). The
   `set-caret` reply payload does not count. Missing Text typed-fails
   (`a11y_caret_unavailable`). Chrome `CaretField` unfocused
   `CaretOffset` may be `-1`; after `set-caret --offset N` independent
-  readback equals `N`. Linux `agenterm-con` composer `Command`
+  readback equals `N`. Reasonix composer after `send-text HELLO`
+  reports `CaretOffset=5`; after `set-caret --offset 2` independent
+  `get-caret` is `2`. Linux `agenterm-con` composer `Command`
   publishes real `SetCaretOffset` / `CaretOffset` (ABI 1.9 verbs).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
