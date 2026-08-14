@@ -10,16 +10,18 @@
 //!
 //! Cut 3.31 locked the first observe path. Cut 3.32 locked the first
 //! actuate path via `send-text`. Cut 3.33 locked the first clipboard write
-//! via `paste --text`. Cut 3.34 locks clipboard publish: seed already on a
-//! second `agenterm-con` `Command` field (or planted over vnc `paste --text`
-//! / `send-text`), host `copy --name Command` over `--vnc` publishes session
-//! GetText onto the **session** native CLIPBOARD (`via=gettext`), then host
-//! clear/overwrite + `paste --name Command` (no `--text`) + independent
-//! `get-text --name Command` over the same `--vnc` equals that seed.
-//! Gate-owned dedicated loopback x11vnc; never steal
+//! via `paste --text`. Cut 3.34 locked clipboard publish via `copy`.
+//! Cut 3.35 locks key delivery: host `focus --name Command` then
+//! `send-keys --window HANDLE` (no `--name`; same focused path as local
+//! con / ssh send-keys) over `--vnc` types plain keys into a second
+//! `agenterm-con` `Command` field (native AT-SPI Device/key or
+//! EditableText fallback via the session worker), then host independent
+//! `get-text --name Command` over the same `--vnc` equals those keys
+//! (`via=gettext`). Gate-owned dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
 //! as the only proof. Observe and actuate grants both forward.
-//! `paste --text` (3.33) and `send-text` (3.32) over vnc remain valid.
+//! `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc
+//! remain valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -692,6 +694,43 @@ mod tests {
             } => {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn send_keys_write_survives_target_rewrite() {
+        // 3.35: first vnc send-keys path reuses the same RFB + session-worker
+        // rewrite; the worker still runs target=current send-keys. Circuit:
+        // focus remote Command, host send-keys --window H -- KEYS (no
+        // --name; plain typeable text uses focused EditableText fallback
+        // when Device/key is absent on con Command), then host get-text
+        // equals KEYS. Keys travel in the session command JSON (`--` ends
+        // flags). No focused field typed-fails on the session worker the
+        // same as local current.
+        let command = CuCommand::SendKeys {
+            target: TargetRef::Vnc,
+            keys: "335VNCKEYS".into(),
+            window: Some(42),
+            name: None,
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "send-keys");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::SendKeys {
+                keys,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(keys, "335VNCKEYS");
+                assert_eq!(window, Some(42));
+                assert!(name.is_none());
                 assert!(role.is_none());
             }
             other => panic!("unexpected command {other:?}"),

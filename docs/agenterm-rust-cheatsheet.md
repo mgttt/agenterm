@@ -1365,28 +1365,28 @@ have no whitespace). Do not implement ssh as D-Bus port-forward or a
 second control protocol in this cut.
 
 `agenterm-cu --vnc <host[:port]>` is the first VNC target tier (PRD 30,
-cuts 3.31 observe / 3.32 send-text / 3.33 paste / 3.34 copy). It does
-not invent verbs: the host handshakes RFB (security type None /
-`x11vnc -nopw` only in this cut), rewrites the abstract command to
-`target=current`, and runs a local `agenterm-cu exec --json -` session
-worker against the shared desktop (`vnc_transport`; `DISPLAY` /
+cuts 3.31 observe / 3.32 send-text / 3.33 paste / 3.34 copy / 3.35
+send-keys). It does not invent verbs: the host handshakes RFB (security
+type None / `x11vnc -nopw` only in this cut), rewrites the abstract
+command to `target=current`, and runs a local `agenterm-cu exec --json -`
+session worker against the shared desktop (`vnc_transport`; `DISPLAY` /
 `AT_SPI_BUS` via host env or `--vnc-env`). Observe and actuate grants
 both forward; structured work still uses AT-SPI / native clipboard on
 that session — never RFB framebuffer OCR, screenshot, or `--coords`.
-Copy evidence is a **gate-owned** loopback x11vnc (not the resident
+Send-keys evidence is a **gate-owned** loopback x11vnc (not the resident
 `:2` listener alone) plus a second `agenterm-con` on a unique control
-socket and title: seed already on `Command` (or planted over vnc
-`paste --text` / `send-text`), host `copy --name Command` publishes
-session GetText onto the **session** native CLIPBOARD (`via=gettext`,
-detached X11 owner on the session display), then host clear/overwrite +
-`paste --name Command` (no `--text`) + independent
-`get-text --name Command` equals that seed. Never the host clipboard,
-screenshot, or `--coords`. `paste --text` (3.33) and `send-text` (3.32)
-over vnc remain valid. Do not steal `unix:/tmp/run-box/agenterm-con.sock`
-or kill the resident avatar PIDs. Connect / protocol / auth failures are
-typed (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed`);
-missing `--vnc` on `--target vnc` is `invalid_input`. Do not implement
-vnc as a second control protocol or D-Bus port-forward in this cut.
+socket and title: host `focus --name Command` then
+`send-keys --window HANDLE -- KEYS` (no `--name`; same focused path as
+local con / ssh) types plain keys into `Command` via native AT-SPI
+Device/key or EditableText fallback, then host independent
+`get-text --name Command` equals those keys (`via=gettext`). Never
+screenshot or `--coords`. `copy` (3.34), `paste --text` (3.33), and
+`send-text` (3.32) over vnc remain valid. Do not steal
+`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
+Connect / protocol / auth failures are typed (`vnc_unavailable` /
+`vnc_transport_failed` / `vnc_auth_failed`); missing `--vnc` on
+`--target vnc` is `invalid_input`. Do not implement vnc as a second
+control protocol or D-Bus port-forward in this cut.
 
 `cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
 (`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.
