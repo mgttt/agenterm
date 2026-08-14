@@ -117,30 +117,54 @@ fn entry() {
         "supply_chain_resolve_missing"
     );
 
-    // The resolved package graph is host-filtered: target-specific direct
-    // dependencies disappear when metadata runs on another OS. The manifest
-    // view from `--no-deps` retains every target-conditioned workspace
-    // dependency, so it is the stable authority for THIRD_PARTY_NOTICES.md.
-    let manifest_metadata_name =
-        "cargo-manifest-metadata-" + run_stamp + ".json";
-    let manifest_metadata_path =
-        std::path::join(output_parent, manifest_metadata_name).display;
-    let manifest_metadata_code = std::process::command_stdout_file(
-        "cargo",
-        [
-            "metadata", "--locked", "--format-version", "1", "--no-deps",
-            "--manifest-path", manifest_path
-        ],
-        120000,
-        manifest_metadata_path,
-        #{ current_dir: repo }
-    );
-    require(
-        manifest_metadata_code == 0,
-        "supply_chain_manifest_metadata:exit=" + manifest_metadata_code
-    );
-    let manifest_metadata = rh::json::parse_file(manifest_metadata_path);
-    std::fs::try_remove_file(manifest_metadata_path);
+    // Even `cargo metadata --no-deps` filters target-conditioned declarations
+    // for its selected platform. Build the notice authority from the exact six
+    // supported target cells instead of whichever host runs this task.
+    let direct_names = #{};
+    let supported_targets = [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin"
+    ];
+    for target in supported_targets {
+        let target_metadata_name =
+            "cargo-manifest-metadata-" + target + "-" + run_stamp + ".json";
+        let target_metadata_path =
+            std::path::join(output_parent, target_metadata_name).display;
+        let target_metadata_code = std::process::command_stdout_file(
+            "cargo",
+            [
+                "metadata", "--locked", "--format-version", "1", "--no-deps",
+                "--filter-platform", target, "--manifest-path", manifest_path
+            ],
+            120000,
+            target_metadata_path,
+            #{ current_dir: repo }
+        );
+        require(
+            target_metadata_code == 0,
+            "supply_chain_manifest_metadata:" + target + ":exit=" +
+                target_metadata_code
+        );
+        let target_metadata = rh::json::parse_file(target_metadata_path);
+        std::fs::try_remove_file(target_metadata_path);
+        let target_workspace_names = #{};
+        for root in target_metadata.packages {
+            let root_name = "" + root.name;
+            target_workspace_names[root_name] = true;
+        }
+        for root in target_metadata.packages {
+            for dependency in root.dependencies {
+                let dependency_name = "" + dependency.name;
+                if !target_workspace_names.contains(dependency_name) {
+                    direct_names[dependency_name] = true;
+                }
+            }
+        }
+    }
 
     let allowed = #{
         "(Apache-2.0 OR MIT) AND BSD-3-Clause": true,
@@ -317,20 +341,6 @@ fn entry() {
         }
     }
 
-    let direct_names = #{};
-    let workspace_names = #{};
-    for root in manifest_metadata.packages {
-        let root_name = "" + root.name;
-        workspace_names[root_name] = true;
-    }
-    for root in manifest_metadata.packages {
-        for dependency in root.dependencies {
-            let dependency_name = "" + dependency.name;
-            if !workspace_names.contains(dependency_name) {
-                direct_names[dependency_name] = true;
-            }
-        }
-    }
     let notice_names = #{};
     let notices_path =
         std::path::join(repo, "THIRD_PARTY_NOTICES.md").display;

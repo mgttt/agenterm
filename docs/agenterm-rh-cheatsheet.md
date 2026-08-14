@@ -354,6 +354,12 @@ fall back to host evaluation for that call. Prefer them for best-effort cleanup
    likely to contain an assertion that was **never** satisfiable than a
    regression.
 
+`cargo metadata --no-deps` still applies its selected platform when reporting
+target-conditioned dependency declarations. A cross-platform notice catalog
+must merge metadata from every supported `--filter-platform` target; one host's
+manifest view can miss macOS-only or Windows-only direct dependencies and make
+the formal Candidate fail before compilation.
+
 ### Cross-build fixtures must live outside Cargo target trees
 
 Formal release builds reclaim the complete `target/` and release scratch trees.
