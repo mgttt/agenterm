@@ -542,12 +542,17 @@ Commands:
         [--button left|right|middle] [--clicks N]
                               --name reuses wait NodeNameContains matching, then the --node AT-SPI path
   focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
-  send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
+  send-text [--window HANDLE [--name PAT [--role ROLE]]] [--] <text...>
                               --name writes via AT-SPI EditableText (SetTextContents /
                               InsertText) or AT-SPI Text + toolkit set-value when
                               EditableText is absent (Chrome renderer AX; WebKitGTK
                               AT-SPI id + eval helper); a node with no
                               writeable text interface typed-fails (never XTest).
+                              --window without --name writes that same path on
+                              the showing focused node (same innermost Text
+                              candidate as get-text --window). Never XTest when
+                              --window is set. Without --window stays the
+                              plain type-into-focused inject.
                               `--` ends flag parsing
   copy --window HANDLE --name PAT [--role ROLE]
                               copies AT-SPI Text.GetText from the unique showing

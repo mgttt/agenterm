@@ -330,18 +330,42 @@ fn focus(
 /// reports; `wait --text-equals` must poll GetText again. A named showing
 /// node with no writeable text interface typed-fails
 /// (`a11y_text_unavailable`) and never falls through to XTest /
-/// `input_inject::type_text`. Without `--name` it stays the plain "type
-/// into whatever is focused" verb.
+/// `input_inject::type_text`.
+///
+/// `--window` without `--name` writes that same path on the showing
+/// focused node — the same innermost `Text.GetText` candidate
+/// `get-text --window` reads — so `focus --name X` then
+/// `send-text --window H TEXT` then `get-text --window H` closes the
+/// loop. Never XTest when `--window` is set. Without `--window` it stays
+/// the plain "type into whatever is focused" inject.
 fn send_text(
     text: &str,
     window: Option<isize>,
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
-    let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-text")? else {
-        mechanism::input_inject::type_text(text).map_err(map_mechanism_err)?;
-        return Ok(serde_json::json!({ "typed": text }));
-    };
+    if let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-text")? {
+        return send_text_to_node(text, window, resolved);
+    }
+    if role.filter(|value| !value.is_empty()).is_some() {
+        return Err(CuError::new(
+            "invalid_input",
+            "send-text --role requires --name <pattern>",
+        ));
+    }
+    if window.is_some() {
+        let (resolved, _current) = get_text_focused(window)?;
+        return send_text_to_node(text, window, resolved);
+    }
+    mechanism::input_inject::type_text(text).map_err(map_mechanism_err)?;
+    Ok(serde_json::json!({ "typed": text }))
+}
+
+fn send_text_to_node(
+    text: &str,
+    window: Option<isize>,
+    resolved: ResolvedNode,
+) -> Result<serde_json::Value, CuError> {
     mechanism::set_node_text(window, &resolved.node_id, text).map_err(map_mechanism_err)?;
     let _ = mechanism::accessibility_tree::drain_bus();
     let via = mechanism::accessibility_tree::last_text_write_via().unwrap_or_default();
@@ -1760,7 +1784,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -1781,7 +1805,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -1885,7 +1909,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -1903,6 +1927,60 @@ mod tests {
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn send_text_role_without_name_is_typed() {
+        let command = Command::SendText {
+            target: TargetRef::Current,
+            text: "hello".into(),
+            window: Some(1),
+            name: None,
+            role: Some("entry".into()),
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+        assert!(
+            reply
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("--role requires --name"),
+            "role-without-name message should name the addressing contract"
+        );
+    }
+
+    #[test]
+    fn send_text_window_without_name_does_not_xtest() {
+        // A synthetic window must take the focused AT-SPI path, not
+        // input_inject::type_text. Success here would mean XTest spray.
+        let command = Command::SendText {
+            target: TargetRef::Current,
+            text: "hello".into(),
+            window: Some(-1),
+            name: None,
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(
+            !reply.ok,
+            "send-text --window without --name must not fall through to XTest"
+        );
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(
+                code,
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_text_unavailable"
+                    | "a11y_backend_failed"
+                    | "unsupported"
+                    | "failed"
+            ),
+            "unexpected code: {code}"
+        );
     }
 
     #[test]
@@ -1945,7 +2023,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2012,7 +2090,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2063,7 +2141,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2122,7 +2200,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2183,7 +2261,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2270,7 +2348,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2333,7 +2411,7 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
             ),
             "unexpected code: {code}"
         );

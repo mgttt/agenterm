@@ -70,8 +70,10 @@ pub enum Command {
     SendText {
         target: TargetRef,
         text: String,
-        /// Optional accessible-name addressing: focus the matched node first,
-        /// resolved with the same matcher as `Focus`, then type into it.
+        /// Optional window scope. With `--name`, name-address the unique
+        /// showing node. Without `--name`, write the showing focused node
+        /// (same innermost Text candidate as `GetText` without `--name`).
+        /// Neither flag keeps the plain focused inject.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
