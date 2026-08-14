@@ -39,19 +39,30 @@ mod linux {
         live_cell().expect("linux cell")
     }
 
-    #[test]
-    fn dlcall_getpid_matches_libc_and_second_dlcall() {
+    fn getpid_script() -> String {
         let c = cell();
-        let mut env = Dyn::new();
-        let script = format!(
+        format!(
             r#"(dlcall "{}" "{}" "{}")"#,
             c.pid_lib, c.pid_symbol, c.pid_ret_type
-        );
+        )
+    }
+
+    #[test]
+    fn dlcall_getpid_matches_libc() {
+        let mut env = Dyn::new();
+        let script = getpid_script();
         let got = env.eval(&script).expect("getpid dlcall");
-        let again = env.eval(&script).expect("second getpid dlcall");
-        assert_eq!(got, again, "two dlcall getpid should agree");
         let real = unsafe { libc::getpid() };
         assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_getpid_is_stable_across_cached_library_calls() {
+        let mut env = Dyn::new();
+        let script = getpid_script();
+        let first = env.eval(&script).expect("first getpid dlcall");
+        let second = env.eval(&script).expect("cached-library getpid dlcall");
+        assert_eq!(first, second, "cached libc must not change symbol results");
     }
 
     #[test]
