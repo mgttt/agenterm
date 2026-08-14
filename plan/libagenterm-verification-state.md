@@ -22,7 +22,8 @@
 | 空指针/非法句柄一律干净失败 | `null_sweep.rs` | 覆盖面本身被门控：47 扫 + 8 豁免 = 55，豁免签名含指针即红 |
 | 能力枚举编号三处一致 | `capability_enum_gate.rs` | 比名字**和**数值、按声明顺序（只比名字集合会漏掉对调） |
 | pkg-config 元数据可用 | `pkgconfig_libs.rs` / `pkgconfig_consume.rs` | 四方防漂移（见 §2）+ 端到端真链真跑 |
-| 安装布局正确 | `install_consume.rs` | 跑真实 `install.sh`，**运行时只指向安装目录，不许回落 `target/`** |
+| 安装布局正确（Unix） | `install_consume.rs` | 跑真实 `install.sh`，**运行时只指向安装目录，不许回落 `target/`** |
+| 安装布局正确（**Windows**） | `install_consume_windows.rs` | 跑真实 `install.ps1`；装出 `lib\agenterm.lib`（静态）+ `lib\agenterm.dll.lib`（导入库）+ `bin\agenterm.dll` + 头文件，`.exp`/`.pdb` 不装。静态与动态各消费一次，**且负对照判决**：`bin\` 不在 PATH 时动态探针必须失败（实测 `-1073741515` = `0xC0000135`），静态探针在同环境必须成功。两半缺一，"静态"就只是自称 |
 | 共享库有安装身份 | `install_identity.rs` | Linux `DT_SONAME`、macOS `@rpath` install name |
 | 消费者拒绝 ABI major 不匹配 | `agenterm-cu` 单测 + 真实产物门控 | 校验在 `load()` 一处，不匹配的库根本没机会被调用 |
 | 一个进程只选一种链接形态 | `mixed_linkage.rs` | 三平台实测两份错误状态独立；规则写进头文件 |
@@ -40,6 +41,22 @@
 4. `crates/agenterm-abi/README.md` 的 `cl` 命令行 ← **Windows 用户实际复制的那份**
 
 第 4 份长期无人看管，而 pkg-config README 恰恰把 MSVC 用户指向它。
+
+**锚点必须唯一（里程碑 71b，修的是一个"绿着但盯错行"的缺陷）：**
+第 4 份的闸原先用 `.find(|l| l.starts_with("cl ") && l.contains(".lib"))`
+取**文件里第一条**匹配行。里程碑 71 在它上面加了 Windows 安装小节（含两条 `cl` 示例），
+**解析锚点静默迁移**到新示例行上——闸照样绿（新行的 6 个库恰好同序同值），
+而里程碑 18 那条"用户真正复制"的命令行**从此无人看管**。
+实测判决：那个排列下删掉被控行里的 `dwmapi.lib`，闸仍 4 passed、退出 0。
+
+现在锚点是**显式且唯一**的：被控行是紧跟标记
+`# AGENTERM_MSVC_SYSTEM_LIBS_ANCHOR` 的那条；闸收集**每一条** `cl ... .lib ...`
+候选行，断言恰好一条带标记。零条或多条都红，并把全部候选连行号打印出来。
+**顺序无关**已实测：把 Windows 小节移回静态链接小节之前（缺陷现场排列），
+删库仍然红（退出 101）。
+
+**这条留给以后的人：凡"取第一条匹配"当锚点的闸都有同样的病**，
+而且**它不可能被"跑一遍、绿了"验证出来——必须先让它红过一次**。
 
 ## 3. 修掉的真缺陷（都属于"没人看所以没人知道"）
 
@@ -64,7 +81,18 @@ rustc 必然自带 `-exported_symbols_list` 且 ld64 取并集；`-unexported_sy
    resize 一个空闲终端本就不产生渲染工作）。要提高样本量必须让它真渲染或换指标。
    在此之前，**建出 con 的 dylib 变体也判不出结果**。
 3. **要不要投 con 的 dylib 变体。** 直接受第 2 条影响：现在投下去换不来判据 3 的结论。
-4. **`agt_input_*` 的成功路径要不要测、怎么测。**
+4. ~~**`agt_input_*` 的成功路径要不要测、怎么测。**~~ **已拍板并在做（里程碑 72）。**
+   安全约束不变（绝不在别人正在用的桌面上注入），解法是把它变成显式 opt-in：
+   测试要求 `AGENTERM_ALLOW_INPUT_INJECTION=1`，未设即带理由 SKIP，
+   **只有 CI 的 windows job 设它**；注入目标只能是我们自己子进程的窗口
+   （标题嵌 pid + `process_id` 双重核对，照抄 `native_window_ops.rs`）；
+   **每次注入前现场确认前台窗口就是那个子窗口，不是就红**（注入到别人窗口是
+   安全事故，必须响，而不是悄悄跳过）；光标位置进出都要还原（含失败路径）。
+   成功与否从**接收端**判定——子进程回报收到的 `WM_CHAR` / `WM_LBUTTONDOWN` /
+   `WM_MOUSEMOVE` / `WM_KEYDOWN`，不是看导出返回了 `AGT_OK`。
+   真跑时必须打印 `INPUT-INJECTION: REAL RUN`，否则 CI 绿了也分不清跑没跑。
+
+   以下是当初记录的原始理由，保留备查：
    `agt_input_pointer_move` / `pointer_click` / `type_text` / `send_keys`
    目前**只有失败路径覆盖**（`null_sweep.rs`；`pointer_move` 连空扫都无从下手，
    它不收指针，已在豁免清单里注明）。成功路径零证据，而
