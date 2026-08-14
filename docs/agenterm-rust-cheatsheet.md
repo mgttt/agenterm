@@ -1366,22 +1366,27 @@ second control protocol in this cut.
 
 `agenterm-cu --vnc <host[:port]>` is the first VNC target tier (PRD 30,
 cuts 3.31 observe / 3.32 send-text / 3.33 paste / 3.34 copy / 3.35
-send-keys). It does not invent verbs: the host handshakes RFB (security
-type None / `x11vnc -nopw` only in this cut), rewrites the abstract
-command to `target=current`, and runs a local `agenterm-cu exec --json -`
-session worker against the shared desktop (`vnc_transport`; `DISPLAY` /
-`AT_SPI_BUS` via host env or `--vnc-env`). Observe and actuate grants
-both forward; structured work still uses AT-SPI / native clipboard on
-that session — never RFB framebuffer OCR, screenshot, or `--coords`.
-Send-keys evidence is a **gate-owned** loopback x11vnc (not the resident
-`:2` listener alone) plus a second `agenterm-con` on a unique control
-socket and title: host `focus --name Command` then
-`send-keys --window HANDLE -- KEYS` (no `--name`; same focused path as
-local con / ssh) types plain keys into `Command` via native AT-SPI
-Device/key or EditableText fallback, then host independent
-`get-text --name Command` equals those keys (`via=gettext`). Never
-screenshot or `--coords`. `copy` (3.34), `paste --text` (3.33), and
-`send-text` (3.32) over vnc remain valid. Do not steal
+send-keys / 3.36 select). It does not invent verbs: the host handshakes
+RFB (security type None / `x11vnc -nopw` only in this cut), rewrites the
+abstract command to `target=current`, and runs a local
+`agenterm-cu exec --json -` session worker against the shared desktop
+(`vnc_transport`; `DISPLAY` / `AT_SPI_BUS` via host env or `--vnc-env`).
+Observe and actuate grants both forward; structured work still uses
+AT-SPI / native clipboard on that session — never RFB framebuffer OCR,
+screenshot, or `--coords`. Select evidence is a **gate-owned** loopback
+x11vnc (not the resident `:2` listener alone) plus a second
+`agenterm-con` on a unique control socket and title: host
+`send-text --window H --name Command -- SEED` (payload after `--`; not
+`--text`) plants the seed, host
+`select --window H --name Command --start N --end M` runs session AT-SPI
+`Text.SetSelection` (`via=set-selection`), then host independent
+`get-selection` returns that range (`via=get-selection`; start/end equal
+the selected slice of the seed, or the seed when the range is the whole
+field). Native AT-SPI `GetNSelections` + `GetSelection` via the session
+worker. Never screenshot, `--coords`, or mouse-drag. Missing Text
+typed-fails `a11y_selection_unavailable` on the session worker the same
+as local `current`. `send-keys` (3.35), `copy` (3.34), `paste --text`
+(3.33), and `send-text` (3.32) over vnc remain valid. Do not steal
 `unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
 Connect / protocol / auth failures are typed (`vnc_unavailable` /
 `vnc_transport_failed` / `vnc_auth_failed`); missing `--vnc` on

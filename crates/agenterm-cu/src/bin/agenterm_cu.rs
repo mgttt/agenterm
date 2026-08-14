@@ -790,11 +790,11 @@ Global:
 
   vnc transport handshakes RFB (security type None / x11vnc -nopw), then runs
   the same verbs (observe and actuate) on a local agenterm-cu --target current
-  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Send-keys
-  evidence: gate-owned loopback x11vnc + second agenterm-con, host focus --name
-  Command then send-keys --window HANDLE -- KEYS (no --name; same focused path
-  as local con / ssh), host independent get-text --name Command equals KEYS
-  (via=gettext; never screenshot / --coords / RFB framebuffer OCR).
+  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Select
+  evidence: gate-owned loopback x11vnc + second agenterm-con, host send-text
+  seed into Command, host select --start --end then independent get-selection
+  equals that range (via=get-selection; native AT-SPI SetSelection /
+  GetNSelections+GetSelection; never screenshot / --coords / RFB OCR).
 
 Commands:
   capabilities
