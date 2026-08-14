@@ -362,6 +362,12 @@ directory plus absolute output paths, then perform bounded
 `try_remove_dir_all` retries and require the disposable directory to become
 absent. A final cleanup failure is failed evidence, not a warning to suppress.
 
+Release-only static policy is too late when the same defect is cheap to reject
+on every push. If Candidate exposes deterministic repository drift such as a
+new PowerShell automation reference, keep the Candidate gate but also invoke
+its owning named Rh task from ordinary CI. Do not copy the policy into workflow
+shell; one task remains the authority and both lanes consume it.
+
 ## 9. Debug checklist when a task fails
 
 1. `AGENTERM_SCRIPT_WORKER_STDERR=inherit` — recover the `STEP` trail.

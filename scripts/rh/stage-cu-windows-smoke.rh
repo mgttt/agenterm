@@ -1,0 +1,61 @@
+// Stage the exact Windows agenterm-cu smoke delivery pair without shell policy.
+//
+// Args: AGENTERM_CU_EXE AGENTERM_DLL DESTINATION_DIRECTORY
+
+fn require_nonempty_file(path, code) {
+    require(std::fs::exists(path), code + "_missing:" + path);
+    let metadata = std::fs::metadata(path);
+    require(metadata.is_file, code + "_not_file:" + path);
+    require(metadata.len > 0, code + "_empty:" + path);
+}
+
+fn entry() {
+    require(
+        args.len == 3,
+        "expected: AGENTERM_CU_EXE AGENTERM_DLL DESTINATION_DIRECTORY"
+    );
+    let executable = std::path::absolute(args[0]).display;
+    let library = std::path::absolute(args[1]).display;
+    let destination = std::path::absolute(args[2]).display;
+
+    require_nonempty_file(executable, "cu_smoke_stage_executable");
+    require_nonempty_file(library, "cu_smoke_stage_library");
+    require(
+        std::path::PathBuf::from(executable).file_name == "agenterm-cu.exe",
+        "cu_smoke_stage_executable_name"
+    );
+    require(
+        std::path::PathBuf::from(library).file_name == "agenterm.dll",
+        "cu_smoke_stage_library_name"
+    );
+
+    std::fs::create_dir_all(destination);
+    let staged_executable =
+        std::path::join(destination, "agenterm-cu.exe").display;
+    let staged_library =
+        std::path::join(destination, "agenterm.dll").display;
+    std::fs::copy(executable, staged_executable);
+    std::fs::copy(library, staged_library);
+    require_nonempty_file(staged_executable, "cu_smoke_staged_executable");
+    require_nonempty_file(staged_library, "cu_smoke_staged_library");
+    require(
+        std::fs::metadata(executable).len
+            == std::fs::metadata(staged_executable).len,
+        "cu_smoke_staged_executable_size"
+    );
+    require(
+        std::fs::metadata(library).len
+            == std::fs::metadata(staged_library).len,
+        "cu_smoke_staged_library_size"
+    );
+
+    print("PASS: staged Windows agenterm-cu smoke delivery pair");
+    0
+}
+
+fn cc_lines() {
+    [
+        "agenterm-cu.exe and agenterm.dll sources are nonempty regular files",
+        "staged pair preserves formal names and exact byte sizes"
+    ]
+}

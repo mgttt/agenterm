@@ -107,11 +107,7 @@ jobs:
       - name: Build agenterm-cu
         run: cargo build --locked -p agenterm-cu --release
       - name: Stage Windows CU delivery pair
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/agenterm-cu.exe dist/agenterm-cu.exe -Force
-          Copy-Item target/abi-release/agenterm.dll dist/agenterm.dll -Force
+        run: target\debug\agenterm.exe rh task run stage-cu-windows-smoke --manifest agenterm.tasks.json
       - name: Prove CU smoke remains a native Rh pack
         run: cargo run --locked -p agenterm-rh --example mode_probe -- --root . scripts/rh/cu-windows-smoke.rh
       - name: Run staged Windows CU smoke

@@ -553,6 +553,25 @@
         "task.control-center-smoke"
       ]
     },
+    "stage-cu-windows-smoke": {
+      "inputs": [
+        "built-agenterm-cu",
+        "built-libagenterm"
+      ],
+      "outputs": [
+        "staged-agenterm-cu",
+        "staged-libagenterm"
+      ],
+      "budget": {
+        "timeout_ms": 10000,
+        "max_operations": 10000,
+        "max_output_bytes": 65536
+      },
+      "network": [],
+      "evidence": [
+        "task.stage-cu-windows-smoke"
+      ]
+    },
     "cu-windows-smoke": {
       "inputs": [
         "staged-agenterm-cu",
@@ -1905,6 +1924,25 @@
         "artifact_write",
         "process_spawn",
         "gui_spawn"
+      ]
+    },
+    {
+      "id": "stage-cu-windows-smoke",
+      "description": "Stage the exact nonempty agenterm-cu.exe and agenterm.dll pair for the Windows public smoke without shell-specific automation",
+      "entry": "scripts/rh/stage-cu-windows-smoke.rh",
+      "profile": "local",
+      "cwd": ".",
+      "args": [
+        "target/release/agenterm-cu.exe",
+        "target/abi-release/agenterm.dll",
+        "dist"
+      ],
+      "dependencies": [],
+      "platforms": [
+        "windows"
+      ],
+      "side_effects": [
+        "artifact_write"
       ]
     },
     {
