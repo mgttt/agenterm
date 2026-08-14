@@ -142,6 +142,14 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     }
 
     let lib_name = expect_string(&args[0], "dlcall library")?;
+    if lib_name.is_empty() {
+        return Err(DynError::Library("library name must not be empty".into()));
+    }
+    if lib_name.as_bytes().contains(&0) {
+        return Err(DynError::Library(
+            "library name contains interior NUL".into(),
+        ));
+    }
     let sym_name = expect_string(&args[1], "dlcall symbol")?;
     if sym_name.is_empty() {
         return Err(DynError::DlCall("symbol name must not be empty".into()));

@@ -152,6 +152,27 @@ fn dlcall_rejects_more_than_six_arguments() {
 }
 
 #[test]
+fn dlcall_rejects_empty_library_before_loading() {
+    let mut env = Dyn::new();
+    let err = env.eval(r#"(dlcall "" "unused" "i32")"#).unwrap_err();
+    assert_eq!(
+        err,
+        DynError::Library("library name must not be empty".into())
+    );
+}
+
+#[test]
+fn dlcall_rejects_library_with_interior_nul_before_loading() {
+    let mut env = Dyn::new();
+    let script = "(dlcall \"bad\0library\" \"unused\" \"i32\")";
+    let err = env.eval(script).unwrap_err();
+    assert_eq!(
+        err,
+        DynError::Library("library name contains interior NUL".into())
+    );
+}
+
+#[test]
 fn dlcall_rejects_empty_symbol_before_loading_library() {
     let mut env = Dyn::new();
     let err = env
