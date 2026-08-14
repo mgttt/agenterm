@@ -210,6 +210,8 @@ type A11yNodeGetExtents =
 type A11yNodeSetSelection = unsafe extern "C" fn(isize, *const c_char, i32, i32) -> i32;
 type A11yNodeGetSelection =
     unsafe extern "C" fn(isize, *const c_char, *mut i32, *mut i32, *mut i32) -> i32;
+type A11yNodeSetCaretOffset = unsafe extern "C" fn(isize, *const c_char, i32) -> i32;
+type A11yNodeGetCaretOffset = unsafe extern "C" fn(isize, *const c_char, *mut i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type ClipboardHasText = unsafe extern "C" fn() -> i32;
@@ -1655,6 +1657,53 @@ fn a11y_node_get_selection_rejects_null_node_id() {
     let mut start = 0i32;
     let mut end = 0i32;
     let st = unsafe { get_selection(0, std::ptr::null(), &mut n, &mut start, &mut end) };
+    if cap == AGT_UNSUPPORTED {
+        eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
+        assert_eq!(st, AGT_UNSUPPORTED, "expected AGT_UNSUPPORTED, got {st}");
+        return;
+    }
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// One-shot AT-SPI SetCaretOffset: NULL node_id → AGT_FAILED{code="bad_pointer"}
+/// when the a11y stack is wired; otherwise AGT_UNSUPPORTED.
+#[test]
+fn a11y_node_set_caret_offset_rejects_null_node_id() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    let cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
+    let set_caret: Symbol<A11yNodeSetCaretOffset> =
+        unsafe { sym(lib, b"agt_a11y_node_set_caret_offset") };
+    let st = unsafe { set_caret(0, std::ptr::null(), 2) };
+    if cap == AGT_UNSUPPORTED {
+        eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
+        assert_eq!(st, AGT_UNSUPPORTED, "expected AGT_UNSUPPORTED, got {st}");
+        return;
+    }
+    assert_eq!(st, AGT_FAILED, "expected AGT_FAILED, got {st}");
+    let msg = last_error_message(lib);
+    assert!(
+        msg.contains("bad_pointer"),
+        "expected code \"bad_pointer\" in error, got: {msg}"
+    );
+}
+
+/// Independent AT-SPI GetCaretOffset: NULL node_id → AGT_FAILED{code="bad_pointer"}
+/// when the a11y stack is wired; otherwise AGT_UNSUPPORTED.
+#[test]
+fn a11y_node_get_caret_offset_rejects_null_node_id() {
+    let lib = load();
+    let query: Symbol<CapabilityQuery> = unsafe { sym(lib, b"agt_capability_query") };
+    let cap = unsafe { query(AGT_CAP_ACCESSIBILITY_TREE) };
+    let get_caret: Symbol<A11yNodeGetCaretOffset> =
+        unsafe { sym(lib, b"agt_a11y_node_get_caret_offset") };
+    let mut offset = 0i32;
+    let st = unsafe { get_caret(0, std::ptr::null(), &mut offset) };
     if cap == AGT_UNSUPPORTED {
         eprintln!("SKIP (no a11y stack): AGT_CAP_ACCESSIBILITY_TREE unsupported");
         assert_eq!(st, AGT_UNSUPPORTED, "expected AGT_UNSUPPORTED, got {st}");

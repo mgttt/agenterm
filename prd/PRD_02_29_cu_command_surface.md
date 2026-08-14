@@ -186,6 +186,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   eval-helper select glue (unlike `ScrollTo` / EditableText). Linux
   `agenterm-con` composer `Command` publishes those same Text methods
   (persistent publisher range; same ABI 1.8 verbs, no protocol change).
+- [x] `set-caret --window HANDLE --name PAT --offset N [--role ROLE]`
+  is one-shot AT-SPI `Text.SetCaretOffset`
+  (`agt_a11y_node_set_caret_offset`) on the unique showing named node
+  and reports `addressing=accessibility-tree` / `via=set-caret-offset`.
+  `--name` is required. Missing Text / `UnknownMethod` typed-fails
+  (`a11y_caret_unavailable`). SetCaretOffset false is
+  `a11y_caret_no_effect`, not `timeout`. Miss / ambiguous keep the
+  existing name codes. Never XTest, `--coords`, or screenshot. The
+  `set-caret` reply is not proof.
+- [x] `get-caret --window HANDLE --name PAT [--role ROLE]` reads
+  independent AT-SPI `Text.CaretOffset` / `GetCaretOffset`
+  (`agt_a11y_node_get_caret_offset`) for that unique showing named
+  node. The `set-caret` reply payload does not count. Missing Text
+  typed-fails (`a11y_caret_unavailable`). Linux `agenterm-con`
+  composer `Command` publishes those same Text methods (persistent
+  publisher caret; ABI 1.9 verbs).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

@@ -7,8 +7,9 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNode, AccessibilityNodeAction, get_node_extents, get_node_selection,
-    perform_node_action, scroll_node, set_node_selection, set_node_text, tree_for_window,
+    AccessibilityNode, AccessibilityNodeAction, get_node_caret_offset, get_node_extents,
+    get_node_selection, perform_node_action, scroll_node, set_node_caret_offset,
+    set_node_selection, set_node_text, tree_for_window,
 };
 
 const DEADLINE: Duration = Duration::from_secs(20);
@@ -160,6 +161,17 @@ fn real_atspi_tree_edits_command_and_activates_send() {
     assert_eq!(after_sel.n, 1);
     assert_eq!(after_sel.start, 0);
     assert_eq!(after_sel.end, 4);
+
+    let before_caret =
+        get_node_caret_offset(None, &command_id).expect("GetCaretOffset before SetCaretOffset");
+    assert_ne!(
+        before_caret, 2,
+        "pre-set caret must not already be 2: {before_caret}"
+    );
+    set_node_caret_offset(None, &command_id, 2).expect("AT-SPI SetCaretOffset");
+    let after_caret =
+        get_node_caret_offset(None, &command_id).expect("GetCaretOffset after SetCaretOffset");
+    assert_eq!(after_caret, 2);
 
     let before = get_node_extents(None, &field_id).expect("GetExtents before ScrollTo");
     assert!(

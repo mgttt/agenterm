@@ -34,6 +34,8 @@ agt_a11y_node_scroll
 agt_a11y_node_get_extents
 agt_a11y_node_set_selection
 agt_a11y_node_get_selection
+agt_a11y_node_set_caret_offset
+agt_a11y_node_get_caret_offset
 agt_a11y_drain_bus
 agt_a11y_last_text_write_via
 agt_clipboard_set_text

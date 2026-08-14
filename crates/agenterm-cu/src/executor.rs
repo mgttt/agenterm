@@ -146,6 +146,16 @@ impl Executor {
             Command::GetSelection {
                 window, name, role, ..
             } => get_selection(*window, name.as_deref(), role.as_deref()),
+            Command::SetCaret {
+                offset,
+                window,
+                name,
+                role,
+                ..
+            } => set_caret(*window, name.as_deref(), role.as_deref(), *offset),
+            Command::GetCaret {
+                window, name, role, ..
+            } => get_caret(*window, name.as_deref(), role.as_deref()),
             Command::Wait {
                 timeout_ms,
                 condition,
@@ -631,6 +641,88 @@ fn get_selection(
         "n": selection.n,
         "start": selection.start,
         "end": selection.end,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `set-caret --name` is one-shot AT-SPI `Text.SetCaretOffset`
+/// (`agt_a11y_node_set_caret_offset`). Missing Text / `UnknownMethod`
+/// typed-fails (`a11y_caret_unavailable`). SetCaretOffset false
+/// typed-fails (`a11y_caret_no_effect`). Never XTest, `--coords`, or
+/// screenshot. The reply is not proof — `get-caret` is the independent
+/// `CaretOffset` readback.
+fn set_caret(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+    offset: i32,
+) -> Result<serde_json::Value, CuError> {
+    if offset < 0 {
+        return Err(CuError::new(
+            "invalid_input",
+            format!("set-caret requires --offset >= 0; got {offset}"),
+        ));
+    }
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "set-caret requires --window <handle> --name <pattern> --offset N",
+        )
+    })?;
+    let resolved = resolve_actuation_node(window, None, Some(name), role, "set-caret")?
+        .ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "set-caret requires --window <handle> --name <pattern> --offset N",
+            )
+        })?;
+    mechanism::set_node_caret_offset(window, &resolved.node_id, offset)
+        .map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "set-caret",
+        "via": "set-caret-offset",
+        "offset": offset,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `get-caret --name` reads independent AT-SPI `Text.CaretOffset`
+/// (`agt_a11y_node_get_caret_offset`). The `set-caret` reply payload
+/// does not count. Missing Text typed-fails (`a11y_caret_unavailable`).
+fn get_caret(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "get-caret requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved = resolve_actuation_node(window, None, Some(name), role, "get-caret")?
+        .ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "get-caret requires --window <handle> --name <pattern>",
+            )
+        })?;
+    let offset =
+        mechanism::get_node_caret_offset(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "get-caret",
+        "via": "get-caret-offset",
+        "offset": offset,
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -2096,5 +2188,55 @@ mod tests {
         assert_eq!(get_selection.verb(), "get-selection");
         assert_eq!(select.required_grant(), Grant::Actuate);
         assert_eq!(get_selection.required_grant(), Grant::Observe);
+    }
+
+    #[test]
+    fn set_caret_without_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth);
+        let command = Command::SetCaret {
+            target: TargetRef::Current,
+            offset: 2,
+            window: Some(1),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
+    }
+
+    #[test]
+    fn name_get_caret_requires_name() {
+        let command = Command::GetCaret {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn set_caret_and_get_caret_verbs_are_named() {
+        let set_caret = Command::SetCaret {
+            target: TargetRef::Current,
+            offset: 2,
+            window: Some(1),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let get_caret = Command::GetCaret {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("Command".into()),
+            role: None,
+        };
+        assert_eq!(set_caret.verb(), "set-caret");
+        assert_eq!(get_caret.verb(), "get-caret");
+        assert_eq!(set_caret.required_grant(), Grant::Actuate);
+        assert_eq!(get_caret.required_grant(), Grant::Observe);
     }
 }

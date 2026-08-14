@@ -33,9 +33,11 @@
 //! Device/key events (Linux: AT-SPI DeviceEventListener),
 //! `agt_a11y_node_scroll` is one-shot `Component.ScrollTo(TopEdge)`,
 //! `agt_a11y_node_get_extents` is independent `Component.GetExtents(Screen)`,
-//! `agt_a11y_node_set_selection` is one-shot `Text.SetSelection`, and
+//! `agt_a11y_node_set_selection` is one-shot `Text.SetSelection`,
 //! `agt_a11y_node_get_selection` is independent `GetNSelections` /
-//! `GetSelection`.
+//! `GetSelection`, `agt_a11y_node_set_caret_offset` is one-shot
+//! `Text.SetCaretOffset`, and `agt_a11y_node_get_caret_offset` is
+//! independent `CaretOffset`.
 //! Backends are
 //! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
 //! `agenterm-platform`; the C header names mechanisms only.
@@ -87,9 +89,10 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_extents,
-    get_node_selection, get_node_text, last_text_write_via, perform_node_action, scroll_node,
-    send_node_keys, set_node_selection, set_node_text, tree_for_window,
+    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_caret_offset,
+    get_node_extents, get_node_selection, get_node_text, last_text_write_via, perform_node_action,
+    scroll_node, send_node_keys, set_node_caret_offset, set_node_selection, set_node_text,
+    tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::desktop_host::{
@@ -269,7 +272,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 8);
+abi_version!(1, 9);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -4016,6 +4019,136 @@ pub extern "C" fn agt_a11y_node_get_selection(
                 c"agt_a11y_node_get_selection",
                 c"panic",
                 "panic in agt_a11y_node_get_selection",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// One-shot AT-SPI `Text.SetCaretOffset` on a child-index path.
+/// Missing Text / `UnknownMethod` →
+/// `AGT_FAILED{code="a11y_caret_unavailable"}`. SetCaretOffset false →
+/// `AGT_FAILED{code="a11y_caret_no_effect"}`. NULL `node_id` →
+/// `bad_pointer`. Never XTest or `--coords`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_set_caret_offset(
+    window_handle: isize,
+    node_id: *const c_char,
+    offset: i32,
+) -> agt_status {
+    fn inner(window_handle: isize, node_id: *const c_char, offset: i32) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(
+                c"agt_a11y_node_set_caret_offset",
+                c"bad_pointer",
+                "node_id is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_set_caret_offset",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match set_node_caret_offset(filter, node_id, offset) {
+            Ok(()) => agt_status::AGT_OK,
+            Err(e) => map_a11y_error(c"agt_a11y_node_set_caret_offset", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(window_handle, node_id, offset))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_set_caret_offset",
+                c"panic",
+                "panic in agt_a11y_node_set_caret_offset",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Independent AT-SPI `Text.CaretOffset` / `GetCaretOffset` for a
+/// child-index path. Not the set-caret reply. NULL `node_id` or NULL
+/// `out_offset` → `bad_pointer`. Missing Text →
+/// `AGT_FAILED{code="a11y_caret_unavailable"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_get_caret_offset(
+    window_handle: isize,
+    node_id: *const c_char,
+    out_offset: *mut i32,
+) -> agt_status {
+    fn inner(window_handle: isize, node_id: *const c_char, out_offset: *mut i32) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(
+                c"agt_a11y_node_get_caret_offset",
+                c"bad_pointer",
+                "node_id is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if out_offset.is_null() {
+            record_error(
+                c"agt_a11y_node_get_caret_offset",
+                c"bad_pointer",
+                "caret out pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_get_caret_offset",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match get_node_caret_offset(filter, node_id) {
+            Ok(offset) => {
+                unsafe {
+                    *out_offset = offset;
+                }
+                agt_status::AGT_OK
+            }
+            Err(e) => map_a11y_error(c"agt_a11y_node_get_caret_offset", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, out_offset)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_get_caret_offset",
+                c"panic",
+                "panic in agt_a11y_node_get_caret_offset",
             );
             agt_status::AGT_FAILED
         }

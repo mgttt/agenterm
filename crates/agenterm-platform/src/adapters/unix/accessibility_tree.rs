@@ -102,3 +102,22 @@ pub(crate) fn get_node_selection(
         reason: "accessibility-tree not wired on this unix host".into(),
     })
 }
+
+pub(crate) fn set_node_caret_offset(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+    _offset: i32,
+) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "accessibility-tree not wired on this unix host".into(),
+    })
+}
+
+pub(crate) fn get_node_caret_offset(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<i32, AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "accessibility-tree not wired on this unix host".into(),
+    })
+}

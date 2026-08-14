@@ -332,6 +332,25 @@ pub(crate) fn get_node_selection(
     })
 }
 
+pub(crate) fn set_node_caret_offset(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+    _offset: i32,
+) -> Result<(), AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "AT-SPI Text.SetCaretOffset is unavailable through Windows UIA".into(),
+    })
+}
+
+pub(crate) fn get_node_caret_offset(
+    _window_handle: Option<isize>,
+    _node_id: &str,
+) -> Result<i32, AccessibilityTreeError> {
+    Err(AccessibilityTreeError::Unsupported {
+        reason: "AT-SPI Text.GetCaretOffset is unavailable through Windows UIA".into(),
+    })
+}
+
 struct Budget {
     deadline: Instant,
     timeout_code: &'static str,

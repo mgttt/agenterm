@@ -79,6 +79,10 @@ struct Store {
     /// Layout snapshots replace node text but must not drop a live range;
     /// independent `GetNSelections` / `GetSelection` is the proof.
     selections: HashMap<u32, (i32, i32)>,
+    /// Persistent AT-SPI Text caret (`SetCaretOffset` / `CaretOffset`).
+    /// Layout snapshots replace node text but must not drop a live caret;
+    /// independent `GetCaretOffset` is the proof.
+    carets: HashMap<u32, i32>,
 }
 
 impl Store {
@@ -295,6 +299,7 @@ fn apply_text_set_selection(
     } else {
         store.selections.insert(id, (start, end));
     }
+    store.carets.insert(id, end);
     true
 }
 
@@ -318,6 +323,42 @@ fn apply_text_remove_selection(store: &Mutex<Store>, id: u32, selection_num: i32
 
 fn clear_node_selection(store: &mut Store, id: u32) {
     store.selections.remove(&id);
+}
+
+fn clamp_caret_offset(text: &str, offset: i32) -> Option<i32> {
+    if offset < 0 {
+        return None;
+    }
+    Some(offset.min(char_count(text)))
+}
+
+fn text_caret_offset(store: &Store, id: u32) -> i32 {
+    let total = char_count(&node_text(store, id));
+    store
+        .carets
+        .get(&id)
+        .copied()
+        .unwrap_or(total)
+        .clamp(0, total)
+}
+
+/// `Text.SetCaretOffset`: persist so later `GetCaretOffset` / `CaretOffset`
+/// reports it. A negative offset is rejected; an offset past the end is
+/// clamped. Moving the caret collapses the stored selection.
+fn apply_text_set_caret_offset(store: &Mutex<Store>, id: u32, offset: i32) -> bool {
+    let mut store = lock_store(store);
+    let Some(node) = store.node(id) else {
+        return false;
+    };
+    if !node.editable {
+        return false;
+    }
+    let Some(offset) = clamp_caret_offset(&node.text, offset) else {
+        return false;
+    };
+    store.carets.insert(id, offset);
+    store.selections.remove(&id);
+    true
 }
 
 /// `Component.ScrollTo`: move a named inner widget (or every child of a
@@ -457,6 +498,11 @@ fn replace_node_text(store: &Mutex<Store>, id: u32, text: String) -> bool {
     }
     store.focused = Some(id);
     clear_node_selection(&mut store, id);
+    let end = store
+        .node(id)
+        .map(|node| char_count(&node.text))
+        .unwrap_or(0);
+    store.carets.insert(id, end);
     true
 }
 
@@ -509,8 +555,14 @@ fn apply_node_key(store: &Mutex<Store>, id: u32, key: PublishedKey) -> bool {
         } else {
             store.selections.remove(&id);
         }
+        store.carets.insert(id, end);
     } else if clear_selection {
         clear_node_selection(&mut store, id);
+        let end = store
+            .node(id)
+            .map(|node| char_count(&node.text))
+            .unwrap_or(0);
+        store.carets.insert(id, end);
     }
     true
 }
@@ -882,8 +934,8 @@ impl TextNode {
         )
     }
 
-    fn set_caret_offset(&self, _offset: i32) -> bool {
-        true
+    fn set_caret_offset(&self, offset: i32) -> bool {
+        apply_text_set_caret_offset(&self.0.store, self.0.id, offset)
     }
 
     #[zbus(property)]
@@ -894,7 +946,8 @@ impl TextNode {
 
     #[zbus(property)]
     fn caret_offset(&self) -> i32 {
-        self.character_count()
+        let store = lock_store(&self.0.store);
+        text_caret_offset(&store, self.0.id)
     }
 }
 
@@ -1308,6 +1361,7 @@ pub(crate) fn start(
         handler: None,
         scroll_dy: HashMap::new(),
         selections: HashMap::new(),
+        carets: HashMap::new(),
     }));
     let publishing = Arc::new(AtomicBool::new(false));
     let thread_store = Arc::clone(&store);
@@ -1490,6 +1544,7 @@ mod tests {
             handler: Some(Arc::new(|_, _| false)),
             scroll_dy: HashMap::new(),
             selections: HashMap::new(),
+            carets: HashMap::new(),
         });
         assert!(!replace_node_text(&store, 4, "rejected".into()));
         assert_eq!(lock_store(&store).node(4).unwrap().text, "original");
@@ -1603,6 +1658,7 @@ mod tests {
                 handler: None,
                 scroll_dy: HashMap::new(),
                 selections: HashMap::new(),
+                carets: HashMap::new(),
             })),
             publishing: Arc::clone(&publishing),
         };
@@ -1666,6 +1722,7 @@ mod tests {
             handler: None,
             scroll_dy: HashMap::new(),
             selections: HashMap::new(),
+            carets: HashMap::new(),
         })
     }
 
@@ -1738,6 +1795,7 @@ mod tests {
             handler: None,
             scroll_dy: HashMap::new(),
             selections: HashMap::new(),
+            carets: HashMap::new(),
         });
         assert!(!apply_component_scroll(&store, 4, ATSPI_SCROLL_TOP_EDGE));
     }
@@ -1755,6 +1813,7 @@ mod tests {
             handler: Some(Arc::new(|_, _| true)),
             scroll_dy: HashMap::new(),
             selections: HashMap::new(),
+            carets: HashMap::new(),
         })
     }
 
@@ -1816,6 +1875,51 @@ mod tests {
         let locked = lock_store(&store);
         assert_eq!(locked.node(4).unwrap().text, "WORLD");
         assert_eq!(text_n_selections(&locked, 4), 0);
+    }
+
+    #[test]
+    fn set_caret_offset_sticks_for_independent_get_caret() {
+        let store = store_with_command("HELLO");
+        {
+            let locked = lock_store(&store);
+            assert_eq!(text_caret_offset(&locked, 4), 5);
+        }
+        assert!(apply_text_set_caret_offset(&store, 4, 2));
+        let locked = lock_store(&store);
+        assert_eq!(text_caret_offset(&locked, 4), 2);
+        assert_eq!(text_n_selections(&locked, 4), 0);
+    }
+
+    #[test]
+    fn set_caret_offset_rejects_negative_and_clamps_past_end() {
+        let store = store_with_command("HELLO");
+        assert!(!apply_text_set_caret_offset(&store, 4, -1));
+        assert!(apply_text_set_caret_offset(&store, 4, 99));
+        assert_eq!(text_caret_offset(&lock_store(&store), 4), 5);
+    }
+
+    #[test]
+    fn publish_does_not_clear_text_caret() {
+        let store = store_with_command("HELLO");
+        assert!(apply_text_set_caret_offset(&store, 4, 2));
+        {
+            let mut locked = lock_store(&store);
+            locked.tree = PublishedTree {
+                app_name: "agenterm-con".into(),
+                nodes: vec![sample_command("HELLO")],
+            };
+        }
+        assert_eq!(text_caret_offset(&lock_store(&store), 4), 2);
+    }
+
+    #[test]
+    fn replace_text_moves_caret_to_the_new_end() {
+        let store = store_with_command("HELLO");
+        assert!(apply_text_set_caret_offset(&store, 4, 2));
+        assert!(replace_node_text(&store, 4, "WORLD".into()));
+        let locked = lock_store(&store);
+        assert_eq!(locked.node(4).unwrap().text, "WORLD");
+        assert_eq!(text_caret_offset(&locked, 4), 5);
     }
 
     #[test]
