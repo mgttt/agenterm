@@ -30,7 +30,7 @@ pub fn run() -> i32 {
 mod macos {
     use super::PlaceAction;
     use crate::host_actions;
-    use crate::{Authorization, Executor, Grant};
+    use crate::{Authorization, Command, Executor, Grant, TargetRef};
     use std::os::raw::{c_uint, c_void};
 
     const CMD: u32 = 1 << 8;

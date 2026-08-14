@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CO_E_OBJNOTCONNECTED, E_ACCESSDENIED, E_NOINTERFACE, HWND, RPC_E_CALL_REJECTED,
+    CO_E_OBJNOTCONNECTED, E_ACCESSDENIED, E_FAIL, E_NOINTERFACE, HWND, RPC_E_CALL_REJECTED,
     RPC_E_CHANGED_MODE, RPC_E_DISCONNECTED, RPC_E_SERVERCALL_RETRYLATER, SysAllocStringLen,
     SysFreeString, SysStringLen,
 };
@@ -133,7 +133,11 @@ pub(crate) fn tree_for_window(
             ));
         }
 
-        let node = session.read_node(&element, id.clone(), parent_id, &mut budget)?;
+        let node = match session.read_node(&element, id.clone(), parent_id.clone(), &mut budget) {
+            Ok(node) => node,
+            Err(error) if parent_id.is_some() && is_snapshot_branch_loss(&error) => continue,
+            Err(error) => return Err(error),
+        };
         budget.account_node(&node)?;
         nodes.push(node);
 
@@ -162,7 +166,15 @@ pub(crate) fn tree_for_window(
                 ));
             }
             let next = session.next_sibling(&child, &budget)?;
-            let segment = runtime_segment(&session.runtime_id(&child, &budget)?)?;
+            let runtime_id = match session.runtime_id(&child, &budget) {
+                Ok(runtime_id) => runtime_id,
+                Err(error) if is_snapshot_branch_loss(&error) => {
+                    current = next;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let segment = runtime_segment(&runtime_id)?;
             let child_id = format!("{id}/{segment}");
             if child_id.len() > MAX_NODE_ID_BYTES {
                 return Err(limit_error(
@@ -504,21 +516,38 @@ impl UiaSession {
         first_child: bool,
     ) -> Result<Option<ComPtr>, AccessibilityTreeError> {
         budget.check()?;
-        let mut raw = ptr::null_mut();
         let vtable = unsafe { tree_walker_vtable(&self.walker) };
-        let hr = unsafe {
-            if first_child {
-                ((*vtable).get_first_child)(self.walker.as_ptr(), element.as_ptr(), &mut raw)
-            } else {
-                ((*vtable).get_next_sibling)(self.walker.as_ptr(), element.as_ptr(), &mut raw)
+        for attempt in 0..3 {
+            let mut raw = ptr::null_mut();
+            let hr = unsafe {
+                if first_child {
+                    ((*vtable).get_first_child)(self.walker.as_ptr(), element.as_ptr(), &mut raw)
+                } else {
+                    ((*vtable).get_next_sibling)(self.walker.as_ptr(), element.as_ptr(), &mut raw)
+                }
+            };
+            if hr >= 0 {
+                return if raw.is_null() {
+                    Ok(None)
+                } else {
+                    unsafe { ComPtr::from_raw(raw, "IUIAutomationElement child") }.map(Some)
+                };
             }
-        };
-        hresult(hr, "IUIAutomationTreeWalker navigation")?;
-        if raw.is_null() {
-            Ok(None)
-        } else {
-            unsafe { ComPtr::from_raw(raw, "IUIAutomationElement child") }.map(Some)
+            if !raw.is_null() {
+                drop(unsafe { ComPtr::from_raw(raw, "failed UIA navigation result")? });
+            }
+            if hr != E_FAIL && hr as u32 != UIA_E_TIMEOUT {
+                return hresult(hr, "IUIAutomationTreeWalker navigation").map(|()| None);
+            }
+            budget.check()?;
+            if attempt < 2 {
+                std::thread::yield_now();
+            }
         }
+        // A provider can disappear or stop responding between sibling
+        // discovery and navigation. After bounded retries that branch is
+        // absent from this snapshot rather than failing the whole desktop.
+        Ok(None)
     }
 
     fn resolve_node(
@@ -1085,6 +1114,14 @@ fn node_recycled(node_id: &str) -> AccessibilityTreeError {
     AccessibilityTreeError::failed(
         "a11y_node_recycled",
         format!("UI Automation node {node_id} disappeared or its runtime id was recycled"),
+    )
+}
+
+fn is_snapshot_branch_loss(error: &AccessibilityTreeError) -> bool {
+    matches!(
+        error,
+        AccessibilityTreeError::Failed { code, .. }
+            if code == "a11y_node_recycled" || code == "a11y_timeout"
     )
 }
 

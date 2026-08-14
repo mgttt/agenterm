@@ -598,7 +598,8 @@ fn select(
 
 /// `get-selection --name` reads independent AT-SPI `Text.GetNSelections`
 /// + `GetSelection(0)` (`agt_a11y_node_get_selection`). The `select`
-/// reply payload does not count. Missing Text typed-fails
+///
+/// The reply payload does not count. Missing Text typed-fails
 /// (`a11y_selection_unavailable`). `n == 0` is empty success.
 fn get_selection(
     window: Option<isize>,

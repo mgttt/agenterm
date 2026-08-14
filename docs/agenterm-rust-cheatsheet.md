@@ -121,6 +121,11 @@ Windows checklist:
   revalidates target plus focus before committing text; dropping the receiver
   on tab/window close must never strand or block the worker.
 - Retry only documented transient errors, with a strict attempt/deadline bound.
+- Do not use the whole Windows desktop (`HWND = 0`) as deterministic UIA success
+  evidence: unrelated providers can recycle, reject calls, or exceed the bounded
+  deadline. Let desktop-wide ABI probes typed-fail when a provider is unavailable,
+  and own success semantics with a child-owned native window fixture plus the
+  public black-box journey.
 - A process-global native resource needs one lock and one RAII owner across every
   adapter path. In particular, Windows console attach/detach cannot be split
   between a dependency helper and a platform guard: serialize the whole
