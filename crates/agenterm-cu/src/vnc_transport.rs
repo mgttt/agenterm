@@ -15,19 +15,20 @@
 //! selection via `select` / `get-selection`. Cut 3.37 locked caret
 //! placement via `set-caret` / `get-caret`. Cut 3.38 locked named Action
 //! click. Cut 3.39 locked named scroll. Cut 3.40 locked named focus.
-//! Cut 3.41 locks structured tree observe: host `tree --window H` over
-//! `--vnc` returns the session AT-SPI flattened control tree
-//! (`addressing=accessibility-tree`) from a second `agenterm-con`
-//! Session, and the unique named Session children `Command`, `SEND`,
-//! and `OffscreenField` each appear once among showing nodes. Native
-//! AT-SPI tree via the session worker — never screenshot / `--coords` /
-//! RFB framebuffer OCR. Gate-owned dedicated loopback x11vnc; never
-//! steal `unix:/tmp/run-box/agenterm-con.sock` or treat the resident
-//! `:2` x11vnc as the only proof. Observe and actuate grants both
-//! forward. `focus` (3.40), `scroll` (3.39), `click` (3.38),
-//! `set-caret` (3.37), `select` (3.36), `send-keys` (3.35), `copy`
-//! (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc remain
-//! valid.
+//! Cut 3.41 locked structured tree observe. Cut 3.42 locks get-caret as
+//! its own observe path: host `get-caret --window H --name Command` over
+//! `--vnc` returns the session AT-SPI caret offset as an int
+//! (`via=get-caret-offset`; native `CaretOffset` / `GetCaretOffset`) from
+//! a second `agenterm-con` `Command` field. Gate precondition (not this
+//! cut's verb): `Command` holds a known ASCII seed and the caret is at
+//! seed end so `offset == seed_len`. Never screenshot / `--coords` /
+//! RFB framebuffer OCR / inferred string length. Gate-owned dedicated
+//! loopback x11vnc; never steal `unix:/tmp/run-box/agenterm-con.sock` or
+//! treat the resident `:2` x11vnc as the only proof. Observe and actuate
+//! grants both forward. `tree` (3.41), `focus` (3.40), `scroll` (3.39),
+//! `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
+//! (3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
+//! over vnc remain valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -852,9 +853,21 @@ mod tests {
 
     #[test]
     fn get_caret_observe_survives_target_rewrite() {
-        // 3.37 observe sibling: get-caret must also rewrite target only and
-        // keep window/name/role so independent CaretOffset/GetCaretOffset
-        // proof rides the same RFB + session-worker path as set-caret.
+        // 3.42: first vnc get-caret as its own observe path reuses the same
+        // RFB + session-worker rewrite; the worker still runs
+        // target=current get-caret. Circuit: gate precondition places a
+        // known ASCII SEED on session Command with caret at seed end
+        // (seed/caret state is not this cut's verb — send-text / set-caret
+        // remain prior paths), host independent get-caret --window H
+        // --name Command returns that offset as an int
+        // (via=get-caret-offset; native AT-SPI CaretOffset /
+        // GetCaretOffset; offset == seed_len). Never screenshot /
+        // --coords / RFB framebuffer OCR / inferred string length.
+        // Missing Text typed-fails a11y_caret_unavailable on the session
+        // worker the same as local current. No new verb; observe grant
+        // only. set-caret (3.37) remains a separate write path that may
+        // use get-caret as readback. Window/name/role must survive the
+        // rewrite so the session worker scopes CaretOffset to the node.
         let command = CuCommand::GetCaret {
             target: TargetRef::Vnc,
             window: Some(42),
