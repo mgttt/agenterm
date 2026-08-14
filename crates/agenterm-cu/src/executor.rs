@@ -491,16 +491,19 @@ fn paste(
 /// `--window` without `--name` targets the showing focused node — the
 /// same innermost `Text.GetText` candidate `get-text --window` reads —
 /// so `focus --name X` then `send-keys --window H KEYS` then
-/// `get-text --window H` closes the loop on Chrome `GetTextField` and
-/// the Reasonix composer (`Message Reasonix…` under
+/// `get-text --window H` closes the loop on agenterm-con `Command`
+/// (native `EditableText`, `via=editable-text` on a second con that
+/// never steals the resident control socket), Chrome `GetTextField`,
+/// and the Reasonix composer (`Message Reasonix…` under
 /// `scripts/reasonix-desktop-a11y.sh`). Prefer
 /// `DeviceEventListener.NotifyEvent`. When that interface is absent
-/// (Chrome renderer entry; WebKitGTK textarea) and `KEYS` is plain
-/// typeable text, write through the same AT-SPI `EditableText` /
-/// `Text` path as focused `send-text` (`via=text`) so the typed string
-/// is still native AT-SPI and never XTest. Special chords (`enter`,
-/// `ctrl+a`, …) without a key interface still typed-fail. Without
-/// `--window` it stays the plain "send to whatever is focused" inject.
+/// (con Command; Chrome renderer entry; WebKitGTK textarea) and `KEYS`
+/// is plain typeable text, write through the same AT-SPI
+/// `EditableText` / `Text` path as focused `send-text` so the typed
+/// string is still native AT-SPI and never XTest. Special chords
+/// (`enter`, `ctrl+a`, …) without a key interface still typed-fail.
+/// Without `--window` it stays the plain "send to whatever is focused"
+/// inject.
 fn send_keys(
     keys: &str,
     window: Option<isize>,
@@ -545,8 +548,9 @@ fn send_keys_to_node(
 }
 
 /// Focused-node key delivery: Device/key first; plain typeable text may
-/// fall back to AT-SPI Text write when the node has no
-/// `DeviceEventListener` (Chrome GetTextField). Never XTest.
+/// fall back to AT-SPI EditableText/Text write when the node has no
+/// `DeviceEventListener` (con Command, Chrome GetTextField, Reasonix
+/// composer). Never XTest.
 fn send_keys_to_focused_node(
     keys: &str,
     window: Option<isize>,
@@ -2316,6 +2320,7 @@ mod tests {
                     | "a11y_key_unavailable"
                     | "a11y_text_unavailable"
                     | "a11y_backend_failed"
+                    | "dylib_load"
                     | "unsupported"
                     | "failed"
                     | "invalid_input"

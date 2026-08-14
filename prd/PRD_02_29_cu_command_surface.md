@@ -148,19 +148,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `send-keys --window HANDLE` without `--name` targets the showing
   focused node (innermost `Text.GetText` candidate — the same node
   `get-text --window HANDLE` reads). Prefers `DeviceEventListener.NotifyEvent`
-  (`via=device-event`). When that interface is absent (Chrome renderer
-  entry; WebKitGTK textarea) and the payload is plain typeable text,
-  writes through the same AT-SPI `EditableText` / `Text` path as focused
-  `send-text` (`via=text`). Never XTest / `input_inject::send_keys` when
-  `--window` is set. Proof is independent `get-text --window HANDLE`
-  (no `--name`) equal to the typed string. Live hosts: Chrome
+  (`via=device-event`). When that interface is absent (con `Command`;
+  Chrome renderer entry; WebKitGTK textarea) and the payload is plain
+  typeable text, writes through the same AT-SPI `EditableText` / `Text`
+  path as focused `send-text`. Never XTest / `input_inject::send_keys`
+  when `--window` is set. Proof is independent `get-text --window HANDLE`
+  (no `--name`) equal to the typed string. Live hosts: agenterm-con
+  named `Command` (native `EditableText`, `via=editable-text` on a
+  second con that never steals the resident control socket), Chrome
   `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`) after
-  `focus --name`; Reasonix composer `Message Reasonix…` after
-  `focus --name` under `scripts/reasonix-desktop-a11y.sh` (eval-helper
-  set-value, same as focused `send-text`). Special chords without a key
-  interface still typed-fail. Without `--window` it stays the plain
-  "send to whatever is focused" inject. Do not mark this leaf shipped
-  on worker JSON.
+  `focus --name` (`via=text`); Reasonix composer `Message Reasonix…`
+  after `focus --name` under `scripts/reasonix-desktop-a11y.sh`
+  (eval-helper set-value, `via=text`, same as focused `send-text`).
+  Special chords without a key interface still typed-fail. Without
+  `--window` it stays the plain "send to whatever is focused" inject.
+  Do not mark this leaf shipped on worker JSON.
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls AT-SPI `Text.GetText` on the unique
   showing named node until that independent text equals `TEXT`. Timeout is
