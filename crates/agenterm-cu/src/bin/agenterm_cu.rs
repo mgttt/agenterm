@@ -579,12 +579,14 @@ Commands:
                               named field. --window without --name writes that
                               same path on the showing focused node (same
                               innermost Text candidate as get-text --window;
-                              Chrome GetTextField; Reasonix Message Reasonix…;
-                              con Command). Never XTest when --window is set.
-                              A node with no writeable text interface typed-fails
-                              (never XTest / --coords / screenshot). Close the
-                              circuit with get-text --window / wait --text-equals;
-                              paste matched.text does not count. `--` ends flag
+                              con Command via=editable-text on a second con
+                              that never steals the resident control socket;
+                              Chrome GetTextField; Reasonix Message Reasonix…).
+                              Never XTest when --window is set. A node with no
+                              writeable text interface typed-fails (never XTest
+                              / --coords / screenshot). Close the circuit with
+                              get-text --window / wait --text-equals; paste
+                              matched.text does not count. `--` ends flag
                               parsing
   send-keys [--window HANDLE [--name PAT [--role ROLE]]] [--] <keys...>
                               --name delivers AT-SPI Device/key events
