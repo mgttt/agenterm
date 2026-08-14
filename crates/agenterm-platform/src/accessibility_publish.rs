@@ -69,9 +69,16 @@ impl AccessibilityPublisher {
         self.inner.set_window_handle(window_handle);
     }
 
-    /// Whether a real host publisher is behind this handle. False on hosts
-    /// whose backend discards snapshots, so callers can skip building them
-    /// instead of testing the OS themselves.
+    /// Whether callers should keep this handle and keep publishing snapshots.
+    /// True for a reconnectable host publisher even while the bus is down.
+    /// False only for a no-op backend that discards every snapshot.
+    pub fn retains_snapshots(&self) -> bool {
+        self.inner.retains_snapshots()
+    }
+
+    /// Whether a live host connection is serving the current snapshot.
+    /// False while a reconnectable publisher is waiting for a bus, and on
+    /// hosts whose backend discards snapshots.
     pub fn is_publishing(&self) -> bool {
         self.inner.is_publishing()
     }

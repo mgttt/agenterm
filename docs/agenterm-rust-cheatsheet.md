@@ -1098,6 +1098,18 @@ and missing values. Keep live service discovery best-effort in the adapter and
 prove actual desktop integration only in a matching-host smoke environment that
 explicitly owns that service.
 
+## Linux AT-SPI publish must reconnect
+
+A one-shot `serve()` then `pending()` dies with the first bus. If
+`DBUS_SESSION_BUS_ADDRESS` points at a missing `unix:path`, hydrate must
+replace it from the live AT-SPI process or `XDG_RUNTIME_DIR/bus` — filling
+only when unset leaves a dead address in place. `start()` returns a handle
+on first connect failure so the product keeps publishing snapshots;
+`is_publishing()` is the live connection flag, not "this backend exists".
+`retains_snapshots()` is how the product keeps a reconnectable handle and
+still drops a no-op host. Do not require killing the con process to pick up
+a replacement bus.
+
 ## AT-SPI action names are not required for a node click
 
 Linux `GetActions` returns localized names. Chrome with
