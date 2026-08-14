@@ -790,11 +790,11 @@ Global:
 
   vnc transport handshakes RFB (security type None / x11vnc -nopw), then runs
   the same verbs (observe and actuate) on a local agenterm-cu --target current
-  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Paste
-  evidence: gate-owned loopback x11vnc + second agenterm-con, host paste
-  --name Command --text SEED plants the seed (session clipboard + AT-SPI
-  EditableText), host get-text --name Command equals that seed (via=gettext;
-  never screenshot / --coords / RFB framebuffer OCR).
+  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Copy
+  evidence: gate-owned loopback x11vnc + second agenterm-con, seed on Command,
+  host copy --name Command publishes session GetText onto session CLIPBOARD,
+  clear/overwrite, host paste (no --text) then get-text equals seed
+  (via=gettext; never host clipboard / screenshot / --coords / RFB OCR).
 
 Commands:
   capabilities
