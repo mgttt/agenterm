@@ -108,6 +108,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [whether standard input is a terminal](examples/isatty-stdin.md)
 - [`open("/dev/null")` then `isatty` then `close`](examples/open-dev-null-isatty-close.md)
+- [`access("/", F_OK)` success](examples/access-root-f-ok.md)
+- [`access` missing-path failure](examples/access-missing-path.md)
 - [terminal window size via `ioctl`](examples/ioctl-window-size.md)
 - [`DISPLAY` via `getenv`](examples/getenv-display.md)
 - [explicit missing-symbol failure](examples/failure-missing-symbol.md)
