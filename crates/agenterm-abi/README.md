@@ -213,6 +213,41 @@ ___REGISTER_CLASS_SoftbufferObserver
 > Linux `nm -D`，macOS `nm -gU`；Linux/macOS 为 CI run 31692909368 实测
 > （三平台全绿），Windows 为本机实测。
 
+## Windows 安装（`packaging/install.ps1`，里程碑 71）
+
+Unix 侧 `packaging/install.sh` 故意拒绝 Windows（`--system auto` 只认
+Linux/Darwin，绝不铺半套布局）；Windows 交付走 `packaging/install.ps1`，
+按 MSVC/vcpkg 惯例平铺安装四个文件：
+
+```
+<prefix>\include\agenterm.h
+<prefix>\lib\agenterm.lib
+<prefix>\lib\agenterm.dll.lib
+<prefix>\bin\agenterm.dll
+```
+
+DLL 进 `bin\` 而非 `lib\`：Windows 运行时按 PATH/应用目录找 DLL，链接期只看
+`lib\`。`.exp`（链接器副产物）与 `.pdb`（调试符号）**不安装**。Windows 不生成
+`.pc` 文件（pkg-config 不是 MSVC 消费者惯例），也没有 soname / 版本化文件名
+（PE 无 ELF `DT_SONAME` 机制，`agenterm.dll` 平铺即可）。脚本幂等：重复安装
+覆盖写，结果树一致。
+
+```powershell
+# 从仓库根执行；产物目录默认 target\abi-release
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\install.ps1 -Prefix C:\opt\libagenterm
+```
+
+安装后静态 / 动态两种消费（已设置 MSVC 工具链环境；`<prefix>` 替换为实际值）：
+
+```
+cl /nologo /W4 /WX /I<prefix>\include examples\c\agenterm_probe.c <prefix>\lib\agenterm.lib ws2_32.lib ntdll.lib ole32.lib user32.lib uxtheme.lib dwmapi.lib /Fe:probe_static.exe
+cl /nologo /W4 /WX /I<prefix>\include examples\c\agenterm_probe.c <prefix>\lib\agenterm.dll.lib /Fe:probe_dynamic.exe
+```
+
+静态版自包含、运行无需 DLL（系统库清单只属于静态链接，见下节那条链，被
+`pkgconfig_libs.rs` 四方防漂移闸盯着）；动态版运行期在 PATH 上找
+`<prefix>\bin\agenterm.dll`（或把 DLL 放到 exe 同目录），只依赖导入库。
+
 ## `allow-abort-profile` feature（逃生舱，默认关闭）
 
 该 feature 是给**没有 C 边界的 Rust 原生 rlib 消费者**（如 `agenterm-cu`
