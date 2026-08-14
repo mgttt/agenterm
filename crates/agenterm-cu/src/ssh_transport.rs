@@ -7,9 +7,9 @@
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
 //! for both read (`wait` / `get-text` / `get-selection` / `get-caret`) and
 //! write (`send-text` / `paste` / `copy` / `send-keys` / `select` /
-//! `set-caret` / `click` / `scroll`). Cut 3.19 locks the clipboard write:
-//! host `paste --text` plants the seed on the remote Command field; host
-//! `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
+//! `set-caret` / `click` / `scroll` / `focus`). Cut 3.19 locks the clipboard
+//! write: host `paste --text` plants the seed on the remote Command field;
+//! host `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
 //! already on Command (or planted over ssh paste/send-text), host `copy`
 //! publishes remote GetText onto the remote session CLIPBOARD, then host
 //! `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21 locks key
@@ -31,8 +31,12 @@
 //! Cut 3.25 locks named scroll: host `scroll --name OffscreenField` runs
 //! remote AT-SPI `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host
 //! independent `get-extents` before/after proves nonzero `|Δy|` or `|Δx|`
-//! (snapshot `node.bounds` do not count). Never screenshot / `--coords` /
-//! mouse-drag / XTest.
+//! (snapshot `node.bounds` do not count). Cut 3.26 locks named focus: host
+//! `focus --name Command` (or `SEND`) runs remote AT-SPI Action `focus` /
+//! `Component::grab_focus` (`addressing=accessibility-tree`), then host
+//! independent `tree` shows that node `focused` and/or host
+//! `get-text --window H` (no `--name`) reads the focused Text node. Never
+//! screenshot / `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -796,6 +800,44 @@ mod tests {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("OffscreenField"));
                 assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn focus_name_survives_target_rewrite() {
+        // 3.26: first ssh focus path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current focus. Circuit: host
+        // focus --window H --name Command (or SEND) runs remote AT-SPI
+        // Action focus / Component::grab_focus (addressing=accessibility-tree;
+        // never --coords / XTest / screenshot), then host independent tree
+        // shows that node focused and/or host get-text --window H (no
+        // --name) reads the focused Text node. Missing / ambiguous name
+        // typed-fails a11y_node_not_found / a11y_node_ambiguous on the remote
+        // worker the same as local current.
+        let command = CuCommand::Focus {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            node: None,
+            name: Some("Command".into()),
+            role: Some("text".into()),
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "focus");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Focus {
+                window,
+                node,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert!(node.is_none());
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert_eq!(role.as_deref(), Some("text"));
             }
             other => panic!("unexpected command {other:?}"),
         }
