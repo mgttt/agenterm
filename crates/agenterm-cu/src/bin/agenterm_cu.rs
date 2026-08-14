@@ -308,8 +308,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             let window = flag_isize(&mut args, "--window");
             let name = flag_value(&mut args, "--name");
             let role = flag_value(&mut args, "--role");
-            if name.as_ref().is_none_or(|value| value.is_empty()) {
-                return usage_err("get-text requires --window <handle> --name <pattern>");
+            if window.is_none() && name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-text requires --window <handle> [--name <pattern>]");
             }
             Command::GetText {
                 target,
@@ -610,9 +610,11 @@ Commands:
                               GetCaretOffset. Not the set-caret reply payload.
                               Missing Text typed-fails
                               (a11y_caret_unavailable).
-  get-text --window HANDLE --name PAT [--role ROLE]
+  get-text --window HANDLE [--name PAT] [--role ROLE]
                               one-shot independent AT-SPI Text.GetText on
-                              the unique showing named node — the same
+                              the unique showing named node, or with no
+                              --name on the node carrying the AT-SPI
+                              focused state — the same
                               text authority wait --text-equals polls,
                               without a timeout. Not send-text / paste /
                               copy matched.text, last_text_write_via, the

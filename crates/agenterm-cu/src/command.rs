@@ -202,7 +202,8 @@ pub enum Command {
         role: Option<String>,
     },
     /// One-shot independent AT-SPI `Text.GetText` for the unique showing
-    /// named node. Not a `wait --text-equals` poll and not `send-text` /
+    /// named node, or — with no `name` — for the node carrying the AT-SPI
+    /// `focused` state. Not a `wait --text-equals` poll and not `send-text` /
     /// `paste` / `copy` `matched.text`, `last_text_write_via`, the WebKit
     /// eval helper's queued-job `OK`, or a tree snapshot `text`. Missing
     /// Text typed-fails (`a11y_text_unavailable`). Never XTest / `--coords`.
