@@ -256,6 +256,20 @@ Canonical host mapping (approved product vocabulary):
   reports `CaretOffset=5`; after `set-caret --offset 2` independent
   `get-caret` is `2`. Linux `agenterm-con` composer `Command`
   publishes real `SetCaretOffset` / `CaretOffset` (ABI 1.9 verbs).
+- [x] `get-text --window HANDLE --name PAT [--role ROLE]` resolves
+  through that same path, then one-shot independent AT-SPI
+  `Text.GetText` (`agt_a11y_node_get_text`) — the same authority
+  `wait --text-equals` polls, without a timeout. `send-text` /
+  `paste` / `copy` `matched.text` and tree snapshot `text` do not
+  count. Missing Text typed-fails (`a11y_text_unavailable`). Never
+  XTest / `--coords` / screenshot. Live Chrome fixture field
+  `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`) and
+  Reasonix composer (`Message Reasonix…` under
+  `scripts/reasonix-desktop-a11y.sh`) both use that same native Text
+  path; WebKit 2.52 already implements GetText on the composer
+  `<textarea>` (no `A11YGETTEXT1` eval helper). Linux `agenterm-con`
+  composer `Command` publishes real `Text.GetText` (same verb, no
+  ABI change).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

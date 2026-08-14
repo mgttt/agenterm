@@ -11,6 +11,8 @@
 # textarea — do not add an eval-helper select path.
 # Text.SetCaretOffset / CaretOffset (GetCaretOffset) already work too —
 # do not add an eval-helper caret path.
+# Text.GetText (cu get-text --name readback, wait --text-equals polling)
+# works on that textarea as well — do not add an eval-helper get-text path.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1

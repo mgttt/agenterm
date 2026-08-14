@@ -211,6 +211,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   after `set-caret --offset 2` independent `get-caret` is `2`.
   Linux `agenterm-con` composer `Command` publishes those same Text
   methods (persistent publisher caret; ABI 1.9 verbs).
+- [x] `get-text --window HANDLE --name PAT [--role ROLE]` reads
+  independent AT-SPI `Text.GetText` (`agt_a11y_node_get_text`) once
+  for that unique showing named node — the same text authority
+  `wait --text-equals` polls, without a timeout. `send-text` /
+  `paste` / `copy` `matched.text`, `last_text_write_via`, the WebKit
+  eval helper's queued-job `OK`, and tree snapshot `text` do not
+  count. Missing Text typed-fails (`a11y_text_unavailable`). Never
+  XTest / `--coords` / screenshot. Proof is independent `get-text`
+  equal to what the field holds: con `Command` after `send-text
+  HELLO`, Chrome fixture `GetTextField` (`fixtures/cu/311b-chrome-gettext.html`,
+  prefilled), and Reasonix composer `Message Reasonix…` under
+  `scripts/reasonix-desktop-a11y.sh` (WebKit 2.52 exposes `Text` on
+  the composer `<textarea>` — no eval-helper get-text glue, unlike
+  `ScrollTo` / EditableText helpers).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.
