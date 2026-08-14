@@ -1241,6 +1241,21 @@ typed `timeout` and reports the last GetText. Never screenshot, XTest,
 or `--coords`. Do not implement contains as OCR, a sidecar tree walk, or
 a check of the write reply.
 
+`cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
+(`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.
+Missing / false / `UnknownMethod` typed-fails
+(`a11y_scroll_unavailable`). ScrollTo true with no later independent
+geometry change is `a11y_scroll_no_effect`, not `timeout` — this is not
+a wait poll. Never Action `scroll*`, XTest wheel, `GenerateMouseEvent`,
+or `--coords`. `matched.extents` / snapshot `node.bounds` do not count.
+`cu get-extents --name` is the independent `Component.GetExtents(Screen)`
+observe sibling (`agt_a11y_node_get_extents`, same `CoordType::Screen`
+as `invoke_component_click`). Empty extents (w/h <= 0 or call fail)
+typed-fail (`a11y_extents_unavailable`). Both verbs are single-node
+`NODE_TIMEOUT` calls. Never fill snapshot bounds during a tree walk —
+WebKitGTK hangs Component on walk. con publish `scroll_to` stays
+`false` until a later 合闸; do not close that loop here.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`

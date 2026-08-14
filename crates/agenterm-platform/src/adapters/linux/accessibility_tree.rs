@@ -15,7 +15,7 @@ use atspi::proxy::device_event_listener::DeviceEventListenerProxy;
 use atspi::proxy::editable_text::EditableTextProxy;
 use atspi::proxy::proxy_ext::ProxyExt;
 use atspi::proxy::text::TextProxy;
-use atspi::{CoordType, Interface, Role, StateSet};
+use atspi::{CoordType, Interface, Role, ScrollType, StateSet};
 use tokio::time::{Duration, timeout};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
@@ -225,6 +225,46 @@ pub(crate) fn get_node_text(
     })
 }
 
+/// One-shot AT-SPI `Component.ScrollTo(TopEdge)`. Missing / false /
+/// `UnknownMethod` is `a11y_scroll_unavailable`. Never Action `scroll*`,
+/// XTest wheel, or `GenerateMouseEvent`.
+pub(crate) fn scroll_node(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<(), AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(SNAPSHOT_TIMEOUT, scroll_node_async(window_handle, node_id))
+            .await
+            .map_err(|_| {
+                AccessibilityTreeError::failed(
+                    "a11y_scroll_unavailable",
+                    "AT-SPI Component.ScrollTo exceeded its deadline",
+                )
+            })?
+    })
+}
+
+/// Independent AT-SPI `Component.GetExtents(Screen)` for one child-index
+/// path. Single-node `NODE_TIMEOUT`. Never fills snapshot bounds.
+pub(crate) fn get_node_extents(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            get_node_extents_async(window_handle, node_id),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_extents_unavailable",
+                "AT-SPI Component.GetExtents exceeded its deadline",
+            )
+        })?
+    })
+}
+
 /// Deliver a chord through AT-SPI Device/key events (`DeviceEventListener`
 /// `NotifyEvent`). A named showing node with no key interface fails typed —
 /// never XTest / `input_inject::send_keys`.
@@ -387,6 +427,154 @@ async fn get_node_text_async(
             format!("node path {node_id} does not expose AT-SPI Text.GetText"),
         )
     })
+}
+
+async fn scroll_node_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<(), AccessibilityTreeError> {
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_scroll_unavailable",
+            format!("node path {node_id} has no AT-SPI Component.ScrollTo"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_component_scroll_to(&proxy).await
+}
+
+async fn get_node_extents_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_extents_unavailable",
+            format!("node path {node_id} has no AT-SPI Component.GetExtents"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    extents_from_component(&proxy).await
+}
+
+async fn invoke_component_scroll_to(
+    proxy: &AccessibleProxy<'_>,
+) -> Result<(), AccessibilityTreeError> {
+    let component = match component_proxy_for(proxy).await {
+        Ok(component) => component,
+        Err(error) if is_missing_scroll_interface(&error) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_scroll_unavailable",
+                "node does not expose AT-SPI Component.ScrollTo",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    let scrolled = match timeout(NODE_TIMEOUT, component.scroll_to(ScrollType::TopEdge)).await {
+        Ok(Ok(scrolled)) => scrolled,
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_scroll_interface(&mapped) {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_scroll_unavailable",
+                    "AT-SPI Component.ScrollTo is missing or UnknownMethod",
+                ));
+            }
+            return Err(mapped);
+        }
+        Err(_) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_scroll_unavailable",
+                "AT-SPI Component.ScrollTo exceeded its deadline",
+            ));
+        }
+    };
+    if !scrolled {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_scroll_unavailable",
+            "AT-SPI Component.ScrollTo returned false",
+        ));
+    }
+    Ok(())
+}
+
+async fn extents_from_component(
+    proxy: &AccessibleProxy<'_>,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
+    let component = match component_proxy_for(proxy).await {
+        Ok(component) => component,
+        Err(error) if is_missing_scroll_interface(&error) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_extents_unavailable",
+                "node does not expose AT-SPI Component.GetExtents",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    let (x, y, width, height) =
+        match timeout(NODE_TIMEOUT, component.get_extents(CoordType::Screen)).await {
+            Ok(Ok(extents)) => extents,
+            Ok(Err(error)) => {
+                let mapped = map_atspi_err(error);
+                if is_missing_scroll_interface(&mapped) {
+                    return Err(AccessibilityTreeError::failed(
+                        "a11y_extents_unavailable",
+                        "AT-SPI Component.GetExtents is missing or UnknownMethod",
+                    ));
+                }
+                return Err(mapped);
+            }
+            Err(_) => {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_extents_unavailable",
+                    "AT-SPI Component.GetExtents exceeded its deadline",
+                ));
+            }
+        };
+    extents_or_unavailable(x, y, width, height)
+}
+
+fn extents_or_unavailable(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<AccessibilityBounds, AccessibilityTreeError> {
+    if width <= 0 || height <= 0 {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_extents_unavailable",
+            format!("Component.GetExtents returned empty rect {width}x{height}"),
+        ));
+    }
+    Ok(AccessibilityBounds {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+fn is_missing_scroll_interface(error: &AccessibilityTreeError) -> bool {
+    let AccessibilityTreeError::Failed { code, message } = error else {
+        return false;
+    };
+    code == "a11y_scroll_unavailable"
+        || code == "a11y_extents_unavailable"
+        || message.contains("UnknownInterface")
+        || message.contains("UnknownMethod")
+        || message.contains("does not exist")
 }
 
 async fn set_node_text_async(
@@ -2344,6 +2532,38 @@ mod tests {
         assert_eq!(extents_center(10, 20, 0, 10), None);
         assert_eq!(extents_center(10, 20, 30, 0), None);
         assert_eq!(extents_center(10, 20, 30, 10), Some((25, 25)));
+    }
+
+    #[test]
+    fn empty_get_extents_is_typed_unavailable() {
+        let err = extents_or_unavailable(10, 20, 0, 40).unwrap_err();
+        let AccessibilityTreeError::Failed { code, .. } = err else {
+            panic!("expected failed");
+        };
+        assert_eq!(code, "a11y_extents_unavailable");
+        let err = extents_or_unavailable(10, 20, 30, 0).unwrap_err();
+        let AccessibilityTreeError::Failed { code, .. } = err else {
+            panic!("expected failed");
+        };
+        assert_eq!(code, "a11y_extents_unavailable");
+    }
+
+    #[test]
+    fn nonempty_get_extents_keeps_screen_rect() {
+        let bounds = extents_or_unavailable(12, 34, 56, 78).unwrap();
+        assert_eq!(bounds.x, 12);
+        assert_eq!(bounds.y, 34);
+        assert_eq!(bounds.width, 56);
+        assert_eq!(bounds.height, 78);
+    }
+
+    #[test]
+    fn unknown_method_scroll_is_unavailable() {
+        let error = AccessibilityTreeError::failed(
+            "a11y_backend_failed",
+            "org.freedesktop.DBus.Error.UnknownMethod: Method does not exist",
+        );
+        assert!(is_missing_scroll_interface(&error));
     }
 
     #[test]

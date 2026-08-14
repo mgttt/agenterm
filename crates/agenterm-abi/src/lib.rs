@@ -29,8 +29,11 @@
 //! `agt_a11y_node_perform` invokes click/focus by child-index path,
 //! `agt_a11y_node_set_text` writes through the host text interface (Linux:
 //! AT-SPI EditableText), `agt_a11y_node_get_text` reads AT-SPI `Text.GetText`
-//! independently of a tree snapshot, and `agt_a11y_node_send_keys` delivers
-//! Device/key events (Linux: AT-SPI DeviceEventListener). Backends are
+//! independently of a tree snapshot, `agt_a11y_node_send_keys` delivers
+//! Device/key events (Linux: AT-SPI DeviceEventListener),
+//! `agt_a11y_node_scroll` is one-shot `Component.ScrollTo(TopEdge)`, and
+//! `agt_a11y_node_get_extents` is independent `Component.GetExtents(Screen)`.
+//! Backends are
 //! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
 //! `agenterm-platform`; the C header names mechanisms only.
 //! Milestone 8 ships the clipboard mechanism: `agt_clipboard_set_text`
@@ -81,8 +84,9 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_text, last_text_write_via,
-    perform_node_action, send_node_keys, set_node_text, tree_for_window,
+    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_extents, get_node_text,
+    last_text_write_via, perform_node_action, scroll_node, send_node_keys, set_node_text,
+    tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
@@ -257,7 +261,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 6);
+abi_version!(1, 7);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -2845,6 +2849,9 @@ fn map_a11y_error(operation: &'static CStr, error: AccessibilityTreeError) -> ag
                 "a11y_text_timeout" => c"a11y_text_timeout",
                 "a11y_key_unavailable" => c"a11y_key_unavailable",
                 "a11y_key_timeout" => c"a11y_key_timeout",
+                "a11y_scroll_unavailable" => c"a11y_scroll_unavailable",
+                "a11y_scroll_no_effect" => c"a11y_scroll_no_effect",
+                "a11y_extents_unavailable" => c"a11y_extents_unavailable",
                 "invalid_input" => c"invalid_input",
                 "a11y_backend_failed" => c"a11y_backend_failed",
                 "a11y_invalid_node_id" => c"a11y_invalid_node_id",
@@ -3476,6 +3483,141 @@ pub extern "C" fn agt_a11y_node_send_keys(
                 c"agt_a11y_node_send_keys",
                 c"panic",
                 "panic in agt_a11y_node_send_keys",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// One-shot AT-SPI `Component.ScrollTo(TopEdge)` on a child-index path.
+/// Missing / false / `UnknownMethod` →
+/// `AGT_FAILED{code="a11y_scroll_unavailable"}`. NULL `node_id` →
+/// `bad_pointer`. Never Action `scroll*`, XTest wheel, or
+/// `GenerateMouseEvent`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_scroll(window_handle: isize, node_id: *const c_char) -> agt_status {
+    fn inner(window_handle: isize, node_id: *const c_char) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(c"agt_a11y_node_scroll", c"bad_pointer", "node_id is null");
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_scroll",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match scroll_node(filter, node_id) {
+            Ok(()) => agt_status::AGT_OK,
+            Err(e) => map_a11y_error(c"agt_a11y_node_scroll", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(window_handle, node_id))) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_scroll",
+                c"panic",
+                "panic in agt_a11y_node_scroll",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Independent AT-SPI `Component.GetExtents(Screen)` for a child-index
+/// path. Not a tree-snapshot `bounds` field. NULL `node_id` or any NULL
+/// out pointer → `bad_pointer`. Empty extents or a failed GetExtents →
+/// `AGT_FAILED{code="a11y_extents_unavailable"}`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_get_extents(
+    window_handle: isize,
+    node_id: *const c_char,
+    out_x: *mut i32,
+    out_y: *mut i32,
+    out_width: *mut i32,
+    out_height: *mut i32,
+) -> agt_status {
+    fn inner(
+        window_handle: isize,
+        node_id: *const c_char,
+        out_x: *mut i32,
+        out_y: *mut i32,
+        out_width: *mut i32,
+        out_height: *mut i32,
+    ) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(
+                c"agt_a11y_node_get_extents",
+                c"bad_pointer",
+                "node_id is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if out_x.is_null() || out_y.is_null() || out_width.is_null() || out_height.is_null() {
+            record_error(
+                c"agt_a11y_node_get_extents",
+                c"bad_pointer",
+                "extents out pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_get_extents",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match get_node_extents(filter, node_id) {
+            Ok(bounds) => {
+                unsafe {
+                    *out_x = bounds.x;
+                    *out_y = bounds.y;
+                    *out_width = bounds.width;
+                    *out_height = bounds.height;
+                }
+                agt_status::AGT_OK
+            }
+            Err(e) => map_a11y_error(c"agt_a11y_node_get_extents", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, out_x, out_y, out_width, out_height)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_get_extents",
+                c"panic",
+                "panic in agt_a11y_node_get_extents",
             );
             agt_status::AGT_FAILED
         }
