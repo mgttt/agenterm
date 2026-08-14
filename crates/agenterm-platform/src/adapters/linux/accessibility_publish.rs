@@ -20,9 +20,9 @@ use zbus::interface;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 
 use crate::accessibility_publish::{
-    AccessibilityPublishError, AccessibilityPublisher, KeyEffect, PublishedAction,
-    PublishedActionHandler, PublishedKey, PublishedNode, PublishedRole, PublishedTree,
-    published_key_effect,
+    AccessibilityPublishError, AccessibilityPublisher, KeyEffect, NODE_OFFSCREEN_FIELD,
+    NODE_SESSION, PublishedAction, PublishedActionHandler, PublishedKey, PublishedNode,
+    PublishedRole, PublishedTree, published_key_effect,
 };
 use crate::contract::accessibility_tree::AccessibilityBounds;
 
@@ -41,6 +41,15 @@ const STATE_SENSITIVE: u64 = 1 << 24;
 const STATE_SHOWING: u64 = 1 << 25;
 const STATE_SINGLE_LINE: u64 = 1 << 26;
 const STATE_VISIBLE: u64 = 1 << 30;
+
+/// AT-SPI `AtspiScrollType` discriminants (`Component.ScrollTo`).
+const ATSPI_SCROLL_TOP_LEFT: u32 = 0;
+const ATSPI_SCROLL_BOTTOM_RIGHT: u32 = 1;
+const ATSPI_SCROLL_TOP_EDGE: u32 = 2;
+const ATSPI_SCROLL_BOTTOM_EDGE: u32 = 3;
+const ATSPI_SCROLL_LEFT_EDGE: u32 = 4;
+const ATSPI_SCROLL_RIGHT_EDGE: u32 = 5;
+const ATSPI_SCROLL_ANYWHERE: u32 = 6;
 
 static RUNTIME: OnceLock<&'static tokio::runtime::Runtime> = OnceLock::new();
 
@@ -62,6 +71,10 @@ struct Store {
     app_id: i32,
     focused: Option<u32>,
     handler: Option<PublishedActionHandler>,
+    /// Persistent window-relative y offset applied by `ScrollTo`. Layout
+    /// snapshots keep publishing the unscrolled bounds; `GetExtents` adds
+    /// this so an independent observe call sees the move immediately.
+    scroll_dy: HashMap<u32, i32>,
 }
 
 impl Store {
@@ -163,6 +176,7 @@ fn extents_for(
     node: &PublishedNode,
     window_handle: Option<i64>,
     coord_type: u32,
+    scroll_dy: i32,
 ) -> (i32, i32, i32, i32) {
     let (origin_x, origin_y) = if coord_type == 0 {
         screen_origin(window_handle)
@@ -171,10 +185,82 @@ fn extents_for(
     };
     (
         origin_x.saturating_add(node.bounds.x),
-        origin_y.saturating_add(node.bounds.y),
+        origin_y
+            .saturating_add(node.bounds.y)
+            .saturating_add(scroll_dy),
         node.bounds.width,
         node.bounds.height,
     )
+}
+
+fn node_scroll_dy(store: &Store, id: u32) -> i32 {
+    store.scroll_dy.get(&id).copied().unwrap_or(0)
+}
+
+fn viewport_bounds(store: &Store, id: u32) -> Option<AccessibilityBounds> {
+    let mut current = store.node(id)?;
+    loop {
+        if current.id == NODE_SESSION || current.role == PublishedRole::Terminal {
+            return Some(current.bounds);
+        }
+        let parent = current.parent?;
+        current = store.node(parent)?;
+    }
+}
+
+fn scroll_target_y(
+    scroll_type: u32,
+    viewport: AccessibilityBounds,
+    node_height: i32,
+) -> Option<i32> {
+    match scroll_type {
+        ATSPI_SCROLL_TOP_LEFT | ATSPI_SCROLL_TOP_EDGE | ATSPI_SCROLL_ANYWHERE => Some(viewport.y),
+        ATSPI_SCROLL_BOTTOM_RIGHT | ATSPI_SCROLL_BOTTOM_EDGE => Some(
+            viewport
+                .y
+                .saturating_add(viewport.height)
+                .saturating_sub(node_height),
+        ),
+        ATSPI_SCROLL_LEFT_EDGE | ATSPI_SCROLL_RIGHT_EDGE => None,
+        _ => Some(viewport.y),
+    }
+}
+
+fn apply_scroll_node_locked(store: &mut Store, id: u32, scroll_type: u32) -> bool {
+    let Some(node) = store.node(id).cloned() else {
+        return false;
+    };
+    let Some(viewport) = viewport_bounds(store, id) else {
+        return false;
+    };
+    let Some(target_y) = scroll_target_y(scroll_type, viewport, node.bounds.height) else {
+        return true;
+    };
+    let new_dy = target_y.saturating_sub(node.bounds.y);
+    store.scroll_dy.insert(id, new_dy);
+    true
+}
+
+/// `Component.ScrollTo`: move a named inner widget (or every child of a
+/// scrollable pane) so later `GetExtents` reports the new y. Returns false
+/// only when the node is missing or has no scrollable ancestor.
+fn apply_component_scroll(store: &Mutex<Store>, id: u32, scroll_type: u32) -> bool {
+    let mut store = lock_store(store);
+    let Some(node) = store.node(id).cloned() else {
+        return false;
+    };
+    if node.id == NODE_SESSION || node.role == PublishedRole::Terminal {
+        let children = store.children(id);
+        if children.is_empty() {
+            return false;
+        }
+        let mut any = false;
+        for child in children {
+            any |= apply_scroll_node_locked(&mut store, child, scroll_type);
+        }
+        return any;
+    }
+    apply_scroll_node_locked(&mut store, id, scroll_type)
 }
 
 fn interfaces_for(node: &PublishedNode) -> Vec<String> {
@@ -483,7 +569,12 @@ impl ComponentNode {
         let Some(node) = store.node(self.0.id) else {
             return false;
         };
-        let (left, top, width, height) = extents_for(node, store.window_handle, coord_type);
+        let (left, top, width, height) = extents_for(
+            node,
+            store.window_handle,
+            coord_type,
+            node_scroll_dy(&store, self.0.id),
+        );
         x >= left && y >= top && x < left.saturating_add(width) && y < top.saturating_add(height)
     }
 
@@ -504,7 +595,14 @@ impl ComponentNode {
         let store = lock_store(&self.0.store);
         store
             .node(self.0.id)
-            .map(|node| extents_for(node, store.window_handle, coord_type))
+            .map(|node| {
+                extents_for(
+                    node,
+                    store.window_handle,
+                    coord_type,
+                    node_scroll_dy(&store, self.0.id),
+                )
+            })
             .unwrap_or((0, 0, 0, 0))
     }
 
@@ -548,8 +646,8 @@ impl ComponentNode {
         true
     }
 
-    fn scroll_to(&self, _type: u32) -> bool {
-        false
+    fn scroll_to(&self, type_: u32) -> bool {
+        apply_component_scroll(&self.0.store, self.0.id, type_)
     }
 
     fn scroll_to_point(&self, _coord_type: u32, _x: i32, _y: i32) -> bool {
@@ -1006,8 +1104,8 @@ async fn serve(
         })?;
     lock_store(&store).unique_name = unique.clone();
 
-    // Fixed chrome ids 0..=5. Product snapshots reuse these paths.
-    for id in 0..=5 {
+    // Fixed chrome ids 0..=NODE_OFFSCREEN_FIELD. Product snapshots reuse these paths.
+    for id in 0..=NODE_OFFSCREEN_FIELD {
         register_node(conn.connection(), &store, id).await?;
     }
 
@@ -1100,6 +1198,7 @@ pub(crate) fn start(
         app_id: 0,
         focused: None,
         handler: None,
+        scroll_dy: HashMap::new(),
     }));
     let publishing = Arc::new(AtomicBool::new(false));
     let thread_store = Arc::clone(&store);
@@ -1280,6 +1379,7 @@ mod tests {
             app_id: 0,
             focused: None,
             handler: Some(Arc::new(|_, _| false)),
+            scroll_dy: HashMap::new(),
         });
         assert!(!replace_node_text(&store, 4, "rejected".into()));
         assert_eq!(lock_store(&store).node(4).unwrap().text, "original");
@@ -1391,6 +1491,7 @@ mod tests {
                 app_id: 0,
                 focused: None,
                 handler: None,
+                scroll_dy: HashMap::new(),
             })),
             publishing: Arc::clone(&publishing),
         };
@@ -1400,5 +1501,154 @@ mod tests {
         assert!(inner.is_publishing());
         publishing.store(false, Ordering::SeqCst);
         assert!(!inner.is_publishing());
+    }
+
+    fn sample_session_with_field(field_y: i32) -> PublishedTree {
+        PublishedTree {
+            app_name: "agenterm-con".into(),
+            nodes: vec![
+                PublishedNode {
+                    id: NODE_SESSION,
+                    parent: Some(1),
+                    role: PublishedRole::Terminal,
+                    name: "Session".into(),
+                    text: String::new(),
+                    bounds: AccessibilityBounds {
+                        x: 200,
+                        y: 0,
+                        width: 400,
+                        height: 300,
+                    },
+                    focusable: true,
+                    focused: false,
+                    editable: false,
+                    clickable: false,
+                },
+                PublishedNode {
+                    id: NODE_OFFSCREEN_FIELD,
+                    parent: Some(NODE_SESSION),
+                    role: PublishedRole::Label,
+                    name: "OffscreenField".into(),
+                    text: String::new(),
+                    bounds: AccessibilityBounds {
+                        x: 200,
+                        y: field_y,
+                        width: 200,
+                        height: 24,
+                    },
+                    focusable: false,
+                    focused: false,
+                    editable: false,
+                    clickable: false,
+                },
+            ],
+        }
+    }
+
+    fn store_with_field(field_y: i32) -> Mutex<Store> {
+        Mutex::new(Store {
+            tree: sample_session_with_field(field_y),
+            window_handle: None,
+            unique_name: String::new(),
+            app_id: 0,
+            focused: None,
+            handler: None,
+            scroll_dy: HashMap::new(),
+        })
+    }
+
+    #[test]
+    fn scroll_to_top_edge_moves_named_field_extents() {
+        let store = store_with_field(2300);
+        let before = {
+            let locked = lock_store(&store);
+            let field = locked.node(NODE_OFFSCREEN_FIELD).unwrap();
+            extents_for(
+                field,
+                None,
+                1,
+                node_scroll_dy(&locked, NODE_OFFSCREEN_FIELD),
+            )
+        };
+        assert!(before.2 > 0 && before.3 > 0);
+        assert!(apply_component_scroll(
+            &store,
+            NODE_OFFSCREEN_FIELD,
+            ATSPI_SCROLL_TOP_EDGE
+        ));
+        let after = {
+            let locked = lock_store(&store);
+            let field = locked.node(NODE_OFFSCREEN_FIELD).unwrap();
+            extents_for(
+                field,
+                None,
+                1,
+                node_scroll_dy(&locked, NODE_OFFSCREEN_FIELD),
+            )
+        };
+        assert_eq!(after.1, 0);
+        assert!((after.1 - before.1).unsigned_abs() >= 20);
+        assert_eq!(after.2, before.2);
+        assert_eq!(after.3, before.3);
+    }
+
+    #[test]
+    fn scroll_to_on_session_pane_moves_its_named_child() {
+        let store = store_with_field(2300);
+        assert!(apply_component_scroll(
+            &store,
+            NODE_SESSION,
+            ATSPI_SCROLL_TOP_EDGE
+        ));
+        let locked = lock_store(&store);
+        let field = locked.node(NODE_OFFSCREEN_FIELD).unwrap();
+        let after = extents_for(
+            field,
+            None,
+            1,
+            node_scroll_dy(&locked, NODE_OFFSCREEN_FIELD),
+        );
+        assert_eq!(after.1, 0);
+        assert_eq!(node_scroll_dy(&locked, NODE_SESSION), 0);
+    }
+
+    #[test]
+    fn scroll_to_without_scrollable_ancestor_is_false() {
+        let store = Mutex::new(Store {
+            tree: PublishedTree {
+                app_name: "agenterm-con".into(),
+                nodes: vec![sample_command("x")],
+            },
+            window_handle: None,
+            unique_name: String::new(),
+            app_id: 0,
+            focused: None,
+            handler: None,
+            scroll_dy: HashMap::new(),
+        });
+        assert!(!apply_component_scroll(&store, 4, ATSPI_SCROLL_TOP_EDGE));
+    }
+
+    #[test]
+    fn publish_does_not_clear_scroll_offset() {
+        let store = store_with_field(2300);
+        assert!(apply_component_scroll(
+            &store,
+            NODE_OFFSCREEN_FIELD,
+            ATSPI_SCROLL_TOP_EDGE
+        ));
+        {
+            let mut locked = lock_store(&store);
+            locked.tree = sample_session_with_field(2300);
+        }
+        let locked = lock_store(&store);
+        let field = locked.node(NODE_OFFSCREEN_FIELD).unwrap();
+        let after = extents_for(
+            field,
+            None,
+            1,
+            node_scroll_dy(&locked, NODE_OFFSCREEN_FIELD),
+        );
+        assert_eq!(after.1, 0);
     }
 }
