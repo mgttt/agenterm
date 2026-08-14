@@ -790,12 +790,13 @@ Global:
 
   vnc transport handshakes RFB (security type None / x11vnc -nopw), then runs
   the same verbs (observe and actuate) on a local agenterm-cu --target current
-  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Get-extents
-  evidence: gate-owned loopback x11vnc + second agenterm-con, host get-extents
-  --window H --name OffscreenField returns screen extents x/y/width/height as
-  ints (via=get-extents; native AT-SPI Component.GetExtents(Screen);
-  width/height >= 0; never screenshot / --coords / RFB framebuffer OCR /
-  copied matched.bounds / node.bounds).
+  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Get-selection
+  evidence: gate-owned loopback x11vnc + second agenterm-con, Command holds a
+  known ASCII seed with a known non-empty selection START..END (gate
+  precondition), host independent get-selection --window H --name Command
+  returns that range (via=get-selection; native AT-SPI GetNSelections +
+  GetSelection(0); n==1 start/end equal precondition range; never screenshot /
+  --coords / mouse-drag / RFB framebuffer OCR / cached setter reply).
 
 Commands:
   capabilities

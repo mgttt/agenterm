@@ -35,20 +35,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first get-extents evidence reuses the #48 con-publish extents
+  `vnc` first get-selection evidence reuses the #50 con-publish selection
   observe path over a **gate-owned** loopback `x11vnc` (not the resident
   `:2` listener alone) against a second `agenterm-con` with a unique
-  title: host
-  `cu --vnc 127.0.0.1:<port> get-extents --window HANDLE --name OffscreenField`
-  returns screen extents whose `x` / `y` / `width` / `height` are ints
-  (`via=get-extents`; native AT-SPI `Component.GetExtents(Screen)`;
-  `width` / `height` >= 0). Snapshot `node.bounds` / copied
-  `matched.bounds` do not count. Never screenshot, `--coords`, RFB
-  framebuffer OCR, or steal the resident control socket. `get-caret`
-  (3.42), `tree` (3.41), `focus` (3.40), `scroll` (3.39), `click`
-  (3.38), `set-caret` (3.37), `select` (3.36), `send-keys` (3.35),
-  `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32) over vnc
-  still hold.
+  title: `Command` holds a known ASCII seed and a known non-empty
+  selection `START..END` (gate precondition via already-landed
+  `send-text` + `select`; not this cut's verb), then host independent
+  `cu --vnc 127.0.0.1:<port> get-selection --window HANDLE --name Command`
+  returns that range (`via=get-selection`; native AT-SPI
+  `GetNSelections` + `GetSelection(0)`; `n == 1` and integer `start` /
+  `end` equal the precondition range so `seed[start:end] == expected`).
+  Never screenshot, `--coords`, mouse-drag, RFB framebuffer OCR, cached
+  setter reply, or steal the resident control socket. `get-extents`
+  (3.43), `get-caret` (3.42), `tree` (3.41), `focus` (3.40), `scroll`
+  (3.39), `click` (3.38), `set-caret` (3.37), `select` (3.36),
+  `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
+  `send-text` (3.32) over vnc still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -449,21 +451,23 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Get-extents observe path:
-  second `agenterm-con` named Session child `OffscreenField` (unique title;
-  never steal `unix:/tmp/run-box/agenterm-con.sock`); host
-  `get-extents --window HANDLE --name OffscreenField` returns screen extents
-  whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
-  AT-SPI `Component.GetExtents(Screen)`; `width` / `height` >= 0). Snapshot
-  `node.bounds` / copied `matched.bounds` do not count. Never screenshot /
-  `--coords` / RFB framebuffer OCR. Missing / empty extents typed-fail
-  `a11y_extents_unavailable` on the session worker the same as local
-  `current`. `get-caret` / `tree` / `focus` / `scroll` / `click` /
-  `set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
-  `send-text` over vnc and observe-only `windows` / `get-text` /
-  `wait --text-equals` still hold. Worker JSON does not count; CEO owns the
-  official gate. Connect / protocol / auth failures are typed
-  (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed` /
+  `agenterm-cu --target current` session worker. Get-selection observe path:
+  second `agenterm-con` `Command` field holds a known ASCII seed and a known
+  non-empty selection `START..END` (gate precondition via already-landed
+  `send-text` + `select`; not this cut's verb; unique title; never steal
+  `unix:/tmp/run-box/agenterm-con.sock`); host independent
+  `get-selection --window HANDLE --name Command` returns that range
+  (`via=get-selection`; native AT-SPI `GetNSelections` + `GetSelection(0)`;
+  `n == 1` and integer `start` / `end` equal the precondition range so
+  `seed[start:end] == expected`). Never screenshot / `--coords` /
+  mouse-drag / RFB framebuffer OCR / cached setter reply. Missing Text
+  typed-fails `a11y_selection_unavailable` on the session worker the same
+  as local `current`. `get-extents` / `get-caret` / `tree` / `focus` /
+  `scroll` / `click` / `set-caret` / `select` / `send-keys` / `copy` /
+  `paste --text` / `send-text` over vnc and observe-only `windows` /
+  `get-text` / `wait --text-equals` still hold. Worker JSON does not
+  count; CEO owns the official gate. Connect / protocol / auth failures
+  are typed (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed` /
   `invalid_input`).
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
   runs remote `agenterm-cu --target current`. Get-selection observe path: host

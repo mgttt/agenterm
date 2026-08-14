@@ -16,19 +16,24 @@
 //! placement via `set-caret` / `get-caret`. Cut 3.38 locked named Action
 //! click. Cut 3.39 locked named scroll. Cut 3.40 locked named focus.
 //! Cut 3.41 locked structured tree observe. Cut 3.42 locked get-caret as
-//! its own observe path. Cut 3.43 locks get-extents as its own observe
-//! path: host `get-extents --window H --name OffscreenField` over `--vnc`
-//! returns screen extents whose `x` / `y` / `width` / `height` are ints
-//! (`via=get-extents`; native AT-SPI `Component.GetExtents(Screen)`) from
-//! a second `agenterm-con` Session child. Snapshot `node.bounds` / copied
-//! `matched.bounds` do not count. Never screenshot / `--coords` / RFB
-//! framebuffer OCR. Gate-owned dedicated loopback x11vnc; never steal
+//! its own observe path. Cut 3.43 locked get-extents as its own observe
+//! path. Cut 3.44 locks get-selection as its own observe path: host
+//! `get-selection --window H --name Command` over `--vnc` returns the
+//! session AT-SPI selection range (`via=get-selection`; native
+//! `GetNSelections` + `GetSelection(0)`; `n == 1` and integer `start` /
+//! `end` equal the known precondition range so
+//! `seed[start:end] == expected`) from a second `agenterm-con` `Command`
+//! field. Gate precondition (not this cut's verb): `Command` holds a
+//! known ASCII seed and a known non-empty selection `START..END` (use
+//! already-landed `send-text` + `select`). Never screenshot / `--coords`
+//! / mouse-drag / RFB framebuffer OCR / cached setter reply. Gate-owned
+//! dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
 //! as the only proof. Observe and actuate grants both forward.
-//! `get-caret` (3.42), `tree` (3.41), `focus` (3.40), `scroll` (3.39),
-//! `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
-//! (3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
-//! over vnc remain valid.
+//! `get-extents` (3.43), `get-caret` (3.42), `tree` (3.41), `focus`
+//! (3.40), `scroll` (3.39), `click` (3.38), `set-caret` (3.37),
+//! `select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
+//! (3.33), and `send-text` (3.32) over vnc remain valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -788,9 +793,23 @@ mod tests {
 
     #[test]
     fn get_selection_observe_survives_target_rewrite() {
-        // 3.36 observe sibling: get-selection must also rewrite target only
-        // and keep window/name/role so independent GetNSelections+GetSelection
-        // proof rides the same RFB + session-worker path as select.
+        // 3.44: first vnc get-selection as its own observe path reuses the
+        // same RFB + session-worker rewrite; the worker still runs
+        // target=current get-selection. Circuit: gate precondition places a
+        // known ASCII SEED on session Command with a known non-empty
+        // selection START..END (seed/range setup is not this cut's verb —
+        // send-text / select remain prior paths), host independent
+        // get-selection --window H --name Command returns that range
+        // (via=get-selection; native AT-SPI GetNSelections +
+        // GetSelection(0); n == 1 and integer start/end equal the
+        // precondition range so seed[start:end] == expected). Never
+        // screenshot / --coords / mouse-drag / RFB framebuffer OCR /
+        // cached setter reply. Missing Text typed-fails
+        // a11y_selection_unavailable on the session worker the same as
+        // local current. No new verb; observe grant only. select (3.36)
+        // remains a separate write path that may use get-selection as
+        // readback. Window/name/role must survive the rewrite so the
+        // session worker scopes GetSelection to the node.
         let command = CuCommand::GetSelection {
             target: TargetRef::Vnc,
             window: Some(42),

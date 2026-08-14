@@ -1367,29 +1367,33 @@ second control protocol in this cut.
 `agenterm-cu --vnc <host[:port]>` is the first VNC target tier (PRD 30,
 cuts 3.31 observe / 3.32 send-text / 3.33 paste / 3.34 copy / 3.35
 send-keys / 3.36 select / 3.37 set-caret / 3.38 click / 3.39 scroll /
-3.40 focus / 3.41 tree / 3.42 get-caret / 3.43 get-extents). It does not
-invent verbs: the host handshakes RFB (security type None /
-`x11vnc -nopw` only in this cut), rewrites the abstract command to
-`target=current`, and runs a local `agenterm-cu exec --json -` session
-worker against the shared desktop (`vnc_transport`; `DISPLAY` /
-`AT_SPI_BUS` via host env or `--vnc-env`). Observe and actuate grants
-both forward; structured work still uses AT-SPI / native clipboard on
-that session — never RFB framebuffer OCR, screenshot, or `--coords`.
-Get-extents evidence is a **gate-owned** loopback x11vnc (not the
-resident `:2` listener alone) plus a second `agenterm-con` on a unique
-control socket and title: host
-`get-extents --window H --name OffscreenField` returns screen extents
-whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
-AT-SPI `Component.GetExtents(Screen)`; `width` / `height` >= 0). Snapshot
-`node.bounds` / copied `matched.bounds` do not count. Never screenshot,
-`--coords`, or RFB framebuffer OCR. Missing / empty extents typed-fail
-`a11y_extents_unavailable` on the session worker the same as local
-`current`. `get-caret` (3.42), `tree` (3.41), `focus` (3.40), `scroll`
-(3.39), `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
-(3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
-over vnc remain valid. Do not steal `unix:/tmp/run-box/agenterm-con.sock`
-or kill the resident avatar PIDs. Connect / protocol / auth failures are
-typed (`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed`);
+3.40 focus / 3.41 tree / 3.42 get-caret / 3.43 get-extents / 3.44
+get-selection). It does not invent verbs: the host handshakes RFB
+(security type None / `x11vnc -nopw` only in this cut), rewrites the
+abstract command to `target=current`, and runs a local
+`agenterm-cu exec --json -` session worker against the shared desktop
+(`vnc_transport`; `DISPLAY` / `AT_SPI_BUS` via host env or `--vnc-env`).
+Observe and actuate grants both forward; structured work still uses
+AT-SPI / native clipboard on that session — never RFB framebuffer OCR,
+screenshot, or `--coords`. Get-selection evidence is a **gate-owned**
+loopback x11vnc (not the resident `:2` listener alone) plus a second
+`agenterm-con` on a unique control socket and title: `Command` holds a
+known ASCII seed and a known non-empty selection `START..END` (gate
+precondition via already-landed `send-text` + `select`; not this cut's
+verb), then host independent
+`get-selection --window H --name Command` returns that range
+(`via=get-selection`; native AT-SPI `GetNSelections` + `GetSelection(0)`;
+`n == 1` and integer `start` / `end` equal the precondition range so
+`seed[start:end] == expected`). Never screenshot, `--coords`,
+mouse-drag, RFB framebuffer OCR, or a cached setter reply. Missing Text
+typed-fails `a11y_selection_unavailable` on the session worker the same
+as local `current`. `get-extents` (3.43), `get-caret` (3.42), `tree`
+(3.41), `focus` (3.40), `scroll` (3.39), `click` (3.38), `set-caret`
+(3.37), `select` (3.36), `send-keys` (3.35), `copy` (3.34),
+`paste --text` (3.33), and `send-text` (3.32) over vnc remain valid. Do
+not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident
+avatar PIDs. Connect / protocol / auth failures are typed
+(`vnc_unavailable` / `vnc_transport_failed` / `vnc_auth_failed`);
 missing `--vnc` on `--target vnc` is `invalid_input`. Do not implement
 vnc as a second control protocol or D-Bus port-forward in this cut.
 
