@@ -690,10 +690,10 @@ Global:
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
-  worker over OpenSSH stdio (no new verb). Tree evidence: loopback sshd +
-  second agenterm-con, host tree --window H returns the remote AT-SPI
-  control tree (addressing=accessibility-tree) with unique named nodes
-  Command, SEND, and OffscreenField (never screenshot / --coords / XTest).
+  worker over OpenSSH stdio (no new verb). Get-caret evidence: loopback sshd +
+  second agenterm-con, host send-text seed into Command, host independent
+  get-caret --name Command returns offset as an int (typically end of seed;
+  via=get-caret-offset; native AT-SPI CaretOffset; never screenshot / --coords).
 
 Commands:
   capabilities

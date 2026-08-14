@@ -118,15 +118,17 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Tree evidence is
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Get-caret evidence is
 loopback `sshd` plus a second `agenterm-con`: host
-`tree --window HANDLE` returns the remote AT-SPI flattened control tree
-(`addressing=accessibility-tree`) and the unique named Session children
-`Command`, `SEND`, and `OffscreenField` each appear once among showing nodes.
-Never screenshot / `--coords` / mouse-drag / XTest. `focus` / `scroll` /
-`click` / `set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
-`send-text` over ssh and observe-only `wait` / `get-text` / `get-selection` /
-`get-caret` / `get-extents` remain valid too.
+`send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
+`--text`) plants the seed (caret ends at seed length), host independent
+`get-caret --window HANDLE --name Command` returns that offset as an int
+(`via=get-caret-offset`; native AT-SPI `CaretOffset` / `GetCaretOffset`).
+Never screenshot / `--coords` / mouse-drag / XTest. Missing Text typed-fails
+`a11y_caret_unavailable` on the remote worker the same as local `current`.
+`tree` / `focus` / `scroll` / `click` / `set-caret` / `select` / `send-keys` /
+`copy` / `paste --text` / `send-text` over ssh and observe-only `wait` /
+`get-text` / `get-selection` / `get-extents` remain valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -140,10 +142,12 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Tree path: tree --window HANDLE returns nodes named Command, SEND,
-# and OffscreenField (unique among showing nodes).
+# Get-caret observe path: send-text SEED → get-caret offset is an int
+# (typically end of seed; via=get-caret-offset).
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe tree --window HANDLE
+  --grant observe,actuate send-text --window HANDLE --name Command -- SEED
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
+  get-caret --window HANDLE --name Command
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows
