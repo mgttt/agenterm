@@ -118,17 +118,16 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Get-caret evidence is
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Get-extents evidence is
 loopback `sshd` plus a second `agenterm-con`: host
-`send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
-`--text`) plants the seed (caret ends at seed length), host independent
-`get-caret --window HANDLE --name Command` returns that offset as an int
-(`via=get-caret-offset`; native AT-SPI `CaretOffset` / `GetCaretOffset`).
-Never screenshot / `--coords` / mouse-drag / XTest. Missing Text typed-fails
-`a11y_caret_unavailable` on the remote worker the same as local `current`.
-`tree` / `focus` / `scroll` / `click` / `set-caret` / `select` / `send-keys` /
-`copy` / `paste --text` / `send-text` over ssh and observe-only `wait` /
-`get-text` / `get-selection` / `get-extents` remain valid too.
+`get-extents --window HANDLE --name OffscreenField` returns screen extents
+whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
+AT-SPI `Component.GetExtents(Screen)`). Snapshot `node.bounds` do not count.
+Never screenshot / `--coords` / mouse-drag / XTest. Missing / empty extents
+typed-fail `a11y_extents_unavailable` on the remote worker the same as local
+`current`. `get-caret` / `tree` / `focus` / `scroll` / `click` / `set-caret` /
+`select` / `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
+observe-only `wait` / `get-text` / `get-selection` remain valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -142,12 +141,10 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Get-caret observe path: send-text SEED → get-caret offset is an int
-# (typically end of seed; via=get-caret-offset).
+# Get-extents observe path: get-extents x/y/width/height are ints
+# (via=get-extents; Component.GetExtents(Screen); not node.bounds).
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate send-text --window HANDLE --name Command -- SEED
-agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
-  get-caret --window HANDLE --name Command
+  --grant observe get-extents --window HANDLE --name OffscreenField
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows

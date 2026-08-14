@@ -1342,19 +1342,19 @@ It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
 OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
 desktop work still happens on the remote side (AT-SPI via that worker's
-libagenterm). Get-caret evidence is loopback `sshd` plus a second
+libagenterm). Get-extents evidence is loopback `sshd` plus a second
 `agenterm-con` on a unique control socket: host
-`send-text --window H --name Command -- SEED` (payload after `--`; not
-`--text`) plants the seed (caret ends at seed length), host independent
-`get-caret --window H --name Command` returns that offset as an int
-(`via=get-caret-offset`; native AT-SPI `CaretOffset` / `GetCaretOffset`).
-Never screenshot, `--coords`, or XTest. Missing Text typed-fails
-`a11y_caret_unavailable` on the remote worker the same as local
-`current`. `tree` (3.27), `focus` (3.26), `scroll` (3.25), `click` (3.24),
-`set-caret` (3.23), `select` (3.22), `send-keys` (3.21), `copy` (3.20),
-`paste --text` (3.19), and `send-text` (3.18) over ssh remain valid. Do
-not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident
-avatar PIDs. Auth / connect failures are typed (`ssh_unavailable` /
+`get-extents --window H --name OffscreenField` returns screen extents
+whose `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
+AT-SPI `Component.GetExtents(Screen)`). Snapshot `node.bounds` do not
+count. Never screenshot, `--coords`, or XTest. Missing / empty extents
+typed-fail `a11y_extents_unavailable` on the remote worker the same as
+local `current`. `get-caret` (3.28), `tree` (3.27), `focus` (3.26),
+`scroll` (3.25), `click` (3.24), `set-caret` (3.23), `select` (3.22),
+`send-keys` (3.21), `copy` (3.20), `paste --text` (3.19), and
+`send-text` (3.18) over ssh remain valid. Do not steal
+`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
+Auth / connect failures are typed (`ssh_unavailable` /
 `ssh_transport_failed`); missing `--ssh` on `--target ssh` is
 `invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` / `AGENTERM_ABI_LIB`
 via `--ssh-env` or host env (defaults copy common desktop keys when they

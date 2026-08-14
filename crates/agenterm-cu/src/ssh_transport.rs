@@ -45,7 +45,11 @@
 //! remote Command (caret ends at seed length), host independent
 //! `get-caret --name Command` returns that offset as an int
 //! (`via=get-caret-offset`; native AT-SPI `CaretOffset` / `GetCaretOffset`).
-//! Never screenshot / `--coords` / mouse-drag / XTest.
+//! Cut 3.29 locks get-extents as its own observe path: host
+//! `get-extents --name OffscreenField` returns screen extents whose
+//! `x` / `y` / `width` / `height` are ints (`via=get-extents`; native
+//! AT-SPI `Component.GetExtents(Screen)`). Snapshot `node.bounds` do not
+//! count. Never screenshot / `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -797,9 +801,16 @@ mod tests {
 
     #[test]
     fn get_extents_observe_survives_target_rewrite() {
-        // 3.25 observe sibling: get-extents must also rewrite target only and
-        // keep window/name/role so independent Component.GetExtents(Screen)
-        // proof rides the same OpenSSH exec path as scroll.
+        // 3.29: first ssh get-extents as its own observe path reuses the same
+        // OpenSSH exec rewrite; remote worker runs target=current get-extents.
+        // Circuit: host get-extents --window H --name OffscreenField returns
+        // screen extents whose x/y/width/height are ints (via=get-extents;
+        // native AT-SPI Component.GetExtents(Screen)). Snapshot node.bounds
+        // do not count. Never screenshot / --coords / mouse-drag / XTest.
+        // Missing / empty extents typed-fails a11y_extents_unavailable on the
+        // remote worker the same as local current. No new verb; observe grant
+        // only. scroll (3.25) remains a separate write path that may use
+        // get-extents as independent before/after geometry proof.
         let command = CuCommand::GetExtents {
             target: TargetRef::Ssh,
             window: Some(42),
