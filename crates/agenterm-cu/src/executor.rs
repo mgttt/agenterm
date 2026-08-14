@@ -750,15 +750,14 @@ fn get_text(
             "get-text requires --window <handle> --name <pattern>",
         )
     })?;
-    let resolved = resolve_actuation_node(window, None, Some(name), role, "get-text")?
-        .ok_or_else(|| {
+    let resolved =
+        resolve_actuation_node(window, None, Some(name), role, "get-text")?.ok_or_else(|| {
             CuError::new(
                 "invalid_input",
                 "get-text requires --window <handle> --name <pattern>",
             )
         })?;
-    let text =
-        mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    let text = mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
     let mut payload = serde_json::json!({
         "addressing": "accessibility-tree",
         "mechanism": "libagenterm",
