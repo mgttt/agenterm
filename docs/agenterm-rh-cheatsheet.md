@@ -354,12 +354,13 @@ fall back to host evaluation for that call. Prefer them for best-effort cleanup
 (they do not fail when the target is absent), and keep `mode=native` verified.
 
 On Windows, a completed compiler command does not prove that compiler helpers
-have released their inherited current directory. MSVC can leave a helper such
-as `vctip` alive briefly, making immediate recursive deletion fail with sharing
-error 32. Never launch a tool from the disposable directory being reclaimed:
-use a stable working directory plus absolute output paths, then perform bounded
-`try_remove_dir_all` retries and require the directory to become absent. A final
-cleanup failure is failed evidence, not a warning to suppress.
+have released inherited directories or output handles. `VsDevCmd.bat` can
+launch the `vctip` telemetry helper, which may outlive `cl.exe` and make cleanup
+fail with sharing error 32. Set `VSCMD_SKIP_SENDTELEMETRY=1` on scripted
+`VsDevCmd.bat` commands so that helper is not launched. Also use a stable working
+directory plus absolute output paths, then perform bounded
+`try_remove_dir_all` retries and require the disposable directory to become
+absent. A final cleanup failure is failed evidence, not a warning to suppress.
 
 ## 9. Debug checklist when a task fails
 

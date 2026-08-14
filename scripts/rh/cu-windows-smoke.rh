@@ -104,6 +104,9 @@ fn compile_fixture(run_directory, repo, source) {
     let object_argument = "/Fo:" + fixture_object;
     let executable_argument = "/Fe:" + fixture_executable;
     let compile = std::process::command("cmd.exe");
+    // VsDevCmd otherwise launches the vctip telemetry helper, which can
+    // outlive cl.exe and retain handles to this disposable fixture build.
+    compile.env("VSCMD_SKIP_SENDTELEMETRY", "1");
     compile.args([
         "/d", "/s", "/c", "call", vsdevcmd,
         "-no_logo", "-arch=x64", "-host_arch=x64", "&&",
