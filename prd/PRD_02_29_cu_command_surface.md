@@ -145,8 +145,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `get-text --window HANDLE` (no `--name`) equal to the clipboard string,
   not `paste` `matched.text`. Live hosts: Chrome `GetTextField`
   (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name` (optional
-  `--text` seeds CLIPBOARD); Reasonix composer and agenterm-con `Command`
-  share the same focused write path as focused `send-text`. Without
+  `--text` seeds CLIPBOARD); Reasonix composer `Message Reasonix…` after
+  `focus --name` under `scripts/reasonix-desktop-a11y.sh` (eval-helper
+  set-value, `via=text`, same as focused `send-text`); agenterm-con
+  `Command` after `focus --name` (`via=editable-text`). Without
   `--window` paste is invalid (no plain inject paste). Do not mark this
   leaf shipped on worker JSON.
 - [x] `send-keys` accepts that same name addressing (`--window` + `--name` +

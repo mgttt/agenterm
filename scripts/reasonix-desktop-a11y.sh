@@ -20,6 +20,11 @@
 # Device/key is absent on the WebKit textarea, so plain typeable text
 # falls back to the focused send-text write (via=text / eval-helper).
 # Do not add a second focused-keys protocol or XTest when --window is set.
+# paste --window without --name seeds native CLIPBOARD (optional --text)
+# then writes that clipboard into the same focused Text node via the
+# focused send-text path (via=text / eval-helper). Independent
+# get-text --window must equal the clipboard string. Do not add a
+# second focused-paste protocol, Ctrl+V, or XTest when --window is set.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
