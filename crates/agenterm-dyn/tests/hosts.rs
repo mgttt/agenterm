@@ -13,6 +13,7 @@ fn platform_candidates_index_lists_host_table_items() {
     assert!(PLATFORM_CANDIDATES.contains(&"live_cell"));
     assert!(PLATFORM_CANDIDATES.contains(&"LINUX_X86_64"));
     assert!(PLATFORM_CANDIDATES.contains(&"WINDOWS_AARCH64"));
+    assert!(PLATFORM_CANDIDATES.contains(&"CU_ADJACENT_PROBE_CATALOG"));
 }
 
 #[test]

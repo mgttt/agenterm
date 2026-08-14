@@ -14,6 +14,8 @@ thiserror = "2"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
+libloading = "0.8"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
+libloading = "0.8"

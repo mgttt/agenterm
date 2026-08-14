@@ -3,7 +3,23 @@
 //! Each supported OS module uses [`agenterm_dyn::live_cell`] script data and
 //! cross-checks results with a second `dlcall` where possible.
 
-use agenterm_dyn::{Dyn, SecondaryProbe, SizeProbe, Value, live_cell};
+use std::ffi::{CString, c_void};
+
+use agenterm_dyn::DynError;
+use agenterm_dyn::{
+    CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, LINUX_ATSPI_EXISTENCE_LIBS, SecondaryProbe,
+    SizeProbe, Value, live_cell,
+};
+
+#[test]
+fn cu_adjacent_catalog_has_six_cells() {
+    assert_eq!(CU_ADJACENT_PROBE_CATALOG.len(), 6);
+    assert!(
+        CU_ADJACENT_PROBE_CATALOG
+            .iter()
+            .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64)
+    );
+}
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -134,6 +150,56 @@ mod linux {
         let real = unsafe { libc::getpid() };
         assert_eq!(v, Value::Int(i64::from(real)));
     }
+
+    #[test]
+    fn dlcall_getenv_display_probe() {
+        let c = cell();
+        let mut env = Dyn::new();
+        let key = CString::new("DISPLAY").expect("DISPLAY key");
+        env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
+            .expect("bind env_key");
+
+        let script = format!(
+            r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#,
+            c.pid_lib
+        );
+        env.eval(&script)
+            .expect("getenv dlcall should resolve and run");
+    }
+
+    #[test]
+    fn dlcall_x11_x_open_display_probe() {
+        let row = CU_ADJACENT_PROBE_CATALOG
+            .iter()
+            .find(|c| c.os == HostOs::Linux && c.arch == HostArch::X86_64)
+            .expect("linux x86_64 catalog row");
+        let lib = row.window_list.lib;
+        let sym = row.window_list.symbol;
+
+        let mut env = Dyn::new();
+        let script = format!(r#"(dlcall "{lib}" "{sym}" "ptr" "ptr" 0)"#);
+        match env.eval(&script) {
+            Ok(Value::Ptr(_)) | Ok(Value::Nil) => {}
+            Err(DynError::Library(msg)) => {
+                assert!(
+                    msg.contains(lib),
+                    "library load should name {lib}, got {msg}"
+                );
+            }
+            other => panic!("unexpected XOpenDisplay probe outcome: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn atspi_library_existence_probe() {
+        let mut attempted = false;
+        for name in LINUX_ATSPI_EXISTENCE_LIBS {
+            attempted = true;
+            // SAFETY: existence probe only; we never invoke resolved symbols.
+            let _ = unsafe { libloading::Library::new(name) };
+        }
+        assert!(attempted, "should try at least one AT-SPI library name");
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -234,6 +300,21 @@ mod macos {
             );
         }
     }
+
+    #[test]
+    fn dlcall_getenv_display_probe() {
+        let c = cell();
+        let mut env = Dyn::new();
+        let key = CString::new("DISPLAY").expect("DISPLAY key");
+        env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
+            .expect("bind env_key");
+        let script = format!(
+            r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#,
+            c.pid_lib
+        );
+        env.eval(&script)
+            .expect("getenv dlcall should resolve and run");
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -277,6 +358,22 @@ mod windows {
         let got = env.eval(&script).expect("GetCurrentThreadId dlcall");
         let real = unsafe { GetCurrentThreadId() };
         assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_getenv_display_probe() {
+        let mut env = Dyn::new();
+        let key = CString::new("DISPLAY").expect("DISPLAY key");
+        env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
+            .expect("bind env_key");
+        match env.eval(r#"(dlcall "ucrtbase.dll" "getenv" "ptr" "ptr" env_key)"#) {
+            Ok(_) => {}
+            Err(DynError::Library(_)) => {
+                env.eval(r#"(dlcall "msvcrt.dll" "getenv" "ptr" "ptr" env_key)"#)
+                    .expect("getenv via msvcrt when ucrtbase is absent");
+            }
+            Err(other) => panic!("unexpected getenv probe error: {other:?}"),
+        }
     }
 }
 

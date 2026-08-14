@@ -11,6 +11,9 @@
 //!
 //! Every cell is written explicitly so the full matrix compiles on any host;
 //! `live_cell()` selects the row matching `cfg(target_os)` × `cfg(target_arch)`.
+//!
+//! A parallel **CU-ADJACENT** catalog (`CU_ADJACENT_PROBE_CATALOG`) names libs/symbols/bus
+//! facts for `agenterm-cu` hands — script data only, no AT-SPI/UIA/AX wiring.
 
 /// Names of items marked `PLATFORM-CANDIDATE` in this module (migration index).
 pub const PLATFORM_CANDIDATES: &[&str] = &[
@@ -26,6 +29,7 @@ pub const PLATFORM_CANDIDATES: &[&str] = &[
     "ALL_CELLS",
     "live_cell",
     "cell",
+    "CU_ADJACENT_PROBE_CATALOG",
 ];
 
 // PLATFORM-CANDIDATE: one OS×ISA row — default libs, symbols, and probe script data.
@@ -244,4 +248,235 @@ pub fn live_cell() -> Option<&'static HostCell> {
 #[doc(alias = "platform-candidate")]
 pub fn cell(os: &str, arch: &str) -> Option<&'static HostCell> {
     ALL_CELLS.iter().find(|c| c.os == os && c.arch == arch)
+}
+
+// --- CU-ADJACENT probe catalog (PLATFORM-CANDIDATE) ---------------------------
+
+/// Names of LAYER3-CANDIDATE markers in this crate (grep / registry hook). No SLJIT/DynASM
+/// dependency is linked yet; see README for portable-backend preference and W^X notes.
+pub const LAYER3_CANDIDATES: &[&str] = &[
+    "eval_special_form_match",
+    "dlcall_libffi_dynamic_cif",
+];
+
+// LAYER3-CANDIDATE (portable codegen, deferred): prefer SLJIT (one LIR, both ISAs) over
+// DynASM (per-ISA macro assembler). If SLJIT is ever linked on Linux/Windows, pin
+// `SLJIT_WX_EXECUTABLE_ALLOCATOR`; Apple hosts already use MAP_JIT in-tree elsewhere.
+// Licenses for future survey only: SLJIT 2-clause BSD, DynASM MIT — not vendored here.
+
+/// Host OS facet for a catalog cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HostOs {
+    Linux,
+    Macos,
+    Windows,
+}
+
+impl HostOs {
+    pub const ALL: [Self; 3] = [Self::Linux, Self::Macos, Self::Windows];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::Macos => "macos",
+            Self::Windows => "windows",
+        }
+    }
+}
+
+/// Host ISA facet for a catalog cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HostArch {
+    X86_64,
+    Aarch64,
+}
+
+impl HostArch {
+    pub const ALL: [Self; 2] = [Self::X86_64, Self::Aarch64];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::X86_64 => "x86_64",
+            Self::Aarch64 => "aarch64",
+        }
+    }
+}
+
+/// One dlcall-oriented or protocol note for a cu hand concern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProbeFact {
+    /// Dynamic library when dlcall applies; empty for pure bus/protocol rows.
+    pub lib: &'static str,
+    /// Exported symbol when dlcall applies; empty for pure bus/protocol rows.
+    pub symbol: &'static str,
+    /// Protocol / bus / pattern note for script planners and future wiring.
+    pub note: &'static str,
+}
+
+/// CU-ADJACENT probe row for one `{os, arch}` cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CuAdjacentProbeCell {
+    pub os: HostOs,
+    pub arch: HostArch,
+    pub window_list: ProbeFact,
+    pub focus: ProbeFact,
+    pub get_text: ProbeFact,
+}
+
+impl CuAdjacentProbeCell {
+    pub const fn cell_id(self) -> (&'static str, &'static str) {
+        (self.os.as_str(), self.arch.as_str())
+    }
+}
+
+// CU-ADJACENT · PLATFORM-CANDIDATE — per-OS probe facts (arch shares the same script data).
+
+const LINUX_WINDOW_LIST: ProbeFact = ProbeFact {
+    lib: "libX11.so.6",
+    symbol: "XOpenDisplay",
+    note: "X11 _NET_CLIENT_LIST (cu live hand via libagenterm; dyn names lib/symbol only)",
+};
+
+const LINUX_FOCUS: ProbeFact = ProbeFact {
+    lib: "libatspi.so.0",
+    symbol: "",
+    note: "AT-SPI2 org.a11y.atspi.Component::grab_focus on session D-Bus (org.a11y.atspi.*)",
+};
+
+const LINUX_GET_TEXT: ProbeFact = ProbeFact {
+    lib: "",
+    symbol: "",
+    note: "AT-SPI2 org.a11y.atspi.Text.GetText on session D-Bus",
+};
+
+const WINDOWS_WINDOW_LIST: ProbeFact = ProbeFact {
+    lib: "user32.dll",
+    symbol: "EnumWindows",
+    note: "Win32 top-level window enumeration (cu live hand)",
+};
+
+const WINDOWS_FOCUS: ProbeFact = ProbeFact {
+    lib: "UIAutomationCore.dll",
+    symbol: "",
+    note: "UIA IUIAutomation::GetFocusedElement",
+};
+
+const WINDOWS_GET_TEXT: ProbeFact = ProbeFact {
+    lib: "UIAutomationCore.dll",
+    symbol: "",
+    note: "UIA ValuePattern / LegacyIAccessible for readable text",
+};
+
+const MACOS_WINDOW_LIST: ProbeFact = ProbeFact {
+    lib: "ApplicationServices",
+    symbol: "AXUIElementCreateApplication",
+    note: "macOS AX application windows (cu planned hand; PLATFORM-CANDIDATE)",
+};
+
+const MACOS_FOCUS: ProbeFact = ProbeFact {
+    lib: "ApplicationServices",
+    symbol: "",
+    note: "AX kAXFocusedAttribute / AXUIElementSetAttributeValue (PLATFORM-CANDIDATE)",
+};
+
+const MACOS_GET_TEXT: ProbeFact = ProbeFact {
+    lib: "ApplicationServices",
+    symbol: "",
+    note: "AX kAXValueAttribute / AXUIElementCopyAttributeValue (PLATFORM-CANDIDATE)",
+};
+
+const fn linux_cell(arch: HostArch) -> CuAdjacentProbeCell {
+    CuAdjacentProbeCell {
+        os: HostOs::Linux,
+        arch,
+        window_list: LINUX_WINDOW_LIST,
+        focus: LINUX_FOCUS,
+        get_text: LINUX_GET_TEXT,
+    }
+}
+
+const fn windows_cell(arch: HostArch) -> CuAdjacentProbeCell {
+    CuAdjacentProbeCell {
+        os: HostOs::Windows,
+        arch,
+        window_list: WINDOWS_WINDOW_LIST,
+        focus: WINDOWS_FOCUS,
+        get_text: WINDOWS_GET_TEXT,
+    }
+}
+
+const fn macos_cell(arch: HostArch) -> CuAdjacentProbeCell {
+    CuAdjacentProbeCell {
+        os: HostOs::Macos,
+        arch,
+        window_list: MACOS_WINDOW_LIST,
+        focus: MACOS_FOCUS,
+        get_text: MACOS_GET_TEXT,
+    }
+}
+
+/// Six-cell CU-ADJACENT probe catalog — PLATFORM-CANDIDATE script data.
+pub const CU_ADJACENT_PROBE_CATALOG: [CuAdjacentProbeCell; 6] = [
+    linux_cell(HostArch::X86_64),
+    linux_cell(HostArch::Aarch64),
+    macos_cell(HostArch::X86_64),
+    macos_cell(HostArch::Aarch64),
+    windows_cell(HostArch::X86_64),
+    windows_cell(HostArch::Aarch64),
+];
+
+/// Look up a catalog cell by `{os, arch}`.
+pub fn cu_adjacent_probe(os: HostOs, arch: HostArch) -> Option<&'static CuAdjacentProbeCell> {
+    CU_ADJACENT_PROBE_CATALOG
+        .iter()
+        .find(|cell| cell.os == os && cell.arch == arch)
+}
+
+/// Candidate dynamic-library names for an AT-SPI existence probe on Linux hosts.
+pub const LINUX_ATSPI_EXISTENCE_LIBS: &[&str] = &["libatspi.so.0", "libatspi.so"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn platform_candidates_lists_catalog() {
+        assert!(PLATFORM_CANDIDATES.contains(&"ALL_CELLS"));
+        assert!(PLATFORM_CANDIDATES.contains(&"CU_ADJACENT_PROBE_CATALOG"));
+    }
+
+    #[test]
+    fn layer3_candidates_lists_markers() {
+        assert!(LAYER3_CANDIDATES.contains(&"eval_special_form_match"));
+        assert!(LAYER3_CANDIDATES.contains(&"dlcall_libffi_dynamic_cif"));
+    }
+
+    #[test]
+    fn catalog_has_six_unique_cells() {
+        assert_eq!(CU_ADJACENT_PROBE_CATALOG.len(), 6);
+        let mut seen = HashSet::new();
+        for cell in &CU_ADJACENT_PROBE_CATALOG {
+            assert!(seen.insert(cell.cell_id()));
+            assert!(!cell.window_list.note.is_empty());
+            assert!(!cell.focus.note.is_empty());
+            assert!(!cell.get_text.note.is_empty());
+        }
+        for os in HostOs::ALL {
+            for arch in HostArch::ALL {
+                assert!(cu_adjacent_probe(os, arch).is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn linux_rows_name_x11_and_atspi_facts() {
+        for arch in HostArch::ALL {
+            let cell = cu_adjacent_probe(HostOs::Linux, arch).expect("linux cell");
+            assert_eq!(cell.window_list.lib, "libX11.so.6");
+            assert_eq!(cell.window_list.symbol, "XOpenDisplay");
+            assert!(cell.focus.note.contains("AT-SPI2"));
+            assert!(cell.get_text.note.contains("Text.GetText"));
+        }
+    }
 }
