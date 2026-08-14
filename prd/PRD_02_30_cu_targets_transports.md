@@ -221,6 +221,10 @@ Canonical host mapping (approved product vocabulary):
   + `GetSelection(0)` (`agt_a11y_node_get_selection`). The `select`
   reply payload does not count. Missing Text typed-fails
   (`a11y_selection_unavailable`). `n == 0` is empty success.
+  Reasonix composer (`Message Reasonix…` under
+  `scripts/reasonix-desktop-a11y.sh`) uses that same native Text
+  path; WebKit 2.52 already implements SetSelection/GetSelection
+  (no `A11YSELECT1` eval helper — unlike ScrollTo).
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

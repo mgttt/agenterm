@@ -173,7 +173,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   The `select` reply payload does not count. Missing Text typed-fails
   (`a11y_selection_unavailable`). `n == 0` is empty success. Never
   screenshot / XTest / `--coords`. Live Chrome fixture field
-  `SelectField` (`fixtures/cu/36-chrome-select.html`).
+  `SelectField` (`fixtures/cu/36-chrome-select.html`). Reasonix
+  composer (`Message Reasonix…` under
+  `scripts/reasonix-desktop-a11y.sh`) uses the same native
+  `Text.SetSelection` / `GetNSelections` / `GetSelection` path — no
+  eval-helper select glue (unlike `ScrollTo` / EditableText).
 - [ ] screenshot, control tree and action results are causally identifiable
   against the same observation instant, so a caller can detect that the target
   changed underneath a plan.

@@ -7,6 +7,8 @@
 # The eval helper implements the missing set-value and scrollIntoView on
 # the GTK thread so cu send-text --name can confirm via Text.GetText and
 # cu scroll --name can confirm via independent Component.GetExtents.
+# Text.SetSelection / GetNSelections / GetSelection already work on that
+# textarea — do not add an eval-helper select path.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1

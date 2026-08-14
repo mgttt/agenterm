@@ -1290,6 +1290,14 @@ often report `n==0`; grab-focus then `SetSelection(0,…)`, and only if
 that returns false with `n==0` use `AddSelection` to create selection
 0. Still AT-SPI Text, never a mouse drag.
 
+WebKitGTK 2.52 / Reasonix composer (`Message Reasonix…` under
+`scripts/reasonix-desktop-a11y.sh`) already implements those same
+`Text.SetSelection` / `GetNSelections` / `GetSelection` methods. Unlike
+`ScrollTo` (true-no-op) and `EditableText` (absent), select /
+get-selection need no eval-helper glue and must not grow an
+`A11YSELECT1` hello. Independent `get-selection` after `0..4` is
+`n=1 start=0 end=4`. Do not treat the `select` reply as proof.
+
 ## Do not drop the AT-SPI bus between resolve and keys
 
 Linux `AccessibilityConnection::new()` is not a cheap handle. A `cu`
