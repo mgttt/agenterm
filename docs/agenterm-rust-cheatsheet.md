@@ -1342,20 +1342,19 @@ It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
 OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
 desktop work still happens on the remote side (AT-SPI via that worker's
-libagenterm). Click evidence is loopback `sshd` plus a second
-`agenterm-con` on a unique control socket: host
-`send-text --window H --name Command -- SEED` (payload after `--`; not
-`--text`) plants the seed, host
-`click --window H --name SEND` runs remote AT-SPI Action `DoAction`
-(`addressing=accessibility-tree`), then host independent
-`get-text --window H --name Command` returns empty (composer cleared on
-SEND submit). Never screenshot, `--coords`, or XTest. Missing or
-ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous`
-on the remote worker the same as local `current`. `set-caret` (3.23),
-`select` (3.22), `send-keys` (3.21), `copy` (3.20), `paste --text`
-(3.19), and `send-text` (3.18) over ssh remain valid. Do not steal
-`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
-Auth / connect failures are typed (`ssh_unavailable` /
+libagenterm). Scroll evidence is loopback `sshd` plus a second
+`agenterm-con` on a unique control socket: host independent
+`get-extents --window H --name OffscreenField` records before extents,
+host `scroll --window H --name OffscreenField` runs remote AT-SPI
+`Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host independent
+`get-extents` after proves nonzero `|Δy|` or `|Δx|` (snapshot
+`node.bounds` do not count). Never screenshot, `--coords`, or XTest.
+Missing / false / `UnknownMethod` typed-fails `a11y_scroll_unavailable`
+on the remote worker the same as local `current`. `click` (3.24),
+`set-caret` (3.23), `select` (3.22), `send-keys` (3.21), `copy` (3.20),
+`paste --text` (3.19), and `send-text` (3.18) over ssh remain valid. Do
+not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the resident
+avatar PIDs. Auth / connect failures are typed (`ssh_unavailable` /
 `ssh_transport_failed`); missing `--ssh` on `--target ssh` is
 `invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` / `AGENTERM_ABI_LIB`
 via `--ssh-env` or host env (defaults copy common desktop keys when they

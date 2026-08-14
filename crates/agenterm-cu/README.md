@@ -118,17 +118,18 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Click evidence is
-loopback `sshd` plus a second `agenterm-con`: host `send-text --window HANDLE
---name Command -- SEED` (payload after `--`; not `--text`) plants the seed,
-host `click --window HANDLE --name SEND` runs remote AT-SPI Action `DoAction`
-(`addressing=accessibility-tree`), then host independent
-`get-text --window HANDLE --name Command` returns empty (composer cleared on
-SEND submit). Never screenshot / `--coords` / mouse-drag / XTest. Missing or
-ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous` on the
-remote worker the same as local `current`. `set-caret` / `select` /
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Scroll evidence is
+loopback `sshd` plus a second `agenterm-con`: host independent
+`get-extents --window HANDLE --name OffscreenField` records before extents,
+host `scroll --window HANDLE --name OffscreenField` runs remote AT-SPI
+`Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host independent
+`get-extents` after proves nonzero `|Δy|` or `|Δx|` (snapshot `node.bounds`
+do not count). Never screenshot / `--coords` / mouse-drag / XTest. Missing /
+false / `UnknownMethod` typed-fails `a11y_scroll_unavailable` on the remote
+worker the same as local `current`. `click` / `set-caret` / `select` /
 `send-keys` / `copy` / `paste --text` / `send-text` over ssh and observe-only
-`wait` / `get-text` / `get-selection` / `get-caret` remain valid too.
+`wait` / `get-text` / `get-selection` / `get-caret` / `get-extents` remain
+valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -142,13 +143,14 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Click path: send-text SEED → click --name SEND → get-text --name Command == "".
+# Scroll path: get-extents before → scroll --name OffscreenField → get-extents
+# after with nonzero |Δy| or |Δx|.
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate send-text --window HANDLE --name Command -- SEED
+  --grant observe get-extents --window HANDLE --name OffscreenField
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant actuate click --window HANDLE --name SEND
+  --grant actuate scroll --window HANDLE --name OffscreenField
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
-  get-text --window HANDLE --name Command
+  get-extents --window HANDLE --name OffscreenField
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows

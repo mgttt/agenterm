@@ -7,8 +7,8 @@
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
 //! for both read (`wait` / `get-text` / `get-selection` / `get-caret`) and
 //! write (`send-text` / `paste` / `copy` / `send-keys` / `select` /
-//! `set-caret` / `click`). Cut 3.19 locks the clipboard write: host
-//! `paste --text` plants the seed on the remote Command field; host
+//! `set-caret` / `click` / `scroll`). Cut 3.19 locks the clipboard write:
+//! host `paste --text` plants the seed on the remote Command field; host
 //! `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
 //! already on Command (or planted over ssh paste/send-text), host `copy`
 //! publishes remote GetText onto the remote session CLIPBOARD, then host
@@ -28,7 +28,11 @@
 //! on remote Command, host `click --name SEND` runs remote AT-SPI Action
 //! `DoAction` (`addressing=accessibility-tree`), then host independent
 //! `get-text --name Command` returns empty (composer cleared on submit).
-//! Never screenshot / `--coords` / mouse-drag / XTest.
+//! Cut 3.25 locks named scroll: host `scroll --name OffscreenField` runs
+//! remote AT-SPI `Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host
+//! independent `get-extents` before/after proves nonzero `|Δy|` or `|Δx|`
+//! (snapshot `node.bounds` do not count). Never screenshot / `--coords` /
+//! mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -732,6 +736,66 @@ mod tests {
                 assert!(!degraded);
                 assert_eq!(clicks, 1);
                 assert_eq!(button, crate::command::PointerButton::Left);
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scroll_name_survives_target_rewrite() {
+        // 3.25: first ssh scroll path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current scroll. Circuit: host
+        // get-extents --window H --name OffscreenField records before,
+        // host scroll --window H --name OffscreenField runs remote AT-SPI
+        // Component.ScrollTo(TopEdge) (via=scroll-to; never --coords /
+        // XTest / screenshot / Action scroll*), then host independent
+        // get-extents after proves nonzero |Δy| or |Δx| (snapshot
+        // node.bounds do not count). Missing / false / UnknownMethod
+        // typed-fails a11y_scroll_unavailable on the remote worker the same
+        // as local current; ScrollTo true with no later independent geometry
+        // change is a11y_scroll_no_effect (CEO gate, not this rewrite test).
+        let command = CuCommand::Scroll {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "scroll");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Scroll {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("OffscreenField"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_extents_observe_survives_target_rewrite() {
+        // 3.25 observe sibling: get-extents must also rewrite target only and
+        // keep window/name/role so independent Component.GetExtents(Screen)
+        // proof rides the same OpenSSH exec path as scroll.
+        let command = CuCommand::GetExtents {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            name: Some("OffscreenField".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "get-extents");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::GetExtents {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("OffscreenField"));
+                assert!(role.is_none());
             }
             other => panic!("unexpected command {other:?}"),
         }
