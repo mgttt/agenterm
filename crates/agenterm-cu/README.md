@@ -138,17 +138,16 @@ The `vnc` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --vnc` handshakes RFB (security type None / `x11vnc -nopw`),
 rewrites the command to `target=current`, and runs a local session worker
 against the desktop that x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host
-env or `--vnc-env`). Copy evidence is a **gate-owned** loopback `x11vnc`
-plus a second `agenterm-con` with a unique title (never steal
+env or `--vnc-env`). Send-keys evidence is a **gate-owned** loopback
+`x11vnc` plus a second `agenterm-con` with a unique title (never steal
 `unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
-as the only proof): seed already on `Command` (or planted over vnc
-`paste --text` / `send-text`), host `copy --window HANDLE --name Command`
-publishes session GetText onto the **session** native CLIPBOARD
-(`via=gettext`), then host clear/overwrite + `paste --window HANDLE --name
-Command` (no `--text`) + independent `get-text --window HANDLE --name
-Command` equals that seed via session clipboard + AT-SPI EditableText /
-GetText (never screenshot / `--coords` / RFB framebuffer OCR, never the
-host clipboard). `paste --text` and `send-text` over vnc and observe-only
+as the only proof): host `focus --window HANDLE --name Command` then
+`send-keys --window HANDLE -- KEYS` (no `--name`; same focused path as
+local con / ssh send-keys) types plain keys into `Command` via native
+AT-SPI Device/key or EditableText fallback on the session worker, then
+host independent `get-text --window HANDLE --name Command` equals those
+keys (`via=gettext`; never screenshot / `--coords` / RFB framebuffer
+OCR). `copy` / `paste --text` / `send-text` over vnc and observe-only
 `windows` / `get-text` / `wait` remain valid too. Connect / protocol
 failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
 `vnc_auth_failed`).
@@ -165,14 +164,12 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
-# Copy path: seed on Command → host copy → clear → paste (no --text) → get-text == seed.
-agenterm-cu --vnc 127.0.0.1:5934 --grant observe,actuate \
-  paste --window HANDLE --name Command --text SEED
-agenterm-cu --vnc 127.0.0.1:5934 --grant observe,actuate \
-  copy --window HANDLE --name Command
-agenterm-cu --vnc 127.0.0.1:5934 --grant observe,actuate \
-  paste --window HANDLE --name Command
-agenterm-cu --vnc 127.0.0.1:5934 --grant observe \
+# Send-keys path: focus Command → host send-keys --window HANDLE -- KEYS → get-text == KEYS.
+agenterm-cu --vnc 127.0.0.1:5935 --grant observe,actuate \
+  focus --window HANDLE --name Command
+agenterm-cu --vnc 127.0.0.1:5935 --grant observe,actuate \
+  send-keys --window HANDLE -- KEYS
+agenterm-cu --vnc 127.0.0.1:5935 --grant observe \
   get-text --window HANDLE --name Command
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
