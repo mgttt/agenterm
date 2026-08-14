@@ -6,12 +6,17 @@
 //! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
 //! for both read (`wait` / `get-text`) and write (`send-text` / `paste` /
-//! `copy`). Cut 3.19 locks the clipboard write: host `paste --text` plants the
-//! seed on the remote Command field; host `get-text` equals that seed. Cut
-//! 3.20 locks clipboard publish: seed already on Command (or planted over ssh
-//! paste/send-text), host `copy` publishes remote GetText onto the remote
-//! session CLIPBOARD, then host `paste` (no `--text`) + `get-text` equals that
-//! seed.
+//! `copy` / `send-keys`). Cut 3.19 locks the clipboard write: host
+//! `paste --text` plants the seed on the remote Command field; host
+//! `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
+//! already on Command (or planted over ssh paste/send-text), host `copy`
+//! publishes remote GetText onto the remote session CLIPBOARD, then host
+//! `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21 locks
+//! key delivery: host `send-keys` types plain keys into the remote
+//! focused Command field (same `--window` without `--name` path as local
+//! con focused send-keys), then host `wait` + `get-text` equals those
+//! keys. Keys ride in the remote command JSON (`--` or leftover argv
+//! joined with `+`); never screenshot / `--coords`.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -496,6 +501,43 @@ mod tests {
             } => {
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn send_keys_write_survives_target_rewrite() {
+        // 3.21: first ssh send-keys path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current send-keys. Circuit: focus remote
+        // Command, host send-keys --window H -- KEYS (no --name; plain
+        // typeable text uses focused EditableText fallback when Device/key
+        // is absent on con Command), then host wait + get-text equals KEYS.
+        // Keys travel in the JSON command over ssh stdin (`--` ends flags;
+        // leftover argv joined with `+`). No focused field typed-fails on
+        // the remote worker the same as local current.
+        let command = CuCommand::SendKeys {
+            target: TargetRef::Ssh,
+            keys: "321SSHKEYS".into(),
+            window: Some(42),
+            name: None,
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "send-keys");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::SendKeys {
+                keys,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(keys, "321SSHKEYS");
+                assert_eq!(window, Some(42));
+                assert!(name.is_none());
                 assert!(role.is_none());
             }
             other => panic!("unexpected command {other:?}"),

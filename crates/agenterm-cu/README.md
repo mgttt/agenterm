@@ -118,15 +118,16 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Copy evidence is
-loopback `sshd` plus a second `agenterm-con`: seed already on `Command` (or
-planted over ssh `paste --text` / `send-text`), host `copy --name Command`
-publishes remote GetText onto the **remote** session CLIPBOARD (`via=gettext`),
-then host `paste --name Command` (no `--text`) + `get-text --name Command`
-equals that seed via remote clipboard + AT-SPI EditableText / GetText (never
-screenshot / `--coords`, never the host clipboard). `paste --text` and
-`send-text` over ssh and observe-only `wait --text-contains` / `get-text`
-remain valid too.
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Send-keys evidence is
+loopback `sshd` plus a second `agenterm-con`: host `focus --name Command` then
+`send-keys --window HANDLE -- KEYS` (no `--name`; same focused path as local
+con send-keys — plain typeable text uses native AT-SPI EditableText / Text
+when Device/key is absent) plants the keys, then host `wait --text-equals` /
+`get-text --name Command` equals those keys via AT-SPI GetText (never
+screenshot / `--coords`). Keys ride in the remote command JSON (`--` ends
+flags; leftover argv joined with `+`). No focused field typed-fails on the
+remote worker the same as local `current`. `copy` / `paste --text` /
+`send-text` over ssh and observe-only `wait` / `get-text` remain valid too.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -140,13 +141,14 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Copy path: seed on Command → host copy → host paste (no --text) → get-text == seed.
+# Send-keys path: focus Command → host send-keys -- KEYS → wait + get-text == KEYS.
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate paste --window HANDLE --name Command --text SEED
+  --grant observe,actuate focus --window HANDLE --name Command
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate copy --window HANDLE --name Command
+  --grant observe,actuate send-keys --window HANDLE -- KEYS
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe,actuate paste --window HANDLE --name Command
+  --grant observe wait --timeout-ms 8000 --window HANDLE --name Command \
+  --text-equals KEYS
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
   get-text --window HANDLE --name Command
 

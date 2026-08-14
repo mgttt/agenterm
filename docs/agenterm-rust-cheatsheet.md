@@ -1342,15 +1342,18 @@ It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
 OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
 desktop work still happens on the remote side (AT-SPI via that worker's
-libagenterm). Copy evidence is loopback `sshd` plus a second `agenterm-con`
-on a unique control socket: seed already on `Command` (or planted over ssh
-`paste --text` / `send-text`), host `copy --name Command` publishes remote
-GetText onto the **remote** session CLIPBOARD (`via=gettext`, detached X11
-owner on the remote display), then host `paste --name Command` (no `--text`)
-+ `get-text` equals that seed. Never the host clipboard, screenshot, or
-`--coords`. `paste --text` (3.19) and `send-text` (3.18) over ssh remain
-valid. Do not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the
-resident avatar PIDs. Auth / connect failures are typed (`ssh_unavailable` /
+libagenterm). Send-keys evidence is loopback `sshd` plus a second
+`agenterm-con` on a unique control socket: host `focus --name Command` then
+`send-keys --window H -- KEYS` (no `--name`; same focused path as local
+con send-keys — plain typeable text uses remote AT-SPI EditableText / Text
+when Device/key is absent on Command), then host `wait --text-equals` +
+`get-text` equals those keys. Keys ride in the remote command JSON (`--`
+ends flags; leftover argv joined with `+`). Never screenshot or
+`--coords`. No focused field typed-fails on the remote worker the same as
+local `current`. `copy` (3.20), `paste --text` (3.19), and `send-text`
+(3.18) over ssh remain valid. Do not steal
+`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
+Auth / connect failures are typed (`ssh_unavailable` /
 `ssh_transport_failed`); missing `--ssh` on `--target ssh` is
 `invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` / `AGENTERM_ABI_LIB` via
 `--ssh-env` or host env (defaults copy common desktop keys when they have no
