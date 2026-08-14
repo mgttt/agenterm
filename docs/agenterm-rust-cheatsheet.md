@@ -1653,6 +1653,12 @@ Candidate and release status remain separate and are not implied.
   partial result, query/allocate again, cap attempts and return typed failure on
   exhaustion. Never truncate while claiming success, write past capacity or
   retry forever.
+- A unit test that sends a synthetic HWND or RuntimeId through the selected
+  native backend must assert the typed failure class, not one host-specific
+  error code: Windows may reject the identity as invalid before lookup, a stub
+  host may report unsupported, and an unstaged unit-test process may have no
+  adjacent runtime dynamic library. Keep exact matching semantics in pure tests
+  and prove native success with an owned fixture or public smoke journey.
 
 ## macOS Accessibility trust is signature + process, not the Settings label
 

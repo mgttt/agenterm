@@ -1413,7 +1413,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_backend_failed" | "unsupported"
+                "a11y_invalid_node_id"
+                    | "a11y_node_not_found"
+                    | "a11y_backend_failed"
+                    | "dylib_load"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
