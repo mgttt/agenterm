@@ -87,12 +87,31 @@ fn additional_system_probes_are_live_only_on_linux() {
     for c in [LINUX_X86_64, LINUX_AARCH64] {
         assert_eq!(
             c.system_probes.map(|probe| probe.name),
-            ["time", "clock_gettime", "uname", "getuid", "getgid"]
+            [
+                "time",
+                "clock_gettime",
+                "uname",
+                "getuid",
+                "getgid",
+                "sysconf_pagesize",
+                "getcwd"
+            ]
         );
-        assert!(c.system_probes.iter().all(|probe| matches!(
-            probe.status,
-            SystemProbeStatus::LiveDlcall { lib: "libc.so.6", symbol } if symbol == probe.name
-        )));
+        assert_eq!(
+            c.system_probes.map(|probe| match probe.status {
+                SystemProbeStatus::LiveDlcall { lib, symbol } => (probe.name, lib, symbol),
+                SystemProbeStatus::Placeholder => panic!("Linux probe must be live"),
+            }),
+            [
+                ("time", "libc.so.6", "time"),
+                ("clock_gettime", "libc.so.6", "clock_gettime"),
+                ("uname", "libc.so.6", "uname"),
+                ("getuid", "libc.so.6", "getuid"),
+                ("getgid", "libc.so.6", "getgid"),
+                ("sysconf_pagesize", "libc.so.6", "sysconf"),
+                ("getcwd", "libc.so.6", "getcwd"),
+            ]
+        );
     }
     for c in [MACOS_X86_64, MACOS_AARCH64, WINDOWS_X86_64, WINDOWS_AARCH64] {
         assert!(

@@ -158,6 +158,51 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_sysconf_pagesize_matches_libc() {
+        let probe = live_system_probe("sysconf_pagesize");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {})"#,
+                libc::_SC_PAGESIZE
+            ))
+            .expect("sysconf(_SC_PAGESIZE) dlcall");
+        let real = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        assert!(real > 0, "host page size should be positive");
+        assert_eq!(got, Value::Int(real));
+    }
+
+    #[test]
+    fn dlcall_getcwd_writes_current_directory() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let probe = live_system_probe("getcwd");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut buffer = [0_u8; 4096];
+        let buffer_ptr = buffer.as_mut_ptr();
+        let mut env = Dyn::new();
+        env.bind("cwd", buffer_ptr.cast()).expect("bind cwd buffer");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "ptr" "ptr" cwd "u64" {})"#,
+                buffer.len()
+            ))
+            .expect("getcwd dlcall");
+        assert_eq!(got, Value::Ptr(buffer_ptr as usize));
+        let end = buffer
+            .iter()
+            .position(|byte| *byte == 0)
+            .expect("getcwd result should be NUL terminated");
+        let expected = std::env::current_dir().expect("read current directory");
+        assert_eq!(&buffer[..end], expected.as_os_str().as_bytes());
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
