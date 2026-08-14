@@ -1,7 +1,8 @@
 # agenterm-dyn
 
 Tiny in-process **live native door**: interned symbols, evaluation of a small
-S-expression list language (`do` / `set` / `if`), and one native primitive
+S-expression list language (`do` / `set` / `if` / comparisons / `and` / `or` /
+fixnum `+` `-` / bounded `repeat` / `dlcall`), and one native primitive
 `dlcall` implemented with **libffi** (no writable executable pages, no DIY JIT).
 
 ## What this is
@@ -24,6 +25,24 @@ S-expression list language (`do` / `set` / `if`), and one native primitive
 - **Not** integrated with `agenterm-platform` — that wiring is explicitly
   deferred to a later milestone.
 
+## Drift toward cu / platform surfaces (script data only)
+
+`agenterm-dyn` is gradually naming the same libs, symbols, and bus facts that
+`agenterm-cu` and `agenterm-platform` hands use — as **PLATFORM-CANDIDATE**
+script data in `hosts.rs` (`CU_ADJACENT_PROBE_CATALOG`, six `{linux,macos,windows}
+× {x86_64,aarch64}` rows). Dyn still does intern/bind/eval/dlcall only; **cu
+remains the live hand** and there is no import of `agenterm-platform` or
+`agenterm-cu`.
+
+## Layer 3 codegen (deferred, markers only)
+
+No SLJIT, DynASM, or JIT is linked. Grep **`LAYER3-CANDIDATE`** for future hooks:
+`eval.rs` special-form match (SLJIT `sljit_emit_*` lowering, one LIR for both ISAs),
+`native.rs` `dlcall` (stay on libffi dynamic CIF — SLJIT `sljit_emit_icall` is not a
+replacement). DynASM is per-ISA macro assembly and is **not** the first portable backend;
+if SLJIT is ever linked on Linux/Windows, pin `SLJIT_WX_EXECUTABLE_ALLOCATOR` (Apple
+MAP_JIT is already handled in-tree elsewhere). Registry: `LAYER3_CANDIDATES`.
+
 ## Integration (deferred)
 
 Cross-arch logic aggregation, libagenterm wiring, and `agenterm-platform`
@@ -31,11 +50,11 @@ facades are **out of scope** until `agenterm-dyn` matures on its own.
 
 Items tagged **`PLATFORM-CANDIDATE`** in `src/hosts.rs` (and listed in
 `hosts::PLATFORM_CANDIDATES`) are OS/host-facts tables — library paths, PID
-symbols, ioctl request codes, console probes — that may move to
-`agenterm-platform` when that crate grows an equivalent contract. They are
-**not** imported from platform today. What stays in dyn: `intern` / `bind` /
-`eval`, `dlcall` + libffi, value/error/parse, and the rule that OS names
-remain opaque script data at the eval boundary.
+symbols, ioctl request codes, console probes, and CU-adjacent probe rows — that
+may move to `agenterm-platform` when that crate grows an equivalent contract.
+They are **not** imported from platform today. What stays in dyn: `intern` /
+`bind` / `eval`, `dlcall` + libffi, value/error/parse, and the rule that OS
+names remain opaque script data at the eval boundary.
 
 ## Public surface
 
@@ -43,9 +62,9 @@ remain opaque script data at the eval boundary.
 |-----|------|
 | `Dyn::intern` | Intern a string into a stable `Symbol` |
 | `Dyn::bind` | Hand an existing pointer/handle into the environment |
-| `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, `dlcall`) |
+| `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, comparisons, `and`/`or`, `+`/`-`, `repeat`, `dlcall`) |
 | `dlcall` | Only native primitive — invoked from lists, not a verb table |
-| `hosts::*` | Six-cell host table (`PLATFORM-CANDIDATE` — may move to platform later) |
+| `hosts::*` | Six-cell host table + CU-adjacent catalog (`PLATFORM-CANDIDATE`) |
 
 ## Six-cell host table
 
@@ -83,8 +102,8 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 
 | File | Coverage |
 |------|----------|
-| `language.rs` | `intern`, `bind`, `do` / `set` / `if`, nested lists, truthiness |
-| `errors.rs` | Bad S-exprs, unknown vars/forms, arity, bad FFI types, missing lib/symbol |
+| `language.rs` | comparisons, `and`/`or`, `+`/`-`, `repeat`, nested logic |
+| `errors.rs` | Bad S-exprs, unknown vars/forms, arity, overflow, repeat bounds |
 | `hosts.rs` | Six-cell matrix completeness, `live_cell()` selection, row well-formedness |
 | `smoke.rs` | Real `dlcall` into host libraries per OS (`#[cfg]`-gated) |
 
@@ -92,14 +111,15 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 cargo test -p agenterm-dyn
 ```
 
-**Linux** (CI): `getpid` + `getppid` cross-checked with libc and a second
-`dlcall`; `ioctl(TIOCGWINSZ)` on a 24×80 pty when `openpty` succeeds.
+**Linux** (CI): `getpid` + `getppid` cross-checked with libc; `ioctl(TIOCGWINSZ)`
+on a 24×80 pty when `openpty` succeeds; `getenv("DISPLAY")`; honest `libX11`
+`XOpenDisplay` and AT-SPI library existence probes (no session a11y bus).
 
 **macOS** (local / CI when available): `getpid`, `time(NULL)`, optional
-`ioctl` on `/dev/tty`.
+`ioctl` on `/dev/tty`, `getenv("DISPLAY")`.
 
 **Windows** (local / CI when available): `GetCurrentProcessId`,
-`GetCurrentThreadId`.
+`GetCurrentThreadId`, optional CRT `getenv("DISPLAY")`.
 
 Non-live cells are never faked on the wrong OS — only data rows and
 compile-only gates.
