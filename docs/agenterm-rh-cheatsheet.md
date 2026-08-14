@@ -353,6 +353,14 @@ implementation. They are rh-native-only conveniences: a script using them cannot
 fall back to host evaluation for that call. Prefer them for best-effort cleanup
 (they do not fail when the target is absent), and keep `mode=native` verified.
 
+On Windows, a completed compiler command does not prove that compiler helpers
+have released their inherited current directory. MSVC can leave a helper such
+as `vctip` alive briefly, making immediate recursive deletion fail with sharing
+error 32. Never launch a tool from the disposable directory being reclaimed:
+use a stable working directory plus absolute output paths, then perform bounded
+`try_remove_dir_all` retries and require the directory to become absent. A final
+cleanup failure is failed evidence, not a warning to suppress.
+
 ## 9. Debug checklist when a task fails
 
 1. `AGENTERM_SCRIPT_WORKER_STDERR=inherit` — recover the `STEP` trail.

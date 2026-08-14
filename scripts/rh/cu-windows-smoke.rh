@@ -17,6 +17,20 @@ fn direct_file(path) {
     metadata.is_file && !metadata.is_symlink && !metadata.is_reparse_point
 }
 
+fn remove_directory_bounded(path) {
+    if !std::fs::exists(path) {
+        return 1;
+    }
+    for attempt in 0..40 {
+        std::fs::try_remove_dir_all(path);
+        if !std::fs::exists(path) {
+            return 1;
+        }
+        rh::task::sleep(std::time::Duration::from_millis(50));
+    }
+    0
+}
+
 fn run_cu_json(run_directory, executable, arguments) {
     let command = std::process::command(executable);
     command.args(arguments);
@@ -97,7 +111,9 @@ fn compile_fixture(run_directory, repo, source) {
         "/DUNICODE", "/D_UNICODE", object_argument,
         executable_argument, source, "user32.lib"
     ]);
-    compile.current_dir(run_directory);
+    // MSVC may leave vctip alive briefly after cl.exe exits. Do not let that
+    // descendant inherit the disposable directory as its Windows CWD.
+    compile.current_dir(repo);
     compile.timeout(std::time::Duration::from_secs(45));
     compile.capture_limit(262144);
     let compiled = compile.output();
@@ -156,9 +172,10 @@ fn entry() {
         repo,
         "target/cu-windows-smoke-run"
     ).display;
-    if std::fs::exists(run_directory) {
-        std::fs::remove_dir_all(run_directory);
-    }
+    ensure(
+        remove_directory_bounded(run_directory) != 0,
+        "cu_windows_smoke_stale_directory_locked"
+    );
     std::fs::create_dir_all(run_directory);
     let succeeded = 0;
     let failure = "";
@@ -394,10 +411,16 @@ fn entry() {
         cleanup.output();
     }
     if succeeded == 0 {
-        std::fs::remove_dir_all(run_directory);
+        if remove_directory_bounded(run_directory) == 0 {
+            failure += ":cu_windows_smoke_cleanup_locked";
+        }
         return rh::fail(failure);
     }
 
+    ensure(
+        remove_directory_bounded(run_directory) != 0,
+        "cu_windows_smoke_cleanup_locked"
+    );
     print("EVIDENCE cu.windows-host-self-test");
     print("EVIDENCE cu.libagenterm-load-cleanup");
     print("EVIDENCE cu.windows-uia-window-identity");
@@ -405,7 +428,6 @@ fn entry() {
     print("EVIDENCE cu.windows-uia-name-actuation");
     print("EVIDENCE cu.windows-uia-value-wait");
     print("EVIDENCE cu.windows-uia-cleanup");
-    std::fs::remove_dir_all(run_directory);
     print(
         "PASS: staged agenterm-cu host and public Windows UIA journey"
     );
