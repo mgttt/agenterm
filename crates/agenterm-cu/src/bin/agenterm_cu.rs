@@ -304,6 +304,20 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
+        "get-text" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-text requires --window <handle> --name <pattern>");
+            }
+            Command::GetText {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
         "window-place" => {
             let action = flag_value(&mut args, "--action")
                 .or_else(|| args.first().cloned())
@@ -596,6 +610,16 @@ Commands:
                               GetCaretOffset. Not the set-caret reply payload.
                               Missing Text typed-fails
                               (a11y_caret_unavailable).
+  get-text --window HANDLE --name PAT [--role ROLE]
+                              one-shot independent AT-SPI Text.GetText on
+                              the unique showing named node — the same
+                              text authority wait --text-equals polls,
+                              without a timeout. Not send-text / paste /
+                              copy matched.text, last_text_write_via, the
+                              WebKit eval helper queued-job OK, or a tree
+                              snapshot text. Missing Text typed-fails
+                              (a11y_text_unavailable). Never XTest /
+                              --coords / screenshot.
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE

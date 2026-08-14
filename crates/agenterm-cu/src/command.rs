@@ -201,6 +201,20 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// One-shot independent AT-SPI `Text.GetText` for the unique showing
+    /// named node. Not a `wait --text-equals` poll and not `send-text` /
+    /// `paste` / `copy` `matched.text`, `last_text_write_via`, the WebKit
+    /// eval helper's queued-job `OK`, or a tree snapshot `text`. Missing
+    /// Text typed-fails (`a11y_text_unavailable`). Never XTest / `--coords`.
+    GetText {
+        target: TargetRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
     Wait {
         target: TargetRef,
         timeout_ms: u64,
@@ -290,6 +304,7 @@ impl Command {
             Self::GetSelection { .. } => "get-selection".into(),
             Self::SetCaret { .. } => "set-caret".into(),
             Self::GetCaret { .. } => "get-caret".into(),
+            Self::GetText { .. } => "get-text".into(),
             Self::Wait { .. } => "wait".into(),
             Self::WindowPlace { .. } => "window-place".into(),
         }
@@ -313,6 +328,7 @@ impl Command {
             | Self::GetSelection { target, .. }
             | Self::SetCaret { target, .. }
             | Self::GetCaret { target, .. }
+            | Self::GetText { target, .. }
             | Self::Wait { target, .. }
             | Self::WindowPlace { target, .. } => *target,
         }

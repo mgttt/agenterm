@@ -156,6 +156,9 @@ impl Executor {
             Command::GetCaret {
                 window, name, role, ..
             } => get_caret(*window, name.as_deref(), role.as_deref()),
+            Command::GetText {
+                window, name, role, ..
+            } => get_text(*window, name.as_deref(), role.as_deref()),
             Command::Wait {
                 timeout_ms,
                 condition,
@@ -723,6 +726,47 @@ fn get_caret(
         "action": "get-caret",
         "via": "get-caret-offset",
         "offset": offset,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `get-text --name` reads independent AT-SPI `Text.GetText`
+/// (`agt_a11y_node_get_text`) once for the unique showing named node.
+/// This is the same text authority `wait --text-equals` polls, exposed
+/// as a first-class one-shot readback so an independent observation does
+/// not need a wait timeout. Not `send-text` / `paste` / `copy`
+/// `matched.text`, `last_text_write_via`, the WebKit eval helper's
+/// queued-job `OK`, or a tree snapshot `text`. Missing Text typed-fails
+/// (`a11y_text_unavailable`). Never XTest / `--coords` / screenshot.
+fn get_text(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "get-text requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved = resolve_actuation_node(window, None, Some(name), role, "get-text")?
+        .ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "get-text requires --window <handle> --name <pattern>",
+            )
+        })?;
+    let text =
+        mechanism::get_node_text(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "get-text",
+        "via": "gettext",
+        "text": text,
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -2268,5 +2312,39 @@ mod tests {
         assert_eq!(get_caret.verb(), "get-caret");
         assert_eq!(set_caret.required_grant(), Grant::Actuate);
         assert_eq!(get_caret.required_grant(), Grant::Observe);
+    }
+
+    #[test]
+    fn get_text_requires_window_and_name() {
+        let command = Command::GetText {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+        assert!(
+            reply
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("--window <handle> --name <pattern>"),
+            "missing-name message should name the addressing contract"
+        );
+    }
+
+    #[test]
+    fn get_text_verb_is_named_and_observe() {
+        let get_text = Command::GetText {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("Command".into()),
+            role: None,
+        };
+        assert_eq!(get_text.verb(), "get-text");
+        assert_eq!(get_text.required_grant(), Grant::Observe);
     }
 }
