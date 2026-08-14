@@ -8,6 +8,7 @@
 //! same way it walks GTK/Chrome.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -29,6 +30,8 @@ const ROOT_PATH: &str = "/org/a11y/atspi/accessible/root";
 const NULL_PATH: &str = "/org/a11y/atspi/null";
 const OBJECT_PREFIX: &str = "/org/a11y/atspi/accessible/";
 const START_TIMEOUT: Duration = Duration::from_secs(5);
+const RECONNECT_MIN: Duration = Duration::from_millis(200);
+const RECONNECT_MAX: Duration = Duration::from_secs(5);
 
 const STATE_EDITABLE: u64 = 1 << 7;
 const STATE_ENABLED: u64 = 1 << 8;
@@ -828,16 +831,112 @@ fn empty_tree(app_name: &str) -> PublishedTree {
     }
 }
 
-fn hydrate_session_bus_env() {
-    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
-        return;
+fn unix_path_from_dbus_address(address: &str) -> Option<&str> {
+    let rest = address.strip_prefix("unix:path=")?;
+    let path = rest.split(',').next().unwrap_or(rest);
+    if path.is_empty() { None } else { Some(path) }
+}
+
+fn session_bus_address_usable(address: &str) -> bool {
+    if address.is_empty() {
+        return false;
+    }
+    match unix_path_from_dbus_address(address) {
+        Some(path) => std::path::Path::new(path).exists(),
+        None => true,
+    }
+}
+
+fn resolve_session_bus_address(current: Option<&str>, discovered: Option<&str>) -> Option<String> {
+    if current.is_some_and(session_bus_address_usable) {
+        return current.map(str::to_owned);
+    }
+    discovered
+        .filter(|address| session_bus_address_usable(address))
+        .map(str::to_owned)
+}
+
+fn process_cmdline_matches(cmdline: &[u8], process_name: &str) -> bool {
+    let needle = process_name.as_bytes();
+    cmdline.split(|byte| *byte == 0).any(|part| {
+        part == needle
+            || part.ends_with(needle)
+            || part
+                .rsplit(|byte| *byte == b'/')
+                .next()
+                .is_some_and(|base| base == needle)
+    })
+}
+
+fn dbus_address_from_environ(environ: &[u8]) -> Option<String> {
+    environ.split(|byte| *byte == 0).find_map(|item| {
+        let text = std::str::from_utf8(item).ok()?;
+        text.strip_prefix("DBUS_SESSION_BUS_ADDRESS=")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn dbus_address_from_process(process_name: &str) -> Option<String> {
+    let proc_root = std::fs::read_dir("/proc").ok()?;
+    for entry in proc_root.flatten() {
+        let file_name = entry.file_name();
+        let Some(pid) = file_name.to_string_lossy().parse::<u32>().ok() else {
+            continue;
+        };
+        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+        if !process_cmdline_matches(&cmdline, process_name) {
+            continue;
+        }
+        let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+        if let Some(address) = dbus_address_from_environ(&environ) {
+            return Some(address);
+        }
+    }
+    None
+}
+
+fn default_user_session_bus() -> Option<String> {
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR")
+        && !runtime_dir.is_empty()
+    {
+        let path = format!("{runtime_dir}/bus");
+        if std::path::Path::new(&path).exists() {
+            return Some(format!("unix:path={path}"));
+        }
     }
     let uid = unsafe { libc::getuid() };
     let path = format!("/run/user/{uid}/bus");
     if std::path::Path::new(&path).exists() {
-        unsafe {
-            std::env::set_var("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={path}"));
-        }
+        return Some(format!("unix:path={path}"));
+    }
+    None
+}
+
+fn discover_session_bus_address() -> Option<String> {
+    dbus_address_from_process("at-spi2-registryd")
+        .or_else(|| dbus_address_from_process("at-spi-bus-launcher"))
+        .filter(|address| session_bus_address_usable(address))
+        .or_else(default_user_session_bus)
+        .filter(|address| session_bus_address_usable(address))
+}
+
+fn hydrate_session_bus_env() {
+    let current = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok();
+    if current.as_deref().is_some_and(session_bus_address_usable) {
+        return;
+    }
+    match resolve_session_bus_address(
+        current.as_deref(),
+        discover_session_bus_address().as_deref(),
+    ) {
+        Some(address) => unsafe {
+            std::env::set_var("DBUS_SESSION_BUS_ADDRESS", address);
+        },
+        None if current.is_some() => unsafe {
+            std::env::remove_var("DBUS_SESSION_BUS_ADDRESS");
+        },
+        None => {}
     }
 }
 
@@ -924,8 +1023,42 @@ async fn serve(
     Ok(conn)
 }
 
+fn notify_ready(ready_tx: &mut Option<mpsc::SyncSender<()>>) {
+    if let Some(tx) = ready_tx.take() {
+        let _ = tx.send(());
+    }
+}
+
+async fn publish_loop(
+    store: Arc<Mutex<Store>>,
+    publishing: Arc<AtomicBool>,
+    mut ready_tx: Option<mpsc::SyncSender<()>>,
+) {
+    let mut backoff = RECONNECT_MIN;
+    loop {
+        hydrate_session_bus_env();
+        match serve(Arc::clone(&store)).await {
+            Ok(conn) => {
+                publishing.store(true, Ordering::SeqCst);
+                backoff = RECONNECT_MIN;
+                notify_ready(&mut ready_tx);
+                conn.connection().closed().await;
+                publishing.store(false, Ordering::SeqCst);
+                lock_store(&store).unique_name.clear();
+            }
+            Err(_) => {
+                publishing.store(false, Ordering::SeqCst);
+                notify_ready(&mut ready_tx);
+                tokio::time::sleep(backoff).await;
+                backoff = backoff.saturating_mul(2).min(RECONNECT_MAX);
+            }
+        }
+    }
+}
+
 pub(crate) struct PublisherInner {
     store: Arc<Mutex<Store>>,
+    publishing: Arc<AtomicBool>,
 }
 
 impl PublisherInner {
@@ -947,8 +1080,12 @@ impl PublisherInner {
         lock_store(&self.store).window_handle = window_handle;
     }
 
-    pub(crate) fn is_publishing(&self) -> bool {
+    pub(crate) fn retains_snapshots(&self) -> bool {
         true
+    }
+
+    pub(crate) fn is_publishing(&self) -> bool {
+        self.publishing.load(Ordering::SeqCst)
     }
 }
 
@@ -964,34 +1101,27 @@ pub(crate) fn start(
         focused: None,
         handler: None,
     }));
+    let publishing = Arc::new(AtomicBool::new(false));
     let thread_store = Arc::clone(&store);
+    let thread_publishing = Arc::clone(&publishing);
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name("agenterm-a11y-publish".into())
         .spawn(move || {
-            let result = runtime().block_on(serve(thread_store));
-            match result {
-                Ok(conn) => {
-                    let _ = ready_tx.send(Ok(()));
-                    runtime().block_on(async move {
-                        let _conn = conn;
-                        std::future::pending::<()>().await;
-                    });
-                }
-                Err(error) => {
-                    let _ = ready_tx.send(Err(error));
-                }
-            }
+            runtime().block_on(publish_loop(
+                thread_store,
+                thread_publishing,
+                Some(ready_tx),
+            ));
         })
         .map_err(|error| AccessibilityPublishError::failed("a11y_publish_thread", error))?;
-    match ready_rx.recv_timeout(START_TIMEOUT) {
-        Ok(Ok(())) => Ok(AccessibilityPublisher::from_inner(PublisherInner { store })),
-        Ok(Err(error)) => Err(error),
-        Err(_) => Err(AccessibilityPublishError::failed(
-            "a11y_publish_timeout",
-            "AT-SPI publisher did not register before its deadline",
-        )),
-    }
+    // First serve() may fail; still return the handle so snapshots accumulate
+    // and the loop can reconnect when a session/a11y bus appears.
+    let _ = ready_rx.recv_timeout(START_TIMEOUT);
+    Ok(AccessibilityPublisher::from_inner(PublisherInner {
+        store,
+        publishing,
+    }))
 }
 
 #[cfg(test)]
@@ -1168,5 +1298,107 @@ mod tests {
         let store = lock_store(&store);
         assert_eq!(store.node(4).unwrap().text, "original");
         assert_eq!(store.focused, None);
+    }
+
+    #[test]
+    fn unix_path_extracts_before_comma() {
+        assert_eq!(
+            unix_path_from_dbus_address("unix:path=/tmp/dbus-dead,guid=abc"),
+            Some("/tmp/dbus-dead")
+        );
+        assert_eq!(
+            unix_path_from_dbus_address("unix:path=/tmp/dbus-live"),
+            Some("/tmp/dbus-live")
+        );
+        assert_eq!(unix_path_from_dbus_address("unix:abstract=/tmp/dbus"), None);
+        assert_eq!(
+            unix_path_from_dbus_address("tcp:host=127.0.0.1,port=1"),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_unix_path_is_not_usable() {
+        assert!(!session_bus_address_usable(
+            "unix:path=/tmp/agenterm-missing-dbus-socket"
+        ));
+        assert!(!session_bus_address_usable(""));
+        assert!(session_bus_address_usable("unix:path=/dev/null"));
+        assert!(session_bus_address_usable("unix:abstract=/tmp/dbus"));
+    }
+
+    #[test]
+    fn resolve_keeps_live_address_and_replaces_dead_unix_path() {
+        assert_eq!(
+            resolve_session_bus_address(
+                Some("unix:path=/dev/null"),
+                Some("unix:path=/tmp/other-bus")
+            ),
+            Some("unix:path=/dev/null".into())
+        );
+        assert_eq!(
+            resolve_session_bus_address(
+                Some("unix:path=/tmp/agenterm-missing-dbus-socket"),
+                Some("unix:path=/dev/null")
+            ),
+            Some("unix:path=/dev/null".into())
+        );
+        assert_eq!(
+            resolve_session_bus_address(
+                Some("unix:path=/tmp/agenterm-missing-dbus-socket"),
+                Some("unix:path=/tmp/also-missing")
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_session_bus_address(None, Some("unix:path=/dev/null")),
+            Some("unix:path=/dev/null".into())
+        );
+    }
+
+    #[test]
+    fn process_environ_helpers_parse_synthetic_bytes() {
+        assert!(process_cmdline_matches(
+            b"/usr/libexec/at-spi2-registryd\0--use-gnome-session\0",
+            "at-spi2-registryd"
+        ));
+        assert!(process_cmdline_matches(
+            b"at-spi-bus-launcher\0",
+            "at-spi-bus-launcher"
+        ));
+        assert!(!process_cmdline_matches(
+            b"dbus-daemon\0",
+            "at-spi2-registryd"
+        ));
+        assert_eq!(
+            dbus_address_from_environ(
+                b"HOME=/tmp\0DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-live\0TERM=xterm\0"
+            )
+            .as_deref(),
+            Some("unix:path=/tmp/dbus-live")
+        );
+        assert_eq!(dbus_address_from_environ(b"HOME=/tmp\0TERM=xterm\0"), None);
+    }
+
+    #[test]
+    fn is_publishing_follows_live_connection_flag() {
+        let publishing = Arc::new(AtomicBool::new(false));
+        let inner = PublisherInner {
+            store: Arc::new(Mutex::new(Store {
+                tree: empty_tree("agenterm-con"),
+                window_handle: None,
+                unique_name: String::new(),
+                app_id: 0,
+                focused: None,
+                handler: None,
+            })),
+            publishing: Arc::clone(&publishing),
+        };
+        assert!(inner.retains_snapshots());
+        assert!(!inner.is_publishing());
+        publishing.store(true, Ordering::SeqCst);
+        assert!(inner.is_publishing());
+        publishing.store(false, Ordering::SeqCst);
+        assert!(!inner.is_publishing());
     }
 }

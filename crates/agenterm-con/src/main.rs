@@ -4568,9 +4568,10 @@ impl PixelWindowApplication for ConApp {
             "agenterm-con",
             window.native_identity(),
         ) {
-            // A backend that discards snapshots is dropped here, so the chrome
-            // tree is never built on hosts that cannot serve it.
-            Ok(publisher) if publisher.is_publishing() => {
+            // Keep a reconnectable publisher even if the first bus connect
+            // failed. Snapshots stay in the store and go out on reconnect.
+            // A no-op backend reports retains_snapshots() == false.
+            Ok(publisher) if publisher.retains_snapshots() => {
                 let inbox = Arc::clone(&self.a11y_inbox);
                 let waker = window.waker();
                 publisher.set_handler(Arc::new(move |node, action| {

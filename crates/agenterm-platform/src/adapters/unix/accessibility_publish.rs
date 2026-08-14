@@ -13,6 +13,10 @@ impl PublisherInner {
 
     pub(crate) fn set_window_handle(&self, _window_handle: Option<i64>) {}
 
+    pub(crate) fn retains_snapshots(&self) -> bool {
+        false
+    }
+
     pub(crate) fn is_publishing(&self) -> bool {
         false
     }
