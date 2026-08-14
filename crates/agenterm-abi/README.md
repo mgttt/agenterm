@@ -70,8 +70,11 @@ cargo fmt --all -- --check
 **Windows / MSVC 实测系统库列表**（kernel32 由 MSVC 链接器默认自动链接，
 无需显式给出）：
 
-```
+```powershell
 cl /nologo /W4 /WX /Iinclude examples/c/agenterm_probe.c target/abi-dev/agenterm.lib ws2_32.lib ntdll.lib ole32.lib user32.lib uxtheme.lib dwmapi.lib /Fe:probe.exe
+# AGENTERM_MSVC_SYSTEM_LIBS_ANCHOR —— 防漂移锚点：tests/pkgconfig_libs.rs 只认这一条 `cl`
+# 命令行（本文件唯一），改这行前先读该测试的文档注释；其它 `cl` 示例（如 "Windows 安装"
+# 小节）不得在下一行带本标记，否则锚点不唯一会让闸变红。
 ```
 
 对应符号分布：`ws2_32` = Winsock2（recv/send/accept/WSA*…）、`ntdll` =
@@ -244,7 +247,7 @@ cl /nologo /W4 /WX /I<prefix>\include examples\c\agenterm_probe.c <prefix>\lib\a
 cl /nologo /W4 /WX /I<prefix>\include examples\c\agenterm_probe.c <prefix>\lib\agenterm.dll.lib /Fe:probe_dynamic.exe
 ```
 
-静态版自包含、运行无需 DLL（系统库清单只属于静态链接，见下节那条链，被
+静态版自包含、运行无需 DLL（系统库清单只属于静态链接，见上节「静态链接」小节那条链，被
 `pkgconfig_libs.rs` 四方防漂移闸盯着）；动态版运行期在 PATH 上找
 `<prefix>\bin\agenterm.dll`（或把 DLL 放到 exe 同目录），只依赖导入库。
 

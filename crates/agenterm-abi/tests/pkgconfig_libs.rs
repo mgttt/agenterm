@@ -187,24 +187,98 @@ fn pc_in_template_shape_ok() {
 /// it to anything. The other three copies have been gated against each other
 /// since milestone 42; this one drifted freely.
 ///
-/// The parse anchor is the `cl ` line inside the fenced block: every
+/// Milestone 71b (anchor uniqueness): the parse anchor is NOT "the first `cl`
+/// line in the file" anymore. A Windows-install section added above the
+/// original command line silently migrated the gated object to a new example
+/// line whose 6 system libraries happened to match -- the gate stayed green
+/// while the line it was meant to watch drifted freely. The anchor is now
+/// explicit and must be UNIQUE:
+///
+/// - The gated command line is the one followed (after only blank/comment
+///   lines) by the marker `# AGENTERM_MSVC_SYSTEM_LIBS_ANCHOR`. The marker
+///   comment sits inside the README's fenced block, directly below the
+///   command -- read it before editing the anchored line.
+/// - The gate collects EVERY `cl ... .lib ...` line in the README and asserts
+///   exactly ONE of them is anchored. Zero anchors or several anchors both
+///   fail on purpose, printing every candidate line with its 1-based line
+///   number, so a second `cl` example can never again silently steal or split
+///   the gate -- whatever the section order.
+///
+/// Keep the anchored command line on one line, with the marker line directly
+/// below it inside the same fenced block. The documented list is every
 /// whitespace token ending in `.lib` that is not the library's own
-/// `agenterm.lib`. Keep it on one line.
+/// `agenterm.lib`.
 #[test]
 fn abi_readme_msvc_command_line_matches_link_system_libs() {
+    const ANCHOR_MARKER: &str = "# AGENTERM_MSVC_SYSTEM_LIBS_ANCHOR";
     let readme = std::fs::read_to_string(repo_root().join("crates/agenterm-abi/README.md"))
         .expect("crates/agenterm-abi/README.md must exist");
-    let line = readme
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("cl ") && l.contains(".lib"))
-        .unwrap_or_else(|| {
-            panic!(
-                "crates/agenterm-abi/README.md has no `cl ... .lib ...` command line \
-                 (that command is the anti-drift parse anchor for the MSVC system \
-                 libraries -- keep it on a single line inside its fenced block)"
-            )
-        });
+    let lines: Vec<&str> = readme.lines().map(str::trim).collect();
+
+    fn render_candidates(cands: &[(usize, &str)]) -> String {
+        cands
+            .iter()
+            .map(|(n, l)| format!("  line {n}: {l}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // Every `cl ... .lib ...` command line in the file (1-based line number).
+    // All are candidates; exactly one may be the anchor.
+    let candidates: Vec<(usize, &str)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.starts_with("cl ") && l.contains(".lib"))
+        .map(|(i, l)| (i + 1, *l))
+        .collect();
+    if candidates.is_empty() {
+        panic!(
+            "crates/agenterm-abi/README.md has no `cl ... .lib ...` command line \
+             (that command is the anti-drift parse anchor for the MSVC system \
+             libraries -- keep it on a single line inside its fenced block)"
+        );
+    }
+
+    // The anchored candidate: the one whose directly following lines (only
+    // blank/comment lines in between) contain the anchor marker. Skipping
+    // blank/comment lines lets the marker block reflow without dropping the
+    // anchor, while a different command line in between still breaks it.
+    let anchored: Vec<(usize, &str)> = candidates
+        .iter()
+        .copied()
+        .filter(|&(lineno, _)| {
+            lines[lineno..]
+                .iter()
+                .take_while(|l| l.is_empty() || l.starts_with('#'))
+                .any(|l| l.starts_with(ANCHOR_MARKER))
+        })
+        .collect();
+    if anchored.is_empty() {
+        panic!(
+            "crates/agenterm-abi/README.md has {} `cl ... .lib ...` line(s) but none \
+             carries the anti-drift anchor marker {ANCHOR_MARKER:?}. The gated command \
+             line is the one followed by that marker (see the marker's comment in the \
+             README -- read it before editing the anchored line). A missing anchor is \
+             a hard failure, never a silent pass. All `cl` candidate lines found:\n{}",
+            candidates.len(),
+            render_candidates(&candidates),
+        );
+    }
+    if anchored.len() > 1 {
+        panic!(
+            "crates/agenterm-abi/README.md has {} anchored `cl ... .lib ...` line(s) but \
+             the anti-drift gate requires EXACTLY ONE. The anchor is unique by design: \
+             only the command line followed by the marker {ANCHOR_MARKER:?} is watched, \
+             so a second `cl` example that also carries the marker steals or splits the \
+             gate. New `cl` examples are welcome but must NOT be followed by the anchor \
+             marker line -- see the marker's comment in the README. Anchored lines:\n{}\n\
+             All `cl` candidate lines found:\n{}",
+            anchored.len(),
+            render_candidates(&anchored),
+            render_candidates(&candidates),
+        );
+    }
+    let line = anchored[0].1;
     let documented: Vec<String> = line
         .split_whitespace()
         .filter(|t| t.ends_with(".lib"))
@@ -217,10 +291,10 @@ fn abi_readme_msvc_command_line_matches_link_system_libs() {
         .collect();
     assert_eq!(
         documented, linked,
-        "the `cl` command line in crates/agenterm-abi/README.md drifted from \
-         common::system_libs::MSVC (the list c_static_link.rs actually links \
-         with). Single source of truth: tests/common/mod.rs::system_libs. \
-         Update the constant, the packaging README table, generate-pc.sh AND \
-         this command line in the same change."
+        "the anchored `cl` command line in crates/agenterm-abi/README.md (the one \
+         followed by {ANCHOR_MARKER:?}) drifted from common::system_libs::MSVC (the \
+         list c_static_link.rs actually links with). Single source of truth: \
+         tests/common/mod.rs::system_libs. Update the constant, the packaging README \
+         table, generate-pc.sh AND this command line in the same change."
     );
 }
