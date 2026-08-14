@@ -50,7 +50,7 @@ pub struct HostCell {
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates; only Linux is live in this leaf.
-    pub system_probes: [SystemProbe; 15],
+    pub system_probes: [SystemProbe; 17],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -76,7 +76,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 15] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 17] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -110,6 +110,20 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 15] = [
         status: SystemProbeStatus::LiveDlcall {
             lib: "libc.so.6",
             symbol: "getgid",
+        },
+    },
+    SystemProbe {
+        name: "getppid",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "getppid",
+        },
+    },
+    SystemProbe {
+        name: "getpgrp",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "getpgrp",
         },
     },
     SystemProbe {
@@ -184,7 +198,7 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 15] = [
     },
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 15] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 17] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -203,6 +217,14 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 15] = [
     },
     SystemProbe {
         name: "getgid",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "getppid",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "getpgrp",
         status: SystemProbeStatus::Placeholder,
     },
     SystemProbe {

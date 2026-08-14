@@ -93,10 +93,29 @@ mod linux {
         else {
             panic!("linux secondary should be getppid family");
         };
+        let system_probe = live_system_probe("getppid");
+        assert_eq!(
+            system_probe.status,
+            SystemProbeStatus::LiveDlcall { lib, symbol }
+        );
         let mut env = Dyn::new();
         let script = format!(r#"(dlcall "{lib}" "{symbol}" "{ret_type}")"#);
         let got = env.eval(&script).expect("getppid dlcall");
         let real = unsafe { libc::getppid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_getpgrp_matches_libc() {
+        let probe = live_system_probe("getpgrp");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+            .expect("getpgrp dlcall");
+        let real = unsafe { libc::getpgrp() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
 
