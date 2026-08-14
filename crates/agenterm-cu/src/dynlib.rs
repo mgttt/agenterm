@@ -1,4 +1,4 @@
-//! Runtime dynamic-library loading shared by `cu`, `agenterm-cu` and the
+//! Runtime dynamic-library loading shared by `agenterm-cu` and the
 //! `mechanism` layer (milestone 46).
 //!
 //! Every `agt_*` call goes through one process-wide `dlopen` / `LoadLibrary`

@@ -10,10 +10,9 @@ repository = "https://github.com/mgttt/agenterm"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Milestone 46: both `cu` and `agenterm-cu` REALLY load the libagenterm
-# dynamic library at run time (dlopen / LoadLibrary) through the shared
-# `crate::dynlib` layer. The former platform/abi static dependencies are
-# gone entirely.
+# `agenterm-cu` loads libagenterm at run time (dlopen / LoadLibrary) through
+# the shared `crate::dynlib` mechanism boundary. There is no platform/ABI
+# static dependency.
 libloading = "0.8"
 
 # These feature lists must stay complete on their own. Until milestone 46 the
@@ -48,12 +47,6 @@ objc2-foundation = { version = "0.2.2", features = [
     "NSValue",
 ] }
 
-[[bin]]
-name = "cu"
-path = "src/bin/cu.rs"
-
-# Milestone 44: runtime dynamic-library demo binary. Loads libagenterm via
-# dlopen / LoadLibrary and exercises a read-only subset of the agt_* exports.
 [[bin]]
 name = "agenterm-cu"
 path = "src/bin/agenterm_cu.rs"

@@ -38,8 +38,8 @@ provided by these native accessibility stacks (see
 [30 § Platform accessibility backends](PRD_02_30_cu_targets_transports.md#platform-accessibility-backends)).
 Screenshot and coordinate actuation are **degraded fallbacks** with typed
 markers in the command result; they are never silent substitutes for a missing
-control tree. `cu` consumes `agenterm-platform`; it does not open raw OS APIs or
-fork a fifth screenshot stack.
+control tree. `agenterm-cu` consumes `libagenterm` as its runtime mechanism
+boundary; it does not open raw OS APIs or fork a fifth screenshot stack.
 
 ## Subtree index
 
@@ -48,7 +48,7 @@ fork a fifth screenshot stack.
 | 29 | [Command surface and layering](PRD_02_29_cu_command_surface.md) | 抽象命令集、洋葱分层契约、结构化控件树与确定性等待 |
 | 30 | [Targets and transports](PRD_02_30_cu_targets_transports.md) | `current`/`ssh`/`rdp`/`vnc` 目标族、transport 抽象、**platform a11y backends**（Win UIA / macOS AX / Linux AT-SPI2） |
 | 31 | [Authorization, safety and audit](PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义与证据 |
-| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放（Spectacle 目录）：几何核 + `window-place` + macOS 日用 `cu hotkeys` 宿主 |
+| 32 | [Window placement](PRD_02_32_cu_window_placement.md) | 命名摆放（Spectacle 目录）：几何核 + `window-place` + 桌面常驻 `agenterm-cu host` 宿主 |
 
 ## Product outcome
 
@@ -80,6 +80,9 @@ fork a fifth screenshot stack.
   `agenterm-remote.exe` working name used in
   [`plan/plan-v0.1.15.md`](../plan/plan-v0.1.15.md) §5.6.1. Remote protocol
   support is a transport axis inside this product, not a separate product.
+- [ ] `agenterm-cu` is also the only executable name. ABI diagnostics,
+  command mode, and the desktop host are modes of that executable; a second
+  `cu` binary is not a product or compatibility surface.
 
 ## Product boundary
 
@@ -147,7 +150,8 @@ independent implementation.
   evidence arrives; a partial platform slice does not promote the subtree root.
 - [~] Linux `current` has first black-box evidence for AT-SPI2 `tree` and
   structured `click` / `focus` by node path (`scripts/cu-linux-smoke.sh` against
-  the real `cu` binary). Windows UIA and macOS AX are not claimed in this slice.
+  the real `agenterm-cu` binary). Windows UIA and macOS AX are not claimed in
+  this slice.
 - [ ] the subtree root still has no shipped version. Roadmap ownership is
   [18 Focused product roadmap](PRD_02_18_roadmap.md). Window placement
   ([32](PRD_02_32_cu_window_placement.md)) opened under the v0.1.19 draft and

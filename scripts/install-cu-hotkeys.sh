@@ -22,11 +22,11 @@ APP_BIN="${APP}/Contents/MacOS/agenterm-cu"
 BIN="${BIN_DIR}/agenterm-cu"
 PLIST="${LAUNCH_DIR}/${LABEL}.plist"
 
-echo "building release cu..."
-cargo build -p agenterm-cu --bin cu --release --manifest-path "${ROOT}/Cargo.toml"
+echo "building release agenterm-cu..."
+cargo build -p agenterm-cu --bin agenterm-cu --release --manifest-path "${ROOT}/Cargo.toml"
 
 mkdir -p "${BIN_DIR}" "${DATA_DIR}" "${LAUNCH_DIR}" "${APP}/Contents/MacOS"
-cp "${ROOT}/target/release/cu" "${APP_BIN}"
+cp "${ROOT}/target/release/agenterm-cu" "${APP_BIN}"
 chmod 755 "${APP_BIN}"
 ln -sfn "${APP_BIN}" "${BIN}"
 
@@ -99,7 +99,7 @@ cat > "${PLIST}" <<EOF
   <key>ProgramArguments</key>
   <array>
     <string>${APP_BIN}</string>
-    <string>hotkeys</string>
+      <string>host</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

@@ -8,7 +8,7 @@ use crate::place::PlaceAction;
 
 #[cfg(not(target_os = "macos"))]
 pub fn run() -> i32 {
-    eprintln!("cu hotkeys is only implemented on macOS");
+    eprintln!("agenterm-cu host is not implemented on this platform yet");
     1
 }
 
@@ -212,7 +212,7 @@ mod macos {
 
     pub fn run() -> i32 {
         if bootstrap_nsapp().is_err() {
-            eprintln!("cu hotkeys: failed to start NSApplication");
+                eprintln!("agenterm-cu host: failed to start NSApplication");
             return 1;
         }
         crate::ax_guide::ensure_accessibility_surface();
@@ -226,7 +226,7 @@ mod macos {
             let app_target = GetApplicationEventTarget();
             let target = GetEventDispatcherTarget();
             if app_target.is_null() || target.is_null() {
-                eprintln!("cu hotkeys: no event dispatcher");
+                eprintln!("agenterm-cu host: no event dispatcher");
                 return 1;
             }
             let spec = EventTypeSpec {
@@ -243,7 +243,7 @@ mod macos {
                 &mut handler,
             );
             if err != 0 {
-                eprintln!("cu hotkeys: InstallEventHandler failed ({err})");
+                eprintln!("agenterm-cu host: InstallEventHandler failed ({err})");
                 return 1;
             }
             for (index, bind) in bindings().iter().enumerate() {
@@ -255,7 +255,7 @@ mod macos {
                 let err = RegisterEventHotKey(bind.key, bind.modifiers, id, target, 0, &mut href);
                 if err != 0 {
                     eprintln!(
-                        "cu hotkeys: failed to register {} (err {err})",
+                        "agenterm-cu host: failed to register {} (err {err})",
                         bind.action.kebab()
                     );
                 }
@@ -263,7 +263,7 @@ mod macos {
         }
         let trusted = crate::ax_guide::ax_trusted();
         crate::ax_guide::write_status(trusted);
-        eprintln!("cu hotkeys: listening with Spectacle defaults (ax_trusted={trusted})");
+        eprintln!("agenterm-cu host: listening with Spectacle defaults (ax_trusted={trusted})");
         let _status =
             objc2_foundation::MainThreadMarker::new().and_then(crate::status_menu::install);
         run_nsapp();
@@ -272,12 +272,12 @@ mod macos {
 
     pub fn self_test() -> i32 {
         if bootstrap_nsapp().is_err() {
-            eprintln!("cu hotkeys --self-test: NSApplication failed");
+            eprintln!("agenterm-cu host --self-test: NSApplication failed");
             return 1;
         }
         let trusted = crate::ax_guide::ax_trusted();
         crate::ax_guide::write_status(trusted);
-        eprintln!("cu hotkeys --self-test: ax_trusted={trusted}");
+        eprintln!("agenterm-cu host --self-test: ax_trusted={trusted}");
         if !trusted {
             return 2;
         }
@@ -289,12 +289,12 @@ mod macos {
             window: None,
         });
         if reply.ok {
-            eprintln!("cu hotkeys --self-test: window-place center ok");
+            eprintln!("agenterm-cu host --self-test: window-place center ok");
             0
         } else {
             let err = reply.error.as_ref();
             eprintln!(
-                "cu hotkeys --self-test: window-place failed: {} ({})",
+                "agenterm-cu host --self-test: window-place failed: {} ({})",
                 err.map(|e| e.message.as_str()).unwrap_or("?"),
                 err.map(|e| e.code.as_str()).unwrap_or("?")
             );
@@ -318,7 +318,7 @@ mod macos {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(&stamp, b"1");
-        eprintln!("cu hotkeys: process is untrusted; restarting after Accessibility grant");
+        eprintln!("agenterm-cu host: process is untrusted; restarting after Accessibility grant");
         // Non-zero so launchd KeepAlive (SuccessfulExit=false) brings us back.
         std::process::exit(1);
     }
@@ -387,7 +387,7 @@ mod macos {
             && let Some(error) = reply.error
         {
             eprintln!(
-                "cu hotkeys: {} failed: {} ({})",
+                "agenterm-cu host: {} failed: {} ({})",
                 action.kebab(),
                 error.message,
                 error.code

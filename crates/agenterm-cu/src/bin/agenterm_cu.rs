@@ -1,363 +1,575 @@
-//! agenterm-cu: milestone 44/46 — runtime dynamic-library demo.
+//! `agenterm-cu` shell command (PRD_02_29 shell layer).
 //!
-//! This binary REALLY loads the libagenterm dynamic library at run time
-//! (`dlopen` on Unix, `LoadLibrary` on Windows) via the shared
-//! `agenterm_cu::dynlib` layer (which caches the load process-wide), instead
-//! of linking `agenterm-abi` as a static rlib. Every symbol below is resolved
-//! from the loaded `.dll` / `.so` / `.dylib` and called through the FFI.
-//!
-//! Strictly read-only: it never calls any export that changes system state —
-//! no `agt_input_*`, no `agt_native_window_*`, no screenshot writes, no
-//! clipboard access. This is the user's desktop.
-//!
-//! Human output shows the absolute path of the library actually loaded, the
-//! abi version, build id, capability statuses, a top-level window
-//! enumeration (count + first 5 records; window titles are printed as
-//! LENGTHS only, never content), a process probe (self pid + live process
-//! count) and the default-shell path length. `--json` emits the same data as
-//! one JSON object for downstream tooling.
+//! Machine-readable JSON on stdout; human usage on stderr.
 
-use libloading::Symbol;
-use std::ffi::{CStr, c_char};
-
-use agenterm_cu::dynlib::{self, agt_window_info};
-
-// ---------------------------------------------------------------------------
-// FFI types — layout must match include/agenterm.h exactly.
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-#[allow(dead_code)] // ABI-layout struct: every field must exist even if unread.
-#[allow(non_camel_case_types)]
-struct agt_process_info {
-    id: u32,
-    parent_id: u32,
-    name: [u8; 64],
-    name_len: u32,
-    name_truncated: u32,
-}
-
-impl Default for agt_process_info {
-    fn default() -> Self {
-        agt_process_info {
-            id: 0,
-            parent_id: 0,
-            name: [0u8; 64],
-            name_len: 0,
-            name_truncated: 0,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Capability ids and statuses (values are part of the ABI contract and must
-// match include/agenterm.h; the constants live in `dynlib`).
-// ---------------------------------------------------------------------------
-
-/// Capabilities the demo probes, in display order.
-const CAPABILITIES: [(&str, i32); 10] = [
-    ("PTY", dynlib::AGT_CAP_PTY),
-    ("WINDOW_HOST", dynlib::AGT_CAP_WINDOW_HOST),
-    ("SCREENSHOT", dynlib::AGT_CAP_SCREENSHOT),
-    ("PROCESS_OBSERVE", dynlib::AGT_CAP_PROCESS_OBSERVE),
-    ("CLIPBOARD", dynlib::AGT_CAP_CLIPBOARD),
-    ("PARENT_CONSOLE", dynlib::AGT_CAP_PARENT_CONSOLE),
-    ("WINDOW_ENUMERATE", dynlib::AGT_CAP_WINDOW_ENUMERATE),
-    ("WINDOW_OP", dynlib::AGT_CAP_WINDOW_OP),
-    ("INPUT_INJECT", dynlib::AGT_CAP_INPUT_INJECT),
-    ("ACCESSIBILITY_TREE", dynlib::AGT_CAP_ACCESSIBILITY_TREE),
-];
-
-// ---------------------------------------------------------------------------
-// Export signatures — identical to crates/agenterm-abi/tests/dylib_load.rs.
-// ---------------------------------------------------------------------------
-
-type AbiVersion = unsafe extern "C" fn() -> u32;
-type BuildId = unsafe extern "C" fn() -> *const c_char;
-type CapabilityQuery = unsafe extern "C" fn(i32) -> i32;
-type WindowEnumerate = unsafe extern "C" fn(*mut agt_window_info, usize, *mut usize) -> i32;
-type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize) -> i32;
-type ProcessSelf = unsafe extern "C" fn() -> u32;
-type RuntimeDefaultShell = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
-
-// ---------------------------------------------------------------------------
-// Two-stage read-only probes (cap=0 probe, allocate, fetch).
-// ---------------------------------------------------------------------------
-
-/// `agt_window_enumerate`: probe with cap=0, allocate the required count,
-/// fetch. Returns the records written. Titles are never copied out — only
-/// `title_len` is reported.
-unsafe fn window_enumerate(lib: &dynlib::Dynlib) -> Result<Vec<agt_window_info>, String> {
-    let f: Symbol<WindowEnumerate> = unsafe { lib.sym(b"agt_window_enumerate") }?;
-    let mut needed = 0usize;
-    let st = unsafe { f(std::ptr::null_mut(), 0, &mut needed) };
-    if st == dynlib::AGT_UNSUPPORTED {
-        return Err(
-            "agt_window_enumerate: AGT_UNSUPPORTED — window enumeration not available on this host"
-                .to_owned(),
-        );
-    }
-    if st != dynlib::AGT_FAILED {
-        return Err(format!(
-            "agt_window_enumerate probe: expected AGT_FAILED (buffer_too_small), got {st}"
-        ));
-    }
-    if needed == 0 {
-        return Ok(Vec::new());
-    }
-    let mut buf = vec![agt_window_info::default(); needed];
-    let mut got = 0usize;
-    let st = unsafe { f(buf.as_mut_ptr(), needed, &mut got) };
-    if st != dynlib::AGT_OK {
-        return Err(format!(
-            "agt_window_enumerate fetch: {}",
-            lib.last_error_message()
-        ));
-    }
-    buf.truncate(got);
-    Ok(buf)
-}
-
-/// `agt_process_list`: two-stage, returns the number of live processes.
-unsafe fn process_list_count(lib: &dynlib::Dynlib) -> Result<usize, String> {
-    let f: Symbol<ProcessList> = unsafe { lib.sym(b"agt_process_list") }?;
-    let mut needed = 0usize;
-    let st = unsafe { f(std::ptr::null_mut(), 0, &mut needed) };
-    if st != dynlib::AGT_FAILED {
-        return Err(format!(
-            "agt_process_list probe: expected AGT_FAILED (buffer_too_small), got {st}"
-        ));
-    }
-    if needed == 0 {
-        return Ok(0);
-    }
-    let mut buf = vec![agt_process_info::default(); needed];
-    let mut got = 0usize;
-    let st = unsafe { f(buf.as_mut_ptr(), needed, &mut got) };
-    if st != dynlib::AGT_OK {
-        return Err(format!(
-            "agt_process_list fetch: {}",
-            lib.last_error_message()
-        ));
-    }
-    Ok(got)
-}
-
-/// `agt_runtime_default_shell`: two-stage, returns only the path LENGTH —
-/// the path itself is never printed (privacy).
-unsafe fn default_shell_length(lib: &dynlib::Dynlib) -> Result<usize, String> {
-    let f: Symbol<RuntimeDefaultShell> = unsafe { lib.sym(b"agt_runtime_default_shell") }?;
-    let mut needed = 0usize;
-    let st = unsafe { f(std::ptr::null_mut(), 0, &mut needed) };
-    if st != dynlib::AGT_FAILED {
-        return Err(format!(
-            "agt_runtime_default_shell probe: expected AGT_FAILED (buffer_too_small), got {st}"
-        ));
-    }
-    if needed == 0 {
-        return Ok(0);
-    }
-    let mut buf = vec![0u8; needed];
-    let mut got = 0usize;
-    let st = unsafe { f(buf.as_mut_ptr(), needed, &mut got) };
-    if st != dynlib::AGT_OK {
-        return Err(format!(
-            "agt_runtime_default_shell fetch: {}",
-            lib.last_error_message()
-        ));
-    }
-    Ok(got)
-}
-
-// ---------------------------------------------------------------------------
-// Demo orchestration.
-// ---------------------------------------------------------------------------
-
-/// Everything the demo collected.
-struct Demo {
-    library_path: String,
-    abi_version: u32,
-    build_id: String,
-    capabilities: Vec<(&'static str, i32)>,
-    windows: Vec<agt_window_info>,
-    self_pid: u32,
-    process_count: usize,
-    default_shell_len: usize,
-}
-
-/// Exercise the read-only exports of the loaded library.
-unsafe fn run(lib: &dynlib::Dynlib) -> Result<Demo, String> {
-    let abi_version: Symbol<AbiVersion> = unsafe { lib.sym(b"agt_abi_version") }?;
-    let build_id: Symbol<BuildId> = unsafe { lib.sym(b"agt_build_id") }?;
-    let capability: Symbol<CapabilityQuery> = unsafe { lib.sym(b"agt_capability_query") }?;
-    let process_self: Symbol<ProcessSelf> = unsafe { lib.sym(b"agt_process_self") }?;
-
-    let abi_version = unsafe { abi_version() };
-    let build_id = unsafe { CStr::from_ptr(build_id()) }
-        .to_string_lossy()
-        .into_owned();
-
-    let mut capabilities = Vec::with_capacity(CAPABILITIES.len());
-    for (name, cap) in CAPABILITIES {
-        let st = unsafe { capability(cap) };
-        if st != dynlib::AGT_OK && st != dynlib::AGT_UNSUPPORTED {
-            return Err(format!(
-                "agt_capability_query({name}) returned unexpected status {st}"
-            ));
-        }
-        capabilities.push((name, st));
-    }
-
-    let windows = unsafe { window_enumerate(lib) }?;
-    let self_pid = unsafe { process_self() };
-    let process_count = unsafe { process_list_count(lib) }?;
-    let default_shell_len = unsafe { default_shell_length(lib) }?;
-
-    Ok(Demo {
-        library_path: lib.path().display().to_string(),
-        abi_version,
-        build_id,
-        capabilities,
-        windows,
-        self_pid,
-        process_count,
-        default_shell_len,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Output.
-// ---------------------------------------------------------------------------
-
-fn status_label(st: i32) -> &'static str {
-    if st == dynlib::AGT_OK {
-        "OK"
-    } else {
-        "UNSUPPORTED"
-    }
-}
-
-fn print_human(d: &Demo) {
-    println!("agenterm-cu — runtime libagenterm dlopen demo (milestone 44)");
-    println!("loaded library : {}", d.library_path);
-    let major = (d.abi_version >> 16) & 0xffff;
-    let minor = d.abi_version & 0xffff;
-    println!("abi_version    : {major}.{minor} (0x{:08x})", d.abi_version);
-    println!("build_id       : {}", d.build_id);
-    println!("capabilities:");
-    for (name, st) in &d.capabilities {
-        println!("  {:<18} {}", name, status_label(*st));
-    }
-    println!("windows (visible top-level):");
-    println!("  count: {}", d.windows.len());
-    for (i, w) in d.windows.iter().take(5).enumerate() {
-        println!(
-            "  [{}] handle=0x{:x} pid={} {}x{} focused={} title_len={}",
-            i + 1,
-            w.handle as u64,
-            w.process_id,
-            w.width,
-            w.height,
-            w.focused,
-            w.title_len
-        );
-    }
-    if d.windows.len() > 5 {
-        println!("  ... ({} more)", d.windows.len() - 5);
-    }
-    println!("processes:");
-    println!("  self_pid: {}", d.self_pid);
-    println!("  count   : {}", d.process_count);
-    println!("default_shell:");
-    println!("  length  : {} bytes", d.default_shell_len);
-}
-
-fn print_json(d: &Demo) {
-    let mut capabilities = serde_json::Map::new();
-    for (name, st) in &d.capabilities {
-        capabilities.insert((*name).to_owned(), status_label(*st).into());
-    }
-    let windows: Vec<serde_json::Value> = d
-        .windows
-        .iter()
-        .map(|w| {
-            serde_json::json!({
-                "handle": format!("0x{:x}", w.handle as u64),
-                "pid": w.process_id,
-                "x": w.x,
-                "y": w.y,
-                "width": w.width,
-                "height": w.height,
-                "focused": w.focused,
-                "title_len": w.title_len,
-            })
-        })
-        .collect();
-    let out = serde_json::json!({
-        "ok": true,
-        "library_path": d.library_path,
-        "abi": {
-            "major": (d.abi_version >> 16) & 0xffff,
-            "minor": d.abi_version & 0xffff,
-            "raw": d.abi_version,
-            "build_id": d.build_id,
-        },
-        "capabilities": capabilities,
-        "windows": { "count": d.windows.len(), "sample": windows },
-        "processes": { "self_pid": d.self_pid, "count": d.process_count },
-        "default_shell_len": d.default_shell_len,
-    });
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{}".to_owned())
-    );
-}
-
-fn fail(msg: &str, tried: Option<&[std::path::PathBuf]>, json: bool) -> ! {
-    if json {
-        let value = match tried {
-            Some(paths) => serde_json::json!({
-                "ok": false,
-                "error": msg,
-                "tried": paths.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>(),
-            }),
-            None => serde_json::json!({ "ok": false, "error": msg }),
-        };
-        println!("{value}");
-    }
-    eprintln!("agenterm-cu: {msg}");
-    if let Some(paths) = tried {
-        eprintln!("Tried, in order:");
-        for p in paths {
-            eprintln!("  {}", p.display());
-        }
-        eprintln!("Build it first: cargo build -p agenterm-abi --profile abi-release");
-        eprintln!(
-            "or point AGENTERM_ABI_LIB at an existing agenterm.dll / libagenterm.so / libagenterm.dylib"
-        );
-    }
-    std::process::exit(1);
-}
+use agenterm_cu::{Authorization, Command, Executor, PointerButton, TargetRef, WaitCondition};
 
 fn main() {
-    let json = std::env::args().skip(1).any(|a| a == "--json");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(
+        args.first().map(String::as_str),
+        Some("host" | "hotkeys")
+    ) {
+        std::process::exit(agenterm_cu::hotkeys::run());
+    }
+    if args.first().map(String::as_str)
+        == Some(agenterm_cu::mechanism::clipboard::X11_CLIPBOARD_OWNER_ARG)
+    {
+        std::process::exit(run_x11_clipboard_owner());
+    }
+    let reply = dispatch(args);
+    let json = serde_json::to_string(&reply).unwrap_or_else(|_| {
+        r#"{"ok":false,"target":"","command":"","error":{"code":"serialize","message":"reply serialization failed"}}"#
+            .to_string()
+    });
+    println!("{json}");
+}
 
-    let lib = match dynlib::load() {
-        Ok(lib) => lib,
-        Err(error) => {
-            fail(&error.message, Some(&error.tried), json);
+fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
+    if args.is_empty() || matches!(args[0].as_str(), "help" | "--help" | "-h") {
+        eprint_usage();
+        return help_reply(true);
+    }
+
+    if args[0] == "exec" {
+        return dispatch_json(&args[1..]);
+    }
+
+    let mut grant: Option<String> = None;
+    let mut target: Option<TargetRef> = None;
+    while let Some(flag) = args.first() {
+        match flag.as_str() {
+            "--target" => {
+                let value = take_value(&mut args, "--target");
+                target = TargetRef::parse(&value).or_else(|| {
+                    eprint_usage();
+                    None
+                });
+                if target.is_none() {
+                    return usage_err("unknown --target value; only 'current' is supported");
+                }
+            }
+            "--grant" => {
+                grant = Some(take_value(&mut args, "--grant"));
+            }
+            _ if flag.starts_with('-') => {
+                return usage_err(format!("unknown global flag '{flag}'"));
+            }
+            _ => break,
         }
+    }
+
+    let Some(target) = target else {
+        eprint_usage();
+        return usage_err("--target is required on every command");
     };
 
-    match unsafe { run(lib) } {
-        Ok(demo) => {
-            if json {
-                print_json(&demo);
-            } else {
-                print_human(&demo);
+    let Some(verb) = args.first().cloned() else {
+        eprint_usage();
+        return usage_err("missing command verb");
+    };
+    args.remove(0);
+
+    let command = match verb.as_str() {
+        "capabilities" => Command::Capabilities { target },
+        "windows" => Command::Windows { target },
+        "tree" => {
+            let window = flag_isize(&mut args, "--window");
+            Command::Tree { target, window }
+        }
+        "screenshot" => {
+            let path = flag_value(&mut args, "--out")
+                .or_else(|| args.first().cloned())
+                .unwrap_or_default();
+            if !args.is_empty() {
+                args.remove(0);
+            }
+            let window = flag_isize(&mut args, "--window");
+            Command::Screenshot {
+                target,
+                path,
+                window,
             }
         }
-        Err(msg) => fail(&msg, None, json),
+        "click" => {
+            let window = flag_isize(&mut args, "--window");
+            let node = flag_value(&mut args, "--node");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            let coords = flag_coords(&mut args, "--coords");
+            let degraded = args.iter().any(|arg| arg == "--degraded");
+            args.retain(|arg| arg != "--degraded");
+            let clicks = flag_u32(&mut args, "--clicks").unwrap_or(1);
+            let button = match flag_value(&mut args, "--button").as_deref() {
+                Some("right") => PointerButton::Right,
+                Some("middle") => PointerButton::Middle,
+                _ => PointerButton::Left,
+            };
+            Command::Click {
+                target,
+                window,
+                node,
+                name,
+                role,
+                coords,
+                degraded,
+                clicks,
+                button,
+            }
+        }
+        "focus" => {
+            let window = flag_isize(&mut args, "--window");
+            let node = flag_value(&mut args, "--node");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if node.as_ref().is_none_or(|value| value.is_empty())
+                && name.as_ref().is_none_or(|value| value.is_empty())
+            {
+                return usage_err(
+                    "focus requires --node <path-id> or --window <handle> --name <pattern>",
+                );
+            }
+            Command::Focus {
+                target,
+                window,
+                node,
+                name,
+                role,
+            }
+        }
+        "send-text" => {
+            // `--` ends flag parsing so the text may itself start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            Command::SendText {
+                target,
+                text: literal_text.unwrap_or_else(|| args.join(" ")),
+                window,
+                name,
+                role,
+            }
+        }
+        "copy" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("copy requires --window <handle> --name <pattern>");
+            }
+            Command::Copy {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
+        "paste" => {
+            // `--` ends flag parsing so --text may itself start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            let text = flag_value(&mut args, "--text").or(literal_text);
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("paste requires --window <handle> --name <pattern>");
+            }
+            Command::Paste {
+                target,
+                text,
+                window,
+                name,
+                role,
+            }
+        }
+        "send-keys" => {
+            // `--` ends flag parsing so a chord may itself start with a dash.
+            let literal_keys = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join("+")),
+                None => None,
+            };
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            Command::SendKeys {
+                target,
+                keys: literal_keys.unwrap_or_else(|| args.join("+")),
+                window,
+                name,
+                role,
+            }
+        }
+        "scroll" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("scroll requires --window <handle> --name <pattern>");
+            }
+            Command::Scroll {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
+        "get-extents" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-extents requires --window <handle> --name <pattern>");
+            }
+            Command::GetExtents {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
+        "select" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            let start = flag_i32(&mut args, "--start");
+            let end = flag_i32(&mut args, "--end");
+            if name.as_ref().is_none_or(|value| value.is_empty())
+                || start.is_none()
+                || end.is_none()
+            {
+                return usage_err(
+                    "select requires --window <handle> --name <pattern> --start N --end M",
+                );
+            }
+            Command::Select {
+                target,
+                start: start.unwrap_or(0),
+                end: end.unwrap_or(0),
+                window,
+                name,
+                role,
+            }
+        }
+        "get-selection" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-selection requires --window <handle> --name <pattern>");
+            }
+            Command::GetSelection {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
+        "window-place" => {
+            let action = flag_value(&mut args, "--action")
+                .or_else(|| args.first().cloned())
+                .unwrap_or_default();
+            if action.is_empty() {
+                return usage_err("window-place requires --action <id>");
+            }
+            let window = flag_isize(&mut args, "--window");
+            Command::WindowPlace {
+                target,
+                action,
+                window,
+            }
+        }
+        "wait" => {
+            // `--` ends flag parsing so --text-equals / --text-contains may start with a dash.
+            let literal_text = match args.iter().position(|arg| arg == "--") {
+                Some(index) => Some(args.split_off(index)[1..].join(" ")),
+                None => None,
+            };
+            let timeout_ms = flag_u64(&mut args, "--timeout-ms").unwrap_or(5_000);
+            let text_equals_present = args
+                .iter()
+                .any(|arg| arg == "--text-equals" || arg == "--node-text-equals");
+            let text_contains_present = args
+                .iter()
+                .any(|arg| arg == "--text-contains" || arg == "--node-text-contains");
+            let condition = if text_equals_present && text_contains_present {
+                return usage_err("wait accepts one of --text-equals or --text-contains, not both");
+            } else if text_equals_present {
+                let expected = flag_value(&mut args, "--text-equals")
+                    .or_else(|| flag_value(&mut args, "--node-text-equals"))
+                    .filter(|value| value != "--")
+                    .or(literal_text);
+                let Some(expected) = expected else {
+                    return usage_err(
+                        "wait --text-equals / --node-text-equals requires the expected text",
+                    );
+                };
+                let name = flag_value(&mut args, "--name")
+                    .or_else(|| flag_value(&mut args, "--node-name-contains"))
+                    .filter(|value| !value.is_empty());
+                let Some(name) = name else {
+                    return usage_err("wait --text-equals requires --name <pattern>");
+                };
+                WaitCondition::NodeTextEquals {
+                    expected,
+                    name,
+                    role: flag_value(&mut args, "--role")
+                        .or_else(|| flag_value(&mut args, "--node-role")),
+                    window: flag_isize(&mut args, "--window"),
+                }
+            } else if text_contains_present {
+                let substring = flag_value(&mut args, "--text-contains")
+                    .or_else(|| flag_value(&mut args, "--node-text-contains"))
+                    .filter(|value| value != "--")
+                    .or(literal_text);
+                let Some(substring) = substring else {
+                    return usage_err(
+                        "wait --text-contains / --node-text-contains requires the substring",
+                    );
+                };
+                let name = flag_value(&mut args, "--name")
+                    .or_else(|| flag_value(&mut args, "--node-name-contains"))
+                    .filter(|value| !value.is_empty());
+                let Some(name) = name else {
+                    return usage_err("wait --text-contains requires --name <pattern>");
+                };
+                WaitCondition::NodeTextContains {
+                    substring,
+                    name,
+                    role: flag_value(&mut args, "--role")
+                        .or_else(|| flag_value(&mut args, "--node-role")),
+                    window: flag_isize(&mut args, "--window"),
+                }
+            } else if let Some(count) = flag_usize(&mut args, "--window-count-gte") {
+                WaitCondition::WindowCountGte { count }
+            } else if let Some(pattern) = flag_value(&mut args, "--window-title-contains") {
+                WaitCondition::WindowTitleContains { pattern }
+            } else if let Some(handle) = flag_isize(&mut args, "--focused-handle") {
+                WaitCondition::FocusedHandle { handle }
+            } else if let Some(pattern) = flag_value(&mut args, "--node-name-contains") {
+                WaitCondition::NodeNameContains {
+                    pattern,
+                    role: flag_value(&mut args, "--node-role"),
+                    window: flag_isize(&mut args, "--window"),
+                }
+            } else {
+                return usage_err(
+                    "wait requires one of --window-count-gte, --window-title-contains, --focused-handle, --node-name-contains, --text-equals, or --text-contains",
+                );
+            };
+            Command::Wait {
+                target,
+                timeout_ms,
+                condition,
+            }
+        }
+        other => return usage_err(format!("unknown command '{other}'")),
+    };
+
+    let auth = Authorization::from_cli_and_env(grant.as_deref());
+    Executor::new(auth).execute(&command)
+}
+
+fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
+    let mut grant: Option<String> = None;
+    let mut payload = None;
+    for arg in args {
+        if let Some(value) = arg.strip_prefix("--grant=") {
+            grant = Some(value.to_owned());
+        } else if arg == "--json" {
+            continue;
+        } else if payload.is_none() {
+            payload = Some(arg.clone());
+        }
     }
+    let Some(raw) = payload else {
+        return usage_err("exec requires a JSON command payload argument");
+    };
+    let command: Command = match serde_json::from_str(&raw) {
+        Ok(command) => command,
+        Err(error) => return usage_err(format!("invalid JSON command: {error}")),
+    };
+    let auth = Authorization::from_cli_and_env(grant.as_deref());
+    Executor::new(auth).execute(&command)
+}
+
+fn take_value(args: &mut Vec<String>, flag: &str) -> String {
+    args.remove(0);
+    if args.is_empty() {
+        eprintln!("missing value for {flag}");
+        return String::new();
+    }
+    args.remove(0)
+}
+
+fn flag_value(args: &mut Vec<String>, flag: &str) -> Option<String> {
+    let index = args.iter().position(|arg| arg == flag)?;
+    args.remove(index);
+    args.get(index).cloned()
+}
+
+fn flag_isize(args: &mut Vec<String>, flag: &str) -> Option<isize> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_i32(args: &mut Vec<String>, flag: &str) -> Option<i32> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_u32(args: &mut Vec<String>, flag: &str) -> Option<u32> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_u64(args: &mut Vec<String>, flag: &str) -> Option<u64> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_usize(args: &mut Vec<String>, flag: &str) -> Option<usize> {
+    flag_value(args, flag)?.parse().ok()
+}
+
+fn flag_coords(args: &mut Vec<String>, flag: &str) -> Option<[i32; 2]> {
+    let raw = flag_value(args, flag)?;
+    let mut parts = raw.split(',');
+    let x = parts.next()?.trim().parse().ok()?;
+    let y = parts.next()?.trim().parse().ok()?;
+    Some([x, y])
+}
+
+fn usage_err(message: impl Into<String>) -> agenterm_cu::CuReply {
+    eprint_usage();
+    agenterm_cu::CuReply {
+        ok: false,
+        target: String::new(),
+        command: "usage".into(),
+        data: None,
+        error: Some(agenterm_cu::CuError::new("usage", message)),
+    }
+}
+
+fn help_reply(ok: bool) -> agenterm_cu::CuReply {
+    agenterm_cu::CuReply {
+        ok,
+        target: String::new(),
+        command: "help".into(),
+        data: Some(serde_json::json!({ "usage": "see stderr" })),
+        error: None,
+    }
+}
+
+fn run_x11_clipboard_owner() -> i32 {
+    use std::io::Read;
+    let mut text = String::new();
+    if std::io::stdin().read_to_string(&mut text).is_err() {
+        return 1;
+    }
+    match agenterm_cu::mechanism::clipboard::own_text(&text) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
+fn eprint_usage() {
+    eprintln!(
+        r#"usage: agenterm-cu --target <current> [--grant observe,actuate] <command> [args...]
+       agenterm-cu exec [--grant observe,actuate] --json '<command-json>'
+       agenterm-cu host                        desktop menu and global shortcuts
+       agenterm-cu hotkeys                     compatibility alias for host
+
+Global:
+  --target current          explicit target reference (required)
+  --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
+
+Commands:
+  capabilities
+  windows
+  tree [--window HANDLE]
+  screenshot --out PATH [--window HANDLE]
+  click (--window HANDLE --node ID | --window HANDLE --name PAT [--role ROLE] | --coords X,Y --degraded)
+        [--button left|right|middle] [--clicks N]
+                              --name reuses wait NodeNameContains matching, then the --node AT-SPI path
+  focus [--window HANDLE] (--node ID | --window HANDLE --name PAT [--role ROLE])
+  send-text [--window HANDLE --name PAT [--role ROLE]] [--] <text...>
+                              --name writes via AT-SPI EditableText (SetTextContents /
+                              InsertText) or AT-SPI Text + toolkit set-value when
+                              EditableText is absent (Chrome renderer AX; WebKitGTK
+                              AT-SPI id + eval helper); a node with no
+                              writeable text interface typed-fails (never XTest).
+                              `--` ends flag parsing
+  copy --window HANDLE --name PAT [--role ROLE]
+                              copies AT-SPI Text.GetText from the unique showing
+                              named node onto the native clipboard (Linux X11:
+                              SetSelectionOwner, not xclip). addressing=
+                              accessibility-tree via=gettext. A node with no
+                              Text interface typed-fails (never XTest / --coords
+                              / screenshot). Close the circuit with paste --name
+                              (no --text) then wait --text-equals; copy
+                              matched.text does not count. Live: Chrome fixture
+                              and Reasonix composer (Message Reasonix…)
+  paste --window HANDLE --name PAT [--role ROLE] [--text TEXT]
+                              writes clipboard text into the unique showing named
+                              field via native AT-SPI EditableText / Text
+                              (addressing=accessibility-tree). --text only seeds
+                              the clipboard; the field write always reads the
+                              clipboard. A node with no writeable text interface
+                              typed-fails (never XTest / --coords / screenshot).
+                              Close the circuit with wait --text-equals; paste
+                              matched.text does not count. `--` ends flag parsing
+  send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
+                              --name delivers AT-SPI Device/key events
+                              (DeviceEventListener NotifyEvent); a node with no
+                              key interface typed-fails (never XTest). `--`
+                              ends flag parsing. e.g. ctrl+c / enter / k
+  scroll --window HANDLE --name PAT [--role ROLE]
+                              one-shot AT-SPI Component.ScrollTo(TopEdge).
+                              addressing=accessibility-tree via=scroll-to.
+                              Missing / false / UnknownMethod typed-fails
+                              (a11y_scroll_unavailable). Never Action scroll*,
+                              XTest wheel, --coords, or screenshot.
+  get-extents --window HANDLE --name PAT [--role ROLE]
+                              independent AT-SPI Component.GetExtents(Screen).
+                              Snapshot node.bounds do not count. Empty extents
+                              typed-fail (a11y_extents_unavailable).
+  select --window HANDLE --name PAT --start N --end M [--role ROLE]
+                              one-shot AT-SPI Text.SetSelection(0, start, end).
+                              addressing=accessibility-tree via=set-selection.
+                              Missing Text / UnknownMethod typed-fails
+                              (a11y_selection_unavailable). SetSelection false
+                              typed-fails (a11y_selection_no_effect). Never
+                              XTest, mouse-drag, --coords, or screenshot. The
+                              reply is not proof; observe with get-selection.
+  get-selection --window HANDLE --name PAT [--role ROLE]
+                              independent AT-SPI Text.GetNSelections +
+                              GetSelection(0). Not the select reply payload.
+                              Missing Text typed-fails
+                              (a11y_selection_unavailable). n=0 is empty
+                              success.
+  wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
+                        | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
+                        | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE
+                        | --text-contains SUB --name PAT [--role ROLE] --window HANDLE)
+                              --text-equals / --node-text-equals and --text-contains /
+                              --node-text-contains poll AT-SPI Text.GetText on the unique
+                              showing named node until that independent text equals TEXT
+                              or contains SUB. send-text / paste / copy matched.text,
+                              last_text_write_via, and the WebKit eval helper's queued-job
+                              OK are not this condition. Timeout is typed ("timeout")
+                              and reports the last GetText. Never screenshot / XTest /
+                              --coords. `--` ends flag parsing.
+  window-place --action <id> [--window HANDLE]
+      ids: center|fullscreen|left-half|right-half|top-half|bottom-half
+           upper-left|lower-left|upper-right|lower-right
+           next-third|previous-third|next-display|previous-display
+           larger|smaller|undo|redo
+           (or SpectacleWindowAction* constants)
+
+All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"error":..}}
+"#
+    );
 }

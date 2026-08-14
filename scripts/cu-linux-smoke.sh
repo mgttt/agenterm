@@ -14,10 +14,10 @@ AUDIT_DIR="${AGENTERM_CU_AUDIT_PATH:-${TMPDIR:-/tmp}/agenterm-cu-smoke-$$}"
 export AGENTERM_CU_AUDIT_PATH="${AUDIT_DIR}/audit.jsonl"
 mkdir -p "$(dirname "$AGENTERM_CU_AUDIT_PATH")"
 
-echo "Building cu..."
+echo "Building agenterm-cu..."
 # libagenterm requires panic=unwind; the workspace dev/release profiles abort.
-cargo build -p agenterm-cu --bin cu --profile abi-dev
-CU="$ROOT/target/abi-dev/cu"
+cargo build -p agenterm-cu --bin agenterm-cu --profile abi-dev
+CU="$ROOT/target/abi-dev/agenterm-cu"
 
 json_field() {
   python3 - "$1" "$2" <<'PY'

@@ -19,7 +19,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   region without dragging.
 - [~] the command surface owns the **action catalog and geometry contract**
   so orchestrators issue the same placements without pixels. The macOS
-  daily-driver hotkey host is now `cu hotkeys` / `AgentermCu.app` (menu bar +
+  daily-driver hotkey host is now `agenterm-cu host` / `AgentermCu.app` (menu bar +
   Spectacle-default shortcuts), not a continued dependency on Spectacle.app.
   Geometry still comes from this module; host TCC/install lessons live in
   `docs/agenterm-rust-cheatsheet.md` (macOS Accessibility trust).
@@ -46,7 +46,7 @@ agenterm-cu (28)
 
 ## Product outcome
 
-- [~] `cu window-place` applies one named action to one window on a `current`
+- [~] `agenterm-cu window-place` applies one named action to one window on a `current`
   target (macOS apply path live; remote later) and returns the before/after
   rect plus the resolved action id.
 - [~] it succeeds when an agent can tile, third-cycle, move-across-displays,
@@ -134,7 +134,7 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
 
 ## Explicit non-goals
 
-- [x] daily-driver host is `cu hotkeys` (menu-bar extra + Spectacle-default
+- [x] macOS daily-driver host is `agenterm-cu host` (menu-bar extra + Spectacle-default
   global shortcuts). Accessibility is checked only when the menu opens; the
   first item shows status and opens Settings. No popup, no background TCC
   poll, no `Shortcuts.json` editor. Host trust is the launchd process’s
@@ -142,6 +142,13 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
   Settings label alone, and not a Terminal-spawned CLI place. Install story
   and evidence: `scripts/install-cu-hotkeys.sh`,
   `docs/agenterm-rust-cheatsheet.md` (macOS Accessibility trust).
+- [ ] Windows daily-driver host uses the same `agenterm-cu host` mode and
+  placement action catalog, presented as a notification-area menu plus global
+  shortcuts. It calls the same `Command` / `Executor` path as CLI and macOS;
+  Win32 window, input, screenshot, and accessibility mechanisms remain behind
+  `libagenterm.dll`. The host owns only lifecycle, menu projection, shortcut
+  registration, and dispatch, and must return typed unsupported capability
+  status rather than adding product-local native fallbacks.
 - [ ] no drag-to-snap, no tile occupancy grid, no batch layout of
   non-addressed windows.
 - [ ] no Rectangle-only features (gaps, almost-maximize, custom regions)
@@ -156,7 +163,7 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
   1. freeze ids (this file + Spectacle `FEATURE-CATALOG`);
   2. port geometry for `center` / `fullscreen` / four halves with fixture
      parity;
-  3. `cu window-place` on `current` + macOS AX set-rect through platform;
+  3. `agenterm-cu window-place` on `current` + macOS AX set-rect through platform;
   4. grant/audit black-box.
 - [ ] later increments on the same module: thirds, corners, display walk,
   larger/smaller, then undo/redo.
@@ -170,6 +177,6 @@ that `cu` does not yet own. The ids stay reserved; v0.1.19 may return
 
 - [ ] pure tests: every frozen action's fixtures agree with Spectacle's
   calculation specs within 1 pt.
-- [ ] black-box: real `cu` on a real macOS session places a visible window
+- [ ] black-box: real `agenterm-cu` on a real macOS session places a visible window
   and a subsequent `windows` / `wait` observation shows the new bounds.
 - [ ] unauthorized call is `refused` and does not move the window.

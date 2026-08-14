@@ -1520,6 +1520,17 @@ both silent narrowing and a Clippy fix that fails to type-check elsewhere.
 
 ## macOS Accessibility trust is signature + process, not the Settings label
 
+## Product executable names must not be occupied by ABI demos
+
+When a package has one accepted product executable, its real command shell and
+desktop host own that executable name. A dynamic-library smoke/demo belongs in
+a test, example, or diagnostic subcommand; it must not create a second product
+binary or take the formal executable name while the real product ships under a
+short alias. Build scripts and black-box tests must name the formal executable
+explicitly so an accidental extra `[[bin]]` cannot become a release artifact.
+
+## macOS Accessibility trust is signature + process, not the Settings label
+
 Proven on the `cu hotkeys` / `AgentermCu.app` host (`scripts/install-cu-hotkeys.sh`,
 `crates/agenterm-cu` ax_guide / status_menu / hotkeys).
 
