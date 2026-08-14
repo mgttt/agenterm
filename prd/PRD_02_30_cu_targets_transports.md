@@ -35,20 +35,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first select evidence reuses the same con-publish `select` /
-  `get-selection` path over a **gate-owned** loopback `x11vnc` (not the
+  `vnc` first set-caret evidence reuses the same con-publish `set-caret` /
+  `get-caret` path over a **gate-owned** loopback `x11vnc` (not the
   resident `:2` listener alone) against a second `agenterm-con` with a
   unique title: host `cu --vnc 127.0.0.1:<port> send-text --name Command
   -- SEED` (payload after `--`; not `--text`) plants the seed, host
-  `cu --vnc select --name Command --start N --end M` runs session AT-SPI
-  `Text.SetSelection` (`via=set-selection`), then host independent
-  `cu --vnc get-selection --name Command` returns that range
-  (`via=get-selection`; start/end equal the selected slice of the seed,
-  or the seed when the range is the whole field). Native AT-SPI
-  `GetNSelections` + `GetSelection` via the session worker. Never
-  screenshot, `--coords`, mouse-drag, RFB framebuffer OCR, or steal the
-  resident control socket. `send-keys` (3.35), `copy` (3.34),
-  `paste --text` (3.33), and `send-text` (3.32) over vnc still hold.
+  `cu --vnc set-caret --name Command --offset N` runs session AT-SPI
+  `Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
+  `cu --vnc get-caret --name Command` returns that offset
+  (`via=get-caret-offset`) and host `cu --vnc get-text --name Command`
+  still equals the seed. Native AT-SPI `CaretOffset` / `GetCaretOffset` /
+  `SetCaretOffset` via the session worker. Never screenshot, `--coords`,
+  mouse-drag, RFB framebuffer OCR, or steal the resident control socket.
+  `select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
+  (3.33), and `send-text` (3.32) over vnc still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -449,24 +449,25 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Select path: second
+  `agenterm-cu --target current` session worker. Caret path: second
   `agenterm-con` `Command` field (unique title; never steal
   `unix:/tmp/run-box/agenterm-con.sock`); host
   `send-text --window HANDLE --name Command -- SEED` (payload after `--`;
   not `--text`) plants the seed; host
-  `select --window HANDLE --name Command --start N --end M` runs session
-  AT-SPI `Text.SetSelection` (`via=set-selection`); host independent
-  `get-selection --window HANDLE --name Command` returns that range
-  (`via=get-selection`; start/end equal the selected slice of the seed, or
-  the seed when the range is the whole field). Native AT-SPI
-  `GetNSelections` + `GetSelection` via the session worker (never
-  screenshot / `--coords` / mouse-drag / RFB framebuffer OCR). Missing Text
-  typed-fails `a11y_selection_unavailable` on the session worker the same
-  as local `current`. `send-keys` / `copy` / `paste --text` / `send-text`
-  over vnc and observe-only `windows` / `get-text` / `wait --text-equals`
-  still hold. Worker JSON does not count; CEO owns the official gate.
-  Connect / protocol / auth failures are typed (`vnc_unavailable` /
-  `vnc_transport_failed` / `vnc_auth_failed` / `invalid_input`).
+  `set-caret --window HANDLE --name Command --offset N` runs session
+  AT-SPI `Text.SetCaretOffset` (`via=set-caret-offset`); host independent
+  `get-caret --window HANDLE --name Command` returns that offset
+  (`via=get-caret-offset`) and host
+  `get-text --window HANDLE --name Command` still equals the seed. Native
+  AT-SPI `CaretOffset` / `GetCaretOffset` / `SetCaretOffset` via the
+  session worker (never screenshot / `--coords` / mouse-drag / RFB
+  framebuffer OCR). Missing Text typed-fails `a11y_caret_unavailable` on
+  the session worker the same as local `current`. `select` / `send-keys` /
+  `copy` / `paste --text` / `send-text` over vnc and observe-only
+  `windows` / `get-text` / `wait --text-equals` still hold. Worker JSON
+  does not count; CEO owns the official gate. Connect / protocol / auth
+  failures are typed (`vnc_unavailable` / `vnc_transport_failed` /
+  `vnc_auth_failed` / `invalid_input`).
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
   runs remote `agenterm-cu --target current`. Get-selection observe path: host
   `send-text --window HANDLE --name Command -- SEED` (payload after `--`; not

@@ -790,11 +790,11 @@ Global:
 
   vnc transport handshakes RFB (security type None / x11vnc -nopw), then runs
   the same verbs (observe and actuate) on a local agenterm-cu --target current
-  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Select
+  worker against the shared session (DISPLAY/AT-SPI env; no new verb). Caret
   evidence: gate-owned loopback x11vnc + second agenterm-con, host send-text
-  seed into Command, host select --start --end then independent get-selection
-  equals that range (via=get-selection; native AT-SPI SetSelection /
-  GetNSelections+GetSelection; never screenshot / --coords / RFB OCR).
+  seed into Command, host set-caret --offset N then independent get-caret
+  equals N and get-text still equals seed (via=get-caret-offset; native
+  AT-SPI SetCaretOffset / CaretOffset; never screenshot / --coords / RFB OCR).
 
 Commands:
   capabilities

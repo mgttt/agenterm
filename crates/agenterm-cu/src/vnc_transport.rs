@@ -11,21 +11,21 @@
 //! Cut 3.31 locked the first observe path. Cut 3.32 locked the first
 //! actuate path via `send-text`. Cut 3.33 locked the first clipboard write
 //! via `paste --text`. Cut 3.34 locked clipboard publish via `copy`.
-//! Cut 3.35 locked key delivery via `send-keys`. Cut 3.36 locks text
-//! selection: host `send-text` plants a seed on a second `agenterm-con`
+//! Cut 3.35 locked key delivery via `send-keys`. Cut 3.36 locked text
+//! selection via `select` / `get-selection`. Cut 3.37 locks caret
+//! placement: host `send-text` plants a seed on a second `agenterm-con`
 //! `Command` field (payload after `--`; not `--text`), host
-//! `select --start N --end M` over `--vnc` runs session AT-SPI
-//! `Text.SetSelection` (`via=set-selection`), then host independent
-//! `get-selection` over the same `--vnc` returns that range
-//! (`via=get-selection`; start/end equal the selected slice of the seed,
-//! or the seed when the range is the whole field). Native AT-SPI
-//! `GetNSelections` + `GetSelection` via the session worker — never
-//! screenshot / `--coords` / mouse-drag / RFB framebuffer OCR.
-//! Gate-owned dedicated loopback x11vnc; never steal
+//! `set-caret --offset N` over `--vnc` runs session AT-SPI
+//! `Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
+//! `get-caret` over the same `--vnc` returns that offset
+//! (`via=get-caret-offset`) and host `get-text` still equals the seed.
+//! Native AT-SPI `CaretOffset` / `GetCaretOffset` / `SetCaretOffset` via
+//! the session worker — never screenshot / `--coords` / mouse-drag /
+//! RFB framebuffer OCR. Gate-owned dedicated loopback x11vnc; never steal
 //! `unix:/tmp/run-box/agenterm-con.sock` or treat the resident `:2` x11vnc
 //! as the only proof. Observe and actuate grants both forward.
-//! `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
-//! `send-text` (3.32) over vnc remain valid.
+//! `select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
+//! (3.33), and `send-text` (3.32) over vnc remain valid.
 //!
 //! This is not a second control protocol and not D-Bus port-forwarding.
 //! Connect / protocol / auth failures are typed. True off-box VNC without
@@ -799,6 +799,71 @@ mod tests {
         assert_eq!(remote.target(), TargetRef::Current);
         match remote {
             CuCommand::GetSelection {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_caret_offset_survives_target_rewrite() {
+        // 3.37: first vnc set-caret path reuses the same RFB + session-worker
+        // rewrite; the worker still runs target=current set-caret. Circuit:
+        // host send-text plants SEED on session Command (`--` ends flags;
+        // not --text), host set-caret --window H --name Command --offset 3
+        // runs session AT-SPI Text.SetCaretOffset (via=set-caret-offset),
+        // then host independent get-caret returns offset 3
+        // (via=get-caret-offset) and get-text still equals the seed. Never
+        // screenshot / --coords / mouse-drag / RFB OCR. Missing Text
+        // typed-fails a11y_caret_unavailable on the session worker the same
+        // as local current; SetCaretOffset false is a11y_caret_no_effect.
+        let command = CuCommand::SetCaret {
+            target: TargetRef::Vnc,
+            offset: 3,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "set-caret");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::SetCaret {
+                offset,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(offset, 3);
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_caret_observe_survives_target_rewrite() {
+        // 3.37 observe sibling: get-caret must also rewrite target only and
+        // keep window/name/role so independent CaretOffset/GetCaretOffset
+        // proof rides the same RFB + session-worker path as set-caret.
+        let command = CuCommand::GetCaret {
+            target: TargetRef::Vnc,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "get-caret");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::GetCaret {
                 window, name, role, ..
             } => {
                 assert_eq!(window, Some(42));
