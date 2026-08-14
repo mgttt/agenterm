@@ -231,6 +231,43 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
+        "select" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            let start = flag_i32(&mut args, "--start");
+            let end = flag_i32(&mut args, "--end");
+            if name.as_ref().is_none_or(|value| value.is_empty())
+                || start.is_none()
+                || end.is_none()
+            {
+                return usage_err(
+                    "select requires --window <handle> --name <pattern> --start N --end M",
+                );
+            }
+            Command::Select {
+                target,
+                start: start.unwrap_or(0),
+                end: end.unwrap_or(0),
+                window,
+                name,
+                role,
+            }
+        }
+        "get-selection" => {
+            let window = flag_isize(&mut args, "--window");
+            let name = flag_value(&mut args, "--name");
+            let role = flag_value(&mut args, "--role");
+            if name.as_ref().is_none_or(|value| value.is_empty()) {
+                return usage_err("get-selection requires --window <handle> --name <pattern>");
+            }
+            Command::GetSelection {
+                target,
+                window,
+                name,
+                role,
+            }
+        }
         "window-place" => {
             let action = flag_value(&mut args, "--action")
                 .or_else(|| args.first().cloned())
@@ -378,6 +415,10 @@ fn flag_isize(args: &mut Vec<String>, flag: &str) -> Option<isize> {
     flag_value(args, flag)?.parse().ok()
 }
 
+fn flag_i32(args: &mut Vec<String>, flag: &str) -> Option<i32> {
+    flag_value(args, flag)?.parse().ok()
+}
+
 fn flag_u32(args: &mut Vec<String>, flag: &str) -> Option<u32> {
     flag_value(args, flag)?.parse().ok()
 }
@@ -491,6 +532,20 @@ Commands:
                               independent AT-SPI Component.GetExtents(Screen).
                               Snapshot node.bounds do not count. Empty extents
                               typed-fail (a11y_extents_unavailable).
+  select --window HANDLE --name PAT --start N --end M [--role ROLE]
+                              one-shot AT-SPI Text.SetSelection(0, start, end).
+                              addressing=accessibility-tree via=set-selection.
+                              Missing Text / UnknownMethod typed-fails
+                              (a11y_selection_unavailable). SetSelection false
+                              typed-fails (a11y_selection_no_effect). Never
+                              XTest, mouse-drag, --coords, or screenshot. The
+                              reply is not proof; observe with get-selection.
+  get-selection --window HANDLE --name PAT [--role ROLE]
+                              independent AT-SPI Text.GetNSelections +
+                              GetSelection(0). Not the select reply payload.
+                              Missing Text typed-fails
+                              (a11y_selection_unavailable). n=0 is empty
+                              success.
   wait --timeout-ms MS (--window-count-gte N | --window-title-contains PAT | --focused-handle HANDLE
                         | --node-name-contains PAT [--node-role ROLE] [--window HANDLE]
                         | --text-equals TEXT --name PAT [--role ROLE] --window HANDLE

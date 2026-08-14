@@ -143,6 +143,36 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// One-shot AT-SPI `Text.SetSelection(0, start, end)` on the unique
+    /// showing named node. Success is `via=set-selection`. Missing Text /
+    /// `UnknownMethod` typed-fails (`a11y_selection_unavailable`).
+    /// SetSelection false typed-fails (`a11y_selection_no_effect`). Never
+    /// XTest, mouse-drag, `--coords`, or screenshot. The reply is not
+    /// proof; callers observe via `get-selection`.
+    Select {
+        target: TargetRef,
+        start: i32,
+        end: i32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
+    /// Independent AT-SPI `Text.GetNSelections` + `GetSelection(0)` for
+    /// the unique showing named node. Not the `select` reply payload.
+    /// Missing Text typed-fails (`a11y_selection_unavailable`). `n == 0`
+    /// is empty success.
+    GetSelection {
+        target: TargetRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<isize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+    },
     Wait {
         target: TargetRef,
         timeout_ms: u64,
@@ -228,6 +258,8 @@ impl Command {
             Self::SendKeys { .. } => "send-keys".into(),
             Self::Scroll { .. } => "scroll".into(),
             Self::GetExtents { .. } => "get-extents".into(),
+            Self::Select { .. } => "select".into(),
+            Self::GetSelection { .. } => "get-selection".into(),
             Self::Wait { .. } => "wait".into(),
             Self::WindowPlace { .. } => "window-place".into(),
         }
@@ -247,6 +279,8 @@ impl Command {
             | Self::SendKeys { target, .. }
             | Self::Scroll { target, .. }
             | Self::GetExtents { target, .. }
+            | Self::Select { target, .. }
+            | Self::GetSelection { target, .. }
             | Self::Wait { target, .. }
             | Self::WindowPlace { target, .. } => *target,
         }
@@ -261,6 +295,7 @@ impl Command {
             | Self::Paste { .. }
             | Self::SendKeys { .. }
             | Self::Scroll { .. }
+            | Self::Select { .. }
             | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }

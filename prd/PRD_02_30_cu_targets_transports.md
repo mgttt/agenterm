@@ -208,6 +208,19 @@ Canonical host mapping (approved product vocabulary):
   `Component.GetExtents(Screen)` (`agt_a11y_node_get_extents`). Snapshot
   `node.bounds` do not count. Empty extents typed-fail
   (`a11y_extents_unavailable`).
+- [x] `select --window HANDLE --name PAT --start N --end M [--role ROLE]`
+  resolves through that same path, then one-shot AT-SPI
+  `Text.SetSelection(0, start, end)` (`agt_a11y_node_set_selection`).
+  Success is `via=set-selection`. Missing Text / `UnknownMethod`
+  typed-fails (`a11y_selection_unavailable`). SetSelection false
+  typed-fails (`a11y_selection_no_effect`). Never XTest, mouse-drag,
+  `--coords`, or screenshot. Proof is independent `get-selection`, not
+  the `select` reply.
+- [x] `get-selection --window HANDLE --name PAT [--role ROLE]` resolves
+  through that same path, then independent AT-SPI `Text.GetNSelections`
+  + `GetSelection(0)` (`agt_a11y_node_get_selection`). The `select`
+  reply payload does not count. Missing Text typed-fails
+  (`a11y_selection_unavailable`). `n == 0` is empty success.
 - [~] `windows` / `screenshot` / coordinate-degraded input on `current` still
   use `agenterm-platform` until `agt_window_enumerate` / unified screenshot /
   `agt_input_inject` milestones ship; capability JSON documents the gap.

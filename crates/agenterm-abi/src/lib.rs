@@ -31,8 +31,11 @@
 //! AT-SPI EditableText), `agt_a11y_node_get_text` reads AT-SPI `Text.GetText`
 //! independently of a tree snapshot, `agt_a11y_node_send_keys` delivers
 //! Device/key events (Linux: AT-SPI DeviceEventListener),
-//! `agt_a11y_node_scroll` is one-shot `Component.ScrollTo(TopEdge)`, and
-//! `agt_a11y_node_get_extents` is independent `Component.GetExtents(Screen)`.
+//! `agt_a11y_node_scroll` is one-shot `Component.ScrollTo(TopEdge)`,
+//! `agt_a11y_node_get_extents` is independent `Component.GetExtents(Screen)`,
+//! `agt_a11y_node_set_selection` is one-shot `Text.SetSelection`, and
+//! `agt_a11y_node_get_selection` is independent `GetNSelections` /
+//! `GetSelection`.
 //! Backends are
 //! the host accessibility stack (Windows UIA / macOS AX / Linux AT-SPI2) behind
 //! `agenterm-platform`; the C header names mechanisms only.
@@ -84,9 +87,9 @@ use std::time::{Duration, Instant};
 
 use agenterm_platform::CapabilityStatus;
 use agenterm_platform::accessibility_tree::{
-    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_extents, get_node_text,
-    last_text_write_via, perform_node_action, scroll_node, send_node_keys, set_node_text,
-    tree_for_window,
+    AccessibilityNodeAction, AccessibilityTreeError, drain_bus, get_node_extents,
+    get_node_selection, get_node_text, last_text_write_via, perform_node_action, scroll_node,
+    send_node_keys, set_node_selection, set_node_text, tree_for_window,
 };
 use agenterm_platform::clipboard::{get_text, has_unicode_text, set_text};
 use agenterm_platform::ime::ImeEvent;
@@ -261,7 +264,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 7);
+abi_version!(1, 8);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -2852,6 +2855,8 @@ fn map_a11y_error(operation: &'static CStr, error: AccessibilityTreeError) -> ag
                 "a11y_scroll_unavailable" => c"a11y_scroll_unavailable",
                 "a11y_scroll_no_effect" => c"a11y_scroll_no_effect",
                 "a11y_extents_unavailable" => c"a11y_extents_unavailable",
+                "a11y_selection_unavailable" => c"a11y_selection_unavailable",
+                "a11y_selection_no_effect" => c"a11y_selection_no_effect",
                 "invalid_input" => c"invalid_input",
                 "a11y_backend_failed" => c"a11y_backend_failed",
                 "a11y_invalid_node_id" => c"a11y_invalid_node_id",
@@ -3618,6 +3623,150 @@ pub extern "C" fn agt_a11y_node_get_extents(
                 c"agt_a11y_node_get_extents",
                 c"panic",
                 "panic in agt_a11y_node_get_extents",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// One-shot AT-SPI `Text.SetSelection(0, start, end)` on a child-index path.
+/// Missing Text / `UnknownMethod` →
+/// `AGT_FAILED{code="a11y_selection_unavailable"}`. SetSelection false →
+/// `AGT_FAILED{code="a11y_selection_no_effect"}`. NULL `node_id` →
+/// `bad_pointer`. Never XTest, mouse-drag, or `--coords`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_set_selection(
+    window_handle: isize,
+    node_id: *const c_char,
+    start: i32,
+    end: i32,
+) -> agt_status {
+    fn inner(window_handle: isize, node_id: *const c_char, start: i32, end: i32) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(
+                c"agt_a11y_node_set_selection",
+                c"bad_pointer",
+                "node_id is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_set_selection",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match set_node_selection(filter, node_id, start, end) {
+            Ok(()) => agt_status::AGT_OK,
+            Err(e) => map_a11y_error(c"agt_a11y_node_set_selection", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, start, end)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_set_selection",
+                c"panic",
+                "panic in agt_a11y_node_set_selection",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
+/// Independent AT-SPI `Text.GetNSelections` + `GetSelection(0)` for a
+/// child-index path. Not the set-selection reply. NULL `node_id` or any
+/// NULL out pointer → `bad_pointer`. Missing Text →
+/// `AGT_FAILED{code="a11y_selection_unavailable"}`. `n == 0` is empty
+/// success.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_a11y_node_get_selection(
+    window_handle: isize,
+    node_id: *const c_char,
+    out_n: *mut i32,
+    out_start: *mut i32,
+    out_end: *mut i32,
+) -> agt_status {
+    fn inner(
+        window_handle: isize,
+        node_id: *const c_char,
+        out_n: *mut i32,
+        out_start: *mut i32,
+        out_end: *mut i32,
+    ) -> agt_status {
+        if !a11y_mechanism_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        if node_id.is_null() {
+            record_error(
+                c"agt_a11y_node_get_selection",
+                c"bad_pointer",
+                "node_id is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if out_n.is_null() || out_start.is_null() || out_end.is_null() {
+            record_error(
+                c"agt_a11y_node_get_selection",
+                c"bad_pointer",
+                "selection out pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let node_id = match unsafe { CStr::from_ptr(node_id) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                record_error(
+                    c"agt_a11y_node_get_selection",
+                    c"bad_encoding",
+                    "node_id is not UTF-8",
+                );
+                return agt_status::AGT_FAILED;
+            }
+        };
+        let filter = if window_handle == 0 {
+            None
+        } else {
+            Some(window_handle)
+        };
+        match get_node_selection(filter, node_id) {
+            Ok(selection) => {
+                unsafe {
+                    *out_n = selection.n;
+                    *out_start = selection.start;
+                    *out_end = selection.end;
+                }
+                agt_status::AGT_OK
+            }
+            Err(e) => map_a11y_error(c"agt_a11y_node_get_selection", e),
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        inner(window_handle, node_id, out_n, out_start, out_end)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            record_error(
+                c"agt_a11y_node_get_selection",
+                c"panic",
+                "panic in agt_a11y_node_get_selection",
             );
             agt_status::AGT_FAILED
         }

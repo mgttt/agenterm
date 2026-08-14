@@ -135,6 +135,17 @@ impl Executor {
             Command::GetExtents {
                 window, name, role, ..
             } => get_extents(*window, name.as_deref(), role.as_deref()),
+            Command::Select {
+                start,
+                end,
+                window,
+                name,
+                role,
+                ..
+            } => select(*window, name.as_deref(), role.as_deref(), *start, *end),
+            Command::GetSelection {
+                window, name, role, ..
+            } => get_selection(*window, name.as_deref(), role.as_deref()),
             Command::Wait {
                 timeout_ms,
                 condition,
@@ -531,6 +542,93 @@ fn get_extents(
             "width": extents.width,
             "height": extents.height,
         },
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `select --name` is one-shot AT-SPI `Text.SetSelection`
+/// (`agt_a11y_node_set_selection`). Missing Text / `UnknownMethod`
+/// typed-fails (`a11y_selection_unavailable`). SetSelection false
+/// typed-fails (`a11y_selection_no_effect`). Never XTest, mouse-drag,
+/// `--coords`, or screenshot. The reply is not proof — `get-selection`
+/// is the independent `GetNSelections` / `GetSelection` readback.
+fn select(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+    start: i32,
+    end: i32,
+) -> Result<serde_json::Value, CuError> {
+    if start < 0 || end < start {
+        return Err(CuError::new(
+            "invalid_input",
+            format!("select requires 0 <= --start <= --end; got {start}..{end}"),
+        ));
+    }
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "select requires --window <handle> --name <pattern> --start N --end M",
+        )
+    })?;
+    let resolved =
+        resolve_actuation_node(window, None, Some(name), role, "select")?.ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "select requires --window <handle> --name <pattern> --start N --end M",
+            )
+        })?;
+    mechanism::set_node_selection(window, &resolved.node_id, start, end)
+        .map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "select",
+        "via": "set-selection",
+        "start": start,
+        "end": end,
+    });
+    attach_name_match(&mut payload, &resolved);
+    Ok(payload)
+}
+
+/// `get-selection --name` reads independent AT-SPI `Text.GetNSelections`
+/// + `GetSelection(0)` (`agt_a11y_node_get_selection`). The `select`
+/// reply payload does not count. Missing Text typed-fails
+/// (`a11y_selection_unavailable`). `n == 0` is empty success.
+fn get_selection(
+    window: Option<isize>,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<serde_json::Value, CuError> {
+    let name = name.filter(|value| !value.is_empty()).ok_or_else(|| {
+        CuError::new(
+            "invalid_input",
+            "get-selection requires --window <handle> --name <pattern>",
+        )
+    })?;
+    let resolved = resolve_actuation_node(window, None, Some(name), role, "get-selection")?
+        .ok_or_else(|| {
+            CuError::new(
+                "invalid_input",
+                "get-selection requires --window <handle> --name <pattern>",
+            )
+        })?;
+    let selection =
+        mechanism::get_node_selection(window, &resolved.node_id).map_err(map_mechanism_err)?;
+    let mut payload = serde_json::json!({
+        "addressing": "accessibility-tree",
+        "mechanism": "libagenterm",
+        "node": resolved.node_id,
+        "window": window,
+        "action": "get-selection",
+        "via": "get-selection",
+        "n": selection.n,
+        "start": selection.start,
+        "end": selection.end,
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
@@ -1850,5 +1948,151 @@ mod tests {
         assert_eq!(extents.verb(), "get-extents");
         assert_eq!(scroll.required_grant(), Grant::Actuate);
         assert_eq!(extents.required_grant(), Grant::Observe);
+    }
+
+    #[test]
+    fn name_select_requires_name() {
+        let command = Command::Select {
+            target: TargetRef::Current,
+            start: 0,
+            end: 4,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_select_requires_window() {
+        let command = Command::Select {
+            target: TargetRef::Current,
+            start: 0,
+            end: 4,
+            window: None,
+            name: Some("SelectField".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_select_rejects_inverted_range() {
+        let command = Command::Select {
+            target: TargetRef::Current,
+            start: 4,
+            end: 0,
+            window: Some(1),
+            name: Some("SelectField".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_select_missing_node_is_typed_and_selects_nothing() {
+        let command = Command::Select {
+            target: TargetRef::Current,
+            start: 0,
+            end: 4,
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not select");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn select_without_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth);
+        let command = Command::Select {
+            target: TargetRef::Current,
+            start: 0,
+            end: 4,
+            window: Some(1),
+            name: Some("SelectField".into()),
+            role: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
+    }
+
+    #[test]
+    fn name_get_selection_requires_name() {
+        let command = Command::GetSelection {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: None,
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_get_selection_requires_window() {
+        let command = Command::GetSelection {
+            target: TargetRef::Current,
+            window: None,
+            name: Some("SelectField".into()),
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn name_get_selection_missing_node_is_typed() {
+        let command = Command::GetSelection {
+            target: TargetRef::Current,
+            window: Some(-1),
+            name: Some("agenterm-no-such-node".into()),
+            role: None,
+        };
+        let reply = observe_executor().execute(&command);
+        assert!(!reply.ok, "missing name must not invent a selection");
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(code, "a11y_node_not_found" | "unsupported"),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn select_and_get_selection_verbs_are_named() {
+        let select = Command::Select {
+            target: TargetRef::Current,
+            start: 0,
+            end: 4,
+            window: Some(1),
+            name: Some("SelectField".into()),
+            role: None,
+        };
+        let get_selection = Command::GetSelection {
+            target: TargetRef::Current,
+            window: Some(1),
+            name: Some("SelectField".into()),
+            role: None,
+        };
+        assert_eq!(select.verb(), "select");
+        assert_eq!(get_selection.verb(), "get-selection");
+        assert_eq!(select.required_grant(), Grant::Actuate);
+        assert_eq!(get_selection.required_grant(), Grant::Observe);
     }
 }

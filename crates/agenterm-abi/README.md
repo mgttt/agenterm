@@ -279,7 +279,8 @@ PTY / window / frame / input / screenshot / process / clipboard /
 parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面增长
 （含 `agt_a11y_node_set_text` / `agt_a11y_node_get_text` /
 `agt_a11y_node_send_keys` / `agt_a11y_node_scroll` /
-`agt_a11y_node_get_extents`）。
+`agt_a11y_node_get_extents` / `agt_a11y_node_set_selection` /
+`agt_a11y_node_get_selection`）。
 
 `agt_build_id()` 返回 `<crate 版本>+abi.<major>.<minor>`
 （例如 `0.1.16+abi.1.1`），在**编译期**由 `CARGO_PKG_VERSION` 与

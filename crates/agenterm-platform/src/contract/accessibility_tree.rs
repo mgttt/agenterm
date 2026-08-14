@@ -15,6 +15,16 @@ pub struct AccessibilityBounds {
     pub height: i32,
 }
 
+/// Independent AT-SPI `Text` selection (`GetNSelections` + `GetSelection`).
+/// `n == 0` is empty (start/end stay 0), not a missing interface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AccessibilitySelection {
+    pub n: i32,
+    pub start: i32,
+    pub end: i32,
+}
+
 /// One node in a flattened accessibility tree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

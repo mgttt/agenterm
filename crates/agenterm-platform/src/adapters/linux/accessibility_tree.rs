@@ -25,8 +25,8 @@ use zbus::zvariant::OwnedObjectPath;
 
 use crate::CapabilityStatus;
 use crate::contract::accessibility_tree::{
-    AccessibilityBounds, AccessibilityNode, AccessibilityNodeAction, AccessibilityTree,
-    AccessibilityTreeError,
+    AccessibilityBounds, AccessibilityNode, AccessibilityNodeAction, AccessibilitySelection,
+    AccessibilityTree, AccessibilityTreeError,
 };
 
 const MAX_NODES: usize = 1_000;
@@ -266,6 +266,52 @@ pub(crate) fn get_node_extents(
     })
 }
 
+/// One-shot AT-SPI `Text.SetSelection(0, start, end)`. Missing Text /
+/// `UnknownMethod` is `a11y_selection_unavailable`. SetSelection false
+/// is `a11y_selection_no_effect`. Never XTest or mouse-drag.
+pub(crate) fn set_node_selection(
+    window_handle: Option<isize>,
+    node_id: &str,
+    start: i32,
+    end: i32,
+) -> Result<(), AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            set_node_selection_async(window_handle, node_id, start, end),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "AT-SPI Text.SetSelection exceeded its deadline",
+            )
+        })?
+    })
+}
+
+/// Independent AT-SPI `Text.GetNSelections` + `GetSelection(0)` for one
+/// child-index path. Not the set-selection reply. `n == 0` is empty
+/// success.
+pub(crate) fn get_node_selection(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<AccessibilitySelection, AccessibilityTreeError> {
+    runtime().block_on(async {
+        timeout(
+            SNAPSHOT_TIMEOUT,
+            get_node_selection_async(window_handle, node_id),
+        )
+        .await
+        .map_err(|_| {
+            AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "AT-SPI Text.GetSelection exceeded its deadline",
+            )
+        })?
+    })
+}
+
 /// Deliver a chord through AT-SPI Device/key events (`DeviceEventListener`
 /// `NotifyEvent`). A named showing node with no key interface fails typed —
 /// never XTest / `input_inject::send_keys`.
@@ -472,6 +518,54 @@ async fn get_node_extents_async(
     let object = resolve_path(&conn, &selected, &indices).await?;
     let proxy = open_bus_object(&conn, &object).await?;
     extents_from_component(&proxy).await
+}
+
+async fn set_node_selection_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+    start: i32,
+    end: i32,
+) -> Result<(), AccessibilityTreeError> {
+    if start < 0 || end < start {
+        return Err(AccessibilityTreeError::failed(
+            "invalid_input",
+            format!("selection range {start}..{end} is invalid"),
+        ));
+    }
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_selection_unavailable",
+            format!("node path {node_id} has no AT-SPI Text.SetSelection"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_text_set_selection(&proxy, start, end).await
+}
+
+async fn get_node_selection_async(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<AccessibilitySelection, AccessibilityTreeError> {
+    let indices = parse_node_path(node_id)?;
+    let conn = connect().await?;
+    let identity = window_handle.and_then(window_identity);
+    let roots = registry_children(&conn).await?;
+    let selected = select_roots(&conn, roots, identity.as_ref()).await?;
+    if selected.is_empty() {
+        return Err(AccessibilityTreeError::failed(
+            "a11y_selection_unavailable",
+            format!("node path {node_id} has no AT-SPI Text.GetSelection"),
+        ));
+    }
+    let object = resolve_path(&conn, &selected, &indices).await?;
+    let proxy = open_bus_object(&conn, &object).await?;
+    invoke_text_get_selection(&proxy).await
 }
 
 async fn invoke_component_scroll_to(
@@ -682,6 +776,143 @@ fn is_missing_scroll_interface(error: &AccessibilityTreeError) -> bool {
         || message.contains("UnknownInterface")
         || message.contains("UnknownMethod")
         || message.contains("does not exist")
+}
+
+fn is_missing_selection_interface(error: &AccessibilityTreeError) -> bool {
+    let AccessibilityTreeError::Failed { code, message } = error else {
+        return false;
+    };
+    code == "a11y_selection_unavailable"
+        || message.contains("UnknownInterface")
+        || message.contains("UnknownMethod")
+        || message.contains("does not exist")
+}
+
+async fn invoke_text_set_selection(
+    proxy: &AccessibleProxy<'_>,
+    start: i32,
+    end: i32,
+) -> Result<(), AccessibilityTreeError> {
+    let text = match text_proxy_for(proxy).await {
+        Ok(text) => text,
+        Err(error) if is_missing_selection_interface(&error) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "node does not expose AT-SPI Text.SetSelection",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    // A focused field is more likely to already have selection 0 (caret).
+    if let Ok(component) = component_proxy_for(proxy).await {
+        let _ = timeout(NODE_TIMEOUT, component.grab_focus()).await;
+    }
+    let applied = match timeout(NODE_TIMEOUT, text.set_selection(0, start, end)).await {
+        Ok(Ok(applied)) => applied,
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_selection_interface(&mapped) {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_selection_unavailable",
+                    "AT-SPI Text.SetSelection is missing or UnknownMethod",
+                ));
+            }
+            return Err(mapped);
+        }
+        Err(_) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "AT-SPI Text.SetSelection exceeded its deadline",
+            ));
+        }
+    };
+    if !applied {
+        // No selection 0 yet: AddSelection creates it. Still AT-SPI Text,
+        // never XTest / mouse-drag.
+        let n = timeout(ACTION_TIMEOUT, text.get_n_selections())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(0);
+        if n <= 0 {
+            match timeout(NODE_TIMEOUT, text.add_selection(start, end)).await {
+                Ok(Ok(true)) => {}
+                Ok(Ok(false)) | Ok(Err(_)) | Err(_) => {
+                    return Err(AccessibilityTreeError::failed(
+                        "a11y_selection_no_effect",
+                        format!("AT-SPI Text.SetSelection returned false for {start}..{end}"),
+                    ));
+                }
+            }
+        } else {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_selection_no_effect",
+                format!("AT-SPI Text.SetSelection returned false for {start}..{end}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn invoke_text_get_selection(
+    proxy: &AccessibleProxy<'_>,
+) -> Result<AccessibilitySelection, AccessibilityTreeError> {
+    let text = match text_proxy_for(proxy).await {
+        Ok(text) => text,
+        Err(error) if is_missing_selection_interface(&error) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "node does not expose AT-SPI Text.GetSelection",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    let n = match timeout(NODE_TIMEOUT, text.get_n_selections()).await {
+        Ok(Ok(n)) => n,
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_selection_interface(&mapped) {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_selection_unavailable",
+                    "AT-SPI Text.GetNSelections is missing or UnknownMethod",
+                ));
+            }
+            return Err(mapped);
+        }
+        Err(_) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "AT-SPI Text.GetNSelections exceeded its deadline",
+            ));
+        }
+    };
+    if n <= 0 {
+        return Ok(AccessibilitySelection {
+            n: 0,
+            start: 0,
+            end: 0,
+        });
+    }
+    let (start, end) = match timeout(NODE_TIMEOUT, text.get_selection(0)).await {
+        Ok(Ok(range)) => range,
+        Ok(Err(error)) => {
+            let mapped = map_atspi_err(error);
+            if is_missing_selection_interface(&mapped) {
+                return Err(AccessibilityTreeError::failed(
+                    "a11y_selection_unavailable",
+                    "AT-SPI Text.GetSelection is missing or UnknownMethod",
+                ));
+            }
+            return Err(mapped);
+        }
+        Err(_) => {
+            return Err(AccessibilityTreeError::failed(
+                "a11y_selection_unavailable",
+                "AT-SPI Text.GetSelection exceeded its deadline",
+            ));
+        }
+    };
+    Ok(AccessibilitySelection { n, start, end })
 }
 
 async fn set_node_text_async(

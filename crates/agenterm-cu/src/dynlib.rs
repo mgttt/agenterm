@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn check_abi_major_accepts_same_major_higher_minor() {
-        // Major 1, minor 7 (the current artifact); a higher minor is additive.
+        // Major 1, minor 8 (the current artifact); a higher minor is additive.
         assert!(check_abi_major(0x0001_0006).is_ok());
     }
 

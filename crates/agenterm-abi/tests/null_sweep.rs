@@ -159,6 +159,9 @@ type A11yNodeSendKeys = unsafe extern "C" fn(isize, *const c_char, *const u8, us
 type A11yNodeScroll = unsafe extern "C" fn(isize, *const c_char) -> i32;
 type A11yNodeGetExtents =
     unsafe extern "C" fn(isize, *const c_char, *mut i32, *mut i32, *mut i32, *mut i32) -> i32;
+type A11yNodeSetSelection = unsafe extern "C" fn(isize, *const c_char, i32, i32) -> i32;
+type A11yNodeGetSelection =
+    unsafe extern "C" fn(isize, *const c_char, *mut i32, *mut i32, *mut i32) -> i32;
 type ClipboardSetText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type ClipboardGetText = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type RuntimeUserConfigDir = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
@@ -782,6 +785,32 @@ fn null_group() -> Vec<SweepCase> {
                         0,
                         std::ptr::null(),
                         std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    ))
+                }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_set_selection[window_handle=0,node_id=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeSetSelection> =
+                    unsafe { sym(lib, b"agt_a11y_node_set_selection") };
+                unsafe { CallResult::Status(f(0, std::ptr::null(), 0, 4)) }
+            }),
+        },
+        SweepCase {
+            label: "agt_a11y_node_get_selection[window_handle=0,node_id=NULL,outs=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| {
+                let f: Symbol<A11yNodeGetSelection> =
+                    unsafe { sym(lib, b"agt_a11y_node_get_selection") };
+                unsafe {
+                    CallResult::Status(f(
+                        0,
+                        std::ptr::null(),
                         std::ptr::null_mut(),
                         std::ptr::null_mut(),
                         std::ptr::null_mut(),

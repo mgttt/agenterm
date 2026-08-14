@@ -1,8 +1,8 @@
 //! Accessibility / control-tree facade.
 
 pub use crate::contract::accessibility_tree::{
-    AccessibilityBounds, AccessibilityNode, AccessibilityNodeAction, AccessibilityTree,
-    AccessibilityTreeError,
+    AccessibilityBounds, AccessibilityNode, AccessibilityNodeAction, AccessibilitySelection,
+    AccessibilityTree, AccessibilityTreeError,
 };
 
 pub fn capability_status() -> crate::CapabilityStatus {
@@ -65,6 +65,29 @@ pub fn get_node_extents(
     node_id: &str,
 ) -> Result<AccessibilityBounds, AccessibilityTreeError> {
     crate::selected::accessibility_tree::get_node_extents(window_handle, node_id)
+}
+
+/// One-shot AT-SPI `Text.SetSelection(0, start, end)` (Linux). Missing
+/// Text / `UnknownMethod` fails typed (`a11y_selection_unavailable`).
+/// SetSelection false fails typed (`a11y_selection_no_effect`). Never
+/// XTest, mouse-drag, or `--coords`.
+pub fn set_node_selection(
+    window_handle: Option<isize>,
+    node_id: &str,
+    start: i32,
+    end: i32,
+) -> Result<(), AccessibilityTreeError> {
+    crate::selected::accessibility_tree::set_node_selection(window_handle, node_id, start, end)
+}
+
+/// Independent AT-SPI `Text.GetNSelections` + `GetSelection(0)` for one
+/// resolved child-index path. Not the set-selection reply. Missing Text
+/// fails typed (`a11y_selection_unavailable`). `n == 0` is empty success.
+pub fn get_node_selection(
+    window_handle: Option<isize>,
+    node_id: &str,
+) -> Result<AccessibilitySelection, AccessibilityTreeError> {
+    crate::selected::accessibility_tree::get_node_selection(window_handle, node_id)
 }
 
 /// Route of the last successful `set_node_text` on this thread.
