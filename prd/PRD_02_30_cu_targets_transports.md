@@ -22,10 +22,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` write evidence reuses the #47 con-publish
-  `send-text` / `get-text` circuit over loopback `sshd` against a second
+  commands above it. `ssh` paste evidence reuses the #47 con-publish
+  `paste` / `get-text` circuit over loopback `sshd` against a second
   `agenterm-con` (never steal the resident control socket): the seed is planted
-  by host `cu --ssh send-text` (or `paste`), not by a local `current` write.
+  by host `cu --ssh paste --text`, not by a local `current` write or host
+  clipboard. `send-text` over ssh remains a valid write path (3.18).
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -424,10 +425,12 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Write path: host
-  `send-text --name Command` (or `paste`) plants a unique seed on a second
-  `agenterm-con` `Command` field; host `get-text --name Command` equals that
-  seed via AT-SPI GetText (never screenshot / `--coords`). Observe-only
+  runs remote `agenterm-cu --target current`. Paste path: host
+  `paste --name Command --text SEED` plants a unique seed on a second
+  `agenterm-con` `Command` field via remote clipboard + AT-SPI EditableText;
+  host `get-text --name Command` equals that seed via AT-SPI GetText (never
+  screenshot / `--coords`). Seed must go over ssh paste, not local
+  `--target current`. `send-text` over ssh and observe-only
   `wait --text-contains` / `get-text` still hold. Worker JSON does not count;
   CEO owns the official gate. Auth failure and missing destination are typed
   (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).

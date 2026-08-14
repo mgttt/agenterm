@@ -5,7 +5,9 @@
 //! `ssh` stdio. No new verbs. Observe and actuate grants both forward; the
 //! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
-//! for both read (`wait` / `get-text`) and write (`send-text` / `paste`).
+//! for both read (`wait` / `get-text`) and write (`send-text` then `paste`).
+//! Cut 3.19 locks the clipboard write: host `paste --text` plants the seed on
+//! the remote Command field; host `get-text` equals that seed.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -429,6 +431,38 @@ mod tests {
                 ..
             } => {
                 assert_eq!(text, "318SSHSEED");
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn paste_write_survives_target_rewrite() {
+        // 3.19: first ssh paste path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current paste with optional --text seed.
+        // Seed travels in the JSON command over ssh stdin, not local clipboard.
+        let command = CuCommand::Paste {
+            target: TargetRef::Ssh,
+            text: Some("319SSHPASTE".into()),
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "paste");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Paste {
+                text,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(text.as_deref(), Some("319SSHPASTE"));
                 assert_eq!(window, Some(42));
                 assert_eq!(name.as_deref(), Some("Command"));
                 assert!(role.is_none());

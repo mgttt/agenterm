@@ -690,8 +690,9 @@ Global:
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
-  worker over OpenSSH stdio (no new verb). Write evidence: loopback sshd +
-  second agenterm-con, host send-text (or paste) then get-text equals seed.
+  worker over OpenSSH stdio (no new verb). Paste evidence: loopback sshd +
+  second agenterm-con, host paste --text then get-text equals seed (seed over
+  ssh paste, not local --target current).
 
 Commands:
   capabilities
