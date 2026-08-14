@@ -35,20 +35,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   (`via=get-selection`; start/end equal the selected slice of the seed, or
   the seed when the range is the whole field). Native AT-SPI
   `GetNSelections` + `GetSelection`. Never screenshot, `--coords`, or XTest.
-  `vnc` first focus evidence reuses the same con-publish named `Command`
-  (or `SEND`) focus Action over a **gate-owned** loopback `x11vnc` (not
-  the resident `:2` listener alone) against a second `agenterm-con` with
-  a unique title: host `cu --vnc 127.0.0.1:<port> focus --name Command`
-  runs session AT-SPI Action `focus` / `Component::grab_focus`
-  (`addressing=accessibility-tree`), then host independent
-  `cu --vnc tree` shows that node `focused` and host independent
-  `cu --vnc get-text --window H` (no `--name`) equals that Command text
-  (focused Text node). Native AT-SPI Action / Component via the session
-  worker. Never screenshot, `--coords`, RFB pointer, framebuffer OCR,
-  XTest, or steal the resident control socket. `scroll` (3.39),
-  `click` (3.38), `set-caret` (3.37), `select` (3.36), `send-keys`
-  (3.35), `copy` (3.34), `paste --text` (3.33), and `send-text` (3.32)
-  over vnc still hold.
+  `vnc` first tree evidence reuses the same con-publish named Session
+  children over a **gate-owned** loopback `x11vnc` (not the resident `:2`
+  listener alone) against a second `agenterm-con` with a unique title:
+  host `cu --vnc 127.0.0.1:<port> tree --window HANDLE` returns the
+  session AT-SPI flattened control tree
+  (`addressing=accessibility-tree`) and the unique named nodes
+  `Command`, `SEND`, and `OffscreenField` each appear once among showing
+  nodes. Native AT-SPI tree via the session worker. Never screenshot,
+  `--coords`, RFB framebuffer OCR, or steal the resident control socket.
+  `focus` (3.40), `scroll` (3.39), `click` (3.38), `set-caret` (3.37),
+  `select` (3.36), `send-keys` (3.35), `copy` (3.34), `paste --text`
+  (3.33), and `send-text` (3.32) over vnc still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -449,23 +447,18 @@ Canonical host mapping (approved product vocabulary):
 - [~] Linux `vnc` first cut: host `agenterm-cu --vnc 127.0.0.1:<port>` against
   a gate-owned loopback `x11vnc` (RFB security type None / `-nopw`; not the
   resident `:2` listener alone) handshakes RFB then runs a local
-  `agenterm-cu --target current` session worker. Focus path: second
-  `agenterm-con` named Session child `Command` (unique title; never steal
+  `agenterm-cu --target current` session worker. Tree path: second
+  `agenterm-con` with unique title (never steal
   `unix:/tmp/run-box/agenterm-con.sock`); host
-  `focus --window HANDLE --name Command` (or `SEND`) runs session AT-SPI
-  Action `focus` / `Component::grab_focus`
-  (`addressing=accessibility-tree`); host independent
-  `tree --window HANDLE` shows that node `focused`; host independent
-  `get-text --window HANDLE` (no `--name`) equals that Command text
-  (focused Text node — not a reread by name). Native AT-SPI Action /
-  Component via the session worker (never screenshot / `--coords` / RFB
-  pointer / framebuffer OCR / XTest). Missing or ambiguous name
-  typed-fails `a11y_node_not_found` / `a11y_node_ambiguous` on the
-  session worker the same as local `current`. `scroll` / `click` /
-  `set-caret` / `select` / `send-keys` / `copy` / `paste --text` /
-  `send-text` over vnc and observe-only `windows` / `get-text` /
-  `wait --text-equals` / `get-caret` / `get-extents` / `tree` still hold.
-  Worker JSON does not count; CEO owns the official gate. Connect /
+  `tree --window HANDLE` returns the session AT-SPI flattened control
+  tree (`addressing=accessibility-tree`); the unique named Session
+  children `Command`, `SEND`, and `OffscreenField` each appear once
+  among showing nodes. Native AT-SPI tree via the session worker (never
+  screenshot / `--coords` / RFB framebuffer OCR). `focus` / `scroll` /
+  `click` / `set-caret` / `select` / `send-keys` / `copy` /
+  `paste --text` / `send-text` over vnc and observe-only `windows` /
+  `get-text` / `wait --text-equals` / `get-caret` / `get-extents` still
+  hold. Worker JSON does not count; CEO owns the official gate. Connect /
   protocol / auth failures are typed (`vnc_unavailable` /
   `vnc_transport_failed` / `vnc_auth_failed` / `invalid_input`).
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
