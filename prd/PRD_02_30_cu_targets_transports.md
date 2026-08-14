@@ -22,14 +22,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` set-caret evidence reuses the #47 con-publish
-  `set-caret` / `get-caret` circuit over loopback `sshd` against a second
-  `agenterm-con` (never steal the resident control socket): host
+  commands above it. `ssh` click evidence reuses the #47 con-publish named
+  `SEND` Action over loopback `sshd` against a second `agenterm-con` (never
+  steal the resident control socket): host
   `cu --ssh send-text --name Command -- SEED` (payload after `--`; not
-  `--text`) plants the seed, host `cu --ssh set-caret --offset N` runs remote
-  AT-SPI `Text.SetCaretOffset`, then host `cu --ssh get-caret` returns that
-  offset and host `get-text` still equals the seed. Never screenshot,
-  `--coords`, or mouse-drag.
+  `--text`) plants the seed, host `cu --ssh click --name SEND` runs remote
+  AT-SPI Action `DoAction`, then host independent
+  `cu --ssh get-text --name Command` returns empty (composer cleared on
+  submit). Never screenshot, `--coords`, or XTest.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -428,20 +428,20 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Caret path: host
+  runs remote `agenterm-cu --target current`. Click path: host
   `send-text --window HANDLE --name Command -- SEED` (payload after `--`; not
   `--text`) plants a seed on a second `agenterm-con` `Command` field; host
-  `set-caret --window HANDLE --name Command --offset N` runs remote AT-SPI
-  `Text.SetCaretOffset` (`via=set-caret-offset`); host independent
-  `get-caret --window HANDLE --name Command` returns that offset
-  (`via=get-caret-offset`); host `get-text` still equals the seed. Never
-  screenshot / `--coords` / mouse-drag / XTest. Missing Text typed-fails
-  `a11y_caret_unavailable` on the remote worker the same as local `current`;
-  SetCaretOffset false is `a11y_caret_no_effect`. `select` / `send-keys` /
-  `copy` / `paste --text` / `send-text` over ssh and observe-only `wait` /
-  `get-text` / `get-selection` still hold. Worker JSON does not count; CEO
-  owns the official gate. Auth failure and missing destination are typed
-  (`ssh_unavailable` / `ssh_transport_failed` / `invalid_input`).
+  `click --window HANDLE --name SEND` runs remote AT-SPI Action `DoAction`
+  (`addressing=accessibility-tree`); host independent
+  `get-text --window HANDLE --name Command` returns empty (composer cleared on
+  SEND submit). Never screenshot / `--coords` / mouse-drag / XTest. Missing or
+  ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous` on
+  the remote worker the same as local `current`. `set-caret` / `select` /
+  `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
+  observe-only `wait` / `get-text` / `get-selection` / `get-caret` still hold.
+  Worker JSON does not count; CEO owns the official gate. Auth failure and
+  missing destination are typed (`ssh_unavailable` / `ssh_transport_failed` /
+  `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
   actuation, audited degraded coordinate click, invalid node path failure, and

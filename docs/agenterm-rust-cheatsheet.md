@@ -1342,25 +1342,25 @@ It does not invent verbs: the host rewrites the abstract command to
 `target=current` and runs a remote `agenterm-cu exec --json -` worker over
 OpenSSH stdio (`ssh_transport`). Observe and actuate grants both forward;
 desktop work still happens on the remote side (AT-SPI via that worker's
-libagenterm). Caret evidence is loopback `sshd` plus a second
+libagenterm). Click evidence is loopback `sshd` plus a second
 `agenterm-con` on a unique control socket: host
 `send-text --window H --name Command -- SEED` (payload after `--`; not
 `--text`) plants the seed, host
-`set-caret --window H --name Command --offset N` runs remote AT-SPI
-`Text.SetCaretOffset` (`via=set-caret-offset`), then host independent
-`get-caret` returns that offset (`via=get-caret-offset`) and host
-`get-text` still equals the seed. Never screenshot, `--coords`, or
-mouse-drag. Missing Text typed-fails `a11y_caret_unavailable` on the
-remote worker the same as local `current`; SetCaretOffset false is
-`a11y_caret_no_effect`. `select` (3.22), `send-keys` (3.21), `copy`
-(3.20), `paste --text` (3.19), and `send-text` (3.18) over ssh remain
-valid. Do not steal `unix:/tmp/run-box/agenterm-con.sock` or kill the
-resident avatar PIDs. Auth / connect failures are typed
-(`ssh_unavailable` / `ssh_transport_failed`); missing `--ssh` on
-`--target ssh` is `invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` /
-`AGENTERM_ABI_LIB` via `--ssh-env` or host env (defaults copy common
-desktop keys when they have no whitespace). Do not implement ssh as D-Bus
-port-forward or a second control protocol in this cut.
+`click --window H --name SEND` runs remote AT-SPI Action `DoAction`
+(`addressing=accessibility-tree`), then host independent
+`get-text --window H --name Command` returns empty (composer cleared on
+SEND submit). Never screenshot, `--coords`, or XTest. Missing or
+ambiguous name typed-fails `a11y_node_not_found` / `a11y_node_ambiguous`
+on the remote worker the same as local `current`. `set-caret` (3.23),
+`select` (3.22), `send-keys` (3.21), `copy` (3.20), `paste --text`
+(3.19), and `send-text` (3.18) over ssh remain valid. Do not steal
+`unix:/tmp/run-box/agenterm-con.sock` or kill the resident avatar PIDs.
+Auth / connect failures are typed (`ssh_unavailable` /
+`ssh_transport_failed`); missing `--ssh` on `--target ssh` is
+`invalid_input`. Forward `DISPLAY` / `AT_SPI_BUS` / `AGENTERM_ABI_LIB`
+via `--ssh-env` or host env (defaults copy common desktop keys when they
+have no whitespace). Do not implement ssh as D-Bus port-forward or a
+second control protocol in this cut.
 
 `cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
 (`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.
