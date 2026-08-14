@@ -50,8 +50,8 @@ impl Authorization {
         self.grants.contains(&required)
     }
 
-    /// Reconstruct a `--grant` CLI value for remote workers (ssh transport).
-    /// Observe and actuate both forward so remote get-selection /
+    /// Reconstruct a `--grant` CLI value for session workers (ssh / vnc
+    /// transport). Observe and actuate both forward so remote get-selection /
     /// get-extents / get-caret / tree / send-text / paste / copy /
     /// send-keys / select / set-caret / click / scroll / focus work.
     pub fn grant_cli_arg(&self) -> String {

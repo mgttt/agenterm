@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use agenterm_cu::{
-    Authorization, Command, Executor, PointerButton, SshEndpoint, TargetRef, WaitCondition,
+    Authorization, Command, Executor, PointerButton, SshEndpoint, TargetRef, VncEndpoint,
+    WaitCondition,
 };
 
 fn main() {
@@ -43,6 +44,10 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     let mut ssh_identity: Option<PathBuf> = None;
     let mut ssh_cu: Option<PathBuf> = None;
     let mut ssh_env: Vec<(String, String)> = Vec::new();
+    let mut vnc_dest: Option<String> = None;
+    let mut vnc_port: Option<u16> = None;
+    let mut vnc_cu: Option<PathBuf> = None;
+    let mut vnc_env: Vec<(String, String)> = Vec::new();
     while let Some(flag) = args.first() {
         match flag.as_str() {
             "--target" => {
@@ -52,7 +57,9 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                     None
                 });
                 if target.is_none() {
-                    return usage_err("unknown --target value; supported: 'current' and 'ssh'");
+                    return usage_err(
+                        "unknown --target value; supported: 'current', 'ssh', and 'vnc'",
+                    );
                 }
             }
             "--ssh" => {
@@ -96,6 +103,42 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 }
                 ssh_env.push((key.to_owned(), val.to_owned()));
             }
+            "--vnc" => {
+                let value = take_value(&mut args, "--vnc");
+                if value.is_empty() {
+                    return usage_err("--vnc requires <host[:port]>");
+                }
+                vnc_dest = Some(value);
+                if target.is_none() {
+                    target = Some(TargetRef::Vnc);
+                }
+            }
+            "--vnc-port" => {
+                let value = take_value(&mut args, "--vnc-port");
+                match value.parse::<u16>() {
+                    Ok(port) => vnc_port = Some(port),
+                    Err(_) => return usage_err("--vnc-port requires a TCP port number"),
+                }
+            }
+            "--vnc-cu" => {
+                let value = take_value(&mut args, "--vnc-cu");
+                if value.is_empty() {
+                    return usage_err(
+                        "--vnc-cu requires an agenterm-cu path for the session worker",
+                    );
+                }
+                vnc_cu = Some(PathBuf::from(value));
+            }
+            "--vnc-env" => {
+                let value = take_value(&mut args, "--vnc-env");
+                let Some((key, val)) = value.split_once('=') else {
+                    return usage_err("--vnc-env requires KEY=VAL");
+                };
+                if key.is_empty() {
+                    return usage_err("--vnc-env requires a non-empty KEY");
+                }
+                vnc_env.push((key.to_owned(), val.to_owned()));
+            }
             "--grant" => {
                 grant = Some(take_value(&mut args, "--grant"));
             }
@@ -124,14 +167,32 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         ssh_dest = Some(dest);
         target = Some(TargetRef::Ssh);
     }
+    if target.is_none()
+        && let Ok(dest) = std::env::var("AGENTERM_CU_VNC")
+        && !dest.is_empty()
+    {
+        vnc_dest = Some(dest);
+        target = Some(TargetRef::Vnc);
+    }
 
     let Some(target) = target else {
         eprint_usage();
-        return usage_err("--target current or --ssh <user@host> is required on every command");
+        return usage_err(
+            "--target current, --ssh <user@host>, or --vnc <host[:port]> is required on every command",
+        );
     };
 
     if target == TargetRef::Current && ssh_dest.is_some() {
         return usage_err("--ssh cannot be combined with --target current");
+    }
+    if target == TargetRef::Current && vnc_dest.is_some() {
+        return usage_err("--vnc cannot be combined with --target current");
+    }
+    if target == TargetRef::Ssh && vnc_dest.is_some() {
+        return usage_err("--vnc cannot be combined with --target ssh / --ssh");
+    }
+    if target == TargetRef::Vnc && ssh_dest.is_some() {
+        return usage_err("--ssh cannot be combined with --target vnc / --vnc");
     }
     if target == TargetRef::Ssh
         && ssh_dest.is_none()
@@ -142,6 +203,16 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     }
     if target == TargetRef::Ssh && ssh_dest.is_none() {
         return usage_err("ssh target requires --ssh <user@host> (or AGENTERM_CU_SSH)");
+    }
+    if target == TargetRef::Vnc
+        && vnc_dest.is_none()
+        && let Ok(dest) = std::env::var("AGENTERM_CU_VNC")
+        && !dest.is_empty()
+    {
+        vnc_dest = Some(dest);
+    }
+    if target == TargetRef::Vnc && vnc_dest.is_none() {
+        return usage_err("vnc target requires --vnc <host[:port]> (or AGENTERM_CU_VNC)");
     }
 
     let Some(verb) = args.first().cloned() else {
@@ -527,6 +598,21 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             }
         }
     }
+    if target == TargetRef::Vnc {
+        let dest = vnc_dest.expect("vnc destination checked above");
+        match VncEndpoint::from_parts(dest, vnc_port, vnc_cu, vnc_env) {
+            Ok(endpoint) => executor = executor.with_vnc(endpoint),
+            Err(error) => {
+                return agenterm_cu::CuReply {
+                    ok: false,
+                    target: "vnc".into(),
+                    command: "usage".into(),
+                    data: None,
+                    error: Some(error),
+                };
+            }
+        }
+    }
     executor.execute(&command)
 }
 
@@ -672,21 +758,27 @@ fn run_x11_clipboard_owner() -> i32 {
 
 fn eprint_usage() {
     eprintln!(
-        r#"usage: agenterm-cu --target <current|ssh> [--grant observe,actuate] <command> [args...]
+        r#"usage: agenterm-cu --target <current|ssh|vnc> [--grant observe,actuate] <command> [args...]
        agenterm-cu --ssh <user@host> [--ssh-port N] [--ssh-identity PATH] [--ssh-cu PATH]
                    [--ssh-env KEY=VAL]... [--grant observe,actuate] <command> [args...]
+       agenterm-cu --vnc <host[:port]> [--vnc-port N] [--vnc-cu PATH]
+                   [--vnc-env KEY=VAL]... [--grant observe,actuate] <command> [args...]
        agenterm-cu exec [--grant observe,actuate] --json '<command-json>'
        agenterm-cu exec [--grant observe,actuate] --json -   # JSON command on stdin
        agenterm-cu host                        desktop menu and global shortcuts
        agenterm-cu hotkeys                     compatibility alias for host
 
 Global:
-  --target current|ssh      explicit target reference (required unless --ssh)
+  --target current|ssh|vnc  explicit target reference (required unless --ssh/--vnc)
   --ssh <user@host>         ssh target destination (implies --target ssh)
   --ssh-port N              OpenSSH -p (or AGENTERM_CU_SSH_PORT)
   --ssh-identity PATH       OpenSSH -i (or AGENTERM_CU_SSH_IDENTITY)
   --ssh-cu PATH             remote agenterm-cu path (or AGENTERM_CU_SSH_CU; default: this exe)
   --ssh-env KEY=VAL         remote env for the worker (repeatable; also AGENTERM_CU_SSH_ENV)
+  --vnc <host[:port]>       vnc/RFB endpoint (implies --target vnc; or AGENTERM_CU_VNC)
+  --vnc-port N              RFB TCP port when --vnc omits :port (or AGENTERM_CU_VNC_PORT; default 5900)
+  --vnc-cu PATH             session worker agenterm-cu path (or AGENTERM_CU_VNC_CU; default: this exe)
+  --vnc-env KEY=VAL         session env for the worker (repeatable; also AGENTERM_CU_VNC_ENV)
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
@@ -695,6 +787,13 @@ Global:
   range, host independent get-selection --name Command returns that range
   (via=get-selection; native AT-SPI GetNSelections+GetSelection; never
   screenshot / --coords / mouse-drag).
+
+  vnc transport handshakes RFB (security type None / x11vnc -nopw), then runs
+  the same verbs on a local agenterm-cu --target current worker against the
+  shared session (DISPLAY/AT-SPI env; no new verb). First observe evidence:
+  gate-owned loopback x11vnc + second agenterm-con, seed on Command, host
+  get-text --name Command equals that seed (via=gettext; never screenshot /
+  --coords / RFB framebuffer OCR).
 
 Commands:
   capabilities

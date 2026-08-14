@@ -111,10 +111,11 @@ at call time and returns `a11y_node_not_found` when the path is stale.
 
 ## Authorization and audit
 
-Every command requires an explicit `--target current` or `--ssh <user@host>`
-(which implies `--target ssh`). Observation commands need the `observe` grant;
-actuation commands need `actuate`. Grants come from `--grant` or
-`AGENTERM_CU_GRANT` (comma-separated). Local `current` is not exempt.
+Every command requires an explicit `--target current`, `--ssh <user@host>`
+(which implies `--target ssh`), or `--vnc <host[:port]>` (which implies
+`--target vnc`). Observation commands need the `observe` grant; actuation
+commands need `actuate`. Grants come from `--grant` or `AGENTERM_CU_GRANT`
+(comma-separated). Local `current` is not exempt.
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
@@ -133,6 +134,19 @@ as local `current`. `get-extents` / `get-caret` / `tree` / `focus` /
 `paste --text` / `send-text` over ssh and observe-only `wait` / `get-text`
 remain valid too.
 
+The `vnc` tier reuses the same verbs. Host `agenterm-cu --vnc` handshakes RFB
+(security type None / `x11vnc -nopw`), rewrites the command to
+`target=current`, and runs a local session worker against the desktop that
+x11vnc shares (`DISPLAY` / `AT_SPI_BUS` via host env or `--vnc-env`). First
+observe evidence is a **gate-owned** loopback `x11vnc` plus a second
+`agenterm-con` with a unique title (never steal
+`unix:/tmp/run-box/agenterm-con.sock`, never treat the resident `:2` x11vnc
+as the only proof): seed `Command` via local `current`, then host
+independent `get-text --window HANDLE --name Command` equals that seed
+(`via=gettext`; never screenshot / `--coords` / RFB framebuffer OCR).
+Connect / protocol failures are typed (`vnc_unavailable` /
+`vnc_transport_failed` / `vnc_auth_failed`).
+
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
 (`AGENTERM_CU_AUDIT_PATH`, default `~/.local/share/agenterm/cu-audit.jsonl`).
@@ -143,6 +157,12 @@ If the audit path cannot be written, actuation does not execute.
 ```bash
 # Declare capabilities (observe grant)
 agenterm-cu --target current --grant observe capabilities
+
+# Same verbs over VNC/RFB (session agenterm-cu --target current worker).
+# Observe path: seed Command via local current, then host get-text equals seed.
+agenterm-cu --vnc 127.0.0.1:5931 --grant observe windows
+agenterm-cu --vnc 127.0.0.1:5931 --grant observe \
+  get-text --window HANDLE --name Command
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
 # Get-selection observe path: send-text SEED → select N..M → get-selection
