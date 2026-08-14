@@ -16,6 +16,10 @@
 # send-text --window without --name writes that same textarea once it
 # reports AT-SPI focused (innermost Text node); do not add a second
 # focused-write protocol.
+# send-keys --window without --name uses that same focused Text node:
+# Device/key is absent on the WebKit textarea, so plain typeable text
+# falls back to the focused send-text write (via=text / eval-helper).
+# Do not add a second focused-keys protocol or XTest when --window is set.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
