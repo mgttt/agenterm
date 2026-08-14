@@ -22,14 +22,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` scroll evidence reuses the #52 con-publish named
-  `OffscreenField` `Component.ScrollTo` over loopback `sshd` against a second
+  commands above it. `ssh` focus evidence reuses the named `Command` (or
+  `SEND`) AT-SPI focus Action over loopback `sshd` against a second
   `agenterm-con` (never steal the resident control socket): host
-  `cu --ssh get-extents --name OffscreenField` records before extents, host
-  `cu --ssh scroll --name OffscreenField` runs remote AT-SPI
-  `Component.ScrollTo(TopEdge)`, then host independent
-  `cu --ssh get-extents` after proves nonzero `|Δy|` or `|Δx|` (snapshot
-  `node.bounds` do not count). Never screenshot, `--coords`, or XTest.
+  `cu --ssh focus --name Command` runs remote AT-SPI Action `focus` /
+  `Component::grab_focus` (`addressing=accessibility-tree`), then host
+  independent `cu --ssh tree` shows that node `focused` and/or host
+  `cu --ssh get-text --window HANDLE` (no `--name`) reads the focused Text
+  node. Never screenshot, `--coords`, or XTest.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -428,15 +428,15 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Scroll path: host independent
-  `get-extents --window HANDLE --name OffscreenField` records before extents
-  on a second `agenterm-con` named Session child; host
-  `scroll --window HANDLE --name OffscreenField` runs remote AT-SPI
-  `Component.ScrollTo(TopEdge)` (`via=scroll-to`); host independent
-  `get-extents` after proves nonzero `|Δy|` or `|Δx|` (snapshot `node.bounds`
-  do not count). Never screenshot / `--coords` / mouse-drag / XTest. Missing /
-  false / `UnknownMethod` typed-fails `a11y_scroll_unavailable` on the remote
-  worker the same as local `current`. `click` / `set-caret` / `select` /
+  runs remote `agenterm-cu --target current`. Focus path: host
+  `focus --window HANDLE --name Command` (or `SEND`) on a second
+  `agenterm-con` runs remote AT-SPI Action `focus` / `Component::grab_focus`
+  (`addressing=accessibility-tree`); host independent `tree --window HANDLE`
+  shows that node `focused` and/or host `get-text --window HANDLE` (no
+  `--name`) reads the focused Text node. Never screenshot / `--coords` /
+  mouse-drag / XTest. Missing or ambiguous name typed-fails
+  `a11y_node_not_found` / `a11y_node_ambiguous` on the remote worker the same
+  as local `current`. `scroll` / `click` / `set-caret` / `select` /
   `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
   observe-only `wait` / `get-text` / `get-selection` / `get-caret` /
   `get-extents` still hold. Worker JSON does not count; CEO owns the official

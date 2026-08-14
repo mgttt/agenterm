@@ -118,15 +118,15 @@ actuation commands need `actuate`. Grants come from `--grant` or
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote
-`agenterm-cu exec --json -` worker over OpenSSH stdio. Scroll evidence is
-loopback `sshd` plus a second `agenterm-con`: host independent
-`get-extents --window HANDLE --name OffscreenField` records before extents,
-host `scroll --window HANDLE --name OffscreenField` runs remote AT-SPI
-`Component.ScrollTo(TopEdge)` (`via=scroll-to`), then host independent
-`get-extents` after proves nonzero `|Δy|` or `|Δx|` (snapshot `node.bounds`
-do not count). Never screenshot / `--coords` / mouse-drag / XTest. Missing /
-false / `UnknownMethod` typed-fails `a11y_scroll_unavailable` on the remote
-worker the same as local `current`. `click` / `set-caret` / `select` /
+`agenterm-cu exec --json -` worker over OpenSSH stdio. Focus evidence is
+loopback `sshd` plus a second `agenterm-con`: host
+`focus --window HANDLE --name Command` (or `SEND`) runs remote AT-SPI Action
+`focus` / `Component::grab_focus` (`addressing=accessibility-tree`), then host
+independent `tree --window HANDLE` shows that node `focused` and/or host
+`get-text --window HANDLE` (no `--name`) reads the focused Text node. Never
+screenshot / `--coords` / mouse-drag / XTest. Missing or ambiguous name
+typed-fails `a11y_node_not_found` / `a11y_node_ambiguous` on the remote worker
+the same as local `current`. `scroll` / `click` / `set-caret` / `select` /
 `send-keys` / `copy` / `paste --text` / `send-text` over ssh and observe-only
 `wait` / `get-text` / `get-selection` / `get-caret` / `get-extents` remain
 valid too.
@@ -143,14 +143,14 @@ If the audit path cannot be written, actuation does not execute.
 agenterm-cu --target current --grant observe capabilities
 
 # Same verbs over OpenSSH (remote agenterm-cu --target current worker).
-# Scroll path: get-extents before → scroll --name OffscreenField → get-extents
-# after with nonzero |Δy| or |Δx|.
+# Focus path: focus --name Command → tree shows focused and/or get-text
+# --window HANDLE (no --name) reads the focused node.
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant observe get-extents --window HANDLE --name OffscreenField
-agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed25519 \
-  --grant actuate scroll --window HANDLE --name OffscreenField
+  --grant actuate focus --window HANDLE --name Command
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
-  get-extents --window HANDLE --name OffscreenField
+  tree --window HANDLE
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
+  get-text --window HANDLE
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows
