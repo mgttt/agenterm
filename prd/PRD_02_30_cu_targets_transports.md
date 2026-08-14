@@ -197,7 +197,12 @@ Canonical host mapping (approved product vocabulary):
   (`agt_a11y_node_scroll`). Success is `via=scroll-to`. Missing / false /
   `UnknownMethod` typed-fails (`a11y_scroll_unavailable`). Never Action
   `scroll*`, XTest wheel, `--coords`, or screenshot. Geometric proof is
-  independent `get-extents`, not `matched.extents`.
+  independent `get-extents`, not `matched.extents`. WebKitGTK
+  `Component.GetExtents(Screen)` is already the independent observe
+  sibling; `ScrollTo` is a no-op true, so Reasonix launched via
+  `scripts/reasonix-desktop-a11y.sh` applies `scrollIntoView` through
+  the same eval helper as named set-value (hello `A11YSCROLL1`, no ABI
+  change).
 - [x] `get-extents --window HANDLE --name PAT [--role ROLE]` resolves
   through that same path, then independent AT-SPI
   `Component.GetExtents(Screen)` (`agt_a11y_node_get_extents`). Snapshot

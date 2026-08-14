@@ -3,8 +3,10 @@
 # Without WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 the web process aborts
 # (signal 6) and cu tree is only GTK fillers.
 # WebKit 2.52 exposes AT-SPI Text on the composer <textarea> but never
-# EditableText; the eval helper implements the missing set-value on the
-# GTK thread so cu send-text --name can confirm via Text.GetText.
+# EditableText; Component.ScrollTo returns true without moving geometry.
+# The eval helper implements the missing set-value and scrollIntoView on
+# the GTK thread so cu send-text --name can confirm via Text.GetText and
+# cu scroll --name can confirm via independent Component.GetExtents.
 # Extra args are passed through.
 set -euo pipefail
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
