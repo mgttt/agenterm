@@ -5,18 +5,21 @@
 //! `ssh` stdio. No new verbs. Observe and actuate grants both forward; the
 //! remote worker runs the same AT-SPI / UIA / AX path via its libagenterm.
 //! Loopback `sshd` against a second `agenterm-con` is the first evidence path
-//! for both read (`wait` / `get-text`) and write (`send-text` / `paste` /
-//! `copy` / `send-keys`). Cut 3.19 locks the clipboard write: host
-//! `paste --text` plants the seed on the remote Command field; host
-//! `get-text` equals that seed. Cut 3.20 locks clipboard publish: seed
-//! already on Command (or planted over ssh paste/send-text), host `copy`
-//! publishes remote GetText onto the remote session CLIPBOARD, then host
-//! `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21 locks
-//! key delivery: host `send-keys` types plain keys into the remote
-//! focused Command field (same `--window` without `--name` path as local
-//! con focused send-keys), then host `wait` + `get-text` equals those
-//! keys. Keys ride in the remote command JSON (`--` or leftover argv
-//! joined with `+`); never screenshot / `--coords`.
+//! for both read (`wait` / `get-text` / `get-selection`) and write
+//! (`send-text` / `paste` / `copy` / `send-keys` / `select`). Cut 3.19 locks
+//! the clipboard write: host `paste --text` plants the seed on the remote
+//! Command field; host `get-text` equals that seed. Cut 3.20 locks clipboard
+//! publish: seed already on Command (or planted over ssh paste/send-text),
+//! host `copy` publishes remote GetText onto the remote session CLIPBOARD,
+//! then host `paste` (no `--text`) + `get-text` equals that seed. Cut 3.21
+//! locks key delivery: host `send-keys` types plain keys into the remote
+//! focused Command field, then host `wait` + `get-text` equals those keys.
+//! Cut 3.22 locks text selection: host `send-text` plants a seed on remote
+//! Command (`--` ends flags; not `--text`), host `select --start N --end M`
+//! runs remote AT-SPI `Text.SetSelection` (`via=set-selection`), then host
+//! independent `get-selection` returns that range (`via=get-selection`;
+//! start/end equal the selected slice of the seed). Never screenshot /
+//! `--coords` / mouse-drag / XTest.
 //!
 //! This is not D-Bus port-forwarding and not a second control protocol. Auth
 //! failure, missing destination, and remote non-JSON failures are typed.
@@ -538,6 +541,73 @@ mod tests {
                 assert_eq!(keys, "321SSHKEYS");
                 assert_eq!(window, Some(42));
                 assert!(name.is_none());
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_range_survives_target_rewrite() {
+        // 3.22: first ssh select path reuses the same OpenSSH exec rewrite;
+        // remote worker runs target=current select. Circuit: host send-text
+        // plants SEED on remote Command (`--` ends flags; not --text), host
+        // select --window H --name Command --start 0 --end LEN runs remote
+        // AT-SPI Text.SetSelection (via=set-selection), then host independent
+        // get-selection returns that range (via=get-selection; start/end
+        // equal the selected slice). Never screenshot / --coords / mouse-drag.
+        // Missing Text typed-fails a11y_selection_unavailable on the remote
+        // worker the same as local current.
+        let command = CuCommand::Select {
+            target: TargetRef::Ssh,
+            start: 0,
+            end: 11,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "select");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::Select {
+                start,
+                end,
+                window,
+                name,
+                role,
+                ..
+            } => {
+                assert_eq!(start, 0);
+                assert_eq!(end, 11);
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
+                assert!(role.is_none());
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_selection_observe_survives_target_rewrite() {
+        // 3.22 observe sibling: get-selection must also rewrite target only
+        // and keep window/name/role so independent GetNSelections+GetSelection
+        // proof rides the same OpenSSH exec path as select.
+        let command = CuCommand::GetSelection {
+            target: TargetRef::Ssh,
+            window: Some(42),
+            name: Some("Command".into()),
+            role: None,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "get-selection");
+        assert_eq!(remote.target(), TargetRef::Current);
+        match remote {
+            CuCommand::GetSelection {
+                window, name, role, ..
+            } => {
+                assert_eq!(window, Some(42));
+                assert_eq!(name.as_deref(), Some("Command"));
                 assert!(role.is_none());
             }
             other => panic!("unexpected command {other:?}"),
