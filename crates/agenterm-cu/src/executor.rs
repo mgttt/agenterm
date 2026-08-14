@@ -565,7 +565,7 @@ fn send_keys_to_focused_node(
                 "via": "device-event",
             });
             attach_name_match(&mut payload, &resolved);
-            return Ok(payload);
+            Ok(payload)
         }
         Err(error) if focused_keys_may_use_text_write(keys, &error) => {
             mechanism::set_node_text(window, &resolved.node_id, keys).map_err(map_mechanism_err)?;
@@ -581,9 +581,9 @@ fn send_keys_to_focused_node(
                 "via": via,
             });
             attach_name_match(&mut payload, &resolved);
-            return Ok(payload);
+            Ok(payload)
         }
-        Err(error) => return Err(map_mechanism_err(error)),
+        Err(error) => Err(map_mechanism_err(error)),
     }
 }
 
