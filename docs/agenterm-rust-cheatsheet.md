@@ -1184,6 +1184,17 @@ resolve the unique showing node, then send the chord through AT-SPI
 `DeviceEventListener.NotifyEvent`. A named showing node with no key
 interface typed-fails (`a11y_key_unavailable`). That path never falls
 through to XTest / `input_inject::send_keys`. A miss types nothing.
+`send-keys --window HANDLE` without `--name` targets the same innermost
+focused Text node `get-text --window` reads. Prefer
+`DeviceEventListener.NotifyEvent` (`via=device-event`). Chrome renderer
+entries do not expose that interface; plain typeable text
+(`314GATE…`, single letters) then uses the AT-SPI `EditableText` /
+`Text` + toolkit set-value path (`via=text`, same as focused
+`send-text`) so `focus --name X` → `send-keys --window H TEXT` →
+`get-text --window H` closes without XTest. Special chords (`enter`,
+`ctrl+a`) without a key interface still typed-fail. A synthetic
+`--window` with no focused Text node typed-fails; it must not spray
+XTest.
 
 `agenterm-cu send-text --name` resolves the same unique showing node, then writes
 through native AT-SPI `EditableText` (`SetTextContents`, then `InsertText`)

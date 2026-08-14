@@ -111,8 +111,11 @@ pub enum Command {
     SendKeys {
         target: TargetRef,
         keys: String,
-        /// Optional accessible-name addressing: focus the matched node first,
-        /// resolved with the same matcher as `Focus`, then send the chord.
+        /// Optional window scope. With `--name`, name-address the unique
+        /// showing node and deliver Device/key events. Without `--name`,
+        /// target the showing focused node (same innermost Text candidate
+        /// as `GetText` without `--name`). Neither flag keeps the plain
+        /// focused inject.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -573,11 +573,18 @@ Commands:
                               typed-fails (never XTest / --coords / screenshot).
                               Close the circuit with wait --text-equals; paste
                               matched.text does not count. `--` ends flag parsing
-  send-keys [--window HANDLE --name PAT [--role ROLE]] [--] <keys...>
+  send-keys [--window HANDLE [--name PAT [--role ROLE]]] [--] <keys...>
                               --name delivers AT-SPI Device/key events
                               (DeviceEventListener NotifyEvent); a node with no
-                              key interface typed-fails (never XTest). `--`
-                              ends flag parsing. e.g. ctrl+c / enter / k
+                              key interface typed-fails (never XTest).
+                              --window without --name targets the showing
+                              focused node (same innermost Text candidate as
+                              get-text --window). Prefers DeviceEventListener;
+                              plain typeable text falls back to the AT-SPI
+                              Text write path when that interface is absent
+                              (Chrome). Never XTest when --window is set.
+                              Without --window stays the plain focused inject.
+                              `--` ends flag parsing. e.g. ctrl+c / enter / k
   scroll --window HANDLE --name PAT [--role ROLE]
                               one-shot AT-SPI Component.ScrollTo(TopEdge).
                               addressing=accessibility-tree via=scroll-to.

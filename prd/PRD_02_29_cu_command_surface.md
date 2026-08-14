@@ -143,9 +143,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   native AT-SPI Device/key events (`DeviceEventListener.NotifyEvent`) and
   report `addressing=accessibility-tree`. A named showing node with no key
   interface typed-fails (`a11y_key_unavailable`) and never falls through to
-  XTest / `input_inject::send_keys`. Without `--name` it stays the plain
-  "send to whatever is focused" verb. A miss or an ambiguous name sends no
+  XTest / `input_inject::send_keys`. A miss or an ambiguous name sends no
   chord at all.
+- [x] `send-keys --window HANDLE` without `--name` targets the showing
+  focused node (innermost `Text.GetText` candidate — the same node
+  `get-text --window HANDLE` reads). Prefers `DeviceEventListener.NotifyEvent`
+  (`via=device-event`). When that interface is absent (Chrome renderer
+  entry) and the payload is plain typeable text, writes through the same
+  AT-SPI `EditableText` / `Text` path as focused `send-text` (`via=text`).
+  Never XTest / `input_inject::send_keys` when `--window` is set. Proof is
+  independent `get-text --window HANDLE` (no `--name`) equal to the typed
+  string. Live host: Chrome `GetTextField`
+  (`fixtures/cu/311b-chrome-gettext.html`) after `focus --name`. Special
+  chords without a key interface still typed-fail. Without `--window` it
+  stays the plain "send to whatever is focused" inject. Do not mark this
+  leaf shipped on worker JSON.
 - [x] `wait --window HANDLE --name PAT [--role ROLE] --text-equals TEXT`
   (alias `--node-text-equals`) polls AT-SPI `Text.GetText` on the unique
   showing named node until that independent text equals `TEXT`. Timeout is

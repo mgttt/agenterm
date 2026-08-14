@@ -486,18 +486,47 @@ fn paste(
 /// `send-keys` with `--name` delivers the chord through native AT-SPI
 /// Device/key events (`DeviceEventListener.NotifyEvent`). A named showing
 /// node with no key interface typed-fails (`a11y_key_unavailable`) and
-/// never falls through to XTest / `input_inject::send_keys`. Without
-/// `--name` it stays the plain "send to whatever is focused" verb.
+/// never falls through to XTest / `input_inject::send_keys`.
+///
+/// `--window` without `--name` targets the showing focused node — the
+/// same innermost `Text.GetText` candidate `get-text --window` reads —
+/// so `focus --name X` then `send-keys --window H KEYS` then
+/// `get-text --window H` closes the loop. Prefer
+/// `DeviceEventListener.NotifyEvent`. When that interface is absent
+/// (Chrome renderer entry) and `KEYS` is plain typeable text, write
+/// through the same AT-SPI `EditableText` / `Text` path as focused
+/// `send-text` (`via=text`) so the typed string is still native AT-SPI
+/// and never XTest. Special chords (`enter`, `ctrl+a`, …) without a key
+/// interface still typed-fail. Without `--window` it stays the plain
+/// "send to whatever is focused" inject.
 fn send_keys(
     keys: &str,
     window: Option<isize>,
     name: Option<&str>,
     role: Option<&str>,
 ) -> Result<serde_json::Value, CuError> {
-    let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-keys")? else {
-        mechanism::input_inject::send_keys(keys).map_err(map_mechanism_err)?;
-        return Ok(serde_json::json!({ "keys": keys }));
-    };
+    if let Some(resolved) = resolve_actuation_node(window, None, name, role, "send-keys")? {
+        return send_keys_to_node(keys, window, resolved);
+    }
+    if role.filter(|value| !value.is_empty()).is_some() {
+        return Err(CuError::new(
+            "invalid_input",
+            "send-keys --role requires --name <pattern>",
+        ));
+    }
+    if window.is_some() {
+        let (resolved, _current) = get_text_focused(window)?;
+        return send_keys_to_focused_node(keys, window, resolved);
+    }
+    mechanism::input_inject::send_keys(keys).map_err(map_mechanism_err)?;
+    Ok(serde_json::json!({ "keys": keys }))
+}
+
+fn send_keys_to_node(
+    keys: &str,
+    window: Option<isize>,
+    resolved: ResolvedNode,
+) -> Result<serde_json::Value, CuError> {
     mechanism::send_node_keys(window, &resolved.node_id, keys).map_err(map_mechanism_err)?;
     let _ = mechanism::accessibility_tree::drain_bus();
     let mut payload = serde_json::json!({
@@ -511,6 +540,112 @@ fn send_keys(
     });
     attach_name_match(&mut payload, &resolved);
     Ok(payload)
+}
+
+/// Focused-node key delivery: Device/key first; plain typeable text may
+/// fall back to AT-SPI Text write when the node has no
+/// `DeviceEventListener` (Chrome GetTextField). Never XTest.
+fn send_keys_to_focused_node(
+    keys: &str,
+    window: Option<isize>,
+    resolved: ResolvedNode,
+) -> Result<serde_json::Value, CuError> {
+    match mechanism::send_node_keys(window, &resolved.node_id, keys) {
+        Ok(()) => {
+            let _ = mechanism::accessibility_tree::drain_bus();
+            let mut payload = serde_json::json!({
+                "addressing": "accessibility-tree",
+                "mechanism": "libagenterm",
+                "node": resolved.node_id,
+                "window": window,
+                "action": "send-keys",
+                "keys": keys,
+                "via": "device-event",
+            });
+            attach_name_match(&mut payload, &resolved);
+            return Ok(payload);
+        }
+        Err(error) if focused_keys_may_use_text_write(keys, &error) => {
+            mechanism::set_node_text(window, &resolved.node_id, keys).map_err(map_mechanism_err)?;
+            let _ = mechanism::accessibility_tree::drain_bus();
+            let via = mechanism::accessibility_tree::last_text_write_via().unwrap_or_default();
+            let mut payload = serde_json::json!({
+                "addressing": "accessibility-tree",
+                "mechanism": "libagenterm",
+                "node": resolved.node_id,
+                "window": window,
+                "action": "send-keys",
+                "keys": keys,
+                "via": via,
+            });
+            attach_name_match(&mut payload, &resolved);
+            return Ok(payload);
+        }
+        Err(error) => return Err(map_mechanism_err(error)),
+    }
+}
+
+/// Plain typeable text (no modifier chords / named special keys) may use
+/// the AT-SPI Text write path when Device/key is missing or the chord
+/// parser rejects a multi-character literal. `enter` / `ctrl+a` stay on
+/// the Device/key typed-fail contract.
+fn focused_keys_may_use_text_write(keys: &str, error: &mechanism::MechanismError) -> bool {
+    if !is_plain_typeable_text(keys) {
+        return false;
+    }
+    match error {
+        mechanism::MechanismError::Failed { code, .. } => {
+            code == "a11y_key_unavailable" || code == "invalid_input"
+        }
+        mechanism::MechanismError::Unsupported { .. } => false,
+    }
+}
+
+/// Printable text payload for focused send-keys Text fallback: no `+`
+/// modifier chords, not a single named special key token (`enter`,
+/// `tab`, …). Multi-character literals and single printable letters
+/// qualify so Chrome can close `send-keys --window` → `get-text --window`
+/// without DeviceEventListener or XTest.
+fn is_plain_typeable_text(keys: &str) -> bool {
+    if keys.is_empty() || keys.contains('+') {
+        return false;
+    }
+    if is_named_special_key(keys) {
+        return false;
+    }
+    keys.chars().all(|ch| !ch.is_control())
+}
+
+fn is_named_special_key(keys: &str) -> bool {
+    matches!(
+        keys.to_ascii_lowercase().as_str(),
+        "backspace"
+            | "tab"
+            | "enter"
+            | "return"
+            | "escape"
+            | "esc"
+            | "space"
+            | "home"
+            | "left"
+            | "up"
+            | "right"
+            | "down"
+            | "delete"
+            | "del"
+            | "f1"
+            | "f2"
+            | "f3"
+            | "f4"
+            | "f5"
+            | "f6"
+            | "f7"
+            | "f8"
+            | "f9"
+            | "f10"
+            | "f11"
+            | "f12"
+    )
 }
 
 /// `scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
@@ -2129,6 +2264,71 @@ mod tests {
         let reply = actuate_executor().execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn send_keys_role_without_name_is_typed() {
+        let command = Command::SendKeys {
+            target: TargetRef::Current,
+            keys: "k".into(),
+            window: Some(1),
+            name: None,
+            role: Some("entry".into()),
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+        assert!(
+            reply
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("--role requires --name"),
+            "role-without-name message should name the addressing contract"
+        );
+    }
+
+    #[test]
+    fn send_keys_window_without_name_does_not_xtest() {
+        // A synthetic window must take the focused AT-SPI path, not
+        // input_inject::send_keys. Success here would mean XTest spray.
+        let command = Command::SendKeys {
+            target: TargetRef::Current,
+            keys: "314GATE".into(),
+            window: Some(-1),
+            name: None,
+            role: None,
+        };
+        let reply = actuate_executor().execute(&command);
+        assert!(
+            !reply.ok,
+            "send-keys --window without --name must not fall through to XTest"
+        );
+        let code = reply.error.as_ref().unwrap().code.as_str();
+        assert!(
+            matches!(
+                code,
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_key_unavailable"
+                    | "a11y_text_unavailable"
+                    | "a11y_backend_failed"
+                    | "unsupported"
+                    | "failed"
+                    | "invalid_input"
+            ),
+            "unexpected code: {code}"
+        );
+    }
+
+    #[test]
+    fn plain_typeable_text_accepts_gate_literal() {
+        assert!(is_plain_typeable_text("314GATE123456"));
+        assert!(is_plain_typeable_text("k"));
+        assert!(!is_plain_typeable_text("enter"));
+        assert!(!is_plain_typeable_text("ctrl+a"));
+        assert!(!is_plain_typeable_text(""));
     }
 
     #[test]
