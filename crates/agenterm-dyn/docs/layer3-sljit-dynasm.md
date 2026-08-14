@@ -54,13 +54,13 @@
 **SLJIT**
 
 - 遍历 `do` / `set` / `if`，生成 LIR 基本块与分支。
-- `dlcall`：保留 **libffi C 辅助函数**（动态 CIF、变参、库路径解析仍在 Rust/C 侧）；`sljit_emit_icall` 为 **固定签名、≤4 参数** 的便捷路径，**不能**替代完整动态 `dlcall`。
+- `dlcall`：保留现有**有界 Rust `extern "C"` 跳板**（无 C 辅助函数、无 libffi）；仅支持固定签名、≤6 个整数/指针参数，不支持变参。
 - 变量槽可用固定栈帧或环境指针。
 
 **DynASM**
 
 - 需 **两套** emitter（x86_64 与 AArch64 各一套 `.dasc` / 生成头）。
-- 同样：`dlcall` 落点为 libffi 或固定 thunk，而非在模板里重写 ffi。
+- 同样：`dlcall` 落点为现有有界 Rust `extern "C"` 跳板，而非在模板里重写调用边界；无 C 辅助函数、无 libffi。
 
 ## 许可证
 
@@ -73,7 +73,7 @@
 
 ## 建议
 
-1. **第三层优先试 SLJIT**：单一 LIR、双 ISA 已验证、与「薄 lowering + libffi `dlcall`」模型契合；体积更大但集成面更窄。
+1. **历史结论曾优先考虑 SLJIT**：单一 LIR、双 ISA 已验证；若只比较 lowering，它与现有有界 Rust `dlcall` 跳板可分层，但当前不实施第三层或 JIT。
 2. **仅当** 团队愿意长期维护 **两套宏汇编后端**、且对编码器体积有硬上限时，再考虑 DynASM。
 3. 无论选型，**不** 在本调研阶段改 `eval` / `native` 行为；落地时单独里程碑与测试矩阵（含 W^X 与双架构 smoke）。
 
@@ -81,7 +81,7 @@
 
 ```
 Layer 1（今日）: parse → eval（解释） + dlcall（有界 Rust 跳板）
-Layer 3（调研）: parse → lowering → JIT/asm → 原生代码；dlcall 仍经 libffi 边界
+Layer 3（历史调研）: parse → lowering → JIT/asm → 原生代码；dlcall 仍复用有界 Rust 跳板（无 C、无 libffi）
 ```
 
 README 中的集成与 libagenterm 接线仍 **延后**；本文档仅沉淀选型知识，避免散落在对话里。
