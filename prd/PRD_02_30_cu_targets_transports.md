@@ -22,14 +22,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `vnc` remain planned.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
-  commands above it. `ssh` focus evidence reuses the named `Command` (or
-  `SEND`) AT-SPI focus Action over loopback `sshd` against a second
-  `agenterm-con` (never steal the resident control socket): host
-  `cu --ssh focus --name Command` runs remote AT-SPI Action `focus` /
-  `Component::grab_focus` (`addressing=accessibility-tree`), then host
-  independent `cu --ssh tree` shows that node `focused` and/or host
-  `cu --ssh get-text --window HANDLE` (no `--name`) reads the focused Text
-  node. Never screenshot, `--coords`, or XTest.
+  commands above it. `ssh` tree evidence reuses the #52 con-publish named
+  Session children over loopback `sshd` against a second `agenterm-con`
+  (never steal the resident control socket): host
+  `cu --ssh tree --window HANDLE` returns the remote AT-SPI flattened control
+  tree (`addressing=accessibility-tree`) and the unique named nodes
+  `Command`, `SEND`, and `OffscreenField` each appear once among showing
+  nodes. Never screenshot, `--coords`, or XTest.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
   its session. Enumerating targets and describing one target's declared
   capabilities are themselves commands.
@@ -428,20 +427,17 @@ Canonical host mapping (approved product vocabulary):
 - [ ] each tier is proven by a public black-box journey against a real target of
   that tier. A tier proven only in simulation is not claimed.
 - [~] Linux `ssh` first cut: host `agenterm-cu --ssh` against loopback OpenSSH
-  runs remote `agenterm-cu --target current`. Focus path: host
-  `focus --window HANDLE --name Command` (or `SEND`) on a second
-  `agenterm-con` runs remote AT-SPI Action `focus` / `Component::grab_focus`
-  (`addressing=accessibility-tree`); host independent `tree --window HANDLE`
-  shows that node `focused` and/or host `get-text --window HANDLE` (no
-  `--name`) reads the focused Text node. Never screenshot / `--coords` /
-  mouse-drag / XTest. Missing or ambiguous name typed-fails
-  `a11y_node_not_found` / `a11y_node_ambiguous` on the remote worker the same
-  as local `current`. `scroll` / `click` / `set-caret` / `select` /
-  `send-keys` / `copy` / `paste --text` / `send-text` over ssh and
-  observe-only `wait` / `get-text` / `get-selection` / `get-caret` /
-  `get-extents` still hold. Worker JSON does not count; CEO owns the official
-  gate. Auth failure and missing destination are typed (`ssh_unavailable` /
-  `ssh_transport_failed` / `invalid_input`).
+  runs remote `agenterm-cu --target current`. Tree path: host
+  `tree --window HANDLE` on a second `agenterm-con` returns the remote AT-SPI
+  flattened control tree (`addressing=accessibility-tree`); the unique named
+  Session children `Command`, `SEND`, and `OffscreenField` each appear once
+  among showing nodes. Never screenshot / `--coords` / mouse-drag / XTest.
+  `focus` / `scroll` / `click` / `set-caret` / `select` / `send-keys` /
+  `copy` / `paste --text` / `send-text` over ssh and observe-only `wait` /
+  `get-text` / `get-selection` / `get-caret` / `get-extents` still hold.
+  Worker JSON does not count; CEO owns the official gate. Auth failure and
+  missing destination are typed (`ssh_unavailable` / `ssh_transport_failed` /
+  `invalid_input`).
 - [~] Linux `current` / AT-SPI2: `scripts/cu-linux-smoke.sh` (real `agenterm-cu`, X11
   `DISPLAY`, running `at-spi2-registryd`) proves `tree`, refused unauthorized
   actuation, audited degraded coordinate click, invalid node path failure, and

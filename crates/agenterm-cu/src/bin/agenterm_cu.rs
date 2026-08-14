@@ -690,11 +690,10 @@ Global:
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
-  worker over OpenSSH stdio (no new verb). Focus evidence: loopback sshd +
-  second agenterm-con, host focus --name Command (or SEND) runs remote AT-SPI
-  Action focus / Component::grab_focus, then independent tree shows focused
-  and/or get-text --window H (no --name) reads the focused node (never
-  screenshot / --coords / XTest).
+  worker over OpenSSH stdio (no new verb). Tree evidence: loopback sshd +
+  second agenterm-con, host tree --window H returns the remote AT-SPI
+  control tree (addressing=accessibility-tree) with unique named nodes
+  Command, SEND, and OffscreenField (never screenshot / --coords / XTest).
 
 Commands:
   capabilities
