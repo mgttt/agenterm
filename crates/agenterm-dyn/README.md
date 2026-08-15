@@ -113,6 +113,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [whether standard input is a terminal](examples/isatty-stdin.md)
+- [whether standard output is a terminal](examples/isatty-stdout.md)
+- [whether standard error is a terminal](examples/isatty-stderr.md)
 - [`open("/dev/null")` then `isatty` then `close`](examples/open-dev-null-isatty-close.md)
 - [`fcntl(0, F_GETFD)` descriptor flags](examples/fcntl-stdin-getfd.md)
 - [`lseek(0, 0, SEEK_CUR)` current offset](examples/lseek-stdin-current.md)
