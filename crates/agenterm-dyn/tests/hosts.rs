@@ -215,13 +215,17 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..45].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
                 ..
             }
         )));
+        assert!(matches!(
+            c.system_probes[45].status,
+            SystemProbeStatus::Placeholder
+        ));
     }
     for c in [WINDOWS_X86_64, WINDOWS_AARCH64] {
         assert!(
