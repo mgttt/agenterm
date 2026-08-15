@@ -71,6 +71,7 @@ pub enum Capability {
     InputInject,
     AccessibilityTree,
     DesktopHost,
+    WindowPlacementInspect,
 }
 
 impl Capability {
@@ -82,7 +83,226 @@ impl Capability {
             Capability::InputInject => dynlib::AGT_CAP_INPUT_INJECT,
             Capability::AccessibilityTree => dynlib::AGT_CAP_ACCESSIBILITY_TREE,
             Capability::DesktopHost => dynlib::AGT_CAP_DESKTOP_HOST,
+            Capability::WindowPlacementInspect => dynlib::AGT_CAP_WINDOW_PLACEMENT_INSPECT,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Foreign-window placement inspection (ABI 1.10).
+// ---------------------------------------------------------------------------
+
+pub mod window_placement {
+    use crate::dynlib;
+
+    use super::{MechanismError, last_mechanism_error};
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum PlacementRole {
+        Standard,
+        Dialog,
+        Sheet,
+        SystemDialog,
+        Other,
+        Unknown,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum Support {
+        Yes,
+        No,
+        Unknown,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct WindowSize {
+        pub width: u32,
+        pub height: u32,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum SizeConstraints {
+        Explicit {
+            min: Option<WindowSize>,
+            max: Option<WindowSize>,
+            increment: Option<WindowSize>,
+        },
+        ApplicationEnforced,
+        Unknown,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct PlacementWindowInfo {
+        pub handle: isize,
+        pub process_id: u32,
+        pub role: PlacementRole,
+        pub movable: Support,
+        pub resizable: Support,
+        pub constraints: SizeConstraints,
+    }
+
+    pub fn inspect(
+        handle: isize,
+        expected_pid: u32,
+    ) -> Result<PlacementWindowInfo, MechanismError> {
+        let lib = dynlib::load().map_err(|error| MechanismError::Failed {
+            code: "dylib_load".into(),
+            message: error.message.clone(),
+        })?;
+        let version = lib
+            .abi_version()
+            .map_err(|message| MechanismError::Failed {
+                code: "dylib_symbol".into(),
+                message,
+            })?;
+        require_placement_abi(version)?;
+        let query =
+            unsafe { lib.sym::<super::WindowPlacementQuery>(b"agt_window_placement_query") }
+                .map_err(|_| MechanismError::Unsupported {
+                    reason: "ABI 1.10 window placement inspection symbol is unavailable".into(),
+                })?;
+        let mut record = dynlib::agt_window_placement_info_v1 {
+            struct_size: std::mem::size_of::<dynlib::agt_window_placement_info_v1>() as u32,
+            ..Default::default()
+        };
+        match unsafe { query(handle, expected_pid, &mut record) } {
+            dynlib::AGT_OK => parse_record(record, handle, expected_pid),
+            dynlib::AGT_UNSUPPORTED => Err(MechanismError::Unsupported {
+                reason: "window placement inspection is unavailable on this host".into(),
+            }),
+            _ => Err(last_mechanism_error("agt_window_placement_query")),
+        }
+    }
+
+    pub(super) fn require_placement_abi(version: u32) -> Result<(), MechanismError> {
+        let major = version >> 16;
+        let minor = (version & 0xffff) as u16;
+        if major == 1 && minor >= dynlib::WINDOW_PLACEMENT_ABI_MINOR {
+            Ok(())
+        } else {
+            Err(MechanismError::Unsupported {
+                reason: format!(
+                    "window placement inspection requires ABI 1.{}, loaded library reports {major}.{minor}",
+                    dynlib::WINDOW_PLACEMENT_ABI_MINOR
+                ),
+            })
+        }
+    }
+
+    pub(super) fn parse_record(
+        record: dynlib::agt_window_placement_info_v1,
+        expected_handle: isize,
+        expected_pid: u32,
+    ) -> Result<PlacementWindowInfo, MechanismError> {
+        let invalid = |message: &str| MechanismError::Failed {
+            code: "window_metadata_invalid".into(),
+            message: message.into(),
+        };
+        if record.struct_size != std::mem::size_of::<dynlib::agt_window_placement_info_v1>() as u32
+            || record.record_version != dynlib::AGT_WINDOW_PLACEMENT_RECORD_V1
+            || record.handle != expected_handle
+            || record.process_id != expected_pid
+        {
+            return Err(invalid(
+                "placement record size, version, or identity does not match the query",
+            ));
+        }
+        let role = match record.role {
+            dynlib::AGT_WINDOW_ROLE_STANDARD => PlacementRole::Standard,
+            dynlib::AGT_WINDOW_ROLE_DIALOG => PlacementRole::Dialog,
+            dynlib::AGT_WINDOW_ROLE_SHEET => PlacementRole::Sheet,
+            dynlib::AGT_WINDOW_ROLE_SYSTEM_DIALOG => PlacementRole::SystemDialog,
+            dynlib::AGT_WINDOW_ROLE_OTHER => PlacementRole::Other,
+            dynlib::AGT_WINDOW_ROLE_UNKNOWN => PlacementRole::Unknown,
+            _ => return Err(invalid("placement record contains an invalid role")),
+        };
+        let parse_support = |raw| match raw {
+            dynlib::AGT_WINDOW_SUPPORT_YES => Ok(Support::Yes),
+            dynlib::AGT_WINDOW_SUPPORT_NO => Ok(Support::No),
+            dynlib::AGT_WINDOW_SUPPORT_UNKNOWN => Ok(Support::Unknown),
+            _ => Err(invalid(
+                "placement record contains an invalid support value",
+            )),
+        };
+        let movable = parse_support(record.movable)?;
+        let resizable = parse_support(record.resizable)?;
+        let known_flags = dynlib::AGT_WINDOW_CONSTRAINT_HAS_MIN
+            | dynlib::AGT_WINDOW_CONSTRAINT_HAS_MAX
+            | dynlib::AGT_WINDOW_CONSTRAINT_HAS_INCREMENT;
+        if record.constraint_flags & !known_flags != 0 {
+            return Err(invalid(
+                "placement record contains unknown constraint flags",
+            ));
+        }
+        let pair = |flag, width, height, name| {
+            if record.constraint_flags & flag != 0 {
+                if width == 0 || height == 0 {
+                    return Err(invalid(&format!("{name} constraint must be nonzero")));
+                }
+                Ok(Some(WindowSize { width, height }))
+            } else if width != 0 || height != 0 {
+                Err(invalid(&format!(
+                    "{name} dimensions are set without their flag"
+                )))
+            } else {
+                Ok(None)
+            }
+        };
+        let min = pair(
+            dynlib::AGT_WINDOW_CONSTRAINT_HAS_MIN,
+            record.min_width,
+            record.min_height,
+            "minimum",
+        )?;
+        let max = pair(
+            dynlib::AGT_WINDOW_CONSTRAINT_HAS_MAX,
+            record.max_width,
+            record.max_height,
+            "maximum",
+        )?;
+        let increment = pair(
+            dynlib::AGT_WINDOW_CONSTRAINT_HAS_INCREMENT,
+            record.increment_width,
+            record.increment_height,
+            "increment",
+        )?;
+        if let (Some(min), Some(max)) = (min, max)
+            && (min.width > max.width || min.height > max.height)
+        {
+            return Err(invalid("minimum constraint exceeds maximum constraint"));
+        }
+        let constraints = match record.constraints_kind {
+            dynlib::AGT_WINDOW_CONSTRAINTS_EXPLICIT => SizeConstraints::Explicit {
+                min,
+                max,
+                increment,
+            },
+            dynlib::AGT_WINDOW_CONSTRAINTS_APPLICATION_ENFORCED if record.constraint_flags == 0 => {
+                SizeConstraints::ApplicationEnforced
+            }
+            dynlib::AGT_WINDOW_CONSTRAINTS_UNKNOWN if record.constraint_flags == 0 => {
+                SizeConstraints::Unknown
+            }
+            dynlib::AGT_WINDOW_CONSTRAINTS_APPLICATION_ENFORCED
+            | dynlib::AGT_WINDOW_CONSTRAINTS_UNKNOWN => {
+                return Err(invalid(
+                    "non-explicit constraints must not carry dimensions",
+                ));
+            }
+            _ => {
+                return Err(invalid(
+                    "placement record contains an invalid constraints kind",
+                ));
+            }
+        };
+        Ok(PlacementWindowInfo {
+            handle: record.handle,
+            process_id: record.process_id,
+            role,
+            movable,
+            resizable,
+            constraints,
+        })
     }
 }
 
@@ -1216,6 +1436,8 @@ type DesktopHostOpen = unsafe extern "C" fn(
 type DesktopHostPoll = unsafe extern "C" fn(*mut std::ffi::c_void, u32, *mut u32) -> i32;
 type DesktopHostClose = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
 type WindowEnumerate = unsafe extern "C" fn(*mut dynlib::agt_window_info, usize, *mut usize) -> i32;
+type WindowPlacementQuery =
+    unsafe extern "C" fn(isize, u32, *mut dynlib::agt_window_placement_info_v1) -> i32;
 type ScreenList = unsafe extern "C" fn(*mut dynlib::agt_screen_info, usize, *mut usize) -> i32;
 type WindowShow = unsafe extern "C" fn(isize, i32) -> i32;
 type WindowMove = unsafe extern "C" fn(isize, i32, i32, u32, u32) -> i32;
@@ -1261,6 +1483,151 @@ type LastError = unsafe extern "C" fn(*mut agt_error) -> i32;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn placement_record() -> dynlib::agt_window_placement_info_v1 {
+        dynlib::agt_window_placement_info_v1 {
+            struct_size: std::mem::size_of::<dynlib::agt_window_placement_info_v1>() as u32,
+            record_version: dynlib::AGT_WINDOW_PLACEMENT_RECORD_V1,
+            handle: 7,
+            process_id: 42,
+            role: dynlib::AGT_WINDOW_ROLE_STANDARD,
+            movable: dynlib::AGT_WINDOW_SUPPORT_YES,
+            resizable: dynlib::AGT_WINDOW_SUPPORT_YES,
+            constraints_kind: dynlib::AGT_WINDOW_CONSTRAINTS_EXPLICIT,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn placement_record_parses_all_typed_fields() {
+        use window_placement::{PlacementRole, SizeConstraints, Support, WindowSize};
+        let record = dynlib::agt_window_placement_info_v1 {
+            role: dynlib::AGT_WINDOW_ROLE_DIALOG,
+            movable: dynlib::AGT_WINDOW_SUPPORT_NO,
+            resizable: dynlib::AGT_WINDOW_SUPPORT_UNKNOWN,
+            constraint_flags: dynlib::AGT_WINDOW_CONSTRAINT_HAS_MIN
+                | dynlib::AGT_WINDOW_CONSTRAINT_HAS_MAX
+                | dynlib::AGT_WINDOW_CONSTRAINT_HAS_INCREMENT,
+            min_width: 320,
+            min_height: 200,
+            max_width: 1600,
+            max_height: 1200,
+            increment_width: 8,
+            increment_height: 16,
+            ..placement_record()
+        };
+        let parsed = window_placement::parse_record(record, 7, 42).expect("valid record");
+        assert_eq!(parsed.role, PlacementRole::Dialog);
+        assert_eq!(parsed.movable, Support::No);
+        assert_eq!(parsed.resizable, Support::Unknown);
+        assert_eq!(
+            parsed.constraints,
+            SizeConstraints::Explicit {
+                min: Some(WindowSize {
+                    width: 320,
+                    height: 200
+                }),
+                max: Some(WindowSize {
+                    width: 1600,
+                    height: 1200
+                }),
+                increment: Some(WindowSize {
+                    width: 8,
+                    height: 16
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn placement_record_rejects_invalid_flags_zero_reversed_and_enums() {
+        let cases = [
+            dynlib::agt_window_placement_info_v1 {
+                constraint_flags: 1 << 31,
+                ..placement_record()
+            },
+            dynlib::agt_window_placement_info_v1 {
+                constraint_flags: dynlib::AGT_WINDOW_CONSTRAINT_HAS_MIN,
+                min_width: 0,
+                min_height: 200,
+                ..placement_record()
+            },
+            dynlib::agt_window_placement_info_v1 {
+                constraint_flags: dynlib::AGT_WINDOW_CONSTRAINT_HAS_MIN
+                    | dynlib::AGT_WINDOW_CONSTRAINT_HAS_MAX,
+                min_width: 900,
+                min_height: 700,
+                max_width: 800,
+                max_height: 600,
+                ..placement_record()
+            },
+            dynlib::agt_window_placement_info_v1 {
+                role: 99,
+                ..placement_record()
+            },
+            dynlib::agt_window_placement_info_v1 {
+                movable: 99,
+                ..placement_record()
+            },
+        ];
+        for record in cases {
+            let error = window_placement::parse_record(record, 7, 42).unwrap_err();
+            assert!(matches!(
+                error,
+                MechanismError::Failed { ref code, .. } if code == "window_metadata_invalid"
+            ));
+        }
+    }
+
+    #[test]
+    fn placement_record_refuses_mismatched_identity_and_nonexplicit_dimensions() {
+        assert!(window_placement::parse_record(placement_record(), 8, 42).is_err());
+        let short = dynlib::agt_window_placement_info_v1 {
+            struct_size: 8,
+            ..placement_record()
+        };
+        assert!(window_placement::parse_record(short, 7, 42).is_err());
+        let record = dynlib::agt_window_placement_info_v1 {
+            constraints_kind: dynlib::AGT_WINDOW_CONSTRAINTS_UNKNOWN,
+            constraint_flags: dynlib::AGT_WINDOW_CONSTRAINT_HAS_MIN,
+            min_width: 10,
+            min_height: 10,
+            ..placement_record()
+        };
+        assert!(window_placement::parse_record(record, 7, 42).is_err());
+    }
+
+    #[test]
+    fn placement_old_minor_is_typed_unsupported() {
+        let error = window_placement::require_placement_abi((1 << 16) | 9).unwrap_err();
+        assert!(matches!(error, MechanismError::Unsupported { .. }));
+        assert!(window_placement::require_placement_abi((1 << 16) | 10).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_real_placement_query_rejects_stale_pid_when_available() {
+        let Ok(windows) = window_enumerate::enumerate_top_level() else {
+            eprintln!("SKIP: native window enumeration unavailable");
+            return;
+        };
+        let Some(window) = windows.first() else {
+            eprintln!("SKIP: no visible top-level window");
+            return;
+        };
+        let stale_pid = if window.process_id == u32::MAX {
+            window.process_id - 1
+        } else {
+            window.process_id + 1
+        };
+        match window_placement::inspect(window.handle, stale_pid) {
+            Err(MechanismError::Failed { code, .. }) => assert_eq!(code, "window_stale"),
+            Err(MechanismError::Unsupported { reason }) => {
+                eprintln!("SKIP: {reason}");
+            }
+            Ok(info) => panic!("stale pid unexpectedly inspected: {info:?}"),
+        }
+    }
 
     #[test]
     fn two_stage_empty_payload_does_not_reprobe_with_cap_zero() {

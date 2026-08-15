@@ -111,6 +111,17 @@ agenterm-cu (28)
 - [ ] application min/max size is honored; the pipeline may undershoot the
   ideal rect but must not report success with a fabricated frame.
 
+The typed preflight is now wired through `agenterm-platform`, libagenterm ABI
+1.10 (`agt_window_placement_query`), and CU before the first native write.
+Known standard/dialog windows require explicit move/resize support; sheet,
+system-dialog, other, and unknown roles fail closed. Explicit min/max/increment
+constraints normalize the requested size, application-enforced constraints
+publish only the final independent readback, and unknown constraints refuse
+resizing. Windows has live UIA + bounded `WM_GETMINMAXINFO` evidence; macOS AX
+and Linux X11 adapters have compile/unit evidence, but their real-session
+placement black boxes remain open (Linux role intentionally stays unknown
+until a trustworthy XID-to-AT-SPI join exists).
+
 `undo` / `redo` now have a bounded per-application history first cut (40
 entries, redo truncation, corruption detection and same-directory replacement).
 Its deterministic persistence tests are closed, but a public real-window
@@ -205,7 +216,8 @@ crash recovery and concurrent-writer CAS remain open; this leaf is still partial
 - [x] The staged `dist/agenterm-cu.exe` beside its exact `dist/agenterm.dll`
   passes `cu-windows-smoke`: version probe, dynamic load, 19 actions,
   observe-only placement refusal with unchanged bounds, authorized
-  `left-half` placement with destination-screen reply and independent bounds
-  readback, isolated JSONL attempt/outcome audit, and deterministic host cleanup.
+  `left-half` placement through ABI 1.10 role/support/constraint preflight with
+  destination-screen reply and independent bounds readback, isolated JSONL
+  attempt/outcome audit, and deterministic host cleanup.
 - [ ] Candidate qualification and Windows ARM64 evidence remain open. Until
   those gates close, Windows host and this subtree remain partial.

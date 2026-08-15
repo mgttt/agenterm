@@ -373,6 +373,7 @@ fn capabilities_payload() -> serde_json::Value {
             "screenshot": status(mechanism::Capability::Screenshot),
             "input": status(mechanism::Capability::InputInject),
             "window_place": status(mechanism::Capability::WindowOp),
+            "window_placement_inspect": status(mechanism::Capability::WindowPlacementInspect),
             "desktop_host": status(mechanism::Capability::DesktopHost),
         },
         "verbs": {
@@ -1408,6 +1409,11 @@ struct PlaceIdentity {
 
 trait PlaceRuntime {
     fn read_rect(&mut self, handle: isize) -> Result<crate::place::Rect, CuError>;
+    fn inspect_placement(
+        &mut self,
+        handle: isize,
+        expected_pid: u32,
+    ) -> Result<mechanism::window_placement::PlacementWindowInfo, CuError>;
     fn apply_rect(
         &mut self,
         handle: isize,
@@ -1422,6 +1428,14 @@ struct NativePlaceRuntime;
 impl PlaceRuntime for NativePlaceRuntime {
     fn read_rect(&mut self, handle: isize) -> Result<crate::place::Rect, CuError> {
         crate::place::read_rect(handle).map_err(map_mechanism_err)
+    }
+
+    fn inspect_placement(
+        &mut self,
+        handle: isize,
+        expected_pid: u32,
+    ) -> Result<mechanism::window_placement::PlacementWindowInfo, CuError> {
+        mechanism::window_placement::inspect(handle, expected_pid).map_err(map_mechanism_err)
     }
 
     fn apply_rect(
@@ -1501,7 +1515,7 @@ where
     })?;
     let geo_screens: Vec<_> = screens.iter().map(crate::place::screen_from_info).collect();
 
-    let (after_target, planned_history) = if action.is_history() {
+    let (requested_target, planned_history) = if action.is_history() {
         let step = if matches!(action, crate::place::PlaceAction::Undo) {
             history.plan_undo(&app_key)
         } else {
@@ -1519,6 +1533,30 @@ where
             .ok_or_else(|| CuError::new("failed", "could not compute destination rectangle"))?;
         (dest, None)
     };
+
+    let inspection = runtime
+        .inspect_placement(identity.handle, identity.process_id)
+        .map_err(|error| {
+            CuError::new(error.code.clone(), error.message.clone()).with_detail(serde_json::json!({
+                "stage": "placement_preflight",
+                "effect": "not_applied",
+                "history": "unchanged",
+                "window": identity.handle,
+                "app": app_key,
+                "cause": error_payload(&error),
+            }))
+        })?;
+    let constraint = placement_target(before, requested_target, inspection).map_err(|error| {
+        CuError::new(error.code.clone(), error.message.clone()).with_detail(serde_json::json!({
+            "stage": "placement_preflight",
+            "effect": "not_applied",
+            "history": "unchanged",
+            "window": identity.handle,
+            "app": app_key,
+            "cause": error_payload(&error),
+        }))
+    })?;
+    let after_target = constraint.target;
 
     let (screen_index, screen) = screen_for_rect(after_target, screens)
         .ok_or_else(|| CuError::new("failed", "could not resolve destination screen"))?;
@@ -1650,6 +1688,8 @@ where
         ));
     }
 
+    let constraint_adjusted = constraint.adjusted
+        || (constraint.mode == "application_enforced" && !after.almost_eq(after_target));
     Ok(serde_json::json!({
         "effect": "committed",
         "history": "committed",
@@ -1667,7 +1707,139 @@ where
         "after": { "x": after.x, "y": after.y, "width": after.width, "height": after.height },
         "quantized": quantized,
         "clamped": clamped,
+        "constraint_mode": constraint.mode,
+        "constraint_adjusted": constraint_adjusted,
     }))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PlacementTarget {
+    target: crate::place::Rect,
+    mode: &'static str,
+    adjusted: bool,
+}
+
+fn placement_target(
+    before: crate::place::Rect,
+    requested: crate::place::Rect,
+    inspection: mechanism::window_placement::PlacementWindowInfo,
+) -> Result<PlacementTarget, CuError> {
+    use mechanism::window_placement::{PlacementRole, SizeConstraints, Support};
+
+    if !matches!(
+        inspection.role,
+        PlacementRole::Standard | PlacementRole::Dialog
+    ) {
+        return Err(CuError::new(
+            "window_role_refused",
+            format!(
+                "window role {:?} is not eligible for placement",
+                inspection.role
+            ),
+        ));
+    }
+    let (bx, by, bw, bh) = before.to_i32();
+    let (rx, ry, rw, rh) = requested.to_i32();
+    let moves = (bx, by) != (rx, ry);
+    let resizes = (bw, bh) != (rw, rh);
+    if moves && inspection.movable != Support::Yes {
+        return Err(CuError::new(
+            "window_not_movable",
+            format!(
+                "window movable support is {:?}, not Yes",
+                inspection.movable
+            ),
+        ));
+    }
+    if resizes && inspection.resizable != Support::Yes {
+        return Err(CuError::new(
+            "window_not_resizable",
+            format!(
+                "window resizable support is {:?}, not Yes",
+                inspection.resizable
+            ),
+        ));
+    }
+    match inspection.constraints {
+        SizeConstraints::Unknown if resizes => Err(CuError::new(
+            "window_constraints_unknown",
+            "window size constraints are unknown; refusing resize",
+        )),
+        SizeConstraints::Unknown => Ok(PlacementTarget {
+            target: requested,
+            mode: "unknown",
+            adjusted: false,
+        }),
+        SizeConstraints::ApplicationEnforced => Ok(PlacementTarget {
+            target: requested,
+            mode: "application_enforced",
+            adjusted: false,
+        }),
+        SizeConstraints::Explicit {
+            min,
+            max,
+            increment,
+        } => {
+            if !resizes {
+                return Ok(PlacementTarget {
+                    target: requested,
+                    mode: "explicit",
+                    adjusted: false,
+                });
+            }
+            let normalize_axis = |value: u32,
+                                  min: Option<u32>,
+                                  max: Option<u32>,
+                                  increment: Option<u32>|
+             -> Result<u32, CuError> {
+                let lower = min.unwrap_or(1);
+                let upper = max.unwrap_or(u32::MAX);
+                let mut normalized = value.clamp(lower, upper);
+                if let Some(step) = increment {
+                    let base = u64::from(min.unwrap_or(0));
+                    let step = u64::from(step);
+                    let lower_delta = u64::from(lower).saturating_sub(base);
+                    let upper_delta = u64::from(upper).saturating_sub(base);
+                    let first = lower_delta.div_ceil(step);
+                    let last = upper_delta / step;
+                    if first > last {
+                        return Err(CuError::new(
+                            "window_constraints_invalid",
+                            "size increment has no value inside the min/max range",
+                        ));
+                    }
+                    let desired_delta = u64::from(normalized).saturating_sub(base);
+                    let nearest = (desired_delta + step / 2) / step;
+                    let steps = nearest.clamp(first, last);
+                    normalized = u32::try_from(base + steps * step).map_err(|_| {
+                        CuError::new(
+                            "window_constraints_invalid",
+                            "normalized size exceeds the ABI dimension range",
+                        )
+                    })?;
+                }
+                Ok(normalized)
+            };
+            let width = normalize_axis(
+                rw,
+                min.map(|s| s.width),
+                max.map(|s| s.width),
+                increment.map(|s| s.width),
+            )?;
+            let height = normalize_axis(
+                rh,
+                min.map(|s| s.height),
+                max.map(|s| s.height),
+                increment.map(|s| s.height),
+            )?;
+            let target = crate::place::Rect::new(rx as f64, ry as f64, width as f64, height as f64);
+            Ok(PlacementTarget {
+                adjusted: !target.almost_eq(requested),
+                target,
+                mode: "explicit",
+            })
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2387,6 +2559,8 @@ mod tests {
     struct FakePlaceRuntime {
         rect: crate::place::Rect,
         first_read_error: Option<CuError>,
+        inspections: VecDeque<Result<mechanism::window_placement::PlacementWindowInfo, CuError>>,
+        inspect_args: Vec<(isize, u32)>,
         identities: VecDeque<Result<bool, CuError>>,
         applies: VecDeque<FakeApply>,
         apply_handles: Vec<isize>,
@@ -2397,6 +2571,8 @@ mod tests {
             Self {
                 rect,
                 first_read_error: None,
+                inspections: VecDeque::from([Ok(placement_fixture())]),
+                inspect_args: Vec::new(),
                 identities: VecDeque::from([Ok(true), Ok(true)]),
                 applies: applies.into_iter().collect(),
                 apply_handles: Vec::new(),
@@ -2410,6 +2586,17 @@ mod tests {
                 return Err(error);
             }
             Ok(self.rect)
+        }
+
+        fn inspect_placement(
+            &mut self,
+            handle: isize,
+            expected_pid: u32,
+        ) -> Result<mechanism::window_placement::PlacementWindowInfo, CuError> {
+            self.inspect_args.push((handle, expected_pid));
+            self.inspections
+                .pop_front()
+                .unwrap_or_else(|| Ok(placement_fixture()))
         }
 
         fn apply_rect(
@@ -2516,10 +2703,133 @@ mod tests {
         crate::place::Rect::new(x, y, width, height)
     }
 
+    fn placement_fixture() -> mechanism::window_placement::PlacementWindowInfo {
+        use mechanism::window_placement::{
+            PlacementRole, PlacementWindowInfo, SizeConstraints, Support,
+        };
+        PlacementWindowInfo {
+            handle: 7,
+            process_id: 42,
+            role: PlacementRole::Standard,
+            movable: Support::Yes,
+            resizable: Support::Yes,
+            constraints: SizeConstraints::Explicit {
+                min: None,
+                max: None,
+                increment: None,
+            },
+        }
+    }
+
     fn remove_saga_scratch(path: &std::path::Path) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::remove_dir_all(parent);
         }
+    }
+
+    #[test]
+    fn placement_roles_and_unknown_support_fail_closed() {
+        use mechanism::window_placement::{PlacementRole, Support};
+        let before = saga_rect(100.0, 100.0, 800.0, 600.0);
+        let moved = saga_rect(200.0, 100.0, 800.0, 600.0);
+        for role in [
+            PlacementRole::Sheet,
+            PlacementRole::SystemDialog,
+            PlacementRole::Other,
+            PlacementRole::Unknown,
+        ] {
+            let mut info = placement_fixture();
+            info.role = role;
+            assert_eq!(
+                placement_target(before, moved, info).unwrap_err().code,
+                "window_role_refused"
+            );
+        }
+        for role in [PlacementRole::Standard, PlacementRole::Dialog] {
+            let mut info = placement_fixture();
+            info.role = role;
+            info.movable = Support::Unknown;
+            assert_eq!(
+                placement_target(before, moved, info).unwrap_err().code,
+                "window_not_movable"
+            );
+            info.movable = Support::Yes;
+            info.resizable = Support::Unknown;
+            assert_eq!(
+                placement_target(before, saga_rect(100.0, 100.0, 900.0, 600.0), info)
+                    .unwrap_err()
+                    .code,
+                "window_not_resizable"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_constraints_clamp_and_quantize_requested_size() {
+        use mechanism::window_placement::{SizeConstraints, WindowSize};
+        let before = saga_rect(10.0, 20.0, 400.0, 300.0);
+        let mut info = placement_fixture();
+        info.constraints = SizeConstraints::Explicit {
+            min: Some(WindowSize {
+                width: 300,
+                height: 200,
+            }),
+            max: Some(WindowSize {
+                width: 800,
+                height: 700,
+            }),
+            increment: Some(WindowSize {
+                width: 50,
+                height: 20,
+            }),
+        };
+        let result = placement_target(before, saga_rect(10.0, 20.0, 503.0, 407.0), info)
+            .expect("explicit normalization");
+        assert_eq!(result.mode, "explicit");
+        assert!(result.adjusted);
+        assert_eq!(result.target, saga_rect(10.0, 20.0, 500.0, 400.0));
+
+        info.constraints = SizeConstraints::Unknown;
+        assert_eq!(
+            placement_target(before, saga_rect(10.0, 20.0, 500.0, 300.0), info)
+                .unwrap_err()
+                .code,
+            "window_constraints_unknown"
+        );
+    }
+
+    #[test]
+    fn application_enforced_constraints_use_final_readback_and_expected_pid() {
+        use mechanism::window_placement::SizeConstraints;
+        let path = saga_scratch("application-enforced");
+        let before = saga_rect(100.0, 100.0, 800.0, 600.0);
+        let actual = saga_rect(0.0, 0.0, 900.0, 1000.0);
+        let history = crate::place::PlaceHistory::open_at(path.clone()).expect("history");
+        let mut runtime = FakePlaceRuntime::new(
+            before,
+            [FakeApply::Ok {
+                actual,
+                quantized: false,
+                clamped: false,
+            }],
+        );
+        let mut info = placement_fixture();
+        info.constraints = SizeConstraints::ApplicationEnforced;
+        runtime.inspections = VecDeque::from([Ok(info)]);
+        let reply = window_place_resolved(
+            crate::place::PlaceAction::LeftHalf,
+            &saga_window(before),
+            &[saga_screen()],
+            history,
+            &mut runtime,
+            &mut SavingHistory,
+        )
+        .expect("application-enforced placement");
+        assert_eq!(runtime.inspect_args, [(7, 42)]);
+        assert_eq!(reply["constraint_mode"], "application_enforced");
+        assert_eq!(reply["constraint_adjusted"], true);
+        assert_eq!(reply["after"], rect_payload(actual));
+        remove_saga_scratch(&path);
     }
 
     #[test]

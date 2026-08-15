@@ -452,6 +452,8 @@ fn entry() {
                 && ("" + placed.target) == "current"
                 && ("" + placed.command) == "window-place"
                 && ("" + placed.data.action) == "left-half"
+                && (("" + placed.data.constraint_mode) == "explicit"
+                    || ("" + placed.data.constraint_mode) == "application_enforced")
                 && (0 + placed.data.window) == fixture_handle,
             "cu_windows_smoke_window_place_reply:" + place_text
         );

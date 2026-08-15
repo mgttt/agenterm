@@ -71,6 +71,28 @@ pub struct agt_window_info {
     pub app_name_truncated: u32,
 }
 
+/// ABI 1.10 caller-sized placement inspection record.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+#[allow(non_camel_case_types)]
+pub struct agt_window_placement_info_v1 {
+    pub struct_size: u32,
+    pub record_version: u32,
+    pub handle: isize,
+    pub process_id: u32,
+    pub role: i32,
+    pub movable: i32,
+    pub resizable: i32,
+    pub constraints_kind: i32,
+    pub constraint_flags: u32,
+    pub min_width: u32,
+    pub min_height: u32,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub increment_width: u32,
+    pub increment_height: u32,
+}
+
 impl Default for agt_window_info {
     fn default() -> Self {
         agt_window_info {
@@ -139,6 +161,24 @@ pub const AGT_CAP_INPUT_INJECT: i32 = 10;
 pub const AGT_CAP_PARENT_CONSOLE: i32 = 15;
 pub const AGT_CAP_ACCESSIBILITY_TREE: i32 = 16;
 pub const AGT_CAP_DESKTOP_HOST: i32 = 17;
+pub const AGT_CAP_WINDOW_PLACEMENT_INSPECT: i32 = 18;
+
+pub const AGT_WINDOW_PLACEMENT_RECORD_V1: u32 = 1;
+pub const AGT_WINDOW_ROLE_UNKNOWN: i32 = 0;
+pub const AGT_WINDOW_ROLE_STANDARD: i32 = 1;
+pub const AGT_WINDOW_ROLE_DIALOG: i32 = 2;
+pub const AGT_WINDOW_ROLE_SHEET: i32 = 3;
+pub const AGT_WINDOW_ROLE_SYSTEM_DIALOG: i32 = 4;
+pub const AGT_WINDOW_ROLE_OTHER: i32 = 5;
+pub const AGT_WINDOW_SUPPORT_UNKNOWN: i32 = 0;
+pub const AGT_WINDOW_SUPPORT_YES: i32 = 1;
+pub const AGT_WINDOW_SUPPORT_NO: i32 = 2;
+pub const AGT_WINDOW_CONSTRAINTS_UNKNOWN: i32 = 0;
+pub const AGT_WINDOW_CONSTRAINTS_EXPLICIT: i32 = 1;
+pub const AGT_WINDOW_CONSTRAINTS_APPLICATION_ENFORCED: i32 = 2;
+pub const AGT_WINDOW_CONSTRAINT_HAS_MIN: u32 = 1 << 0;
+pub const AGT_WINDOW_CONSTRAINT_HAS_MAX: u32 = 1 << 1;
+pub const AGT_WINDOW_CONSTRAINT_HAS_INCREMENT: u32 = 1 << 2;
 
 /// `agt_a11y_tree_meta_string` fields.
 pub const AGT_A11Y_META_BACKEND: i32 = 0;
@@ -172,6 +212,7 @@ pub const AGT_NATIVE_WINDOW_RESTORE: i32 = 4;
 /// EXPECTED_ABI_MAJOR`, so this value cannot drift from the library without
 /// that gate failing first.
 const EXPECTED_ABI_MAJOR: u16 = 1;
+pub const WINDOW_PLACEMENT_ABI_MINOR: u16 = 10;
 
 /// `agt_input_pointer_click` buttons.
 pub const AGT_INPUT_BUTTON_LEFT: i32 = 0;
@@ -226,6 +267,11 @@ impl Dynlib {
         let code = unsafe { CStr::from_ptr(e.code) }.to_string_lossy();
         let msg = unsafe { CStr::from_ptr(e.message) }.to_string_lossy();
         format!("{op}: {code}: {msg}")
+    }
+
+    pub fn abi_version(&self) -> Result<u32, String> {
+        let f = unsafe { self.sym::<AbiVersion>(b"agt_abi_version") }?;
+        Ok(unsafe { f() })
     }
 }
 
