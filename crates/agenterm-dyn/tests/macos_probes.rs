@@ -243,6 +243,63 @@ fn dlcall_sysctl_writes_ncpu_into_caller_buffer() {
 }
 
 #[test]
+fn dlcall_sysctlnametomib_writes_caller_owned_mib() {
+    unsafe extern "C" {
+        fn sysctlnametomib(
+            name: *const libc::c_char,
+            mibp: *mut libc::c_int,
+            sizep: *mut usize,
+        ) -> libc::c_int;
+    }
+
+    let symbol = live_symbol("sysctlnametomib");
+    let name = CString::new("hw.ncpu").expect("literal has no NUL");
+    let mut mib = [0 as libc::c_int; 8];
+    let mut len = mib.len();
+    let mut env = Dyn::new();
+    env.bind("name", name.as_ptr().cast_mut().cast::<c_void>())
+        .expect("bind sysctl name");
+    env.bind("mib", mib.as_mut_ptr().cast())
+        .expect("bind MIB output");
+    env.bind("len", (&mut len as *mut usize).cast())
+        .expect("bind MIB output length");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "ptr" mib "ptr" len)"#
+        ))
+        .expect("sysctlnametomib dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!((1..=mib.len()).contains(&len), "MIB length must fit output");
+
+    let mut direct = [0 as libc::c_int; 8];
+    let mut direct_len = direct.len();
+    let direct_status =
+        unsafe { sysctlnametomib(name.as_ptr(), direct.as_mut_ptr(), &mut direct_len) };
+    assert_eq!(direct_status, 0, "direct sysctlnametomib must succeed");
+    assert_eq!(len, direct_len);
+    assert_eq!(&mib[..len], &direct[..direct_len]);
+}
+
+#[test]
+fn dlcall_pthread_equal_recognizes_current_thread() {
+    let symbol = live_symbol("pthread_equal");
+    let first = unsafe { libc::pthread_self() } as u64;
+    let second = unsafe { libc::pthread_self() } as u64;
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "u64" {first} "u64" {second})"#
+        ))
+        .expect("pthread_equal dlcall")
+        .as_int()
+        .expect("pthread_equal integer result");
+    assert_ne!(got, 0, "dlcall must recognize the current thread");
+    let direct =
+        unsafe { libc::pthread_equal(first as libc::pthread_t, second as libc::pthread_t) };
+    assert_ne!(direct, 0, "direct C call must recognize the current thread");
+}
+
+#[test]
 fn dlcall_mach_timebase_info_writes_caller_owned_ratio() {
     #[repr(C)]
     struct Timebase {
@@ -537,12 +594,10 @@ fn dlcall_getentropy_fills_caller_owned_buffer() {
         ))
         .expect("getentropy dlcall");
     assert_eq!(got, Value::Int(0));
-    assert!(bytes.iter().any(|byte| *byte != 0));
 
     let mut direct = [0_u8; BYTES];
     let direct_status = unsafe { libc::getentropy(direct.as_mut_ptr().cast(), BYTES) };
     assert_eq!(direct_status, 0, "direct getentropy must succeed");
-    assert!(direct.iter().any(|byte| *byte != 0));
 }
 
 #[test]

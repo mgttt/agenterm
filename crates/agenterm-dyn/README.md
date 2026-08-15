@@ -93,7 +93,7 @@ deny, or otherwise change any native-door or caller authority semantics.
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
 | linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | fixed-ABI live rows include `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `access`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; variadic `open`/`fcntl` and Darwin-only rows are placeholders |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, and `pthread_jit_write_protect_supported_np`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -152,6 +152,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [random word via `arc4random`](examples/arc4random.md) (macOS)
 - [uptime nanoseconds via `clock_gettime_nsec_np`](examples/clock-gettime-nsec-np.md) (macOS)
 - [hardware CPU count via `sysctl`](examples/sysctl.md) (macOS)
+- [MIB lookup via `sysctlnametomib`](examples/sysctlnametomib.md) (macOS)
 - [Mach tick-to-nanosecond ratio via `mach_timebase_info`](examples/mach-timebase-info.md) (macOS)
 - [main-thread predicate via `pthread_main_np`](examples/pthread-main-np.md) (macOS)
 - [login name via `getlogin_r`](examples/getlogin-r.md) (macOS)
@@ -173,6 +174,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [process program-name pointer via `_NSGetProgname`](examples/nsget-progname.md) (macOS)
 - [libproc version via `proc_libversion`](examples/proc-libversion.md) (macOS)
 - [JIT write-protect availability via `pthread_jit_write_protect_supported_np`](examples/pthread-jit-write-protect-supported-np.md) (macOS)
+- [current-thread equality via `pthread_equal`](examples/pthread-equal.md) (macOS)
 - [`mach_host_self` resource-safety boundary](examples/mach-host-self.md) (macOS; intentionally not live)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
@@ -246,13 +248,13 @@ direct-libc baselines. Darwin-specific smokes cover `sysctlbyname`,
 `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
 `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`,
 `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
-`pthread_cpu_number_np`, and `malloc_good_size`;
+`pthread_cpu_number_np`, `malloc_good_size`, `sysctlnametomib`, and `pthread_equal`;
 the caller-owned timebase, login, thread-id, thread-name, `proc_bsdinfo`, and
 `rusage_info_v4` buffers are compared with direct C baselines. The
 dynamic-loader image count is an instantaneous positive fact checked against a
-later native call. `getentropy` fills two independent caller-owned 16-byte
-buffers; the smoke checks only success and nonzero contents, never entropy
-values. `mach_host_self`
+later native call. `getentropy` fills independent caller-owned 16-byte
+buffers; the smoke checks only successful status and never observes entropy
+contents. `mach_host_self`
 remains intentionally uncalled because its returned send right has no dyn release
 owner. `ioctl(TIOCGWINSZ)` uses the resolved
 `libSystem.B.dylib` symbol through its signature-gated variadic ABI and an

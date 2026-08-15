@@ -154,6 +154,8 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "nsget_progname",
                 "proc_libversion",
                 "pthread_jit_write_protect_supported_np",
+                "sysctlnametomib",
+                "pthread_equal",
                 "mach_host_self",
             ]
         );
@@ -282,10 +284,12 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "nsget_progname",
                 "proc_libversion",
                 "pthread_jit_write_protect_supported_np",
+                "sysctlnametomib",
+                "pthread_equal",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..66].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..68].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -293,7 +297,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[66].status,
+            c.system_probes[68].status,
             SystemProbeStatus::Placeholder
         ));
     }
@@ -327,6 +331,8 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
                 "pthread_jit_write_protect_supported_np",
                 "pthread_jit_write_protect_supported_np",
             ),
+            ("sysctlnametomib", "sysctlnametomib"),
+            ("pthread_equal", "pthread_equal"),
         ] {
             let probe = c
                 .system_probes

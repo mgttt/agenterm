@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 67],
+    pub system_probes: [SystemProbe; 69],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 67] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 69] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -376,6 +376,8 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 67] = [
     placeholder("nsget_progname"),
     placeholder("proc_libversion"),
     placeholder("pthread_jit_write_protect_supported_np"),
+    placeholder("sysctlnametomib"),
+    placeholder("pthread_equal"),
     placeholder("mach_host_self"),
 ];
 
@@ -396,7 +398,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 67] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 69] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -466,13 +468,15 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 67] = [
         "pthread_jit_write_protect_supported_np",
         "pthread_jit_write_protect_supported_np",
     ),
+    macos_live("sysctlnametomib", "sysctlnametomib"),
+    macos_live("pthread_equal", "pthread_equal"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 67] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 69] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -668,6 +672,8 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 67] = [
     placeholder("nsget_progname"),
     placeholder("proc_libversion"),
     placeholder("pthread_jit_write_protect_supported_np"),
+    placeholder("sysctlnametomib"),
+    placeholder("pthread_equal"),
     placeholder("mach_host_self"),
 ];
 
