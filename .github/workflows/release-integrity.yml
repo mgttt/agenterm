@@ -92,7 +92,7 @@ jobs:
               and .releases[0].version == $version
               and .releases[0].tag == $tag
               and .releases[0].source_commit == $source_sha
-              and (.releases[0].artifacts | length) == 6
+              and (.releases[0].artifacts | length) == 7
               and (
                 [.releases[0].artifacts[] |
                   {

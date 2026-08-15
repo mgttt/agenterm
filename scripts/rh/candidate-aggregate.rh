@@ -579,7 +579,7 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
         gate_path
     );
 
-    require(manifest.assets.len == 6, "candidate_asset_count");
+    require(manifest.assets.len == 7, "candidate_asset_count");
     let expected_files = [receipt_name, sbom_name];
     let mac_channel = "";
     verify_platform(
@@ -631,6 +631,13 @@ fn validate_manifest(source_root_value, manifest_path_value, asset_root_value, n
         "macos", "x86_64",
         "agenterm-" + version + "-macos-x86_64.zip",
         "agenterm-" + version + "-macos-x86_64-unsigned-preview.zip"
+    );
+    verify_platform(
+        manifest, asset_root, source_sha, version, expected_tag,
+        cargo_hash, artifact_hash, sbom_hash,
+        "chassis", "multi",
+        "agenterm-" + version + "-chassis-product.tgz",
+        ""
     );
     for asset in manifest.assets {
         let asset_os = "" + asset.os;
@@ -843,6 +850,13 @@ fn build_manifest(
             preview_name:
                 "agenterm-" + metadata_version +
                     "-macos-x86_64-unsigned-preview.zip"
+        },
+        #{
+            os: "chassis",
+            arch: "multi",
+            release_name:
+                "agenterm-" + metadata_version + "-chassis-product.tgz",
+            preview_name: ""
         }
     ];
     for spec in specs {

@@ -54,7 +54,7 @@ fn unique_root(name: &str) -> PathBuf {
     ))
 }
 
-fn archive_specs() -> [(&'static str, &'static str, &'static str, bool); 6] {
+fn archive_specs() -> [(&'static str, &'static str, &'static str, bool); 7] {
     [
         ("windows", "x86_64", "zip", false),
         ("windows", "aarch64", "zip", false),
@@ -62,6 +62,7 @@ fn archive_specs() -> [(&'static str, &'static str, &'static str, bool); 6] {
         ("linux", "aarch64", "tar.gz", false),
         ("macos", "aarch64", "zip", true),
         ("macos", "x86_64", "zip", true),
+        ("chassis", "multi", "tgz", false),
     ]
 }
 
@@ -130,7 +131,11 @@ fn fixture(name: &str) -> Fixture {
         } else {
             ""
         };
-        let archive_name = format!("agenterm-{VERSION}-{os}-{arch}{suffix}.{extension}");
+        let archive_name = if os == "chassis" {
+            format!("agenterm-{VERSION}-chassis-product.{extension}")
+        } else {
+            format!("agenterm-{VERSION}-{os}-{arch}{suffix}.{extension}")
+        };
         let archive = assets.join(&archive_name);
         fs::write(&archive, format!("fixture archive {os} {arch}\n")).expect("write archive");
         let archive_hash = sha256(&archive);
@@ -320,7 +325,7 @@ fn releases_index_is_pure_derived_from_sealed_candidate() {
     let indexed = run_build_releases_index(&[&fixture.manifest, &fixture.assets, &index_path]);
     assert!(indexed.status.success(), "{}", output_text(&indexed));
     assert!(output_text(&indexed).contains("RELEASES_INDEX"));
-    assert!(output_text(&indexed).contains("artifacts=6"));
+    assert!(output_text(&indexed).contains("artifacts=7"));
 
     let index: Value =
         serde_json::from_str(&fs::read_to_string(&index_path).expect("read releases.json"))
@@ -336,7 +341,7 @@ fn releases_index_is_pure_derived_from_sealed_candidate() {
     let artifacts = index["releases"][0]["artifacts"]
         .as_array()
         .expect("artifacts array");
-    assert_eq!(artifacts.len(), 6);
+    assert_eq!(artifacts.len(), 7);
     let linux = artifacts
         .iter()
         .find(|a| a["os"] == "linux" && a["arch"] == "x86_64")
@@ -349,6 +354,16 @@ fn releases_index_is_pure_derived_from_sealed_candidate() {
         format!("agenterm-{VERSION}-linux-x86_64.tar.gz")
     );
     assert_eq!(linux["source_commit"], SOURCE_SHA);
+    let chassis = artifacts
+        .iter()
+        .find(|a| a["os"] == "chassis" && a["arch"] == "multi")
+        .expect("chassis multi-cell product artifact");
+    assert_eq!(chassis["variant"], "release");
+    assert_eq!(chassis["distribution"], "stable");
+    assert_eq!(
+        chassis["name"],
+        format!("agenterm-{VERSION}-chassis-product.tgz")
+    );
     let mac = artifacts
         .iter()
         .find(|a| a["os"] == "macos" && a["arch"] == "aarch64")
