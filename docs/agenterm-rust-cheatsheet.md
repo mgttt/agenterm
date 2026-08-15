@@ -1911,6 +1911,16 @@ protect it before reading or writing authority state, reject link-like store
 entries, and create every replacement temporary with the platform's private
 exclusive-create options rather than ordinary umask-dependent defaults.
 
+For a persisted authorization attempt, keep the order explicit and testable:
+open the audit, resolve the verified binding, durably reserve the use, flush an
+attempt record, resolve the binding again immediately before dispatch, then
+write the outcome with the same decision ID. A reservation is not refundable
+after an audit or mechanism failure. If the binding disappears or changes
+after reservation, record a failed no-dispatch outcome; if reservation
+publication reports uncertain durability, return authorization-in-doubt and do
+not execute or retry. Never put the session digest or installation key in the
+audit merely to prove the comparison occurred.
+
 For window placement, compensation is a saga, never an atomicity claim. Read
 the exact native bounds, revalidate handle plus process/application identity,
 apply, independently read back the final rect, then publish cloned history.

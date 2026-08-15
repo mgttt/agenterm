@@ -107,9 +107,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   now uses that production path, generates opaque IDs from platform entropy,
   explicitly enrolls and resolves the sealed binding, and projects records
   without session identity. It rejects ambient authorization selectors and
-  sanitizes store failures. `--grant-id` command execution, executor/audit
-  decisions and session-nonce invalidation remain open, so management alone is
-  not an authority path.
+  sanitizes store failures. Current-target `--grant-id` execution now opens the
+  audit first, resolves the verified binding, durably reserves one attempt,
+  flushes an authorized attempt record, re-resolves the exact binding before
+  dispatch, and writes the outcome with the same opaque decision ID. Denials
+  are recorded without consuming uses; a failed downstream command does not
+  refund a reserved use. Session identity/key material is absent from the
+  audit. Remote delegation and session-nonce invalidation remain open.
 - [~] A sealed `TargetBinding` contract now separates opaque provider identity
   and exact desktop-session identity from routing material. Current, SSH and
   VNC fail typed when no crate-owned verified provider is available; RDP stays

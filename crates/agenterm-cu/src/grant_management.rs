@@ -314,7 +314,7 @@ fn generated_grant_id() -> Option<String> {
     Some(format!("cu1_{}", encode_hex(&bytes)))
 }
 
-fn valid_grant_id(value: &str) -> bool {
+pub fn valid_grant_id(value: &str) -> bool {
     value.strip_prefix("cu1_").is_some_and(|hex| {
         hex.len() == 64
             && hex

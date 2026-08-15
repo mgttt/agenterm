@@ -19,6 +19,12 @@ struct AuditRecord<'a> {
     grant: &'a str,
     decision: &'a str,
     authority_scope: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decision_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grant_id: Option<&'a str>,
     outcome: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<serde_json::Value>,
@@ -108,9 +114,51 @@ impl AuditLog {
             },
             decision: "authorized",
             authority_scope: "process",
+            decision_id: None,
+            target_id: None,
+            grant_id: None,
             outcome,
             detail,
         };
+        self.write_record(&record)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_persisted(
+        &mut self,
+        target: TargetRef,
+        command: &Command,
+        grant: Grant,
+        decision_id: &str,
+        target_id: &str,
+        grant_id: &str,
+        decision: &str,
+        outcome: &str,
+        detail: Option<serde_json::Value>,
+    ) -> Result<(), CuError> {
+        let record = AuditRecord {
+            ts_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0),
+            target: target.as_str(),
+            verb: &command.verb(),
+            grant: match grant {
+                Grant::Observe => "observe",
+                Grant::Actuate => "actuate",
+            },
+            decision,
+            authority_scope: "stored_bounded",
+            decision_id: Some(decision_id),
+            target_id: Some(target_id),
+            grant_id: Some(grant_id),
+            outcome,
+            detail,
+        };
+        self.write_record(&record)
+    }
+
+    fn write_record(&mut self, record: &AuditRecord<'_>) -> Result<(), CuError> {
         let line = serde_json::to_string(&record).map_err(|error| {
             CuError::new(
                 "audit_unavailable",

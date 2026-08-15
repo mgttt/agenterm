@@ -153,8 +153,10 @@ Observation commands need the `observe` grant; actuation commands need
 (comma-separated). Local `current` is not exempt. The local management surface
 can create, list, and revoke bounded current-session grants with `grant
 create|list|revoke`; it stores them in protected machine-local product data and
-never prints the session binding. Command execution through `--grant-id` is not
-wired yet, so these persisted records do not currently authorize a command.
+never prints the session binding. `--grant-id ID` executes current-target
+commands through a durable one-attempt reservation, audit attempt flush,
+immediate binding revalidation, dispatch, and linked audit outcome. Persisted
+SSH/VNC delegation remains unsupported rather than forwarding the selector.
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote

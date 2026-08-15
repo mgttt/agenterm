@@ -32,16 +32,8 @@ fn main() {
 }
 
 fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
-    let ambient_authority_present = std::env::vars_os().any(|(key, _)| {
-        key.to_str().is_some_and(|key| {
-            ["AGENTERM_CU_GRANT", "AGENTERM_CU_AUTH"]
-                .iter()
-                .any(|prefix| {
-                    key.get(..prefix.len())
-                        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-                })
-        })
-    });
+    let (ambient_authority_present, unsupported_authority_environment) =
+        authority_environment_flags();
     if let Some(reply) = agenterm_cu::grant_management::dispatch(&args, ambient_authority_present) {
         return reply;
     }
@@ -51,6 +43,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     }
 
     let mut grant: Option<String> = None;
+    let mut grant_id: Option<String> = None;
+    let mut grant_store: Option<PathBuf> = None;
     let mut target: Option<TargetRef> = None;
     let mut ssh_dest: Option<String> = None;
     let mut ssh_port: Option<u16> = None;
@@ -164,7 +158,30 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 }
             }
             "--grant" => {
+                if grant.is_some() {
+                    return usage_err("duplicate --grant");
+                }
                 grant = Some(take_value(&mut args, "--grant"));
+            }
+            "--grant-id" => {
+                if grant_id.is_some() {
+                    return usage_err("duplicate --grant-id");
+                }
+                let value = take_value(&mut args, "--grant-id");
+                if !agenterm_cu::grant_management::valid_grant_id(&value) {
+                    return usage_err("--grant-id is invalid");
+                }
+                grant_id = Some(value);
+            }
+            "--grant-store" => {
+                if grant_store.is_some() {
+                    return usage_err("duplicate --grant-store");
+                }
+                let value = take_value(&mut args, "--grant-store");
+                if value.is_empty() {
+                    return usage_err("--grant-store requires a path");
+                }
+                grant_store = Some(PathBuf::from(value));
             }
             _ if flag.starts_with('-') => {
                 return usage_err(format!("unknown global flag '{flag}'"));
@@ -179,6 +196,12 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         let mut exec_args: Vec<String> = Vec::new();
         if let Some(raw) = grant.as_ref() {
             exec_args.push(format!("--grant={raw}"));
+        }
+        if let Some(id) = grant_id.as_ref() {
+            exec_args.push(format!("--grant-id={id}"));
+        }
+        if let Some(path) = grant_store.as_ref() {
+            exec_args.push(format!("--grant-store={}", path.display()));
         }
         exec_args.extend(args.into_iter().skip(1));
         return dispatch_json(&exec_args);
@@ -648,7 +671,38 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         other => return usage_err(format!("unknown command '{other}'")),
     };
 
-    let auth = match resolve_authorization(grant.as_deref()) {
+    if grant_id.is_some() && (grant.is_some() || ambient_authority_present) {
+        return agenterm_cu::CuReply {
+            ok: false,
+            target: command.target().as_str().into(),
+            command: command.verb(),
+            data: None,
+            error: Some(agenterm_cu::CuError::new(
+                "invalid_authorization",
+                "--grant-id cannot be combined with another authorization source",
+            )),
+        };
+    }
+    if grant_id.is_none() && grant_store.is_some() {
+        return usage_err("--grant-store requires --grant-id for command execution");
+    }
+    if grant_id.is_none() && unsupported_authority_environment {
+        return agenterm_cu::CuReply {
+            ok: false,
+            target: command.target().as_str().into(),
+            command: command.verb(),
+            data: None,
+            error: Some(agenterm_cu::CuError::new(
+                "invalid_authorization",
+                "unsupported authorization environment selector is present",
+            )),
+        };
+    }
+    let auth = match if grant_id.is_some() {
+        Ok(Authorization::new(Default::default()))
+    } else {
+        resolve_authorization(grant.as_deref())
+    } {
         Ok(auth) => auth,
         Err(error) => {
             return agenterm_cu::CuReply {
@@ -661,6 +715,25 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         }
     };
     let mut executor = Executor::new(auth);
+    if let Some(grant_id) = grant_id {
+        let store_path =
+            match grant_store.map_or_else(agenterm_cu::auth_store::AuthStore::default_path, Ok) {
+                Ok(path) => path,
+                Err(_) => {
+                    return agenterm_cu::CuReply {
+                        ok: false,
+                        target: command.target().as_str().into(),
+                        command: command.verb(),
+                        data: None,
+                        error: Some(agenterm_cu::CuError::new(
+                            "grant_store_unavailable",
+                            "grant store is unavailable",
+                        )),
+                    };
+                }
+            };
+        executor = executor.with_persisted_grant(grant_id, store_path);
+    }
     if target == TargetRef::Ssh {
         let dest = ssh_dest.expect("ssh destination checked above");
         match SshEndpoint::from_parts(dest, ssh_port, ssh_identity, ssh_cu, ssh_env) {
@@ -713,15 +786,41 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
 
 fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
     let mut grant: Option<String> = None;
+    let mut grant_id: Option<String> = None;
+    let mut grant_store: Option<PathBuf> = None;
     let mut payload = None;
     let mut read_stdin = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
         if let Some(value) = arg.strip_prefix("--grant=") {
+            if grant.is_some() {
+                return usage_err("duplicate --grant");
+            }
             grant = Some(value.to_owned());
             i += 1;
+        } else if let Some(value) = arg.strip_prefix("--grant-id=") {
+            if grant_id.is_some() {
+                return usage_err("duplicate --grant-id");
+            }
+            if !agenterm_cu::grant_management::valid_grant_id(value) {
+                return usage_err("--grant-id is invalid");
+            }
+            grant_id = Some(value.to_owned());
+            i += 1;
+        } else if let Some(value) = arg.strip_prefix("--grant-store=") {
+            if grant_store.is_some() {
+                return usage_err("duplicate --grant-store");
+            }
+            if value.is_empty() {
+                return usage_err("--grant-store requires a path");
+            }
+            grant_store = Some(PathBuf::from(value));
+            i += 1;
         } else if arg == "--grant" {
+            if grant.is_some() {
+                return usage_err("duplicate --grant");
+            }
             i += 1;
             if let Some(value) = args.get(i) {
                 grant = Some(value.clone());
@@ -771,7 +870,39 @@ fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
         Ok(command) => command,
         Err(error) => return usage_err(format!("invalid JSON command: {error}")),
     };
-    let auth = match resolve_authorization(grant.as_deref()) {
+    let (ambient, unsupported_authority_environment) = authority_environment_flags();
+    if grant_id.is_some() && (grant.is_some() || ambient) {
+        return agenterm_cu::CuReply {
+            ok: false,
+            target: command.target().as_str().into(),
+            command: command.verb(),
+            data: None,
+            error: Some(agenterm_cu::CuError::new(
+                "invalid_authorization",
+                "--grant-id cannot be combined with another authorization source",
+            )),
+        };
+    }
+    if grant_id.is_none() && grant_store.is_some() {
+        return usage_err("--grant-store requires --grant-id for command execution");
+    }
+    if grant_id.is_none() && unsupported_authority_environment {
+        return agenterm_cu::CuReply {
+            ok: false,
+            target: command.target().as_str().into(),
+            command: command.verb(),
+            data: None,
+            error: Some(agenterm_cu::CuError::new(
+                "invalid_authorization",
+                "unsupported authorization environment selector is present",
+            )),
+        };
+    }
+    let auth = match if grant_id.is_some() {
+        Ok(Authorization::new(Default::default()))
+    } else {
+        resolve_authorization(grant.as_deref())
+    } {
         Ok(auth) => auth,
         Err(error) => {
             return agenterm_cu::CuReply {
@@ -783,7 +914,48 @@ fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
             };
         }
     };
-    Executor::new(auth).execute(&command)
+    let mut executor = Executor::new(auth);
+    if let Some(grant_id) = grant_id {
+        let store_path =
+            match grant_store.map_or_else(agenterm_cu::auth_store::AuthStore::default_path, Ok) {
+                Ok(path) => path,
+                Err(_) => {
+                    return agenterm_cu::CuReply {
+                        ok: false,
+                        target: command.target().as_str().into(),
+                        command: command.verb(),
+                        data: None,
+                        error: Some(agenterm_cu::CuError::new(
+                            "grant_store_unavailable",
+                            "grant store is unavailable",
+                        )),
+                    };
+                }
+            };
+        executor = executor.with_persisted_grant(grant_id, store_path);
+    }
+    executor.execute(&command)
+}
+
+fn authority_environment_flags() -> (bool, bool) {
+    let mut any = false;
+    let mut unsupported = false;
+    for (key, _) in std::env::vars_os() {
+        let Some(key) = key.to_str() else { continue };
+        let reserved = ["AGENTERM_CU_GRANT", "AGENTERM_CU_AUTH"]
+            .iter()
+            .any(|prefix| {
+                key.get(..prefix.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+            });
+        if reserved {
+            any = true;
+            if !key.eq_ignore_ascii_case("AGENTERM_CU_GRANT") {
+                unsupported = true;
+            }
+        }
+    }
+    (any, unsupported)
 }
 
 fn resolve_authorization(cli_grant: Option<&str>) -> Result<Authorization, agenterm_cu::CuError> {
@@ -925,6 +1097,9 @@ Global:
                             no connect / TLS / CredSSP; always rdp_unavailable)
   --grant observe,actuate   strict authorization scopes; CLI wins over
                             AGENTERM_CU_GRANT and sources never union
+  --grant-id ID             bounded persisted current-target grant selector;
+                            mutually exclusive with every other auth source
+  --grant-store PATH        explicit store override; valid only with --grant-id
 
   grant management is local/current only. It refuses ambient AGENTERM_CU_GRANT*
   and AGENTERM_CU_AUTH* selectors; --grant-store is an explicit test/admin seam.
