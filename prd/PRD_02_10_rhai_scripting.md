@@ -308,10 +308,11 @@ this parity test.
   script, child, cancelled, Fleet, protocol, and host classes; the CLI maps
   them to documented process codes, and `Output.require_success(code)`
   explicitly propagates a required nonzero child exit.
-- [x] `Output.require_success(code)` is the first catchable typed-error slice:
-  Rhai receives class, code, operation, safe message, retryability, target
-  kind, truncation, and optional cause class from the same object used by the
-  unhandled CLI result; other public runtime errors migrate incrementally.
+- [x] `Output.require_success(code)` emits the same stable `child_nonzero`
+  typed Child envelope and caller label as other unhandled CLI failures.
+- [ ] Script-level catch of that typed object remains planned: the native AOT
+  try/catch ABI currently carries integers only and must not claim map-valued
+  catch support until the typed entry/error channel is wired.
 - [x] privacy-bounded audit records contain identity, source fingerprint and
   label, API/runtime/budget facts, broker operation IDs, duration, result
   class, failure, cancellation, timeout, and crash, but never source, argv,

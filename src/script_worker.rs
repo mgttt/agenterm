@@ -733,7 +733,7 @@ fn dispatch_via_engine(
         ScriptOperation::Run | ScriptOperation::Eval => {
             let result = engine
                 .execute(source, options, fleet_bridge)
-                .map_err(|error| configuration_error(backend_code, error))?;
+                .map_err(|error| engine_execution_error(&backend_code, error))?;
             Ok((result.stdout, result.value))
         }
         // Unreachable in practice: `execute_inner` short-circuits
@@ -806,6 +806,18 @@ fn configuration_error(code: impl Into<String>, message: impl Into<String>) -> S
     failure(code, message, ScriptFailureCategory::Configuration)
 }
 
+fn engine_execution_error(backend_code: &str, message: String) -> ScriptFailure {
+    if backend_code == "rh_backend"
+        && let Some(rest) = message.split("rh_fail: ").nth(1)
+        && let Some(code) = rest.split(':').next()
+        && (code.starts_with("process_") || code.starts_with("child_"))
+    {
+        let code = code.to_owned();
+        return failure(code, message, ScriptFailureCategory::Child);
+    }
+    configuration_error(backend_code, message)
+}
+
 fn limit_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
     failure(code, message, ScriptFailureCategory::Limit)
 }
@@ -849,6 +861,16 @@ mod tests {
         } else {
             format!("fn entry() {{ {body} }}")
         }
+    }
+
+    #[test]
+    fn rh_process_failure_retains_child_exit_class() {
+        let failure = engine_execution_error(
+            "rh_backend",
+            "rh compile error: rh_fail: process_spawn: missing".to_owned(),
+        );
+        assert_eq!(failure.code, "process_spawn");
+        assert_eq!(failure.category, ScriptFailureCategory::Child);
     }
 
     fn invocation(operation: ScriptOperation, source: &str) -> ScriptInvocation {

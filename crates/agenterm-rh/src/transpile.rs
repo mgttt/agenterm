@@ -37,6 +37,7 @@ enum ValueKind {
     WindowRect,
     Stream,
     Bytes,
+    Task,
     /// `std::fs::try_lock_exclusive` attempt. The binding OWNS the locked file
     /// handle, so the lock is held for the binding's scope exactly like the
     /// hosted `FileLockAttempt` value.
@@ -203,6 +204,7 @@ impl EmitCtx {
                 | ValueKind::WindowRect
                 | ValueKind::Stream
                 | ValueKind::Bytes
+                | ValueKind::Task
                 | ValueKind::FileLock => {
                     out.push_str(&format!(
                         "\\\"{name}\\\":{{{{\\\"kind\\\":\\\"json\\\",\\\"value\\\":{{}}}}}}"
@@ -1113,7 +1115,8 @@ fn call_site_arg_kind_for_param_upgrade(arg: &Expr, ctx: &EmitCtx) -> Option<Val
                 | ValueKind::WindowRect
                 | ValueKind::StringList
                 | ValueKind::Stream
-                | ValueKind::Bytes),
+                | ValueKind::Bytes
+                | ValueKind::Task),
             ) => kind,
             _ if ctx.empty_child_lists.contains(ident.1.as_str()) => ValueKind::ChildList,
             _ => return None,
@@ -3325,6 +3328,7 @@ fn fail_return_default(kind: ValueKind) -> Option<&'static str> {
         }
         ValueKind::WindowRect => Some("RhWindowRect { left: 0, top: 0, right: 0, bottom: 0 }"),
         ValueKind::Bytes => Some("RhBytes { bytes: Vec::new() }"),
+        ValueKind::Task => Some("rh_task_after(0)"),
         ValueKind::Command => None,
         ValueKind::Char
         | ValueKind::Metadata
@@ -3515,6 +3519,24 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         _ if std_process_list(expr) => ValueKind::Json,
         _ if std_process_id(expr) => ValueKind::Int,
         _ if std_process_command_arg(expr).is_some() => ValueKind::Command,
+        _ if task_after_arg(expr).is_some() => ValueKind::Task,
+        _ if task_race_call(expr) => ValueKind::Int,
+        _ if task_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| matches!(property, "kind" | "state")) =>
+        {
+            ValueKind::String
+        }
+        _ if task_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| matches!(property, "done" | "cancelled")) =>
+        {
+            ValueKind::Bool
+        }
+        _ if task_property_binding(expr, ctx).is_some() => ValueKind::Int,
+        _ if task_method_call(expr, ctx)
+            .is_some_and(|(_, call)| call.name == "cancel" && call.args.is_empty()) =>
+        {
+            ValueKind::Bool
+        }
         _ if command_output_call(expr, ctx).is_some() => ValueKind::Output,
         _ if command_start_call(expr, ctx).is_some() => ValueKind::Child,
         _ if local_command_receiver_call(expr, ctx, "output").is_some() => ValueKind::Output,
@@ -3528,6 +3550,17 @@ fn infer_binding_kind(expr: &Expr, ctx: &EmitCtx) -> ValueKind {
         {
             ValueKind::Bytes
         }
+        _ if stream_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| matches!(property, "kind" | "state")) =>
+        {
+            ValueKind::String
+        }
+        _ if stream_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| matches!(property, "truncated" | "complete")) =>
+        {
+            ValueKind::Bool
+        }
+        _ if stream_property_binding(expr, ctx).is_some() => ValueKind::Int,
         _ if bytes_property_binding(expr, ctx).is_some() => ValueKind::Int,
         _ if char_to_string_binding(expr, ctx).is_some() => ValueKind::String,
         _ if child_property_binding(expr, ctx)
@@ -5018,6 +5051,25 @@ fn bytes_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a 
     command_binding_method(expr, ctx, ValueKind::Bytes)
 }
 
+fn task_method_call<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a rhai::FnCallExpr)> {
+    command_binding_method(expr, ctx, ValueKind::Task)
+}
+
+fn task_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Task) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    matches!(property, "id" | "kind" | "state" | "done" | "cancelled")
+        .then_some((ident.1.as_str(), property))
+}
+
 fn window_control_method_call<'a>(
     expr: &'a Expr,
     ctx: &EmitCtx,
@@ -5136,6 +5188,24 @@ fn output_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str
     matches!(
         property,
         "success" | "exit_code" | "stdout" | "stderr" | "truncated" | "complete"
+    )
+    .then_some((ident.1.as_str(), property))
+}
+
+fn stream_property_binding<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Stream) {
+        return None;
+    }
+    let property = dot_property_name(&boxed.rhs)?;
+    matches!(
+        property,
+        "id" | "kind" | "state" | "buffered_bytes" | "truncated" | "complete"
     )
     .then_some((ident.1.as_str(), property))
 }
@@ -5282,6 +5352,108 @@ fn emit_task_sleep_stmt(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
     out.push_str("    std::thread::sleep(std::time::Duration::from_millis((");
     out.push_str(&ms);
     out.push_str(").max(0) as u64));\n");
+    Ok(true)
+}
+
+fn task_after_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::FnCall(call, ..) = expr else {
+        return None;
+    };
+    if is_host_api_call(call, "task", "after", 1) {
+        Some(&call.args[0])
+    } else {
+        None
+    }
+}
+
+fn emit_task_after(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let Some(duration) = task_after_arg(expr) else {
+        return Ok(false);
+    };
+    out.push_str("rh_task_after(");
+    if !emit_duration_ms(out, duration, ctx)? {
+        return Ok(false);
+    }
+    out.push(')');
+    Ok(true)
+}
+
+fn emit_task_race(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let Expr::FnCall(call, ..) = expr else {
+        return Ok(false);
+    };
+    if !task_race_call(expr) {
+        return Ok(false);
+    }
+    let Expr::Array(tasks, ..) = &call.args[0] else {
+        return Ok(false);
+    };
+    out.push_str("rh_task_race(&mut vec![");
+    for (index, task) in tasks.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        let Expr::Variable(ident, ..) = task else {
+            return Ok(false);
+        };
+        if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Task) {
+            return Ok(false);
+        }
+        out.push_str(ident.1.as_str());
+        out.push_str(".clone()");
+    }
+    out.push_str("], ");
+    if !emit_duration_ms(out, &call.args[1], ctx)? {
+        return Ok(false);
+    }
+    out.push(')');
+    Ok(true)
+}
+
+fn task_race_call(expr: &Expr) -> bool {
+    matches!(expr, Expr::FnCall(call, ..) if is_host_api_call(call, "task", "race", 2))
+}
+
+fn emit_task_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, call)) = task_method_call(expr, ctx) else {
+        return Ok(false);
+    };
+    match call.name.as_str() {
+        "wait" if call.args.is_empty() => {
+            out.push_str("rh_task_wait(&mut ");
+            out.push_str(binding);
+            out.push_str(", -1)");
+            Ok(true)
+        }
+        "wait" if call.args.len() == 1 => {
+            out.push_str("rh_task_wait(&mut ");
+            out.push_str(binding);
+            out.push_str(", ");
+            if !emit_duration_ms(out, &call.args[0], ctx)? {
+                return Ok(false);
+            }
+            out.push(')');
+            Ok(true)
+        }
+        "cancel" if call.args.is_empty() => {
+            out.push_str("rh_task_cancel(&mut ");
+            out.push_str(binding);
+            out.push(')');
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn emit_task_property(out: &mut String, expr: &Expr, ctx: &EmitCtx) -> Result<bool, RhError> {
+    let Some((binding, property)) = task_property_binding(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str("rh_task_");
+    out.push_str(property);
+    out.push_str("(&mut ");
+    out.push_str(binding);
+    out.push(')');
     Ok(true)
 }
 
@@ -6272,6 +6444,8 @@ fn is_native_json_value_item(expr: &Expr, ctx: &EmitCtx) -> bool {
                 || output_property_binding(expr, ctx).is_some()
                 || output_stdout_text_call(expr, ctx).is_some()
                 || output_stderr_text_call(expr, ctx).is_some()
+                || task_property_binding(expr, ctx).is_some()
+                || task_race_call(expr)
                 || std_process_id(expr)
                 || std_time_system_time_now_unix_millis(expr)
                 || is_pure_int_expr(expr)
@@ -7640,6 +7814,8 @@ fn is_explicit_string_expr(expr: &Expr, ctx: &EmitCtx) -> bool {
         || fs_metadata_modified_rfc3339(expr).is_some()
         || dir_entry_metadata_modified_rfc3339(expr, ctx).is_some()
         || child_state_binding(expr, ctx).is_some()
+        || task_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| matches!(property, "kind" | "state"))
         || output_stdout_text_call(expr, ctx).is_some()
         || output_stderr_text_call(expr, ctx).is_some()
         || parse_string_method_call(expr, ctx).is_some_and(|(_, call)| {
@@ -8004,6 +8180,11 @@ fn emit_stringish(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<()
             out.push_str(binding);
             out.push(')');
         }
+        _ if task_property_binding(expr, ctx)
+            .is_some_and(|(_, property)| matches!(property, "kind" | "state")) =>
+        {
+            emit_task_property(out, expr, ctx)?;
+        }
         _ if let Some(binding) = output_stdout_text_call(expr, ctx) => {
             out.push_str("rh_output_stdout_text(&");
             out.push_str(binding);
@@ -8213,6 +8394,12 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
                 out.push_str("    0\n}");
                 return Ok(());
             }
+        }
+        if emit_task_after(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_task_race(out, expr, ctx)? {
+            return Ok(());
         }
         if let Some(path) = std_fs_exists_arg(expr)
             && emit_std_fs_exists(out, path, ctx)?
@@ -8600,6 +8787,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
         if emit_bytes_method(out, expr, ctx)? {
             return Ok(());
         }
+        if emit_task_method(out, expr, ctx)? {
+            return Ok(());
+        }
         if emit_output_property(out, expr, ctx)? {
             return Ok(());
         }
@@ -8613,6 +8803,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_bytes_property(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_task_property(out, expr, ctx)? {
             return Ok(());
         }
         if std_time_system_time_now_rfc3339(expr) {
@@ -9239,6 +9432,46 @@ fn emit_json_value_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Res
                     out.push_str(binding);
                     out.push('.');
                     out.push_str(property);
+                    out.push(')');
+                }
+            }
+        }
+        _ if stream_property_binding(expr, ctx).is_some() => {
+            let (_, property) = stream_property_binding(expr, ctx).expect("checked stream");
+            match property {
+                "kind" | "state" => {
+                    out.push_str("serde_json::Value::String(");
+                    emit_stringish(out, expr, ctx)?;
+                    out.push(')');
+                }
+                "truncated" | "complete" => {
+                    out.push_str("serde_json::Value::Bool(");
+                    emit_expr(out, expr, ctx)?;
+                    out.push_str(" != 0)");
+                }
+                _ => {
+                    out.push_str("serde_json::json!(");
+                    emit_expr(out, expr, ctx)?;
+                    out.push(')');
+                }
+            }
+        }
+        _ if task_property_binding(expr, ctx).is_some() => {
+            let (_, property) = task_property_binding(expr, ctx).expect("checked task");
+            match property {
+                "kind" | "state" => {
+                    out.push_str("serde_json::Value::String(");
+                    emit_task_property(out, expr, ctx)?;
+                    out.push(')');
+                }
+                "done" | "cancelled" => {
+                    out.push_str("serde_json::Value::Bool(");
+                    emit_task_property(out, expr, ctx)?;
+                    out.push_str(" != 0)");
+                }
+                _ => {
+                    out.push_str("serde_json::json!(");
+                    emit_task_property(out, expr, ctx)?;
                     out.push(')');
                 }
             }
@@ -15751,6 +15984,56 @@ fn entry() {
             output.rust.contains(
                 "std::thread::sleep(std::time::Duration::from_millis((1).max(0) as u64));"
             ),
+            "{}",
+            output.rust
+        );
+        assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
+    }
+
+    #[test]
+    fn cdylib_transpile_task_timer_race_wait_cancel_and_properties_native() {
+        let output = transpile_cdylib_with_mode(
+            r#"
+fn entry() {
+    let slow = rh::task::after(std::time::Duration::from_millis(100));
+    let fast = rh::task::after(std::time::Duration::from_millis(1));
+    let winner = rh::task::race([slow, fast], std::time::Duration::from_secs(1));
+    fast.wait();
+    let changed = slow.cancel();
+    require(winner == 1 && fast.done && slow.cancelled && changed, slow.state);
+    let snapshot = #{winner: winner, done: fast.done, cancelled: slow.cancelled};
+    print(rh::json::stringify(snapshot));
+    0
+}
+"#,
+        )
+        .expect("transpile");
+        assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
+        assert!(output.rust.contains("rh_task_after(100)"), "{}", output.rust);
+        assert!(
+            output
+                .rust
+                .contains("rh_task_race(&mut vec![slow.clone(), fast.clone()], 1 * 1000)"),
+            "{}",
+            output.rust
+        );
+        assert!(output.rust.contains("rh_task_wait(&mut fast, -1)"), "{}", output.rust);
+        assert!(output.rust.contains("rh_task_cancel(&mut slow)"), "{}", output.rust);
+        assert!(output.rust.contains("rh_task_done(&mut fast)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_task_cancelled(&mut slow)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("serde_json::json!(winner)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output
+                .rust
+                .contains("serde_json::Value::Bool(rh_task_done(&mut fast) != 0)"),
             "{}",
             output.rust
         );

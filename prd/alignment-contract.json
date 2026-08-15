@@ -543,7 +543,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`Output.require_success(code)` is the first catchable typed-error slice",
+      "prd": "`Output.require_success(code)` emits the same stable `child_nonzero`",
       "evidence_ids": ["script.typed-errors"]
     },
     {

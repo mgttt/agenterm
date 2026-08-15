@@ -1,7 +1,7 @@
 //! C ABI between rh native packs and the embedding host (worker, gateway, CC).
 
 pub const RH_HOST_API_VERSION: u32 = 13;
-pub const RH_CODEGEN_REVISION: u32 = 101;
+pub const RH_CODEGEN_REVISION: u32 = 107;
 
 /// First-class host API module root registered on the Engine and accepted by AOT emit.
 pub const RH_HOST_API_ROOT: &str = "rh";
@@ -889,11 +889,118 @@ pub fn emit_host_runtime(out: &mut String) {
              state: String,\n\
              capture_limit: usize,\n\
          }\n\n\
-        struct RhStream {\n\
-            receiver: std::sync::mpsc::Receiver<Vec<u8>>,\n\
-        }\n\n\
+         struct RhStream {\n\
+             receiver: std::sync::mpsc::Receiver<Vec<u8>>,\n\
+             pending: Vec<u8>,\n\
+         }\n\n\
         struct RhBytes {\n\
             bytes: Vec<u8>,\n\
+        }\n\n\
+        #[derive(Clone)]\n\
+        struct RhTask {\n\
+            inner: std::rc::Rc<std::cell::RefCell<RhTaskInner>>,\n\
+        }\n\n\
+        struct RhTaskInner {\n\
+            id: INT,\n\
+            deadline: std::time::Instant,\n\
+            state: &'static str,\n\
+        }\n\n\
+        static RH_NEXT_TASK_ID: std::sync::atomic::AtomicI64 =\n\
+            std::sync::atomic::AtomicI64::new(1);\n\n\
+        fn rh_task_after(duration_ms: INT) -> RhTask {\n\
+            RhTask {\n\
+                inner: std::rc::Rc::new(std::cell::RefCell::new(RhTaskInner {\n\
+                    id: RH_NEXT_TASK_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),\n\
+                    deadline: std::time::Instant::now()\n\
+                        + std::time::Duration::from_millis(duration_ms.max(0) as u64),\n\
+                    state: \"pending\",\n\
+                })),\n\
+            }\n\
+        }\n\n\
+        fn rh_task_refresh(task: &mut RhTask) {\n\
+            let mut inner = task.inner.borrow_mut();\n\
+            if inner.state == \"pending\" && std::time::Instant::now() >= inner.deadline {\n\
+                inner.state = \"completed\";\n\
+            }\n\
+        }\n\n\
+        fn rh_task_id(task: &mut RhTask) -> INT {\n\
+            task.inner.borrow().id\n\
+        }\n\n\
+        fn rh_task_kind(_task: &mut RhTask) -> String {\n\
+            String::from(\"timer\")\n\
+        }\n\n\
+        fn rh_task_state(task: &mut RhTask) -> String {\n\
+            rh_task_refresh(task);\n\
+            task.inner.borrow().state.to_owned()\n\
+        }\n\n\
+        fn rh_task_done(task: &mut RhTask) -> INT {\n\
+            rh_task_refresh(task);\n\
+            (task.inner.borrow().state != \"pending\") as INT\n\
+        }\n\n\
+        fn rh_task_cancelled(task: &mut RhTask) -> INT {\n\
+            rh_task_refresh(task);\n\
+            (task.inner.borrow().state == \"cancelled\") as INT\n\
+        }\n\n\
+        fn rh_task_cancel(task: &mut RhTask) -> INT {\n\
+            rh_task_refresh(task);\n\
+            let mut inner = task.inner.borrow_mut();\n\
+            if inner.state != \"pending\" {\n\
+                return 0;\n\
+            }\n\
+            inner.state = \"cancelled\";\n\
+            1\n\
+        }\n\n\
+        fn rh_task_wait(task: &mut RhTask, timeout_ms: INT) -> INT {\n\
+            rh_task_refresh(task);\n\
+            let (state, remaining) = {\n\
+                let inner = task.inner.borrow();\n\
+                (\n\
+                    inner.state,\n\
+                    inner.deadline.saturating_duration_since(std::time::Instant::now()),\n\
+                )\n\
+            };\n\
+            if state == \"cancelled\" {\n\
+                return rh_fail(\"task_cancelled: task was cancelled\");\n\
+            }\n\
+            if state == \"completed\" {\n\
+                return 0;\n\
+            }\n\
+            if timeout_ms >= 0 && remaining > std::time::Duration::from_millis(timeout_ms as u64) {\n\
+                std::thread::sleep(std::time::Duration::from_millis(timeout_ms as u64));\n\
+                return rh_fail(\"task_wait_timeout: task remained pending\");\n\
+            }\n\
+            std::thread::sleep(remaining);\n\
+            rh_task_refresh(task);\n\
+            0\n\
+        }\n\n\
+        fn rh_task_race(tasks: &mut [RhTask], timeout_ms: INT) -> INT {\n\
+            if tasks.is_empty() {\n\
+                return rh_fail(\"task_race_empty: at least one task is required\");\n\
+            }\n\
+            if tasks.len() > 64 {\n\
+                return rh_fail(\"task_collection_too_large: maximum is 64\");\n\
+            }\n\
+            let started = std::time::Instant::now();\n\
+            loop {\n\
+                for (index, task) in tasks.iter_mut().enumerate() {\n\
+                    rh_task_refresh(task);\n\
+                    match task.inner.borrow().state {\n\
+                        \"completed\" => return index as INT,\n\
+                        \"cancelled\" => {\n\
+                            return rh_fail(&format!(\n\
+                                \"task_cancelled: raced task {index} was cancelled\"\n\
+                            ));\n\
+                        }\n\
+                        _ => {}\n\
+                    }\n\
+                }\n\
+                if timeout_ms >= 0\n\
+                    && started.elapsed() >= std::time::Duration::from_millis(timeout_ms as u64)\n\
+                {\n\
+                    return rh_fail(\"task_wait_timeout: no raced task completed\");\n\
+                }\n\
+                std::thread::sleep(std::time::Duration::from_millis(1));\n\
+            }\n\
         }\n\n\
          impl Clone for RhChild {\n\
              fn clone(&self) -> Self {\n\
@@ -1326,7 +1433,7 @@ pub fn emit_host_runtime(out: &mut String) {
              if output.success != 0 {\n\
                  return 0;\n\
              }\n\
-             rh_fail(message)\n\
+             rh_fail(&format!(\"child_nonzero: {message}\"))\n\
          }\n\n\
          fn rh_child_state(child: &mut RhChild) -> String {\n\
              let mut inner = child.inner.borrow_mut();\n\
@@ -1375,7 +1482,7 @@ pub fn emit_host_runtime(out: &mut String) {
                     }\n\
                 });\n\
             }\n\
-            RhStream { receiver }\n\
+            RhStream { receiver, pending: Vec::new() }\n\
         }\n\n\
         fn rh_child_stderr(child: &mut RhChild) -> RhStream {\n\
             let pipe = child\n\
@@ -1401,12 +1508,17 @@ pub fn emit_host_runtime(out: &mut String) {
                     }\n\
                 });\n\
             }\n\
-            RhStream { receiver }\n\
+            RhStream { receiver, pending: Vec::new() }\n\
         }\n\n\
         fn rh_stream_read(stream: &mut RhStream, limit: INT, timeout_ms: INT) -> RhBytes {\n\
             let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);\n\
-            let mut bytes = stream.receiver.recv_timeout(timeout).unwrap_or_default();\n\
-            bytes.truncate(usize::try_from(limit.max(0)).unwrap_or(0));\n\
+            if stream.pending.is_empty() {\n\
+                stream.pending = stream.receiver.recv_timeout(timeout).unwrap_or_default();\n\
+            }\n\
+            let count = usize::try_from(limit.max(0))\n\
+                .unwrap_or(0)\n\
+                .min(stream.pending.len());\n\
+            let bytes = stream.pending.drain(..count).collect();\n\
             RhBytes { bytes }\n\
         }\n\n\
         fn rh_bytes_to_text(bytes: &RhBytes) -> String {\n\

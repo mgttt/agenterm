@@ -1534,9 +1534,7 @@ pub fn catalog() -> Value {
                 "truncated",
                 "cause_class",
             ],
-            "catchable_slices": [
-                "std.process.Output.require_success",
-            ],
+            "catchable_slices": [],
         },
         "failure_categories": [
             "configuration", "limit", "script", "child", "cancelled", "fleet", "protocol", "host"

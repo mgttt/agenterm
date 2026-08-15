@@ -3372,7 +3372,10 @@ fn normalize_script_source(mut source: String) -> String {
 /// engine backend so file-backed scripts and direct engine callers continue to
 /// fail closed when their program omits the required entry point.
 fn script_eval_entry_source(expression: &str) -> String {
-    format!("fn entry() {{ {expression} }}")
+    format!(
+        "fn __agenterm_eval_expression() {{ {expression} }}\nfn entry() {{ let __agenterm_eval_value = __agenterm_eval_expression(); print(\"{}\" + rh::json::stringify(__agenterm_eval_value)); 0 }}",
+        crate::script_protocol::RH_EVAL_VALUE_MARKER
+    )
 }
 
 fn script_operand(arguments: &[String]) -> Option<&str> {
@@ -4235,10 +4238,12 @@ mod tests {
 
     #[test]
     fn script_eval_wraps_expression_at_the_command_boundary() {
-        assert_eq!(
-            script_eval_entry_source("let value = 40; value + 2"),
-            "fn entry() { let value = 40; value + 2 }"
-        );
+        let source = script_eval_entry_source("let value = 40; value + 2");
+        assert!(source.starts_with("fn __agenterm_eval_expression() {"));
+        assert!(source.contains("fn entry() {"));
+        assert!(source.contains(crate::script_protocol::RH_EVAL_VALUE_MARKER));
+        assert!(source.contains("rh::json::stringify(__agenterm_eval_value)"));
+        assert!(source.ends_with("; 0 }"));
     }
 
     #[test]

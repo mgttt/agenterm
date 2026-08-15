@@ -120,7 +120,11 @@ fn run_program(
     require(
         output.exit_code == expected_exit,
         "script_smoke_process_exit:" + program + ":" +
-            output.exit_code + ":expected:" + expected_exit + ":" +
+            output.exit_code + ":expected:" + expected_exit + ":args:" +
+            test_harness::redact_text(
+                rh::json::stringify(arguments),
+                redactions
+            ) + ":" +
             test_harness::redact_text(
                 output.stdout_text() + output.stderr_text(),
                 redactions

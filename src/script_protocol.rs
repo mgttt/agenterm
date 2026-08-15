@@ -10,6 +10,7 @@ use serde_json::Value;
 
 pub const SCRIPT_ENVELOPE_VERSION: u32 = 2;
 pub const SCRIPT_API_VERSION: u32 = 2;
+pub const RH_EVAL_VALUE_MARKER: &str = "__AGENTERM_RH_EVAL_VALUE_V1__";
 pub const SCRIPT_INVOCATION_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub const SCRIPT_FRAME_VERSION: u32 = 1;
 pub const SCRIPT_FRAME_MAX_BYTES: u32 = 2 * 1024 * 1024;
