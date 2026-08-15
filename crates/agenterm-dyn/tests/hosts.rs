@@ -106,7 +106,9 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "isatty_stdin",
                 "open_dev_null",
                 "access_root",
-                "access_missing"
+                "access_missing",
+                "fcntl_stdin_getfd",
+                "dup_stdin"
             ]
         );
         assert_eq!(
@@ -134,6 +136,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("open_dev_null", "libc.so.6", "open"),
                 ("access_root", "libc.so.6", "access"),
                 ("access_missing", "libc.so.6", "access"),
+                ("fcntl_stdin_getfd", "libc.so.6", "fcntl"),
+                ("dup_stdin", "libc.so.6", "dup"),
             ]
         );
     }

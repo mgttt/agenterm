@@ -50,7 +50,7 @@ pub struct HostCell {
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates; only Linux is live in this leaf.
-    pub system_probes: [SystemProbe; 19],
+    pub system_probes: [SystemProbe; 21],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -76,7 +76,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 19] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 21] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -210,9 +210,23 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 19] = [
             symbol: "access",
         },
     },
+    SystemProbe {
+        name: "fcntl_stdin_getfd",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "fcntl",
+        },
+    },
+    SystemProbe {
+        name: "dup_stdin",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "dup",
+        },
+    },
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 19] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 21] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -287,6 +301,14 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 19] = [
     },
     SystemProbe {
         name: "access_missing",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "fcntl_stdin_getfd",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "dup_stdin",
         status: SystemProbeStatus::Placeholder,
     },
 ];

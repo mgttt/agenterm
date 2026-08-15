@@ -425,6 +425,47 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_fcntl_stdin_getfd_matches_libc() {
+        let probe = live_system_probe("fcntl_stdin_getfd");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0 "i32" {})"#,
+                libc::F_GETFD
+            ))
+            .expect("fcntl(0, F_GETFD) dlcall");
+        let real = unsafe { libc::fcntl(0, libc::F_GETFD) };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_dup_stdin_then_close() {
+        let probe = live_system_probe("dup_stdin");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let fd = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
+            .expect("dup(0) dlcall")
+            .as_int()
+            .expect("dup return code");
+        let close =
+            (fd >= 0).then(|| env.eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#)));
+
+        assert!(fd >= 0, "dup(0) returned {fd}");
+        assert_eq!(
+            close
+                .expect("successful dup should be closed")
+                .expect("close duplicated fd dlcall"),
+            Value::Int(0)
+        );
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
