@@ -84,7 +84,7 @@ agenterm-cu (28)
   | `redo` | `SpectacleWindowActionRedo` |
 
 - [ ] unknown action → typed `invalid_input`. No alias soup beyond the table.
-- [ ] machine-readable result includes `action`, `window`, `before`, `after`,
+- [x] machine-readable result includes `action`, `window`, `before`, `after`,
   `screen`, and whether quantized / clamped adjustment ran.
 - [ ] `wait` already owned by [29](PRD_02_29_cu_command_surface.md) is the
   only legal way to observe completion. Workflows must not sleep.
@@ -111,9 +111,11 @@ agenterm-cu (28)
 - [ ] application min/max size is honored; the pipeline may undershoot the
   ideal rect but must not report success with a fabricated frame.
 
-`undo` / `redo` are **deferred leaves**. They need per-application history
-that `agenterm-cu` does not yet own. The ids stay reserved; v0.1.19 may return
-`unsupported` with that reason rather than invent a second history model.
+`undo` / `redo` now have a bounded per-application history first cut (40
+entries, redo truncation, corruption detection and same-directory replacement).
+Its deterministic persistence tests are closed, but a public real-window
+undo/redo journey and a transaction/compensation contract spanning native
+movement plus history publication remain open; this leaf is still partial.
 
 ## Layering
 
@@ -199,7 +201,7 @@ that `agenterm-cu` does not yet own. The ids stay reserved; v0.1.19 may return
 - [x] The staged `dist/agenterm-cu.exe` beside its exact `dist/agenterm.dll`
   passes `cu-windows-smoke`: version probe, dynamic load, 19 actions,
   observe-only placement refusal with unchanged bounds, authorized
-  `left-half` placement with independent bounds readback, isolated JSONL
-  attempt/outcome audit, and deterministic host cleanup.
+  `left-half` placement with destination-screen reply and independent bounds
+  readback, isolated JSONL attempt/outcome audit, and deterministic host cleanup.
 - [ ] Candidate qualification and Windows ARM64 evidence remain open. Until
   those gates close, Windows host and this subtree remain partial.

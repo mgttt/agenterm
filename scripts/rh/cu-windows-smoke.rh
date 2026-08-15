@@ -460,6 +460,19 @@ fn entry() {
         let reply_after_y = 0 + placed.data.after.y;
         let reply_after_width = 0 + placed.data.after.width;
         let reply_after_height = 0 + placed.data.after.height;
+        let reply_screen_index = 0 + placed.data.screen.index;
+        let reply_screen_x = 0 + placed.data.screen.visible.x;
+        let reply_screen_y = 0 + placed.data.screen.visible.y;
+        let reply_screen_width = 0 + placed.data.screen.visible.width;
+        let reply_screen_height = 0 + placed.data.screen.visible.height;
+        ensure(
+            reply_screen_index >= 0
+                && reply_after_x >= reply_screen_x
+                && reply_after_y >= reply_screen_y
+                && reply_after_x + reply_after_width <= reply_screen_x + reply_screen_width
+                && reply_after_y + reply_after_height <= reply_screen_y + reply_screen_height,
+            "cu_windows_smoke_window_place_screen:" + place_text
+        );
         ensure(
             reply_after_x != fixture_x_before
                 || reply_after_y != fixture_y_before

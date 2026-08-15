@@ -486,108 +486,310 @@ mod tests {
     }
     fn eq(got: Rect, x: f64, y: f64, w: f64, h: f64) {
         let want = Rect::new(x, y, w, h);
-        assert!(
-            got.almost_eq(want) || (got.x == x && got.y == y && got.width == w && got.height == h),
-            "got {got:?} want {want:?}"
-        );
-        assert_eq!(got.x, x);
-        assert_eq!(got.y, y);
-        assert_eq!(got.width, w);
-        assert_eq!(got.height, h);
+        assert_eq!(got, want);
     }
 
     #[test]
-    fn center_matches_spec() {
-        eq(
-            calc(PlaceAction::Center, Rect::new(165.0, 245.0, 564.0, 384.0)),
-            438.0,
-            249.0,
-            564.0,
-            384.0,
-        );
-    }
-
-    #[test]
-    fn fullscreen_is_visible_frame() {
-        eq(
-            calc(
-                PlaceAction::Fullscreen,
-                Rect::new(165.0, 245.0, 564.0, 384.0),
+    fn deterministic_fixtures_cover_every_stateless_action() {
+        let ordinary = Rect::new(165.0, 245.0, 564.0, 384.0);
+        let first_third = Rect::new(0.0, 4.0, 480.0, 873.0);
+        let centered = Rect::new(360.0, 222.0, 720.0, 436.0);
+        let fixtures = [
+            (
+                PlaceAction::Center,
+                ordinary,
+                Rect::new(438.0, 249.0, 564.0, 384.0),
             ),
-            0.0,
-            4.0,
-            1440.0,
-            873.0,
-        );
+            (PlaceAction::Fullscreen, ordinary, vis()),
+            (
+                PlaceAction::LeftHalf,
+                ordinary,
+                Rect::new(0.0, 4.0, 720.0, 873.0),
+            ),
+            (
+                PlaceAction::RightHalf,
+                ordinary,
+                Rect::new(720.0, 4.0, 720.0, 873.0),
+            ),
+            (
+                PlaceAction::TopHalf,
+                ordinary,
+                Rect::new(0.0, 441.0, 1440.0, 436.0),
+            ),
+            (
+                PlaceAction::BottomHalf,
+                ordinary,
+                Rect::new(0.0, 4.0, 1440.0, 436.0),
+            ),
+            (
+                PlaceAction::UpperLeft,
+                ordinary,
+                Rect::new(0.0, 441.0, 720.0, 436.0),
+            ),
+            (
+                PlaceAction::LowerLeft,
+                ordinary,
+                Rect::new(0.0, 4.0, 720.0, 436.0),
+            ),
+            (
+                PlaceAction::UpperRight,
+                ordinary,
+                Rect::new(720.0, 441.0, 720.0, 436.0),
+            ),
+            (
+                PlaceAction::LowerRight,
+                ordinary,
+                Rect::new(720.0, 4.0, 720.0, 436.0),
+            ),
+            (
+                PlaceAction::NextThird,
+                first_third,
+                Rect::new(480.0, 4.0, 480.0, 873.0),
+            ),
+            (
+                PlaceAction::PreviousThird,
+                first_third,
+                Rect::new(0.0, 4.0, 1440.0, 291.0),
+            ),
+            (
+                PlaceAction::Larger,
+                centered,
+                Rect::new(345.0, 207.0, 750.0, 466.0),
+            ),
+            (
+                PlaceAction::Smaller,
+                centered,
+                Rect::new(375.0, 237.0, 690.0, 406.0),
+            ),
+        ];
+
+        for (action, input, want) in fixtures {
+            assert_eq!(calc(action, input), want, "fixture for {action:?}");
+        }
+
+        // Display walk has a multi-screen input and is covered independently.
+        // Undo/redo deliberately have no stateless geometry; see the safe-failure test.
     }
 
     #[test]
-    fn left_half_cycles() {
-        let a = calc(PlaceAction::LeftHalf, Rect::new(165.0, 245.0, 564.0, 384.0));
-        eq(a, 0.0, 4.0, 720.0, 873.0);
-        let b = calc(PlaceAction::LeftHalf, a);
-        eq(b, 0.0, 4.0, 960.0, 873.0);
-        let c = calc(PlaceAction::LeftHalf, b);
-        eq(c, 0.0, 4.0, 480.0, 873.0);
+    fn halves_cycle_half_two_thirds_one_third_then_half() {
+        let ordinary = Rect::new(165.0, 245.0, 564.0, 384.0);
+        let cycles = [
+            (
+                PlaceAction::LeftHalf,
+                [
+                    Rect::new(0.0, 4.0, 720.0, 873.0),
+                    Rect::new(0.0, 4.0, 960.0, 873.0),
+                    Rect::new(0.0, 4.0, 480.0, 873.0),
+                ],
+            ),
+            (
+                PlaceAction::RightHalf,
+                [
+                    Rect::new(720.0, 4.0, 720.0, 873.0),
+                    Rect::new(480.0, 4.0, 960.0, 873.0),
+                    Rect::new(960.0, 4.0, 480.0, 873.0),
+                ],
+            ),
+            (
+                PlaceAction::TopHalf,
+                [
+                    Rect::new(0.0, 441.0, 1440.0, 436.0),
+                    Rect::new(0.0, 295.0, 1440.0, 582.0),
+                    Rect::new(0.0, 586.0, 1440.0, 291.0),
+                ],
+            ),
+            (
+                PlaceAction::BottomHalf,
+                [
+                    Rect::new(0.0, 4.0, 1440.0, 436.0),
+                    Rect::new(0.0, 4.0, 1440.0, 582.0),
+                    Rect::new(0.0, 4.0, 1440.0, 291.0),
+                ],
+            ),
+        ];
+
+        for (action, expected) in cycles {
+            let mut current = ordinary;
+            for want in expected {
+                current = calc(action, current);
+                assert_eq!(current, want, "cycle step for {action:?}");
+            }
+            assert_eq!(
+                calc(action, current),
+                expected[0],
+                "cycle reset for {action:?}"
+            );
+        }
     }
 
     #[test]
-    fn next_third_walks_horizontal_then_vertical() {
-        let a = calc(
-            PlaceAction::NextThird,
-            Rect::new(165.0, 245.0, 564.0, 384.0),
-        );
-        eq(a, 0.0, 4.0, 480.0, 873.0);
-        let b = calc(PlaceAction::NextThird, a);
-        eq(b, 480.0, 4.0, 480.0, 873.0);
-        let c = calc(PlaceAction::NextThird, b);
-        eq(c, 960.0, 4.0, 480.0, 873.0);
-        let d = calc(PlaceAction::NextThird, c);
-        eq(d, 0.0, 586.0, 1440.0, 291.0);
+    fn corners_cycle_width_without_leaving_their_vertical_half() {
+        let ordinary = Rect::new(165.0, 245.0, 564.0, 384.0);
+        let cycles = [
+            (
+                PlaceAction::UpperLeft,
+                [
+                    Rect::new(0.0, 441.0, 720.0, 436.0),
+                    Rect::new(0.0, 441.0, 960.0, 436.0),
+                    Rect::new(0.0, 441.0, 480.0, 436.0),
+                ],
+            ),
+            (
+                PlaceAction::LowerLeft,
+                [
+                    Rect::new(0.0, 4.0, 720.0, 436.0),
+                    Rect::new(0.0, 4.0, 960.0, 436.0),
+                    Rect::new(0.0, 4.0, 480.0, 436.0),
+                ],
+            ),
+            (
+                PlaceAction::UpperRight,
+                [
+                    Rect::new(720.0, 441.0, 720.0, 436.0),
+                    Rect::new(480.0, 441.0, 960.0, 436.0),
+                    Rect::new(960.0, 441.0, 480.0, 436.0),
+                ],
+            ),
+            (
+                PlaceAction::LowerRight,
+                [
+                    Rect::new(720.0, 4.0, 720.0, 436.0),
+                    Rect::new(480.0, 4.0, 960.0, 436.0),
+                    Rect::new(960.0, 4.0, 480.0, 436.0),
+                ],
+            ),
+        ];
+
+        for (action, expected) in cycles {
+            let mut current = ordinary;
+            for want in expected {
+                current = calc(action, current);
+                assert_eq!(current, want, "cycle step for {action:?}");
+            }
+            assert_eq!(
+                calc(action, current),
+                expected[0],
+                "cycle reset for {action:?}"
+            );
+        }
     }
 
     #[test]
-    fn upper_left_cycles_width() {
-        let a = calc(
-            PlaceAction::UpperLeft,
-            Rect::new(165.0, 245.0, 564.0, 384.0),
-        );
-        eq(a, 0.0, 441.0, 720.0, 436.0);
-        let b = calc(PlaceAction::UpperLeft, a);
-        eq(b, 0.0, 441.0, 960.0, 436.0);
-        let c = calc(PlaceAction::UpperLeft, b);
-        eq(c, 0.0, 441.0, 480.0, 436.0);
+    fn next_and_previous_third_walk_are_exact_inverses() {
+        let expected = [
+            Rect::new(0.0, 4.0, 480.0, 873.0),
+            Rect::new(480.0, 4.0, 480.0, 873.0),
+            Rect::new(960.0, 4.0, 480.0, 873.0),
+            Rect::new(0.0, 586.0, 1440.0, 291.0),
+            Rect::new(0.0, 295.0, 1440.0, 291.0),
+            Rect::new(0.0, 4.0, 1440.0, 291.0),
+        ];
+
+        let mut current = Rect::new(165.0, 245.0, 564.0, 384.0);
+        for want in expected {
+            current = calc(PlaceAction::NextThird, current);
+            assert_eq!(current, want);
+        }
+        assert_eq!(calc(PlaceAction::NextThird, current), expected[0]);
+
+        current = expected[0];
+        for want in expected.into_iter().rev() {
+            current = calc(PlaceAction::PreviousThird, current);
+            assert_eq!(current, want);
+        }
+        assert_eq!(current, expected[0]);
     }
 
     #[test]
-    fn larger_centered_steps() {
-        let a = calc(PlaceAction::Larger, Rect::new(360.0, 222.0, 720.0, 436.0));
-        eq(a, 345.0, 207.0, 750.0, 466.0);
-        let b = calc(PlaceAction::Larger, a);
-        eq(b, 330.0, 192.0, 780.0, 496.0);
-        let c = calc(PlaceAction::Larger, b);
-        eq(c, 315.0, 177.0, 810.0, 526.0);
-    }
+    fn display_walk_uses_each_distinct_destination_visible_frame() {
+        let primary = Screen {
+            visible: Rect::new(0.0, 24.0, 1440.0, 876.0),
+            frame: Rect::new(0.0, 0.0, 1440.0, 900.0),
+        };
+        let secondary = Screen {
+            visible: Rect::new(1440.0, 30.0, 1920.0, 1050.0),
+            frame: Rect::new(1440.0, 0.0, 1920.0, 1080.0),
+        };
+        let screens = [primary, secondary];
+        let on_primary = Rect::new(100.0, 100.0, 600.0, 400.0);
+        let on_secondary = Rect::new(1800.0, 200.0, 800.0, 500.0);
 
-    #[test]
-    fn larger_against_bottom() {
-        let a = calc(PlaceAction::Larger, Rect::new(238.0, 4.0, 720.0, 436.0));
-        eq(a, 223.0, 4.0, 750.0, 466.0);
-    }
-
-    #[test]
-    fn larger_against_right() {
-        let a = calc(PlaceAction::Larger, Rect::new(720.0, 303.0, 720.0, 436.0));
-        eq(a, 690.0, 288.0, 750.0, 466.0);
-    }
-
-    #[test]
-    fn parse_both_spellings() {
-        assert_eq!(PlaceAction::parse("left-half"), Some(PlaceAction::LeftHalf));
+        let secondary_center = Rect::new(2100.0, 355.0, 600.0, 400.0);
         assert_eq!(
-            PlaceAction::parse("SpectacleWindowActionLeftHalf"),
-            Some(PlaceAction::LeftHalf)
+            place(PlaceAction::NextDisplay, on_primary, &screens),
+            Some(secondary_center)
         );
-        assert!(PlaceAction::parse("tile-magic").is_none());
+        assert_eq!(
+            place(PlaceAction::PreviousDisplay, on_primary, &screens),
+            Some(secondary_center)
+        );
+
+        let primary_center = Rect::new(320.0, 212.0, 800.0, 500.0);
+        assert_eq!(
+            place(PlaceAction::NextDisplay, on_secondary, &screens),
+            Some(primary_center)
+        );
+        assert_eq!(
+            place(PlaceAction::PreviousDisplay, on_secondary, &screens),
+            Some(primary_center)
+        );
+    }
+
+    #[test]
+    fn display_walk_fullscreens_a_window_that_does_not_fit_destination() {
+        let screens = [
+            Screen {
+                visible: Rect::new(0.0, 0.0, 2000.0, 1200.0),
+                frame: Rect::new(0.0, 0.0, 2000.0, 1200.0),
+            },
+            Screen {
+                visible: Rect::new(2000.0, 20.0, 1000.0, 700.0),
+                frame: Rect::new(2000.0, 0.0, 1000.0, 720.0),
+            },
+        ];
+        assert_eq!(
+            place(
+                PlaceAction::NextDisplay,
+                Rect::new(100.0, 100.0, 1400.0, 900.0),
+                &screens,
+            ),
+            Some(screens[1].visible)
+        );
+    }
+
+    #[test]
+    fn resize_keeps_attached_edges_and_refuses_too_small_result() {
+        eq(
+            calc(PlaceAction::Larger, Rect::new(238.0, 4.0, 720.0, 436.0)),
+            223.0,
+            4.0,
+            750.0,
+            466.0,
+        );
+        eq(
+            calc(PlaceAction::Larger, Rect::new(720.0, 303.0, 720.0, 436.0)),
+            690.0,
+            288.0,
+            750.0,
+            466.0,
+        );
+
+        let minimum = Rect::new(540.0, 331.0, 360.0, 219.0);
+        assert_eq!(calc(PlaceAction::Smaller, minimum), minimum);
+    }
+
+    #[test]
+    fn missing_geometry_context_and_deferred_history_fail_without_a_rect() {
+        let window = Rect::new(100.0, 100.0, 600.0, 400.0);
+        assert_eq!(place(PlaceAction::Center, window, &[]), None);
+        assert_eq!(place(PlaceAction::NextDisplay, window, &screen()), None);
+        assert_eq!(place(PlaceAction::PreviousDisplay, window, &screen()), None);
+        assert_eq!(place(PlaceAction::Undo, window, &screen()), None);
+        assert_eq!(place(PlaceAction::Redo, window, &screen()), None);
+
+        // Undo/redo require per-application history and are intentionally not
+        // fabricated by this stateless geometry module. Native application
+        // constraints and size/position actuation are also outside its scope.
     }
 }

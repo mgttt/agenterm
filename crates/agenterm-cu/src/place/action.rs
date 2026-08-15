@@ -103,3 +103,66 @@ impl PlaceAction {
         matches!(self, Self::NextDisplay | Self::PreviousDisplay)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PlaceAction;
+
+    const CATALOG: [PlaceAction; 18] = [
+        PlaceAction::Center,
+        PlaceAction::Fullscreen,
+        PlaceAction::LeftHalf,
+        PlaceAction::RightHalf,
+        PlaceAction::TopHalf,
+        PlaceAction::BottomHalf,
+        PlaceAction::UpperLeft,
+        PlaceAction::LowerLeft,
+        PlaceAction::UpperRight,
+        PlaceAction::LowerRight,
+        PlaceAction::NextThird,
+        PlaceAction::PreviousThird,
+        PlaceAction::NextDisplay,
+        PlaceAction::PreviousDisplay,
+        PlaceAction::Larger,
+        PlaceAction::Smaller,
+        PlaceAction::Undo,
+        PlaceAction::Redo,
+    ];
+
+    #[test]
+    fn closed_catalog_accepts_exactly_both_frozen_spellings() {
+        assert_eq!(CATALOG.len(), 18);
+        for action in CATALOG {
+            assert_eq!(PlaceAction::parse(action.kebab()), Some(action));
+            assert_eq!(PlaceAction::parse(action.spectacle_id()), Some(action));
+        }
+
+        // The catalog intentionally has no compatibility alias soup.
+        for invalid in [
+            "",
+            "left",
+            "LeftHalf",
+            "left_half",
+            "SpectacleWindowActionTileMagic",
+        ] {
+            assert_eq!(PlaceAction::parse(invalid), None, "accepted {invalid:?}");
+        }
+    }
+
+    #[test]
+    fn history_and_display_walk_classes_are_exhaustive() {
+        for action in CATALOG {
+            assert_eq!(
+                action.is_history(),
+                matches!(action, PlaceAction::Undo | PlaceAction::Redo)
+            );
+            assert_eq!(
+                action.is_display_walk(),
+                matches!(
+                    action,
+                    PlaceAction::NextDisplay | PlaceAction::PreviousDisplay
+                )
+            );
+        }
+    }
+}

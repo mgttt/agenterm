@@ -1830,6 +1830,25 @@ silently discarding the audit error. Inject append/flush failures through a
 test-only sink or constructor; do not mutate a process-global audit-path
 environment variable in parallel tests.
 
+## Publish small persisted state without erasing the last valid snapshot
+
+Treat a missing state file as empty state, but report malformed JSON or invalid
+cursors/capacities as corruption; silently replacing either with defaults loses
+the evidence needed to diagnose the failure. Write a collision-safe
+`create_new` temporary beside the destination, complete `write_all`, `flush`
+and file sync, close it, then publish with one replacement rename. RAII must
+remove every abandoned temporary. A same-directory rename owns name atomicity;
+directory sync is a separate durability claim and is not available with equal
+strength on every host.
+
+Give tests an injected path plus write/publish fault seams. Prove partial-write
+cleanup, failed-publication preservation, validation of corrupt input, and a
+successful second replacement/reopen—not only first-file creation. Keep this
+file transaction distinct from native side effects: atomically replacing JSON
+does not make a preceding window move or other OS action transactional. If the
+product requires all-or-nothing behavior across both, it needs an explicit
+prepare/commit or compensation contract and failure evidence for that boundary.
+
 ## Windows UIA clients keep identity, apartments and actuation separate
 
 The Windows accessibility adapter established a reusable native-FFI rule set.

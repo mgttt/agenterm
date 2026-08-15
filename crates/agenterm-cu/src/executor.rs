@@ -1392,8 +1392,9 @@ fn window_place(action_raw: &str, window: Option<isize>) -> Result<serde_json::V
     };
 
     let apply_handle = used_history.unwrap_or(handle);
-    let visible = crate::place::place(crate::place::PlaceAction::Fullscreen, before, &geo_screens)
-        .unwrap_or(before);
+    let (screen_index, screen) = screen_for_rect(after_target, &screens)
+        .ok_or_else(|| CuError::new("failed", "could not resolve destination screen"))?;
+    let visible = crate::place::rect_from_bounds(screen.visible);
     let (after, quantized, clamped) =
         crate::place::apply_rect(apply_handle, after_target, visible).map_err(map_mechanism_err)?;
     if !action.is_history() {
@@ -1408,11 +1409,42 @@ fn window_place(action_raw: &str, window: Option<isize>) -> Result<serde_json::V
         "spectacle_id": action.spectacle_id(),
         "window": apply_handle,
         "app": app_key,
+        "screen": {
+            "index": screen_index,
+            "frame": screen.frame,
+            "visible": screen.visible,
+            "primary": screen.primary,
+        },
         "before": { "x": before.x, "y": before.y, "width": before.width, "height": before.height },
         "after": { "x": after.x, "y": after.y, "width": after.width, "height": after.height },
         "quantized": quantized,
         "clamped": clamped,
     }))
+}
+
+fn screen_for_rect(
+    rect: crate::place::Rect,
+    screens: &[mechanism::window_enumerate::ScreenInfo],
+) -> Option<(usize, &mechanism::window_enumerate::ScreenInfo)> {
+    let mut best: Option<(f64, usize, &mechanism::window_enumerate::ScreenInfo)> = None;
+    for (index, screen) in screens.iter().enumerate() {
+        let frame = crate::place::rect_from_bounds(screen.frame);
+        if frame.contains(rect) {
+            return Some((index, screen));
+        }
+        if let Some(hit) = rect.intersection(frame) {
+            let proportion = hit.area() / rect.area().max(1.0);
+            if best
+                .as_ref()
+                .map(|(current, _, _)| proportion > *current)
+                .unwrap_or(true)
+            {
+                best = Some((proportion, index, screen));
+            }
+        }
+    }
+    best.map(|(_, index, screen)| (index, screen))
+        .or_else(|| screens.first().map(|screen| (0, screen)))
 }
 
 fn wait(timeout_ms: u64, condition: &WaitCondition) -> Result<serde_json::Value, CuError> {
@@ -2343,6 +2375,59 @@ mod tests {
         let reply = executor.execute(&command);
         assert!(!reply.ok);
         assert_eq!(reply.error.as_ref().unwrap().code, "invalid_input");
+    }
+
+    #[test]
+    fn window_place_resolves_the_destination_screen_for_clamp_and_reply() {
+        use mechanism::window_enumerate::{ScreenInfo, WindowBounds};
+
+        let screens = [
+            ScreenInfo {
+                frame: WindowBounds {
+                    x: 0,
+                    y: 0,
+                    width: 1000,
+                    height: 800,
+                },
+                visible: WindowBounds {
+                    x: 0,
+                    y: 40,
+                    width: 1000,
+                    height: 760,
+                },
+                primary: true,
+            },
+            ScreenInfo {
+                frame: WindowBounds {
+                    x: 1000,
+                    y: 0,
+                    width: 1200,
+                    height: 900,
+                },
+                visible: WindowBounds {
+                    x: 1000,
+                    y: 0,
+                    width: 1200,
+                    height: 860,
+                },
+                primary: false,
+            },
+        ];
+
+        let (index, screen) = screen_for_rect(
+            crate::place::Rect::new(1300.0, 200.0, 500.0, 400.0),
+            &screens,
+        )
+        .expect("destination screen");
+        assert_eq!(index, 1);
+        assert_eq!(screen.visible, screens[1].visible);
+
+        let (index, _) = screen_for_rect(
+            crate::place::Rect::new(850.0, 100.0, 500.0, 300.0),
+            &screens,
+        )
+        .expect("largest intersection screen");
+        assert_eq!(index, 1);
     }
 
     #[test]
