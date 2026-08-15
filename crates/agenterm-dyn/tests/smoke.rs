@@ -466,6 +466,37 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_getpriority_process_matches_libc() {
+        let probe = live_system_probe("getpriority_process");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "u32" {} "u32" 0)"#,
+                libc::PRIO_PROCESS
+            ))
+            .expect("getpriority(PRIO_PROCESS, 0) dlcall");
+        let real = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_nice_zero_matches_libc() {
+        let probe = live_system_probe("nice_zero");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
+            .expect("nice(0) dlcall");
+        let real = unsafe { libc::nice(0) };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {

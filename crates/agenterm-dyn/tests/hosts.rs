@@ -108,7 +108,9 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "access_root",
                 "access_missing",
                 "fcntl_stdin_getfd",
-                "dup_stdin"
+                "dup_stdin",
+                "getpriority_process",
+                "nice_zero"
             ]
         );
         assert_eq!(
@@ -138,6 +140,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("access_missing", "libc.so.6", "access"),
                 ("fcntl_stdin_getfd", "libc.so.6", "fcntl"),
                 ("dup_stdin", "libc.so.6", "dup"),
+                ("getpriority_process", "libc.so.6", "getpriority"),
+                ("nice_zero", "libc.so.6", "nice"),
             ]
         );
     }
