@@ -229,13 +229,25 @@ fn dlcall_rejects_more_than_six_arguments() {
 }
 
 #[test]
-fn dlcall_rejects_empty_library_before_loading() {
-    let mut env = Dyn::new();
-    let err = env.eval(r#"(dlcall "" "unused" "i32")"#).unwrap_err();
-    assert_eq!(
-        err,
-        DynError::Library("library name must not be empty".into())
-    );
+fn dlcall_rejects_empty_library_or_symbol_before_arguments_or_load() {
+    for (script, expected) in [
+        (
+            r#"(dlcall "" "unused" "i32" "i32" (set touched 1))"#,
+            DynError::Library("library name must not be empty".into()),
+        ),
+        (
+            r#"(dlcall "missing-library-for-empty-symbol" "" "i32"
+                "i32" (set touched 1))"#,
+            DynError::DlCall("symbol name must not be empty".into()),
+        ),
+    ] {
+        let mut env = Dyn::new();
+        assert_eq!(env.eval(script), Err(expected));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
 }
 
 #[test]
@@ -250,21 +262,17 @@ fn dlcall_rejects_library_with_interior_nul_before_loading() {
 }
 
 #[test]
-fn dlcall_rejects_invalid_symbol_before_arguments_or_library_load() {
-    for (symbol, expected) in [
-        ("", "symbol name must not be empty"),
-        ("bad\0symbol", "symbol name contains interior NUL"),
-    ] {
-        let mut env = Dyn::new();
-        let script = format!(
-            "(dlcall \"missing-library-for-invalid-symbol\" \"{symbol}\" \"i32\" \"i32\" (set touched 1))"
-        );
-        assert_eq!(env.eval(&script), Err(DynError::DlCall(expected.into())));
-        assert_eq!(
-            env.eval("touched").unwrap_err(),
-            DynError::UnknownVar("touched".into())
-        );
-    }
+fn dlcall_rejects_nul_symbol_before_arguments_or_library_load() {
+    let mut env = Dyn::new();
+    let script = "(dlcall \"missing-library-for-nul-symbol\" \"bad\0symbol\" \"i32\" \"i32\" (set touched 1))";
+    assert_eq!(
+        env.eval(script),
+        Err(DynError::DlCall("symbol name contains interior NUL".into()))
+    );
+    assert_eq!(
+        env.eval("touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
 }
 
 #[test]
