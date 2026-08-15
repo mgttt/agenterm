@@ -25,6 +25,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Lock W1 Candidate reasons
+        run: python3 scripts/chassis-l1-change-gate-test.py
       - name: Classify frozen L1 surface
         id: gate
         env:
