@@ -143,19 +143,30 @@ fn dlcall_rejects_unknown_signature_types_before_arguments_or_library_load() {
 
 #[test]
 fn dlcall_validates_entire_signature_before_evaluating_arguments() {
-    for rejected in ["struct", "void"] {
-        let mut env = Dyn::new();
-        let script = format!(
-            r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
-                "i32" (set touched 1) "{rejected}" 0)"#
-        );
-        let err = env.eval(&script).unwrap_err();
-        assert!(matches!(err, DynError::Type(_)));
-        assert_eq!(
-            env.eval("touched").unwrap_err(),
-            DynError::UnknownVar("touched".into())
-        );
-    }
+    let mut env = Dyn::new();
+    let script = r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
+        "i32" (set touched 1) "struct" 0)"#;
+    let err = env.eval(script).unwrap_err();
+    assert!(matches!(err, DynError::Type(_)));
+    assert_eq!(
+        env.eval("touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
+}
+
+#[test]
+fn dlcall_rejects_void_argument_before_arguments_or_library_load() {
+    let mut env = Dyn::new();
+    let script = r#"(dlcall "missing-library-for-void-argument" "unused" "void"
+        "i32" (set touched 1) "void" 0)"#;
+    assert_eq!(
+        env.eval(script),
+        Err(DynError::Type("void cannot be an argument type".into()))
+    );
+    assert_eq!(
+        env.eval("touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
 }
 
 #[test]

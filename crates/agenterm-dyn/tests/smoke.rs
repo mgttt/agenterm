@@ -165,6 +165,15 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_void_return_maps_to_nil() {
+        let mut env = Dyn::new();
+        let got = env
+            .eval(r#"(dlcall "libc.so.6" "free" "void" "ptr" 0)"#)
+            .expect("free(NULL) dlcall");
+        assert_eq!(got, Value::Nil);
+    }
+
+    #[test]
     fn dlcall_clock_gettime_writes_timespec() {
         let mut ts = libc::timespec {
             tv_sec: 0,
