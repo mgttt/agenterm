@@ -407,46 +407,32 @@ fn dlcall_nsget_argc_matches_libc_pointer_and_count() {
 }
 
 #[test]
-fn dlcall_proc_pid_rusage_writes_caller_owned_v4_info() {
+fn dlcall_proc_pid_rusage_writes_caller_owned_v4() {
     let symbol = live_symbol("proc_pid_rusage");
     let pid = unsafe { libc::getpid() };
-    let mut info = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
+    let flavor = libc::RUSAGE_INFO_V4;
+    let mut ri = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
     let mut env = Dyn::new();
-    env.bind("info", (&raw mut info).cast())
-        .expect("bind rusage_info_v4 output");
+    env.bind("ri", (&raw mut ri).cast())
+        .expect("bind rusage_info_v4");
     let got = env
         .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {} "ptr" info)"#,
-            libc::RUSAGE_INFO_V4
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "ptr" ri)"#
         ))
         .expect("proc_pid_rusage dlcall");
     assert_eq!(got, Value::Int(0));
-    assert_ne!(
-        info.ri_proc_start_abstime, 0,
-        "process start absolute time must be populated"
-    );
 
     let mut direct = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
     let direct_status = unsafe {
-        libc::proc_pid_rusage(
-            pid,
-            libc::RUSAGE_INFO_V4,
-            (&raw mut direct).cast::<libc::c_void>(),
-        )
+        libc::proc_pid_rusage(pid, flavor, (&raw mut direct).cast::<libc::rusage_info_t>())
     };
     assert_eq!(direct_status, 0, "direct proc_pid_rusage must succeed");
-    assert_eq!(
-        info.ri_proc_start_abstime, direct.ri_proc_start_abstime,
-        "the later direct baseline must identify the same process start"
-    );
-    assert_eq!(
-        info.ri_uuid, direct.ri_uuid,
-        "the later direct baseline must identify the same process"
-    );
+    assert_eq!(ri.ri_uuid, direct.ri_uuid);
+    assert_eq!(ri.ri_proc_start_abstime, direct.ri_proc_start_abstime);
 }
 
 #[test]
-fn dlcall_dyld_image_count_matches_libc() {
+fn dlcall_dyld_image_count_matches_direct_c() {
     unsafe extern "C" {
         fn _dyld_image_count() -> u32;
     }
@@ -457,14 +443,8 @@ fn dlcall_dyld_image_count_matches_libc() {
         .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#))
         .expect("_dyld_image_count dlcall")
         .as_int()
-        .expect("_dyld_image_count integer result");
-    assert!(
-        (1..=i64::from(u32::MAX)).contains(&got),
-        "dyld must have at least one loaded image"
-    );
+        .expect("_dyld_image_count integer");
+    assert!(got >= 1, "loaded image count must be at least 1");
     let direct = unsafe { _dyld_image_count() };
-    assert!(
-        direct >= 1,
-        "direct dyld count must have at least one image"
-    );
+    assert!(direct >= 1, "direct image count must be at least 1");
 }

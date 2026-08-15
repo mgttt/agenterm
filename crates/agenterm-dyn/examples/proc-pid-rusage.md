@@ -1,13 +1,12 @@
-# Read process rusage with `proc_pid_rusage`
+# Read process resource accounting with `proc_pid_rusage`
 
-macOS example. Bind caller-owned storage matching `rusage_info_v4` as `info`.
-Pass the current process id and `RUSAGE_INFO_V4` (decimal `4`).
+macOS example. Bind a caller-owned `rusage_info_v4` (or same-layout buffer) as
+`ri` before evaluation. Supply the current pid and `RUSAGE_INFO_V4` (`4`).
 
 ```lisp
 (dlcall "libSystem.B.dylib" "proc_pid_rusage" "i32"
-  "i32" pid "i32" 4 "ptr" info)
+  "i32" pid "i32" 4 "ptr" ri)
 ```
 
-A zero status fills the caller-owned buffer. The host controls that allocation and
-may compare stable process identity fields with a later direct native call; dyn
-neither allocates nor retains the structure.
+A successful result is `0`. The host then reads identity and size fields from
+its own buffer; dyn does not allocate or retain that storage.

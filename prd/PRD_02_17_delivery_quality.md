@@ -178,6 +178,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   other. This module owns the cross-product rule; the con-side workflow content,
   profiles and artifact budget are owned by
   [`agenterm-con` package and delivery](PRD_02_27_con_delivery.md).
+- [x] ordinary push/PR feedback remains replaceable by mutable ref, while an
+  explicit `workflow_dispatch` qualification is grouped by immutable
+  `github.sha` in all three Candidate prerequisite workflows. A later `main`
+  push therefore cannot cancel an exact-SHA agenterm, agenterm-con or
+  libagenterm run; a duplicate dispatch for the same SHA still replaces its
+  predecessor.
 - v0.1.12 exact-SHA candidate promotion (P0)
   - [x] ordinary feedback CI, complete candidate qualification and tag
     promotion are separate contracts; the same eligible commit does not rerun

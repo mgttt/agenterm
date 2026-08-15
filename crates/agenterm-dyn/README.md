@@ -229,10 +229,11 @@ direct-libc baselines. Darwin-specific smokes cover `sysctlbyname`,
 `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
 `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`,
 `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`,
-`proc_pidinfo`, and `_NSGetArgc`; the caller-owned timebase, login, thread-id,
-`proc_bsdinfo`, and rusage buffers are compared with direct C baselines. The
-dynamic-loader image count is checked as an instantaneous positive fact against
-a later native call. `mach_host_self`
+`proc_pidinfo`, `_NSGetArgc`, `proc_pid_rusage`, and `_dyld_image_count`;
+the caller-owned timebase, login, thread-id, `proc_bsdinfo`, and
+`rusage_info_v4` buffers are compared with direct C baselines. The
+dynamic-loader image count is an instantaneous positive fact checked against a
+later native call. `mach_host_self`
 remains intentionally uncalled because its returned send right has no dyn release
 owner. `ioctl(TIOCGWINSZ)` uses the resolved
 `libSystem.B.dylib` symbol through its signature-gated variadic ABI and an
