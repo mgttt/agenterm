@@ -119,7 +119,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "alarm_zero",
                 "umask",
                 "getdtablesize",
-                "gethostid"
+                "gethostid",
+                "getpagesize"
             ]
         );
         assert_eq!(
@@ -160,6 +161,7 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("umask", "libc.so.6", "umask"),
                 ("getdtablesize", "libc.so.6", "getdtablesize"),
                 ("gethostid", "libc.so.6", "gethostid"),
+                ("getpagesize", "libc.so.6", "getpagesize"),
             ]
         );
     }
