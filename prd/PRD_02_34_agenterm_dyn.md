@@ -76,6 +76,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   measured on this aarch64-apple-darwin host with Rust 1.97, is **176**
   (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl + 42
   macos_probes + 4 macos_resource + 27 cfg-gated macOS smoke; 0 doctests).
+  A later portable catalog/documentation gate adds 3 tests and passes on
+  Windows; the next Darwin rerun is expected to report 179, but 176 remains
+  the last host-measured Darwin receipt until that rerun occurs.
   Wave 8 catalog rows (`dladdr`, `gethostuuid`, `_dyld_get_image_header`)
   are live `dlcall`s compared with later native calls.
   Native CI remains the evidence gate for current source. Host-specific

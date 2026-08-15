@@ -42,7 +42,9 @@ host.
 - Darwin evidence (this host): `cargo test --locked -p agenterm-dyn` with
   `CARGO_TARGET_DIR=target/dyn-macos-docs8` **176 passed** (25 unit + 40
   errors + 11 hosts + 26 language + 1 macos_ioctl + 42 macos_probes + 4
-  macos_resource + 27 smoke; 0 doctests).
+  macos_resource + 27 smoke; 0 doctests). The later portable `catalog_docs`
+  gate adds 3 tests and passes on Windows; 179 is the expected next Darwin
+  total, not yet a Darwin receipt.
 
 ## Wave 4 — shipped
 
