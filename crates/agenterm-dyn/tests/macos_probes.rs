@@ -621,3 +621,69 @@ fn dlcall_pthread_get_stacksize_np_matches_libc_current_thread() {
     assert!(direct > 0, "direct thread stack size must be positive");
     assert_eq!(got, direct);
 }
+
+#[test]
+fn dlcall_pthread_self_matches_libc_current_thread() {
+    let symbol = live_symbol("pthread_self");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "u64")"#))
+        .expect("pthread_self dlcall")
+        .as_int()
+        .expect("pthread_self thread handle") as u64;
+    let direct = unsafe { libc::pthread_self() } as u64;
+    assert_ne!(got, 0, "current pthread handle must be non-zero");
+    assert_eq!(got, direct);
+}
+
+#[test]
+fn dlcall_pthread_cpu_number_np_writes_current_cpu() {
+    unsafe extern "C" {
+        fn pthread_cpu_number_np(cpu: *mut u32) -> libc::c_int;
+    }
+
+    let symbol = live_symbol("pthread_cpu_number_np");
+    // The `dlcall` ABI exposes this caller-owned output slot as `u64`; zeroing
+    // its upper bytes preserves the C function's `u32` write exactly.
+    let mut cpu = 0_u64;
+    let mut env = Dyn::new();
+    env.bind("cpu", (&mut cpu as *mut u64).cast())
+        .expect("bind current CPU output");
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" cpu)"#))
+        .expect("pthread_cpu_number_np dlcall");
+    assert_eq!(got, Value::Int(0));
+    let ncpu = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+    assert!(ncpu > 0, "online CPU count must be positive");
+    assert!(cpu < ncpu as u64, "current CPU must be online");
+
+    let mut direct = 0_u64;
+    let direct_status = unsafe { pthread_cpu_number_np((&mut direct as *mut u64).cast()) };
+    assert_eq!(
+        direct_status, 0,
+        "direct pthread_cpu_number_np must succeed"
+    );
+    assert!(direct < ncpu as u64, "direct current CPU must be online");
+}
+
+#[test]
+fn dlcall_malloc_good_size_matches_direct_c_for_requests() {
+    unsafe extern "C" {
+        fn malloc_good_size(size: usize) -> usize;
+    }
+
+    let symbol = live_symbol("malloc_good_size");
+    for request in [1_u64, 4097] {
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{LIB}" "{symbol}" "u64" "u64" {request})"#
+            ))
+            .expect("malloc_good_size dlcall")
+            .as_int()
+            .expect("malloc_good_size allocation size") as u64;
+        let direct = unsafe { malloc_good_size(request as usize) } as u64;
+        assert!(got >= request, "good allocation size must cover request");
+        assert_eq!(got, direct);
+    }
+}

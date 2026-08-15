@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 61],
+    pub system_probes: [SystemProbe; 64],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 61] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 64] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -370,6 +370,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 61] = [
     placeholder("proc_name"),
     placeholder("pthread_get_stackaddr_np"),
     placeholder("pthread_get_stacksize_np"),
+    placeholder("pthread_self"),
+    placeholder("pthread_cpu_number_np"),
+    placeholder("malloc_good_size"),
     placeholder("mach_host_self"),
 ];
 
@@ -390,7 +393,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 61] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 64] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -451,13 +454,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 61] = [
     macos_live("proc_name", "proc_name"),
     macos_live("pthread_get_stackaddr_np", "pthread_get_stackaddr_np"),
     macos_live("pthread_get_stacksize_np", "pthread_get_stacksize_np"),
+    macos_live("pthread_self", "pthread_self"),
+    macos_live("pthread_cpu_number_np", "pthread_cpu_number_np"),
+    macos_live("malloc_good_size", "malloc_good_size"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 61] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 64] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -647,6 +653,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 61] = [
     placeholder("proc_name"),
     placeholder("pthread_get_stackaddr_np"),
     placeholder("pthread_get_stacksize_np"),
+    placeholder("pthread_self"),
+    placeholder("pthread_cpu_number_np"),
+    placeholder("malloc_good_size"),
     placeholder("mach_host_self"),
 ];
 

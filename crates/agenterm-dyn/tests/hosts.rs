@@ -148,6 +148,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "proc_name",
                 "pthread_get_stackaddr_np",
                 "pthread_get_stacksize_np",
+                "pthread_self",
+                "pthread_cpu_number_np",
+                "malloc_good_size",
                 "mach_host_self",
             ]
         );
@@ -270,10 +273,13 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "proc_name",
                 "pthread_get_stackaddr_np",
                 "pthread_get_stacksize_np",
+                "pthread_self",
+                "pthread_cpu_number_np",
+                "malloc_good_size",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..60].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..63].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -281,7 +287,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[60].status,
+            c.system_probes[63].status,
             SystemProbeStatus::Placeholder
         ));
     }
@@ -306,6 +312,9 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
             ("proc_name", "proc_name"),
             ("pthread_get_stackaddr_np", "pthread_get_stackaddr_np"),
             ("pthread_get_stacksize_np", "pthread_get_stacksize_np"),
+            ("pthread_self", "pthread_self"),
+            ("pthread_cpu_number_np", "pthread_cpu_number_np"),
+            ("malloc_good_size", "malloc_good_size"),
         ] {
             let probe = c
                 .system_probes

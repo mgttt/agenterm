@@ -32,7 +32,8 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`,
   `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`,
   `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`,
-  `proc_name`, `pthread_get_stackaddr_np`, and `pthread_get_stacksize_np`
+  `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
+  `pthread_cpu_number_np`, and `malloc_good_size`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Darwin `ioctl` calls its resolved symbol through a
@@ -72,7 +73,8 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `pthread_getname_np`,
 `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
 `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`,
-`pthread_get_stackaddr_np`, and `pthread_get_stacksize_np`.
+`pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
+`pthread_cpu_number_np`, and `malloc_good_size`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.
