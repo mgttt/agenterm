@@ -59,10 +59,8 @@ pub(crate) fn load_image(root: &Path) -> Result<LoadedChassisImage, String> {
     }
     agenterm_chassis::check_product_image(root)
         .map_err(|error| format!("chassis image check failed: {error}"))?;
-    let native_cell = agenterm_chassis::native_cell();
-    if native_cell == "unknown" {
-        return Err("this OS/ISA has no Chassis-L1 loader cell".to_owned());
-    }
+    let native_cell = agenterm_platform::chassis_loader::native_cell()
+        .ok_or_else(|| "this OS/ISA has no Chassis-L1 loader cell".to_owned())?;
     let native_loader = root.join("l1").join(native_cell).join("loader");
     if !native_loader.is_file() {
         return Err(format!(
@@ -158,22 +156,10 @@ fn validate_native_loader(root: &Path, cell: &str, loader: &Path) -> Result<(), 
         ));
     }
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        if metadata.permissions().mode() & 0o111 == 0 {
-            return Err("native chassis loader is not executable".to_owned());
-        }
-    }
-
     let bytes = std::fs::read(loader)
         .map_err(|error| format!("cannot read native chassis loader: {error}"))?;
-    if !has_native_executable_magic(cell, &bytes) {
-        return Err(format!(
-            "native chassis loader for cell {cell} is not an executable image"
-        ));
-    }
+    agenterm_platform::chassis_loader::validate_executable(loader, &bytes)
+        .map_err(|error| format!("native chassis loader for cell {cell}: {error}"))?;
     let actual_sha = sha256_hex(&bytes);
     if &actual_sha != expected_sha {
         return Err(format!(
@@ -188,18 +174,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-fn has_native_executable_magic(cell: &str, bytes: &[u8]) -> bool {
-    match cell.split_once('-').map(|(os, _)| os) {
-        Some("win") => bytes.starts_with(b"MZ"),
-        Some("lnx") => bytes.starts_with(b"\x7fELF"),
-        Some("osx") => matches!(
-            bytes.get(..4),
-            Some([0xcf, 0xfa, 0xed, 0xfe]) | Some([0xfe, 0xed, 0xfa, 0xcf])
-        ),
-        _ => false,
-    }
 }
 
 #[cfg(test)]
@@ -258,25 +232,18 @@ mod tests {
     }
 
     fn executable_bytes(cell: &str) -> Vec<u8> {
-        let mut bytes = match cell.split_once('-').map(|(os, _)| os) {
-            Some("win") => b"MZ".to_vec(),
-            Some("lnx") => b"\x7fELF".to_vec(),
-            Some("osx") => vec![0xcf, 0xfa, 0xed, 0xfe],
-            _ => unreachable!("canonical cell"),
+        let mut bytes = if Some(cell) == agenterm_platform::chassis_loader::native_cell() {
+            agenterm_platform::chassis_loader::native_executable_header().to_vec()
+        } else {
+            b"non-native-loader".to_vec()
         };
         bytes.extend_from_slice(format!("thin-loader-{cell}").as_bytes());
         bytes
     }
 
-    #[cfg(unix)]
     fn make_executable(path: &Path) {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("executable");
+        agenterm_platform::chassis_loader::make_executable(path).expect("executable");
     }
-
-    #[cfg(not(unix))]
-    fn make_executable(_path: &Path) {}
 
     #[test]
     fn loads_native_cell_from_composed_image() {

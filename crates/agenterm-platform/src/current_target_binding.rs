@@ -126,7 +126,7 @@ fn load_key(directory: &Path) -> Result<[u8; KEY_BYTES], CurrentTargetBindingErr
             "installation key is not a regular non-link file",
         ));
     }
-    validate_private_key_metadata(&metadata)?;
+    selected::validate_private_key_metadata(&metadata)?;
     selected::current_target_binding::validate_private_key_file(&path)?;
     let mut file = fs::File::open(&path).map_err(map_key_io)?;
     let mut key = [0_u8; KEY_BYTES];
@@ -163,37 +163,6 @@ fn create_key(directory: &Path, key: &[u8; KEY_BYTES]) -> Result<(), CurrentTarg
     drop(file);
     crate::filesystem::sync_parent(directory).map_err(map_key_io)?;
     pending.disarm();
-    Ok(())
-}
-
-#[cfg(unix)]
-fn validate_private_key_metadata(metadata: &fs::Metadata) -> Result<(), CurrentTargetBindingError> {
-    use std::os::unix::fs::MetadataExt as _;
-
-    let current = crate::user_identity::current_user_identity().map_err(map_state_io)?;
-    let credentials = current.posix_credentials().ok_or_else(|| {
-        error(
-            CurrentTargetBindingErrorKind::Native,
-            "install-key-owner-unavailable",
-            "current key owner could not be determined",
-        )
-    })?;
-    if metadata.uid() != credentials.effective_user_id
-        || metadata.mode() & 0o777 != 0o600
-        || metadata.nlink() != 1
-    {
-        return Err(error(
-            CurrentTargetBindingErrorKind::Permission,
-            "install-key-permissions",
-            "installation key ownership, permissions, or link count are unsafe",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn validate_private_key_metadata(_: &fs::Metadata) -> Result<(), CurrentTargetBindingError> {
-    // `prepare_directory` installs a protected current-user-only inheritable ACL.
     Ok(())
 }
 

@@ -6,6 +6,7 @@ pub mod accessibility_tree;
 #[cfg(feature = "activation")]
 pub mod activation;
 pub mod cache_hierarchy;
+pub mod chassis_loader;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 #[cfg(feature = "console-interrupt")]
