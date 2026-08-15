@@ -36,8 +36,15 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+fn failed(code: &'static str, message: impl ToString) -> TextReviewError {
+    TextReviewError::Failed {
+        code: code.into(),
+        message: message.to_string(),
+    }
+}
+
 fn last_error(code: &'static str) -> TextReviewError {
-    TextReviewError::failed(code, io::Error::last_os_error())
+    failed(code, io::Error::last_os_error())
 }
 
 unsafe extern "system" fn dialog_proc(
@@ -99,7 +106,7 @@ fn ensure_class() -> Result<Vec<u16>, TextReviewError> {
     });
     registration
         .as_ref()
-        .map_err(|message| TextReviewError::failed("text_review_register_failed", message))?;
+        .map_err(|message| failed("text_review_register_failed", message))?;
     Ok(class)
 }
 

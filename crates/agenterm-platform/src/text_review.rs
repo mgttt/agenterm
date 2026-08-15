@@ -14,18 +14,9 @@ pub enum TextReviewError {
 }
 
 impl TextReviewError {
-    #[cfg(not(windows))]
-    pub(crate) fn unsupported(reason: impl Into<Cow<'static, str>>) -> Self {
+    pub fn unsupported(reason: impl Into<Cow<'static, str>>) -> Self {
         Self::Unsupported {
             reason: reason.into(),
-        }
-    }
-
-    #[cfg(windows)]
-    pub(crate) fn failed(code: &'static str, message: impl ToString) -> Self {
-        Self::Failed {
-            code: Cow::Borrowed(code),
-            message: message.to_string(),
         }
     }
 }
