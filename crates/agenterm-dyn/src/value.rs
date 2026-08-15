@@ -26,9 +26,11 @@ impl Value {
     pub fn as_ptr(self) -> Result<usize, String> {
         match self {
             Self::Ptr(p) => Ok(p),
-            Self::Int(n) => u64::try_from(n)
-                .map(|v| v as usize)
-                .map_err(|_| format!("integer {n} does not fit in a pointer")),
+            Self::Int(n) => {
+                let value = u64::try_from(n)
+                    .map_err(|_| format!("integer {n} does not fit in a pointer"))?;
+                usize::try_from(value).map_err(|_| format!("integer {n} does not fit in a pointer"))
+            }
             Self::Nil => Err("expected pointer, got nil".to_owned()),
         }
     }
@@ -41,5 +43,30 @@ impl fmt::Display for Value {
             Self::Int(n) => write!(f, "{n}"),
             Self::Ptr(p) => write!(f, "#x{p:x}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Value;
+
+    #[test]
+    fn integer_pointer_conversion_keeps_representable_values() {
+        assert_eq!(Value::Int(42).as_ptr(), Ok(42));
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn integer_pointer_conversion_rejects_values_wider_than_usize() {
+        assert_eq!(
+            Value::Int(4_294_967_297).as_ptr(),
+            Err("integer 4294967297 does not fit in a pointer".to_owned())
+        );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn integer_pointer_conversion_accepts_u32_plus_one_on_64_bit_targets() {
+        assert_eq!(Value::Int(4_294_967_297).as_ptr(), Ok(4_294_967_297));
     }
 }
