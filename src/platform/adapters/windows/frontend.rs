@@ -5,6 +5,7 @@ use crate::frontend::{
 };
 use crate::wake_signal::WakeSignal;
 use std::env;
+use std::path::Path;
 
 /// Wake the Win32 message loop without posting one message per producer event.
 pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) -> GuiWakeResult {
@@ -44,19 +45,26 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
             return GuiLaunchResult::UsageError;
         }
     };
-    match crate::frontend::chassis_image::load_selected_image(
+    let selected_image = match crate::frontend::chassis_image::load_selected_image(
         launch_options.chassis_image.as_deref(),
     ) {
-        Ok(Some(image)) => write_best_effort_stderr(&format!(
-            "Loaded chassis L3 {} through {}",
-            image.l3_name,
-            image.native_loader.display()
-        )),
-        Ok(None) => {}
+        Ok(image) => image,
         Err(error) => {
             show_startup_error(&anyhow::anyhow!(error.clone()));
             return GuiLaunchResult::StartupFailed(error);
         }
+    };
+    if let Some(image) = selected_image {
+        write_best_effort_stderr(&format!(
+            "Starting chassis L3 {} through selected native loader {}",
+            image.l3_name,
+            image.native_loader.display()
+        ));
+        if let Err(error) = run_selected_chassis_loader(&image.native_loader, &image.root) {
+            show_startup_error(&anyhow::anyhow!(error.clone()));
+            return GuiLaunchResult::StartupFailed(error);
+        }
+        return GuiLaunchResult::Launched;
     }
     let no_activate = launch_options.no_activate || crate::client::no_activate_from_environment();
     write_best_effort_stderr(&gui_console_summary(&crate::ipc_address()));
@@ -93,6 +101,28 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     GuiLaunchResult::Launched
 }
 
+fn run_selected_chassis_loader(loader: &Path, image_root: &Path) -> Result<(), String> {
+    run_selected_chassis_loader_with(loader, image_root, |loader, image_root| {
+        std::process::Command::new(loader)
+            .arg(image_root)
+            .status()
+            .map(|status| status.success())
+            .map_err(|error| format!("cannot start selected native chassis loader: {error}"))
+    })
+}
+
+fn run_selected_chassis_loader_with(
+    loader: &Path,
+    image_root: &Path,
+    launch: impl FnOnce(&Path, &Path) -> Result<bool, String>,
+) -> Result<(), String> {
+    if launch(loader, image_root)? {
+        Ok(())
+    } else {
+        Err("selected native chassis loader exited unsuccessfully".to_owned())
+    }
+}
+
 fn gui_console_summary(address: &str) -> String {
     format!(
         "Launcher PID: {}\n\
@@ -117,8 +147,28 @@ fn show_startup_error(error: &anyhow::Error) {
 mod tests {
     use super::{
         GuiLaunchResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE, gui_help_result,
-        parse_gui_launch_target,
+        parse_gui_launch_target, run_selected_chassis_loader_with,
     };
+    use std::cell::Cell;
+    use std::path::Path;
+
+    #[test]
+    fn selected_chassis_loader_runs_once_and_propagates_failure() {
+        let calls = Cell::new(0);
+        run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
+            calls.set(calls.get() + 1);
+            Ok(true)
+        })
+        .expect("selected loader");
+        assert_eq!(calls.get(), 1);
+
+        let error =
+            run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
+                Ok(false)
+            })
+            .expect_err("unsuccessful loader");
+        assert!(error.contains("exited unsuccessfully"));
+    }
 
     #[test]
     fn gui_launcher_accepts_no_activate_and_address_in_either_order() {

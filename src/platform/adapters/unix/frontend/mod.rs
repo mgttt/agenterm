@@ -572,17 +572,26 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
             return GuiLaunchResult::UsageError;
         }
     };
-    match crate::frontend::chassis_image::load_selected_image(options.chassis_image.as_deref()) {
-        Ok(Some(image)) => eprintln!(
-            "Loaded chassis L3 {} through {}",
+    let selected_image =
+        match crate::frontend::chassis_image::load_selected_image(options.chassis_image.as_deref())
+        {
+            Ok(image) => image,
+            Err(error) => {
+                eprintln!("AgenTerm GUI failed to load chassis image: {error}");
+                return GuiLaunchResult::StartupFailed(error);
+            }
+        };
+    if let Some(image) = selected_image {
+        eprintln!(
+            "Starting chassis L3 {} through selected native loader {}",
             image.l3_name,
             image.native_loader.display()
-        ),
-        Ok(None) => {}
-        Err(error) => {
-            eprintln!("AgenTerm GUI failed to load chassis image: {error}");
+        );
+        if let Err(error) = run_selected_chassis_loader(&image.native_loader, &image.root) {
+            eprintln!("AgenTerm GUI failed to start selected chassis loader: {error}");
             return GuiLaunchResult::StartupFailed(error);
         }
+        return GuiLaunchResult::Launched;
     }
     let no_activate = options.no_activate || no_activate_from_environment();
 
@@ -612,6 +621,28 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
             eprintln!("AgenTerm GUI failed: {error:#}");
             GuiLaunchResult::StartupFailed(error.to_string())
         }
+    }
+}
+
+fn run_selected_chassis_loader(loader: &Path, image_root: &Path) -> Result<(), String> {
+    run_selected_chassis_loader_with(loader, image_root, |loader, image_root| {
+        std::process::Command::new(loader)
+            .arg(image_root)
+            .status()
+            .map(|status| status.success())
+            .map_err(|error| format!("cannot start selected native chassis loader: {error}"))
+    })
+}
+
+fn run_selected_chassis_loader_with(
+    loader: &Path,
+    image_root: &Path,
+    launch: impl FnOnce(&Path, &Path) -> Result<bool, String>,
+) -> Result<(), String> {
+    if launch(loader, image_root)? {
+        Ok(())
+    } else {
+        Err("selected native chassis loader exited unsuccessfully".to_owned())
     }
 }
 
@@ -6737,17 +6768,36 @@ mod system_menu_tests {
     use super::{
         GuiLaunchResult, RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure,
         UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, UnixFocusSurface, compact_cwd_for_status,
-        gui_help_result, parse_gui_launch_target, scale_frame_nearest, scale_rect_to_frame,
-        shift_extend_anchor, terminal_paste_bytes, terminal_paste_target_is_current,
-        workspace_toolbar_snapshot_json,
+        gui_help_result, parse_gui_launch_target, run_selected_chassis_loader_with,
+        scale_frame_nearest, scale_rect_to_frame, shift_extend_anchor, terminal_paste_bytes,
+        terminal_paste_target_is_current, workspace_toolbar_snapshot_json,
     };
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
     use crate::frontend::selection::{TerminalPoint, TerminalSelection};
     use std::{
+        cell::Cell,
         path::Path,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn selected_chassis_loader_runs_once_and_propagates_failure() {
+        let calls = Cell::new(0);
+        run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
+            calls.set(calls.get() + 1);
+            Ok(true)
+        })
+        .expect("selected loader");
+        assert_eq!(calls.get(), 1);
+
+        let error =
+            run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
+                Ok(false)
+            })
+            .expect_err("unsuccessful loader");
+        assert!(error.contains("exited unsuccessfully"));
+    }
 
     #[test]
     fn gui_launch_help_is_supported_by_frontend_contract() {
