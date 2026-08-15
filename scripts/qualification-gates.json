@@ -254,6 +254,7 @@
       "id": "cu-windows-smoke",
       "evidence": [
         "cu.windows-host-self-test",
+        "cu.windows-persisted-grant",
         "cu.libagenterm-load-cleanup",
         "cu.windows-clipboard-read",
         "cu.windows-uia-window-identity",

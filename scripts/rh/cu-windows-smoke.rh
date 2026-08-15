@@ -54,6 +54,26 @@ fn run_cu_json(run_directory, executable, arguments) {
     document
 }
 
+// Persisted grant replies contain opaque selectors. Keep them in memory and
+// never copy child stdout, store paths, or identifiers into task stdout.
+fn run_private_cu_json(run_directory, executable, arguments, audit_path) {
+    let command = std::process::command(executable);
+    command.args(arguments);
+    command.current_dir(run_directory);
+    command.env("AGENTERM_CU_AUDIT_PATH", audit_path);
+    command.timeout(std::time::Duration::from_secs(30));
+    command.capture_limit(262144);
+    let output = command.output();
+    ensure(
+        output.success != 0,
+        "cu_windows_smoke_persisted_cli_process"
+    );
+    let stdout = output.stdout_text();
+    stdout.trim();
+    ensure(stdout != "", "cu_windows_smoke_persisted_cli_empty");
+    rh::json::parse(stdout)
+}
+
 fn compile_fixture(run_directory, repo, source) {
     ensure(
         std::env::has("ProgramFiles(x86)") != 0,
@@ -131,6 +151,7 @@ fn compile_fixture(run_directory, repo, source) {
 fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
         print("cu.windows-host-self-test");
+        print("cu.windows-persisted-grant");
         print("cu.libagenterm-load-cleanup");
         print("cu.windows-clipboard-read");
         print("cu.windows-uia-window-identity");
@@ -184,6 +205,18 @@ fn entry() {
         "cu_windows_smoke_stale_directory_locked"
     );
     std::fs::create_dir_all(run_directory);
+    let persisted_state = std::path::join(
+        run_directory,
+        "persisted-grant-state"
+    ).display;
+    let persisted_store = std::path::join(
+        persisted_state,
+        "grants.json"
+    ).display;
+    let persisted_audit = std::path::join(
+        run_directory,
+        "persisted-grant-audit.jsonl"
+    ).display;
     let succeeded = 0;
     let failure = "";
     let fixture_pid = 0;
@@ -231,6 +264,204 @@ fn entry() {
                 && host.dispatch_refused != 0
                 && host.cleaned_up != 0,
             "cu_windows_smoke_host_contract:" + host_text
+        );
+
+        print("STEP persisted current-target grants consume, exhaust, revoke, and audit");
+        std::fs::create_dir_all(persisted_state);
+        std::fs::try_remove_file(persisted_audit);
+        let one_created = run_private_cu_json(
+            run_directory,
+            executable,
+            [
+                "grant", "create", "--target", "current",
+                "--scopes", "observe", "--ttl-ms", "60000",
+                "--one-shot", "--grant-store", persisted_store
+            ],
+            persisted_audit
+        );
+        ensure(
+            one_created.ok != 0
+                && ("" + one_created.command) == "grant-create"
+                && (0 + one_created.data.grant.max_uses) == 1
+                && (0 + one_created.data.grant.remaining_uses) == 1,
+            "cu_windows_smoke_persisted_one_create"
+        );
+        let one_id = "" + one_created.data.grant.grant_id;
+        ensure(one_id.starts_with("cu1_"), "cu_windows_smoke_persisted_one_id");
+
+        let one_first = run_private_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant-id", one_id,
+                "--grant-store", persisted_store, "capabilities"
+            ],
+            persisted_audit
+        );
+        ensure(
+            one_first.ok != 0
+                && ("" + one_first.target) == "current"
+                && ("" + one_first.command) == "capabilities",
+            "cu_windows_smoke_persisted_one_first"
+        );
+        let one_second = run_private_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant-id", one_id,
+                "--grant-store", persisted_store, "capabilities"
+            ],
+            persisted_audit
+        );
+        let one_second_message = "" + one_second.error.message;
+        ensure(
+            one_second.ok == 0
+                && ("" + one_second.error.code) == "refused"
+                && one_second_message.contains("exhausted"),
+            "cu_windows_smoke_persisted_one_exhausted"
+        );
+
+        let revoked_created = run_private_cu_json(
+            run_directory,
+            executable,
+            [
+                "grant", "create", "--target", "current",
+                "--scopes", "observe", "--ttl-ms", "60000",
+                "--max-uses", "2", "--grant-store", persisted_store
+            ],
+            persisted_audit
+        );
+        ensure(
+            revoked_created.ok != 0
+                && (0 + revoked_created.data.grant.max_uses) == 2,
+            "cu_windows_smoke_persisted_revoked_create"
+        );
+        let revoked_id = "" + revoked_created.data.grant.grant_id;
+        ensure(
+            revoked_id.starts_with("cu1_") && revoked_id != one_id,
+            "cu_windows_smoke_persisted_revoked_id"
+        );
+        let revoked = run_private_cu_json(
+            run_directory,
+            executable,
+            [
+                "grant", "revoke", "--grant-id", revoked_id,
+                "--grant-store", persisted_store
+            ],
+            persisted_audit
+        );
+        ensure(
+            revoked.ok != 0 && revoked.data.grant.revoked != 0,
+            "cu_windows_smoke_persisted_revoke"
+        );
+        let after_revoke = run_private_cu_json(
+            run_directory,
+            executable,
+            [
+                "--target", "current", "--grant-id", revoked_id,
+                "--grant-store", persisted_store, "capabilities"
+            ],
+            persisted_audit
+        );
+        let after_revoke_message = "" + after_revoke.error.message;
+        ensure(
+            after_revoke.ok == 0
+                && ("" + after_revoke.error.code) == "refused"
+                && after_revoke_message.contains("revoked"),
+            "cu_windows_smoke_persisted_revoked_refusal"
+        );
+
+        ensure(
+            direct_file(persisted_audit) != 0,
+            "cu_windows_smoke_persisted_audit_missing"
+        );
+        let persisted_audit_text = std::fs::read_to_string(persisted_audit);
+        let persisted_audit_lower = persisted_audit_text.to_lower();
+        ensure(
+            !persisted_audit_lower.contains("session_binding")
+                && !persisted_audit_lower.contains("install_key")
+                && !persisted_audit_lower.contains("credential")
+                && !persisted_audit_lower.contains("secret")
+                && !persisted_audit_lower.contains("token"),
+            "cu_windows_smoke_persisted_audit_sensitive_field"
+        );
+        let one_attempt_decision = "";
+        let one_ok_decision = "";
+        let one_exhausted_decision = "";
+        let revoked_decision = "";
+        let one_attempts = 0;
+        let one_oks = 0;
+        let one_exhausted = 0;
+        let revoked_denials = 0;
+        let persisted_lines = persisted_audit_text.split("\n");
+        for raw_line in persisted_lines {
+            let line = raw_line;
+            line.trim();
+            if line != "" {
+                let record = rh::json::parse(line);
+                ensure(
+                    ("" + record.target) == "current"
+                        && ("" + record.verb) == "capabilities"
+                        && ("" + record.grant) == "observe"
+                        && ("" + record.authority_scope) == "stored_bounded",
+                    "cu_windows_smoke_persisted_audit_scope"
+                );
+                let record_grant = "" + record.grant_id;
+                let record_decision_id = "" + record.decision_id;
+                let record_decision = "" + record.decision;
+                let record_outcome = "" + record.outcome;
+                ensure(
+                    record_decision_id.starts_with("d1_"),
+                    "cu_windows_smoke_persisted_audit_decision_id"
+                );
+                if record_grant == one_id && record_outcome == "attempt" {
+                    ensure(
+                        record_decision == "authorized",
+                        "cu_windows_smoke_persisted_attempt_decision"
+                    );
+                    one_attempt_decision = record_decision_id;
+                    one_attempts += 1;
+                } else if record_grant == one_id && record_outcome == "ok" {
+                    ensure(
+                        record_decision == "authorized",
+                        "cu_windows_smoke_persisted_ok_decision"
+                    );
+                    one_ok_decision = record_decision_id;
+                    one_oks += 1;
+                } else if record_grant == one_id
+                        && record_outcome == "exhausted" {
+                    ensure(
+                        record_decision == "denied",
+                        "cu_windows_smoke_persisted_exhausted_decision"
+                    );
+                    one_exhausted_decision = record_decision_id;
+                    one_exhausted += 1;
+                } else if record_grant == revoked_id
+                        && record_outcome == "revoked" {
+                    ensure(
+                        record_decision == "denied",
+                        "cu_windows_smoke_persisted_revoked_decision"
+                    );
+                    revoked_decision = record_decision_id;
+                    revoked_denials += 1;
+                } else {
+                    ensure(0, "cu_windows_smoke_persisted_audit_unexpected");
+                }
+            }
+        }
+        ensure(
+            one_attempts == 1 && one_oks == 1 && one_exhausted == 1
+                && revoked_denials == 1
+                && one_attempt_decision == one_ok_decision
+                && one_attempt_decision != one_exhausted_decision
+                && one_exhausted_decision != revoked_decision,
+            "cu_windows_smoke_persisted_audit_linkage"
+        );
+        std::fs::try_remove_file(persisted_audit);
+        ensure(
+            remove_directory_bounded(persisted_state) != 0
+                && !std::fs::exists(persisted_audit),
+            "cu_windows_smoke_persisted_cleanup"
         );
 
         print("STEP standalone clipboard-read matches a non-mutating native snapshot");
@@ -701,6 +932,9 @@ fn entry() {
         failure = "" + error;
     }
 
+    std::fs::try_remove_file(persisted_audit);
+    std::fs::try_remove_dir_all(persisted_state);
+
     if succeeded == 0 && fixture_pid != 0 {
         let fixture_pid_text = "" + fixture_pid;
         let cleanup = std::process::command("taskkill.exe");
@@ -721,6 +955,7 @@ fn entry() {
         "cu_windows_smoke_cleanup_locked"
     );
     print("EVIDENCE cu.windows-host-self-test");
+    print("EVIDENCE cu.windows-persisted-grant");
     print("EVIDENCE cu.libagenterm-load-cleanup");
     print("EVIDENCE cu.windows-clipboard-read");
     print("EVIDENCE cu.windows-uia-window-identity");
@@ -741,6 +976,7 @@ fn cc_lines() {
     [
         "staged agenterm-cu and agenterm.dll are colocated",
         "Windows desktop host self-test closes registered resources",
+        "isolated persisted observe grants consume once, exhaust, revoke, and emit linked secret-free decisions",
         "standalone clipboard-read matches a non-mutating native Unicode-text snapshot without persisting its content",
         "public UIA tree exposes unique named edit and button controls",
         "public name addressing uses ValuePattern, GetText, and Invoke",

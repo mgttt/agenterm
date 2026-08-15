@@ -10,6 +10,7 @@
       "prd": "On Windows, the product `Command`/`Executor` path consumes UIA tree",
       "evidence_ids": [
         "cu.windows-host-self-test",
+        "cu.windows-persisted-grant",
         "cu.libagenterm-load-cleanup",
         "cu.windows-clipboard-read",
         "cu.windows-uia-window-identity",

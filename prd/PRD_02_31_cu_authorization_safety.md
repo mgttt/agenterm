@@ -113,7 +113,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   dispatch, and writes the outcome with the same opaque decision ID. Denials
   are recorded without consuming uses; a failed downstream command does not
   refund a reserved use. Session identity/key material is absent from the
-  audit. Remote delegation and session-nonce invalidation remain open.
+  audit. The public Windows smoke now owns an isolated one-shot observe grant:
+  its first `capabilities` command succeeds, the second is refused as
+  exhausted, and a separately revoked grant is refused before dispatch. Four
+  JSONL records prove that the authorized attempt/outcome share one decision
+  ID, exhausted and revoked denials have distinct decisions, and no session,
+  install-key or credential-like field reaches the audit. That journey has
+  passed against a current-source CU binary; the complete staged smoke still
+  needs a same-source ABI artifact rerun because the available older staged
+  library failed the unrelated clipboard-read contract later in the task.
+  Remote delegation and session-nonce invalidation remain open.
 - [~] A sealed `TargetBinding` contract now separates opaque provider identity
   and exact desktop-session identity from routing material. Current, SSH and
   VNC fail typed when no crate-owned verified provider is available; RDP stays
@@ -130,9 +139,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   32-byte identities into its sealed, fixed-prefix target/session binding;
   resolution never creates state, while a separate explicit enrollment call
   owns first installation. Linux and macOS providers remain explicitly
-  unsupported. The verified binding is not yet accepted by the grant-store
-  schema, CLI or per-command executor decision, so no persisted grant is
-  executable through this mechanism yet.
+  unsupported. Store schema 2, the management CLI and the current-target
+  executor now consume this verified binding; remote tiers still have no
+  verified provider or delegation path.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`
@@ -140,7 +149,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `authorized` decision and process-bounded authority scope. Independent
   window enumeration confirms the reported placement, and the smoke rejects
   credential-like fields from the published audit records.
-- [ ] This checkpoint does not prove per-target expiry/revocation, every
+- [ ] This checkpoint proves current-target one-shot exhaustion and revocation,
+  but does not yet prove bounded expiry through the public gate, every
   actuation verb, credential absence from every published artifact, Windows
   ARM64, another OS, or the required remote-transport security review. The
   module therefore remains planned/partial rather than shipped.

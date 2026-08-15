@@ -583,6 +583,7 @@
       ],
       "outputs": [
         "cu-windows-host-evidence",
+        "cu-windows-persisted-grant-evidence",
         "cu-windows-uia-window-identity-evidence",
         "cu-windows-uia-tree-evidence",
         "cu-windows-uia-name-actuation-evidence",
@@ -1950,7 +1951,7 @@
     },
     {
       "id": "cu-windows-smoke",
-      "description": "Prove staged agenterm-cu loads colocated libagenterm, opens its no-activate Windows desktop host, and drives an owned Win32 fixture through public UIA tree, ValuePattern, GetText, Invoke, authorized window placement, refusal, audit, and bounded cleanup",
+      "description": "Prove staged agenterm-cu loads colocated libagenterm, consumes and revokes bounded current-target grants, opens its no-activate Windows desktop host, and drives an owned Win32 fixture through public UIA tree, ValuePattern, GetText, Invoke, authorized window placement, refusal, audit, and bounded cleanup",
       "entry": "scripts/rh/cu-windows-smoke.rh",
       "profile": "local",
       "cwd": ".",
