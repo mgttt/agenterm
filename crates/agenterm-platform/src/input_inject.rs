@@ -11,6 +11,12 @@ pub fn pointer_move(position: PointerPosition) -> Result<(), InputInjectError> {
     crate::selected::input_inject::pointer_move(position)
 }
 
+/// Reads the current pointer position in absolute target-session screen
+/// coordinates without injecting an event.
+pub fn pointer_position() -> Result<PointerPosition, InputInjectError> {
+    crate::selected::input_inject::pointer_position()
+}
+
 pub fn pointer_click(
     position: PointerPosition,
     button: PointerButton,

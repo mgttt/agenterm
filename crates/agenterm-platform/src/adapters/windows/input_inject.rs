@@ -7,7 +7,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_LEFT,
     VK_LWIN, VK_MENU, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP, mouse_event,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::SetCursorPos;
+use windows_sys::Win32::{
+    Foundation::POINT,
+    UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos},
+};
 
 use crate::CapabilityStatus;
 use crate::contract::input_inject::{InputInjectError, PointerButton, PointerPosition};
@@ -26,6 +29,20 @@ pub(crate) fn pointer_move(position: PointerPosition) -> Result<(), InputInjectE
         }
     }
     Ok(())
+}
+
+pub(crate) fn pointer_position() -> Result<PointerPosition, InputInjectError> {
+    let mut point = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(&mut point) } == 0 {
+        return Err(InputInjectError::failed(
+            "get_cursor_failed",
+            "GetCursorPos returned 0",
+        ));
+    }
+    Ok(PointerPosition {
+        x: point.x,
+        y: point.y,
+    })
 }
 
 pub(crate) fn pointer_click(

@@ -104,8 +104,8 @@ use agenterm_platform::input::{
     KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
 };
 use agenterm_platform::input_inject::{
-    PointerButton as InjectPointerButton, PointerPosition, pointer_click, pointer_move, send_keys,
-    type_text,
+    PointerButton as InjectPointerButton, PointerPosition, pointer_click, pointer_move,
+    pointer_position, send_keys, type_text,
 };
 use agenterm_platform::parent_console::{write_stderr, write_stdout};
 use agenterm_platform::process::{kill, list};
@@ -273,7 +273,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 10);
+abi_version!(1, 11);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -5474,6 +5474,55 @@ pub extern "C" fn agt_native_window_close(handle: isize) -> agt_status {
     }
 }
 
+/// Read the pointer's current absolute screen coordinates without injecting
+/// input. Both output pointers are required and validated before the platform
+/// query.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_input_pointer_position(x: *mut i32, y: *mut i32) -> agt_status {
+    fn inner(x: *mut i32, y: *mut i32) -> agt_status {
+        if x.is_null() || y.is_null() {
+            record_error(
+                c"agt_input_pointer_position",
+                c"bad_pointer",
+                "x and y output pointers are required",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        if !input_inject_available() {
+            return agt_status::AGT_UNSUPPORTED;
+        }
+        match pointer_position() {
+            Ok(position) => {
+                unsafe {
+                    *x = position.x;
+                    *y = position.y;
+                }
+                agt_status::AGT_OK
+            }
+            Err(error) => {
+                record_error(
+                    c"agt_input_pointer_position",
+                    c"input_failed",
+                    format!("{error:?}"),
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(x, y))) {
+        Ok(status) => status,
+        Err(_) => {
+            record_error(
+                c"agt_input_pointer_position",
+                c"panic",
+                "panic in agt_input_pointer_position",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
 /// Move the pointer to absolute screen coordinates. Mechanism absent →
 /// `AGT_UNSUPPORTED`; platform failure →
 /// `AGT_FAILED{code="input_failed"}`.
@@ -5671,6 +5720,19 @@ pub extern "C" fn agt_input_send_keys(shortcut: *const u8, len: usize) -> agt_st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_position_rejects_each_null_output_before_platform_query() {
+        let mut coordinate = 0;
+        assert_eq!(
+            agt_input_pointer_position(std::ptr::null_mut(), &mut coordinate),
+            agt_status::AGT_FAILED
+        );
+        assert_eq!(
+            agt_input_pointer_position(&mut coordinate, std::ptr::null_mut()),
+            agt_status::AGT_FAILED
+        );
+    }
 
     #[test]
     fn placement_record_layout_is_stable_and_c_compatible() {

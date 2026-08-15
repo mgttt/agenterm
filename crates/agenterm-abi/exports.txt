@@ -56,6 +56,7 @@ agt_native_window_move
 agt_native_window_rect
 agt_native_window_set_topmost
 agt_native_window_close
+agt_input_pointer_position
 agt_input_pointer_move
 agt_input_pointer_click
 agt_input_type_text

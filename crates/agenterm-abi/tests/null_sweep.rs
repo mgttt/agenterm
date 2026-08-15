@@ -189,6 +189,7 @@ type NativeWindowMove = unsafe extern "C" fn(isize, i32, i32, u32, u32) -> i32;
 type NativeWindowRect = unsafe extern "C" fn(isize, *mut i32, *mut i32, *mut u32, *mut u32) -> i32;
 type NativeWindowSetTopmost = unsafe extern "C" fn(isize, i32) -> i32;
 type NativeWindowClose = unsafe extern "C" fn(isize) -> i32;
+type InputPointerPosition = unsafe extern "C" fn(*mut i32, *mut i32) -> i32;
 type InputPointerMove = unsafe extern "C" fn(i32, i32) -> i32;
 type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
 type InputText = unsafe extern "C" fn(*const u8, usize) -> i32;
@@ -468,6 +469,11 @@ fn native_window_set_topmost_handle0(lib: &Library) -> i32 {
 fn native_window_close_handle0(lib: &Library) -> i32 {
     let f: Symbol<NativeWindowClose> = unsafe { sym(lib, b"agt_native_window_close") };
     unsafe { f(0) }
+}
+
+fn input_pointer_position_null(lib: &Library) -> i32 {
+    let f: Symbol<InputPointerPosition> = unsafe { sym(lib, b"agt_input_pointer_position") };
+    unsafe { f(std::ptr::null_mut(), std::ptr::null_mut()) }
 }
 
 /// Invalid `button` value: `agt_input_pointer_click` validates the button
@@ -973,6 +979,11 @@ fn null_group() -> Vec<SweepCase> {
             label: "agt_native_window_close[handle=0]",
             kind: Kind::MustFail,
             call: Box::new(|lib| CallResult::Status(native_window_close_handle0(lib))),
+        },
+        SweepCase {
+            label: "agt_input_pointer_position[x=NULL,y=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(input_pointer_position_null(lib))),
         },
         SweepCase {
             label: "agt_input_pointer_click[x=0,y=0,button=99,clicks=1]",

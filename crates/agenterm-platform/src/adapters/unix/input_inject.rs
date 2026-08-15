@@ -15,6 +15,12 @@ pub(crate) fn pointer_move(_position: PointerPosition) -> Result<(), InputInject
     })
 }
 
+pub(crate) fn pointer_position() -> Result<PointerPosition, InputInjectError> {
+    Err(InputInjectError::Unsupported {
+        reason: "pointer-position not wired on unix".into(),
+    })
+}
+
 pub(crate) fn pointer_click(
     _position: PointerPosition,
     _button: PointerButton,

@@ -44,7 +44,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 10
+#define AGT_ABI_MINOR 11
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -754,6 +754,10 @@ agt_status agt_native_window_close(intptr_t handle);
 
 /* Input injection. Mechanism absent on this host -> AGT_UNSUPPORTED;
  * platform failure -> AGT_FAILED{code="input_failed"}. */
+
+/* Read absolute screen coordinates without injecting input. x and y are
+ * required; a null output pointer returns AGT_FAILED{code="bad_pointer"}. */
+agt_status agt_input_pointer_position(int32_t* x, int32_t* y);
 
 /* Move the pointer to absolute screen coordinates. */
 agt_status agt_input_pointer_move(int32_t x, int32_t y);

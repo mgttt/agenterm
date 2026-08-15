@@ -160,6 +160,7 @@ type WindowPlacementQuery =
     unsafe extern "C" fn(isize, u32, *mut agt_window_placement_info_v1) -> i32;
 type NativeWindowShow = unsafe extern "C" fn(isize, i32) -> i32;
 type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
+type InputPointerPosition = unsafe extern "C" fn(*mut i32, *mut i32) -> i32;
 type InputTypeText = unsafe extern "C" fn(*const u8, usize) -> i32;
 
 #[repr(C)]
@@ -3000,6 +3001,24 @@ fn input_pointer_click_rejects_bad_button() {
         msg.contains("bad_button"),
         "expected code \"bad_button\" in error, got: {msg}"
     );
+}
+
+#[test]
+fn input_pointer_position_export_rejects_each_null_output() {
+    let lib = load();
+    let position: Symbol<InputPointerPosition> = unsafe { sym(lib, b"agt_input_pointer_position") };
+    let mut coordinate = 0;
+    for status in [
+        unsafe { position(std::ptr::null_mut(), &mut coordinate) },
+        unsafe { position(&mut coordinate, std::ptr::null_mut()) },
+    ] {
+        assert_eq!(status, AGT_FAILED, "expected AGT_FAILED, got {status}");
+        let message = last_error_message(lib);
+        assert!(
+            message.contains("bad_pointer"),
+            "expected bad_pointer, got {message}"
+        );
+    }
 }
 
 /// Milestone 43: `agt_input_type_text(NULL, 5)` ->

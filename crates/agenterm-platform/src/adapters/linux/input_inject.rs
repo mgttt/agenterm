@@ -227,6 +227,20 @@ pub(crate) fn pointer_move(position: PointerPosition) -> Result<(), InputInjectE
     xtest_input(&context, MOTION_NOTIFY_EVENT, 0, x, y)
 }
 
+pub(crate) fn pointer_position() -> Result<PointerPosition, InputInjectError> {
+    let context = connect()?;
+    let reply = context
+        .connection
+        .query_pointer(context.root)
+        .map_err(|_| failed("X11 pointer query could not be sent"))?
+        .reply()
+        .map_err(|_| failed("X11 pointer query failed"))?;
+    Ok(PointerPosition {
+        x: i32::from(reply.root_x),
+        y: i32::from(reply.root_y),
+    })
+}
+
 pub(crate) fn pointer_click(
     position: PointerPosition,
     button: PointerButton,
