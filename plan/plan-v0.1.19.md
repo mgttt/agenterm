@@ -80,5 +80,8 @@ agent 已经能 `windows` / `tree` / `click`，还需要像人按热键那样把
   action 加 Quit。
 - [x] 本机 `target/abi-dev` `host --self-test --json` 已报告
   `actions=19`、`cleaned_up=true`。
+- [x] staged Windows x86_64 `cu-windows-smoke` 已对 owned fixture 证明
+  observe-only `window-place` 拒绝且 bounds 不变、授权 `left-half` 后独立
+  bounds 回读一致、隔离 JSONL 恰有 `attempt` + `ok` 且无敏感字段名。
 - [ ] 正式 `dist`、Candidate、qualification 尚未闭环；本 checkpoint 只能
   支持 `[~]`，不得把 CU 根或 Windows 正式交付标为 shipped。

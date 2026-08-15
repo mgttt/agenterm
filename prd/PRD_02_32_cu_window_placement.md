@@ -179,7 +179,9 @@ that `agenterm-cu` does not yet own. The ids stay reserved; v0.1.19 may return
   calculation specs within 1 pt.
 - [ ] black-box: real `agenterm-cu` on a real macOS session places a visible window
   and a subsequent `windows` / `wait` observation shows the new bounds.
-- [ ] unauthorized call is `refused` and does not move the window.
+- [~] unauthorized call is `refused` and does not move the window. The staged
+  Windows x86_64 public smoke proves this against its owned fixture; macOS and
+  Linux evidence remain open.
 
 ## Windows desktop-host checkpoint
 
@@ -195,7 +197,9 @@ that `agenterm-cu` does not yet own. The ids stay reserved; v0.1.19 may return
   `host_actions::execute` function owns Windows menu/global-shortcut and macOS
   callback dispatch, so host modes cannot bypass command authorization/audit.
 - [x] The staged `dist/agenterm-cu.exe` beside its exact `dist/agenterm.dll`
-  passes `cu-windows-smoke`: version probe, dynamic load, 19 actions and
-  deterministic host cleanup.
+  passes `cu-windows-smoke`: version probe, dynamic load, 19 actions,
+  observe-only placement refusal with unchanged bounds, authorized
+  `left-half` placement with independent bounds readback, isolated JSONL
+  attempt/outcome audit, and deterministic host cleanup.
 - [ ] Candidate qualification and Windows ARM64 evidence remain open. Until
   those gates close, Windows host and this subtree remain partial.

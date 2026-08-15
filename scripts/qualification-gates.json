@@ -259,6 +259,9 @@
         "cu.windows-uia-tree",
         "cu.windows-uia-name-actuation",
         "cu.windows-uia-value-wait",
+        "cu.windows-window-place-refusal",
+        "cu.windows-window-place-actuation",
+        "cu.windows-window-place-audit",
         "cu.windows-uia-cleanup"
       ]
     }

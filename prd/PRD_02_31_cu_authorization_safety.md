@@ -65,3 +65,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [ ] a security review of this surface is required before any remote transport
   tier is claimed, and it belongs to the release gate rather than to the
   authoring agent's own judgment.
+
+## Windows current checkpoint
+
+- [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
+  `window-place` is typed `refused` and leaves the owned fixture bounds
+  unchanged. The authorized call writes exactly one `attempt` and one `ok`
+  JSONL record through an isolated audit path, and independent window
+  enumeration confirms the reported placement.
+- [ ] This checkpoint does not prove per-target expiry/revocation, every
+  actuation verb, credential absence from every published artifact, Windows
+  ARM64, another OS, or the required remote-transport security review. The
+  module therefore remains planned/partial rather than shipped.

@@ -136,6 +136,9 @@ fn entry() {
         print("cu.windows-uia-tree");
         print("cu.windows-uia-name-actuation");
         print("cu.windows-uia-value-wait");
+        print("cu.windows-window-place-refusal");
+        print("cu.windows-window-place-actuation");
+        print("cu.windows-window-place-audit");
         print("cu.windows-uia-cleanup");
         return 0;
     }
@@ -269,16 +272,19 @@ fn entry() {
         );
         let identity_matches = 0;
         let fixture_handle = 0;
+        let fixture_bounds_before = "";
         for row in windows.data {
             let row_pid = 0 + row.process_id;
             let row_title = "" + row.title;
             if row_pid == fixture_pid && row_title == fixture_title {
                 identity_matches += 1;
                 fixture_handle = 0 + row.handle;
+                fixture_bounds_before = rh::json::stringify(row.bounds);
             }
         }
         ensure(
-            identity_matches == 1 && fixture_handle != 0,
+            identity_matches == 1 && fixture_handle != 0
+                && fixture_bounds_before != "",
             "cu_windows_smoke_window_identity"
         );
         let handle_text = "" + fixture_handle;
@@ -354,6 +360,177 @@ fn entry() {
                 && ("" + text_wait.data.text) == roundtrip_text,
             "cu_windows_smoke_gettext_wait:" +
                 rh::json::stringify(text_wait)
+        );
+
+        print("STEP observe-only window-place is refused without moving fixture");
+        let audit_path = std::path::join(
+            run_directory,
+            "window-place-audit.jsonl"
+        ).display;
+        std::fs::try_remove_file(audit_path);
+        let refused_command = std::process::command(executable);
+        refused_command.args([
+            "--target", "current", "--grant", "observe",
+            "window-place", "--action", "left-half",
+            "--window", handle_text
+        ]);
+        refused_command.env("AGENTERM_CU_AUDIT_PATH", audit_path);
+        refused_command.current_dir(run_directory);
+        refused_command.timeout(std::time::Duration::from_secs(30));
+        refused_command.capture_limit(262144);
+        let refused_output = refused_command.output();
+        let refused_text = refused_output.stdout_text();
+        refused_text.trim();
+        ensure(
+            refused_output.success != 0 && refused_text != "",
+            "cu_windows_smoke_window_place_refused_process:" +
+                refused_text + refused_output.stderr_text()
+        );
+        let refused = rh::json::parse(refused_text);
+        ensure(
+            refused.ok == 0
+                && ("" + refused.target) == "current"
+                && ("" + refused.command) == "window-place"
+                && ("" + refused.error.code) == "refused",
+            "cu_windows_smoke_window_place_refused_reply:" + refused_text
+        );
+        ensure(
+            !std::fs::exists(audit_path),
+            "cu_windows_smoke_refused_window_place_wrote_audit"
+        );
+        let after_refusal = run_cu_json(
+            run_directory,
+            executable,
+            ["--target", "current", "--grant", "observe", "windows"]
+        );
+        let refusal_matches = 0;
+        let bounds_after_refusal = "";
+        for row in after_refusal.data {
+            let row_handle = 0 + row.handle;
+            if row_handle == fixture_handle {
+                refusal_matches += 1;
+                bounds_after_refusal = rh::json::stringify(row.bounds);
+            }
+        }
+        ensure(
+            refusal_matches == 1
+                && bounds_after_refusal == fixture_bounds_before,
+            "cu_windows_smoke_refused_window_place_changed_bounds:before=" +
+                fixture_bounds_before + ":after=" + bounds_after_refusal
+        );
+
+        print("STEP actuated window-place changes fixture and is independently observed");
+        let place_command = std::process::command(executable);
+        place_command.args([
+            "--target", "current", "--grant", "actuate",
+            "window-place", "--action", "left-half",
+            "--window", handle_text
+        ]);
+        place_command.env("AGENTERM_CU_AUDIT_PATH", audit_path);
+        place_command.current_dir(run_directory);
+        place_command.timeout(std::time::Duration::from_secs(30));
+        place_command.capture_limit(262144);
+        let place_output = place_command.output();
+        let place_text = place_output.stdout_text();
+        place_text.trim();
+        ensure(
+            place_output.success != 0 && place_text != "",
+            "cu_windows_smoke_window_place_process:" +
+                place_text + place_output.stderr_text()
+        );
+        let placed = rh::json::parse(place_text);
+        ensure(
+            placed.ok != 0
+                && ("" + placed.target) == "current"
+                && ("" + placed.command) == "window-place"
+                && ("" + placed.data.action) == "left-half"
+                && (0 + placed.data.window) == fixture_handle,
+            "cu_windows_smoke_window_place_reply:" + place_text
+        );
+        let reply_after = rh::json::stringify(placed.data.after);
+        ensure(
+            reply_after != fixture_bounds_before,
+            "cu_windows_smoke_window_place_reply_unchanged"
+        );
+        let observed_after = "";
+        let observed_matches = 0;
+        for attempt in 0..80 {
+            let observed_windows = run_cu_json(
+                run_directory,
+                executable,
+                ["--target", "current", "--grant", "observe", "windows"]
+            );
+            for row in observed_windows.data {
+                let row_handle = 0 + row.handle;
+                if row_handle == fixture_handle {
+                    let row_bounds = rh::json::stringify(row.bounds);
+                    observed_after = row_bounds;
+                    if row_bounds == reply_after {
+                        observed_matches = 1;
+                    }
+                }
+            }
+            if observed_matches != 0 {
+                break;
+            }
+            rh::task::sleep(std::time::Duration::from_millis(25));
+        }
+        ensure(
+            observed_matches != 0
+                && observed_after != fixture_bounds_before,
+            "cu_windows_smoke_window_place_readback:before=" +
+                fixture_bounds_before + ":reply=" + reply_after +
+                ":observed=" + observed_after
+        );
+
+        print("STEP isolated window-place audit records attempt and success");
+        ensure(
+            direct_file(audit_path) != 0,
+            "cu_windows_smoke_window_place_audit_missing"
+        );
+        let audit_text = std::fs::read_to_string(audit_path);
+        let audit_lower = audit_text.to_lower();
+        ensure(
+            !audit_lower.contains("password")
+                && !audit_lower.contains("credential")
+                && !audit_lower.contains("secret")
+                && !audit_lower.contains("token")
+                && !audit_lower.contains("endpoint"),
+            "cu_windows_smoke_window_place_audit_sensitive_field"
+        );
+        let attempt_records = 0;
+        let ok_records = 0;
+        let audit_lines = audit_text.split("\n");
+        for raw_line in audit_lines {
+            let line = raw_line;
+            line.trim();
+            if line != "" {
+                let record = rh::json::parse(line);
+                ensure(
+                    ("" + record.target) == "current"
+                        && ("" + record.verb) == "window-place"
+                        && ("" + record.grant) == "actuate",
+                    "cu_windows_smoke_window_place_audit_scope:" + line
+                );
+                let outcome = "" + record.outcome;
+                if outcome == "attempt" {
+                    attempt_records += 1;
+                } else if outcome == "ok" {
+                    ensure(
+                        ("" + record.detail.action) == "left-half"
+                            && (0 + record.detail.window) == fixture_handle,
+                        "cu_windows_smoke_window_place_audit_detail:" + line
+                    );
+                    ok_records += 1;
+                } else {
+                    throw "cu_windows_smoke_window_place_audit_outcome:" + line;
+                }
+            }
+        }
+        ensure(
+            attempt_records == 1 && ok_records == 1,
+            "cu_windows_smoke_window_place_audit_counts:attempt=" +
+                attempt_records + ":ok=" + ok_records
         );
 
         print("STEP public name-addressed Invoke closes only owned fixture");
@@ -433,6 +610,9 @@ fn entry() {
     print("EVIDENCE cu.windows-uia-tree");
     print("EVIDENCE cu.windows-uia-name-actuation");
     print("EVIDENCE cu.windows-uia-value-wait");
+    print("EVIDENCE cu.windows-window-place-refusal");
+    print("EVIDENCE cu.windows-window-place-actuation");
+    print("EVIDENCE cu.windows-window-place-audit");
     print("EVIDENCE cu.windows-uia-cleanup");
     print(
         "PASS: staged agenterm-cu host and public Windows UIA journey"
@@ -446,6 +626,9 @@ fn cc_lines() {
         "Windows desktop host self-test closes registered resources",
         "public UIA tree exposes unique named edit and button controls",
         "public name addressing uses ValuePattern, GetText, and Invoke",
+        "observe-only window placement is refused without changing bounds",
+        "authorized left-half placement matches independent window bounds",
+        "isolated window-placement audit records attempt and success without sensitive fields",
         "owned no-activate fixture exits normally with bounded cleanup proof"
     ]
 }
