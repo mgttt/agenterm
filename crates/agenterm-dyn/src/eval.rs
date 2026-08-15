@@ -6,8 +6,38 @@ use crate::value::Value;
 
 /// Hard cap for `(repeat N …)` — unbounded loops are intentionally unsupported.
 pub const REPEAT_MAX: i64 = 1_000_000;
+/// Total `(repeat …)` body iterations available to one top-level evaluation.
+///
+/// Nested `repeat` forms share this budget, preventing multiplicative work.
+pub const MAX_TOTAL_REPEAT_ITERATIONS: usize = 1_000_000;
 
-pub(crate) fn eval_expr(env: &mut Dyn, expr: &SExpr) -> Result<Value, DynError> {
+pub(crate) struct RepeatBudget {
+    remaining: usize,
+}
+
+impl RepeatBudget {
+    pub(crate) fn new() -> Self {
+        Self {
+            remaining: MAX_TOTAL_REPEAT_ITERATIONS,
+        }
+    }
+
+    fn reserve(&mut self, count: usize) -> Result<(), DynError> {
+        self.remaining =
+            self.remaining
+                .checked_sub(count)
+                .ok_or(DynError::RepeatBudgetExceeded {
+                    limit: MAX_TOTAL_REPEAT_ITERATIONS,
+                })?;
+        Ok(())
+    }
+}
+
+pub(crate) fn eval_expr(
+    env: &mut Dyn,
+    expr: &SExpr,
+    budget: &mut RepeatBudget,
+) -> Result<Value, DynError> {
     match expr {
         SExpr::Int(n) => Ok(Value::Int(*n)),
         SExpr::Str(s) => Err(DynError::Type(format!(
@@ -18,11 +48,11 @@ pub(crate) fn eval_expr(env: &mut Dyn, expr: &SExpr) -> Result<Value, DynError> 
             .get(name)
             .copied()
             .ok_or_else(|| DynError::UnknownVar(name.clone())),
-        SExpr::List(items) => eval_list(env, items),
+        SExpr::List(items) => eval_list(env, items, budget),
     }
 }
 
-fn eval_list(env: &mut Dyn, items: &[SExpr]) -> Result<Value, DynError> {
+fn eval_list(env: &mut Dyn, items: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     let head = items
         .first()
         .ok_or_else(|| DynError::Parse("empty list".into()))?;
@@ -32,21 +62,21 @@ fn eval_list(env: &mut Dyn, items: &[SExpr]) -> Result<Value, DynError> {
         ));
     };
     match form.as_str() {
-        "do" => eval_do(env, &items[1..]),
-        "set" => eval_set(env, &items[1..]),
-        "if" => eval_if(env, &items[1..]),
-        "dlcall" => native::eval_dlcall(env, &items[1..]),
-        "=" => eval_cmp(env, "=", &items[1..], |a, b| a == b),
-        "<" => eval_cmp(env, "<", &items[1..], |a, b| a < b),
-        ">" => eval_cmp(env, ">", &items[1..], |a, b| a > b),
-        "<=" => eval_cmp(env, "<=", &items[1..], |a, b| a <= b),
-        ">=" => eval_cmp(env, ">=", &items[1..], |a, b| a >= b),
-        "not" => eval_not(env, &items[1..]),
-        "and" => eval_and(env, &items[1..]),
-        "or" => eval_or(env, &items[1..]),
-        "+" => eval_add(env, &items[1..]),
-        "-" => eval_sub(env, &items[1..]),
-        "repeat" => eval_repeat(env, &items[1..]),
+        "do" => eval_do(env, &items[1..], budget),
+        "set" => eval_set(env, &items[1..], budget),
+        "if" => eval_if(env, &items[1..], budget),
+        "dlcall" => native::eval_dlcall(env, &items[1..], budget),
+        "=" => eval_cmp(env, "=", &items[1..], budget, |a, b| a == b),
+        "<" => eval_cmp(env, "<", &items[1..], budget, |a, b| a < b),
+        ">" => eval_cmp(env, ">", &items[1..], budget, |a, b| a > b),
+        "<=" => eval_cmp(env, "<=", &items[1..], budget, |a, b| a <= b),
+        ">=" => eval_cmp(env, ">=", &items[1..], budget, |a, b| a >= b),
+        "not" => eval_not(env, &items[1..], budget),
+        "and" => eval_and(env, &items[1..], budget),
+        "or" => eval_or(env, &items[1..], budget),
+        "+" => eval_add(env, &items[1..], budget),
+        "-" => eval_sub(env, &items[1..], budget),
+        "repeat" => eval_repeat(env, &items[1..], budget),
         other => Err(DynError::UnknownForm(other.to_owned())),
     }
 }
@@ -61,15 +91,15 @@ fn bool_value(cond: bool) -> Value {
     Value::Int(i64::from(cond))
 }
 
-fn eval_do(env: &mut Dyn, body: &[SExpr]) -> Result<Value, DynError> {
+fn eval_do(env: &mut Dyn, body: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     let mut last = Value::Nil;
     for expr in body {
-        last = eval_expr(env, expr)?;
+        last = eval_expr(env, expr, budget)?;
     }
     Ok(last)
 }
 
-fn eval_set(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_set(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.len() != 2 {
         return Err(DynError::Arity {
             form: "set",
@@ -84,12 +114,12 @@ fn eval_set(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     // an expression's side effects merely because its target is a new name.
     Dyn::ensure_name(name)?;
     env.ensure_binding_capacity(name)?;
-    let value = eval_expr(env, &args[1])?;
+    let value = eval_expr(env, &args[1], budget)?;
     env.bindings.insert(name.clone(), value);
     Ok(value)
 }
 
-fn eval_if(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_if(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.len() != 3 {
         return Err(DynError::Arity {
             form: "if",
@@ -97,11 +127,11 @@ fn eval_if(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
             got: args.len(),
         });
     }
-    let cond = eval_expr(env, &args[0])?;
+    let cond = eval_expr(env, &args[0], budget)?;
     if cond.is_truthy() {
-        eval_expr(env, &args[1])
+        eval_expr(env, &args[1], budget)
     } else {
-        eval_expr(env, &args[2])
+        eval_expr(env, &args[2], budget)
     }
 }
 
@@ -109,6 +139,7 @@ fn eval_cmp(
     env: &mut Dyn,
     form: &'static str,
     args: &[SExpr],
+    budget: &mut RepeatBudget,
     op: impl FnOnce(i64, i64) -> bool,
 ) -> Result<Value, DynError> {
     if args.len() != 2 {
@@ -118,12 +149,15 @@ fn eval_cmp(
             got: args.len(),
         });
     }
-    let left = expect_int(eval_expr(env, &args[0])?, "comparison left operand")?;
-    let right = expect_int(eval_expr(env, &args[1])?, "comparison right operand")?;
+    let left = expect_int(eval_expr(env, &args[0], budget)?, "comparison left operand")?;
+    let right = expect_int(
+        eval_expr(env, &args[1], budget)?,
+        "comparison right operand",
+    )?;
     Ok(bool_value(op(left, right)))
 }
 
-fn eval_and(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_and(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.is_empty() {
         return Err(DynError::Arity {
             form: "and",
@@ -133,7 +167,7 @@ fn eval_and(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     }
     let mut last = Value::Nil;
     for arg in args {
-        last = eval_expr(env, arg)?;
+        last = eval_expr(env, arg, budget)?;
         if !last.is_truthy() {
             return Ok(last);
         }
@@ -141,7 +175,7 @@ fn eval_and(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     Ok(last)
 }
 
-fn eval_or(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_or(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.is_empty() {
         return Err(DynError::Arity {
             form: "or",
@@ -151,7 +185,7 @@ fn eval_or(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     }
     let mut last = Value::Nil;
     for arg in args {
-        last = eval_expr(env, arg)?;
+        last = eval_expr(env, arg, budget)?;
         if last.is_truthy() {
             return Ok(last);
         }
@@ -159,7 +193,7 @@ fn eval_or(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     Ok(last)
 }
 
-fn eval_not(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_not(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.len() != 1 {
         return Err(DynError::Arity {
             form: "not",
@@ -167,10 +201,10 @@ fn eval_not(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
             got: args.len(),
         });
     }
-    Ok(bool_value(!eval_expr(env, &args[0])?.is_truthy()))
+    Ok(bool_value(!eval_expr(env, &args[0], budget)?.is_truthy()))
 }
 
-fn eval_add(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_add(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.is_empty() {
         return Err(DynError::Arity {
             form: "+",
@@ -180,7 +214,7 @@ fn eval_add(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     }
     let mut sum = 0_i64;
     for arg in args {
-        let n = expect_int(eval_expr(env, arg)?, "+ operand")?;
+        let n = expect_int(eval_expr(env, arg, budget)?, "+ operand")?;
         sum = sum
             .checked_add(n)
             .ok_or_else(|| DynError::Type("integer overflow in +".into()))?;
@@ -188,7 +222,7 @@ fn eval_add(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     Ok(Value::Int(sum))
 }
 
-fn eval_sub(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_sub(env: &mut Dyn, args: &[SExpr], budget: &mut RepeatBudget) -> Result<Value, DynError> {
     if args.is_empty() {
         return Err(DynError::Arity {
             form: "-",
@@ -196,7 +230,7 @@ fn eval_sub(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
             got: 0,
         });
     }
-    let first = expect_int(eval_expr(env, &args[0])?, "- operand")?;
+    let first = expect_int(eval_expr(env, &args[0], budget)?, "- operand")?;
     if args.len() == 1 {
         return first
             .checked_neg()
@@ -205,7 +239,7 @@ fn eval_sub(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     }
     let mut acc = first;
     for arg in &args[1..] {
-        let n = expect_int(eval_expr(env, arg)?, "- operand")?;
+        let n = expect_int(eval_expr(env, arg, budget)?, "- operand")?;
         acc = acc
             .checked_sub(n)
             .ok_or_else(|| DynError::Type("integer overflow in -".into()))?;
@@ -213,7 +247,11 @@ fn eval_sub(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     Ok(Value::Int(acc))
 }
 
-fn eval_repeat(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+fn eval_repeat(
+    env: &mut Dyn,
+    args: &[SExpr],
+    budget: &mut RepeatBudget,
+) -> Result<Value, DynError> {
     if args.len() != 2 {
         return Err(DynError::Arity {
             form: "repeat",
@@ -221,7 +259,7 @@ fn eval_repeat(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
             got: args.len(),
         });
     }
-    let count = expect_int(eval_expr(env, &args[0])?, "repeat count")?;
+    let count = expect_int(eval_expr(env, &args[0], budget)?, "repeat count")?;
     if count < 0 {
         return Err(DynError::Type(
             "repeat count must be a non-negative integer".into(),
@@ -234,9 +272,12 @@ fn eval_repeat(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     }
     let count_usize = usize::try_from(count)
         .map_err(|_| DynError::Type("repeat count does not fit in usize".into()))?;
+    // Reserve before the body begins so an over-budget nested repeat cannot
+    // commit a body-side effect.
+    budget.reserve(count_usize)?;
     let mut last = Value::Nil;
     for _ in 0..count_usize {
-        last = eval_expr(env, &args[1])?;
+        last = eval_expr(env, &args[1], budget)?;
     }
     Ok(last)
 }

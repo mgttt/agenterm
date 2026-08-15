@@ -2,7 +2,9 @@
 
 use std::ffi::c_void;
 
-use agenterm_dyn::{Dyn, DynError, MAX_BINDINGS, MAX_NAME_BYTES, MAX_SYMBOLS, Value};
+use agenterm_dyn::{
+    Dyn, DynError, MAX_BINDINGS, MAX_NAME_BYTES, MAX_SYMBOLS, MAX_TOTAL_REPEAT_ITERATIONS, Value,
+};
 
 #[test]
 fn intern_is_stable() {
@@ -337,6 +339,29 @@ fn repeat_runs_body_and_returns_last() {
         .expect("repeat accum");
     assert_eq!(v, Value::Int(3));
     assert_eq!(env.eval("(repeat 0 99)").unwrap(), Value::Nil);
+    assert_eq!(
+        env.eval(&format!("(repeat {MAX_TOTAL_REPEAT_ITERATIONS} 1)")),
+        Ok(Value::Int(1))
+    );
+    assert_eq!(
+        env.eval(&format!("(repeat {MAX_TOTAL_REPEAT_ITERATIONS} 1)")),
+        Ok(Value::Int(1))
+    );
+}
+
+#[test]
+fn safe_nested_repeat_rejects_shared_total_budget_before_inner_body() {
+    let mut env = Dyn::new();
+    let script = format!(
+        "(do (set touched 0) (repeat {MAX_TOTAL_REPEAT_ITERATIONS} (repeat 1 (set touched 1))))"
+    );
+    assert_eq!(
+        env.eval(&script),
+        Err(DynError::RepeatBudgetExceeded {
+            limit: MAX_TOTAL_REPEAT_ITERATIONS,
+        })
+    );
+    assert_eq!(env.eval("touched"), Ok(Value::Int(0)));
 }
 
 #[test]

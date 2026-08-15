@@ -4,6 +4,7 @@ use std::ffi::{CString, c_void};
 use libloading::Library;
 
 use crate::error::DynError;
+use crate::eval::RepeatBudget;
 use crate::parse::SExpr;
 use crate::value::Value;
 use crate::{Dyn, MAX_NAME_BYTES};
@@ -146,7 +147,11 @@ fn expect_string(expr: &SExpr, what: &str) -> Result<String, DynError> {
 ///
 /// This intentionally supports only fixed, non-variadic C ABI calls with at most six
 /// integer/pointer arguments. Floating-point and aggregate ABI classes are rejected.
-pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
+pub(crate) fn eval_dlcall(
+    env: &mut Dyn,
+    args: &[SExpr],
+    budget: &mut RepeatBudget,
+) -> Result<Value, DynError> {
     if args.len() < 3 {
         return Err(DynError::Arity {
             form: "dlcall",
@@ -235,7 +240,7 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         .copied()
         .zip(args[3..].chunks_exact(2).map(|pair| &pair[1]))
         .map(|(ty, expr)| {
-            let value = crate::eval::eval_expr(env, expr)?;
+            let value = crate::eval::eval_expr(env, expr, budget)?;
             DynArg::from_value(ty, value)
         })
         .collect::<Result<Vec<_>, _>>()?;

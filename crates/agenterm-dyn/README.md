@@ -99,6 +99,15 @@ than consuming unbounded parser input, allocation, or stack. This is a
 robustness limit only: it does not grant, deny, or otherwise change any
 native-door or caller authority semantics.
 
+## Repeat resource bound
+
+Each top-level `Dyn::eval` or `Dyn::eval_native` call has a shared budget of
+1,000,000 repeat-body iterations (`MAX_TOTAL_REPEAT_ITERATIONS`). A single
+`repeat` remains capped at 1,000,000 (`REPEAT_MAX`), but nested repeats draw
+from the same top-level budget. A repeat whose full count cannot be reserved
+returns `DynError::RepeatBudgetExceeded` before its body executes; this avoids
+multiplicative nested-loop work and body-side effects on the rejected form.
+
 ## Public surface
 
 | API | Role |
@@ -108,6 +117,7 @@ native-door or caller authority semantics.
 | `Dyn::eval` | Safely evaluate pure S-expr source; rejects any AST containing `dlcall` before execution |
 | `Dyn::eval_native` | Unsafe native-capable evaluation; caller upholds ABI, pointer, aliasing, lifetime, library, thread, and side-effect contracts |
 | `dlcall` | Only native primitive — invoked from lists, not a verb table |
+| `REPEAT_MAX` / `MAX_TOTAL_REPEAT_ITERATIONS` | Per-form and per-top-level repeat-work bounds |
 | `hosts::*` | Six-cell host table + CU-adjacent catalog (`PLATFORM-CANDIDATE`) |
 
 ## Six-cell host table

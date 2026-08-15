@@ -19,6 +19,8 @@ pub enum DynError {
         resource: &'static str,
         limit: usize,
     },
+    #[error("total repeat iteration limit reached: {limit}")]
+    RepeatBudgetExceeded { limit: usize },
     #[error("arity mismatch in special form `{form}`: expected {expected}, got {got}")]
     Arity {
         form: &'static str,

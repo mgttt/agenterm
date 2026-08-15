@@ -47,6 +47,11 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   4,096 AST nodes (every list and scalar expression counts) accept; the next
   byte or node returns `DynError::Parse`. These parser bounds do not add
   authority semantics or persistent environment quotas.
+- Every top-level evaluation shares a 1,000,000-iteration repeat budget.
+  `REPEAT_MAX` still permits a single 1,000,000-iteration loop, while nested
+  loops reserve from `MAX_TOTAL_REPEAT_ITERATIONS` before their body executes.
+  A rejected nested body reports `DynError::RepeatBudgetExceeded` without its
+  body-side effects.
 - Win six-cell extra probes stay placeholders. **macOS** has the shared
   fixed-ABI live libc rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`,
   `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`,
@@ -62,9 +67,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
-  1.97: **145 passed** (22 unit + 39 errors + 11 hosts + 25 language + 48
+  1.97: **147 passed** (22 unit + 40 errors + 11 hosts + 26 language + 48
   cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory is
-  **158** (22 unit + 39 errors + 11 hosts + 25 language + 1 macos_ioctl +
+  **160** (22 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl +
   32 macos_probes + 4 macos_resource + 24 cfg-gated macOS smoke; 0 doctests);
   native CI remains the evidence gate for current source. Wave 4–6 live rows were `dlcall`ed on the earlier
   Darwin CI host and compared to later native calls. Host-specific counts, not

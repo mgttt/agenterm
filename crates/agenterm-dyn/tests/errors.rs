@@ -2,7 +2,7 @@
 
 use std::ffi::c_void;
 
-use agenterm_dyn::{Dyn, DynError, REPEAT_MAX};
+use agenterm_dyn::{Dyn, DynError, MAX_TOTAL_REPEAT_ITERATIONS, REPEAT_MAX};
 
 fn eval_native(env: &mut Dyn, source: &str) -> Result<agenterm_dyn::Value, DynError> {
     // SAFETY: error fixtures intentionally exercise native validation only.
@@ -676,6 +676,21 @@ fn repeat_rejects_negative_and_over_cap() {
 
     let over = eval_native(&mut env, &format!("(repeat {} 1)", REPEAT_MAX + 1)).unwrap_err();
     assert!(matches!(over, DynError::Type(_)));
+}
+
+#[test]
+fn nested_repeat_rejects_shared_total_budget_before_inner_body() {
+    let mut env = Dyn::new();
+    let script = format!(
+        "(do (set touched 0) (repeat {MAX_TOTAL_REPEAT_ITERATIONS} (repeat 1 (set touched 1))))"
+    );
+    assert_eq!(
+        eval_native(&mut env, &script),
+        Err(DynError::RepeatBudgetExceeded {
+            limit: MAX_TOTAL_REPEAT_ITERATIONS,
+        })
+    );
+    assert_eq!(env.eval("touched"), Ok(agenterm_dyn::Value::Int(0)));
 }
 
 #[test]

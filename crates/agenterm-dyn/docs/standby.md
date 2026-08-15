@@ -19,6 +19,9 @@ This note is the crate-side pointer so the next knife does not start from chat.
    each environment retains at most 4,096 bindings and
    4,096 distinct symbols. The parser accepts 256 nested lists and rejects 257 with
    `DynError::Parse` before evaluation.
+   Every top-level evaluation also shares a 1,000,000-iteration repeat budget;
+   nested repeats reserve against it before their body executes and report
+   `DynError::RepeatBudgetExceeded` when exhausted.
 3. **probes** — Linux and macOS integer/void/ptr libc rows are live; Windows
    extra probes remain explicit placeholders. Unix `ioctl` (Linux and macOS) remains variadic
    script data, not a claimed fixed-trampoline success. `umask` restores its
@@ -28,8 +31,8 @@ This note is the crate-side pointer so the next knife does not start from chat.
    README link.
 
 Current Linux evidence, not a portable estimate: Rust 1.97
-`cargo test --locked -p agenterm-dyn` passes **145** tests (22 unit, 39 errors,
-11 hosts, 25 language, 48 Linux smoke; 0 doctests).
+`cargo test --locked -p agenterm-dyn` passes **147** tests (22 unit, 40 errors,
+11 hosts, 26 language, 48 Linux smoke; 0 doctests).
 
 ## Later — requires explicit product authorization
 

@@ -10,7 +10,7 @@ mod sym;
 mod value;
 
 pub use error::DynError;
-pub use eval::REPEAT_MAX;
+pub use eval::{MAX_TOTAL_REPEAT_ITERATIONS, REPEAT_MAX};
 pub use hosts::{
     ALL_CELLS, CU_ADJACENT_PROBE_CATALOG, CuAdjacentProbeCell, HostArch, HostCell, HostOs,
     LAYER3_CANDIDATES, LINUX_AARCH64, LINUX_ATSPI_EXISTENCE_LIBS, LINUX_X86_64, MACOS_AARCH64,
@@ -97,7 +97,8 @@ impl Dyn {
         if parse::contains_dlcall(&expr) {
             return Err(DynError::NativeRequiresUnsafe);
         }
-        eval::eval_expr(self, &expr)
+        let mut budget = eval::RepeatBudget::new();
+        eval::eval_expr(self, &expr, &mut budget)
     }
 
     /// Evaluate source that may invoke the native `dlcall` primitive.
@@ -113,7 +114,8 @@ impl Dyn {
     /// contracts and must not be used for arbitrary variadic APIs.
     pub unsafe fn eval_native(&mut self, source: &str) -> Result<Value, DynError> {
         let expr = parse::parse(source)?;
-        eval::eval_expr(self, &expr)
+        let mut budget = eval::RepeatBudget::new();
+        eval::eval_expr(self, &expr, &mut budget)
     }
 }
 
