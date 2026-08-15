@@ -1,86 +1,91 @@
-# Goal: first-class `agenterm-dyn` on macOS (wave 3)
+# Goal: first-class `agenterm-dyn` on macOS (standing)
 
-Status: active  
+Status: **active — do not stop between waves**  
 Owner: this session (`agenterm-osx`) + exclusive-file subagents **in background**  
 CWD: repository root. Paths: repo-relative or `~/...` only.  
 Git identity: `agenterm-osx <agenterm@mgttt.com>`.
 
+The human does **not** need to re-send `/goal`. After I/P, immediately
+plan the next wave and spawn again until 政委 says stop.
+
 ## Outcome
 
-Waves 1–2 are on `main` (40 then 43 probes; loaded-symbol Darwin ioctl).
-This Darwin host just ran `cargo test -p agenterm-dyn`: **106 passed**.
-Wave 3 adds more Darwin-only integer/ptr facts, a few more header-alias
-rejects, and honest CU-adjacent notes. Still not a fourth engine.
+Tiny intern/eval/`dlcall` door. Darwin is first-class and honest: live
+integer/ptr facts, no leaked Mach rights / fds, ioctl only via the
+loaded-symbol variadic gate. Windows stays placeholder.
+
+Evidence every wave: `cargo test -p agenterm-dyn` on this aarch64-apple-darwin
+host.
 
 ## Invariants
 
 - No C, no libffi, no JIT, no lambda, no cu/platform import.
 - Do not fake live probes on Linux/Windows.
+- Do **not** live-call `mach_host_self` (send right, no release path).
+  Keep it Placeholder.
+- Do not allocate fds/ports without restore/close in the same test.
 - Subagents do **not** commit. Primary owns I/P as `agenterm-osx`.
 - Commit-pull-rebase-push on each coherent increment. Exact pathspec.
-- Background only. Private `CARGO_TARGET_DIR`: `target/dyn-harden3`,
-  `target/dyn-probes3`, `target/dyn-cuadj`.
-- Do **not** re-do ioctl, `sysctlbyname`, `mach_absolute_time`,
-  `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`,
-  `arc4random`. Those shipped.
+- Already shipped — do not redo: ioctl gate, `sysctlbyname`,
+  `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
+  `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`.
 
-## DAG
+## Wave 4 DAG
 
 ```text
-G  this goal
-├── A  more C-header aliases     files: tests/errors.rs only
-├── B  three more Darwin probes  files: src/hosts.rs (system_probes only),
-│                                tests/hosts.rs (system_probes asserts),
-│                                tests/macos_probes.rs (append),
-│                                examples/{clock-gettime-nsec-np,sysctl,
-│                                mach-host-self}.md (new)
-├── C  CU-adjacent macos notes   files: src/hosts.rs CU-adjacent constants
-│                                + catalog tests at the bottom of hosts.rs
-│                                (do not touch system_probes)
-└── I/P  primary: README/PRD if needed, test, commit, rebase, push
+G  this standing goal
+├── A  more C-header aliases      files: tests/errors.rs only
+├── B  leak-free Darwin probes    files: src/hosts.rs (system_probes only),
+│                                 tests/hosts.rs (system_probes asserts),
+│                                 tests/macos_probes.rs (append),
+│                                 examples/{mach-timebase-info,
+│                                 pthread-main-np,getlogin-r}.md (new)
+├── C  resource honesty           files: tests/macos_resource.rs (new),
+│                                 examples/mach-host-self.md (new honesty)
+└── I/P  primary README/PRD + test + commit + rebase + push
+         then immediately open wave 5
 ```
 
-A and B share no files. B and C both touch `src/hosts.rs` in **disjoint
-regions**: B = `LINUX_SYSTEM_PROBES` / `MACOS_SYSTEM_PROBES` /
-`PLACEHOLDER_SYSTEM_PROBES` / `HostCell.system_probes` length; C = only
-`MACOS_WINDOW_LIST` / `MACOS_FOCUS` / `MACOS_GET_TEXT` and the
-`#[cfg(test)]` catalog tests at the file bottom. Do not reformat the
-whole file.
+Private dirs: `target/dyn-harden4`, `target/dyn-probes4`, `target/dyn-res4`.
 
 ## Leaves
 
 ### A — harden
 
-Add to the existing C-alias reject list (same test shape, no library load):
-`ptrdiff_t`, `rlim_t`, `dev_t`, `ino_t`, `clockid_t`, `sigset_t`.
-Do not accept as aliases.
+Extend the existing C-alias reject list (same Type error, no `touched`,
+no library load): `blkcnt_t`, `nlink_t`, `suseconds_t`, `useconds_t`,
+`fsblkcnt_t`, `pthread_t`. Do not accept as aliases.
 
-### B — probes (43 → 46)
+### B — probes (46 → 49)
+
+Keep `mach_host_self` as Placeholder. Append three **leak-free** live rows:
 
 | name | Darwin | Linux / Windows |
 |------|--------|-----------------|
-| `clock_gettime_nsec_np` | live `clock_gettime_nsec_np` | Placeholder |
-| `sysctl` | live `sysctl` | Placeholder |
-| `mach_host_self` | live `mach_host_self` | Placeholder |
+| `mach_timebase_info` | live `mach_timebase_info` | Placeholder |
+| `pthread_main_np` | live `pthread_main_np` | Placeholder |
+| `getlogin_r` | live `getlogin_r` | Placeholder |
 
-Live tests (`#[cfg(macos)]` append):
+Tests (`#[cfg(macos)]` append):
 
-- `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` as `u64`; two calls monotonic.
-- `sysctl` `CTL_HW`/`HW_NCPU` into caller-owned `i32` + `size_t`; rc 0;
-  ncpu >= 1; agree with `libc::sysctl` or `sysctlbyname("hw.ncpu")`.
-- `mach_host_self` returns a non-zero port (`u32`); second call same value.
+- `mach_timebase_info` writes caller-owned `{numer,denom}`; rc 0; both > 0;
+  agree with a later libc/`mach` call.
+- `pthread_main_np` returns 0 or 1 and matches `libc::pthread_main_np`.
+- `getlogin_r` into a caller-owned 256-byte buffer; rc 0 or ERANGE-handled
+  with a bigger buffer; C string matches `libc::getlogin_r`.
 
-If a symbol is missing, omit that row. One example md per new name.
+If a symbol is missing, omit that row. One example md per new live name.
 
-### C — CU-adjacent notes
+### C — do not leak Mach rights
 
-`MACOS_WINDOW_LIST` / `FOCUS` / `GET_TEXT` still say “planned hand”.
-cu `window-place` + AX is live on this host. Update **notes only**
-(still script data, no import of cu/platform): say cu owns the live AX
-hand; dyn names ApplicationServices / AX symbols only. Add/adjust a
-hosts.rs unit test that the macos notes mention `AX` and do not say
-“planned”. Do not change linux/windows facts.
+New `tests/macos_resource.rs`: assert catalog `mach_host_self` is
+**Placeholder** on the live macOS cell; do **not** `dlcall` it.
+
+Restore `examples/mach-host-self.md` as an honesty note: symbol exists,
+dyn will not live-call it because the send right has no release path.
+No “successful dlcall” lisp.
 
 ## Non-goals
 
-Windows live. JIT. General variadic FFI. `getloadavg`. Re-opening ioctl.
+Windows live. JIT. General variadic FFI. `getloadavg`. Re-living
+`mach_host_self`.
