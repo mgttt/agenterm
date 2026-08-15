@@ -13,16 +13,21 @@ changed, not because an app, a catalog row, or a cu hand changed.
 Apps (Shell-L3) call a versioned Host ABI (Shell-L2). L2 updates do not rebuild
 the Base PE.
 
-## This increment (W0)
+## Done
 
-- Plan tree exists.
-- L1 path surface is machine-readable.
-- ARCHITECTURE and PRD point at the tree without claiming the PE is split.
+- W0: L1 path surface named.
+- W1: plan states the pack-not-compile loop; `scripts/shell-compose-product.py`
+  copies frozen six-cell L1 loaders plus L2/L3 into a deterministic archive
+  without cargo; `scripts/shell-compose-product-test.py` proves L1 SHA
+  identity, determinism, and a PATH with no working cargo.
 
-## Next (W1+)
+This increment proves the economic model. It does **not** split the live
+`agenterm` PE.
 
-Wire the surface into CI intent, then freeze Host ABI names, then ship one
-L2 artifact that does not invoke Base Candidate.
+## Next (later waves)
+
+Host ABI name table, cu as L2, first real L2 payload through the composer,
+then v0.1.18 `.agp` as L3.
 
 ## Non-goals
 
