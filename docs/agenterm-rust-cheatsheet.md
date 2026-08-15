@@ -1953,3 +1953,20 @@ to Rust's variadic declaration, and invokes that loaded address. The macOS
 smoke opens a 24×80 pty slave and requires `TIOCGWINSZ` to return the same
 dimensions. All other names and signatures retain the fixed trampoline: this
 is not general variadic FFI and adds no C or libffi shim.
+
+## Six-cell `system_probes` must grow together
+
+`agenterm-dyn` stores headless probe rows as one fixed-length
+`[SystemProbe; N]` on every `{linux,macos,windows} × {x86_64,aarch64}` cell.
+A Darwin-only live name still needs a same-length Placeholder on Linux and
+Windows or the crate will not compile. Keep `mach_host_self` last and
+Placeholder: `dlcall` has no Mach-port release owner, so a live call would
+leak a send right.
+
+## Do not pull `mach2` for Darwin probe baselines
+
+`libc` 0.2 deprecates some Darwin `mach_*` types and functions toward the
+`mach2` crate. `agenterm-dyn` must not take that dependency. For a probe
+baseline, declare the `#[repr(C)]` layout and `unsafe extern "C"` symbol
+locally (same pattern as `clock_gettime_nsec_np`) and compare `Dyn::eval`
+against that later native call.

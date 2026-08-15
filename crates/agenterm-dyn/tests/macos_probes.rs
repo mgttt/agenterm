@@ -2,9 +2,9 @@
 
 #![cfg(target_os = "macos")]
 
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{c_void, CStr, CString};
 
-use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
+use agenterm_dyn::{live_cell, Dyn, SystemProbeStatus, Value};
 
 const LIB: &str = "libSystem.B.dylib";
 
@@ -244,14 +244,20 @@ fn dlcall_sysctl_writes_ncpu_into_caller_buffer() {
 
 #[test]
 fn dlcall_mach_timebase_info_writes_caller_owned_ratio() {
+    #[repr(C)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+    unsafe extern "C" {
+        fn mach_timebase_info(info: *mut Timebase) -> libc::c_int;
+    }
+
     let symbol = live_symbol("mach_timebase_info");
-    let mut ratio = libc::mach_timebase_info { numer: 0, denom: 0 };
+    let mut ratio = Timebase { numer: 0, denom: 0 };
     let mut env = Dyn::new();
-    env.bind(
-        "ratio",
-        (&mut ratio as *mut libc::mach_timebase_info).cast(),
-    )
-    .expect("bind timebase output");
+    env.bind("ratio", (&mut ratio as *mut Timebase).cast())
+        .expect("bind timebase output");
     let got = env
         .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" ratio)"#))
         .expect("mach_timebase_info dlcall");
@@ -259,8 +265,8 @@ fn dlcall_mach_timebase_info_writes_caller_owned_ratio() {
     assert!(ratio.numer > 0, "timebase numerator must be positive");
     assert!(ratio.denom > 0, "timebase denominator must be positive");
 
-    let mut direct = libc::mach_timebase_info { numer: 0, denom: 0 };
-    let direct_status = unsafe { libc::mach_timebase_info(&mut direct) };
+    let mut direct = Timebase { numer: 0, denom: 0 };
+    let direct_status = unsafe { mach_timebase_info(&mut direct) };
     assert_eq!(direct_status, 0, "direct mach_timebase_info must succeed");
     assert_eq!(ratio.numer, direct.numer);
     assert_eq!(ratio.denom, direct.denom);

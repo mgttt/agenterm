@@ -186,6 +186,9 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 | `language.rs` | comparisons, `not`, `and`/`or`, `+`/`-`, `repeat`, nested logic |
 | `errors.rs` | Bad S-exprs, unknown vars/forms, arity, overflow, repeat bounds |
 | `hosts.rs` | Six-cell matrix completeness, `live_cell()` selection, row well-formedness |
+| `macos_ioctl.rs` | Darwin variadic `ioctl(TIOCGWINSZ)` through the loaded libSystem symbol |
+| `macos_probes.rs` | Darwin-only live `dlcall` facts compared with later native calls |
+| `macos_resource.rs` | `mach_host_self` stays Placeholder and is never live-called |
 | `smoke.rs` | Real `dlcall` into host libraries per OS (`#[cfg]`-gated) |
 
 ```bash

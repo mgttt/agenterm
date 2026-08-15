@@ -28,62 +28,66 @@ host.
 - Commit-pull-rebase-push on each coherent increment. Exact pathspec.
 - Already shipped — do not redo: ioctl gate, `sysctlbyname`,
   `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
-  `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`.
+  `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`,
+  `mach_timebase_info`, `pthread_main_np`, `getlogin_r`.
+- Darwin evidence (this host): `cargo test --locked -p agenterm-dyn` **116
+  passed** twice (13 unit + 38 errors + 9 hosts + 16 language + 1
+  macos_ioctl + 12 macos_probes + 4 macos_resource + 23 smoke).
 
-## Wave 4 DAG
+## Wave 4 — shipped
+
+Catalog is 49 rows. The three Wave 4 names are Darwin Live / Linux+Windows
+Placeholder. `mach_host_self` stays last Placeholder. Honesty example has
+no live-call lisp.
+
+## Wave 5 DAG
 
 ```text
 G  this standing goal
-├── A  more C-header aliases      files: tests/errors.rs only
+├── A  (none) Wave 4 already closed the C-alias list
 ├── B  leak-free Darwin probes    files: src/hosts.rs (system_probes only),
 │                                 tests/hosts.rs (system_probes asserts),
 │                                 tests/macos_probes.rs (append),
-│                                 examples/{mach-timebase-info,
-│                                 pthread-main-np,getlogin-r}.md (new)
-├── C  resource honesty           files: tests/macos_resource.rs (new),
-│                                 examples/mach-host-self.md (new honesty)
+│                                 examples/{pthread-threadid-np,
+│                                 proc-pidinfo,nsget-argc}.md (new)
+├── C  resource honesty           files: tests/macos_resource.rs
+│                                 (keep mach_host_self last + no-dlcall scan)
 └── I/P  primary README/PRD + test + commit + rebase + push
-         then immediately open wave 5
+         then immediately open wave 6
 ```
 
-Private dirs: `target/dyn-harden4`, `target/dyn-probes4`, `target/dyn-res4`.
+Private dirs: `target/dyn-probes5`, `target/dyn-res5`.
 
 ## Leaves
 
-### A — harden
+### B — probes (49 → 52)
 
-Extend the existing C-alias reject list (same Type error, no `touched`,
-no library load): `blkcnt_t`, `nlink_t`, `suseconds_t`, `useconds_t`,
-`fsblkcnt_t`, `pthread_t`. Do not accept as aliases.
-
-### B — probes (46 → 49)
-
-Keep `mach_host_self` as Placeholder. Append three **leak-free** live rows:
+Keep `mach_host_self` last and Placeholder. Insert three **leak-free**
+live rows immediately before it:
 
 | name | Darwin | Linux / Windows |
 |------|--------|-----------------|
-| `mach_timebase_info` | live `mach_timebase_info` | Placeholder |
-| `pthread_main_np` | live `pthread_main_np` | Placeholder |
-| `getlogin_r` | live `getlogin_r` | Placeholder |
+| `pthread_threadid_np` | live `pthread_threadid_np` | Placeholder |
+| `proc_pidinfo` | live `proc_pidinfo` | Placeholder |
+| `nsget_argc` | live `_NSGetArgc` | Placeholder |
 
 Tests (`#[cfg(macos)]` append):
 
-- `mach_timebase_info` writes caller-owned `{numer,denom}`; rc 0; both > 0;
-  agree with a later libc/`mach` call.
-- `pthread_main_np` returns 0 or 1 and matches `libc::pthread_main_np`.
-- `getlogin_r` into a caller-owned 256-byte buffer; rc 0 or ERANGE-handled
-  with a bigger buffer; C string matches `libc::getlogin_r`.
+- `pthread_threadid_np(NULL, &tid)` rc 0, `tid != 0`, matches later libc
+  with a null thread pointer (do not spell `pthread_t` in the S-expr).
+- `proc_pidinfo(getpid(), PROC_PIDTBSDINFO, …)` writes caller-owned
+  `proc_bsdinfo`; returned size matches the struct; `pbi_pid`/`pbi_ppid`
+  match `getpid`/`getppid` and a later libc call.
+- `_NSGetArgc` returns a non-null `int*`; `*argc >= 1` and matches
+  `libc::_NSGetArgc()`.
 
 If a symbol is missing, omit that row. One example md per new live name.
 
 ### C — do not leak Mach rights
 
-New `tests/macos_resource.rs`: assert catalog `mach_host_self` is
-**Placeholder** on the live macOS cell; do **not** `dlcall` it.
-
-Restore `examples/mach-host-self.md` as an honesty note: symbol exists,
-dyn will not live-call it because the send right has no release path.
-No “successful dlcall” lisp.
+`tests/macos_resource.rs` must keep finding `mach_host_self` by name as
+Placeholder on every cell and must keep the no-`dlcall` source scan.
+Do not live-call Mach send-right symbols.
 
 ## Non-goals
 
