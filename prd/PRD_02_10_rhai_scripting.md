@@ -1060,6 +1060,8 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     delivery does not rebuild the Base. Rh native packs remain Build/CI and
     general automation artifacts, not the product App portability fallback.
     Current execution plan: [`plan/plan-v0.1.18.md`](../plan/plan-v0.1.18.md).
+    Shell-layer split (thin L1 / Host ABI L2 / app L3) so Base CI stays cold:
+    [`plan/refactor-shell-l1-l2-l3.md`](../plan/refactor-shell-l1-l2-l3.md).
   - Control Center remains a separate PE and will obtain cacheable static App
     semantics from the server's single Engine over IPC; PTY/parser/render/Fleet
     authority remain native. Phase 0 does not yet migrate real CC behavior.

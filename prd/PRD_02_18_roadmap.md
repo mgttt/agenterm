@@ -626,6 +626,10 @@ track remains planned, but every declared dependency must still pass.
   - [ ] execution SSOT: [`plan/plan-v0.1.18.md`](../plan/plan-v0.1.18.md);
     Script Runtime authority:
     [`PRD_02_10_rhai_scripting.md`](PRD_02_10_rhai_scripting.md)
+  - [ ] **Shell L1 freeze (planned):** thin kernel vs replaceable Host ABI vs
+    app packs, so six-cell Candidate is not the default tax on every resource
+    or app change. Execution tree:
+    [`plan/refactor-shell-l1-l2-l3.md`](../plan/refactor-shell-l1-l2-l3.md)
   - [ ] v0.1.18 non-goals: remote channel/signature/apply, real CC authority
     migration, WASM product wiring, APE/polyglot loader, and npm dependencies
 - [ ] M13 / v0.2.x Distribution surface and one package substrate

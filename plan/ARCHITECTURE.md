@@ -26,7 +26,8 @@
 - 产品 `ui-action` interim 集合闸：[`src/frontend/ui_action_catalog.rs`](../src/frontend/ui_action_catalog.rs)。  
 - 机制漏点表：[`plan/plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md)。  
 - 可执行 goal：[`plan/goal-crate-platform.md`](goal-crate-platform.md)。  
-- **Rhai ↔ Rust Facade 边界**（L3 pack / L2 catalog / L1 kernel）：[`plan/design-rhai-rust-boundary.md`](design-rhai-rust-boundary.md)。
+- **Rhai ↔ Rust Facade 边界**（脚本 L3 pack / L2 catalog / L1 kernel）：[`plan/design-rhai-rust-boundary.md`](design-rhai-rust-boundary.md)。  
+  那是脚本嵌入边界。工作台 **Shell-L1 / L2 / L3**（薄内核 / 可换宿主 ABI / 应用包，为减少六格 CI）是目标分层，现行 PE 尚未拆完；执行树 [`plan/refactor-shell-l1-l2-l3.md`](refactor-shell-l1-l2-l3.md)，L1 面 [`plan/shell-l1-surface.json`](shell-l1-surface.json)。结构变更仍只改本文，不另开第二份现行文件地图。
 
 ### 1.1 目录树
 

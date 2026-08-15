@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "plan": "plan/refactor-shell-l1-l2-l3.md",
+  "rule": "A six-cell Base Candidate is justified only when a change touches l1_path_prefixes or l1_exact_paths. Other tree changes must not require that lane.",
+  "l1_path_prefixes": [
+    "crates/agenterm-platform/",
+    "crates/agenterm-con/",
+    "src/platform/adapters/",
+    "src/pty/",
+    "src/bin/agenterm.rs",
+    "src/bin/agenterm-com.rs",
+    "packaging/",
+    "rust-toolchain.toml"
+  ],
+  "l1_exact_paths": [
+    "src/ipc_endpoint.rs",
+    "src/ipc_transport.rs",
+    "src/protocol.rs",
+    "src/server_app.rs",
+    "src/terminal_runtime.rs",
+    "src/terminal_lifecycle.rs",
+    "crates/agenterm-dyn/src/native.rs"
+  ],
+  "explicitly_not_l1": [
+    "src/frontend/",
+    "src/operations.rs",
+    "src/script_catalog.rs",
+    "src/theme.rs",
+    "src/locale.rs",
+    "crates/agenterm-cu/",
+    "crates/agenterm-dyn/src/hosts.rs",
+    "crates/agenterm-dyn/examples/",
+    "crates/agenterm-dyn/tests/",
+    "scripts/",
+    "prd/",
+    "plan/",
+    "docs/"
+  ],
+  "notes": [
+    "This is the intended freeze surface, not a claim that the PE is already thin.",
+    "agenterm-platform types may stay linked from L1; growing resource inventories belongs in L2 data or cu.",
+    "dyn trampoline (native.rs) is L1; dyn host-fact catalog rows are L2 data.",
+    "src/bin/agenterm-cc.rs is an App/L2-or-L3 PE, not L1.",
+    "Workflow edits that only add an App/L2 lane must not be classified as L1."
+  ]
+}

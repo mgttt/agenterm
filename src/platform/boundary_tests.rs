@@ -600,3 +600,42 @@ fn frontend_path_attr_debt_does_not_grow() {
          Do not add more; L1 removes them — see plan/ARCHITECTURE.md §4"
     );
 }
+
+#[test]
+fn shell_l1_surface_names_the_six_cell_candidate_tax() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("plan/shell-l1-surface.json");
+    let raw = fs::read_to_string(&path).expect("plan/shell-l1-surface.json");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("shell-l1-surface JSON");
+    assert_eq!(value["schema"], 1);
+    let l1 = value["l1_path_prefixes"]
+        .as_array()
+        .expect("l1_path_prefixes");
+    let exact = value["l1_exact_paths"].as_array().expect("l1_exact_paths");
+    let not_l1 = value["explicitly_not_l1"]
+        .as_array()
+        .expect("explicitly_not_l1");
+    assert!(!l1.is_empty(), "L1 prefix list must not be empty");
+    assert!(!exact.is_empty(), "L1 exact path list must not be empty");
+    assert!(
+        not_l1.iter().any(|p| p.as_str() == Some("src/frontend/")),
+        "product frontend must stay outside L1"
+    );
+    assert!(
+        not_l1
+            .iter()
+            .any(|p| p.as_str() == Some("crates/agenterm-cu/")),
+        "computer-use must stay an L2 product, not L1"
+    );
+    let l1_set: std::collections::BTreeSet<_> = l1
+        .iter()
+        .chain(exact.iter())
+        .filter_map(|v| v.as_str())
+        .collect();
+    for excluded in not_l1.iter().filter_map(|v| v.as_str()) {
+        assert!(
+            !l1_set.contains(excluded),
+            "{excluded} cannot be both L1 and explicitly-not-L1"
+        );
+    }
+}
