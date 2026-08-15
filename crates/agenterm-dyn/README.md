@@ -93,7 +93,7 @@ deny, or otherwise change any native-door or caller authority semantics.
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
 | linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live first 36: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `open`/`access`/`fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; Darwin-only final ten are placeholders |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | live first 36 matching-host rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, and `mach_host_self` |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | live first 36 matching-host rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, and `sysctl`; `mach_host_self` remains a placeholder because its send right needs explicit release |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -152,7 +152,6 @@ without wiring dyn into cu, platform, or the ABI:
 - [random word via `arc4random`](examples/arc4random.md) (macOS)
 - [uptime nanoseconds via `clock_gettime_nsec_np`](examples/clock-gettime-nsec-np.md) (macOS)
 - [hardware CPU count via `sysctl`](examples/sysctl.md) (macOS)
-- [Mach host port via `mach_host_self`](examples/mach-host-self.md) (macOS)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [whether standard input is a terminal](examples/isatty-stdin.md)

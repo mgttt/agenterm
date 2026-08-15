@@ -35,6 +35,31 @@ mod linux {
         ws_ypixel: u16,
     }
 
+    /// Test-only owner for file descriptors obtained from `openpty`.
+    ///
+    /// The ioctl assertions intentionally have several early-panic paths, so
+    /// the pty master must be tied to Rust scope rather than a trailing close.
+    struct ProbeFd(libc::c_int);
+
+    impl ProbeFd {
+        fn as_i64(&self) -> i64 {
+            i64::from(self.0)
+        }
+    }
+
+    impl Drop for ProbeFd {
+        fn drop(&mut self) {
+            if self.0 >= 0 {
+                // SAFETY: this owner is created only from an fd returned by
+                // openpty (including an unusual partial-failure result) and
+                // is the sole closer for that descriptor.
+                unsafe {
+                    libc::close(self.0);
+                }
+            }
+        }
+    }
+
     fn cell() -> &'static HostCell {
         live_cell().expect("linux cell")
     }
@@ -812,8 +837,9 @@ mod linux {
             .expect("bind ws");
 
         let (fd, expect_pty_dims) = open_probe_fd();
+        let raw_fd = fd.as_ref().map_or(0, ProbeFd::as_i64);
         let script =
-            format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd} "u64" {request} "ptr" ws)"#);
+            format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {raw_fd} "u64" {request} "ptr" ws)"#);
         let ret = env.eval(&script).expect("ioctl dlcall");
         let code = ret.as_int().expect("ioctl return code");
         if expect_pty_dims {
@@ -828,11 +854,11 @@ mod linux {
         }
     }
 
-    fn open_probe_fd() -> (i64, bool) {
+    fn open_probe_fd() -> (Option<ProbeFd>, bool) {
         unsafe {
             let mut master: libc::c_int = -1;
             let mut slave: libc::c_int = -1;
-            if libc::openpty(
+            let status = libc::openpty(
                 &mut master,
                 &mut slave,
                 std::ptr::null_mut(),
@@ -843,13 +869,19 @@ mod linux {
                     ws_xpixel: 0,
                     ws_ypixel: 0,
                 },
-            ) == 0
-            {
-                libc::close(slave);
-                return (i64::from(master), true);
+            );
+            if status == 0 {
+                let master = ProbeFd(master);
+                let _slave = ProbeFd(slave);
+                return (Some(master), true);
             }
+
+            // Defensive ownership for any libc implementation that leaves a
+            // descriptor initialized on a failed openpty call.
+            drop(ProbeFd(master));
+            drop(ProbeFd(slave));
         }
-        (0, false)
+        (None, false)
     }
 
     #[test]

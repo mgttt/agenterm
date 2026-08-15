@@ -219,7 +219,7 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         // SAFETY: the resolved `ioctl` symbol has the one supported Darwin signature below;
         // the script types were validated before argument evaluation. Its variadic ABI differs
         // from the general fixed-arity trampoline.
-        return unsafe { invoke_darwin_ioctl(func_ptr, &dyn_args) };
+        return unsafe { invoke_darwin_ioctl(func_ptr, &dyn_args, arg_types[1]) };
     }
 
     // SAFETY: callers provide the native symbol's signature. `invoke` supports only the
@@ -238,7 +238,11 @@ fn is_darwin_ioctl_signature(sym_name: &str, ret_ty: SigType, arg_types: &[SigTy
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn invoke_darwin_ioctl(func_ptr: *const c_void, args: &[DynArg]) -> Result<Value, DynError> {
+unsafe fn invoke_darwin_ioctl(
+    func_ptr: *const c_void,
+    args: &[DynArg],
+    request_type: SigType,
+) -> Result<Value, DynError> {
     let [fd, request, pointer] = args else {
         unreachable!("darwin ioctl signature checked before invocation");
     };
@@ -247,9 +251,21 @@ unsafe fn invoke_darwin_ioctl(func_ptr: *const c_void, args: &[DynArg]) -> Resul
     // remains valid while `env.libs` owns the library. The signature gate established the typed
     // `(i32, u64, ptr) -> i32` script contract and this function type supplies Darwin's ABI.
     let ioctl: IoctlFn = unsafe { std::mem::transmute(func_ptr) };
+    // `DynArg::from_value(I32, ...)` sign-extends through `i64`; Darwin's `unsigned long`
+    // request parameter instead needs the i32 request's low 32 bits zero-extended to u64.
+    let request = darwin_ioctl_request(request_type, *request);
     // SAFETY: `ioctl` and its three arguments satisfy the narrow contract above.
-    let result = unsafe { ioctl(fd.0 as i32, request.0, pointer.0 as *mut c_void) };
+    let result = unsafe { ioctl(fd.0 as i32, request, pointer.0 as *mut c_void) };
     Ok(Value::Int(i64::from(result)))
+}
+
+#[cfg(target_os = "macos")]
+fn darwin_ioctl_request(request_type: SigType, request: DynArg) -> u64 {
+    match request_type {
+        SigType::I32 => u64::from(request.0 as u32),
+        SigType::U64 => request.0,
+        _ => unreachable!("darwin ioctl signature checked before invocation"),
+    }
 }
 
 macro_rules! call_fixed {
@@ -362,6 +378,18 @@ mod tests {
             Err(DynError::DlCall(
                 "7 arguments exceed the fixed limit of 6".into()
             ))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_ioctl_i32_request_zero_extends_its_bit_pattern() {
+        let signed_request = DynArg::from_value(SigType::I32, Value::Int(-1))
+            .expect("negative i32 request is representable");
+        assert_eq!(signed_request.0, u64::MAX);
+        assert_eq!(
+            darwin_ioctl_request(SigType::I32, signed_request),
+            u64::from(u32::MAX)
         );
     }
 }

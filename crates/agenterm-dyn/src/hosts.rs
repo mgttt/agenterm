@@ -426,7 +426,10 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 46] = [
     macos_live("arc4random", "arc4random"),
     macos_live("clock_gettime_nsec_np", "clock_gettime_nsec_np"),
     macos_live("sysctl", "sysctl"),
-    macos_live("mach_host_self", "mach_host_self"),
+    // `mach_host_self` allocates a send right. `dlcall` intentionally has no
+    // ownership-aware Mach API to release that right, so it is catalogued but
+    // never invoked by the headless probe suite.
+    placeholder("mach_host_self"),
 ];
 
 const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 46] = [

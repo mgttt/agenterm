@@ -241,22 +241,3 @@ fn dlcall_sysctl_writes_ncpu_into_caller_buffer() {
     assert_eq!(direct_status, 0, "direct sysctl must succeed");
     assert_eq!(ncpu, direct);
 }
-
-#[test]
-fn dlcall_mach_host_self_returns_stable_nonzero_port() {
-    let symbol = live_symbol("mach_host_self");
-    let mut env = Dyn::new();
-    let script = format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#);
-    let first = env
-        .eval(&script)
-        .expect("first mach_host_self dlcall")
-        .as_int()
-        .expect("host port integer");
-    let second = env
-        .eval(&script)
-        .expect("second mach_host_self dlcall")
-        .as_int()
-        .expect("host port integer");
-    assert!(first > 0, "mach_host_self must return a non-zero port");
-    assert_eq!(first, second, "mach_host_self must be stable");
-}

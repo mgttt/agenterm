@@ -29,8 +29,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Win six-cell extra probes stay placeholders. **macOS** has the 36 shared
   live libc rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`,
   `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`,
-  `clock_gettime_nsec_np`, `sysctl`, and `mach_host_self` against
-  `libSystem.B.dylib`. Darwin `ioctl` calls its resolved symbol through a
+  `clock_gettime_nsec_np`, and `sysctl` against `libSystem.B.dylib`.
+  `mach_host_self` stays a placeholder because dyn has no ownership-aware
+  release path for its send right. Darwin `ioctl` calls its resolved symbol through a
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
@@ -59,8 +60,9 @@ deliberately small; this does not authorize a broader type system.
 Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 (`libSystem.B.dylib`); macOS additionally covers `sysctlbyname`,
 `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
-`proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, and
-`mach_host_self`. Windows extra probes stay placeholders. No
+`proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, and `sysctl`.
+`mach_host_self` remains a placeholder because dyn cannot release its returned
+Mach send right. Windows extra probes stay placeholders. No
 C shim.
 Restore process-global side effects before the test ends (`umask` pattern).
 Darwin `ioctl` transmutes its already-resolved symbol only for the validated
