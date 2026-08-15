@@ -56,11 +56,12 @@ most six integer or pointer arguments. The trampoline passes every input in a
 sign-extended and narrow unsigned inputs are zero-extended before that call.
 
 Floating-point values and aggregates have no supported ABI class. Variadic
-symbols are also outside the contract: the fixed trampoline cannot reliably
-detect that a resolved symbol is variadic, so callers must not use one (for
-example `printf`, or a platform's variadic `ioctl`). This is an ABI-compatibility
-boundary, not an authorization or safety policy; library names and symbols
-remain caller-supplied script data.
+symbols are outside the contract because the fixed trampoline cannot reliably
+detect them, so callers must not use `printf` or another arbitrary variadic
+symbol. The only exception is Darwin `ioctl` with the validated
+`(i32, u64|i32, ptr) -> i32` signature: it uses a dedicated Rust variadic
+declaration. This remains an ABI-compatibility boundary, not an authorization
+or safety policy; library names and symbols remain caller-supplied script data.
 
 The language stores integer results as signed `i64`. A `u64` result therefore
 returns an error when it exceeds `i64::MAX`; use `ptr` for address- or

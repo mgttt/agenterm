@@ -1,15 +1,17 @@
-# Goal: first-class `agenterm-dyn` on macOS
+# Goal: first-class `agenterm-dyn` on macOS (wave 2)
 
 Status: active  
-Owner: this session (primary) + exclusive-file subagents  
-CWD: repository root. Paths: repo-relative or `~/...` only.
+Owner: this session (`agenterm-osx`) + exclusive-file subagents **in background**  
+CWD: repository root. Paths: repo-relative or `~/...` only.  
+Git identity for this clone: `agenterm-osx <agenterm@mgttt.com>`.
 
 ## Outcome
 
-`agenterm-dyn` stays a tiny intern/eval/`dlcall` door. On Darwin it is no
-longer a Linux copy with a shrug: matching-host smoke is green here, Darwin
-facts that are actually useful are live, and the `ioctl` ABI hole is either
-fixed in Rust or named as a typed limit — not “maybe −1”.
+`agenterm-dyn` stays a tiny intern/eval/`dlcall` door. Wave 1 on `main` already
+has 40-slot probes, Darwin-only live rows, and a signature-gated ioctl path.
+Wave 2 makes that path honest (loaded symbol, not a linked `ioctl` bypass),
+adds more Darwin facts that are not Linux clones, and stops the leftover
+“maybe −1” smoke wording.
 
 Evidence: `cargo test -p agenterm-dyn` on this aarch64-apple-darwin host.
 
@@ -19,105 +21,99 @@ Evidence: `cargo test -p agenterm-dyn` on this aarch64-apple-darwin host.
 - OS names stay **script data**. Host tables stay six-cell explicit.
 - Restore process-global side effects before a test ends (`umask` pattern).
 - Do not fake a live probe on the wrong OS.
-- Commit-pull-rebase-push on each coherent increment. Exact pathspec. No `git add -A`.
 - Subagents do **not** commit or push. Primary owns I/P.
+- Commit-pull-rebase-push on each coherent increment. Exact pathspec. No `git add -A`.
+- Subagents run **in background**. Exclusive write sets. Private
+  `CARGO_TARGET_DIR` (`target/dyn-ioctl2`, `target/dyn-probes2`, `target/dyn-smoke`).
 
 ## Current facts (do not rediscover)
 
-- `system_probes` is `[SystemProbe; 36]`. Linux + macOS rows are live; Windows
-  placeholders. `size_t` / `ssize_t` / `int` / `long` already reject in
-  `tests/errors.rs`.
-- Darwin `ioctl(int, unsigned long, ...)` is variadic. Fixed-arity trampoline
-  on arm64 often returns `-1`/`EFAULT`. Smoke only asserts the symbol resolves.
-- Cheatsheet: `docs/agenterm-rust-cheatsheet.md` § Darwin ioctl. PRD:
-  `prd/PRD_02_34_agenterm_dyn.md`.
+- `system_probes` is `[SystemProbe; 40]`. First 36 Linux/macOS live; last 4
+  Darwin-only live on macOS (`sysctlbyname`, `mach_absolute_time`,
+  `getprogname`, `issetugid`); Linux last 4 + all Windows are Placeholder.
+- Header aliases including `off_t` / `mode_t` / `pid_t` / `uid_t` / `gid_t` /
+  `time_t` / `socklen_t` / `nfds_t` already reject.
+- Darwin ioctl: `tests/macos_ioctl.rs` claims TIOCGWINSZ success. `native.rs`
+  currently calls a **linked** `extern "C" { fn ioctl(...) }` and ignores the
+  `libloading` pointer. That is a bypass, not `dlcall`.
+- `tests/smoke.rs` macos `dlcall_ioctl_winsize` still says “success is not
+  claimed”. README test-suite paragraph is stale the same way.
+- `getloadavg` uses `double[]` — **out of ABI**. Do not add it.
 
-## DAG (independent leaves first)
+## DAG
 
 ```text
-G  write this goal
-├── A  harden extra C-header spellings     files: tests/errors.rs only
-├── B  Darwin-only live probes + examples  files: src/hosts.rs,
-│                                          tests/hosts.rs,
-│                                          tests/macos_probes.rs (new),
-│                                          examples/{sysctlbyname,mach-absolute-time,
-│                                          getprogname,issetugid}.md (new),
-│                                          README.md (table + example links only)
-├── C  Darwin ioctl variadic path          files: src/native.rs,
-│                                          tests/macos_ioctl.rs (new)
-└── I  integrate: rustfmt + cargo test -p agenterm-dyn
+G  this goal (wave 2)
+├── A  ioctl via loaded symbol     files: src/native.rs only
+├── B  more Darwin-only probes     files: src/hosts.rs, tests/hosts.rs,
+│                                  tests/macos_probes.rs (append),
+│                                  examples/{nsget-executable-path,
+│                                  proc-pidpath,arc4random}.md (new)
+├── C  leftover honesty            files: tests/smoke.rs (macos ioctl
+│                                  test + comment only),
+│                                  examples/ioctl-window-size.md
+└── I  integrate + README/PRD/cheatsheet (primary)
     └── P  commit / pull --rebase / push
 ```
 
-A, B, C share **no** writable files. Each uses a private `CARGO_TARGET_DIR`
-(`target/dyn-harden`, `target/dyn-probes`, `target/dyn-ioctl`). Primary owns
-I/P and later docs (`prd/PRD_02_34_agenterm_dyn.md`, cheatsheet ioctl
-paragraph) after C reports success or stop.
-
-Do **not** edit `tests/smoke.rs`. Existing Linux/macOS/Windows smoke stays.
+Do not edit README / PRD / cheatsheet in A/B/C. Primary owns those after
+leaves land. Do not grow general variadic FFI.
 
 ## Leaves
 
-### A — harden (small door)
+### A — ioctl is still a `dlcall`
 
-Reject more Darwin/Linux header spellings before load (do not accept as aliases):
+Replace the linked `extern "C" { fn ioctl(...) }` with a transmute of the
+already-resolved `func_ptr`:
 
-`off_t`, `mode_t`, `pid_t`, `uid_t`, `gid_t`, `time_t`, `socklen_t`, `nfds_t`
+```rust
+type IoctlFn = unsafe extern "C" fn(i32, u64, ...) -> i32;
+let f: IoctlFn = transmute(func_ptr);
+f(fd, request, ptr)
+```
 
-Same shape as existing `dlcall_rejects_c_abi_aliases_before_arguments_or_library_load`:
-type error, no `touched` mutation, no library load. Extend that test's list.
+Keep the signature gate. Keep Linux invoke unchanged. `tests/macos_ioctl.rs`
+must still pass (do not edit it). If the loaded-symbol path EFAULTs, **stop**
+and leave the linked declaration with a one-line comment that the bypass
+remains; do not add a C file.
 
-### B — Darwin facts that are not Linux clones
+### B — three more Darwin facts
 
-Grow `system_probes` from 36 → 40 on **all** six cells. New names (same order
-on every OS):
+Grow `system_probes` 40 → 43 on **all** six cells. Append, same order
+everywhere:
 
 | name | Darwin | Linux / Windows |
 |------|--------|-----------------|
-| `sysctlbyname` | live `libSystem.B.dylib` / `sysctlbyname` | Placeholder |
-| `mach_absolute_time` | live `mach_absolute_time` | Placeholder |
-| `getprogname` | live `getprogname` | Placeholder |
-| `issetugid` | live `issetugid` | Placeholder |
+| `nsget_executable_path` | live `libSystem.B.dylib` / `_NSGetExecutablePath` | Placeholder |
+| `proc_pidpath` | live `libSystem.B.dylib` / `proc_pidpath` | Placeholder |
+| `arc4random` | live `libSystem.B.dylib` / `arc4random` | Placeholder |
 
-Keep the first 36 Linux rows live. First 36 macOS rows stay live. First 36
-Windows rows stay placeholders. Update `tests/hosts.rs` name/status assertions
-so Linux is no longer “every slot live”.
+Append-only tests in `tests/macos_probes.rs`:
 
-Live smoke goes in **new** `tests/macos_probes.rs` (`#[cfg(target_os = "macos")]`):
+- `_NSGetExecutablePath`: caller-owned buffer + `u32` length; rc 0; path
+  non-empty; agrees with a second libc/`std::env::current_exe` prefix.
+- `proc_pidpath(getpid(), buf, len)`: rc > 0; buffer C string non-empty.
+- `arc4random`: `"u32"` return; two calls both fit `i64`; no crash.
 
-- `sysctlbyname("hw.ncpu")` into a caller-owned buffer; `ncpu >= 1`; agree
-  with `libc::sysctlbyname` or `std::thread::available_parallelism`.
-- `mach_absolute_time` returns `u64` (via `i64` if it fits, else treat as
-  monotonic and compare two calls); later libc/dlcall tick is not before the
-  first.
-- `getprogname` returns a non-null `ptr`; C string matches `libc::getprogname`.
-- `issetugid` returns 0 or 1 and matches `libc::issetugid`.
+One new example md per name. If a libc symbol is missing, **stop** that row
+and leave it out of the table — do not fake live.
 
-One `examples/*.md` + README link per new live name. Do not rewrite Linux
-smoke or existing examples.
+### C — stop saying “maybe −1”
 
-### C — ioctl on Darwin
+In `tests/smoke.rs` macos `dlcall_ioctl_winsize`: when `openpty` slave
+succeeds, assert `code == 0` and 24×80. Keep a fallback fd path honest if
+openpty fails. Update the comment. Do not rewrite other smoke tests.
 
-Fixed-arity trampoline ≠ Darwin `ioctl(int, unsigned long, ...)`.
+In `examples/ioctl-window-size.md`: add a second lisp block for
+`libSystem.B.dylib` + macOS `TIOCGWINSZ` `0x40087468`. Keep the Linux block.
 
-Allowed fix, still no C file / no libffi: in `eval_dlcall`, if
-`cfg(target_os = "macos")` and `symbol == "ioctl"` and the signature is
-`(i32, u64|i32, ptr) -> i32`, invoke through
-`unsafe extern "C" fn(i32, u64, ...) -> i32` (Apple arm64 puts unnamed
-variadic args on the stack). Keep the general trampoline for every other
-symbol. Do not change Linux invoke.
+## I / P
 
-Evidence: `tests/macos_ioctl.rs` — `openpty` 24×80 on the **slave**,
-`TIOCGWINSZ` **succeeds**, rows/cols match. If the variadic transmute still
-EFAULT/returns −1, **stop**, leave this test as “symbol resolves, no success
-claim”, and do not add a C shim.
-
-### I / P
-
-Primary integrates, `cargo fmt` + `cargo test -p agenterm-dyn`, exact-path
-commit, rebase `origin/main`, push. Repeat after each landed leaf if isolated.
+Primary: rustfmt, `cargo test -p agenterm-dyn`, README + PRD 34 + cheatsheet
+alignment, exact-path commit as `agenterm-osx`, rebase `origin/main`, push.
+Repeat whenever a leaf is coherent.
 
 ## Non-goals
 
-Windows live rows. JIT. cu/platform wiring. libagenterm merge. Growing
-`dlcall` into a general variadic FFI. Editing `tests/smoke.rs`.
+Windows live rows. JIT. cu/platform wiring. libagenterm merge. General
+variadic FFI. `getloadavg`. Editing files outside the assigned set.
