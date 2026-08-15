@@ -89,6 +89,7 @@ fn additional_system_probes_are_live_only_on_linux() {
             c.system_probes.map(|probe| probe.name),
             [
                 "time",
+                "times",
                 "clock_gettime",
                 "uname",
                 "getuid",
@@ -130,6 +131,7 @@ fn additional_system_probes_are_live_only_on_linux() {
             }),
             [
                 ("time", "libc.so.6", "time"),
+                ("times", "libc.so.6", "times"),
                 ("clock_gettime", "libc.so.6", "clock_gettime"),
                 ("uname", "libc.so.6", "uname"),
                 ("getuid", "libc.so.6", "getuid"),

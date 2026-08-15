@@ -116,6 +116,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [descriptor-table limit via `getdtablesize`](examples/getdtablesize.md)
 - [current host ID via `gethostid`](examples/gethostid.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
+- [process CPU ticks via `times`](examples/times.md)
 - [host page size via `sysconf`](examples/sysconf-pagesize.md)
 - [host page size via `getpagesize`](examples/getpagesize.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)

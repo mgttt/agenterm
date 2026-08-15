@@ -375,6 +375,29 @@ fn dlcall_rejects_overlong_symbol_before_arguments_or_load() {
 }
 
 #[test]
+fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
+    let library = "x".repeat(255);
+    let mut library_env = Dyn::new();
+    let library_script = format!(r#"(dlcall "{library}" "unused" "i32" "i32" (set touched 1))"#);
+    let library_err = library_env.eval(&library_script).unwrap_err();
+    assert!(matches!(library_err, DynError::Library(message) if message.starts_with(&library)));
+    assert_eq!(
+        library_env.eval("touched").unwrap(),
+        agenterm_dyn::Value::Int(1)
+    );
+
+    let symbol = "x".repeat(255);
+    let mut symbol_env = Dyn::new();
+    let symbol_script = format!(r#"(dlcall "libc.so.6" "{symbol}" "i32" "i32" (set touched 1))"#);
+    let symbol_err = symbol_env.eval(&symbol_script).unwrap_err();
+    assert!(matches!(symbol_err, DynError::DlCall(message) if message.starts_with(&symbol)));
+    assert_eq!(
+        symbol_env.eval("touched").unwrap(),
+        agenterm_dyn::Value::Int(1)
+    );
+}
+
+#[test]
 fn dlcall_rejects_library_with_interior_nul_before_loading() {
     let mut env = Dyn::new();
     let script = "(dlcall \"bad\0library\" \"unused\" \"i32\")";

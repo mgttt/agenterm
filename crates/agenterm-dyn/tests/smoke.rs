@@ -165,6 +165,54 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_times_writes_caller_owned_tms_and_matches_libc_baseline() {
+        let probe = live_system_probe("times");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut dlcall_tms = libc::tms {
+            tms_utime: 0,
+            tms_stime: 0,
+            tms_cutime: 0,
+            tms_cstime: 0,
+        };
+        let mut env = Dyn::new();
+        env.bind("tms", (&mut dlcall_tms as *mut libc::tms).cast())
+            .expect("bind caller-owned tms");
+
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#))
+            .expect("times dlcall")
+            .as_int()
+            .expect("times return value");
+
+        let mut libc_tms = libc::tms {
+            tms_utime: 0,
+            tms_stime: 0,
+            tms_cutime: 0,
+            tms_cstime: 0,
+        };
+        let baseline = unsafe { libc::times(&mut libc_tms) };
+
+        assert!(got >= 0, "times dlcall should return elapsed clock ticks");
+        assert!(
+            baseline >= 0,
+            "libc times should return elapsed clock ticks"
+        );
+        assert!(
+            baseline >= got,
+            "later libc baseline must not precede dlcall result"
+        );
+        assert!(
+            libc_tms.tms_utime >= dlcall_tms.tms_utime
+                && libc_tms.tms_stime >= dlcall_tms.tms_stime
+                && libc_tms.tms_cutime >= dlcall_tms.tms_cutime
+                && libc_tms.tms_cstime >= dlcall_tms.tms_cstime,
+            "times fields must be initialized by dlcall and monotonic at the later libc baseline"
+        );
+    }
+
+    #[test]
     fn dlcall_void_return_maps_to_nil() {
         let mut env = Dyn::new();
         let got = env
