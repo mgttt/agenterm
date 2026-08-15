@@ -703,3 +703,10 @@ track remains planned, but every declared dependency must still pass.
     approved minimal watchdog, lease activation, crash rollback and proven
     Explorer recovery, and development builds never directly persist a
     Winlogon shell change
+
+## Parked parallel crate (not a GUI milestone)
+
+- [~] `agenterm-dyn` — tiny intern/eval/dlcall door, parallel to libagenterm.
+  Owned by [agenterm-dyn](PRD_02_34_agenterm_dyn.md). First cut is on `main`.
+  Resume after Grok Bot Cursor quota resets: harden leftovers, pointer-buffer
+  Linux probes, paired examples. No cu/platform/JIT unless 政委 orders it.
