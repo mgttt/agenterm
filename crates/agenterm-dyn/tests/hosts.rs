@@ -1,5 +1,7 @@
 //! Host-table matrix tests — all six ISA×OS cells exist as explicit data.
 
+use std::collections::HashSet;
+
 use agenterm_dyn::{
     ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
     SizeProbe, SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
@@ -83,8 +85,47 @@ fn windows_cells_share_kernel32_names() {
 }
 
 #[test]
+fn system_probe_catalog_names_are_ordered_and_unique_across_all_cells() {
+    let canonical = LINUX_X86_64
+        .system_probes
+        .iter()
+        .map(|probe| probe.name)
+        .collect::<Vec<_>>();
+    let canonical_unique = canonical.iter().copied().collect::<HashSet<_>>();
+    assert_eq!(canonical_unique.len(), canonical.len());
+
+    for cell in [
+        LINUX_AARCH64,
+        MACOS_X86_64,
+        MACOS_AARCH64,
+        WINDOWS_X86_64,
+        WINDOWS_AARCH64,
+    ] {
+        assert_eq!(cell.system_probes.len(), canonical.len());
+        let unique = cell
+            .system_probes
+            .iter()
+            .map(|probe| probe.name)
+            .collect::<HashSet<_>>();
+        assert_eq!(unique.len(), cell.system_probes.len());
+        for (index, (expected, actual)) in canonical
+            .iter()
+            .zip(cell.system_probes.iter().map(|probe| probe.name))
+            .enumerate()
+        {
+            assert_eq!(
+                actual, *expected,
+                "{} {} system probe {index} must match Linux x86_64 catalog order",
+                cell.os, cell.arch
+            );
+        }
+    }
+}
+
+#[test]
 fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
     for c in [LINUX_X86_64, LINUX_AARCH64] {
+        let sysctlbyname = system_probe_index(c, "sysctlbyname");
         assert_eq!(
             c.system_probes.map(|probe| probe.name),
             [
@@ -160,7 +201,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             ]
         );
         assert_eq!(
-            c.system_probes[..36]
+            c.system_probes[..sysctlbyname]
                 .iter()
                 .filter(|probe| {
                     !matches!(
@@ -220,13 +261,15 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             ));
         }
         assert!(
-            c.system_probes[36..]
+            c.system_probes[sysctlbyname..]
                 .iter()
                 .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
         );
     }
     for c in [MACOS_X86_64, MACOS_AARCH64] {
-        assert!(c.system_probes[..36].iter().all(|probe| {
+        let sysctlbyname = system_probe_index(c, "sysctlbyname");
+        let mach_host_self = system_probe_index(c, "mach_host_self");
+        assert!(c.system_probes[..sysctlbyname].iter().all(|probe| {
             matches!(
                 probe.name,
                 "open_dev_null" | "fcntl_stdin_getfd" | "fcntl_stdin_getfl"
@@ -249,7 +292,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             ));
         }
         assert_eq!(
-            c.system_probes[36..]
+            c.system_probes[sysctlbyname..]
                 .iter()
                 .map(|probe| probe.name)
                 .collect::<Vec<_>>(),
@@ -289,15 +332,20 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..68].iter().all(|probe| matches!(
-            probe.status,
-            SystemProbeStatus::LiveDlcall {
-                lib: "libSystem.B.dylib",
-                ..
-            }
-        )));
+        assert_eq!(mach_host_self + 1, c.system_probes.len());
+        assert!(
+            c.system_probes[sysctlbyname..mach_host_self]
+                .iter()
+                .all(|probe| matches!(
+                    probe.status,
+                    SystemProbeStatus::LiveDlcall {
+                        lib: "libSystem.B.dylib",
+                        ..
+                    }
+                ))
+        );
         assert!(matches!(
-            c.system_probes[68].status,
+            c.system_probes[mach_host_self].status,
             SystemProbeStatus::Placeholder
         ));
     }
@@ -424,4 +472,11 @@ fn assert_cell_probe_fields(c: HostCell) {
             assert!(!symbol.is_empty());
         }
     }
+}
+
+fn system_probe_index(c: HostCell, name: &str) -> usize {
+    c.system_probes
+        .iter()
+        .position(|probe| probe.name == name)
+        .expect("system probe must be catalogued")
 }
