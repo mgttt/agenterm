@@ -22,6 +22,10 @@ pub use value::Value;
 
 /// Maximum number of distinct bindings retained by one [`Dyn`] environment.
 pub const MAX_BINDINGS: usize = 4_096;
+/// Maximum number of distinct interned symbols retained by one [`Dyn`] environment.
+pub const MAX_SYMBOLS: usize = 4_096;
+/// Maximum UTF-8 byte length of a binding, symbol, library, or native symbol name.
+pub const MAX_NAME_BYTES: usize = 255;
 
 /// In-process live-native evaluation environment.
 pub struct Dyn {
@@ -40,7 +44,7 @@ impl Dyn {
     }
 
     /// Intern `name` into a stable [`Symbol`].
-    pub fn intern(&mut self, name: &str) -> Symbol {
+    pub fn intern(&mut self, name: &str) -> Result<Symbol, DynError> {
         self.interner.intern(name)
     }
 
@@ -53,6 +57,7 @@ impl Dyn {
         if name.is_empty() {
             return Err(DynError::InvalidBindingName);
         }
+        Self::ensure_name(name)?;
         self.ensure_binding_capacity(name)?;
         self.bindings
             .insert(name.to_owned(), Value::Ptr(ptr as usize));
@@ -68,6 +73,19 @@ impl Dyn {
             resource: "bindings",
             limit: MAX_BINDINGS,
         })
+    }
+
+    pub(crate) fn ensure_name(name: &str) -> Result<(), DynError> {
+        if name.as_bytes().contains(&0) {
+            return Err(DynError::NameContainsNul);
+        }
+        if name.len() <= MAX_NAME_BYTES {
+            Ok(())
+        } else {
+            Err(DynError::NameTooLong {
+                limit: MAX_NAME_BYTES,
+            })
+        }
     }
 
     /// Evaluate pure S-expression `source` in this environment.

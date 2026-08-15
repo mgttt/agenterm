@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::{DynError, MAX_SYMBOLS};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Symbol(u32);
 
@@ -24,14 +26,21 @@ impl Interner {
         Self::default()
     }
 
-    pub fn intern(&mut self, name: &str) -> Symbol {
+    pub fn intern(&mut self, name: &str) -> Result<Symbol, DynError> {
         if let Some(&sym) = self.index.get(name) {
-            return sym;
+            return Ok(sym);
         }
-        let id = u32::try_from(self.strings.len()).expect("symbol table overflow");
+        crate::Dyn::ensure_name(name)?;
+        if self.strings.len() == MAX_SYMBOLS {
+            return Err(DynError::StateLimit {
+                resource: "symbols",
+                limit: MAX_SYMBOLS,
+            });
+        }
+        let id = u32::try_from(self.strings.len()).expect("symbol table limit fits u32");
         let sym = Symbol::from_raw(id);
         self.strings.push(name.to_owned());
         self.index.insert(name.to_owned(), sym);
-        sym
+        Ok(sym)
     }
 }

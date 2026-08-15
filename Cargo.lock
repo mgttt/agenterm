@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "agenterm-dyn"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "libloading 0.8.9",

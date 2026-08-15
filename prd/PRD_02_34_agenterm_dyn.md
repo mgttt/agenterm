@@ -33,7 +33,11 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Each `Dyn` retains at most 4,096 distinct bindings across Rust `bind` and S-expression `set`.
   Replacement of an existing name remains valid at capacity; a new `set` returns
   `DynError::StateLimit` before evaluating its right-hand side, so rejection has no nested
-  assignment side effect. This does not constrain the public `intern` API.
+  assignment side effect. Binding and `set` targets, interned symbols, libraries, and native
+  symbols are limited to 255 UTF-8 bytes and reject interior NUL. Each `Dyn` also retains at most 4,096 distinct
+  interned symbols; `Dyn::intern` now returns `Result<Symbol, DynError>`, preserving reuse of
+  existing names at capacity and reporting `NameContainsNul`, `NameTooLong`, or `StateLimit` for
+  rejected new names. Script source NUL remains a parser rejection before execution.
 - C spelling aliases outside the fixed-width ABI whitelist reject before
   loading or argument evaluation.
 - The parser accepts exactly 256 nested lists; 257 nested lists return
@@ -58,9 +62,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
-  1.97: **141 passed** (21 unit + 39 errors + 11 hosts + 22 language + 48
+  1.97: **145 passed** (22 unit + 39 errors + 11 hosts + 25 language + 48
   cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory is
-  **155** (22 unit + 39 errors + 11 hosts + 22 language + 1 macos_ioctl +
+  **158** (22 unit + 39 errors + 11 hosts + 25 language + 1 macos_ioctl +
   32 macos_probes + 4 macos_resource + 24 cfg-gated macOS smoke; 0 doctests);
   native CI remains the evidence gate for current source. Wave 4–6 live rows were `dlcall`ed on the earlier
   Darwin CI host and compared to later native calls. Host-specific counts, not

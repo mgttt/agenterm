@@ -338,6 +338,14 @@ Each `Dyn` environment retains at most 4,096 distinct bindings, whether introduc
 returns `DynError::StateLimit { resource: "bindings", limit: 4096 }`; `set` reports that error
 before evaluating its right-hand side, so a rejected assignment cannot run nested side effects.
 
+### `agenterm-dyn` name and symbol bounds
+
+All `Dyn` binding, interned-symbol, library, and native-symbol names accept at most 255 UTF-8
+bytes and reject interior NUL. Each environment retains at most 4,096 distinct interned symbols; `Dyn::intern` returns a
+`Result` and reports a name or state-limit error for a new rejected name, while existing symbols
+remain reusable at capacity. `bind` reports the same name errors; script NUL fails parsing, and
+`set` rejects an overlong target before its right-hand side runs.
+
 ## Placeholder TUI
 
 Run `agenterm tui` to open the initial terminal interface. It currently shows

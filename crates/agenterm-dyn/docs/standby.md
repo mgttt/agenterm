@@ -14,7 +14,10 @@ This note is the crate-side pointer so the next knife does not start from chat.
 2. **harden** — void/arity/empty/blank/overlong/NUL names, C spelling aliases,
    and unsupported types (`f32` / `struct` / `f64` / `u128` / `usize` /
    `isize` / `bool`) reject before load/eval. Names accept 255 bytes and
-   reject 256 bytes. The parser accepts 256 nested lists and rejects 257 with
+   reject 256 bytes. Environment binding, interner, library, and native-symbol
+   public binding and interner names reject interior NUL; script source NUL rejects in parsing;
+   each environment retains at most 4,096 bindings and
+   4,096 distinct symbols. The parser accepts 256 nested lists and rejects 257 with
    `DynError::Parse` before evaluation.
 3. **probes** — Linux and macOS integer/void/ptr libc rows are live; Windows
    extra probes remain explicit placeholders. Unix `ioctl` (Linux and macOS) remains variadic
@@ -25,8 +28,8 @@ This note is the crate-side pointer so the next knife does not start from chat.
    README link.
 
 Current Linux evidence, not a portable estimate: Rust 1.97
-`cargo test --locked -p agenterm-dyn` passes **141** tests (21 unit, 39 errors,
-11 hosts, 22 language, 48 Linux smoke; 0 doctests).
+`cargo test --locked -p agenterm-dyn` passes **145** tests (22 unit, 39 errors,
+11 hosts, 25 language, 48 Linux smoke; 0 doctests).
 
 ## Later — requires explicit product authorization
 

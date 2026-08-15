@@ -82,6 +82,7 @@ fn eval_set(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynError> {
     };
     // Do this before evaluating the RHS: a full environment must not permit
     // an expression's side effects merely because its target is a new name.
+    Dyn::ensure_name(name)?;
     env.ensure_binding_capacity(name)?;
     let value = eval_expr(env, &args[1])?;
     env.bindings.insert(name.clone(), value);

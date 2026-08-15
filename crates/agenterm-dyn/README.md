@@ -76,6 +76,17 @@ The language stores integer results as signed `i64`. A `u64` result therefore
 returns an error when it exceeds `i64::MAX`; use `ptr` for address- or
 handle-valued native returns instead of declaring them as `u64`.
 
+## Environment resource bounds
+
+Each environment accepts names of at most 255 UTF-8 bytes and rejects interior
+NUL. It retains at most
+4,096 bindings and 4,096 distinct interned symbols. Existing bindings and
+symbols remain reusable at capacity. `Dyn::intern` returns `Result` so a new
+name can report `DynError::NameContainsNul`, `DynError::NameTooLong`, or
+`DynError::StateLimit`; `bind` returns the same name errors. Script source
+with NUL fails parsing, while `set` rejects an overlong target before evaluating
+its right-hand side.
+
 ## Parser resource bound
 
 The list-language parser accepts at most 64 KiB of UTF-8 source, 4,096 AST
@@ -89,7 +100,7 @@ native-door or caller authority semantics.
 
 | API | Role |
 |-----|------|
-| `Dyn::intern` | Intern a string into a stable `Symbol` |
+| `Dyn::intern` | Fallibly intern a bounded string into a stable `Symbol` |
 | `Dyn::bind` | Safely hand an existing pointer/handle into the environment; native pointer obligations begin only at `eval_native` |
 | `Dyn::eval` | Safely evaluate pure S-expr source; rejects any AST containing `dlcall` before execution |
 | `Dyn::eval_native` | Unsafe native-capable evaluation; caller upholds ABI, pointer, aliasing, lifetime, library, thread, and side-effect contracts |

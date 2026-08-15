@@ -2,17 +2,92 @@
 
 use std::ffi::c_void;
 
-use agenterm_dyn::{Dyn, DynError, MAX_BINDINGS, Value};
+use agenterm_dyn::{Dyn, DynError, MAX_BINDINGS, MAX_NAME_BYTES, MAX_SYMBOLS, Value};
 
 #[test]
 fn intern_is_stable() {
     let mut env = Dyn::new();
-    let a = env.intern("ioctl");
-    let b = env.intern("ioctl");
-    let c = env.intern("getpid");
+    let a = env.intern("ioctl").expect("intern ioctl");
+    let b = env.intern("ioctl").expect("reuse ioctl");
+    let c = env.intern("getpid").expect("intern getpid");
     assert_eq!(a, b);
     assert_ne!(a, c);
     assert_eq!(a.index(), b.index());
+}
+
+#[test]
+fn names_are_bounded_before_binding_or_set_rhs_evaluation() {
+    let mut env = Dyn::new();
+    let at_limit = "x".repeat(MAX_NAME_BYTES);
+    env.bind(&at_limit, std::ptr::null_mut())
+        .expect("255-byte binding name");
+    let overlong = "x".repeat(MAX_NAME_BYTES + 1);
+    assert_eq!(
+        env.bind(&overlong, std::ptr::null_mut()),
+        Err(DynError::NameTooLong {
+            limit: MAX_NAME_BYTES,
+        })
+    );
+    assert_eq!(
+        env.eval(&format!("(set {overlong} (set touched 1))")),
+        Err(DynError::NameTooLong {
+            limit: MAX_NAME_BYTES,
+        })
+    );
+    assert_eq!(
+        env.eval("touched"),
+        Err(DynError::UnknownVar("touched".into()))
+    );
+}
+
+#[test]
+fn nul_names_are_rejected_before_environment_state_changes() {
+    let mut env = Dyn::new();
+    assert_eq!(
+        env.bind("bound\0name", std::ptr::null_mut()),
+        Err(DynError::NameContainsNul)
+    );
+    env.bind("bound", std::ptr::null_mut())
+        .expect("rejection must not add a binding");
+    assert_eq!(env.intern("symbol\0name"), Err(DynError::NameContainsNul));
+    assert_eq!(
+        env.intern("symbol")
+            .expect("rejection must not add a symbol")
+            .index(),
+        0
+    );
+    assert_eq!(
+        env.eval("(set scripted\0name (set touched 1))"),
+        Err(DynError::Parse("unexpected character `\0`".into()))
+    );
+    assert_eq!(
+        env.eval("touched"),
+        Err(DynError::UnknownVar("touched".into()))
+    );
+    assert_eq!(env.eval("bound"), Ok(Value::Ptr(0)));
+}
+
+#[test]
+fn intern_is_bounded_and_existing_names_remain_reusable() {
+    let mut env = Dyn::new();
+    for index in 0..MAX_SYMBOLS {
+        env.intern(&format!("sym_{index}"))
+            .expect("symbol below limit");
+    }
+    assert_eq!(
+        env.intern("overflow"),
+        Err(DynError::StateLimit {
+            resource: "symbols",
+            limit: MAX_SYMBOLS,
+        })
+    );
+    assert!(env.intern("sym_0").is_ok());
+    assert_eq!(
+        env.intern(&"x".repeat(MAX_NAME_BYTES + 1)),
+        Err(DynError::NameTooLong {
+            limit: MAX_NAME_BYTES,
+        })
+    );
 }
 
 #[test]

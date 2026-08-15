@@ -3,10 +3,10 @@ use std::ffi::{CString, c_void};
 
 use libloading::Library;
 
-use crate::Dyn;
 use crate::error::DynError;
 use crate::parse::SExpr;
 use crate::value::Value;
+use crate::{Dyn, MAX_NAME_BYTES};
 
 const MAX_ARGS: usize = 6;
 /// Maximum number of distinct dynamic-library names retained by one [`Dyn`].
@@ -15,8 +15,6 @@ const MAX_ARGS: usize = 6;
 /// environment.  Consequently a cached name remains usable after the limit is reached, while a
 /// new name is rejected before its arguments are evaluated or loading is attempted.
 const MAX_CACHED_LIBRARIES: usize = 32;
-const MAX_LIBRARY_NAME_BYTES: usize = 255;
-const MAX_SYMBOL_NAME_BYTES: usize = 255;
 
 #[derive(Default)]
 pub(crate) struct LibraryCache {
@@ -169,9 +167,9 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     if lib_name.trim().is_empty() {
         return Err(DynError::Library("library name must not be blank".into()));
     }
-    if lib_name.len() > MAX_LIBRARY_NAME_BYTES {
+    if lib_name.len() > MAX_NAME_BYTES {
         return Err(DynError::Library(format!(
-            "library name exceeds {MAX_LIBRARY_NAME_BYTES}-byte limit"
+            "library name exceeds {MAX_NAME_BYTES}-byte limit"
         )));
     }
     if lib_name.as_bytes().contains(&0) {
@@ -186,9 +184,9 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     if sym_name.trim().is_empty() {
         return Err(DynError::DlCall("symbol name must not be blank".into()));
     }
-    if sym_name.len() > MAX_SYMBOL_NAME_BYTES {
+    if sym_name.len() > MAX_NAME_BYTES {
         return Err(DynError::DlCall(format!(
-            "symbol name exceeds {MAX_SYMBOL_NAME_BYTES}-byte limit"
+            "symbol name exceeds {MAX_NAME_BYTES}-byte limit"
         )));
     }
     let c_name = CString::new(sym_name.as_str())
