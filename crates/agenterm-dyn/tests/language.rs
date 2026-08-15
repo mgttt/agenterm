@@ -114,11 +114,26 @@ fn safe_eval_rejects_dead_branch_dlcall_before_any_set_side_effect() {
 #[test]
 fn unsafe_native_entry_executes_native_and_preserves_native_errors() {
     let mut env = Dyn::new();
+    #[cfg(target_os = "linux")]
     let result = unsafe { env.eval_native(r#"(dlcall "libc.so.6" "getpid" "i32")"#) };
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     assert_eq!(result, Ok(Value::Int(i64::from(unsafe { libc::getpid() }))));
-    #[cfg(not(unix))]
-    assert!(result.is_err());
+
+    #[cfg(target_os = "macos")]
+    let result = unsafe { env.eval_native(r#"(dlcall "libSystem.B.dylib" "getpid" "i32")"#) };
+    #[cfg(target_os = "macos")]
+    assert_eq!(result, Ok(Value::Int(i64::from(unsafe { libc::getpid() }))));
+
+    #[cfg(target_os = "windows")]
+    let result =
+        unsafe { env.eval_native(r#"(dlcall "kernel32.dll" "GetCurrentProcessId" "u32")"#) };
+    #[cfg(target_os = "windows")]
+    assert_eq!(
+        result,
+        Ok(Value::Int(i64::from(unsafe {
+            windows_sys::Win32::System::Threading::GetCurrentProcessId()
+        })))
+    );
 
     let error = unsafe { env.eval_native(r#"(dlcall "missing-library" "unused" "i32")"#) };
     assert!(matches!(error, Err(DynError::Library(_))));
