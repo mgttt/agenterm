@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 76],
+    pub system_probes: [SystemProbe; 79],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 76] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 79] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -385,6 +385,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 76] = [
     placeholder("nsget_mach_execute_header"),
     placeholder("dyld_get_image_name"),
     placeholder("dyld_get_image_vmaddr_slide"),
+    placeholder("dladdr"),
+    placeholder("gethostuuid"),
+    placeholder("dyld_get_image_header"),
     placeholder("mach_host_self"),
 ];
 
@@ -405,7 +408,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 76] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 79] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -487,13 +490,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 76] = [
         "dyld_get_image_vmaddr_slide",
         "_dyld_get_image_vmaddr_slide",
     ),
+    macos_live("dladdr", "dladdr"),
+    macos_live("gethostuuid", "gethostuuid"),
+    macos_live("dyld_get_image_header", "_dyld_get_image_header"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 76] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 79] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -698,6 +704,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 76] = [
     placeholder("nsget_mach_execute_header"),
     placeholder("dyld_get_image_name"),
     placeholder("dyld_get_image_vmaddr_slide"),
+    placeholder("dladdr"),
+    placeholder("gethostuuid"),
+    placeholder("dyld_get_image_header"),
     placeholder("mach_host_self"),
 ];
 

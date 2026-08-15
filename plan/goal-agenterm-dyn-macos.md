@@ -38,10 +38,11 @@ host.
   `pthread_jit_write_protect_supported_np`, `sysctlnametomib`,
   `pthread_equal`, `gethostname`, `confstr`, `clock_getres`,
   `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`,
-  `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`.
+  `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`, `dladdr`,
+  `gethostuuid`, `_dyld_get_image_header`.
 - Darwin evidence (this host): `cargo test --locked -p agenterm-dyn` with
-  `CARGO_TARGET_DIR=target/dyn-wave7` **173 passed** (25 unit + 40
-  errors + 11 hosts + 26 language + 1 macos_ioctl + 39 macos_probes + 4
+  `CARGO_TARGET_DIR=target/dyn-macos-docs8` **176 passed** (25 unit + 40
+  errors + 11 hosts + 26 language + 1 macos_ioctl + 42 macos_probes + 4
   macos_resource + 27 smoke; 0 doctests).
 
 ## Wave 4 — shipped
@@ -68,11 +69,18 @@ Catalog is 76 rows. `gethostname`, `confstr`, `clock_getres`,
 and `_dyld_get_image_vmaddr_slide` are Darwin Live / Linux+Windows
 Placeholder. `mach_host_self` stays last Placeholder.
 
+## Wave 8 — shipped
+
+Catalog is 79 rows. `dladdr`, `gethostuuid`, and `_dyld_get_image_header`
+are Darwin Live / Linux+Windows Placeholder. `mach_host_self` stays last
+Placeholder.
+
 ## Next leak-free Darwin candidates
 
-`os_proc_available_memory`, `dladdr`, `gethostuuid` (leak-free; no Mach
-send rights). Do not live-call Mach send rights. Keep `mach_host_self`
-Placeholder.
+`arc4random_uniform`, `getdomainname`, `statvfs` (leak-free; no Mach send
+rights). Do not live-call Mach send rights. Do not pick
+`os_proc_available_memory` — the macOS SDK marks that symbol unavailable.
+Keep `mach_host_self` Placeholder.
 
 ## Non-goals
 

@@ -204,6 +204,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "nsget_mach_execute_header",
                 "dyld_get_image_name",
                 "dyld_get_image_vmaddr_slide",
+                "dladdr",
+                "gethostuuid",
+                "dyld_get_image_header",
                 "mach_host_self",
             ]
         );
@@ -343,6 +346,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "nsget_mach_execute_header",
                 "dyld_get_image_name",
                 "dyld_get_image_vmaddr_slide",
+                "dladdr",
+                "gethostuuid",
+                "dyld_get_image_header",
                 "mach_host_self",
             ]
         );
@@ -405,6 +411,9 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
                 "dyld_get_image_vmaddr_slide",
                 "_dyld_get_image_vmaddr_slide",
             ),
+            ("dladdr", "dladdr"),
+            ("gethostuuid", "gethostuuid"),
+            ("dyld_get_image_header", "_dyld_get_image_header"),
         ] {
             let probe = c
                 .system_probes

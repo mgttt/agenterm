@@ -1980,3 +1980,9 @@ against that later native call.
 On Darwin, `pthread_t` is `usize`. `libc::pthread_threadid_np(std::ptr::null_mut(), …)`
 does not type-check; pass integer `0` for the current thread. Never spell
 `pthread_t` as a `dlcall` type name — it is a rejected C alias.
+
+`os_proc_available_memory` exists in `libSystem` but the macOS SDK marks
+the header unavailable (iOS-oriented). A symbol that `nm` can see is still
+not a live Darwin probe if the public SDK refuses the declaration. Prefer
+`dladdr`, `gethostuuid`, and `_dyld_get_image_header` for leak-free
+loader/host facts.

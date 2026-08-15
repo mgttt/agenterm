@@ -990,3 +990,91 @@ fn dlcall_dyld_get_image_vmaddr_slide_matches_image_zero() {
     let direct = unsafe { _dyld_get_image_vmaddr_slide(0) } as *mut c_void;
     assert_eq!(got, direct);
 }
+
+#[test]
+fn dlcall_dladdr_writes_caller_owned_info() {
+    let symbol = live_symbol("dladdr");
+    let addr = libc::getpid as *mut c_void;
+    let mut info = unsafe { std::mem::zeroed::<libc::Dl_info>() };
+    let mut env = Dyn::new();
+    env.bind("addr", addr).expect("bind live function address");
+    env.bind("info", (&raw mut info).cast())
+        .expect("bind Dl_info output");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" addr "ptr" info)"#),
+    )
+    .expect("dladdr dlcall")
+    .as_int()
+    .expect("dladdr integer status");
+    assert_ne!(got, 0, "dladdr must resolve a live function address");
+
+    let mut direct = unsafe { std::mem::zeroed::<libc::Dl_info>() };
+    let direct_status = unsafe { libc::dladdr(addr, &mut direct) };
+    assert_ne!(direct_status, 0, "direct dladdr must succeed");
+    assert_eq!(info.dli_saddr, direct.dli_saddr);
+    assert_eq!(info.dli_fname.is_null(), direct.dli_fname.is_null());
+    if !info.dli_fname.is_null() {
+        assert_eq!(
+            unsafe { CStr::from_ptr(info.dli_fname) }.to_bytes(),
+            unsafe { CStr::from_ptr(direct.dli_fname) }.to_bytes()
+        );
+    }
+}
+
+#[test]
+fn dlcall_gethostuuid_writes_caller_owned_uuid() {
+    unsafe extern "C" {
+        fn gethostuuid(id: *mut u8, wait: *const libc::timespec) -> libc::c_int;
+    }
+
+    let symbol = live_symbol("gethostuuid");
+    let mut id = [0_u8; 16];
+    let wait = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let mut env = Dyn::new();
+    env.bind("id", id.as_mut_ptr().cast())
+        .expect("bind host uuid output");
+    env.bind("wait", (&raw const wait).cast_mut().cast())
+        .expect("bind gethostuuid wait timespec");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" id "ptr" wait)"#),
+    )
+    .expect("gethostuuid dlcall");
+    assert_eq!(got, Value::Int(0));
+
+    let mut direct = [0_u8; 16];
+    let direct_status = unsafe { gethostuuid(direct.as_mut_ptr(), &wait) };
+    assert_eq!(direct_status, 0, "direct gethostuuid must succeed");
+    assert_eq!(id, direct);
+}
+
+#[test]
+fn dlcall_dyld_get_image_header_matches_image_zero() {
+    unsafe extern "C" {
+        fn _dyld_get_image_header(image_index: u32) -> *const c_void;
+    }
+
+    let symbol = live_symbol("dyld_get_image_header");
+    let mut env = Dyn::new();
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr" "u32" 0)"#),
+    )
+    .expect("_dyld_get_image_header dlcall")
+    .as_ptr()
+    .expect("_dyld_get_image_header pointer") as *const c_void;
+    assert!(
+        !got.is_null(),
+        "_dyld_get_image_header(0) must return a header"
+    );
+    let direct = unsafe { _dyld_get_image_header(0) };
+    assert!(
+        !direct.is_null(),
+        "direct image-zero header must be non-null"
+    );
+    assert_eq!(got, direct);
+}

@@ -30,6 +30,8 @@ This note is the crate-side pointer so the next knife does not start from chat.
    host/loader facts (`gethostname`, `confstr`, `clock_getres`,
    `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
    `_dyld_get_image_vmaddr_slide`) are catalogued; still no JIT, C, or libffi.
+   Wave 8 Darwin loader/uuid facts (`dladdr`, `gethostuuid`,
+   `_dyld_get_image_header`) are catalogued.
 4. **examples** — each shipped live probe has its paired S-expr document and
    README link.
 

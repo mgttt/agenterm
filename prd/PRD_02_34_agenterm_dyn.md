@@ -62,8 +62,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`,
   `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`,
   `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
-  `_NSGetMachExecuteHeader`, `_dyld_get_image_name`, and
-  `_dyld_get_image_vmaddr_slide`
+  `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
+  `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`, and
+  `_dyld_get_image_header`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Unix `ioctl` calls its resolved symbol through a
@@ -72,10 +73,11 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **150 passed** (25 unit + 40 errors + 11 hosts + 26 language + 48
   cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory,
-  measured on this aarch64-apple-darwin host with Rust 1.97, is **173**
-  (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl + 39
+  measured on this aarch64-apple-darwin host with Rust 1.97, is **176**
+  (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl + 42
   macos_probes + 4 macos_resource + 27 cfg-gated macOS smoke; 0 doctests).
-  Wave 7 catalog rows are live `dlcall`s compared with later native calls.
+  Wave 8 catalog rows (`dladdr`, `gethostuuid`, `_dyld_get_image_header`)
+  are live `dlcall`s compared with later native calls.
   Native CI remains the evidence gate for current source. Host-specific
   counts, not
   a cross-platform estimate.
@@ -108,8 +110,9 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`,
 `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`,
 `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
-`_NSGetMachExecuteHeader`, `_dyld_get_image_name`, and
-`_dyld_get_image_vmaddr_slide`.
+`_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
+`_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`, and
+`_dyld_get_image_header`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.
