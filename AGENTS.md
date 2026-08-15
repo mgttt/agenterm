@@ -160,6 +160,12 @@ review it before validation. Run the final formatting, Clippy, unit-test,
 artifact, and full public-interface gates serially on the integrated tree so the
 result represents one reproducible source state.
 
+When a **supervisor** session drives a **named tmux executor** that must itself
+spawn background subagents, follow the settled playbook
+[`docs/tmux-executor-supervision.md`](docs/tmux-executor-supervision.md)
+(short pane nudges, NOT-DONE boxes, worker refill, redacted session log). Do
+not paste host-home paths or mail into that file or into handoff prompts.
+
 ## Rust engineering — read the condensed manual before editing Rust
 
 Repository Rust work repeatedly crosses feature graphs, six target cells,
