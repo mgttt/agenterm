@@ -648,6 +648,20 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_gethostid_matches_libc() {
+        let probe = live_system_probe("gethostid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64")"#))
+            .expect("gethostid dlcall");
+        let real = unsafe { libc::gethostid() };
+        assert_eq!(got, Value::Int(real));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {

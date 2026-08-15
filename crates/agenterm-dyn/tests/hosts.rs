@@ -118,7 +118,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "sched_yield_void",
                 "alarm_zero",
                 "umask",
-                "getdtablesize"
+                "getdtablesize",
+                "gethostid"
             ]
         );
         assert_eq!(
@@ -158,6 +159,7 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("alarm_zero", "libc.so.6", "alarm"),
                 ("umask", "libc.so.6", "umask"),
                 ("getdtablesize", "libc.so.6", "getdtablesize"),
+                ("gethostid", "libc.so.6", "gethostid"),
             ]
         );
     }

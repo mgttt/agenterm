@@ -50,7 +50,7 @@ pub struct HostCell {
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates; only Linux is live in this leaf.
-    pub system_probes: [SystemProbe; 31],
+    pub system_probes: [SystemProbe; 32],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -76,7 +76,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 31] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 32] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -294,9 +294,16 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 31] = [
             symbol: "getdtablesize",
         },
     },
+    SystemProbe {
+        name: "gethostid",
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libc.so.6",
+            symbol: "gethostid",
+        },
+    },
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 31] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 32] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -419,6 +426,10 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 31] = [
     },
     SystemProbe {
         name: "getdtablesize",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "gethostid",
         status: SystemProbeStatus::Placeholder,
     },
 ];
