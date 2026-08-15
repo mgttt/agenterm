@@ -2102,7 +2102,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2123,7 +2127,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2227,7 +2235,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2292,6 +2304,7 @@ mod tests {
                 code,
                 "a11y_node_not_found"
                     | "a11y_tree_empty"
+                    | "a11y_window_gone"
                     | "a11y_text_unavailable"
                     | "a11y_backend_failed"
                     | "unsupported"
@@ -2319,6 +2332,7 @@ mod tests {
                 code,
                 "a11y_node_not_found"
                     | "a11y_tree_empty"
+                    | "a11y_window_gone"
                     | "a11y_text_unavailable"
                     | "a11y_backend_failed"
                     | "dylib_load"
@@ -2368,7 +2382,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2408,6 +2426,7 @@ mod tests {
                 code,
                 "a11y_node_not_found"
                     | "a11y_tree_empty"
+                    | "a11y_window_gone"
                     | "a11y_text_unavailable"
                     | "a11y_backend_failed"
                     | "dylib_load"
@@ -2463,7 +2482,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2544,6 +2567,7 @@ mod tests {
                 code,
                 "a11y_node_not_found"
                     | "a11y_tree_empty"
+                    | "a11y_window_gone"
                     | "a11y_key_unavailable"
                     | "a11y_text_unavailable"
                     | "a11y_backend_failed"
@@ -2580,7 +2604,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2639,7 +2667,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2700,7 +2732,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2787,7 +2823,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );
@@ -2850,7 +2890,11 @@ mod tests {
         assert!(
             matches!(
                 code,
-                "a11y_node_not_found" | "a11y_tree_empty" | "a11y_backend_failed" | "unsupported"
+                "a11y_node_not_found"
+                    | "a11y_tree_empty"
+                    | "a11y_window_gone"
+                    | "a11y_backend_failed"
+                    | "unsupported"
             ),
             "unexpected code: {code}"
         );

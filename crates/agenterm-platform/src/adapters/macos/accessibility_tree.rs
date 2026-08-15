@@ -950,11 +950,11 @@ fn actions_from_array(
             if raw.is_empty() {
                 continue;
             }
-            if let Some(normalized) = normalize_action(&raw) {
-                if !out.iter().any(|existing| existing == &normalized) {
-                    budget.account_string(&normalized)?;
-                    out.push(normalized);
-                }
+            if let Some(normalized) = normalize_action(&raw)
+                && !out.iter().any(|existing| existing == &normalized)
+            {
+                budget.account_string(&normalized)?;
+                out.push(normalized);
             }
         }
         Ok(out)

@@ -1852,8 +1852,12 @@ Candidate and release status remain separate and are not implied.
   native backend must assert the typed failure class, not one host-specific
   error code: Windows may reject the identity as invalid before lookup, a stub
   host may report unsupported, and an unstaged unit-test process may have no
-  adjacent runtime dynamic library. Keep exact matching semantics in pure tests
-  and prove native success with an owned fixture or public smoke journey.
+  adjacent runtime dynamic library. A real desktop can also drop the synthetic
+  or enumerated window before traversal, so `a11y_window_gone` is a valid
+  pre-actuation typed failure; the test must still require failure and prove no
+  input, clipboard, selection or geometry side effect. Keep exact matching
+  semantics in pure tests and prove native success with an owned fixture or
+  public smoke journey.
 
 ## macOS Accessibility trust is signature + process, not the Settings label
 

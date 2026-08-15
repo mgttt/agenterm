@@ -21,6 +21,7 @@ impl TextReviewError {
         }
     }
 
+    #[cfg(windows)]
     pub(crate) fn failed(code: &'static str, message: impl ToString) -> Self {
         Self::Failed {
             code: Cow::Borrowed(code),
