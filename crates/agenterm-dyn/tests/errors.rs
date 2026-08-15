@@ -148,6 +148,27 @@ fn dlcall_rejects_unknown_signature_types_before_arguments_or_library_load() {
 }
 
 #[test]
+fn dlcall_rejects_unknown_argument_types_before_arguments_or_library_load() {
+    for unsupported in ["f64", "u128"] {
+        let mut env = Dyn::new();
+        let script = format!(
+            r#"(dlcall "missing-library-for-unknown-argument-type" "unused" "i32"
+                "i32" (set touched 1) "{unsupported}" 0)"#
+        );
+        assert_eq!(
+            env.eval(&script),
+            Err(DynError::Type(format!(
+                "unsupported dlcall type `{unsupported}`; only void/integer/pointer types are supported"
+            )))
+        );
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
+}
+
+#[test]
 fn dlcall_validates_entire_signature_before_evaluating_arguments() {
     let mut env = Dyn::new();
     let script = r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
