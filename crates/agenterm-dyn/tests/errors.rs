@@ -453,8 +453,16 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
     );
 
     let symbol = "x".repeat(255);
+    let native_library = if cfg!(target_os = "macos") {
+        "libSystem.B.dylib"
+    } else if cfg!(target_os = "windows") {
+        "kernel32.dll"
+    } else {
+        "libc.so.6"
+    };
     let mut symbol_env = Dyn::new();
-    let symbol_script = format!(r#"(dlcall "libc.so.6" "{symbol}" "i32" "i32" (set touched 1))"#);
+    let symbol_script =
+        format!(r#"(dlcall "{native_library}" "{symbol}" "i32" "i32" (set touched 1))"#);
     let symbol_err = symbol_env.eval(&symbol_script).unwrap_err();
     // Reaching the native resolver is the contract here.  The loader's diagnostic text is
     // platform-specific: macOS does not prefix its `dlsym` error with the symbol name.
