@@ -531,6 +531,36 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_isatty_stdout_matches_libc() {
+        let probe = live_system_probe("isatty_stdout");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 1)"#))
+            .expect("isatty(1) dlcall");
+        let real = unsafe { libc::isatty(1) };
+        assert!(matches!(real, 0 | 1));
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_isatty_stderr_matches_libc() {
+        let probe = live_system_probe("isatty_stderr");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 2)"#))
+            .expect("isatty(2) dlcall");
+        let real = unsafe { libc::isatty(2) };
+        assert!(matches!(real, 0 | 1));
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
