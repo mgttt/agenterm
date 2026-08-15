@@ -448,7 +448,13 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
     let mut symbol_env = Dyn::new();
     let symbol_script = format!(r#"(dlcall "libc.so.6" "{symbol}" "i32" "i32" (set touched 1))"#);
     let symbol_err = symbol_env.eval(&symbol_script).unwrap_err();
-    assert!(matches!(symbol_err, DynError::DlCall(message) if message.starts_with(&symbol)));
+    // Reaching the native resolver is the contract here.  The loader's diagnostic text is
+    // platform-specific: macOS does not prefix its `dlsym` error with the symbol name.
+    assert!(matches!(symbol_err, DynError::DlCall(_)));
+    assert_ne!(
+        symbol_err,
+        DynError::DlCall("symbol name exceeds 255-byte limit".into())
+    );
     assert_eq!(
         symbol_env.eval("touched").unwrap(),
         agenterm_dyn::Value::Int(1)

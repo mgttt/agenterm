@@ -1,26 +1,38 @@
-# Standby — remaining branches
+# Standby — authorized scope closed; later work awaits direction
 
-Active 2026-08-15. Low-risk resumption is green; remaining work stays small.
+Updated 2026-08-15. The current authorized first-cut, harden, probes, and
+examples scope is complete on `main`; do not infer an active implementation
+task from this note.
 
 Product remaining-work lives in [`prd/PRD_02_34_agenterm_dyn.md`](../../../prd/PRD_02_34_agenterm_dyn.md).
 This note is the crate-side pointer so the next knife does not start from chat.
 
-## Resume in this order
+## Completed baseline
 
-1. **harden** — more signature/name rejects before load/eval. Door stays small.
-   Void, arity, empty/blank/overlong/NUL names, C spelling aliases, and unknown types
-   (`f32` / `struct` / `f64` / `u128` / `usize` / `isize` / `bool`) are already on `main`.
-2. **probes** — Linux + macOS libc rows are live. Windows extra probes stay
-   placeholders. Darwin `ioctl` is variadic: dlcall may return `-1` even when
-   a typed `libc::ioctl` works. No C shim. Restore side effects (`umask`).
-   Linux caller-owned `ptr` coverage includes `getcwd`, `uname`, `times`,
-   `clock_gettime`, `getrusage`, and `getrlimit`.
-3. **examples** — one S-expr doc + README link per new live probe.
+1. **first cut** — S-expr/intern/eval and fixed-width integer/pointer
+   `dlcall` are shipped without C, libffi, or a fourth engine.
+2. **harden** — void/arity/empty/blank/overlong/NUL names, C spelling aliases,
+   and unsupported types (`f32` / `struct` / `f64` / `u128` / `usize` /
+   `isize` / `bool`) reject before load/eval. Names accept 255 bytes and
+   reject 256 bytes. The parser accepts 256 nested lists and rejects 257 with
+   `DynError::Parse` before evaluation.
+3. **probes** — Linux and macOS integer/void/ptr libc rows are live; Windows
+   extra probes remain explicit placeholders. Darwin `ioctl` remains variadic
+   script data, not a claimed fixed-trampoline success. `umask` restores its
+   side effect. Linux caller-owned-pointer coverage includes `getcwd`, `uname`,
+   `times`, `clock_gettime`, `getrusage`, and `getrlimit`.
+4. **examples** — each shipped live probe has its paired S-expr document and
+   README link.
 
-## Later (not ordered)
+Current Linux evidence, not a portable estimate: Rust 1.97
+`cargo test --locked -p agenterm-dyn` passes **122** tests (11 unit, 38 errors,
+9 hosts, 16 language, 48 Linux smoke; 0 doctests).
 
-Fold the intern tree to the host ISA. wasmbin only as `.wat` / `.wasm` export,
-not a VM. Talk libagenterm merge only after this crate is mature.
+## Later — requires explicit product authorization
+
+Fold the intern tree to the host ISA; use wasmbin only as `.wat` / `.wasm`
+export, not a VM; and consider libagenterm merge only when the crate is mature.
+None is implemented, scheduled, or implicitly authorized.
 
 ## Still locked
 

@@ -1,11 +1,11 @@
 # PRD 02.34 — agenterm-dyn（极小 / 动态 / 底层）
 
-Status: active 2026-08-15. Low-risk resumption is green; remaining work stays deliberately small.
+Status: current authorized scope complete 2026-08-15. Further product work requires 政委 authorization.
 Owner: 政委定方向；主会话按独占文件域推进。
 
 Parallel crate `crates/agenterm-dyn`, not a fourth engine, not libagenterm, not cu.
 
-## What already landed on `main`
+## Completed authorized scope on `main`
 
 First cut is the body: S-expr + intern + `if` / `set` / `do` + comparisons +
 fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
@@ -23,22 +23,32 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   evaluation.
 - C spelling aliases outside the fixed-width ABI whitelist reject before
   loading or argument evaluation.
+- The parser accepts exactly 256 nested lists; 257 nested lists return
+  `DynError::Parse` before evaluation. This is a stack-resource bound, not a
+  caller-policy boundary.
 - Win six-cell extra probes stay placeholders. **macOS** integer/void/ptr
   libc rows are live against `libSystem.B.dylib` (same names as Linux);
   Darwin `ioctl` remains script data (variadic ABI, no C shim).
-- Tests grew ~62 → ~113. Low-risk dyn commits go straight to `main` with `[skip ci]`.
+- Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
+  1.97: **122 passed** (11 unit + 38 errors + 9 hosts + 16 language + 48
+  cfg-gated Linux smoke; 0 doctests). This is a host-specific execution count,
+  not a cross-platform estimate.
 
-## Branches to resume (do these, in this order)
+## Completed branch accounting
 
-### 1. harden — keep the door small
+### first cut
 
-More precise rejects before load/eval. Do not grow a type system.
+Implemented: intern/eval/list language, bounded repeat, and fixed-width
+integer/pointer `dlcall` with no C or libffi dependency.
 
-Still useful: unknown return/arg types that show up in real libc headers, and
-any hole where a bad name or pair still loads a library. The inclusive 255-byte
-accept / 256-byte reject boundary is pinned.
+### harden
 
-### 2. probes — Linux + macOS live; Windows still placeholder
+Implemented: signature/name rejection before load or argument evaluation,
+including the pinned 255-byte accept / 256-byte reject name boundary and the
+256-list accept / 257-list parse-reject boundary. The shipped ABI remains
+deliberately small; this does not authorize a broader type system.
+
+### probes
 
 Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 (`libSystem.B.dylib`). Windows extra probes stay placeholders. No C shim.
@@ -47,17 +57,20 @@ Do not claim Darwin `ioctl` success through the fixed trampoline.
 Linux caller-owned `ptr` coverage includes `getcwd`, `uname`, `times`,
 `clock_gettime`, `getrusage`, and `getrlimit`.
 
-### 3. examples — pair every new live probe
+### examples
 
-One S-expr doc + README link per new probe. Do not duplicate existing
-`examples/*.md`. No cu/platform wiring in the prose.
+Each shipped live probe has its paired S-expr documentation and README link.
+The prose adds no cu or platform wiring.
 
-### 4. later (not ordered)
+## Later — not authorized or implemented
 
-- Fold the intern tree to the host ISA in-process. That is the endgame.
-- Absorb wasmbin only as export/pack (intern tree → `.wat` / `.wasm`, dlcall
-  as import). Not a VM layer.
-- Talk libagenterm merge only after this crate is mature.
+- Fold the intern tree to the host ISA in-process (endgame).
+- Absorb wasmbin only as export/pack (intern tree → `.wat` / `.wasm`, `dlcall`
+  as import), not as a VM layer.
+- Consider libagenterm merge only after this crate is mature.
+
+These are open product decisions, not scheduled branches and not evidence of
+implemented functionality. Do not begin them without explicit 政委 direction.
 
 ## Non-goals until 政委 orders otherwise
 
@@ -66,7 +79,7 @@ One S-expr doc + README link per new probe. Do not duplicate existing
 - No cu or `agenterm-platform` import.
 - No libffi, no C dependency, no fourth engine, no thickening libagenterm.
 
-## How to run it when quota returns
+## If a new authorized increment is opened
 
 Use managed local agent sessions from the repository root, with `harden`,
 `probes`, and `examples` as exclusive file domains. Do not use worktrees.
