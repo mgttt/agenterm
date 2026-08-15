@@ -1932,3 +1932,13 @@ codesign -d -r- ~/Applications/AgentermCu.app
 cat ~/.local/share/agenterm/ax-status
 tail ~/.local/share/agenterm/cu-hotkeys.log
 ```
+
+## Darwin `ioctl` is variadic; the dyn trampoline is not
+
+`agenterm-dyn` `dlcall` uses a bounded Rust `extern "C"` fixed-arity
+trampoline. Darwin `ioctl(int, unsigned long, ...)` is variadic; on arm64
+unnamed arguments are not in the same slots as a fixed third parameter.
+Measured: `TIOCGWINSZ` via Python `fcntl.ioctl` on a pty succeeds, while
+`dlcall "libSystem.B.dylib" "ioctl"` returns `-1`/`EFAULT`. Do not add a
+C/libffi shim. Keep the request as script data, assert the symbol
+resolves, and do not claim window-size success on macOS.

@@ -3,28 +3,26 @@
 //! Each supported OS module uses [`agenterm_dyn::live_cell`] script data and
 //! cross-checks results with a second `dlcall` where possible.
 
-use std::ffi::{CString, c_void};
+use std::ffi::{c_void, CString};
 
 use agenterm_dyn::DynError;
 use agenterm_dyn::{
-    CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, SecondaryProbe, Value, live_cell,
+    live_cell, Dyn, HostArch, HostOs, SecondaryProbe, Value, CU_ADJACENT_PROBE_CATALOG,
 };
 
 #[test]
 fn cu_adjacent_catalog_has_six_cells() {
     assert_eq!(CU_ADJACENT_PROBE_CATALOG.len(), 6);
-    assert!(
-        CU_ADJACENT_PROBE_CATALOG
-            .iter()
-            .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64)
-    );
+    assert!(CU_ADJACENT_PROBE_CATALOG
+        .iter()
+        .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64));
 }
 
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
     use agenterm_dyn::{
-        HostCell, LINUX_ATSPI_EXISTENCE_LIBS, SizeProbe, SystemProbe, SystemProbeStatus,
+        HostCell, SizeProbe, SystemProbe, SystemProbeStatus, LINUX_ATSPI_EXISTENCE_LIBS,
     };
 
     #[repr(C)]
@@ -162,6 +160,119 @@ mod linux {
             (got - real).abs() <= 1,
             "dlcall and libc time should be adjacent"
         );
+    }
+
+    #[test]
+    fn dlcall_times_writes_caller_owned_tms_and_matches_libc_baseline() {
+        let probe = live_system_probe("times");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut dlcall_tms = libc::tms {
+            tms_utime: 0,
+            tms_stime: 0,
+            tms_cutime: 0,
+            tms_cstime: 0,
+        };
+        let mut env = Dyn::new();
+        env.bind("tms", (&mut dlcall_tms as *mut libc::tms).cast())
+            .expect("bind caller-owned tms");
+
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#))
+            .expect("times dlcall")
+            .as_int()
+            .expect("times return value");
+
+        let mut libc_tms = libc::tms {
+            tms_utime: 0,
+            tms_stime: 0,
+            tms_cutime: 0,
+            tms_cstime: 0,
+        };
+        let baseline = unsafe { libc::times(&mut libc_tms) };
+
+        assert!(got >= 0, "times dlcall should return elapsed clock ticks");
+        assert!(
+            baseline >= 0,
+            "libc times should return elapsed clock ticks"
+        );
+        assert!(
+            baseline >= got,
+            "later libc baseline must not precede dlcall result"
+        );
+        assert!(
+            libc_tms.tms_utime >= dlcall_tms.tms_utime
+                && libc_tms.tms_stime >= dlcall_tms.tms_stime
+                && libc_tms.tms_cutime >= dlcall_tms.tms_cutime
+                && libc_tms.tms_cstime >= dlcall_tms.tms_cstime,
+            "times fields must be initialized by dlcall and monotonic at the later libc baseline"
+        );
+    }
+
+    #[test]
+    fn dlcall_getrusage_writes_caller_owned_rusage_and_matches_libc_baseline() {
+        let probe = live_system_probe("getrusage");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut dlcall_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let mut env = Dyn::new();
+        env.bind("usage", (&mut dlcall_usage as *mut libc::rusage).cast())
+            .expect("bind caller-owned rusage");
+
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" usage)"#,
+                libc::RUSAGE_SELF
+            ))
+            .expect("getrusage dlcall");
+        assert_eq!(got, Value::Int(0));
+
+        let mut libc_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let baseline = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut libc_usage) };
+        assert_eq!(baseline, 0, "direct libc getrusage baseline");
+        assert!(
+            timeval_at_most(dlcall_usage.ru_utime, libc_usage.ru_utime)
+                && timeval_at_most(dlcall_usage.ru_stime, libc_usage.ru_stime),
+            "later direct libc baseline must not precede dlcall CPU usage"
+        );
+    }
+
+    #[test]
+    fn dlcall_getrlimit_nofile_writes_caller_owned_rlimit_and_matches_libc_baseline() {
+        let probe = live_system_probe("getrlimit_nofile");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut dlcall_limit: libc::rlimit = unsafe { std::mem::zeroed() };
+        let mut env = Dyn::new();
+        env.bind("limit", (&mut dlcall_limit as *mut libc::rlimit).cast())
+            .expect("bind caller-owned rlimit");
+
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" limit)"#,
+                libc::RLIMIT_NOFILE
+            ))
+            .expect("getrlimit dlcall");
+        assert_eq!(got, Value::Int(0));
+
+        let mut libc_limit: libc::rlimit = unsafe { std::mem::zeroed() };
+        let baseline = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut libc_limit) };
+        assert_eq!(baseline, 0, "direct libc getrlimit baseline");
+        assert_eq!(
+            dlcall_limit.rlim_cur, libc_limit.rlim_cur,
+            "getrlimit dlcall soft limit must match the direct libc baseline"
+        );
+        assert_eq!(
+            dlcall_limit.rlim_max, libc_limit.rlim_max,
+            "getrlimit dlcall hard limit must match the direct libc baseline"
+        );
+    }
+
+    fn timeval_at_most(left: libc::timeval, right: libc::timeval) -> bool {
+        (left.tv_sec, left.tv_usec) <= (right.tv_sec, right.tv_usec)
     }
 
     #[test]
@@ -807,7 +918,7 @@ mod linux {
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
-    use agenterm_dyn::HostCell;
+    use agenterm_dyn::{HostCell, SizeProbe, SystemProbe, SystemProbeStatus};
 
     #[repr(C)]
     struct Winsize {
@@ -821,17 +932,47 @@ mod macos {
         live_cell().expect("macos cell")
     }
 
-    #[test]
-    fn dlcall_getpid_matches_libc_and_second_dlcall() {
+    fn live_system_probe(name: &str) -> SystemProbe {
+        let probe = cell()
+            .system_probes
+            .into_iter()
+            .find(|probe| probe.name == name)
+            .unwrap_or_else(|| panic!("missing {name} system probe"));
+        assert!(matches!(probe.status, SystemProbeStatus::LiveDlcall { .. }));
+        probe
+    }
+
+    fn getpid_script() -> String {
         let c = cell();
-        let mut env = Dyn::new();
-        let script = format!(
+        format!(
             r#"(dlcall "{}" "{}" "{}")"#,
             c.pid_lib, c.pid_symbol, c.pid_ret_type
-        );
+        )
+    }
+
+    #[test]
+    fn dlcall_getpid_matches_libc_and_second_dlcall() {
+        let mut env = Dyn::new();
+        let script = getpid_script();
         let got = env.eval(&script).expect("getpid dlcall");
         let again = env.eval(&script).expect("second getpid dlcall");
         assert_eq!(got, again);
+        let real = unsafe { libc::getpid() };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn missing_symbol_does_not_evict_cached_libsystem() {
+        let c = cell();
+        let missing_symbol = "agenterm_dyn_missing_before_getpid";
+        let missing = format!(r#"(dlcall "{}" "{missing_symbol}" "i32")"#, c.pid_lib);
+        let mut env = Dyn::new();
+        let err = env.eval(&missing).unwrap_err();
+        assert!(matches!(err, DynError::DlCall(_)));
+        assert!(err.to_string().contains(missing_symbol));
+        let got = env
+            .eval(&getpid_script())
+            .expect("getpid after missing symbol");
         let real = unsafe { libc::getpid() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -846,20 +987,432 @@ mod macos {
         let script = format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" 0)"#);
         let got = env.eval(&script).expect("time dlcall");
         let t = got.as_int().expect("time return");
+        let real = unsafe { libc::time(std::ptr::null_mut()) };
         assert!(
-            t > 1_600_000_000,
-            "time() should be a recent unix timestamp"
-        );
-        let again = env.eval(&script).expect("second time dlcall");
-        let t2 = again.as_int().expect("second time");
-        assert!(
-            t2 >= t,
-            "time() should be monotonic across back-to-back calls"
+            (t - real).abs() <= 1,
+            "dlcall and libc time should be adjacent"
         );
     }
 
     #[test]
-    fn dlcall_ioctl_winsize_on_tty_when_possible() {
+    fn dlcall_clock_gettime_writes_timespec() {
+        let probe = live_system_probe("clock_gettime");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut env = Dyn::new();
+        env.bind("ts", (&mut ts as *mut libc::timespec).cast())
+            .expect("bind timespec");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" ts)"#,
+                libc::CLOCK_MONOTONIC
+            ))
+            .expect("clock_gettime dlcall");
+        assert_eq!(got, Value::Int(0));
+        assert!(ts.tv_sec > 0);
+        assert!((0..1_000_000_000).contains(&ts.tv_nsec));
+    }
+
+    #[test]
+    fn dlcall_uname_writes_darwin_identity() {
+        let probe = live_system_probe("uname");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let mut uts = std::mem::MaybeUninit::<libc::utsname>::zeroed();
+        let mut env = Dyn::new();
+        env.bind("uts", uts.as_mut_ptr().cast())
+            .expect("bind utsname");
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" uts)"#))
+            .expect("uname dlcall");
+        assert_eq!(got, Value::Int(0));
+        let uts = unsafe { uts.assume_init() };
+        let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()) };
+        assert_eq!(sysname.to_bytes(), b"Darwin");
+    }
+
+    #[test]
+    fn dlcall_ids_match_libc() {
+        for (name, ret) in [
+            ("getuid", "u32"),
+            ("getgid", "u32"),
+            ("getppid", "i32"),
+            ("getpgrp", "i32"),
+            ("geteuid", "u32"),
+            ("getegid", "u32"),
+        ] {
+            let probe = live_system_probe(name);
+            let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+                unreachable!()
+            };
+            let mut env = Dyn::new();
+            let got = env
+                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "{ret}")"#))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let real = match name {
+                "getuid" => i64::from(unsafe { libc::getuid() }),
+                "getgid" => i64::from(unsafe { libc::getgid() }),
+                "getppid" => i64::from(unsafe { libc::getppid() }),
+                "getpgrp" => i64::from(unsafe { libc::getpgrp() }),
+                "geteuid" => i64::from(unsafe { libc::geteuid() }),
+                "getegid" => i64::from(unsafe { libc::getegid() }),
+                _ => unreachable!(),
+            };
+            assert_eq!(got, Value::Int(real), "{name}");
+        }
+    }
+
+    #[test]
+    fn dlcall_getsid_and_getpgid_zero_match_libc() {
+        for name in ["getsid", "getpgid"] {
+            let probe = live_system_probe(name);
+            let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+                unreachable!()
+            };
+            let mut env = Dyn::new();
+            let got = env
+                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let real = if name == "getsid" {
+                unsafe { libc::getsid(0) }
+            } else {
+                unsafe { libc::getpgid(0) }
+            };
+            assert!(real > 0, "{name} should be positive");
+            assert_eq!(got, Value::Int(i64::from(real)), "{name}");
+        }
+    }
+
+    #[test]
+    fn dlcall_sysconf_matches_libc() {
+        for (name, key) in [
+            ("sysconf_pagesize", libc::_SC_PAGESIZE),
+            ("sysconf_clk_tck", libc::_SC_CLK_TCK),
+            ("sysconf_nprocessors_onln", libc::_SC_NPROCESSORS_ONLN),
+        ] {
+            let probe = live_system_probe(name);
+            let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+                unreachable!()
+            };
+            let mut env = Dyn::new();
+            let got = env
+                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {key})"#))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let real = unsafe { libc::sysconf(key) };
+            assert!(real > 0, "{name} should be positive");
+            assert_eq!(got, Value::Int(real), "{name}");
+        }
+    }
+
+    #[test]
+    fn dlcall_getcwd_writes_current_directory() {
+        use std::os::unix::ffi::OsStrExt;
+        let probe = live_system_probe("getcwd");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let mut buffer = [0_u8; 4096];
+        let buffer_ptr = buffer.as_mut_ptr();
+        let mut env = Dyn::new();
+        env.bind("cwd", buffer_ptr.cast()).expect("bind cwd buffer");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "ptr" "ptr" cwd "u64" {})"#,
+                buffer.len()
+            ))
+            .expect("getcwd dlcall");
+        assert_eq!(got, Value::Ptr(buffer_ptr as usize));
+        let end = buffer
+            .iter()
+            .position(|byte| *byte == 0)
+            .expect("getcwd result should be NUL terminated");
+        let expected = std::env::current_dir().expect("read current directory");
+        assert_eq!(&buffer[..end], expected.as_os_str().as_bytes());
+    }
+
+    #[test]
+    fn dlcall_isatty_std_streams_match_libc() {
+        for (name, fd) in [
+            ("isatty_stdin", 0),
+            ("isatty_stdout", 1),
+            ("isatty_stderr", 2),
+        ] {
+            let probe = live_system_probe(name);
+            let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+                unreachable!()
+            };
+            let mut env = Dyn::new();
+            let got = env
+                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd})"#))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let real = unsafe { libc::isatty(fd) };
+            assert!(matches!(real, 0 | 1));
+            assert_eq!(got, Value::Int(i64::from(real)), "{name}");
+        }
+    }
+
+    #[test]
+    fn dlcall_open_dev_null_is_not_tty_and_closes_fd() {
+        let probe = live_system_probe("open_dev_null");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let path = CString::new("/dev/null").expect("/dev/null path");
+        let mut env = Dyn::new();
+        env.bind("dev_null", path.as_ptr().cast_mut().cast())
+            .expect("bind /dev/null path");
+        let fd = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" dev_null "i32" {})"#,
+                libc::O_RDONLY
+            ))
+            .expect("open(/dev/null) dlcall")
+            .as_int()
+            .expect("open return code");
+        assert!(fd >= 0, "open(/dev/null) returned {fd}");
+        let isatty = env.eval(&format!(r#"(dlcall "{lib}" "isatty" "i32" "i32" {fd})"#));
+        let close = env.eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#));
+        assert_eq!(isatty.expect("isatty(/dev/null) dlcall"), Value::Int(0));
+        assert_eq!(close.expect("close(/dev/null) dlcall"), Value::Int(0));
+    }
+
+    #[test]
+    fn dlcall_access_root_and_missing() {
+        let root_probe = live_system_probe("access_root");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = root_probe.status else {
+            unreachable!()
+        };
+        let root = CString::new("/").expect("root path");
+        let missing = CString::new("/tmp/agenterm-dyn-missing-access-probe").expect("missing path");
+        let mut env = Dyn::new();
+        env.bind("root", root.as_ptr().cast_mut().cast())
+            .expect("bind root");
+        env.bind("missing", missing.as_ptr().cast_mut().cast())
+            .expect("bind missing");
+        let ok = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" root "i32" {})"#,
+                libc::F_OK
+            ))
+            .expect("access /");
+        let miss = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" missing "i32" {})"#,
+                libc::F_OK
+            ))
+            .expect("access missing");
+        assert_eq!(ok, Value::Int(0));
+        assert_eq!(miss, Value::Int(-1));
+    }
+
+    #[test]
+    fn dlcall_fcntl_dup_lseek_match_libc() {
+        let mut env = Dyn::new();
+        let getfd = live_system_probe("fcntl_stdin_getfd");
+        let SystemProbeStatus::LiveDlcall {
+            lib,
+            symbol: getfd_sym,
+        } = getfd.status
+        else {
+            unreachable!()
+        };
+        let got_fd = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{getfd_sym}" "i32" "i32" 0 "i32" {})"#,
+                libc::F_GETFD
+            ))
+            .expect("F_GETFD");
+        assert_eq!(
+            got_fd,
+            Value::Int(i64::from(unsafe { libc::fcntl(0, libc::F_GETFD) }))
+        );
+
+        let getfl = live_system_probe("fcntl_stdin_getfl");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: getfl_sym, ..
+        } = getfl.status
+        else {
+            unreachable!()
+        };
+        let got_fl = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{getfl_sym}" "i32" "i32" 0 "i32" {})"#,
+                libc::F_GETFL
+            ))
+            .expect("F_GETFL");
+        assert_eq!(
+            got_fl,
+            Value::Int(i64::from(unsafe { libc::fcntl(0, libc::F_GETFL) }))
+        );
+
+        let lseek = live_system_probe("lseek_stdin_cur");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: lseek_sym, ..
+        } = lseek.status
+        else {
+            unreachable!()
+        };
+        let got_off = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{lseek_sym}" "i64" "i32" 0 "i64" 0 "i32" {})"#,
+                libc::SEEK_CUR
+            ))
+            .expect("lseek");
+        assert_eq!(
+            got_off,
+            Value::Int(unsafe { libc::lseek(0, 0, libc::SEEK_CUR) })
+        );
+
+        let dup = live_system_probe("dup_stdin");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: dup_sym, ..
+        } = dup.status
+        else {
+            unreachable!()
+        };
+        let fd = env
+            .eval(&format!(r#"(dlcall "{lib}" "{dup_sym}" "i32" "i32" 0)"#))
+            .expect("dup")
+            .as_int()
+            .expect("dup int");
+        assert!(fd >= 0, "dup(0) returned {fd}");
+        let close = env
+            .eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#))
+            .expect("close");
+        assert_eq!(close, Value::Int(0));
+    }
+
+    #[test]
+    fn dlcall_priority_nice_yield_alarm_umask() {
+        let mut env = Dyn::new();
+        let prio = live_system_probe("getpriority_process");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = prio.status else {
+            unreachable!()
+        };
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "u32" {} "u32" 0)"#,
+                libc::PRIO_PROCESS
+            ))
+            .expect("getpriority");
+        assert_eq!(
+            got,
+            Value::Int(i64::from(unsafe {
+                libc::getpriority(libc::PRIO_PROCESS, 0)
+            }))
+        );
+
+        let nice = live_system_probe("nice_zero");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: nice_sym, ..
+        } = nice.status
+        else {
+            unreachable!()
+        };
+        let got_nice = env
+            .eval(&format!(r#"(dlcall "{lib}" "{nice_sym}" "i32" "i32" 0)"#))
+            .expect("nice");
+        assert_eq!(got_nice, Value::Int(i64::from(unsafe { libc::nice(0) })));
+
+        let yld = live_system_probe("sched_yield_void");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: yld_sym, ..
+        } = yld.status
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            env.eval(&format!(r#"(dlcall "{lib}" "{yld_sym}" "void")"#))
+                .expect("sched_yield"),
+            Value::Nil
+        );
+
+        let prior = unsafe { libc::alarm(0) };
+        assert_eq!(
+            prior, 0,
+            "test process should start without a pending alarm"
+        );
+        let alarm = live_system_probe("alarm_zero");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: alarm_sym, ..
+        } = alarm.status
+        else {
+            unreachable!()
+        };
+        let got_alarm = env
+            .eval(&format!(r#"(dlcall "{lib}" "{alarm_sym}" "u32" "u32" 0)"#))
+            .expect("alarm");
+        let remaining = unsafe { libc::alarm(0) };
+        assert_eq!(got_alarm, Value::Int(0));
+        assert_eq!(remaining, 0);
+
+        let umask = live_system_probe("umask");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: umask_sym, ..
+        } = umask.status
+        else {
+            unreachable!()
+        };
+        let previous = env
+            .eval(&format!(r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" 0)"#))
+            .expect("umask(0)")
+            .as_int()
+            .expect("umask int");
+        let restored = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" {previous})"#
+            ))
+            .expect("umask restore");
+        assert_eq!(restored, Value::Int(0));
+        assert_eq!(previous & !0o777, 0);
+    }
+
+    #[test]
+    fn dlcall_sizes_and_hostid_match_libc() {
+        let mut env = Dyn::new();
+        let dt = live_system_probe("getdtablesize");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = dt.status else {
+            unreachable!()
+        };
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+            .expect("getdtablesize");
+        let real = unsafe { libc::getdtablesize() };
+        assert!(real > 0);
+        assert_eq!(got, Value::Int(i64::from(real)));
+
+        let hid = live_system_probe("gethostid");
+        let SystemProbeStatus::LiveDlcall {
+            symbol: hid_sym, ..
+        } = hid.status
+        else {
+            unreachable!()
+        };
+        let got_id = env
+            .eval(&format!(r#"(dlcall "{lib}" "{hid_sym}" "i64")"#))
+            .expect("gethostid");
+        assert_eq!(got_id, Value::Int(unsafe { libc::gethostid() }));
+
+        let ps = live_system_probe("getpagesize");
+        let SystemProbeStatus::LiveDlcall { symbol: ps_sym, .. } = ps.status else {
+            unreachable!()
+        };
+        let got_ps = env
+            .eval(&format!(r#"(dlcall "{lib}" "{ps_sym}" "i32")"#))
+            .expect("getpagesize");
+        let sysconf = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        assert!(sysconf > 0);
+        assert_eq!(got_ps, Value::Int(sysconf));
+    }
+
+    #[test]
+    fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
             lib,
@@ -879,28 +1432,76 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("ws", (&mut ws as *mut Winsize).cast())
             .expect("bind ws");
-
-        let fd = unsafe { libc::open(b"/dev/tty\0".as_ptr().cast(), libc::O_RDONLY) };
-        if fd < 0 {
-            return;
-        }
+        let (fd, expect_pty_dims) = open_probe_fd();
         let script =
             format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd} "u64" {request} "ptr" ws)"#);
         let ret = env.eval(&script).expect("ioctl dlcall");
-        let code = ret.as_int().expect("ioctl code");
-        unsafe {
-            libc::close(fd);
-        }
+        let code = ret.as_int().expect("ioctl return code");
+        // Darwin `ioctl` is variadic. The bounded dlcall trampoline is
+        // fixed-arity `(i32, u64, ptr)` and does not match the arm64
+        // variadic slot, so the live call often returns -1 / EFAULT even
+        // when a typed `libc::ioctl` on the same fd succeeds.
         assert!(
             code == 0 || code == -1,
-            "ioctl on /dev/tty should succeed or fail with -1, got {code}"
+            "ioctl dlcall should resolve; got {code}"
         );
-        if code == 0 {
-            assert!(
-                ws.ws_row > 0 && ws.ws_col > 0,
-                "winsize should be populated"
-            );
+        if code == 0 && expect_pty_dims {
+            assert_eq!(ws.ws_row, 24, "pty rows");
+            assert_eq!(ws.ws_col, 80, "pty cols");
         }
+        if fd > 2 {
+            unsafe {
+                libc::close(fd as libc::c_int);
+            }
+        }
+    }
+
+    fn open_probe_fd() -> (i64, bool) {
+        unsafe {
+            let mut master: libc::c_int = -1;
+            let mut slave: libc::c_int = -1;
+            let mut win = libc::winsize {
+                ws_row: 24,
+                ws_col: 80,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            };
+            if libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut win,
+            ) == 0
+            {
+                // Darwin TIOCGWINSZ is on the slave; master often returns -1.
+                libc::close(master);
+                return (i64::from(slave), true);
+            }
+        }
+        let fd = unsafe { libc::open(b"/dev/tty\0".as_ptr().cast(), libc::O_RDONLY) };
+        if fd >= 0 {
+            (i64::from(fd), false)
+        } else {
+            (0, false)
+        }
+    }
+
+    #[test]
+    fn eval_do_sequence_with_dlcall() {
+        let c = cell();
+        let mut env = Dyn::new();
+        let script = format!(
+            r#"
+            (do
+              (set pid (dlcall "{}" "{}" "{}"))
+              pid)
+            "#,
+            c.pid_lib, c.pid_symbol, c.pid_ret_type
+        );
+        let v = env.eval(script.trim()).expect("do/dlcall");
+        let real = unsafe { libc::getpid() };
+        assert_eq!(v, Value::Int(i64::from(real)));
     }
 
     #[test]
