@@ -122,11 +122,13 @@ impl SshEndpoint {
         if let Ok(raw) = std::env::var("AGENTERM_CU_SSH_ENV") {
             for part in raw.split(',') {
                 if let Some(pair) = parse_env_pair(part) {
+                    reject_reserved_authority_env(&pair.0, "ssh")?;
                     upsert_env(&mut remote_env, pair.0, pair.1);
                 }
             }
         }
         for (key, value) in extra_env {
+            reject_reserved_authority_env(&key, "ssh")?;
             upsert_env(&mut remote_env, key, value);
         }
         let connect_timeout_secs = std::env::var("AGENTERM_CU_SSH_CONNECT_TIMEOUT")
@@ -211,6 +213,7 @@ pub fn run_remote(
     let mut remote_argv: Vec<String> = Vec::new();
     remote_argv.push("env".into());
     for (key, value) in &endpoint.remote_env {
+        reject_reserved_authority_env(key, "ssh")?;
         // OpenSSH joins the remote argv with spaces and runs it through the
         // remote shell; keep values free of whitespace so shell splitting is
         // stable. Callers that need spaces should export them on the remote.
@@ -240,6 +243,7 @@ pub fn run_remote(
     remote_argv.push("-".into());
 
     let mut ssh = Command::new("ssh");
+    crate::auth::clear_reserved_authority_environment(&mut ssh);
     for arg in endpoint.ssh_prefix_args() {
         ssh.arg(arg);
     }
@@ -314,6 +318,16 @@ pub fn run_remote(
         ));
     }
     Ok(reply)
+}
+
+fn reject_reserved_authority_env(key: &str, transport: &str) -> Result<(), CuError> {
+    if crate::auth::is_reserved_authority_env(key) {
+        return Err(CuError::new(
+            "invalid_authorization",
+            format!("{transport} worker environment cannot forward reserved authorization keys"),
+        ));
+    }
+    Ok(())
 }
 
 /// Public reply target is always the ssh tier. For `capabilities`, also
@@ -1077,6 +1091,20 @@ mod tests {
                 .any(|w| w[0] == "-i" && w[1] == "/tmp/id_ed25519")
         );
         assert_eq!(args.last().map(String::as_str), Some("user@127.0.0.1"));
+    }
+
+    #[test]
+    fn from_parts_rejects_reserved_authorization_environment() {
+        let error = SshEndpoint::from_parts(
+            "station".into(),
+            None,
+            None,
+            None,
+            vec![("agenterm_cu_grant_id".into(), "credential-seed".into())],
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_authorization");
+        assert!(!error.message.contains("credential-seed"));
     }
 
     #[test]

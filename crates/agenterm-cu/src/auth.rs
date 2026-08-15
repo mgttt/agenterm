@@ -122,6 +122,37 @@ pub fn evaluate_grant_sources(
     Ok(EvaluatedGrants { source, grants })
 }
 
+/// Authorization selectors and future provider material never cross a worker
+/// boundary through caller-controlled environment forwarding.
+pub(crate) fn is_reserved_authority_env(key: &str) -> bool {
+    ["AGENTERM_CU_GRANT", "AGENTERM_CU_AUTH"]
+        .iter()
+        .any(|prefix| {
+            key.get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        })
+}
+
+pub(crate) fn clear_reserved_authority_environment(command: &mut std::process::Command) {
+    // Remove current and planned selectors even when they are absent from this
+    // parent environment, so a caller-set Command override cannot retain them.
+    for key in [
+        "AGENTERM_CU_GRANT",
+        "AGENTERM_CU_GRANT_ID",
+        "AGENTERM_CU_AUTH",
+        "AGENTERM_CU_AUTH_PROVIDER",
+    ] {
+        command.env_remove(key);
+    }
+    // Also remove every future suffix already present in the parent. This
+    // prevents OpenSSH SendEnv and local session workers from inheriting it.
+    for (key, _) in std::env::vars_os() {
+        if key.to_str().is_some_and(is_reserved_authority_env) {
+            command.env_remove(key);
+        }
+    }
+}
+
 pub struct Authorization {
     grants: BTreeSet<Grant>,
     source: GrantSource,
@@ -270,5 +301,47 @@ mod tests {
             .err()
             .expect("CLI parse failure must win");
         assert_eq!(error.kind, GrantParseErrorKind::UnknownToken);
+    }
+
+    #[test]
+    fn worker_environment_reserves_all_authorization_prefixes() {
+        for key in [
+            "AGENTERM_CU_GRANT",
+            "agenterm_cu_grant_id",
+            "AGENTERM_CU_AUTH",
+            "AgEnTeRm_Cu_AuTh_Provider",
+        ] {
+            assert!(is_reserved_authority_env(key), "key={key}");
+        }
+        for key in ["AGENTERM_CU_AUDIT_PATH", "AGENTERM_ABI_LIB", "DISPLAY"] {
+            assert!(!is_reserved_authority_env(key), "key={key}");
+        }
+    }
+
+    #[test]
+    fn worker_command_clears_authorization_but_retains_unrelated_environment() {
+        let mut command = std::process::Command::new("fixture-worker");
+        command
+            .env("AGENTERM_CU_GRANT", "credential-seed")
+            .env("AGENTERM_CU_AUTH_PROVIDER", "provider-seed")
+            .env("AGENTERM_CU_AUDIT_PATH", "audit.jsonl");
+        clear_reserved_authority_environment(&mut command);
+
+        let configured: std::collections::BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
+            .collect();
+        assert_eq!(
+            configured.get(std::ffi::OsStr::new("AGENTERM_CU_GRANT")),
+            Some(&None)
+        );
+        assert_eq!(
+            configured.get(std::ffi::OsStr::new("AGENTERM_CU_AUTH_PROVIDER")),
+            Some(&None)
+        );
+        assert_eq!(
+            configured.get(std::ffi::OsStr::new("AGENTERM_CU_AUDIT_PATH")),
+            Some(&Some(std::ffi::OsString::from("audit.jsonl")))
+        );
     }
 }

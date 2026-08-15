@@ -75,6 +75,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   scope behind an explicit CLI `observe` placement attempt and proves the
   action remains refused with unchanged bounds. These remain ephemeral
   process inputs, not persisted or target-bound grants.
+- [~] SSH and VNC worker environment forwarding now reserves the complete
+  case-insensitive `AGENTERM_CU_GRANT*` and `AGENTERM_CU_AUTH*` namespaces.
+  Caller-supplied matches fail typed before SSH spawn or VNC handshake, the
+  value is not echoed, and inherited selectors are removed from child process
+  environments. Existing raw scope forwarding is still legacy ephemeral
+  behavior, not a target-bound delegation protocol.
 - [~] A persisted bounded grant-store core now owns validated create/list,
   pre-effect attempt reservation, revocation, expiry/not-before, exact
   target+tier+session matching, generation conflict detection, and corrupt
@@ -91,6 +97,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   filesystems without coherent locking. This is not yet the production
   authorization path: CLI/provider integration, verified target identity and
   session-nonce invalidation remain open.
+- [~] A sealed `TargetBinding` contract now separates opaque provider identity
+  and exact desktop-session identity from routing material. Current, SSH and
+  VNC fail typed when no crate-owned verified provider is available; RDP stays
+  `unsupported` even if a provider is offered. The public resolver accepts no
+  hostname, IP, user, port, `DISPLAY` or arbitrary binding-string constructor.
+  Real per-OS identity providers and their secret persistence remain open.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`

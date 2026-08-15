@@ -111,11 +111,13 @@ impl VncEndpoint {
         if let Ok(raw) = std::env::var("AGENTERM_CU_VNC_ENV") {
             for part in raw.split(',') {
                 if let Some(pair) = parse_env_pair(part) {
+                    reject_reserved_authority_env(&pair.0, "vnc")?;
                     upsert_env(&mut session_env, pair.0, pair.1);
                 }
             }
         }
         for (key, value) in extra_env {
+            reject_reserved_authority_env(&key, "vnc")?;
             upsert_env(&mut session_env, key, value);
         }
         let connect_timeout_secs = std::env::var("AGENTERM_CU_VNC_CONNECT_TIMEOUT")
@@ -143,6 +145,9 @@ pub fn run_session(
     command: &CuCommand,
     auth: &Authorization,
 ) -> Result<CuReply, CuError> {
+    for (key, _) in &endpoint.session_env {
+        reject_reserved_authority_env(key, "vnc")?;
+    }
     rfb_handshake(endpoint)?;
     let session_command = rewrite_command_target_current(command)?;
     let payload = serde_json::to_string(&session_command).map_err(|error| {
@@ -187,6 +192,7 @@ pub fn run_session(
     worker_argv.push("-".into());
 
     let mut child_cmd = Command::new(&worker_argv[0]);
+    crate::auth::clear_reserved_authority_environment(&mut child_cmd);
     for arg in &worker_argv[1..] {
         child_cmd.arg(arg);
     }
@@ -262,6 +268,16 @@ pub fn run_session(
         ));
     }
     Ok(reply)
+}
+
+fn reject_reserved_authority_env(key: &str, transport: &str) -> Result<(), CuError> {
+    if crate::auth::is_reserved_authority_env(key) {
+        return Err(CuError::new(
+            "invalid_authorization",
+            format!("{transport} worker environment cannot forward reserved authorization keys"),
+        ));
+    }
+    Ok(())
 }
 
 /// Public reply target is always the vnc tier. For `capabilities`, also
@@ -1327,5 +1343,18 @@ mod tests {
         assert_eq!(endpoint.host, "127.0.0.1");
         assert_eq!(endpoint.port, 5931);
         assert_eq!(endpoint.address(), "127.0.0.1:5931");
+    }
+
+    #[test]
+    fn from_parts_rejects_reserved_authorization_environment() {
+        let error = VncEndpoint::from_parts(
+            "station:5900".into(),
+            None,
+            None,
+            vec![("AGENTERM_CU_AUTH_PROVIDER".into(), "credential-seed".into())],
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_authorization");
+        assert!(!error.message.contains("credential-seed"));
     }
 }

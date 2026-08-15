@@ -21,6 +21,7 @@ pub mod ssh_transport;
 #[cfg(target_os = "macos")]
 pub mod status_menu;
 pub mod target;
+pub mod target_binding;
 pub mod vnc_transport;
 
 pub use auth::{Authorization, Grant};

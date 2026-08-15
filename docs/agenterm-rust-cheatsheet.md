@@ -1869,6 +1869,22 @@ semantics. On the pinned Windows Rust toolchain,
 destination-to-backup swap adds a crash interval and must not be used as an
 "atomic" fallback.
 
+Authorization selectors and provider material must not inherit through a
+transport worker's generic environment forwarding. Reserve the complete
+case-insensitive product prefixes (for example `AGENTERM_CU_GRANT*` and
+`AGENTERM_CU_AUTH*`) and reject them before any process spawn, network
+handshake or mechanism call. A future remote authorization handoff needs an
+explicit one-command delegation envelope bound to command, target and expiry;
+raw scope strings or environment variables are not delegation.
+
+Treat routing and authorization identity as different types. A target enum,
+hostname, IP, account, port, PID, native window handle or display name can
+locate work but cannot identify the provider plus exact desktop session for a
+persistent grant. Put opaque target/session IDs behind a sealed verified
+provider, expose no arbitrary-string constructor, and fail closed when the
+provider or session proof is unavailable. A placeholder transport remains
+unsupported even if some caller offers identity-shaped data.
+
 For window placement, compensation is a saga, never an atomicity claim. Read
 the exact native bounds, revalidate handle plus process/application identity,
 apply, independently read back the final rect, then publish cloned history.
