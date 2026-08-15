@@ -59,8 +59,9 @@ Floating-point values and aggregates have no supported ABI class. Variadic
 symbols are outside the contract because the fixed trampoline cannot reliably
 detect them, so callers must not use `printf` or another arbitrary variadic
 symbol. The only exception is Darwin `ioctl` with the validated
-`(i32, u64|i32, ptr) -> i32` signature: it uses a dedicated Rust variadic
-declaration. This remains an ABI-compatibility boundary, not an authorization
+`(i32, u64|i32, ptr) -> i32` signature: it transmutes the loaded
+`libloading` pointer to `unsafe extern "C" fn(i32, u64, ...) -> i32`.
+This remains an ABI-compatibility boundary, not an authorization
 or safety policy; library names and symbols remain caller-supplied script data.
 
 The language stores integer results as signed `i64`. A `u64` result therefore

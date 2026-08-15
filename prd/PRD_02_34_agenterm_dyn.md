@@ -34,8 +34,10 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   general variadic FFI.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **122 passed** (11 unit + 38 errors + 9 hosts + 16 language + 48
-  cfg-gated Linux smoke; 0 doctests). This is a host-specific execution count,
-  not a cross-platform estimate.
+  cfg-gated Linux smoke; 0 doctests). Current Darwin evidence on this
+  aarch64-apple-darwin host: **106 passed** (11 unit + 38 errors + 9 hosts +
+  16 language + 1 macos_ioctl + 7 macos_probes + 24 cfg-gated macOS smoke;
+  0 doctests). Host-specific counts, not a cross-platform estimate.
 
 ## Completed branch accounting
 
