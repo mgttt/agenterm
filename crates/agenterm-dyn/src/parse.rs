@@ -1,5 +1,11 @@
 use crate::error::DynError;
 
+/// Maximum number of nested S-expression lists accepted by the parser.
+///
+/// Keeping this bounded prevents adversarial input from exhausting the Rust
+/// call stack before evaluation can apply its own limits.
+pub(crate) const MAX_LIST_DEPTH: usize = 256;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SExpr {
     Int(i64),
@@ -10,7 +16,7 @@ pub(crate) enum SExpr {
 
 pub(crate) fn parse(source: &str) -> Result<SExpr, DynError> {
     let mut parser = Parser::new(source);
-    let expr = parser.parse_expr()?;
+    let expr = parser.parse_expr(0)?;
     parser.skip_ws();
     if !parser.is_eof() {
         return Err(DynError::Parse("trailing tokens after expression".into()));
@@ -52,10 +58,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_expr(&mut self) -> Result<SExpr, DynError> {
+    fn parse_expr(&mut self, list_depth: usize) -> Result<SExpr, DynError> {
         self.skip_ws();
         match self.peek() {
-            Some('(') => self.parse_list(),
+            Some('(') => self.parse_list(list_depth),
             Some('"') => self.parse_string(),
             Some('-') if self.peek_next_is_digit() => self.parse_int(),
             Some('-') => Ok(SExpr::Sym(self.parse_symbol()?)),
@@ -72,7 +78,12 @@ impl<'a> Parser<'a> {
         matches!(iter.next(), Some('0'..='9'))
     }
 
-    fn parse_list(&mut self) -> Result<SExpr, DynError> {
+    fn parse_list(&mut self, list_depth: usize) -> Result<SExpr, DynError> {
+        if list_depth >= MAX_LIST_DEPTH {
+            return Err(DynError::Parse(format!(
+                "maximum list nesting depth ({MAX_LIST_DEPTH}) exceeded"
+            )));
+        }
         self.expect('(')?;
         self.skip_ws();
         let mut items = Vec::new();
@@ -80,7 +91,7 @@ impl<'a> Parser<'a> {
             if self.is_eof() {
                 return Err(DynError::Parse("unclosed list".into()));
             }
-            items.push(self.parse_expr()?);
+            items.push(self.parse_expr(list_depth + 1)?);
             self.skip_ws();
         }
         self.expect(')')?;
@@ -191,5 +202,24 @@ mod tests {
     #[test]
     fn parses_negative_integer_literal() {
         assert_eq!(parse("-12").expect("negative literal"), SExpr::Int(-12));
+    }
+
+    fn nested_list_source(depth: usize) -> String {
+        format!("{}0{}", "(".repeat(depth), ")".repeat(depth))
+    }
+
+    #[test]
+    fn accepts_maximum_list_nesting_depth() {
+        parse(&nested_list_source(MAX_LIST_DEPTH)).expect("maximum nesting parses");
+    }
+
+    #[test]
+    fn rejects_list_nesting_beyond_maximum_depth() {
+        assert_eq!(
+            parse(&nested_list_source(MAX_LIST_DEPTH + 1)),
+            Err(DynError::Parse(format!(
+                "maximum list nesting depth ({MAX_LIST_DEPTH}) exceeded"
+            )))
+        );
     }
 }

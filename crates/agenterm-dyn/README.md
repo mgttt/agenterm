@@ -66,6 +66,13 @@ The language stores integer results as signed `i64`. A `u64` result therefore
 returns an error when it exceeds `i64::MAX`; use `ptr` for address- or
 handle-valued native returns instead of declaring them as `u64`.
 
+## Parser resource bound
+
+The list-language parser accepts at most 256 nested lists. Source that exceeds
+that depth returns a `DynError::Parse` before evaluation, rather than consuming
+unbounded parser stack. This is a robustness limit only: it does not grant,
+deny, or otherwise change any native-door or caller authority semantics.
+
 ## Public surface
 
 | API | Role |

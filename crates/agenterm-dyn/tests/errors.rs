@@ -19,6 +19,23 @@ fn parse_trailing_tokens() {
 }
 
 #[test]
+fn parse_rejects_excessively_nested_legal_sexpression_at_public_eval_boundary() {
+    // This is deliberately much deeper than a practical bounded parser budget.
+    // Keep the assertion at Dyn::eval so callers are protected before recursive
+    // evaluation can consume an unbounded call stack.
+    const EXCESSIVE_NESTING: usize = 4_096;
+
+    let source = format!(
+        "{}0{}",
+        "(do ".repeat(EXCESSIVE_NESTING),
+        ")".repeat(EXCESSIVE_NESTING)
+    );
+    let mut env = Dyn::new();
+    let err = env.eval(&source).unwrap_err();
+    assert!(matches!(err, DynError::Parse(_)));
+}
+
+#[test]
 fn parse_bare_string_not_a_value() {
     let mut env = Dyn::new();
     let err = env.eval(r#""hello""#).unwrap_err();
