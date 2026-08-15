@@ -71,7 +71,7 @@ def run_compose(repo: Path, layout: Path, archive: Path, path_prefix: str) -> di
     proc = subprocess.run(
         [
             sys.executable,
-            str(repo / "scripts" / "shell-compose-product.py"),
+            str(repo / "scripts" / "chassis-compose-product.py"),
             "--from",
             str(layout),
             "--out",
@@ -92,7 +92,7 @@ def run_compose(repo: Path, layout: Path, archive: Path, path_prefix: str) -> di
 
 def main() -> None:
     repo = Path(__file__).resolve().parents[1]
-    with tempfile.TemporaryDirectory(prefix="shell-compose-") as tmp_raw:
+    with tempfile.TemporaryDirectory(prefix="chassis-compose-") as tmp_raw:
         tmp = Path(tmp_raw)
         layout = tmp / "layout"
         layout.mkdir()
@@ -124,7 +124,7 @@ def main() -> None:
                 raise SystemExit("L2/L3 payload missing from archive")
             if "manifest.json" not in names:
                 raise SystemExit("manifest.json missing")
-        print("PASS: shell-compose-product packs L1+L2+L3 without cargo")
+        print("PASS: chassis-compose-product packs L1+L2+L3 without cargo")
         print(f"archive_sha256={report_a['sha256']}")
 
 

@@ -602,11 +602,11 @@ fn frontend_path_attr_debt_does_not_grow() {
 }
 
 #[test]
-fn shell_l1_surface_names_the_six_cell_candidate_tax() {
+fn chassis_l1_surface_names_the_six_cell_candidate_tax() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("plan/shell-l1-surface.json");
-    let raw = fs::read_to_string(&path).expect("plan/shell-l1-surface.json");
-    let value: serde_json::Value = serde_json::from_str(&raw).expect("shell-l1-surface JSON");
+    let path = root.join("plan/chassis-l1-surface.json");
+    let raw = fs::read_to_string(&path).expect("plan/chassis-l1-surface.json");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("chassis-l1-surface JSON");
     assert_eq!(value["schema"], 1);
     let l1 = value["l1_path_prefixes"]
         .as_array()

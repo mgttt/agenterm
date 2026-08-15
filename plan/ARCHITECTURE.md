@@ -27,7 +27,7 @@
 - 机制漏点表：[`plan/plan-platform-encapsulation-gap.md`](plan-platform-encapsulation-gap.md)。  
 - 可执行 goal：[`plan/goal-crate-platform.md`](goal-crate-platform.md)。  
 - **Rhai ↔ Rust Facade 边界**（脚本 L3 pack / L2 catalog / L1 kernel）：[`plan/design-rhai-rust-boundary.md`](design-rhai-rust-boundary.md)。  
-  那是脚本嵌入边界。工作台 **Shell-L1 / L2 / L3**（每格一份冻 loader / 可贴的宿主 ABI / 应用包）是目标分层：日常循环是打包已冻 L1 + L2/L3，不是再编六格。现行 PE 尚未拆成真 loader；执行树 [`plan/refactor-shell-l1-l2-l3.md`](refactor-shell-l1-l2-l3.md)，合成器 [`scripts/shell-compose-product.py`](../scripts/shell-compose-product.py)。结构变更仍只改本文。
+  那是脚本嵌入边界。工作台 **Chassis-L1 / L2 / L3**（每格一份冻 loader / 可贴的宿主 ABI / 应用包；chassis = 底盘，不是命令行 shell）是目标分层：日常循环是打包已冻 L1 + L2/L3，不是再编六格。现行 PE 尚未拆成真 loader；执行树 [`plan/refactor-chassis-l1-l2-l3.md`](refactor-chassis-l1-l2-l3.md)，合成器 [`scripts/chassis-compose-product.py`](../scripts/chassis-compose-product.py)。结构变更仍只改本文。
 
 ### 1.1 目录树
 

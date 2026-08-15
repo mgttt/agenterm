@@ -11,7 +11,7 @@
 | [`plan-v0.1.18.md`](plan-v0.1.18.md) | **在制唯一版本计划**，五条轨：A App Substrate、B v0.1.17 承接树、C `agenterm-con`、D `agenterm-cu`、E `libagenterm` 机制库 |
 | [`plan-v0.1.19.md`](plan-v0.1.19.md) | **预开草案**：CC Phase 1 + cu `window-place` / `cu hotkeys`（PRD 32；macOS 已部分落地） |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层、热文件与结构禁令 SSOT |
-| [`refactor-shell-l1-l2-l3.md`](refactor-shell-l1-l2-l3.md) | **薄 L1 内核 / 可换 L2 宿主 ABI / L3 应用包** 执行树；L1 面 [`shell-l1-surface.json`](shell-l1-surface.json)；goal [`goal-shell-l1-l2-l3.md`](goal-shell-l1-l2-l3.md) |
+| [`refactor-chassis-l1-l2-l3.md`](refactor-chassis-l1-l2-l3.md) | **薄 L1 底盘 / 可换 L2 宿主 ABI / L3 应用包** 执行树（chassis，避免和终端 shell 撞名）；L1 面 [`chassis-l1-surface.json`](chassis-l1-surface.json)；goal [`goal-chassis-l1-l2-l3.md`](goal-chassis-l1-l2-l3.md) |
 | [`plan-rh-3.md`](plan-rh-3.md) | Rh 当前执行与证据轨；已归档 namespace/trace 文档不得替代它 |
 | [`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md) | Win↔Unix 可见行为差距地图 |
 | [`platform-ux-parity-evidence-matrix.md`](platform-ux-parity-evidence-matrix.md) | 平台 UX 证据矩阵（含 templates） |

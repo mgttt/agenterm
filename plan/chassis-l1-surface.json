@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "plan": "plan/refactor-shell-l1-l2-l3.md",
+  "plan": "plan/refactor-chassis-l1-l2-l3.md",
   "rule": "A six-cell Base Candidate is justified only when a change touches l1_path_prefixes or l1_exact_paths. Other tree changes must not require that lane.",
   "l1_path_prefixes": [
     "crates/agenterm-platform/",
