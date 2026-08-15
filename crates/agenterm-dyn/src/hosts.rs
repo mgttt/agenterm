@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 49],
+    pub system_probes: [SystemProbe; 52],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 49] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 52] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -358,6 +358,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 49] = [
     placeholder("mach_timebase_info"),
     placeholder("pthread_main_np"),
     placeholder("getlogin_r"),
+    placeholder("pthread_threadid_np"),
+    placeholder("proc_pidinfo"),
+    placeholder("nsget_argc"),
     placeholder("mach_host_self"),
 ];
 
@@ -378,7 +381,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 49] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 52] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -427,13 +430,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 49] = [
     macos_live("mach_timebase_info", "mach_timebase_info"),
     macos_live("pthread_main_np", "pthread_main_np"),
     macos_live("getlogin_r", "getlogin_r"),
+    macos_live("pthread_threadid_np", "pthread_threadid_np"),
+    macos_live("proc_pidinfo", "proc_pidinfo"),
+    macos_live("nsget_argc", "_NSGetArgc"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 49] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 52] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -611,6 +617,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 49] = [
     placeholder("mach_timebase_info"),
     placeholder("pthread_main_np"),
     placeholder("getlogin_r"),
+    placeholder("pthread_threadid_np"),
+    placeholder("proc_pidinfo"),
+    placeholder("nsget_argc"),
     placeholder("mach_host_self"),
 ];
 

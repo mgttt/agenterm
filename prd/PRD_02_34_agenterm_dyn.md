@@ -30,7 +30,8 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   fixed-ABI live libc rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`,
   `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`,
   `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`,
-  and `getlogin_r` against `libSystem.B.dylib`.
+  `getlogin_r`, `pthread_threadid_np`, `proc_pidinfo`, and `_NSGetArgc`
+  against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Darwin `ioctl` calls its resolved symbol through a
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
@@ -42,8 +43,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   16 language + 1 macos_ioctl + 12 macos_probes + 4 macos_resource + 23
   cfg-gated macOS smoke; 0 doctests). The Wave 4 `mach_timebase_info`,
   `pthread_main_np`, and `getlogin_r` rows were live-`dlcall`ed here and
-  compared to later native calls. Host-specific counts, not a cross-platform
-  estimate.
+  compared to later native calls. Wave 5 `pthread_threadid_np`,
+  `proc_pidinfo`, and `_NSGetArgc` require the next matching-host CI result.
+  Host-specific counts, not a cross-platform estimate.
 
 ## Completed branch accounting
 
@@ -65,7 +67,8 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 (`libSystem.B.dylib`); macOS additionally covers `sysctlbyname`,
 `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
 `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`,
-`mach_timebase_info`, `pthread_main_np`, and `getlogin_r`.
+`mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`,
+`proc_pidinfo`, and `_NSGetArgc`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.

@@ -2,9 +2,9 @@
 
 #![cfg(target_os = "macos")]
 
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 
-use agenterm_dyn::{live_cell, Dyn, SystemProbeStatus, Value};
+use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
 
 const LIB: &str = "libSystem.B.dylib";
 
@@ -328,4 +328,80 @@ fn dlcall_getlogin_r_matches_direct_c_buffer() {
         assert!(!got.to_bytes().is_empty(), "login name must be non-empty");
         assert_eq!(got.to_bytes(), direct.to_bytes());
     }
+}
+
+#[test]
+fn dlcall_pthread_threadid_np_matches_libc() {
+    let symbol = live_symbol("pthread_threadid_np");
+    let mut thread_id = 0_u64;
+    let mut env = Dyn::new();
+    env.bind("thread_id", (&mut thread_id as *mut u64).cast())
+        .expect("bind thread id output");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" 0 "ptr" thread_id)"#
+        ))
+        .expect("pthread_threadid_np dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert_ne!(thread_id, 0, "current thread ID must be non-zero");
+
+    let mut direct = 0_u64;
+    let direct_status = unsafe { libc::pthread_threadid_np(std::ptr::null_mut(), &mut direct) };
+    assert_eq!(direct_status, 0, "direct pthread_threadid_np must succeed");
+    assert_eq!(thread_id, direct);
+}
+
+#[test]
+fn dlcall_proc_pidinfo_writes_caller_owned_bsd_info() {
+    let symbol = live_symbol("proc_pidinfo");
+    let pid = unsafe { libc::getpid() };
+    let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
+    let size = libc::c_int::try_from(std::mem::size_of_val(&info)).expect("bsd info fits c_int");
+    let mut env = Dyn::new();
+    env.bind("info", (&mut info as *mut libc::proc_bsdinfo).cast())
+        .expect("bind bsd info output");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {} "u64" 0 "ptr" info "i32" {size})"#,
+            libc::PROC_PIDTBSDINFO
+        ))
+        .expect("proc_pidinfo dlcall")
+        .as_int()
+        .expect("proc_pidinfo byte count");
+    assert_eq!(got, i64::from(size));
+    assert_eq!(info.pbi_pid, pid as u32);
+    assert_eq!(info.pbi_ppid, unsafe { libc::getppid() } as u32);
+
+    let mut direct = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
+    let direct_size = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut direct as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    assert_eq!(direct_size, size, "direct proc_pidinfo must fill bsd info");
+    assert_eq!(info.pbi_pid, direct.pbi_pid);
+    assert_eq!(info.pbi_ppid, direct.pbi_ppid);
+}
+
+#[test]
+fn dlcall_nsget_argc_matches_libc() {
+    let symbol = live_symbol("nsget_argc");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+        .expect("_NSGetArgc dlcall")
+        .as_ptr()
+        .expect("argc pointer") as *const libc::c_int;
+    let direct = unsafe { libc::_NSGetArgc() };
+    assert!(!got.is_null(), "_NSGetArgc must return a non-null pointer");
+    assert!(
+        !direct.is_null(),
+        "direct _NSGetArgc must return a non-null pointer"
+    );
+    assert!(unsafe { *got } >= 1, "process argc must be positive");
+    assert_eq!(unsafe { *got }, unsafe { *direct });
 }
