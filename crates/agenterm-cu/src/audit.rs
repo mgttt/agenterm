@@ -1,9 +1,9 @@
 //! Machine-readable audit records for authorized actuation (PRD_02_31).
 
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -24,6 +24,18 @@ struct AuditRecord<'a> {
 
 pub struct AuditLog {
     path: PathBuf,
+    file: File,
+    #[cfg(test)]
+    injected_failure: Option<InjectedAuditFailure>,
+    #[cfg(test)]
+    successful_records: usize,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum InjectedAuditFailure {
+    AppendAfter(usize),
+    FlushAfter(usize),
 }
 
 impl AuditLog {
@@ -32,6 +44,11 @@ impl AuditLog {
             .map(PathBuf::from)
             .or_else(|_| default_audit_path())
             .map_err(|error| CuError::new("audit_unavailable", error))?;
+        Self::open_at(path)
+    }
+
+    pub(crate) fn open_at(path: impl AsRef<Path>) -> Result<Self, CuError> {
+        let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
                 CuError::new(
@@ -43,11 +60,33 @@ impl AuditLog {
                 )
             })?;
         }
-        Ok(Self { path })
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| {
+                CuError::new(
+                    "audit_unavailable",
+                    format!("could not open audit log {}: {error}", path.display()),
+                )
+            })?;
+        Ok(Self {
+            path,
+            file,
+            #[cfg(test)]
+            injected_failure: None,
+            #[cfg(test)]
+            successful_records: 0,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_failure(&mut self, failure: InjectedAuditFailure) {
+        self.injected_failure = Some(failure);
     }
 
     pub fn record_actuation(
-        &self,
+        &mut self,
         target: TargetRef,
         command: &Command,
         grant: Grant,
@@ -74,17 +113,21 @@ impl AuditLog {
                 format!("audit serialization failed: {error}"),
             )
         })?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| {
-                CuError::new(
-                    "audit_unavailable",
-                    format!("could not open audit log {}: {error}", self.path.display()),
-                )
-            })?;
-        writeln!(file, "{line}").map_err(|error| {
+        #[cfg(test)]
+        if matches!(
+            self.injected_failure,
+            Some(InjectedAuditFailure::AppendAfter(records))
+                if records == self.successful_records
+        ) {
+            return Err(CuError::new(
+                "audit_unavailable",
+                format!(
+                    "could not append audit log {}: injected failure",
+                    self.path.display()
+                ),
+            ));
+        }
+        writeln!(self.file, "{line}").map_err(|error| {
             CuError::new(
                 "audit_unavailable",
                 format!(
@@ -93,12 +136,31 @@ impl AuditLog {
                 ),
             )
         })?;
-        file.flush().map_err(|error| {
+        #[cfg(test)]
+        if matches!(
+            self.injected_failure,
+            Some(InjectedAuditFailure::FlushAfter(records))
+                if records == self.successful_records
+        ) {
+            return Err(CuError::new(
+                "audit_unavailable",
+                format!(
+                    "could not flush audit log {}: injected failure",
+                    self.path.display()
+                ),
+            ));
+        }
+        self.file.flush().map_err(|error| {
             CuError::new(
                 "audit_unavailable",
                 format!("could not flush audit log {}: {error}", self.path.display()),
             )
-        })
+        })?;
+        #[cfg(test)]
+        {
+            self.successful_records += 1;
+        }
+        Ok(())
     }
 }
 
@@ -132,7 +194,39 @@ fn default_audit_path() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::default_audit_path;
+    use std::{
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use super::{AuditLog, InjectedAuditFailure, default_audit_path};
+    use crate::{auth::Grant, command::Command, target::TargetRef};
+
+    static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+    fn scratch_path(label: &str) -> PathBuf {
+        let sequence = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!(
+                "agenterm-cu-audit-{label}-{}-{sequence}",
+                std::process::id()
+            ))
+            .join("audit.jsonl")
+    }
+
+    fn command() -> Command {
+        Command::WindowPlace {
+            target: TargetRef::Current,
+            action: "left-half".into(),
+            window: None,
+        }
+    }
+
+    fn remove_scratch(path: &Path) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
+    }
 
     #[test]
     fn default_audit_path_resolves_on_current_platform() {
@@ -143,5 +237,79 @@ mod tests {
             path.file_name().and_then(|name| name.to_str()),
             Some("cu-audit.jsonl")
         );
+    }
+
+    #[test]
+    fn one_open_log_appends_and_flushes_both_records() {
+        let path = scratch_path("same-handle");
+        let mut audit = AuditLog::open_at(&path).expect("open isolated audit");
+        audit
+            .record_actuation(
+                TargetRef::Current,
+                &command(),
+                Grant::Actuate,
+                "attempt",
+                None,
+            )
+            .expect("attempt record");
+        audit
+            .record_actuation(
+                TargetRef::Current,
+                &command(),
+                Grant::Actuate,
+                "ok",
+                Some(serde_json::json!({"result": "placed"})),
+            )
+            .expect("outcome record");
+        let records: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .expect("read audit")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("record JSON"))
+            .collect();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["outcome"], "attempt");
+        assert_eq!(records[1]["outcome"], "ok");
+        drop(audit);
+        remove_scratch(&path);
+    }
+
+    #[test]
+    fn append_failure_is_typed() {
+        let path = scratch_path("append-failure");
+        let mut audit = AuditLog::open_at(&path).expect("open isolated audit");
+        audit.inject_failure(InjectedAuditFailure::AppendAfter(0));
+        let error = audit
+            .record_actuation(
+                TargetRef::Current,
+                &command(),
+                Grant::Actuate,
+                "attempt",
+                None,
+            )
+            .expect_err("append failure must fail closed");
+        assert_eq!(error.code, "audit_unavailable");
+        assert!(error.message.contains("append"));
+        drop(audit);
+        remove_scratch(&path);
+    }
+
+    #[test]
+    fn flush_failure_is_typed() {
+        let path = scratch_path("flush-failure");
+        let mut audit = AuditLog::open_at(&path).expect("open isolated audit");
+        audit.inject_failure(InjectedAuditFailure::FlushAfter(0));
+        let error = audit
+            .record_actuation(
+                TargetRef::Current,
+                &command(),
+                Grant::Actuate,
+                "attempt",
+                None,
+            )
+            .expect_err("flush failure must fail closed");
+        assert_eq!(error.code, "audit_unavailable");
+        assert!(error.message.contains("flush"));
+        drop(audit);
+        remove_scratch(&path);
     }
 }

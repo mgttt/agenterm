@@ -17,6 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+use std::path::PathBuf;
+
 use crate::mechanism::window_enumerate::WindowInfo;
 
 use crate::{
@@ -36,6 +39,10 @@ pub struct Executor {
     ssh: Option<SshEndpoint>,
     vnc: Option<VncEndpoint>,
     rdp: Option<RdpEndpoint>,
+    #[cfg(test)]
+    audit_path: Option<PathBuf>,
+    #[cfg(test)]
+    audit_failure: Option<crate::audit::InjectedAuditFailure>,
 }
 
 impl Executor {
@@ -45,7 +52,23 @@ impl Executor {
             ssh: None,
             vnc: None,
             rdp: None,
+            #[cfg(test)]
+            audit_path: None,
+            #[cfg(test)]
+            audit_failure: None,
         }
+    }
+
+    #[cfg(test)]
+    fn with_audit_path(mut self, path: PathBuf) -> Self {
+        self.audit_path = Some(path);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_audit_failure(mut self, failure: crate::audit::InjectedAuditFailure) -> Self {
+        self.audit_failure = Some(failure);
+        self
     }
 
     pub fn with_ssh(mut self, endpoint: SshEndpoint) -> Self {
@@ -78,11 +101,14 @@ impl Executor {
             );
         }
 
-        if required == Grant::Actuate
-            && let Err(error) = self.audit_before(command)
-        {
-            return CuReply::err(command, error);
-        }
+        let mut audit = if required == Grant::Actuate {
+            match self.begin_audit(command) {
+                Ok(audit) => Some(audit),
+                Err(error) => return CuReply::err(command, error),
+            }
+        } else {
+            None
+        };
 
         let reply = match command.target() {
             TargetRef::Current => self.execute_current(command),
@@ -91,8 +117,16 @@ impl Executor {
             TargetRef::Rdp => self.execute_rdp(command),
         };
 
-        if required == Grant::Actuate {
-            let _ = self.audit_after(command, &reply);
+        if let Some(audit) = audit.as_mut()
+            && let Err(mut error) = Self::audit_after(audit, command, &reply)
+        {
+            let mechanism_reply = serde_json::to_string(&reply)
+                .unwrap_or_else(|_| "<unserializable mechanism reply>".to_owned());
+            error.message = format!(
+                "{}; original mechanism reply: {mechanism_reply}",
+                error.message
+            );
+            return CuReply::err(command, error);
         }
 
         reply
@@ -159,13 +193,28 @@ impl Executor {
         }
     }
 
-    fn audit_before(&self, command: &Command) -> Result<(), CuError> {
-        let audit = AuditLog::open()?;
-        audit.record_actuation(command.target(), command, Grant::Actuate, "attempt", None)
+    fn begin_audit(&self, command: &Command) -> Result<AuditLog, CuError> {
+        #[cfg(test)]
+        let mut audit = if let Some(path) = self.audit_path.as_ref() {
+            AuditLog::open_at(path)?
+        } else {
+            AuditLog::open()?
+        };
+        #[cfg(not(test))]
+        let mut audit = AuditLog::open()?;
+        #[cfg(test)]
+        if let Some(failure) = self.audit_failure {
+            audit.inject_failure(failure);
+        }
+        audit.record_actuation(command.target(), command, Grant::Actuate, "attempt", None)?;
+        Ok(audit)
     }
 
-    fn audit_after(&self, command: &Command, reply: &CuReply) -> Result<(), CuError> {
-        let audit = AuditLog::open()?;
+    fn audit_after(
+        audit: &mut AuditLog,
+        command: &Command,
+        reply: &CuReply,
+    ) -> Result<(), CuError> {
         let outcome = if reply.ok { "ok" } else { "failed" };
         audit.record_actuation(
             command.target(),
@@ -1747,9 +1796,29 @@ fn map_mechanism_err(error: mechanism::MechanismError) -> CuError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
     use crate::command::Command;
     use crate::target::TargetRef;
+
+    static NEXT_AUDIT_SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+    fn audit_scratch(label: &str) -> PathBuf {
+        let sequence = NEXT_AUDIT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!(
+                "agenterm-cu-executor-audit-{label}-{}-{sequence}",
+                std::process::id()
+            ))
+            .join("audit.jsonl")
+    }
+
+    fn remove_audit_scratch(path: &std::path::Path) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
+    }
 
     #[test]
     fn coordinate_click_requires_degraded_marker() {
@@ -2023,6 +2092,62 @@ mod tests {
         Executor::new(Authorization::new(
             [Grant::Observe, Grant::Actuate].into_iter().collect(),
         ))
+    }
+
+    #[test]
+    fn audit_open_failure_prevents_actuation_dispatch() {
+        let path = audit_scratch("open-failure");
+        std::fs::create_dir_all(&path).expect("create directory at audit file path");
+        let executor = actuate_executor().with_audit_path(path.clone());
+        let command = Command::WindowPlace {
+            target: TargetRef::Rdp,
+            action: "left-half".into(),
+            window: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.as_ref().unwrap().code, "audit_unavailable");
+        assert!(
+            !reply
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("rdp_unavailable"),
+            "RDP dispatch must not run after the audit transaction cannot open"
+        );
+        remove_audit_scratch(&path);
+    }
+
+    #[test]
+    fn outcome_append_failure_returns_typed_error_with_mechanism_context() {
+        let path = audit_scratch("outcome-failure");
+        let executor = actuate_executor()
+            .with_audit_path(path.clone())
+            .with_audit_failure(crate::audit::InjectedAuditFailure::AppendAfter(1));
+        let command = Command::WindowPlace {
+            target: TargetRef::Rdp,
+            action: "left-half".into(),
+            window: None,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        let error = reply.error.as_ref().expect("typed audit failure");
+        assert_eq!(error.code, "audit_unavailable");
+        assert!(error.message.contains("original mechanism reply"));
+        assert!(
+            error.message.contains("rdp_unavailable"),
+            "the replaced mechanism failure must remain observable: {}",
+            error.message
+        );
+        let records: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .expect("read isolated audit")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("record JSON"))
+            .collect();
+        assert_eq!(records.len(), 1, "failed outcome append must add no record");
+        assert_eq!(records[0]["outcome"], "attempt");
+        remove_audit_scratch(&path);
     }
 
     fn observe_executor() -> Executor {

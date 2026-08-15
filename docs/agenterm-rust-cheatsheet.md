@@ -1816,6 +1816,20 @@ what each action means. Keep these recurring rules together:
   this proves dispatch without moving the user's window, and catches a host
   path that silently reimplements command meaning or bypasses authorization.
 
+## Hold one audit sink across an authorized side effect
+
+Opening an audit path once for the pre-action record and again for the outcome
+creates a race: the first append can succeed, the mechanism can actuate, and a
+second open can fail while the caller is still told the action succeeded. Open
+and retain one writable sink before dispatch, append and flush `attempt` before
+the side effect, then append and flush the typed outcome through that same
+handle. A pre-action failure must prevent dispatch. An outcome-write failure
+cannot undo an already completed native action, so return `audit_unavailable`
+and preserve the original mechanism reply as diagnostic context instead of
+silently discarding the audit error. Inject append/flush failures through a
+test-only sink or constructor; do not mutate a process-global audit-path
+environment variable in parallel tests.
+
 ## Windows UIA clients keep identity, apartments and actuation separate
 
 The Windows accessibility adapter established a reusable native-FFI rule set.
