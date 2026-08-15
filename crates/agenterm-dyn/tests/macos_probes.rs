@@ -407,6 +407,50 @@ fn dlcall_nsget_argc_matches_libc_pointer_and_count() {
 }
 
 #[test]
+fn dlcall_nsget_argv_matches_libc_borrowed_pointer() {
+    let symbol = live_symbol("nsget_argv");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+        .expect("_NSGetArgv dlcall")
+        .as_ptr()
+        .expect("_NSGetArgv pointer") as *mut *mut *mut libc::c_char;
+    assert!(
+        !got.is_null(),
+        "_NSGetArgv must return a non-null outer pointer"
+    );
+    let direct = unsafe { libc::_NSGetArgv() };
+    assert_eq!(got, direct);
+    let argv = unsafe { *got };
+    assert!(!argv.is_null(), "_NSGetArgv must expose argv storage");
+    assert_eq!(argv, unsafe { *direct });
+    assert!(!unsafe { *argv }.is_null(), "argv[0] must name the process");
+}
+
+#[test]
+fn dlcall_nsget_environ_matches_libc_borrowed_pointer() {
+    let symbol = live_symbol("nsget_environ");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+        .expect("_NSGetEnviron dlcall")
+        .as_ptr()
+        .expect("_NSGetEnviron pointer") as *mut *mut *mut libc::c_char;
+    assert!(
+        !got.is_null(),
+        "_NSGetEnviron must return a non-null outer pointer"
+    );
+    let direct = unsafe { libc::_NSGetEnviron() };
+    assert_eq!(got, direct);
+    let environ = unsafe { *got };
+    assert!(
+        !environ.is_null(),
+        "_NSGetEnviron must expose environ storage"
+    );
+    assert_eq!(environ, unsafe { *direct });
+}
+
+#[test]
 fn dlcall_proc_pid_rusage_writes_caller_owned_v4() {
     let symbol = live_symbol("proc_pid_rusage");
     let pid = unsafe { libc::getpid() };

@@ -31,7 +31,8 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`,
   `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`,
   `getlogin_r`, `pthread_threadid_np`, `proc_pidinfo`, `_NSGetArgc`,
-  `proc_pid_rusage`, and `_dyld_image_count` against `libSystem.B.dylib`.
+  `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, and `_dyld_image_count`
+  against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Darwin `ioctl` calls its resolved symbol through a
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
@@ -66,7 +67,8 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
 `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`,
 `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`,
-`proc_pidinfo`, `_NSGetArgc`, `proc_pid_rusage`, and `_dyld_image_count`.
+`proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
+`proc_pid_rusage`, and `_dyld_image_count`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.
