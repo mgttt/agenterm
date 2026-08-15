@@ -504,13 +504,40 @@ pub(crate) mod window_enumerate;
 #[path = "adapters/windows/window_op.rs"]
 pub(crate) mod window_op;
 
+#[cfg(all(
+    feature = "window-enum",
+    feature = "window-op",
+    feature = "a11y-tree",
+    windows
+))]
+#[path = "adapters/windows/window_placement.rs"]
+pub(crate) mod window_placement;
+
 #[cfg(all(feature = "window-op", target_os = "macos"))]
 #[path = "adapters/macos/window_op.rs"]
 pub(crate) mod window_op;
 
+#[cfg(all(
+    feature = "window-enum",
+    feature = "window-op",
+    feature = "a11y-tree",
+    target_os = "macos"
+))]
+#[path = "adapters/macos/window_placement.rs"]
+pub(crate) mod window_placement;
+
 #[cfg(all(feature = "window-op", target_os = "linux"))]
 #[path = "adapters/linux/window_op.rs"]
 pub(crate) mod window_op;
+
+#[cfg(all(
+    feature = "window-enum",
+    feature = "window-op",
+    feature = "a11y-tree",
+    target_os = "linux"
+))]
+#[path = "adapters/linux/window_placement.rs"]
+pub(crate) mod window_placement;
 
 #[cfg(all(
     feature = "window-op",

@@ -276,6 +276,9 @@ pub mod window_enumerate;
 #[cfg(feature = "window-op")]
 pub mod window_op;
 
+#[cfg(all(feature = "window-enum", feature = "window-op", feature = "a11y-tree"))]
+pub mod window_placement;
+
 #[cfg(feature = "input-inject")]
 pub mod input_inject;
 
