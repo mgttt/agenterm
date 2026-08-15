@@ -115,6 +115,8 @@ def main() -> None:
                 member = f"l1/{cell}/loader"
                 if member not in names:
                     raise SystemExit(f"missing {member}")
+                if tar.getmember(member).mode != 0o755:
+                    raise SystemExit(f"L1 loader is not executable: {member}")
                 extracted = tar.extractfile(member)
                 assert extracted is not None
                 digest = hashlib.sha256(extracted.read()).hexdigest()
@@ -122,6 +124,8 @@ def main() -> None:
                     raise SystemExit(f"L1 bytes changed for {cell}")
             if "l2/host-abi.json" not in names or "l3/app.txt" not in names:
                 raise SystemExit("L2/L3 payload missing from archive")
+            if tar.getmember("l2/host-abi.json").mode != 0o644:
+                raise SystemExit("L2 data must not be executable")
             if "manifest.json" not in names:
                 raise SystemExit("manifest.json missing")
         print("PASS: chassis-compose-product packs L1+L2+L3 without cargo")
