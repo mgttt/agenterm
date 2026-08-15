@@ -1516,7 +1516,7 @@ impl RemoteWindowState {
                 self.window.focus();
             }
             "terminal-paste" => {
-                self.paste_terminal_clipboard()?;
+                self.paste_terminal_clipboard(false)?;
             }
             "cwd-prepare" | "cwd-prepare-append" | "cwd-prepare-replace" | "cwd-send-now" => {
                 let mut direct = vec![action.to_owned()];
@@ -3874,6 +3874,46 @@ impl RemoteWindowState {
                     changed = true;
                     continue;
                 }
+            };
+            let text = if completed.requested.review {
+                match agenterm_platform::text_review::review_text(
+                    self.window.native_identity(),
+                    "Review terminal paste",
+                    "Review or edit the text before it is sent to the active terminal.",
+                    &text,
+                ) {
+                    Ok(Some(edited)) => {
+                        let edited = normalize_terminal_paste(&edited);
+                        if edited.is_empty() {
+                            self.last_error = Some(
+                                "Paste cancelled because the reviewed text is empty".to_owned(),
+                            );
+                            changed = true;
+                            continue;
+                        }
+                        if edited.len() > TERMINAL_PASTE_LIMIT_BYTES {
+                            self.last_error = Some(format!(
+                                "Paste cancelled because the reviewed text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
+                            ));
+                            changed = true;
+                            continue;
+                        }
+                        edited
+                    }
+                    Ok(None) => {
+                        self.last_error = None;
+                        self.last_message = Some("Terminal paste cancelled".to_owned());
+                        changed = true;
+                        continue;
+                    }
+                    Err(error) => {
+                        self.last_error = Some(format!("Paste review failed: {error}"));
+                        changed = true;
+                        continue;
+                    }
+                }
+            } else {
+                text
             };
             let current = self.client.as_ref().is_some_and(|client| {
                 let snapshot = client.snapshot();
@@ -6291,7 +6331,7 @@ impl RemoteWindowState {
         Ok(())
     }
 
-    fn paste_terminal_clipboard(&mut self) -> Result<()> {
+    fn paste_terminal_clipboard(&mut self, review: bool) -> Result<()> {
         if self.pending_terminal_paste.is_some() {
             anyhow::bail!("a terminal clipboard read is already pending");
         }
@@ -6318,6 +6358,7 @@ impl RemoteWindowState {
             server_epoch: snapshot.server_epoch.clone(),
             tab_id,
             bracketed: tab.screen.bracketed_paste,
+            review,
         };
         self.terminal_paste_worker
             .queue(RemoteTerminalPasteTask {
@@ -6508,7 +6549,7 @@ impl RemoteWindowState {
             if let Err(error) = self.window.paste_control_selection(control) {
                 self.last_error = Some(format!("Paste failed: {error}"));
             }
-        } else if let Err(error) = self.paste_terminal_clipboard() {
+        } else if let Err(error) = self.paste_terminal_clipboard(true) {
             self.last_error = Some(format!("Paste failed: {error:#}"));
         }
     }
@@ -7293,7 +7334,7 @@ impl RemoteWindowState {
             return true;
         }
         if primary && key == u16::from(b'V') {
-            if let Err(error) = self.paste_terminal_clipboard() {
+            if let Err(error) = self.paste_terminal_clipboard(true) {
                 self.last_error = Some(format!("Paste failed: {error:#}"));
             }
             return true;
@@ -8139,6 +8180,7 @@ struct RemoteTerminalPasteRequest {
     server_epoch: String,
     tab_id: String,
     bracketed: bool,
+    review: bool,
 }
 
 struct RemoteTerminalPasteTask {
@@ -9787,6 +9829,7 @@ mod tests {
             server_epoch: "epoch-a".to_owned(),
             tab_id: "@1".to_owned(),
             bracketed: true,
+            review: true,
         };
         worker
             .queue(RemoteTerminalPasteTask {

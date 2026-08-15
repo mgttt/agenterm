@@ -8,9 +8,7 @@ use windows_sys::Win32::{
         BeginPaint, EndPaint, GetStockObject, InvalidateRect, PAINTSTRUCT, TextOutW, WHITE_BRUSH,
     },
     System::LibraryLoader::GetModuleHandleW,
-    UI::Input::KeyboardAndMouse::{
-        VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP,
-    },
+    UI::Input::KeyboardAndMouse::{VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_RETURN, VK_UP},
     UI::WindowsAndMessaging::{
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
         DispatchMessageW, GetMessageW, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostMessageW,
@@ -292,8 +290,6 @@ fn normalize_key(wparam: WPARAM) -> Option<NativeTextKey> {
     match u16::try_from(wparam).ok()? {
         value if value == VK_UP => Some(NativeTextKey::ArrowUp),
         value if value == VK_DOWN => Some(NativeTextKey::ArrowDown),
-        value if value == VK_LEFT => Some(NativeTextKey::ArrowLeft),
-        value if value == VK_RIGHT => Some(NativeTextKey::ArrowRight),
         value if value == VK_HOME => Some(NativeTextKey::Home),
         value if value == VK_END => Some(NativeTextKey::End),
         value if value == VK_RETURN => Some(NativeTextKey::Enter),

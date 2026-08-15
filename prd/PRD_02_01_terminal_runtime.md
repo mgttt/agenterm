@@ -93,6 +93,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     from word, visual-row, or drag selection
 - [x] terminal paste reads bounded Unicode clipboard text off the GUI thread,
   normalizes newlines, filters unsafe controls, and honors bracketed-paste mode.
+  On Windows, a human Ctrl+V or system-menu paste opens an owner-modal multiline
+  review editor; confirm re-normalizes and revalidates stable server/tab/focus/
+  mode identity before the only PTY write, while cancel has no PTY side effect.
+  CLI `terminal-paste` remains non-interactive and bypasses review deliberately.
   The Windows public `remote-ui-smoke` proves ordinary asynchronous delivery and
   exact `ESC[200~...ESC[201~` PTY bytes; Unix uses the same framing helper and
   rejects stale tab/focus/modal completions instead of pasting into a new target.

@@ -120,6 +120,12 @@ Windows checklist:
   panic, and disconnect. The product retains stable target identity and
   revalidates target plus focus before committing text; dropping the receiver
   on tab/window close must never strand or block the worker.
+- Treat a human-editable paste review as a second asynchronous identity
+  boundary even when its native modal runs a nested GUI message loop. Keep raw
+  handles and dialog callbacks in the platform adapter; after confirmation,
+  re-normalize and re-bound edited text, then revalidate stable target, focus,
+  epoch and terminal mode before the only PTY write. Carry an explicit origin
+  bit so CLI/control paste never inherits an interactive modal accidentally.
 - Retry only documented transient errors, with a strict attempt/deadline bound.
 - Do not use the whole Windows desktop (`HWND = 0`) as deterministic UIA success
   evidence: unrelated providers can recycle, reject calls, or exceed the bounded

@@ -143,9 +143,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   delivered input-side state change.
 - [x] `send-paste` remains deterministic direct-payload injection, while
   terminal-routed `send-keys` or `send-ui-keys` with `Ctrl+Shift+V` queues the
-  same bounded asynchronous OS clipboard read as physical input. A second read
-  fails explicitly while one is pending, and completion cannot retarget itself
-  after tab or focus changes.
+  same bounded asynchronous OS clipboard read as physical input but explicitly
+  bypasses the human review modal. A second read fails explicitly while one is
+  pending, and completion cannot retarget itself after tab or focus changes.
 - [x] the control endpoint uses a fixed worker pool with bounded connection and
   request queues. Its multi-tab journey floods one PTY with oversized CSI
   parameters while issuing concurrent `capture-pane`, `list-tabs` and

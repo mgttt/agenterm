@@ -136,6 +136,11 @@ impl ControlWindowBackend for Backend {
             InvalidateRect(self.window.get(), ptr::null(), 0);
         }
     }
+
+    fn native_identity(&self) -> Option<i64> {
+        let hwnd = self.window.get();
+        (!hwnd.is_null()).then_some(hwnd as isize as i64)
+    }
     fn render_activity(&self) -> ControlWindowRenderActivity {
         ControlWindowRenderActivity {
             redraw_requests: self.redraw_requests.get(),

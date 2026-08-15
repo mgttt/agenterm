@@ -61,6 +61,14 @@ pub(crate) mod alert;
 #[path = "adapters/unix/alert.rs"]
 pub(crate) mod alert;
 
+#[cfg(all(feature = "window", windows))]
+#[path = "adapters/windows/text_review.rs"]
+pub(crate) mod text_review;
+
+#[cfg(all(feature = "window", not(windows)))]
+#[path = "adapters/unix/text_review.rs"]
+pub(crate) mod text_review;
+
 #[cfg(all(feature = "console-interrupt", target_os = "linux"))]
 #[path = "adapters/linux/console_interrupt.rs"]
 pub(crate) mod console_interrupt;

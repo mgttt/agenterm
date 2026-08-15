@@ -175,6 +175,9 @@ pub mod activation;
 #[cfg(feature = "window")]
 pub mod alert;
 
+#[cfg(feature = "window")]
+pub mod text_review;
+
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 
