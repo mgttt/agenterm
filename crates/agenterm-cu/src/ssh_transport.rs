@@ -469,6 +469,24 @@ mod tests {
     use crate::{command::WaitCondition, target::TargetRef};
 
     #[test]
+    fn pointer_move_survives_ssh_target_rewrite() {
+        let command = CuCommand::PointerMove {
+            target: TargetRef::Ssh,
+            x: -17,
+            y: 2048,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert!(matches!(
+            remote,
+            CuCommand::PointerMove {
+                target: TargetRef::Current,
+                x: -17,
+                y: 2048
+            }
+        ));
+    }
+
+    #[test]
     fn capabilities_restore_public_target_does_not_leak_current() {
         // Worker capabilities answer with data.target=current; host must
         // restore public tier identity for both reply.target and data.target.

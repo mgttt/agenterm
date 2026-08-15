@@ -270,6 +270,20 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 window,
             }
         }
+        "pointer-move" => {
+            let x = match required_i32_flag(&mut args, "--x") {
+                Ok(value) => value,
+                Err(message) => return usage_err(message),
+            };
+            let y = match required_i32_flag(&mut args, "--y") {
+                Ok(value) => value,
+                Err(message) => return usage_err(message),
+            };
+            if !args.is_empty() {
+                return usage_err("pointer-move accepts only --x <i32> --y <i32>");
+            }
+            Command::PointerMove { target, x, y }
+        }
         "click" => {
             let window = flag_isize(&mut args, "--window");
             let node = flag_value(&mut args, "--node");
@@ -794,6 +808,19 @@ fn flag_i32(args: &mut Vec<String>, flag: &str) -> Option<i32> {
     flag_value(args, flag)?.parse().ok()
 }
 
+fn required_i32_flag(args: &mut Vec<String>, flag: &'static str) -> Result<i32, String> {
+    let Some(index) = args.iter().position(|arg| arg == flag) else {
+        return Err(format!("pointer-move requires {flag} <i32>"));
+    };
+    args.remove(index);
+    if index >= args.len() {
+        return Err(format!("pointer-move requires {flag} <i32>"));
+    }
+    let raw = args.remove(index);
+    raw.parse::<i32>()
+        .map_err(|_| format!("pointer-move {flag} must be a signed 32-bit integer"))
+}
+
 fn flag_u32(args: &mut Vec<String>, flag: &str) -> Option<u32> {
     flag_value(args, flag)?.parse().ok()
 }
@@ -905,6 +932,8 @@ Commands:
   windows
   tree [--window HANDLE]
   screenshot --out PATH [--window HANDLE]
+  pointer-move --x X --y Y moves to absolute screen coordinates without any
+                              press/release/click/drag/wheel side effect
   click (--window HANDLE --node ID | --window HANDLE --name PAT [--role ROLE] | --coords X,Y --degraded)
         [--button left|right|middle] [--clicks N]
                               --name reuses wait NodeNameContains matching, then the --node AT-SPI path
@@ -1049,6 +1078,44 @@ All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_move_cli_parses_explicit_signed_coordinates_before_authorization() {
+        let reply = dispatch(vec![
+            "--target".into(),
+            "current".into(),
+            "pointer-move".into(),
+            "--x".into(),
+            "-320".into(),
+            "--y".into(),
+            "1440".into(),
+        ]);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "current");
+        assert_eq!(reply.command, "pointer-move");
+        assert_eq!(reply.error.expect("actuate refusal").code, "refused");
+    }
+
+    #[test]
+    fn pointer_move_cli_rejects_missing_overflow_duplicate_and_extra_values() {
+        for tail in [
+            vec!["--x", "1"],
+            vec!["--x", "2147483648", "--y", "0"],
+            vec!["--x", "1", "--x", "2", "--y", "3"],
+            vec!["--x", "1", "--y", "2", "unexpected"],
+        ] {
+            let mut args = vec![
+                "--target".to_owned(),
+                "current".to_owned(),
+                "pointer-move".to_owned(),
+            ];
+            args.extend(tail.into_iter().map(str::to_owned));
+            let reply = dispatch(args);
+            assert!(!reply.ok);
+            assert_eq!(reply.command, "usage");
+            assert_eq!(reply.error.expect("typed usage error").code, "usage");
+        }
+    }
 
     #[test]
     fn clipboard_read_cli_requires_observe_before_native_dispatch() {

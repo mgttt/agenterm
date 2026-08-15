@@ -33,6 +33,13 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         window: Option<isize>,
     },
+    /// Move the pointer to absolute target-session screen coordinates without
+    /// pressing, releasing, clicking, dragging, or scrolling any button.
+    PointerMove {
+        target: TargetRef,
+        x: i32,
+        y: i32,
+    },
     Click {
         target: TargetRef,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -310,6 +317,7 @@ impl Command {
             Self::Windows { .. } => "windows".into(),
             Self::Tree { .. } => "tree".into(),
             Self::Screenshot { .. } => "screenshot".into(),
+            Self::PointerMove { .. } => "pointer-move".into(),
             Self::Click { .. } => "click".into(),
             Self::Focus { .. } => "focus".into(),
             Self::SendText { .. } => "send-text".into(),
@@ -335,6 +343,7 @@ impl Command {
             | Self::Windows { target, .. }
             | Self::Tree { target, .. }
             | Self::Screenshot { target, .. }
+            | Self::PointerMove { target, .. }
             | Self::Click { target, .. }
             | Self::Focus { target, .. }
             | Self::SendText { target, .. }
@@ -356,7 +365,8 @@ impl Command {
 
     pub fn required_grant(&self) -> crate::auth::Grant {
         match self {
-            Self::Click { .. }
+            Self::PointerMove { .. }
+            | Self::Click { .. }
             | Self::Focus { .. }
             | Self::SendText { .. }
             | Self::Copy { .. }
@@ -388,5 +398,36 @@ mod tests {
             serde_json::to_value(&command).expect("serialize"),
             serde_json::json!({ "verb": "clipboard-read", "target": "vnc" })
         );
+    }
+
+    #[test]
+    fn pointer_move_is_target_neutral_actuation_with_explicit_coordinates() {
+        let command = Command::PointerMove {
+            target: TargetRef::Ssh,
+            x: -320,
+            y: 1440,
+        };
+        assert_eq!(command.verb(), "pointer-move");
+        assert_eq!(command.target(), TargetRef::Ssh);
+        assert_eq!(command.required_grant(), Grant::Actuate);
+        let json = serde_json::to_value(&command).expect("serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "verb": "pointer-move",
+                "target": "ssh",
+                "x": -320,
+                "y": 1440
+            })
+        );
+        let decoded: Command = serde_json::from_value(json).expect("deserialize");
+        assert!(matches!(
+            decoded,
+            Command::PointerMove {
+                target: TargetRef::Ssh,
+                x: -320,
+                y: 1440
+            }
+        ));
     }
 }

@@ -612,6 +612,24 @@ mod tests {
     use std::thread;
 
     #[test]
+    fn pointer_move_survives_vnc_target_rewrite() {
+        let command = CuCommand::PointerMove {
+            target: TargetRef::Vnc,
+            x: 4096,
+            y: -64,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert!(matches!(
+            remote,
+            CuCommand::PointerMove {
+                target: TargetRef::Current,
+                x: 4096,
+                y: -64
+            }
+        ));
+    }
+
+    #[test]
     fn split_host_port_parses_inline_port() {
         let (host, port) = split_host_port("127.0.0.1:5931").expect("parse");
         assert_eq!(host, "127.0.0.1");

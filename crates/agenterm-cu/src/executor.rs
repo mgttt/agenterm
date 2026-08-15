@@ -270,6 +270,7 @@ impl Executor {
             }
             Command::Tree { window, .. } => tree_payload(*window),
             Command::Screenshot { path, window, .. } => screenshot(path, *window),
+            Command::PointerMove { x, y, .. } => pointer_move(*x, *y),
             Command::Click { .. } => click_command(command),
             Command::Focus {
                 window,
@@ -341,6 +342,27 @@ impl Executor {
             Command::WindowPlace { action, window, .. } => window_place(action, *window),
         }
     }
+}
+
+fn pointer_move(x: i32, y: i32) -> Result<serde_json::Value, CuError> {
+    pointer_move_with(x, y, |x, y| {
+        mechanism::input_inject::pointer_move(x, y).map_err(map_mechanism_err)
+    })
+}
+
+fn pointer_move_with(
+    x: i32,
+    y: i32,
+    move_once: impl FnOnce(i32, i32) -> Result<(), CuError>,
+) -> Result<serde_json::Value, CuError> {
+    move_once(x, y)?;
+    Ok(serde_json::json!({
+        "effect": "committed",
+        "addressing": "absolute-screen-coordinates",
+        "coords": [x, y],
+        "mechanism": "libagenterm",
+        "button_effect": "none",
+    }))
 }
 
 /// Read the target session's native Unicode-text clipboard through the
@@ -2543,6 +2565,33 @@ mod tests {
     use crate::target::TargetRef;
 
     static NEXT_AUDIT_SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn pointer_move_calls_only_move_once_and_returns_bounded_typed_reply() {
+        let mut calls = Vec::new();
+        let reply = pointer_move_with(-320, 1440, |x, y| {
+            calls.push((x, y));
+            Ok(())
+        })
+        .expect("pointer move");
+        assert_eq!(calls, [(-320, 1440)]);
+        assert_eq!(reply["effect"], "committed");
+        assert_eq!(reply["coords"], serde_json::json!([-320, 1440]));
+        assert_eq!(reply["button_effect"], "none");
+        assert_eq!(reply.as_object().expect("object").len(), 5);
+    }
+
+    #[test]
+    fn pointer_move_requires_actuate_and_refusal_moves_nothing() {
+        let command = Command::PointerMove {
+            target: TargetRef::Current,
+            x: 10,
+            y: 20,
+        };
+        let reply = Executor::new(Authorization::new(Default::default())).execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.error.expect("typed refusal").code, "refused");
+    }
 
     fn audit_scratch(label: &str) -> PathBuf {
         let sequence = NEXT_AUDIT_SCRATCH.fetch_add(1, Ordering::Relaxed);

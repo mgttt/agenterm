@@ -67,6 +67,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   does not seed then restore text because that would destroy unrelated native
   clipboard formats. Standalone write, remote live evidence, and other
   platforms remain open.
+- [~] standalone `pointer-move --x X --y Y` is target-neutral and requires the
+  Actuate grant. `current` reuses the existing bounded
+  `agt_input_pointer_move` mechanism; SSH and VNC preserve the exact signed
+  32-bit coordinates while rewriting only the worker target to `current`.
+  Missing, duplicate, extra, or overflowing CLI values fail typed before
+  native dispatch. Success is a fixed-shape JSON result naming absolute-screen addressing and
+  `button_effect:"none"`; the command performs no press, release, click, drag,
+  or wheel operation. Unit evidence owns authorization, serde/CLI bounds and
+  transport rewrite. Windows live smoke remains
+  open because the current ABI has no independent cursor-position observation;
+  moving a real user pointer without a reliable read/restore circuit is not
+  acceptable evidence. Pointer press/release, drag, and wheel remain planned.
 
 ## Structured observation
 
