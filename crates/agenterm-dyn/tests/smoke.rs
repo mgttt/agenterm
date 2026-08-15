@@ -603,6 +603,36 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_umask_reads_and_immediately_restores_current_mask() {
+        let probe = live_system_probe("umask");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let previous = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" 0)"#))
+            .expect("umask(0) dlcall")
+            .as_int()
+            .expect("umask return value");
+        let restored = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "u32" "u32" {previous})"#
+            ))
+            .expect("umask(previous) restore dlcall");
+
+        assert_eq!(
+            restored,
+            Value::Int(0),
+            "restore should replace temporary zero mask"
+        );
+        assert_eq!(
+            previous & !0o777,
+            0,
+            "Linux umask should contain permission bits only"
+        );
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {

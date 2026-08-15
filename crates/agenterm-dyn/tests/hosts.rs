@@ -116,7 +116,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "isatty_stdout",
                 "isatty_stderr",
                 "sched_yield_void",
-                "alarm_zero"
+                "alarm_zero",
+                "umask"
             ]
         );
         assert_eq!(
@@ -154,6 +155,7 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("isatty_stderr", "libc.so.6", "isatty"),
                 ("sched_yield_void", "libc.so.6", "sched_yield"),
                 ("alarm_zero", "libc.so.6", "alarm"),
+                ("umask", "libc.so.6", "umask"),
             ]
         );
     }
