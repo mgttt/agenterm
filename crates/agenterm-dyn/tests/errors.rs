@@ -251,6 +251,27 @@ fn dlcall_rejects_empty_library_or_symbol_before_arguments_or_load() {
 }
 
 #[test]
+fn dlcall_rejects_blank_library_or_symbol_before_arguments_or_load() {
+    for (script, expected) in [
+        (
+            "(dlcall \" \t \" \"unused\" \"i32\" \"i32\" (set touched 1))",
+            DynError::Library("library name must not be blank".into()),
+        ),
+        (
+            "(dlcall \"missing-library-for-blank-symbol\" \" \t \" \"i32\" \"i32\" (set touched 1))",
+            DynError::DlCall("symbol name must not be blank".into()),
+        ),
+    ] {
+        let mut env = Dyn::new();
+        assert_eq!(env.eval(script), Err(expected));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
+}
+
+#[test]
 fn dlcall_rejects_library_with_interior_nul_before_loading() {
     let mut env = Dyn::new();
     let script = "(dlcall \"bad\0library\" \"unused\" \"i32\")";
