@@ -1938,12 +1938,13 @@ cat ~/.local/share/agenterm/ax-status
 tail ~/.local/share/agenterm/cu-hotkeys.log
 ```
 
-## Darwin `ioctl` is variadic; the dyn trampoline is not
+## Darwin `ioctl` needs a narrow variadic ABI path
 
-`agenterm-dyn` `dlcall` uses a bounded Rust `extern "C"` fixed-arity
-trampoline. Darwin `ioctl(int, unsigned long, ...)` is variadic; on arm64
-unnamed arguments are not in the same slots as a fixed third parameter.
-Measured: `TIOCGWINSZ` via Python `fcntl.ioctl` on a pty succeeds, while
-`dlcall "libSystem.B.dylib" "ioctl"` returns `-1`/`EFAULT`. Do not add a
-C/libffi shim. Keep the request as script data, assert the symbol
-resolves, and do not claim window-size success on macOS.
+`agenterm-dyn` `dlcall` normally uses a bounded Rust `extern "C"` fixed-arity
+trampoline. Darwin `ioctl(int, unsigned long, ...)` is variadic; on arm64 an
+unnamed third argument is not in the same slot as a fixed third parameter.
+The native door therefore recognizes only `ioctl` with
+`(i32, u64|i32, ptr) -> i32` and invokes it through Rust's variadic declaration.
+The macOS smoke opens a 24×80 pty slave and requires `TIOCGWINSZ` to return the
+same dimensions. All other names and signatures retain the fixed trampoline:
+this is not general variadic FFI and adds no C or libffi shim.

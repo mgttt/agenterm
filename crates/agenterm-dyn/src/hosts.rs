@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 36],
+    pub system_probes: [SystemProbe; 40],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 36] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 40] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -330,6 +330,22 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 36] = [
             symbol: "getpagesize",
         },
     },
+    SystemProbe {
+        name: "sysctlbyname",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "mach_absolute_time",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "getprogname",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "issetugid",
+        status: SystemProbeStatus::Placeholder,
+    },
 ];
 
 const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
@@ -342,7 +358,7 @@ const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 36] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 40] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -379,9 +395,13 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 36] = [
     macos_live("getdtablesize", "getdtablesize"),
     macos_live("gethostid", "gethostid"),
     macos_live("getpagesize", "getpagesize"),
+    macos_live("sysctlbyname", "sysctlbyname"),
+    macos_live("mach_absolute_time", "mach_absolute_time"),
+    macos_live("getprogname", "getprogname"),
+    macos_live("issetugid", "issetugid"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 36] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 40] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -524,6 +544,22 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 36] = [
     },
     SystemProbe {
         name: "getpagesize",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "sysctlbyname",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "mach_absolute_time",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "getprogname",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "issetugid",
         status: SystemProbeStatus::Placeholder,
     },
 ];

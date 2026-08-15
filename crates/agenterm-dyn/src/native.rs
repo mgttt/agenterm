@@ -188,8 +188,11 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         .chunks_exact(2)
         .map(|pair| SigType::parse_arg(&expect_string(&pair[0], "dlcall argument type")?))
         .collect::<Result<Vec<_>, _>>()?;
+    #[cfg(target_os = "macos")]
+    let darwin_ioctl = is_darwin_ioctl_signature(&sym_name, ret_ty, &arg_types);
     let dyn_args = arg_types
-        .into_iter()
+        .iter()
+        .copied()
         .zip(args[3..].chunks_exact(2).map(|pair| &pair[1]))
         .map(|(ty, expr)| {
             let value = crate::eval::eval_expr(env, expr)?;
@@ -211,9 +214,45 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         )));
     }
 
+    #[cfg(target_os = "macos")]
+    if darwin_ioctl {
+        // SAFETY: the resolved `ioctl` symbol has the one supported Darwin signature below;
+        // the script types were validated before argument evaluation.  The foreign declaration
+        // preserves Darwin's variadic ABI, unlike the general fixed-arity trampoline.
+        return unsafe { invoke_darwin_ioctl(&dyn_args) };
+    }
+
     // SAFETY: callers provide the native symbol's signature. `invoke` supports only the
     // integer/pointer C ABI class and a fixed arity, which were validated above.
     unsafe { invoke(func_ptr, &dyn_args, ret_ty) }
+}
+
+#[cfg(target_os = "macos")]
+fn is_darwin_ioctl_signature(sym_name: &str, ret_ty: SigType, arg_types: &[SigType]) -> bool {
+    sym_name == "ioctl"
+        && ret_ty == SigType::I32
+        && matches!(
+            arg_types,
+            [SigType::I32, SigType::U64 | SigType::I32, SigType::Ptr]
+        )
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    /// Darwin's third `ioctl` parameter is variadic.  This declaration is deliberately
+    /// narrower than `dlcall`: it is only used for the explicitly recognised `ioctl` shape.
+    fn ioctl(fd: i32, request: u64, ...) -> i32;
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn invoke_darwin_ioctl(args: &[DynArg]) -> Result<Value, DynError> {
+    let [fd, request, pointer] = args else {
+        unreachable!("darwin ioctl signature checked before invocation");
+    };
+    // SAFETY: `is_darwin_ioctl_signature` established the typed `(i32, u64, ptr) -> i32`
+    // script contract; this foreign declaration supplies the required variadic ABI.
+    let result = unsafe { ioctl(fd.0 as i32, request.0, pointer.0 as *mut c_void) };
+    Ok(Value::Int(i64::from(result)))
 }
 
 macro_rules! call_fixed {

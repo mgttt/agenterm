@@ -1,0 +1,112 @@
+//! Darwin-only live `dlcall` probes for facts absent from Linux host rows.
+
+#![cfg(target_os = "macos")]
+
+use std::ffi::{CStr, CString, c_void};
+
+use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
+
+const LIB: &str = "libSystem.B.dylib";
+
+fn live_symbol(name: &str) -> &'static str {
+    let probe = live_cell()
+        .expect("macOS host cell")
+        .system_probes
+        .iter()
+        .find(|probe| probe.name == name)
+        .expect("Darwin probe is catalogued");
+    match probe.status {
+        SystemProbeStatus::LiveDlcall { lib: LIB, symbol } => symbol,
+        other => panic!("{name} must be a live libSystem probe, got {other:?}"),
+    }
+}
+
+#[test]
+fn dlcall_sysctlbyname_writes_ncpu_into_caller_buffer() {
+    let symbol = live_symbol("sysctlbyname");
+    let name = CString::new("hw.ncpu").expect("literal has no NUL");
+    let mut ncpu: libc::c_uint = 0;
+    let mut len = std::mem::size_of_val(&ncpu);
+    let mut env = Dyn::new();
+    env.bind("name", name.as_ptr().cast_mut().cast::<c_void>())
+        .expect("bind sysctl name");
+    env.bind("value", (&mut ncpu as *mut libc::c_uint).cast())
+        .expect("bind CPU output");
+    env.bind("len", (&mut len as *mut usize).cast())
+        .expect("bind CPU output length");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "ptr" value "ptr" len "ptr" 0 "u64" 0)"#
+        ))
+        .expect("sysctlbyname dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert_eq!(len, std::mem::size_of_val(&ncpu));
+    assert!(ncpu >= 1, "hw.ncpu must be positive");
+
+    let mut direct: libc::c_uint = 0;
+    let mut direct_len = std::mem::size_of_val(&direct);
+    let direct_status = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            (&mut direct as *mut libc::c_uint).cast(),
+            &mut direct_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    assert_eq!(direct_status, 0, "direct sysctlbyname must succeed");
+    assert_eq!(direct_len, std::mem::size_of_val(&direct));
+    assert_eq!(ncpu, direct);
+    let available = std::thread::available_parallelism()
+        .expect("host exposes available parallelism")
+        .get();
+    assert!(
+        ncpu as usize >= available,
+        "kernel CPU count must cover process availability"
+    );
+}
+
+#[test]
+fn dlcall_mach_absolute_time_is_monotonic_against_libc() {
+    let symbol = live_symbol("mach_absolute_time");
+    let mut env = Dyn::new();
+    let script = format!(r#"(dlcall "{LIB}" "{symbol}" "i64")"#);
+    let first = env.eval(&script).expect("first mach_absolute_time dlcall");
+    let second = env.eval(&script).expect("second mach_absolute_time dlcall");
+    let first = first.as_int().expect("integer tick result") as u64;
+    let second = second.as_int().expect("integer tick result") as u64;
+    let direct = unsafe { libc::mach_absolute_time() };
+    assert!(second >= first, "later dlcall tick must not precede first");
+    assert!(direct >= second, "later libc tick must not precede dlcall");
+}
+
+#[test]
+fn dlcall_getprogname_matches_libc_c_string() {
+    let symbol = live_symbol("getprogname");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+        .expect("getprogname dlcall")
+        .as_ptr()
+        .expect("program name pointer") as *const libc::c_char;
+    let direct = unsafe { libc::getprogname() };
+    assert!(!got.is_null(), "dlcall must return a program-name pointer");
+    assert!(!direct.is_null(), "libc must return a program-name pointer");
+    let got = unsafe { CStr::from_ptr(got) };
+    let direct = unsafe { CStr::from_ptr(direct) };
+    assert_eq!(got.to_bytes(), direct.to_bytes());
+}
+
+#[test]
+fn dlcall_issetugid_matches_libc_boolean() {
+    let symbol = live_symbol("issetugid");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+        .expect("issetugid dlcall")
+        .as_int()
+        .expect("issetugid integer");
+    let direct = unsafe { libc::issetugid() };
+    assert!(matches!(got, 0 | 1), "issetugid must be boolean");
+    assert_eq!(got, i64::from(direct));
+}

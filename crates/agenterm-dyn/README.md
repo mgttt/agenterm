@@ -90,8 +90,8 @@ deny, or otherwise change any native-door or caller authority semantics.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `getsid(0)`, `getpgid(0)`, `geteuid`, `getegid`, `getpriority(PRIO_PROCESS, 0)`, `nice(0)`, `sched_yield` as void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0/1/2)`, `open("/dev/null")` + `isatty` + `close`, `access` success/failure, `fcntl(0, F_GETFD)`, `fcntl(0, F_GETFL)`, `lseek(0, 0, SEEK_CUR)`, and `dup(0)` + `close` dlcalls |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` (script data; Darwin `ioctl` is variadic, so the fixed `dlcall` trampoline can return `-1`/`EFAULT` on arm64) | `time` | matching-host smoke candidates: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf` pagesize/clk_tck/nprocessors, `getcwd`, `isatty` 0/1/2, `open("/dev/null")`+`close`, `access`, `fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield` void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize` |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live first 36: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `open`/`access`/`fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; Darwin-only final four are placeholders |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | live first 36 matching-host rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, and `issetugid` |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -141,6 +141,10 @@ without wiring dyn into cu, platform, or the ABI:
 - [descriptor resource limits via `getrlimit(RLIMIT_NOFILE, …)`](examples/getrlimit.md)
 - [host page size via `sysconf`](examples/sysconf-pagesize.md)
 - [host page size via `getpagesize`](examples/getpagesize.md)
+- [hardware CPU count via `sysctlbyname`](examples/sysctlbyname.md) (macOS)
+- [monotonic kernel ticks via `mach_absolute_time`](examples/mach-absolute-time.md) (macOS)
+- [program name pointer via `getprogname`](examples/getprogname.md) (macOS)
+- [set-id execution state via `issetugid`](examples/issetugid.md) (macOS)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [whether standard input is a terminal](examples/isatty-stdin.md)

@@ -83,7 +83,7 @@ fn windows_cells_share_kernel32_names() {
 }
 
 #[test]
-fn additional_system_probes_are_live_on_linux_and_macos() {
+fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
     for c in [LINUX_X86_64, LINUX_AARCH64] {
         assert_eq!(
             c.system_probes.map(|probe| probe.name),
@@ -123,14 +123,21 @@ fn additional_system_probes_are_live_on_linux_and_macos() {
                 "umask",
                 "getdtablesize",
                 "gethostid",
-                "getpagesize"
+                "getpagesize",
+                "sysctlbyname",
+                "mach_absolute_time",
+                "getprogname",
+                "issetugid"
             ]
         );
         assert_eq!(
-            c.system_probes.map(|probe| match probe.status {
-                SystemProbeStatus::LiveDlcall { lib, symbol } => (probe.name, lib, symbol),
-                SystemProbeStatus::Placeholder => panic!("Linux probe must be live"),
-            }),
+            c.system_probes[..36]
+                .iter()
+                .map(|probe| match probe.status {
+                    SystemProbeStatus::LiveDlcall { lib, symbol } => (probe.name, lib, symbol),
+                    SystemProbeStatus::Placeholder => panic!("Linux probe must be live"),
+                })
+                .collect::<Vec<_>>(),
             [
                 ("time", "libc.so.6", "time"),
                 ("times", "libc.so.6", "times"),
@@ -170,9 +177,33 @@ fn additional_system_probes_are_live_on_linux_and_macos() {
                 ("getpagesize", "libc.so.6", "getpagesize"),
             ]
         );
+        assert!(
+            c.system_probes[36..]
+                .iter()
+                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
+        );
     }
     for c in [MACOS_X86_64, MACOS_AARCH64] {
-        assert!(c.system_probes.iter().all(|probe| matches!(
+        assert!(c.system_probes[..36].iter().all(|probe| matches!(
+            probe.status,
+            SystemProbeStatus::LiveDlcall {
+                lib: "libSystem.B.dylib",
+                ..
+            }
+        )));
+        assert_eq!(
+            c.system_probes[36..]
+                .iter()
+                .map(|probe| probe.name)
+                .collect::<Vec<_>>(),
+            [
+                "sysctlbyname",
+                "mach_absolute_time",
+                "getprogname",
+                "issetugid"
+            ]
+        );
+        assert!(c.system_probes[36..].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
