@@ -169,7 +169,7 @@ fn header_is_pure_ascii() {
 /// (exports.txt as the single source of truth, header/implementation drift)
 /// were built long ago; this one had not been.
 ///
-/// Today's 55 exports are all mechanisms -- pty, window, screenshot, process,
+/// Today's exports are all mechanisms -- pty, window, screenshot, process,
 /// a11y, clipboard, parent_console, runtime, input, screen, native_window --
 /// so this gate is green on arrival. That is the point: it pins a discipline
 /// that currently holds, so the first violation is the one that turns red.

@@ -245,6 +245,7 @@ pub enum agt_capability {
     AGT_CAP_PARENT_CONSOLE,
     AGT_CAP_ACCESSIBILITY_TREE,
     AGT_CAP_DESKTOP_HOST,
+    AGT_CAP_WINDOW_PLACEMENT_INSPECT,
 }
 
 /// ABI versioning: the numeric constants and the build-identity string are
@@ -272,7 +273,7 @@ macro_rules! abi_version {
         );
     };
 }
-abi_version!(1, 9);
+abi_version!(1, 10);
 
 /// ABI version: `(major << 16) | minor`. `minor` grows with every additive
 /// export; `major` only moves on breaking changes (consumers must reject a
@@ -364,8 +365,8 @@ pub extern "C" fn agt_last_error(out: *mut agt_error) -> agt_status {
 /// statement).
 ///
 /// **The parameter is `u32`, not the `agt_capability` enum — a soundness
-/// decision, not an ABI choice.** `agt_capability` is a `#[repr(C)]` 16-variant
-/// enum (discriminants 1..=16) passed by value from C, and a C caller can pass
+/// decision, not an ABI choice.** `agt_capability` is a `#[repr(C)]` 18-variant
+/// enum (discriminants 1..=18) passed by value from C, and a C caller can pass
 /// any `int`. Constructing a Rust enum from an out-of-range integer is
 /// **immediate undefined behavior** — it happens at function entry, before the
 /// `match` runs — so a `_ =>` wildcard arm can only catch *legal-but-unhandled*
@@ -398,6 +399,8 @@ pub extern "C" fn agt_capability_query(cap: u32) -> agt_status {
     const AGT_CAP_PARENT_CONSOLE: u32 = agt_capability::AGT_CAP_PARENT_CONSOLE as u32;
     const AGT_CAP_ACCESSIBILITY_TREE: u32 = agt_capability::AGT_CAP_ACCESSIBILITY_TREE as u32;
     const AGT_CAP_DESKTOP_HOST: u32 = agt_capability::AGT_CAP_DESKTOP_HOST as u32;
+    const AGT_CAP_WINDOW_PLACEMENT_INSPECT: u32 =
+        agt_capability::AGT_CAP_WINDOW_PLACEMENT_INSPECT as u32;
 
     fn capability_ok(status: CapabilityStatus) -> agt_status {
         if matches!(status, CapabilityStatus::Available) {
@@ -448,8 +451,11 @@ pub extern "C" fn agt_capability_query(cap: u32) -> agt_status {
         AGT_CAP_WINDOW_OP => capability_ok(agenterm_platform::window_op::capability_status()),
         AGT_CAP_INPUT_INJECT => capability_ok(agenterm_platform::input_inject::capability_status()),
         AGT_CAP_DESKTOP_HOST => capability_ok(agenterm_platform::desktop_host::capability_status()),
+        AGT_CAP_WINDOW_PLACEMENT_INSPECT => {
+            capability_ok(agenterm_platform::window_placement::capability_status())
+        }
         // Every value not listed above — including any out-of-range int a C
-        // caller can pass (0, negatives, > 16) — maps to AGT_UNSUPPORTED.
+        // caller can pass (0, negatives, > 18) — maps to AGT_UNSUPPORTED.
         // With an integer parameter this arm is reachable for arbitrary
         // input; under the old enum parameter it never was (constructing the
         // enum from the out-of-range int was UB first).
@@ -4923,6 +4929,201 @@ pub extern "C" fn agt_window_enumerate(
     }
 }
 
+pub const AGT_WINDOW_PLACEMENT_RECORD_V1: u32 = 1;
+pub const AGT_WINDOW_ROLE_UNKNOWN: i32 = 0;
+pub const AGT_WINDOW_ROLE_STANDARD: i32 = 1;
+pub const AGT_WINDOW_ROLE_DIALOG: i32 = 2;
+pub const AGT_WINDOW_ROLE_SHEET: i32 = 3;
+pub const AGT_WINDOW_ROLE_SYSTEM_DIALOG: i32 = 4;
+pub const AGT_WINDOW_ROLE_OTHER: i32 = 5;
+pub const AGT_WINDOW_SUPPORT_UNKNOWN: i32 = 0;
+pub const AGT_WINDOW_SUPPORT_YES: i32 = 1;
+pub const AGT_WINDOW_SUPPORT_NO: i32 = 2;
+pub const AGT_WINDOW_CONSTRAINTS_UNKNOWN: i32 = 0;
+pub const AGT_WINDOW_CONSTRAINTS_EXPLICIT: i32 = 1;
+pub const AGT_WINDOW_CONSTRAINTS_APPLICATION_ENFORCED: i32 = 2;
+pub const AGT_WINDOW_CONSTRAINT_HAS_MIN: u32 = 1 << 0;
+pub const AGT_WINDOW_CONSTRAINT_HAS_MAX: u32 = 1 << 1;
+pub const AGT_WINDOW_CONSTRAINT_HAS_INCREMENT: u32 = 1 << 2;
+
+/// Caller-sized, versioned placement-inspection record. `struct_size` is the
+/// caller's allocation size and is preserved; callers may append storage for
+/// future versions without this v1 implementation overwriting the tail.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub struct agt_window_placement_info_v1 {
+    pub struct_size: u32,
+    pub record_version: u32,
+    pub handle: isize,
+    pub process_id: u32,
+    pub role: i32,
+    pub movable: i32,
+    pub resizable: i32,
+    pub constraints_kind: i32,
+    pub constraint_flags: u32,
+    pub min_width: u32,
+    pub min_height: u32,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub increment_width: u32,
+    pub increment_height: u32,
+}
+
+fn placement_record(
+    info: agenterm_platform::window_placement::PlacementWindowInfo,
+    struct_size: u32,
+) -> agt_window_placement_info_v1 {
+    use agenterm_platform::window_placement::{PlacementRole, SizeConstraints, Support};
+
+    let role = match info.role {
+        PlacementRole::Standard => AGT_WINDOW_ROLE_STANDARD,
+        PlacementRole::Dialog => AGT_WINDOW_ROLE_DIALOG,
+        PlacementRole::Sheet => AGT_WINDOW_ROLE_SHEET,
+        PlacementRole::SystemDialog => AGT_WINDOW_ROLE_SYSTEM_DIALOG,
+        PlacementRole::Other => AGT_WINDOW_ROLE_OTHER,
+        PlacementRole::Unknown => AGT_WINDOW_ROLE_UNKNOWN,
+        _ => AGT_WINDOW_ROLE_UNKNOWN,
+    };
+    let support = |value| match value {
+        Support::Yes => AGT_WINDOW_SUPPORT_YES,
+        Support::No => AGT_WINDOW_SUPPORT_NO,
+        Support::Unknown => AGT_WINDOW_SUPPORT_UNKNOWN,
+        _ => AGT_WINDOW_SUPPORT_UNKNOWN,
+    };
+    let mut record = agt_window_placement_info_v1 {
+        struct_size,
+        record_version: AGT_WINDOW_PLACEMENT_RECORD_V1,
+        handle: info.handle,
+        process_id: info.process_id,
+        role,
+        movable: support(info.movable),
+        resizable: support(info.resizable),
+        ..Default::default()
+    };
+    match info.constraints {
+        SizeConstraints::Explicit {
+            min,
+            max,
+            increment,
+        } => {
+            record.constraints_kind = AGT_WINDOW_CONSTRAINTS_EXPLICIT;
+            if let Some(size) = min {
+                record.constraint_flags |= AGT_WINDOW_CONSTRAINT_HAS_MIN;
+                record.min_width = size.width;
+                record.min_height = size.height;
+            }
+            if let Some(size) = max {
+                record.constraint_flags |= AGT_WINDOW_CONSTRAINT_HAS_MAX;
+                record.max_width = size.width;
+                record.max_height = size.height;
+            }
+            if let Some(size) = increment {
+                record.constraint_flags |= AGT_WINDOW_CONSTRAINT_HAS_INCREMENT;
+                record.increment_width = size.width;
+                record.increment_height = size.height;
+            }
+        }
+        SizeConstraints::ApplicationEnforced => {
+            record.constraints_kind = AGT_WINDOW_CONSTRAINTS_APPLICATION_ENFORCED;
+        }
+        SizeConstraints::Unknown => {
+            record.constraints_kind = AGT_WINDOW_CONSTRAINTS_UNKNOWN;
+        }
+        _ => {
+            record.constraints_kind = AGT_WINDOW_CONSTRAINTS_UNKNOWN;
+        }
+    }
+    record
+}
+
+fn placement_error_code(code: &str) -> &'static CStr {
+    match code {
+        "window_identity_invalid" => c"window_identity_invalid",
+        "window_identity_unknown" => c"window_identity_unknown",
+        "window_stale" => c"window_stale",
+        "window_inspect_failed" => c"window_inspect_failed",
+        "window_inspect_access_denied" => c"window_inspect_access_denied",
+        "window_metadata_invalid" => c"window_metadata_invalid",
+        "window_constraints_invalid" => c"window_constraints_invalid",
+        _ => c"window_inspect_failed",
+    }
+}
+
+/// Inspect placement metadata for a foreign top-level window. The expected
+/// process id is mandatory and is revalidated by the selected host adapter.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn agt_window_placement_query(
+    handle: isize,
+    expected_pid: u32,
+    out: *mut agt_window_placement_info_v1,
+) -> agt_status {
+    fn inner(
+        handle: isize,
+        expected_pid: u32,
+        out: *mut agt_window_placement_info_v1,
+    ) -> agt_status {
+        if out.is_null() {
+            record_error(
+                c"agt_window_placement_query",
+                c"bad_pointer",
+                "out pointer is null",
+            );
+            return agt_status::AGT_FAILED;
+        }
+        let struct_size = unsafe { (*out).struct_size };
+        let required = std::mem::size_of::<agt_window_placement_info_v1>();
+        if (struct_size as usize) < required {
+            record_error(
+                c"agt_window_placement_query",
+                c"bad_size",
+                format!("struct_size {struct_size} is smaller than required v1 size {required}"),
+            );
+            return agt_status::AGT_FAILED;
+        }
+        match agenterm_platform::window_placement::inspect(handle, expected_pid) {
+            Ok(info) => {
+                unsafe { *out = placement_record(info, struct_size) };
+                agt_status::AGT_OK
+            }
+            Err(agenterm_platform::window_placement::WindowPlacementError::Unsupported {
+                ..
+            }) => agt_status::AGT_UNSUPPORTED,
+            Err(agenterm_platform::window_placement::WindowPlacementError::Failed {
+                code,
+                message,
+            }) => {
+                record_error(
+                    c"agt_window_placement_query",
+                    placement_error_code(&code),
+                    message,
+                );
+                agt_status::AGT_FAILED
+            }
+            Err(_) => {
+                record_error(
+                    c"agt_window_placement_query",
+                    c"window_inspect_failed",
+                    "unknown placement inspection failure",
+                );
+                agt_status::AGT_FAILED
+            }
+        }
+    }
+    match catch_unwind(AssertUnwindSafe(|| inner(handle, expected_pid, out))) {
+        Ok(status) => status,
+        Err(_) => {
+            record_error(
+                c"agt_window_placement_query",
+                c"panic",
+                "panic in agt_window_placement_query",
+            );
+            agt_status::AGT_FAILED
+        }
+    }
+}
+
 /// C-compatible single-screen record mirroring `include/agenterm.h`.
 /// `frame` covers the whole display; `visible` is the work area after the
 /// taskbar / docks; `primary` is 0/1 (exactly one screen is primary).
@@ -5470,6 +5671,127 @@ pub extern "C" fn agt_input_send_keys(shortcut: *const u8, len: usize) -> agt_st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn placement_record_layout_is_stable_and_c_compatible() {
+        assert_eq!(
+            std::mem::offset_of!(agt_window_placement_info_v1, struct_size),
+            0
+        );
+        assert_eq!(
+            std::mem::offset_of!(agt_window_placement_info_v1, record_version),
+            4
+        );
+        assert_eq!(
+            std::mem::offset_of!(agt_window_placement_info_v1, handle),
+            8
+        );
+        assert_eq!(
+            std::mem::offset_of!(agt_window_placement_info_v1, process_id),
+            8 + std::mem::size_of::<isize>()
+        );
+        assert_eq!(
+            std::mem::size_of::<agt_window_placement_info_v1>(),
+            56 + std::mem::size_of::<isize>()
+        );
+    }
+
+    #[test]
+    fn placement_record_preserves_unknowns_and_explicit_option_flags() {
+        use agenterm_platform::window_placement::{
+            PlacementRole, PlacementWindowInfo, SizeConstraints, Support, WindowSize,
+        };
+        let record = placement_record(
+            PlacementWindowInfo {
+                handle: 9,
+                process_id: 42,
+                role: PlacementRole::Unknown,
+                movable: Support::Unknown,
+                resizable: Support::No,
+                constraints: SizeConstraints::Explicit {
+                    min: Some(WindowSize::new(320, 200)),
+                    max: None,
+                    increment: Some(WindowSize::new(8, 16)),
+                },
+            },
+            4096,
+        );
+        assert_eq!(record.struct_size, 4096);
+        assert_eq!(record.record_version, AGT_WINDOW_PLACEMENT_RECORD_V1);
+        assert_eq!(record.role, AGT_WINDOW_ROLE_UNKNOWN);
+        assert_eq!(record.movable, AGT_WINDOW_SUPPORT_UNKNOWN);
+        assert_eq!(record.resizable, AGT_WINDOW_SUPPORT_NO);
+        assert_eq!(record.constraints_kind, AGT_WINDOW_CONSTRAINTS_EXPLICIT);
+        assert_eq!(
+            record.constraint_flags,
+            AGT_WINDOW_CONSTRAINT_HAS_MIN | AGT_WINDOW_CONSTRAINT_HAS_INCREMENT
+        );
+        assert_eq!((record.min_width, record.min_height), (320, 200));
+        assert_eq!((record.max_width, record.max_height), (0, 0));
+        assert_eq!((record.increment_width, record.increment_height), (8, 16));
+    }
+
+    #[test]
+    fn placement_query_rejects_null_and_short_but_accepts_long_capacity() {
+        assert_eq!(
+            agt_window_placement_query(0, 0, std::ptr::null_mut()),
+            agt_status::AGT_FAILED
+        );
+        let mut short = agt_window_placement_info_v1 {
+            struct_size: (std::mem::size_of::<agt_window_placement_info_v1>() - 1) as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            agt_window_placement_query(0, 0, &mut short),
+            agt_status::AGT_FAILED
+        );
+        let mut error = agt_error {
+            operation: std::ptr::null(),
+            code: std::ptr::null(),
+            message: std::ptr::null(),
+        };
+        assert_eq!(agt_last_error(&mut error), agt_status::AGT_OK);
+        assert_eq!(unsafe { CStr::from_ptr(error.code) }, c"bad_size");
+
+        #[repr(C)]
+        struct Extended {
+            v1: agt_window_placement_info_v1,
+            tail: [u8; 16],
+        }
+        let mut extended = Extended {
+            v1: agt_window_placement_info_v1 {
+                struct_size: std::mem::size_of::<Extended>() as u32,
+                ..Default::default()
+            },
+            tail: [0xa5; 16],
+        };
+        let status = agt_window_placement_query(0, 0, &mut extended.v1);
+        assert_ne!(status, agt_status::AGT_OK);
+        assert_eq!(extended.tail, [0xa5; 16]);
+        if status == agt_status::AGT_FAILED {
+            assert_eq!(agt_last_error(&mut error), agt_status::AGT_OK);
+            assert_ne!(unsafe { CStr::from_ptr(error.code) }, c"bad_size");
+        }
+    }
+
+    #[test]
+    fn placement_typed_failure_codes_remain_exact() {
+        for code in [
+            "window_identity_invalid",
+            "window_identity_unknown",
+            "window_stale",
+            "window_inspect_failed",
+            "window_inspect_access_denied",
+            "window_metadata_invalid",
+            "window_constraints_invalid",
+        ] {
+            assert_eq!(placement_error_code(code).to_str().unwrap(), code);
+        }
+        assert_eq!(
+            placement_error_code("future_platform_code"),
+            c"window_inspect_failed"
+        );
+    }
 
     /// Evidence 3: every one of the 27 `NamedKey` variants maps to its ABI
     /// code; the table is complete, unique, and never collides with the `_`

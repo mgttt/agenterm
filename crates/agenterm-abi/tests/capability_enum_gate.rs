@@ -197,6 +197,10 @@ fn test_capability_table() -> Vec<(&'static str, u64)> {
             c::AGT_CAP_ACCESSIBILITY_TREE as u64,
         ),
         ("AGT_CAP_DESKTOP_HOST", c::AGT_CAP_DESKTOP_HOST as u64),
+        (
+            "AGT_CAP_WINDOW_PLACEMENT_INSPECT",
+            c::AGT_CAP_WINDOW_PLACEMENT_INSPECT as u64,
+        ),
     ]
 }
 

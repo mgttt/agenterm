@@ -12,6 +12,7 @@ use common::capabilities::{
     AGT_CAP_ACCESSIBILITY_TREE, AGT_CAP_CLIPBOARD, AGT_CAP_INPUT_INJECT, AGT_CAP_PARENT_CONSOLE,
     AGT_CAP_PROCESS_OBSERVE, AGT_CAP_PROCESS_SPAWN, AGT_CAP_PTY, AGT_CAP_SCREENSHOT,
     AGT_CAP_WINDOW_ENUMERATE, AGT_CAP_WINDOW_HOST, AGT_CAP_WINDOW_OP,
+    AGT_CAP_WINDOW_PLACEMENT_INSPECT,
 };
 use libloading::{Library, Symbol};
 use std::ffi::{CStr, CString, c_char};
@@ -136,6 +137,27 @@ type ProcessList = unsafe extern "C" fn(*mut agt_process_info, usize, *mut usize
 type ProcessKill = unsafe extern "C" fn(u32) -> i32;
 type ProcessSelf = unsafe extern "C" fn() -> u32;
 type WindowEnumerate = unsafe extern "C" fn(*mut agt_window_info, usize, *mut usize) -> i32;
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct agt_window_placement_info_v1 {
+    struct_size: u32,
+    record_version: u32,
+    handle: isize,
+    process_id: u32,
+    role: i32,
+    movable: i32,
+    resizable: i32,
+    constraints_kind: i32,
+    constraint_flags: u32,
+    min_width: u32,
+    min_height: u32,
+    max_width: u32,
+    max_height: u32,
+    increment_width: u32,
+    increment_height: u32,
+}
+type WindowPlacementQuery =
+    unsafe extern "C" fn(isize, u32, *mut agt_window_placement_info_v1) -> i32;
 type NativeWindowShow = unsafe extern "C" fn(isize, i32) -> i32;
 type InputPointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
 type InputTypeText = unsafe extern "C" fn(*const u8, usize) -> i32;
@@ -436,6 +458,75 @@ fn capability_query_reports_pty_ok_others_unsupported() {
     assert_eq!(unsafe { f(AGT_CAP_PARENT_CONSOLE) }, AGT_OK);
     // Mechanisms not yet shipped stay AGT_UNSUPPORTED (never AGT_FAILED).
     assert_eq!(unsafe { f(AGT_CAP_PROCESS_SPAWN) }, AGT_UNSUPPORTED);
+    assert!(matches!(
+        unsafe { f(AGT_CAP_WINDOW_PLACEMENT_INSPECT) },
+        AGT_OK | AGT_UNSUPPORTED
+    ));
+}
+
+#[test]
+fn window_placement_query_sizes_and_stale_pid_are_typed() {
+    let lib = load();
+    let query: Symbol<WindowPlacementQuery> = unsafe { sym(lib, b"agt_window_placement_query") };
+    assert_eq!(unsafe { query(0, 0, std::ptr::null_mut()) }, AGT_FAILED);
+    assert!(last_error_message(lib).contains("bad_pointer"));
+
+    let mut short = agt_window_placement_info_v1 {
+        struct_size: (std::mem::size_of::<agt_window_placement_info_v1>() - 1) as u32,
+        ..Default::default()
+    };
+    assert_eq!(unsafe { query(0, 0, &mut short) }, AGT_FAILED);
+    assert!(last_error_message(lib).contains("bad_size"));
+
+    #[repr(C)]
+    struct Extended {
+        v1: agt_window_placement_info_v1,
+        tail: [u8; 16],
+    }
+    let mut extended = Extended {
+        v1: agt_window_placement_info_v1 {
+            struct_size: std::mem::size_of::<Extended>() as u32,
+            ..Default::default()
+        },
+        tail: [0x5a; 16],
+    };
+    let long_status = unsafe { query(0, 0, &mut extended.v1) };
+    assert!(matches!(long_status, AGT_FAILED | AGT_UNSUPPORTED));
+    assert_eq!(extended.tail, [0x5a; 16]);
+    if long_status == AGT_FAILED {
+        assert!(!last_error_message(lib).contains("bad_size"));
+    }
+
+    let enumerate: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
+    let mut required = 0usize;
+    let probe = unsafe { enumerate(std::ptr::null_mut(), 0, &mut required) };
+    if probe == AGT_UNSUPPORTED || required == 0 {
+        eprintln!("SKIP stale-pid branch: no enumerable native window");
+        return;
+    }
+    let mut windows = vec![agt_window_info::default(); required];
+    let mut got = 0usize;
+    if unsafe { enumerate(windows.as_mut_ptr(), windows.len(), &mut got) } != AGT_OK || got == 0 {
+        eprintln!("SKIP stale-pid branch: window set changed during enumeration");
+        return;
+    }
+    let window = windows[0];
+    let stale_pid = if window.process_id == u32::MAX {
+        window.process_id - 1
+    } else {
+        window.process_id + 1
+    };
+    let mut out = agt_window_placement_info_v1 {
+        struct_size: std::mem::size_of::<agt_window_placement_info_v1>() as u32,
+        ..Default::default()
+    };
+    let status = unsafe { query(window.handle, stale_pid, &mut out) };
+    if status == AGT_UNSUPPORTED {
+        eprintln!("SKIP stale-pid branch: placement inspection unsupported on this host");
+        return;
+    }
+    assert_eq!(status, AGT_FAILED);
+    assert!(last_error_message(lib).contains("window_stale"));
 }
 
 /// Milestone 53 defect 3 gate, part 1: out-of-range discriminants are legal

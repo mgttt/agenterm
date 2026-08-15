@@ -12,6 +12,12 @@ kill / self pid；6 = 结构化 accessibility-tree 观察与节点动作（`agt_
 UIA / macOS AX / Linux AT-SPI2）藏在 `agenterm-platform` 适配器后，C 头文件只
 描述机制。
 
+ABI 1.10 新增 `agt_window_placement_query` 与
+`AGT_CAP_WINDOW_PLACEMENT_INSPECT`：调用者传入原生窗口句柄、预期 PID 和
+caller-sized v1 记录，得到 role、movable/resizable 三态与显式/应用强制/未知
+尺寸约束。未知值必须按未知处理，不能降级成普通、可自由调整的窗口；句柄复用
+或 PID 不匹配以稳定的 `window_stale` 失败返回。
+
 ## 构建（必须用 unwind profile）
 
 规格 §3.8：panic 不得穿过 FFI 边界——每个导出都包了 `catch_unwind`，
@@ -281,7 +287,8 @@ parent-console / runtime / a11y 等大量向后兼容导出，minor 随导出面
 `agt_a11y_node_send_keys` / `agt_a11y_node_scroll` /
 `agt_a11y_node_get_extents` / `agt_a11y_node_set_selection` /
 `agt_a11y_node_get_selection` / `agt_a11y_node_set_caret_offset` /
-`agt_a11y_node_get_caret_offset`）。
+`agt_a11y_node_get_caret_offset`）。ABI 1.10 又增加 placement inspection，且未
+改动既有 `agt_window_info`。
 
 `agt_build_id()` 返回 `<crate 版本>+abi.<major>.<minor>`
 （例如 `0.1.16+abi.1.1`），在**编译期**由 `CARGO_PKG_VERSION` 与

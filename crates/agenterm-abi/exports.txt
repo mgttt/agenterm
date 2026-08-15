@@ -49,6 +49,7 @@ agt_runtime_env_present
 agt_runtime_arg_count
 agt_runtime_arg
 agt_window_enumerate
+agt_window_placement_query
 agt_screen_list
 agt_native_window_show
 agt_native_window_move

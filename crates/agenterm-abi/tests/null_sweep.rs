@@ -120,6 +120,9 @@ struct agt_a11y_node;
 struct agt_window_info;
 #[repr(C)]
 #[allow(non_camel_case_types)]
+struct agt_window_placement_info_v1;
+#[repr(C)]
+#[allow(non_camel_case_types)]
 struct agt_screen_info;
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -177,6 +180,8 @@ type RuntimeArgCount = unsafe extern "C" fn(*mut usize) -> i32;
 type RuntimeArg = unsafe extern "C" fn(usize, *mut u8, usize, *mut usize) -> i32;
 type CapabilityQuery = unsafe extern "C" fn(i32) -> i32;
 type WindowEnumerate = unsafe extern "C" fn(*mut agt_window_info, usize, *mut usize) -> i32;
+type WindowPlacementQuery =
+    unsafe extern "C" fn(isize, u32, *mut agt_window_placement_info_v1) -> i32;
 type ScreenList = unsafe extern "C" fn(*mut agt_screen_info, usize, *mut usize) -> i32;
 type A11yLastTextWriteVia = unsafe extern "C" fn(*mut u8, usize, *mut usize) -> i32;
 type NativeWindowShow = unsafe extern "C" fn(isize, i32) -> i32;
@@ -379,6 +384,11 @@ fn window_spec_title_null() -> agt_window_spec {
 fn window_enumerate_bad_args(lib: &Library) -> i32 {
     let f: Symbol<WindowEnumerate> = unsafe { sym(lib, b"agt_window_enumerate") };
     unsafe { f(std::ptr::null_mut(), 1, std::ptr::null_mut()) }
+}
+
+fn window_placement_query_null(lib: &Library) -> i32 {
+    let f: Symbol<WindowPlacementQuery> = unsafe { sym(lib, b"agt_window_placement_query") };
+    unsafe { f(0, 0, std::ptr::null_mut()) }
 }
 
 fn window_enumerate_probe(lib: &Library) -> i32 {
@@ -928,6 +938,11 @@ fn null_group() -> Vec<SweepCase> {
             label: "agt_window_enumerate[buf=NULL,cap=1,out_count=NULL]",
             kind: Kind::MustFail,
             call: Box::new(|lib| CallResult::Status(window_enumerate_bad_args(lib))),
+        },
+        SweepCase {
+            label: "agt_window_placement_query[handle=0,expected_pid=0,out=NULL]",
+            kind: Kind::MustFail,
+            call: Box::new(|lib| CallResult::Status(window_placement_query_null(lib))),
         },
         SweepCase {
             label: "agt_screen_list[buf=NULL,cap=1,out_count=NULL]",

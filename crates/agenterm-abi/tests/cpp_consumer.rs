@@ -6,7 +6,7 @@
 //! the guard entirely. A guard that is written is not a guard that holds: the
 //! header could fail as C++ for unrelated reasons (implicit `void*` -> `T*`,
 //! C++ keywords, C-only initializer syntax). This test proves the guard
-//! REALLY unmangles all 55 exports and that the header really is consumable
+//! REALLY unmangles every export and that the header really is consumable
 //! from C++.
 //!
 //! Two halves, both compiling the real `examples/cpp/agenterm_probe.cpp`:

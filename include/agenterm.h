@@ -21,6 +21,8 @@
  * `agt_window_enumerate`), `agt_a11y_drain_bus` (drain the accessibility
  * event bus), and `agt_a11y_last_text_write_via` (diagnostic string, two-stage
  * buffer protocol).
+ * ABI 1.10 adds typed foreign-window placement inspection with a caller-sized,
+ * versioned record and mandatory expected-pid identity check.
  */
 #ifndef AGENTERM_AGENT_ABI_H
 #define AGENTERM_AGENT_ABI_H
@@ -42,7 +44,7 @@ extern "C" {
  * agt_abi_version() returns (major << 16) | minor. Compare against the
  * AGT_ABI_* macros below instead of hard-coded literals. */
 #define AGT_ABI_MAJOR 1
-#define AGT_ABI_MINOR 9
+#define AGT_ABI_MINOR 10
 #define AGT_ABI_VERSION ((AGT_ABI_MAJOR << 16) | AGT_ABI_MINOR)
 uint32_t    agt_abi_version(void);
 
@@ -104,7 +106,8 @@ typedef enum {
     AGT_CAP_SHARED_MEMORY,
     AGT_CAP_PARENT_CONSOLE,
     AGT_CAP_ACCESSIBILITY_TREE,
-    AGT_CAP_DESKTOP_HOST
+    AGT_CAP_DESKTOP_HOST,
+    AGT_CAP_WINDOW_PLACEMENT_INSPECT
 } agt_capability;
 
 /* Returns AGT_OK or AGT_UNSUPPORTED only (never AGT_FAILED). As of
@@ -648,6 +651,59 @@ typedef struct {
  * absent on this host -> AGT_UNSUPPORTED; platform failure ->
  * AGT_FAILED{code="window_failed"}. */
 agt_status agt_window_enumerate(agt_window_info* buf, size_t cap, size_t* out_count);
+
+/* Typed placement preflight for a foreign top-level window. This record is
+ * caller-sized and versioned: initialize struct_size to the allocation size.
+ * Values smaller than sizeof(agt_window_placement_info_v1) fail with
+ * code="bad_size"; larger values are accepted and bytes beyond this v1 prefix
+ * are never touched. On success struct_size is preserved and record_version is
+ * AGT_WINDOW_PLACEMENT_RECORD_V1. Unknown role/support/constraints are
+ * deliberate fail-honest results and must not be treated as an ordinary,
+ * freely resizable window. */
+#define AGT_WINDOW_PLACEMENT_RECORD_V1 1u
+
+#define AGT_WINDOW_ROLE_UNKNOWN       0
+#define AGT_WINDOW_ROLE_STANDARD      1
+#define AGT_WINDOW_ROLE_DIALOG        2
+#define AGT_WINDOW_ROLE_SHEET         3
+#define AGT_WINDOW_ROLE_SYSTEM_DIALOG 4
+#define AGT_WINDOW_ROLE_OTHER         5
+
+#define AGT_WINDOW_SUPPORT_UNKNOWN 0
+#define AGT_WINDOW_SUPPORT_YES     1
+#define AGT_WINDOW_SUPPORT_NO      2
+
+#define AGT_WINDOW_CONSTRAINTS_UNKNOWN              0
+#define AGT_WINDOW_CONSTRAINTS_EXPLICIT             1
+#define AGT_WINDOW_CONSTRAINTS_APPLICATION_ENFORCED 2
+
+#define AGT_WINDOW_CONSTRAINT_HAS_MIN       (1u << 0)
+#define AGT_WINDOW_CONSTRAINT_HAS_MAX       (1u << 1)
+#define AGT_WINDOW_CONSTRAINT_HAS_INCREMENT (1u << 2)
+
+typedef struct {
+    uint32_t struct_size;       /* input capacity; preserved on success */
+    uint32_t record_version;    /* output: AGT_WINDOW_PLACEMENT_RECORD_V1 */
+    intptr_t handle;            /* identity revalidated during inspection */
+    uint32_t process_id;
+    int32_t role;               /* AGT_WINDOW_ROLE_* */
+    int32_t movable;            /* AGT_WINDOW_SUPPORT_* */
+    int32_t resizable;          /* AGT_WINDOW_SUPPORT_* */
+    int32_t constraints_kind;   /* AGT_WINDOW_CONSTRAINTS_* */
+    uint32_t constraint_flags;  /* AGT_WINDOW_CONSTRAINT_HAS_* */
+    uint32_t min_width, min_height;
+    uint32_t max_width, max_height;
+    uint32_t increment_width, increment_height;
+} agt_window_placement_info_v1;
+
+/* Inspect placement role/support/constraints without moving the window.
+ * expected_pid is mandatory and closes the stale/reused-handle race: a
+ * mismatch fails with the platform's typed "window_stale" diagnostic.
+ * NULL out -> AGT_FAILED{code="bad_pointer"}; unsupported host mechanism ->
+ * AGT_UNSUPPORTED; all other typed inspection failures -> AGT_FAILED with
+ * their stable platform error code. */
+agt_status agt_window_placement_query(intptr_t handle, uint32_t expected_pid,
+                                      agt_window_placement_info_v1* out);
 
 /* Single-screen record. `frame` covers the whole display; `visible` is the
  * work area after the taskbar / docks; `primary` is 0/1 (exactly one screen
