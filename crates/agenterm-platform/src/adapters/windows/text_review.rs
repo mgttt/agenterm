@@ -226,7 +226,12 @@ pub(crate) fn review_text(
     }
     let mut message: MSG = unsafe { mem::zeroed() };
     let mut loop_error = None;
-    while !state.done {
+    loop {
+        // DispatchMessageW enters dialog_proc, which updates this state through
+        // GWLP_USERDATA; keep the callback-visible read inside the loop body.
+        if state.done {
+            break;
+        }
         let status = unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) };
         if status == -1 {
             loop_error = Some(last_error("text_review_message_failed"));
