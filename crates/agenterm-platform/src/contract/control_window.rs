@@ -305,6 +305,9 @@ pub(crate) trait ControlWindowBackend {
     fn client_size(&self) -> PixelSize;
     fn state(&self) -> ControlWindowState;
     fn focused_target(&self) -> FocusTarget;
+    fn native_identity(&self) -> Option<i64> {
+        None
+    }
     fn control_at(&self, point: PixelPoint) -> Option<ControlId>;
     fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError>;
     fn set_presentation(&self, presentation: WindowPresentation);
@@ -387,6 +390,11 @@ impl ControlWindow {
     }
     pub fn focused_target(&self) -> FocusTarget {
         self.0.focused_target()
+    }
+    /// Opaque native owner identity. Product code may only pass this value to
+    /// another platform facade and must not interpret it as an OS handle.
+    pub fn native_identity(&self) -> Option<i64> {
+        self.0.native_identity()
     }
     /// Which child control, if any, owns a client-area point.
     ///

@@ -807,6 +807,7 @@ struct MouseReportOutcome {
 struct PendingClipboardPaste {
     target: workspace::TabId,
     read: agenterm_platform::clipboard::ClipboardTextRead,
+    review: bool,
 }
 
 fn mouse_outcome_json(outcome: MouseOutcome) -> json::JsonValue {
@@ -1644,6 +1645,7 @@ impl ConApp {
         &mut self,
         window: &PixelWindow,
         target: workspace::TabId,
+        review: bool,
     ) -> Result<(), String> {
         if self.pending_clipboard_paste.is_some() {
             return Err("a terminal clipboard paste is already pending".to_owned());
@@ -1667,7 +1669,11 @@ impl ConApp {
             },
         )
         .map_err(|error| format!("clipboard read failed: {error}"))?;
-        self.pending_clipboard_paste = Some(PendingClipboardPaste { target, read });
+        self.pending_clipboard_paste = Some(PendingClipboardPaste {
+            target,
+            read,
+            review,
+        });
         self.terminal_clipboard_error = None;
         window.request_redraw();
         Ok(())
@@ -1688,6 +1694,35 @@ impl ConApp {
         let result = result
             .map_err(|error| format!("clipboard read failed: {error}"))
             .and_then(|text| {
+                let text = terminal_input::normalize_terminal_paste(&text);
+                if text.is_empty() {
+                    return Err("clipboard text contains no pasteable characters".to_owned());
+                }
+                #[cfg(windows)]
+                let text = if pending.review {
+                    match agenterm_platform::text_review::review_text(
+                        window.native_identity(),
+                        "Review terminal paste",
+                        "Review or edit the text before it is sent to the active terminal.",
+                        &text,
+                    )
+                    .map_err(|error| format!("paste review failed: {error}"))?
+                    {
+                        Some(edited) => terminal_input::normalize_terminal_paste(&edited),
+                        None => return Ok(()),
+                    }
+                } else {
+                    text
+                };
+                if text.is_empty() {
+                    return Err("reviewed paste contains no pasteable characters".to_owned());
+                }
+                if text.len() > terminal_input::TERMINAL_PASTE_LIMIT_BYTES {
+                    return Err(format!(
+                        "reviewed paste exceeds the {}-byte limit",
+                        terminal_input::TERMINAL_PASTE_LIMIT_BYTES
+                    ));
+                }
                 if !terminal_clipboard_target_is_current(
                     pending.target,
                     self.workspace.active(),
@@ -1963,7 +1998,7 @@ impl ConApp {
                     session.take_clipboard_paste_request()
                 };
                 if requested {
-                    self.request_terminal_clipboard_paste(window, id)?;
+                    self.request_terminal_clipboard_paste(window, id, false)?;
                 }
                 Ok(single_field_json("sent_keys", keys.len().into()))
             })(),
@@ -1997,7 +2032,7 @@ impl ConApp {
                             session.take_clipboard_paste_request()
                         };
                         if requested {
-                            self.request_terminal_clipboard_paste(window, id)?;
+                            self.request_terminal_clipboard_paste(window, id, false)?;
                         }
                     }
                 }
@@ -2100,7 +2135,7 @@ impl ConApp {
                     .get_mut(&id)
                     .is_some_and(ConTerminal::take_clipboard_paste_request);
                 if requested {
-                    self.request_terminal_clipboard_paste(window, id)?;
+                    self.request_terminal_clipboard_paste(window, id, false)?;
                 }
                 Ok(mouse_outcome_json(outcome))
             })(),
@@ -4776,7 +4811,8 @@ impl PixelWindowApplication for ConApp {
             .sessions
             .get_mut(&active)
             .is_some_and(ConTerminal::take_clipboard_paste_request);
-        if requested && let Err(error) = self.request_terminal_clipboard_paste(window, active) {
+        if requested && let Err(error) = self.request_terminal_clipboard_paste(window, active, true)
+        {
             self.terminal_clipboard_error = Some(error);
             self.mark_chrome_full();
             window.request_redraw();

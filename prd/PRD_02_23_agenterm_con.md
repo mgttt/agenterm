@@ -75,6 +75,9 @@ failure, resize storms, process exit, and interaction races.
   unwind profiles and contain callback panics as typed failures.
 - Input focus has one owner. Composer editing never leaks Space, selection,
   copy, cut, paste, or navigation keys into the PTY.
+- Human terminal clipboard paste is editable and cancellable before delivery;
+  confirmation revalidates the stable tab and focus after the modal closes.
+  Control CLI paste paths remain deterministic and never open interactive UI.
 - Pointer selection, dirty rasterization, native present, structured snapshot,
   and PNG evidence describe the same frame. A click cannot erase or scramble
   pixels outside its local feedback region.

@@ -35,8 +35,8 @@ use windows_sys::Win32::{
             GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE,
             TRACKMOUSEEVENT, TrackMouseEvent, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END,
             VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10,
-            VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN,
-            VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+            VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR,
+            VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
             CREATESTRUCTW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
@@ -2064,6 +2064,7 @@ fn named_key(code: u16) -> Option<NamedKey> {
         value if value == VK_ESCAPE => NamedKey::Escape,
         value if value == VK_HOME => NamedKey::Home,
         value if value == VK_INSERT => NamedKey::Insert,
+        value if value == VK_LEFT => NamedKey::ArrowLeft,
         value if value == VK_NEXT => NamedKey::PageDown,
         value if value == VK_PRIOR => NamedKey::PageUp,
         value if value == VK_RETURN => NamedKey::Enter,
@@ -2085,6 +2086,17 @@ fn named_key(code: u16) -> Option<NamedKey> {
         value if value == VK_F12 => NamedKey::F12,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod terminal_key_tests {
+    use super::*;
+
+    #[test]
+    fn horizontal_cursor_keys_are_normalized_at_the_native_boundary() {
+        assert_eq!(named_key(VK_LEFT), Some(NamedKey::ArrowLeft));
+        assert_eq!(named_key(VK_RIGHT), Some(NamedKey::ArrowRight));
+    }
 }
 
 fn modifiers() -> ModifierState {

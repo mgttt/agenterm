@@ -89,6 +89,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `WriteConsoleInputW`. The real `cmd.exe` cursor journey and the
   alternate-screen `less` arrow/wheel journey are default black-box tests rather
   than ignored known gaps.
+- [x] Windows physical Left/Right keycodes are normalized at the native pixel
+  host boundary, and cursor-key PTY encoding follows live DECCKM state: normal
+  mode emits CSI while application-cursor mode emits SS3. Missing native key
+  normalization is an implementation defect, not a PRD permission to drop keys.
 - [x] named terminal-key aliases are platform-owned rather than duplicated in
   con and the workbench. The shared parser is allocation-free and
   ASCII-case-insensitive; con rejects an unknown multi-character key while
