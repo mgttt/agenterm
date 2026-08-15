@@ -173,24 +173,21 @@ fn dlcall_rejects_library_with_interior_nul_before_loading() {
 }
 
 #[test]
-fn dlcall_rejects_empty_symbol_before_loading_library() {
-    let mut env = Dyn::new();
-    let err = env
-        .eval(r#"(dlcall "missing-library-for-empty-symbol" "" "i32")"#)
-        .unwrap_err();
-    assert_eq!(
-        err,
-        DynError::DlCall("symbol name must not be empty".into())
-    );
-}
-
-#[test]
-fn dlcall_rejects_symbol_with_interior_nul_before_loading_library() {
-    let mut env = Dyn::new();
-    let script = "(dlcall \"missing-library-for-nul-symbol\" \"bad\0symbol\" \"i32\")";
-    let err = env.eval(script).unwrap_err();
-    assert!(matches!(err, DynError::DlCall(_)));
-    assert!(err.to_string().contains("interior NUL"));
+fn dlcall_rejects_invalid_symbol_before_arguments_or_library_load() {
+    for (symbol, expected) in [
+        ("", "symbol name must not be empty"),
+        ("bad\0symbol", "symbol name contains interior NUL"),
+    ] {
+        let mut env = Dyn::new();
+        let script = format!(
+            "(dlcall \"missing-library-for-invalid-symbol\" \"{symbol}\" \"i32\" \"i32\" (set touched 1))"
+        );
+        assert_eq!(env.eval(&script), Err(DynError::DlCall(expected.into())));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
 }
 
 #[test]
