@@ -273,6 +273,10 @@ fn entry() {
         let identity_matches = 0;
         let fixture_handle = 0;
         let fixture_bounds_before = "";
+        let fixture_x_before = 0;
+        let fixture_y_before = 0;
+        let fixture_width_before = 0;
+        let fixture_height_before = 0;
         for row in windows.data {
             let row_pid = 0 + row.process_id;
             let row_title = "" + row.title;
@@ -280,6 +284,10 @@ fn entry() {
                 identity_matches += 1;
                 fixture_handle = 0 + row.handle;
                 fixture_bounds_before = rh::json::stringify(row.bounds);
+                fixture_x_before = 0 + row.bounds.x;
+                fixture_y_before = 0 + row.bounds.y;
+                fixture_width_before = 0 + row.bounds.width;
+                fixture_height_before = 0 + row.bounds.height;
             }
         }
         ensure(
@@ -448,8 +456,15 @@ fn entry() {
             "cu_windows_smoke_window_place_reply:" + place_text
         );
         let reply_after = rh::json::stringify(placed.data.after);
+        let reply_after_x = 0 + placed.data.after.x;
+        let reply_after_y = 0 + placed.data.after.y;
+        let reply_after_width = 0 + placed.data.after.width;
+        let reply_after_height = 0 + placed.data.after.height;
         ensure(
-            reply_after != fixture_bounds_before,
+            reply_after_x != fixture_x_before
+                || reply_after_y != fixture_y_before
+                || reply_after_width != fixture_width_before
+                || reply_after_height != fixture_height_before,
             "cu_windows_smoke_window_place_reply_unchanged"
         );
         let observed_after = "";
@@ -464,10 +479,17 @@ fn entry() {
                 let row_handle = 0 + row.handle;
                 if row_handle == fixture_handle {
                     let row_bounds = rh::json::stringify(row.bounds);
-                    observed_after = row_bounds;
-                    if row_bounds == reply_after {
+                    let observed_x = 0 + row.bounds.x;
+                    let observed_y = 0 + row.bounds.y;
+                    let observed_width = 0 + row.bounds.width;
+                    let observed_height = 0 + row.bounds.height;
+                    if observed_x == reply_after_x
+                            && observed_y == reply_after_y
+                            && observed_width == reply_after_width
+                            && observed_height == reply_after_height {
                         observed_matches = 1;
                     }
+                    observed_after = row_bounds;
                 }
             }
             if observed_matches != 0 {
@@ -513,6 +535,10 @@ fn entry() {
                     "cu_windows_smoke_window_place_audit_scope:" + line
                 );
                 let outcome = "" + record.outcome;
+                ensure(
+                    outcome == "attempt" || outcome == "ok",
+                    "cu_windows_smoke_window_place_audit_outcome:" + line
+                );
                 if outcome == "attempt" {
                     attempt_records += 1;
                 } else if outcome == "ok" {
@@ -522,8 +548,6 @@ fn entry() {
                         "cu_windows_smoke_window_place_audit_detail:" + line
                     );
                     ok_records += 1;
-                } else {
-                    throw "cu_windows_smoke_window_place_audit_outcome:" + line;
                 }
             }
         }

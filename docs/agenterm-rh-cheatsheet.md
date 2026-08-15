@@ -299,6 +299,16 @@ These are places where the same `.rh` behaves differently once `mode=native`.
    topology with a real bounded probe that has no product side effect, such as
    running alternate executable bytes with `--version` and then asserting that
    the live lease, server PID, and PTY identity did not change.
+10. **Compare JSON numbers as numbers, not serialized text.** The same integral
+    geometry can arrive as integer `840` from native enumeration and `840.0`
+    from a floating-point calculation. `rh::json::stringify` preserves that
+    representation difference. Bind each numeric path with `0 + value.path`
+    and compare fields; keep stringify only for diagnostics.
+11. **Assigning a string local transfers ownership in the generated Rust.** If
+    a temporary string must also be compared, inspect it before assigning it
+    to another binding. `observed = value; if value == expected` can compile as
+    use-after-move even though host evaluation accepts it. Reorder the compare
+    before the assignment and run the complete native-pack task.
 
 These three used to be traps and are now fixed in codegen 98 — they work, and
 you should use them freely:
