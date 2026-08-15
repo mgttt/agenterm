@@ -9,6 +9,7 @@ use crate::parse::SExpr;
 use crate::value::Value;
 
 const MAX_ARGS: usize = 6;
+const MAX_LIBRARY_NAME_BYTES: usize = 255;
 
 #[derive(Default)]
 pub(crate) struct LibraryCache {
@@ -147,6 +148,11 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     }
     if lib_name.trim().is_empty() {
         return Err(DynError::Library("library name must not be blank".into()));
+    }
+    if lib_name.len() > MAX_LIBRARY_NAME_BYTES {
+        return Err(DynError::Library(format!(
+            "library name exceeds {MAX_LIBRARY_NAME_BYTES}-byte limit"
+        )));
     }
     if lib_name.as_bytes().contains(&0) {
         return Err(DynError::Library(
