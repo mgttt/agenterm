@@ -965,8 +965,10 @@ mod tests {
         assert_eq!(catalog["exit_classes"]["cancelled"], 5);
         assert_eq!(catalog["exit_classes"]["fleet"], 6);
         assert_eq!(
-            catalog["typed_error"]["catchable_slices"][0],
-            "std.process.Output.require_success"
+            catalog["typed_error"]["catchable_slices"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
         );
         assert_eq!(
             catalog["typed_error"]["fields"].as_array().map(Vec::len),
