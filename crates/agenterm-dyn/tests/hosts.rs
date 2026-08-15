@@ -83,7 +83,7 @@ fn windows_cells_share_kernel32_names() {
 }
 
 #[test]
-fn additional_system_probes_are_live_only_on_linux() {
+fn additional_system_probes_are_live_on_linux_and_macos() {
     for c in [LINUX_X86_64, LINUX_AARCH64] {
         assert_eq!(
             c.system_probes.map(|probe| probe.name),
@@ -171,7 +171,13 @@ fn additional_system_probes_are_live_only_on_linux() {
             ]
         );
     }
-    for c in [MACOS_X86_64, MACOS_AARCH64, WINDOWS_X86_64, WINDOWS_AARCH64] {
+    for c in [MACOS_X86_64, MACOS_AARCH64] {
+        assert!(c.system_probes.iter().all(|probe| matches!(
+            probe.status,
+            SystemProbeStatus::LiveDlcall { lib: "libSystem.B.dylib", .. }
+        )));
+    }
+    for c in [WINDOWS_X86_64, WINDOWS_AARCH64] {
         assert!(c
             .system_probes
             .iter()

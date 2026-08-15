@@ -49,7 +49,8 @@ pub struct HostCell {
     pub size_probe: SizeProbe,
     /// Cheap second native call to prove `dlcall` is not a one-off stub.
     pub secondary_probe: SecondaryProbe,
-    /// Headless system-call smoke candidates; only Linux is live in this leaf.
+    /// Headless system-call smoke candidates. Linux and macOS are live; Windows
+    /// rows stay placeholders.
     pub system_probes: [SystemProbe; 36],
 }
 
@@ -331,6 +332,55 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 36] = [
     },
 ];
 
+const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
+    SystemProbe {
+        name,
+        status: SystemProbeStatus::LiveDlcall {
+            lib: "libSystem.B.dylib",
+            symbol,
+        },
+    }
+}
+
+const MACOS_SYSTEM_PROBES: [SystemProbe; 36] = [
+    macos_live("time", "time"),
+    macos_live("times", "times"),
+    macos_live("getrusage", "getrusage"),
+    macos_live("getrlimit_nofile", "getrlimit"),
+    macos_live("clock_gettime", "clock_gettime"),
+    macos_live("uname", "uname"),
+    macos_live("getuid", "getuid"),
+    macos_live("getgid", "getgid"),
+    macos_live("getppid", "getppid"),
+    macos_live("getpgrp", "getpgrp"),
+    macos_live("getsid", "getsid"),
+    macos_live("getpgid", "getpgid"),
+    macos_live("geteuid", "geteuid"),
+    macos_live("getegid", "getegid"),
+    macos_live("sysconf_pagesize", "sysconf"),
+    macos_live("sysconf_clk_tck", "sysconf"),
+    macos_live("sysconf_nprocessors_onln", "sysconf"),
+    macos_live("getcwd", "getcwd"),
+    macos_live("isatty_stdin", "isatty"),
+    macos_live("open_dev_null", "open"),
+    macos_live("access_root", "access"),
+    macos_live("access_missing", "access"),
+    macos_live("fcntl_stdin_getfd", "fcntl"),
+    macos_live("dup_stdin", "dup"),
+    macos_live("getpriority_process", "getpriority"),
+    macos_live("nice_zero", "nice"),
+    macos_live("lseek_stdin_cur", "lseek"),
+    macos_live("fcntl_stdin_getfl", "fcntl"),
+    macos_live("isatty_stdout", "isatty"),
+    macos_live("isatty_stderr", "isatty"),
+    macos_live("sched_yield_void", "sched_yield"),
+    macos_live("alarm_zero", "alarm"),
+    macos_live("umask", "umask"),
+    macos_live("getdtablesize", "getdtablesize"),
+    macos_live("gethostid", "gethostid"),
+    macos_live("getpagesize", "getpagesize"),
+];
+
 const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 36] = [
     SystemProbe {
         name: "time",
@@ -575,7 +625,7 @@ pub const MACOS_X86_64: HostCell = HostCell {
         lib: "libSystem.B.dylib",
         symbol: "time",
     },
-    system_probes: PLACEHOLDER_SYSTEM_PROBES,
+    system_probes: MACOS_SYSTEM_PROBES,
 };
 
 // PLATFORM-CANDIDATE: macos × aarch64 host row.
@@ -594,7 +644,7 @@ pub const MACOS_AARCH64: HostCell = HostCell {
         lib: "libSystem.B.dylib",
         symbol: "time",
     },
-    system_probes: PLACEHOLDER_SYSTEM_PROBES,
+    system_probes: MACOS_SYSTEM_PROBES,
 };
 
 // --- Windows × {x86_64, aarch64} ----------------------------------------------

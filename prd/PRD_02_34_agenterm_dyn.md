@@ -23,7 +23,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   evaluation.
 - C spelling aliases outside the fixed-width ABI whitelist reject before
   loading or argument evaluation.
-- Win/macOS six-cell rows stay `PLATFORM-CANDIDATE` placeholders.
+- Win six-cell extra probes stay placeholders. **macOS** integer/void/ptr
+  libc rows are live against `libSystem.B.dylib` (same names as Linux);
+  Darwin `ioctl` remains script data (variadic ABI, no C shim).
 - Tests grew ~62 → ~113. Low-risk dyn commits go straight to `main` with `[skip ci]`.
 
 ## Branches to resume (do these, in this order)
@@ -36,12 +38,14 @@ Still useful: unknown return/arg types that show up in real libc headers, and
 any hole where a bad name or pair still loads a library. The inclusive 255-byte
 accept / 256-byte reject boundary is pinned.
 
-### 2. probes — Linux live only, pointer buffers next
+### 2. probes — Linux + macOS live; Windows still placeholder
 
-Integer/void libc rows are mostly filled. `getcwd`, `uname`, `times`, and
-  `clock_gettime`, `getrusage`, and `getrlimit` now prove caller-owned buffers
-  through `ptr`. Keep Win/macOS as placeholders. No C shim. Restore any
-  process-global side effect before the test ends (`umask` is the pattern).
+Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
+(`libSystem.B.dylib`). Windows extra probes stay placeholders. No C shim.
+Restore process-global side effects before the test ends (`umask` pattern).
+Do not claim Darwin `ioctl` success through the fixed trampoline.
+Linux caller-owned `ptr` coverage includes `getcwd`, `uname`, `times`,
+`clock_gettime`, `getrusage`, and `getrlimit`.
 
 ### 3. examples — pair every new live probe
 

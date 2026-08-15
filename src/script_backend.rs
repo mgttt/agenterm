@@ -174,6 +174,11 @@ pub fn try_execute_rh_invocation(
             )?;
             let entry_value = entry_result.entry_value;
             let mut stdout = output_capture.finish()?;
+            let eval_value = if operation == ScriptOperation::Eval {
+                take_rh_eval_value(&mut stdout)?
+            } else {
+                None
+            };
             for line in &pack.cc_lines {
                 if stdout.len().saturating_add(line.len()).saturating_add(1) > output_limit {
                     return Err(agenterm_rh::RhError::Compile(
@@ -185,14 +190,38 @@ pub fn try_execute_rh_invocation(
             }
             Ok(Some(RhInvocationResult {
                 stdout,
-                value: match entry_result.host_value {
+                value: eval_value.or_else(|| match entry_result.host_value {
                     Some(crate::script_rh_host::RhHostEntryValue::Unit) => None,
                     Some(crate::script_rh_host::RhHostEntryValue::Value(value)) => Some(value),
                     None => json_value_from_entry(entry_value),
-                },
+                }),
             }))
         }
     }
+}
+
+fn take_rh_eval_value(stdout: &mut String) -> Result<Option<Value>, agenterm_rh::RhError> {
+    let marker = crate::script_protocol::RH_EVAL_VALUE_MARKER;
+    let mut value = None;
+    let mut retained = String::with_capacity(stdout.len());
+    for segment in stdout.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if let Some(payload) = line.strip_prefix(marker) {
+            if value.is_some() {
+                return Err(agenterm_rh::RhError::Compile(
+                    "rh eval emitted more than one typed value".into(),
+                ));
+            }
+            value = Some(serde_json::from_str(payload).map_err(|error| {
+                agenterm_rh::RhError::Compile(format!("rh eval value is invalid JSON: {error}"))
+            })?);
+        } else {
+            retained.push_str(segment);
+        }
+    }
+    *stdout = retained;
+    Ok(value)
 }
 
 fn json_value_from_entry(entry_value: i64) -> Option<serde_json::Value> {
@@ -260,11 +289,23 @@ pub fn rh_load_pack(
 #[cfg(test)]
 mod tests {
     use super::{
-        RhInvocationOptions, ScriptBackend, rh_backend_enabled, try_execute_rh_invocation,
+        RhInvocationOptions, ScriptBackend, rh_backend_enabled, take_rh_eval_value,
+        try_execute_rh_invocation,
     };
     use crate::script_protocol::ScriptOperation;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn eval_value_marker_is_typed_and_removed_from_stdout() {
+        let marker = crate::script_protocol::RH_EVAL_VALUE_MARKER;
+        let mut stdout = format!("visible\n{marker}{{\"answer\":42}}\n");
+        let value = take_rh_eval_value(&mut stdout)
+            .expect("marker parses")
+            .expect("typed value");
+        assert_eq!(value["answer"], 42);
+        assert_eq!(stdout, "visible\n");
+    }
 
     #[test]
     fn default_backend_is_rh() {
