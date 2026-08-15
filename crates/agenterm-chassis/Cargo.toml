@@ -7,10 +7,24 @@ description = "Chassis-L1 loader + L2 host ABI + L3 app image: pack, do not reco
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = []
+loader = ["dep:agenterm-platform"]
+
 [[bin]]
 name = "agenterm-chassis"
 path = "src/bin/agenterm-chassis.rs"
 
+[[bin]]
+name = "agenterm-chassis-loader"
+path = "src/bin/agenterm-chassis-loader.rs"
+required-features = ["loader"]
+
 [dependencies]
+agenterm-platform = { path = "../agenterm-platform", optional = true, default-features = false, features = [
+    "ime",
+    "input",
+    "portable-pixel-window",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

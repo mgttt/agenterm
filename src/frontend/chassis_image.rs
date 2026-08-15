@@ -3,8 +3,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use agenterm_chassis::{CELLS, ProductManifest};
-
 #[derive(Debug)]
 pub(crate) struct LoadedChassisImage {
     pub(crate) root: PathBuf,
@@ -40,26 +38,8 @@ fn load_image(root: &Path) -> Result<LoadedChassisImage, String> {
             root.display()
         ));
     }
-    agenterm_chassis::check_layout(root)
+    agenterm_chassis::check_product_image(root)
         .map_err(|error| format!("chassis image check failed: {error}"))?;
-    let manifest_path = root.join("manifest.json");
-    let manifest: ProductManifest = serde_json::from_slice(
-        &std::fs::read(&manifest_path)
-            .map_err(|error| format!("cannot read chassis manifest: {error}"))?,
-    )
-    .map_err(|error| format!("invalid chassis manifest: {error}"))?;
-    if manifest.compile || manifest.invokes_cargo {
-        return Err("chassis image is not a compose-without-cargo product".to_owned());
-    }
-    if manifest.schema != 1 {
-        return Err(format!(
-            "unsupported chassis product manifest schema {}",
-            manifest.schema
-        ));
-    }
-    if manifest.cells != CELLS {
-        return Err("chassis image does not contain the canonical six L1 cells".to_owned());
-    }
     let native_cell = agenterm_chassis::native_cell();
     if native_cell == "unknown" {
         return Err("this OS/ISA has no Chassis-L1 loader cell".to_owned());
@@ -82,6 +62,7 @@ fn load_image(root: &Path) -> Result<LoadedChassisImage, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agenterm_chassis::{CELLS, ProductManifest};
     use std::fs;
 
     fn write_image(root: &Path, l3_note: Option<&str>) {
