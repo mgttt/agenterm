@@ -29,6 +29,8 @@ static UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
 static WINDOWS_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
 static UNIX_RH_CHECK: &str = include_str!("../scripts/rh-check.sh");
 static WINDOWS_RH_CHECK: &str = include_str!("../scripts/rh-check.cmd");
+static BUILD: &str = include_str!("../scripts/rh/build.rh");
+static SIGN_MACOS_RELEASE: &str = include_str!("../scripts/sign-macos-release.sh");
 static ARTIFACT_MANIFEST: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../scripts/artifacts.json"))
         .expect("scripts/artifacts.json must be valid JSON")
@@ -202,6 +204,60 @@ fn artifact_manifest_declares_rh_dev_cli_offline_version_probe() {
             .any(|entry| entry["role"] == "scripting-cli"),
         "retired scripting-cli role must not reappear"
     );
+}
+
+#[test]
+fn unix_delivery_manifest_carries_computer_use_and_dynamic_library() {
+    let platforms = ARTIFACT_MANIFEST["platforms"]
+        .as_array()
+        .expect("manifest platforms");
+    for (os, library_name) in [("linux", "libagenterm.so"), ("macos", "libagenterm.dylib")] {
+        for arch in ["x86_64", "aarch64"] {
+            let matches: Vec<_> = platforms
+                .iter()
+                .filter(|entry| entry["os"] == os && entry["arch"] == arch)
+                .collect();
+            assert_eq!(matches.len(), 1, "{os}-{arch}");
+            let platform = matches[0];
+            assert!(
+                platform["executables"]
+                    .as_array()
+                    .expect("platform executables")
+                    .iter()
+                    .any(|entry| entry["name"] == "agenterm-cu"
+                        && entry["role"] == "computer-use-host"),
+                "{os}-{arch} missing agenterm-cu"
+            );
+            assert!(
+                platform["libraries"]
+                    .as_array()
+                    .expect("platform libraries")
+                    .iter()
+                    .any(
+                        |entry| entry["name"] == library_name && entry["kind"] == "dynamic-library"
+                    ),
+                "{os}-{arch} missing {library_name}"
+            );
+        }
+    }
+
+    assert!(BUILD.contains("cargo_args.push(\"agenterm-cu\")"));
+    assert!(BUILD.contains("library_entries.len > 0"));
+    assert!(BUILD.contains("abi_library_name = \"libagenterm.so\""));
+    assert!(BUILD.contains("abi_library_name = \"libagenterm.dylib\""));
+}
+
+#[test]
+fn macos_signing_covers_manifest_libraries_before_executables() {
+    let libraries = SIGN_MACOS_RELEASE
+        .find("get(\"libraries\", [])")
+        .expect("macOS signer libraries");
+    let executables = SIGN_MACOS_RELEASE
+        .find("get(\"executables\", [])")
+        .expect("macOS signer executables");
+    assert!(libraries < executables);
+    assert!(SIGN_MACOS_RELEASE.contains("for name in \"${ARTIFACT_NAMES[@]}\""));
+    assert!(SIGN_MACOS_RELEASE.contains("codesign --verify --strict"));
 }
 
 #[test]

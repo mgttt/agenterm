@@ -565,10 +565,8 @@ fn entry() {
         cargo_args.push("agenterm");
         cargo_args.push("--package");
         cargo_args.push("agenterm-con");
-        if os_name == "windows" {
-            cargo_args.push("--package");
-            cargo_args.push("agenterm-cu");
-        }
+        cargo_args.push("--package");
+        cargo_args.push("agenterm-cu");
         for executable in executable_entries {
             let executable_name = "" + executable.name;
             if executable_name != "agenterm-con"
@@ -789,9 +787,9 @@ fn entry() {
     }
 
     // libagenterm is a C ABI boundary and must retain unwind support. Build it
-    // under the dedicated ABI profile, then merge only the DLL into the normal
+    // under the dedicated ABI profile, then merge only the dynamic library into the normal
     // profile directory consumed by staging and cross-platform packaging.
-    if action == "build" && os_name == "windows" {
+    if action == "build" && (os_name == "windows" || library_entries.len > 0) {
         let abi_profile_name = "abi-release";
         if profile == "dev" {
             abi_profile_name = "abi-dev";
@@ -834,10 +832,16 @@ fn entry() {
         let abi_root = std::path::join(cargo_output, con_target).display;
         let abi_directory =
             std::path::join(abi_root, abi_profile_name).display;
+        let abi_library_name = "agenterm.dll";
+        if os_name == "linux" {
+            abi_library_name = "libagenterm.so";
+        } else if os_name == "macos" {
+            abi_library_name = "libagenterm.dylib";
+        }
         let abi_source =
-            std::path::join(abi_directory, "agenterm.dll").display;
+            std::path::join(abi_directory, abi_library_name).display;
         let abi_destination =
-            std::path::join(profile_directory, "agenterm.dll").display;
+            std::path::join(profile_directory, abi_library_name).display;
         require(
             direct_file(abi_source) != 0,
             "build_abi_artifact_source:" + abi_source

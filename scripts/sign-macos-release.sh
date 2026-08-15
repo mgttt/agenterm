@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Sign every macOS release executable with a Developer ID Application identity.
+# Sign every macOS release dynamic library and executable with a Developer ID
+# Application identity. Libraries go first so the final executable signatures
+# bind an already signed runtime payload.
 #
 # Usage: sign-macos-release.sh ARCH BIN_DIR
 # Required environment: APPLE_SIGNING_IDENTITY
@@ -17,10 +19,10 @@ if [[ ! -d "$BIN_DIR" ]]; then
   exit 1
 fi
 
-EXEC_NAMES=()
+ARTIFACT_NAMES=()
 while IFS= read -r name; do
   name="${name%$'\r'}"
-  EXEC_NAMES+=("$name")
+  ARTIFACT_NAMES+=("$name")
 done < <(
   "$PYTHON" - "$MANIFEST" "$ARCH" <<'PY'
 import json
@@ -37,23 +39,23 @@ matches = [
 ]
 if len(matches) != 1:
     sys.exit(f"Expected one macos-{arch} manifest entry, found {len(matches)}")
-for executable in matches[0].get("executables", []):
-    name = executable.get("name")
+for artifact in matches[0].get("libraries", []) + matches[0].get("executables", []):
+    name = artifact.get("name")
     if not name:
-        sys.exit("macOS executable entry is missing name")
+        sys.exit("macOS artifact entry is missing name")
     print(name)
 PY
 )
 
-if [[ ${#EXEC_NAMES[@]} -eq 0 ]]; then
-  echo "No macOS executables listed for architecture $ARCH" >&2
+if [[ ${#ARTIFACT_NAMES[@]} -eq 0 ]]; then
+  echo "No macOS artifacts listed for architecture $ARCH" >&2
   exit 1
 fi
 
-for name in "${EXEC_NAMES[@]}"; do
+for name in "${ARTIFACT_NAMES[@]}"; do
   path="$BIN_DIR/$name"
   if [[ ! -f "$path" ]]; then
-    echo "Missing macOS binary: $path" >&2
+    echo "Missing macOS artifact: $path" >&2
     exit 1
   fi
   codesign \
@@ -65,4 +67,4 @@ for name in "${EXEC_NAMES[@]}"; do
   codesign --verify --strict --verbose=2 "$path"
 done
 
-echo "==> signed ${#EXEC_NAMES[@]} macOS executable(s) for $ARCH"
+echo "==> signed ${#ARTIFACT_NAMES[@]} macOS artifact(s) for $ARCH"

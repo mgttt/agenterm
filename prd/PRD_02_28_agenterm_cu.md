@@ -84,6 +84,12 @@ boundary; it does not open raw OS APIs or fork a fifth screenshot stack.
 - [x] Staged public `cu-windows-smoke` passes all seven declared evidence
   receipts: host self-test, DLL load cleanup, window identity, UIA tree,
   name-addressed actuation, Value/GetText wait and UIA fixture cleanup.
+- [~] The six-cell artifact manifest and shared build path now include
+  `agenterm-cu` plus the colocated `libagenterm` dynamic library on Linux and
+  macOS as well as Windows. The macOS release signer signs and strictly verifies
+  manifest libraries before executables. Static manifest/build/signing gates
+  own this wiring; native Unix packaging, macOS signing/notarization and sealed
+  Candidate artifact evidence remain open.
 - [ ] Candidate and six-cell qualification and release evidence remain open.
   Passing local fixtures and staged public smoke does not promote this subtree
   root to shipped.

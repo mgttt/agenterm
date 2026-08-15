@@ -232,9 +232,26 @@
             "--version"
           ],
           "release_budget_bytes": 1048575
+        },
+        {
+          "name": "agenterm-cu",
+          "role": "computer-use-host",
+          "documentation_role": "computer-use CLI host",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         }
       ],
-      "libraries": []
+      "libraries": [
+        {
+          "name": "libagenterm.so",
+          "role": "libagenterm-c-abi",
+          "kind": "dynamic-library",
+          "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
+          "release_budget_bytes": 1048575
+        }
+      ]
     },
     {
       "os": "linux",
@@ -268,9 +285,26 @@
             "--version"
           ],
           "release_budget_bytes": 1048575
+        },
+        {
+          "name": "agenterm-cu",
+          "role": "computer-use-host",
+          "documentation_role": "computer-use CLI host",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         }
       ],
-      "libraries": []
+      "libraries": [
+        {
+          "name": "libagenterm.so",
+          "role": "libagenterm-c-abi",
+          "kind": "dynamic-library",
+          "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
+          "release_budget_bytes": 1048575
+        }
+      ]
     },
     {
       "os": "macos",
@@ -304,9 +338,26 @@
             "--version"
           ],
           "release_budget_bytes": 1048575
+        },
+        {
+          "name": "agenterm-cu",
+          "role": "computer-use-host",
+          "documentation_role": "computer-use CLI host",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         }
       ],
-      "libraries": []
+      "libraries": [
+        {
+          "name": "libagenterm.dylib",
+          "role": "libagenterm-c-abi",
+          "kind": "dynamic-library",
+          "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
+          "release_budget_bytes": 1048575
+        }
+      ]
     },
     {
       "os": "macos",
@@ -340,10 +391,26 @@
             "--version"
           ],
           "release_budget_bytes": 1048575
+        },
+        {
+          "name": "agenterm-cu",
+          "role": "computer-use-host",
+          "documentation_role": "computer-use CLI host",
+          "offline_probe": [
+            "--version"
+          ],
+          "release_budget_bytes": 4194304
         }
       ],
-      "libraries": []
+      "libraries": [
+        {
+          "name": "libagenterm.dylib",
+          "role": "libagenterm-c-abi",
+          "kind": "dynamic-library",
+          "documentation_role": "shared native mechanism ABI loaded by agenterm-cu",
+          "release_budget_bytes": 1048575
+        }
+      ]
     }
   ]
 }
-
