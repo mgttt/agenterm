@@ -33,7 +33,8 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`,
   `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`,
   `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
-  `pthread_cpu_number_np`, and `malloc_good_size`
+  `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, and
+  `pthread_jit_write_protect_supported_np`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Darwin `ioctl` calls its resolved symbol through a
@@ -42,8 +43,8 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **122 passed** (12 unit + 38 errors + 10 hosts + 16 language + 46
   cfg-gated Linux smoke; 0 doctests). The Darwin test inventory for this
-  source is **129** (13 unit + 38 errors + 10 hosts +
-  16 language + 1 macos_ioctl + 24 macos_probes + 4 macos_resource + 23
+  source is **135** (13 unit + 38 errors + 10 hosts +
+  16 language + 1 macos_ioctl + 30 macos_probes + 4 macos_resource + 23
   cfg-gated macOS smoke; 0 doctests); native CI remains the evidence gate for
   this Wave 10 source. Wave 4–6 live rows were `dlcall`ed on the earlier
   Darwin CI host and compared to later native calls. Host-specific counts, not
@@ -74,7 +75,8 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
 `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`,
 `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
-`pthread_cpu_number_np`, and `malloc_good_size`.
+`pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, and
+`pthread_jit_write_protect_supported_np`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.

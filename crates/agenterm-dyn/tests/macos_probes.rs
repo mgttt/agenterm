@@ -549,7 +549,7 @@ fn dlcall_getentropy_fills_caller_owned_buffer() {
 fn dlcall_proc_name_matches_direct_c_current_process_name() {
     let symbol = live_symbol("proc_name");
     let pid = unsafe { libc::getpid() };
-    let mut name = [0_i8; libc::PROC_PIDPATHINFO_MAXSIZE];
+    let mut name = [0_i8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     let mut env = Dyn::new();
     env.bind("name", name.as_mut_ptr().cast())
         .expect("bind process-name buffer");
@@ -564,7 +564,7 @@ fn dlcall_proc_name_matches_direct_c_current_process_name() {
     assert!(got > 0, "proc_name must write a current-process name");
     let got = unsafe { CStr::from_ptr(name.as_ptr()) };
 
-    let mut direct_name = [0_i8; libc::PROC_PIDPATHINFO_MAXSIZE];
+    let mut direct_name = [0_i8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     let direct_status = unsafe {
         libc::proc_name(
             pid,
@@ -686,4 +686,75 @@ fn dlcall_malloc_good_size_matches_direct_c_for_requests() {
         assert!(got >= request, "good allocation size must cover request");
         assert_eq!(got, direct);
     }
+}
+
+#[test]
+fn dlcall_nsget_progname_matches_libc_outer_pointer_and_c_string() {
+    let symbol = live_symbol("nsget_progname");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+        .expect("_NSGetProgname dlcall")
+        .as_ptr()
+        .expect("_NSGetProgname outer pointer") as *mut *mut libc::c_char;
+    let direct = unsafe { libc::_NSGetProgname() };
+    assert!(
+        !got.is_null(),
+        "_NSGetProgname must return an outer pointer"
+    );
+    assert_eq!(got, direct);
+    let name = unsafe { *got };
+    let direct_name = unsafe { libc::getprogname() };
+    assert!(!name.is_null(), "_NSGetProgname must expose a program name");
+    assert!(
+        !direct_name.is_null(),
+        "getprogname must return a program name"
+    );
+    assert_eq!(
+        unsafe { CStr::from_ptr(name) }.to_bytes(),
+        unsafe { CStr::from_ptr(direct_name) }.to_bytes()
+    );
+}
+
+#[test]
+fn dlcall_proc_libversion_writes_caller_owned_version() {
+    let symbol = live_symbol("proc_libversion");
+    let mut major = 0_i32;
+    let mut minor = 0_i32;
+    let mut env = Dyn::new();
+    env.bind("major", (&mut major as *mut i32).cast())
+        .expect("bind proc_libversion major output");
+    env.bind("minor", (&mut minor as *mut i32).cast())
+        .expect("bind proc_libversion minor output");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" major "ptr" minor)"#
+        ))
+        .expect("proc_libversion dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!(major >= 1, "libproc major version must be positive");
+
+    let mut direct_major = 0_i32;
+    let mut direct_minor = 0_i32;
+    let direct_status = unsafe { libc::proc_libversion(&mut direct_major, &mut direct_minor) };
+    assert_eq!(direct_status, 0, "direct proc_libversion must succeed");
+    assert_eq!(major, direct_major);
+    assert_eq!(minor, direct_minor);
+}
+
+#[test]
+fn dlcall_pthread_jit_write_protect_supported_np_matches_libc_boolean() {
+    let symbol = live_symbol("pthread_jit_write_protect_supported_np");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+        .expect("pthread_jit_write_protect_supported_np dlcall")
+        .as_int()
+        .expect("pthread_jit_write_protect_supported_np integer");
+    let direct = unsafe { libc::pthread_jit_write_protect_supported_np() };
+    assert!(
+        matches!(got, 0 | 1),
+        "JIT-write-protect support must be boolean"
+    );
+    assert_eq!(got, i64::from(direct));
 }

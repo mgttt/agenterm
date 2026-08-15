@@ -151,6 +151,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_self",
                 "pthread_cpu_number_np",
                 "malloc_good_size",
+                "nsget_progname",
+                "proc_libversion",
+                "pthread_jit_write_protect_supported_np",
                 "mach_host_self",
             ]
         );
@@ -276,10 +279,13 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_self",
                 "pthread_cpu_number_np",
                 "malloc_good_size",
+                "nsget_progname",
+                "proc_libversion",
+                "pthread_jit_write_protect_supported_np",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..63].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..66].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -287,7 +293,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[63].status,
+            c.system_probes[66].status,
             SystemProbeStatus::Placeholder
         ));
     }
@@ -315,6 +321,12 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
             ("pthread_self", "pthread_self"),
             ("pthread_cpu_number_np", "pthread_cpu_number_np"),
             ("malloc_good_size", "malloc_good_size"),
+            ("nsget_progname", "_NSGetProgname"),
+            ("proc_libversion", "proc_libversion"),
+            (
+                "pthread_jit_write_protect_supported_np",
+                "pthread_jit_write_protect_supported_np",
+            ),
         ] {
             let probe = c
                 .system_probes
