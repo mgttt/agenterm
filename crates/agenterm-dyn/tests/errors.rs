@@ -251,6 +251,12 @@ fn dlcall_rejects_c_abi_aliases_before_arguments_or_library_load() {
         "char",
         "short",
         "int",
+        "ptrdiff_t",
+        "rlim_t",
+        "dev_t",
+        "ino_t",
+        "clockid_t",
+        "sigset_t",
     ] {
         let expected = || {
             DynError::Type(format!(

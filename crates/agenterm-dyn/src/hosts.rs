@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 43],
+    pub system_probes: [SystemProbe; 46],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 43] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 46] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -358,6 +358,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 43] = [
         name: "arc4random",
         status: SystemProbeStatus::Placeholder,
     },
+    placeholder("clock_gettime_nsec_np"),
+    placeholder("sysctl"),
+    placeholder("mach_host_self"),
 ];
 
 const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
@@ -370,7 +373,14 @@ const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 43] = [
+const fn placeholder(name: &'static str) -> SystemProbe {
+    SystemProbe {
+        name,
+        status: SystemProbeStatus::Placeholder,
+    }
+}
+
+const MACOS_SYSTEM_PROBES: [SystemProbe; 46] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -414,9 +424,12 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 43] = [
     macos_live("nsget_executable_path", "_NSGetExecutablePath"),
     macos_live("proc_pidpath", "proc_pidpath"),
     macos_live("arc4random", "arc4random"),
+    macos_live("clock_gettime_nsec_np", "clock_gettime_nsec_np"),
+    macos_live("sysctl", "sysctl"),
+    macos_live("mach_host_self", "mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 43] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 46] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -589,6 +602,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 43] = [
         name: "arc4random",
         status: SystemProbeStatus::Placeholder,
     },
+    placeholder("clock_gettime_nsec_np"),
+    placeholder("sysctl"),
+    placeholder("mach_host_self"),
 ];
 
 // PLATFORM-CANDIDATE: terminal/console size probe contract per OS.
@@ -910,19 +926,19 @@ const WINDOWS_GET_TEXT: ProbeFact = ProbeFact {
 const MACOS_WINDOW_LIST: ProbeFact = ProbeFact {
     lib: "ApplicationServices",
     symbol: "AXUIElementCreateApplication",
-    note: "macOS AX application windows (cu planned hand; PLATFORM-CANDIDATE)",
+    note: "macOS AX application windows (cu live AX window hand; dyn names ApplicationServices / AXUIElementCreateApplication only)",
 };
 
 const MACOS_FOCUS: ProbeFact = ProbeFact {
     lib: "ApplicationServices",
     symbol: "",
-    note: "AX kAXFocusedAttribute / AXUIElementSetAttributeValue (PLATFORM-CANDIDATE)",
+    note: "AX focused attribute (kAXFocusedAttribute / AXUIElementSetAttributeValue; cu live hand; dyn names only)",
 };
 
 const MACOS_GET_TEXT: ProbeFact = ProbeFact {
     lib: "ApplicationServices",
     symbol: "",
-    note: "AX kAXValueAttribute / AXUIElementCopyAttributeValue (PLATFORM-CANDIDATE)",
+    note: "AX value/string attributes (kAXValueAttribute / AXUIElementCopyAttributeValue; cu live hand; dyn names only)",
 };
 
 const fn linux_cell(arch: HostArch) -> CuAdjacentProbeCell {
@@ -1011,6 +1027,20 @@ mod tests {
             assert_eq!(cell.window_list.symbol, "XOpenDisplay");
             assert!(cell.focus.note.contains("AT-SPI2"));
             assert!(cell.get_text.note.contains("Text.GetText"));
+        }
+    }
+
+    #[test]
+    fn macos_rows_name_ax_and_cu_not_planned() {
+        for arch in HostArch::ALL {
+            let cell = cu_adjacent_probe(HostOs::Macos, arch).expect("macos cell");
+            assert_eq!(cell.window_list.lib, "ApplicationServices");
+            assert_eq!(cell.window_list.symbol, "AXUIElementCreateApplication");
+            for fact in [cell.window_list, cell.focus, cell.get_text] {
+                assert!(fact.note.contains("AX"), "{}", fact.note);
+                assert!(fact.note.contains("cu"), "{}", fact.note);
+                assert!(!fact.note.contains("planned"), "{}", fact.note);
+            }
         }
     }
 }

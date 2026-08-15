@@ -2,9 +2,9 @@
 
 #![cfg(target_os = "macos")]
 
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{c_void, CStr, CString};
 
-use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
+use agenterm_dyn::{live_cell, Dyn, SystemProbeStatus, Value};
 
 const LIB: &str = "libSystem.B.dylib";
 
@@ -176,4 +176,87 @@ fn dlcall_arc4random_returns_u32_values() {
             .expect("arc4random integer result");
         assert!((0..=i64::from(u32::MAX)).contains(&value));
     }
+}
+
+#[test]
+fn dlcall_clock_gettime_nsec_np_is_monotonic_against_libc() {
+    let symbol = live_symbol("clock_gettime_nsec_np");
+    let clock = i64::from(libc::CLOCK_UPTIME_RAW);
+    let mut env = Dyn::new();
+    let script = format!(r#"(dlcall "{LIB}" "{symbol}" "u64" "i32" {clock})"#);
+    let first = env
+        .eval(&script)
+        .expect("first clock_gettime_nsec_np dlcall");
+    let second = env
+        .eval(&script)
+        .expect("second clock_gettime_nsec_np dlcall");
+    let first = first.as_int().expect("integer nsec result") as u64;
+    let second = second.as_int().expect("integer nsec result") as u64;
+    // libc 0.2 does not bind clock_gettime_nsec_np; call the same Darwin symbol.
+    unsafe extern "C" {
+        fn clock_gettime_nsec_np(clock_id: libc::clockid_t) -> u64;
+    }
+    let direct = unsafe { clock_gettime_nsec_np(libc::CLOCK_UPTIME_RAW) };
+    assert!(second >= first, "later dlcall tick must not precede first");
+    assert!(
+        direct >= second,
+        "later libc tick must not precede last dlcall"
+    );
+}
+
+#[test]
+fn dlcall_sysctl_writes_ncpu_into_caller_buffer() {
+    let symbol = live_symbol("sysctl");
+    let mut mib = [libc::CTL_HW, libc::HW_NCPU];
+    let mut ncpu: i32 = 0;
+    let mut oldlen = std::mem::size_of_val(&ncpu);
+    let mut env = Dyn::new();
+    env.bind("mib", mib.as_mut_ptr().cast())
+        .expect("bind sysctl mib");
+    env.bind("oldp", (&mut ncpu as *mut i32).cast())
+        .expect("bind ncpu output");
+    env.bind("oldlenp", (&mut oldlen as *mut usize).cast())
+        .expect("bind ncpu output length");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" mib "u32" 2 "ptr" oldp "ptr" oldlenp "ptr" 0 "u64" 0)"#
+        ))
+        .expect("sysctl dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!(ncpu >= 1, "hw.ncpu must be at least 1");
+
+    let mut direct: i32 = 0;
+    let mut direct_len = std::mem::size_of_val(&direct);
+    let mut direct_mib = [libc::CTL_HW, libc::HW_NCPU];
+    let direct_status = unsafe {
+        libc::sysctl(
+            direct_mib.as_mut_ptr(),
+            2,
+            (&mut direct as *mut i32).cast(),
+            &mut direct_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    assert_eq!(direct_status, 0, "direct sysctl must succeed");
+    assert_eq!(ncpu, direct);
+}
+
+#[test]
+fn dlcall_mach_host_self_returns_stable_nonzero_port() {
+    let symbol = live_symbol("mach_host_self");
+    let mut env = Dyn::new();
+    let script = format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#);
+    let first = env
+        .eval(&script)
+        .expect("first mach_host_self dlcall")
+        .as_int()
+        .expect("host port integer");
+    let second = env
+        .eval(&script)
+        .expect("second mach_host_self dlcall")
+        .as_int()
+        .expect("host port integer");
+    assert!(first > 0, "mach_host_self must return a non-zero port");
+    assert_eq!(first, second, "mach_host_self must be stable");
 }
