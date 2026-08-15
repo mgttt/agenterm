@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 79],
+    pub system_probes: [SystemProbe; 82],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 79] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 82] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -388,6 +388,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 79] = [
     placeholder("dladdr"),
     placeholder("gethostuuid"),
     placeholder("dyld_get_image_header"),
+    placeholder("arc4random_uniform"),
+    placeholder("getdomainname"),
+    placeholder("statvfs"),
     placeholder("mach_host_self"),
 ];
 
@@ -408,7 +411,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 79] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 82] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -493,13 +496,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 79] = [
     macos_live("dladdr", "dladdr"),
     macos_live("gethostuuid", "gethostuuid"),
     macos_live("dyld_get_image_header", "_dyld_get_image_header"),
+    macos_live("arc4random_uniform", "arc4random_uniform"),
+    macos_live("getdomainname", "getdomainname"),
+    macos_live("statvfs", "statvfs"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 79] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 82] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -707,6 +713,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 79] = [
     placeholder("dladdr"),
     placeholder("gethostuuid"),
     placeholder("dyld_get_image_header"),
+    placeholder("arc4random_uniform"),
+    placeholder("getdomainname"),
+    placeholder("statvfs"),
     placeholder("mach_host_self"),
 ];
 
@@ -870,8 +879,8 @@ pub const WINDOWS_AARCH64: HostCell = HostCell {
 };
 
 // PLATFORM-CANDIDATE: full six-cell matrix.
-/// All six cells — always available as compile-time data.
-pub const ALL_CELLS: [HostCell; 6] = [
+/// All six cells — always available as static host data.
+pub static ALL_CELLS: [HostCell; 6] = [
     LINUX_X86_64,
     LINUX_AARCH64,
     MACOS_X86_64,

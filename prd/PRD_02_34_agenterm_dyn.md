@@ -1,11 +1,12 @@
 # PRD 02.34 — agenterm-dyn（极小 / 动态 / 底层）
 
-Status: current authorized scope complete 2026-08-15. Further product work requires 政委 authorization.
+Status: active — authorized Darwin probe waves continue under
+`plan/goal-agenterm-dyn-macos.md`.
 Owner: 政委定方向；主会话按独占文件域推进。
 
 Parallel crate `crates/agenterm-dyn`, not a fourth engine, not libagenterm, not cu.
 
-## Completed authorized scope on `main`
+## Current authorized scope
 
 First cut is the body: S-expr + intern + `if` / `set` / `do` + comparisons +
 fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
@@ -63,24 +64,30 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`,
   `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
   `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
-  `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`, and
-  `_dyld_get_image_header`
+  `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`,
+  `_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, and
+  `statvfs`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Unix `ioctl` calls its resolved symbol through a
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
-- Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
+- Last Linux Wave 8 evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **150 passed** (25 unit + 40 errors + 11 hosts + 26 language + 48
   cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory,
-  measured on this aarch64-apple-darwin host with Rust 1.97, is **176**
+  last measured on an aarch64-apple-darwin host with Rust 1.97 for Wave 8,
+  is **176**
   (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl + 42
   macos_probes + 4 macos_resource + 27 cfg-gated macOS smoke; 0 doctests).
   A later portable catalog/documentation gate adds 3 tests and passes on
-  Windows; the next Darwin rerun is expected to report 179, but 176 remains
-  the last host-measured Darwin receipt until that rerun occurs.
+  Windows. Wave 9 adds 3 Darwin probe tests, so the next Darwin rerun is
+  expected to report 182, but 176 remains the last host-measured Darwin
+  receipt until that rerun occurs.
   Wave 8 catalog rows (`dladdr`, `gethostuuid`, `_dyld_get_image_header`)
   are live `dlcall`s compared with later native calls.
+  Wave 9 adds `arc4random_uniform`, `getdomainname`, and `statvfs` plus a
+  portable catalog/documentation gate. Its Darwin-native run remains required;
+  no Windows result substitutes for that evidence.
   Native CI remains the evidence gate for current source. Host-specific
   counts, not
   a cross-platform estimate.
@@ -114,8 +121,9 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`,
 `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
 `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
-`_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`, and
-`_dyld_get_image_header`.
+`_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`,
+`_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, and
+`statvfs`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.

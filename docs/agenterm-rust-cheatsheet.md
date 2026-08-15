@@ -2002,6 +2002,12 @@ Windows or the crate will not compile. Keep `mach_host_self` last and
 Placeholder: `dlcall` has no Mach-port release owner, so a live call would
 leak a send right.
 
+Store the assembled six-cell matrix as `static`, not a copying `const`. At 82
+probe rows per cell, the public `[HostCell; 6]` crossed Clippy's
+`large_const_arrays` threshold; `pub static ALL_CELLS` retains one immutable
+catalog allocation while preserving iteration and lookup consumers. Keep the
+individual cell values `const` so target-selected references remain available.
+
 ## Do not pull `mach2` for Darwin probe baselines
 
 `libc` 0.2 deprecates some Darwin `mach_*` types and functions toward the

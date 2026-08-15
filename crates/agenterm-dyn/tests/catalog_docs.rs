@@ -58,6 +58,9 @@ const DARWIN_ONLY_LIVE_EXAMPLES: &[(&str, &str)] = &[
     ("dladdr", "dladdr.md"),
     ("gethostuuid", "gethostuuid.md"),
     ("dyld_get_image_header", "dyld-get-image-header.md"),
+    ("arc4random_uniform", "arc4random-uniform.md"),
+    ("getdomainname", "getdomainname.md"),
+    ("statvfs", "statvfs.md"),
 ];
 
 #[test]

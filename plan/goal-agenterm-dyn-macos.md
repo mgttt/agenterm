@@ -1,6 +1,6 @@
 # Goal: first-class `agenterm-dyn` on macOS (standing)
 
-Status: **active — do not stop between waves**  
+Status: **active — Wave 9 implemented; Darwin-native evidence pending**
 Execution: primary session + exclusive-file subagents **in background**.
 Paths: repository-relative or `~/...` only.
 
@@ -43,8 +43,8 @@ host.
   `CARGO_TARGET_DIR=target/dyn-macos-docs8` **176 passed** (25 unit + 40
   errors + 11 hosts + 26 language + 1 macos_ioctl + 42 macos_probes + 4
   macos_resource + 27 smoke; 0 doctests). The later portable `catalog_docs`
-  gate adds 3 tests and passes on Windows; 179 is the expected next Darwin
-  total, not yet a Darwin receipt.
+  gate adds 3 tests and passes on Windows. Wave 9 adds 3 Darwin-only probe
+  tests, so 182 is the expected next Darwin total, not yet a Darwin receipt.
 
 ## Wave 4 — shipped
 
@@ -76,12 +76,20 @@ Catalog is 79 rows. `dladdr`, `gethostuuid`, and `_dyld_get_image_header`
 are Darwin Live / Linux+Windows Placeholder. `mach_host_self` stays last
 Placeholder.
 
-## Next leak-free Darwin candidates
+## Wave 9 — implemented; native gate pending
 
-`arc4random_uniform`, `getdomainname`, `statvfs` (leak-free; no Mach send
-rights). Do not live-call Mach send rights. Do not pick
-`os_proc_available_memory` — the macOS SDK marks that symbol unavailable.
-Keep `mach_host_self` Placeholder.
+Catalog is 82 rows. `arc4random_uniform`, `getdomainname`, and `statvfs`
+are Darwin Live / Linux+Windows Placeholder. `arc4random_uniform` is checked
+by its bound rather than equality across random calls; `getdomainname` uses
+Darwin's `i32` length and independent caller buffers; `statvfs` compares only
+stable filesystem fields because capacity counters can change between calls.
+The portable catalog/documentation gate runs on every host. A matching Darwin
+`cargo test --locked -p agenterm-dyn` run is still required before this wave is
+called shipped; Windows compilation is not live evidence. Keep
+`mach_host_self` last and Placeholder.
+
+Do not live-call Mach send rights. Do not pick `os_proc_available_memory` —
+the macOS SDK marks that symbol unavailable.
 
 ## Non-goals
 

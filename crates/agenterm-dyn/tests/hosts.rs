@@ -207,6 +207,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "dladdr",
                 "gethostuuid",
                 "dyld_get_image_header",
+                "arc4random_uniform",
+                "getdomainname",
+                "statvfs",
                 "mach_host_self",
             ]
         );
@@ -349,6 +352,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "dladdr",
                 "gethostuuid",
                 "dyld_get_image_header",
+                "arc4random_uniform",
+                "getdomainname",
+                "statvfs",
                 "mach_host_self",
             ]
         );
@@ -414,6 +420,9 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
             ("dladdr", "dladdr"),
             ("gethostuuid", "gethostuuid"),
             ("dyld_get_image_header", "_dyld_get_image_header"),
+            ("arc4random_uniform", "arc4random_uniform"),
+            ("getdomainname", "getdomainname"),
+            ("statvfs", "statvfs"),
         ] {
             let probe = c
                 .system_probes

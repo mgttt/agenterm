@@ -1078,3 +1078,88 @@ fn dlcall_dyld_get_image_header_matches_image_zero() {
     );
     assert_eq!(got, direct);
 }
+
+#[test]
+fn dlcall_arc4random_uniform_respects_each_upper_bound() {
+    let symbol = live_symbol("arc4random_uniform");
+    let mut env = Dyn::new();
+    for bound in [1_u32, 2, 17, u32::MAX] {
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{LIB}" "{symbol}" "u32" "u32" {bound})"#),
+        )
+        .expect("arc4random_uniform dlcall")
+        .as_int()
+        .expect("arc4random_uniform integer result");
+        assert!(
+            (0..i64::from(bound)).contains(&got),
+            "arc4random_uniform({bound}) returned {got}"
+        );
+
+        let direct = unsafe { libc::arc4random_uniform(bound) };
+        assert!(
+            direct < bound,
+            "direct arc4random_uniform({bound}) returned {direct}"
+        );
+    }
+}
+
+#[test]
+fn dlcall_getdomainname_matches_independent_caller_buffer() {
+    const BUFFER_BYTES: usize = 256;
+    let symbol = live_symbol("getdomainname");
+    let length = libc::c_int::try_from(BUFFER_BYTES).expect("domain buffer fits c_int");
+    let mut domain = [0_u8; BUFFER_BYTES];
+    let mut env = Dyn::new();
+    env.bind("domain", domain.as_mut_ptr().cast())
+        .expect("bind domain-name output");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" domain "i32" {length})"#),
+    )
+    .expect("getdomainname dlcall");
+    assert_eq!(got, Value::Int(0));
+    let domain = CStr::from_bytes_until_nul(&domain)
+        .expect("successful getdomainname must NUL-terminate its bounded output");
+
+    let mut direct = [0_u8; BUFFER_BYTES];
+    let direct_status =
+        unsafe { libc::getdomainname(direct.as_mut_ptr().cast::<libc::c_char>(), length) };
+    assert_eq!(direct_status, 0, "direct getdomainname must succeed");
+    let direct = CStr::from_bytes_until_nul(&direct)
+        .expect("direct getdomainname must NUL-terminate its bounded output");
+    assert_eq!(domain.to_bytes(), direct.to_bytes());
+}
+
+#[test]
+fn dlcall_statvfs_matches_stable_root_filesystem_fields() {
+    let symbol = live_symbol("statvfs");
+    let root = CString::new("/").expect("root path literal has no NUL");
+    let mut info = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    let mut env = Dyn::new();
+    env.bind("root", root.as_ptr().cast_mut().cast())
+        .expect("bind root path");
+    env.bind("info", info.as_mut_ptr().cast())
+        .expect("bind statvfs output");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" root "ptr" info)"#),
+    )
+    .expect("statvfs dlcall");
+    assert_eq!(got, Value::Int(0));
+    let info = unsafe { info.assume_init() };
+    assert!(info.f_bsize > 0, "filesystem block size must be positive");
+    assert!(
+        info.f_frsize > 0,
+        "filesystem fragment size must be positive"
+    );
+    assert!(info.f_namemax > 0, "filesystem name limit must be positive");
+
+    let mut direct = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    let direct_status = unsafe { libc::statvfs(root.as_ptr(), direct.as_mut_ptr()) };
+    assert_eq!(direct_status, 0, "direct statvfs must succeed");
+    let direct = unsafe { direct.assume_init() };
+    assert_eq!(info.f_bsize, direct.f_bsize);
+    assert_eq!(info.f_frsize, direct.f_frsize);
+    assert_eq!(info.f_namemax, direct.f_namemax);
+}

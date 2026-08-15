@@ -1,8 +1,8 @@
-# Standby — authorized scope closed; later work awaits direction
+# Active handoff — Darwin probe waves
 
-Updated 2026-08-15. The current authorized first-cut, harden, probes, and
-examples scope is complete on `main`; do not infer an active implementation
-task from this note.
+Updated 2026-08-15. The first-cut and hardening baselines are complete; the
+authorized Darwin probe goal remains active. Wave 9 is implemented in source
+and awaits matching-host native evidence.
 
 Product remaining-work lives in [`prd/PRD_02_34_agenterm_dyn.md`](../../../prd/PRD_02_34_agenterm_dyn.md).
 This note is the crate-side pointer so the next knife does not start from chat.
@@ -31,15 +31,21 @@ This note is the crate-side pointer so the next knife does not start from chat.
    `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
    `_dyld_get_image_vmaddr_slide`) are catalogued; still no JIT, C, or libffi.
    Wave 8 Darwin loader/uuid facts (`dladdr`, `gethostuuid`,
-   `_dyld_get_image_header`) are catalogued.
+   `_dyld_get_image_header`) are catalogued. Wave 9 adds bounded random,
+   domain-name, and filesystem facts (`arc4random_uniform`, `getdomainname`,
+   `statvfs`) without allocating a descriptor or Mach right. `mach_host_self`
+   stays Placeholder.
 4. **examples** — each shipped live probe has its paired S-expr document and
    README link.
 
-Current Linux evidence, not a portable estimate: Rust 1.97
+Last Linux Wave 8 evidence, not a portable estimate: Rust 1.97
 `cargo test --locked -p agenterm-dyn` passes **150** tests (25 unit, 40 errors,
-11 hosts, 26 language, 48 Linux smoke; 0 doctests).
+11 hosts, 26 language, 48 Linux smoke; 0 doctests). The portable
+`catalog_docs` gate adds 3 tests and passes on Windows. Wave 9 adds 3
+Darwin-only probe tests; 182 is the expected Darwin inventory, but the last
+matching-host receipt remains Wave 8's 176 until the native rerun completes.
 
-## Later — requires explicit product authorization
+## Later product branches — require explicit authorization
 
 Fold the intern tree to the host ISA; use wasmbin only as `.wat` / `.wasm`
 export, not a VM; and consider libagenterm merge only when the crate is mature.
