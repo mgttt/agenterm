@@ -631,6 +631,10 @@ pub(crate) const fn desktop_host_supported() -> bool {
     cfg!(all(feature = "desktop-host", windows))
 }
 
+#[cfg(all(feature = "chassis-present", target_os = "linux"))]
+#[path = "adapters/linux/chassis_present.rs"]
+pub(crate) mod chassis_present;
+
 #[cfg(all(feature = "activation", windows))]
 #[path = "adapters/windows/activation.rs"]
 pub(crate) mod activation;

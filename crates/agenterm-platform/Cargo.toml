@@ -12,6 +12,7 @@ readme = "README.md"
 default = []
 native-pixel-window = ["window"]
 portable-pixel-window = ["window", "dep:winit", "dep:softbuffer"]
+chassis-present = ["dep:x11rb"]
 serde = ["dep:serde"]
 hardware = []
 cache-hierarchy = [

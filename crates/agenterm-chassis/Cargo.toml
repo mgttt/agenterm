@@ -21,10 +21,15 @@ path = "src/bin/agenterm-chassis-loader.rs"
 required-features = ["loader"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+agenterm-platform = { path = "../agenterm-platform", optional = true, default-features = false, features = ["chassis-present"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
 agenterm-platform = { path = "../agenterm-platform", optional = true, default-features = false, features = [
     "ime",
     "input",
     "portable-pixel-window",
 ] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"

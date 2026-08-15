@@ -1,5 +1,11 @@
+#[cfg(not(target_os = "linux"))]
 use std::time::Instant;
 
+#[cfg(target_os = "linux")]
+use agenterm_platform::chassis_present::{
+    ChassisPresentError, ChassisPresentOptions, present as present_chassis,
+};
+#[cfg(not(target_os = "linux"))]
 use agenterm_platform::window_host::{
     LogicalSize, PixelWindow, PixelWindowApplication, PixelWindowDirective, PixelWindowError,
     PixelWindowEvent, PixelWindowOptions, XrgbPixelFrame, run_pixel_window,
@@ -7,13 +13,22 @@ use agenterm_platform::window_host::{
 
 use super::LoadedImage;
 
+#[cfg(not(target_os = "linux"))]
 const BACKGROUND: u32 = 0x0014_1b24;
+#[cfg(not(target_os = "linux"))]
 const LOADED: u32 = 0x0036_b37e;
 
+#[cfg(not(target_os = "linux"))]
 pub(super) fn present(image: LoadedImage) -> Result<(), PixelWindowError> {
     present_with(image, run_pixel_window)
 }
 
+#[cfg(target_os = "linux")]
+pub(super) fn present(image: LoadedImage) -> Result<(), ChassisPresentError> {
+    present_with(image, present_chassis)
+}
+
+#[cfg(not(target_os = "linux"))]
 fn present_with<E>(
     image: LoadedImage,
     runner: impl FnOnce(PixelWindowOptions, Box<dyn PixelWindowApplication>) -> Result<(), E>,
@@ -23,12 +38,24 @@ fn present_with<E>(
     runner(options, Box::new(LoaderApplication { image }))
 }
 
+#[cfg(target_os = "linux")]
+fn present_with<E>(
+    image: LoadedImage,
+    runner: impl FnOnce(&ChassisPresentOptions) -> Result<(), E>,
+) -> Result<(), E> {
+    let title = format!("AgenTerm Chassis — {}", image.l3_name());
+    let loaded_rows = 6usize.saturating_add(image.capability_count().min(10));
+    runner(&ChassisPresentOptions::new(title, loaded_rows as u16))
+}
+
+#[cfg(not(target_os = "linux"))]
 struct LoaderApplication {
     // Keeping the checked image here makes the loaded state resident for the
     // complete native-window lifetime.
     image: LoadedImage,
 }
 
+#[cfg(not(target_os = "linux"))]
 impl PixelWindowApplication for LoaderApplication {
     fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
         window.set_visible(true);
@@ -79,6 +106,7 @@ mod tests {
 
     use super::{super::load_image, present_with};
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn checked_image_reaches_native_runner_and_propagates_failure() {
         let native_entrypoint = super::super::present_image;
@@ -96,6 +124,34 @@ mod tests {
 
         let result = present_with(image, |_options, _application| {
             calls += 1;
+            Err("native presenter failed")
+        });
+
+        assert_eq!(calls, 1);
+        assert_eq!(result, Err("native presenter failed"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn checked_image_reaches_native_runner_and_propagates_failure() {
+        let native_entrypoint = super::super::present_image;
+        let _ = native_entrypoint;
+
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-native-present-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        write_valid_image(&root);
+        let image = load_image(&root).expect("checked image");
+        let mut calls = 0;
+
+        let result = present_with(image, |options| {
+            calls += 1;
+            assert!(options.title.contains("native.presenter.test"));
+            assert_eq!(options.loaded_rows, 7);
             Err("native presenter failed")
         });
 
