@@ -31,7 +31,7 @@ This note is the crate-side pointer so the next knife does not start from chat.
    README link.
 
 Current Linux evidence, not a portable estimate: Rust 1.97
-`cargo test --locked -p agenterm-dyn` passes **147** tests (22 unit, 40 errors,
+`cargo test --locked -p agenterm-dyn` passes **150** tests (25 unit, 40 errors,
 11 hosts, 26 language, 48 Linux smoke; 0 doctests).
 
 ## Later — requires explicit product authorization
