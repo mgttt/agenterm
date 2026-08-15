@@ -14,13 +14,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Target family
 
-Branch status (cut 3.47 — per-target `capabilities`; 3.46 RDP placeholder; 3.45 macOS AX observe stub unchanged):
+Branch status (cut 3.48 — Linux `tree` cross-tier conformance; 3.47 per-target
+`capabilities`; 3.46 RDP placeholder; 3.45 macOS AX observe stub unchanged):
 
 | Target | Status | Notes |
 |--------|--------|-------|
-| `current` | **[x]** | Local in-process; Linux/Windows evidence held; `capabilities` names `data.target:"current"` + live libagenterm status |
-| `ssh` | **[x]** | OpenSSH exec of remote `--target current`; `capabilities` restores public/`data.target:"ssh"` |
-| `vnc` | **[x]** | RFB + local `--target current` worker; `capabilities` restores public/`data.target:"vnc"` |
+| `current` | **[x]** | Local in-process; Linux/Windows evidence held; `capabilities` names `data.target:"current"` + live libagenterm status; Linux `tree` cross-tier proven (3.48) |
+| `ssh` | **[x]** | OpenSSH exec of remote `--target current`; `capabilities` restores public/`data.target:"ssh"`; Linux `tree` cross-tier proven (3.48) |
+| `vnc` | **[x]** | RFB + local `--target current` worker; `capabilities` restores public/`data.target:"vnc"`; Linux `tree` cross-tier proven (3.48) |
 | `rdp` | **[~]** | PLACEHOLDER: parseable; `capabilities` declares transport placeholder/unavailable + `tree` unsupported with zero I/O; other authorized commands typed `rdp_unavailable`. Transport/session/live evidence empty |
 
 - [x] `current`, `ssh`, and `vnc` are tiers of one family sharing one
@@ -89,10 +90,12 @@ Branch status (cut 3.47 — per-target `capabilities`; 3.46 RDP placeholder; 3.4
   `ssh`/`vnc` restore public/`data.target` to the requested tier while
   retaining worker mechanism facts; `rdp` declares transport placeholder and
   does **not** claim `tree` supported. Discovery still requires the observe
-  grant and grants no actuation right. Target enumeration and full
-  cross-tier conformance remain **[ ]**. An unsupported command returns
-  typed `Unsupported` / `rdp_unavailable` rather than a fake success or a
-  silent coordinate fallback.
+  grant and grants no actuation right. Target enumeration remains **[ ]**.
+  Linux `current` / `ssh` / `vnc` **`tree` semantic cross-tier conformance is
+  proven** (cut 3.48; harness `scripts/cu-linux-cross-tier-tree.sh`); RDP,
+  macOS AX, Windows-over-RDP, and other verbs remain open. An unsupported
+  command returns typed `Unsupported` / `rdp_unavailable` rather than a fake
+  success or a silent coordinate fallback.
 
 ## Platform backends
 
@@ -621,8 +624,18 @@ Canonical host mapping (approved product vocabulary):
      `capabilities` declaration remains `rdp_unavailable` and the PRD
      branch stays `[~]` placeholder.
 
-- [ ] a cross-tier conformance test proves the same abstract command produces
-  equivalent observable results on every tier that declares support for it.
+- [x] **Linux `tree` cross-tier conformance (cut 3.48).** Same abstract
+  `tree --window HANDLE` on one cut-owned second `agenterm-con` through
+  `current`, loopback SSH, and dedicated loopback VNC. Semantic compare
+  (not byte-for-byte): public target restored per tier; `backend:"at-spi2"`;
+  same window / root / node count; exactly one showing `Command`, `SEND`,
+  and `OffscreenField`; same role/name/text/actions/parent/stable path;
+  bounds equal absent movement (bounded full-set retry on desktop churn);
+  volatile focus states may differ by observation timing. Harness:
+  `scripts/cu-linux-cross-tier-tree.sh` → `live/348-cross-tier-tree.json`.
+  **Not claimed:** RDP tree, macOS AX live, Windows UIA-over-RDP, other
+  verbs, screenshots/`--coords`. A mismatch is
+  `cross_tier_conformance_failed`.
 - [~] **Per-target `capabilities` declaration (cut 3.47).** Existing observe
   verb only (no new verb, no target enumeration). Load-bearing:
   `--rdp … capabilities` → `ok:true` / `target:"rdp"` / transport
@@ -634,4 +647,5 @@ Canonical host mapping (approved product vocabulary):
   available; missing observe grant remains `refused`. Full
   declare-vs-reality conformance across every verb remains **[ ]**: a
   target that declares support and then fails the command is a defect,
-  not a runtime condition.
+  not a runtime condition. Linux `tree` is the first verb closed under
+  cut 3.48.

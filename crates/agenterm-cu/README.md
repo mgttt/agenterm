@@ -254,6 +254,36 @@ SSH/VNC may retain `worker_target:"current"` for the mechanism path. No tier
 declares live RDP or unproven macOS AX as available. Target enumeration is
 **not** a verb in this cut.
 
+### Cross-tier `tree` equivalence (cut 3.48)
+
+Linux `tree` is the same abstract observe command on every tier that declares
+it. Host argv always builds `Command::Tree` with the same window handle;
+`current` runs the local libagenterm AT-SPI path, while `ssh` / `vnc` rewrite
+only the worker target to `current` and restore the public reply target to
+`ssh` / `vnc`. All three workers observe the same AT-SPI application hierarchy —
+no screenshots, OCR, cached JSON, resident con socket, or synthetic one-node
+frame may substitute.
+
+Conformance is **semantic**, not byte-for-byte. After removing only
+tier-specific envelope fields (`target`) and explicitly volatile focus-related
+node states (`focused`, `active`, `armed`, `selected`), each successful reply
+must share:
+
+| Field | Requirement |
+|-------|-------------|
+| envelope | `ok:true`, `command:"tree"`, public `target` equal to the requested tier |
+| data | `backend:"at-spi2"`, same requested `window`, same `root_id` / node count |
+| named chrome | exactly one showing `Command`, one showing `SEND`, one showing `OffscreenField` |
+| per named node | same role, name, text, action list, parent_id, stable node path (`id`) |
+| bounds | equal when sampled without window movement (gate retries the full three-observation set on churn) |
+
+Harness: `scripts/cu-linux-cross-tier-tree.sh` (one cut-owned second
+`agenterm-con`, loopback sshd, dedicated loopback x11vnc; evidence
+`live/348-cross-tier-tree.json`). RDP `tree` remains unsupported; macOS AX and
+Windows UIA cross-tier proof are separate cuts. A mismatch is
+`cross_tier_conformance_failed`; transport failures retain typed SSH/VNC errors
+and do not count as a semantic mismatch.
+
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
 (`AGENTERM_CU_AUDIT_PATH`, default `~/.local/share/agenterm/cu-audit.jsonl`).
@@ -267,6 +297,13 @@ agenterm-cu --target current --grant observe capabilities
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe capabilities
 agenterm-cu --vnc 127.0.0.1:5947 --grant observe capabilities
 agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe capabilities
+
+# Same abstract tree on one window across Linux current / SSH / VNC (cut 3.48).
+# See scripts/cu-linux-cross-tier-tree.sh for the full endpoint lifecycle.
+agenterm-cu --target current --grant observe tree --window "$HANDLE"
+agenterm-cu --ssh "$SSH_DEST" --ssh-port "$SSH_PORT" --ssh-identity "$SSH_KEY" \
+  --ssh-cu "$REMOTE_CU" --grant observe tree --window "$HANDLE"
+agenterm-cu --vnc "127.0.0.1:$VNC_PORT" --grant observe tree --window "$HANDLE"
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
 # Get-selection observe path: seed+range are gate preconditions (send-text +
