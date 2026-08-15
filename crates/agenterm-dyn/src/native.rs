@@ -210,6 +210,26 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     env.libs.ensure_capacity(&lib_name)?;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     let unix_ioctl = is_unix_ioctl_signature(&sym_name, ret_ty, &arg_types);
+
+    // Resolve deterministic native failures before evaluating script argument expressions. The
+    // cache retains the library for `env`'s lifetime, so this copied address remains valid while
+    // the later argument evaluation mutably borrows `env`.
+    let func_ptr = {
+        let lib = env.libs.load(&lib_name)?;
+        // SAFETY: the library remains cached in `env`, so the symbol address stays loaded.
+        unsafe {
+            let sym: libloading::Symbol<*const c_void> = lib
+                .get(c_name.as_bytes_with_nul())
+                .map_err(|e| DynError::DlCall(format!("{sym_name}: {e}")))?;
+            *sym
+        }
+    };
+    if func_ptr.is_null() {
+        return Err(DynError::DlCall(format!(
+            "symbol `{sym_name}` resolved to a null address"
+        )));
+    }
+
     let dyn_args = arg_types
         .iter()
         .copied()
@@ -219,20 +239,6 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
             DynArg::from_value(ty, value)
         })
         .collect::<Result<Vec<_>, _>>()?;
-
-    let lib = env.libs.load(&lib_name)?;
-    // SAFETY: the library remains cached in `env`, so the symbol address stays loaded.
-    let func_ptr = unsafe {
-        let sym: libloading::Symbol<*const c_void> = lib
-            .get(c_name.as_bytes_with_nul())
-            .map_err(|e| DynError::DlCall(format!("{sym_name}: {e}")))?;
-        *sym
-    };
-    if func_ptr.is_null() {
-        return Err(DynError::DlCall(format!(
-            "symbol `{sym_name}` resolved to a null address"
-        )));
-    }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if unix_ioctl {

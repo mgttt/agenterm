@@ -494,8 +494,8 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
     let library_err = eval_native(&mut library_env, &library_script).unwrap_err();
     assert!(matches!(library_err, DynError::Library(message) if message.starts_with(&library)));
     assert_eq!(
-        eval_native(&mut library_env, "touched").unwrap(),
-        agenterm_dyn::Value::Int(1)
+        eval_native(&mut library_env, "touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
     );
 
     let symbol = "x".repeat(255);
@@ -518,8 +518,8 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
         DynError::DlCall("symbol name exceeds 255-byte limit".into())
     );
     assert_eq!(
-        eval_native(&mut symbol_env, "touched").unwrap(),
-        agenterm_dyn::Value::Int(1)
+        eval_native(&mut symbol_env, "touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
     );
 }
 
@@ -558,10 +558,15 @@ fn missing_library() {
     let mut env = Dyn::new();
     let err = eval_native(
         &mut env,
-        r#"(dlcall "libtotally_missing_agenterm_dyn_test.so" "foo" "i32")"#,
+        r#"(dlcall "libtotally_missing_agenterm_dyn_test.so" "foo" "i32"
+            "i32" (set touched 1))"#,
     )
     .unwrap_err();
     assert!(matches!(err, DynError::Library(_)));
+    assert_eq!(
+        eval_native(&mut env, "touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
 }
 
 #[test]
@@ -574,9 +579,15 @@ fn missing_symbol() {
     } else {
         "libc.so.6"
     };
-    let script = format!(r#"(dlcall "{lib}" "agenterm_dyn_no_such_symbol_xyz" "i32")"#);
+    let script = format!(
+        r#"(dlcall "{lib}" "agenterm_dyn_no_such_symbol_xyz" "i32" "i32" (set touched 1))"#
+    );
     let err = eval_native(&mut env, &script).unwrap_err();
     assert!(matches!(err, DynError::DlCall(_)));
+    assert_eq!(
+        eval_native(&mut env, "touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
 }
 
 #[test]

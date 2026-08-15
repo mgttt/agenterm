@@ -69,7 +69,10 @@ the complete AST and returns `DynError::NativeRequiresUnsafe` for any `dlcall`,
 including a dead branch, before any expression runs. Native source must use
 `unsafe { Dyn::eval_native(..) }`. Its caller owns exact fixed C ABI selection,
 pointer validity/alignment/lifetime/aliasing, library availability,
-thread-affinity, and every resource or process side effect. Unix `ioctl` is
+thread-affinity, and every resource or process side effect. Within `eval_native`,
+deterministic `dlcall` validation, library loading, and symbol resolution complete
+before any script argument expression is evaluated; a missing library or symbol
+cannot commit an argument-side `set`. Unix `ioctl` is
 the documented variadic compatibility exception, not a relaxation of those obligations.
 
 The language stores integer results as signed `i64`. A `u64` result therefore
