@@ -1905,6 +1905,11 @@ carry and validate that binding version plus its exact canonical encoding. A
 legacy record with caller-provided target/session strings cannot be silently
 migrated by adding a field or prefix: reject it typed, preserve its bytes, and
 require an explicit migration flow that obtains fresh identity proof.
+Keep the production store opener separate from the raw injected-path seam:
+resolve machine-local product data once, require an explicit parent directory,
+protect it before reading or writing authority state, reject link-like store
+entries, and create every replacement temporary with the platform's private
+exclusive-create options rather than ordinary umask-dependent defaults.
 
 For window placement, compensation is a saga, never an atomicity claim. Read
 the exact native bounds, revalidate handle plus process/application identity,

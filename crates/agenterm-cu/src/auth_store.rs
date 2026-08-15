@@ -12,7 +12,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Write as _},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -20,7 +20,13 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use agenterm_platform::locking::{LockErrorKind, PathLock};
+use agenterm_platform::{
+    filesystem::{
+        host_directories, metadata_is_link_like, private_create_new_options,
+        protect_private_directory,
+    },
+    locking::{LockErrorKind, PathLock},
+};
 
 use crate::{
     auth::Grant,
@@ -275,6 +281,69 @@ pub struct AuthStore {
 }
 
 impl AuthStore {
+    /// Resolves the product-owned, machine-local authorization store.
+    pub fn default_path() -> Result<PathBuf, AuthStoreError> {
+        host_directories()
+            .map(|directories| {
+                directories
+                    .local_data
+                    .join("agenterm")
+                    .join("cu-grants.json")
+            })
+            .map_err(|_| {
+                AuthStoreError::new(
+                    AuthStoreErrorKind::Prepare,
+                    "machine-local grant store directory is unavailable",
+                )
+            })
+    }
+
+    /// Opens a production store only after creating and protecting its parent.
+    ///
+    /// A bare filename is rejected so this operation can never change the
+    /// permissions of the caller's current working directory.
+    pub fn open_private_at(path: impl Into<PathBuf>) -> Result<Self, AuthStoreError> {
+        let path = path.into();
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .ok_or_else(|| {
+                AuthStoreError::new(
+                    AuthStoreErrorKind::Prepare,
+                    "private grant store requires an explicit parent directory",
+                )
+            })?;
+        fs::create_dir_all(parent).map_err(|_| {
+            AuthStoreError::new(
+                AuthStoreErrorKind::Prepare,
+                "private grant store directory could not be created",
+            )
+        })?;
+        protect_private_directory(parent).map_err(|_| {
+            AuthStoreError::new(
+                AuthStoreErrorKind::Prepare,
+                "private grant store directory could not be protected",
+            )
+        })?;
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata_is_link_like(&metadata) || !metadata.is_file() => {
+                return Err(AuthStoreError::new(
+                    AuthStoreErrorKind::Read,
+                    "grant store must be an ordinary non-link file",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(AuthStoreError::new(
+                    AuthStoreErrorKind::Read,
+                    "grant store metadata is unavailable",
+                ));
+            }
+        }
+        Self::open_at(path)
+    }
+
     /// Opens `path`; a missing file is an empty generation-zero store while a
     /// malformed or semantically invalid file is a typed error.
     pub fn open_at(path: impl Into<PathBuf>) -> Result<Self, AuthStoreError> {
@@ -732,11 +801,7 @@ fn create_temporary(parent: &Path, destination: &Path) -> io::Result<(PathBuf, F
             std::process::id(),
             NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
         ));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-        {
+        match private_create_new_options().open(&temporary) {
             Ok(file) => return Ok((temporary, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
@@ -854,6 +919,50 @@ mod tests {
         let reopened = AuthStore::open_at(&path.0).unwrap();
         assert_eq!(reopened.generation(), 2);
         assert_eq!(reopened.list().len(), 2);
+    }
+
+    #[test]
+    fn private_open_requires_parent_and_publishes_inside_protected_directory() {
+        assert_eq!(
+            AuthStore::open_private_at("bare-grants.json")
+                .unwrap_err()
+                .kind,
+            AuthStoreErrorKind::Prepare
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-cu-private-store-{}-{}",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = root.join("private").join("cu-grants.json");
+        let mut store = AuthStore::open_private_at(&path).unwrap();
+        store.create(spec("grant", &[Grant::Observe], 1)).unwrap();
+        assert!(path.is_file());
+        assert_eq!(AuthStore::open_private_at(&path).unwrap().list().len(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+            assert_eq!(
+                fs::metadata(path.parent().unwrap()).unwrap().mode() & 0o777,
+                0o700
+            );
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn default_store_path_is_machine_local_and_has_a_fixed_filename() {
+        let path = AuthStore::default_path().unwrap();
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("cu-grants.json")
+        );
+        assert!(
+            path.parent()
+                .is_some_and(|parent| parent.ends_with("agenterm"))
+        );
     }
 
     #[test]

@@ -99,7 +99,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   explicit binding version, and requires exact fixed-prefix lowercase target
   and session identifiers. Legacy schema 1 contained caller-provided identity;
   it fails typed and remains byte-for-byte unchanged instead of being silently
-  reinterpreted as trusted. This is not yet the production authorization path:
+  reinterpreted as trusted. A separate production open path resolves the
+  machine-local product-data location, refuses bare filenames and link-like
+  stores, protects the parent directory, and publishes every replacement from
+  an exclusively created private temporary. The raw `open_at` remains only an
+  injected-path seam. This is not yet the production authorization path:
   CLI/executor integration and session-nonce invalidation remain open.
 - [~] A sealed `TargetBinding` contract now separates opaque provider identity
   and exact desktop-session identity from routing material. Current, SSH and
