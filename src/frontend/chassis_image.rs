@@ -110,7 +110,7 @@ mod tests {
             compile: false,
             invokes_cargo: false,
             cells: CELLS.iter().map(|cell| (*cell).to_owned()).collect(),
-            native_cell: agenterm_chassis::native_cell().to_owned(),
+            native_cell: None,
         };
         fs::write(
             root.join("manifest.json"),

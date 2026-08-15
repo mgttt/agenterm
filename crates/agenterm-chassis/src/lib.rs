@@ -90,7 +90,8 @@ pub struct ProductManifest {
     pub compile: bool,
     pub invokes_cargo: bool,
     pub cells: Vec<String>,
-    pub native_cell: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_cell: Option<String>,
 }
 
 pub fn native_cell() -> &'static str {
@@ -153,7 +154,7 @@ pub fn compose(from: &Path, out: &Path) -> Result<ProductManifest, ChassisError>
         compile: false,
         invokes_cargo: false,
         cells: CELLS.iter().map(|cell| (*cell).to_string()).collect(),
-        native_cell: native_cell().to_string(),
+        native_cell: Some(native_cell().to_string()),
     };
     fs::create_dir_all(out)?;
     fs::write(

@@ -91,6 +91,7 @@ def compose(src: Path, dest: Path) -> dict:
         "compile": False,
         "invokes_cargo": False,
         "cells": list(CELLS),
+        "native_cell": None,
         "l1_sha256": l1_sha,
         "l2_files": [str(p.relative_to(l2_root)).replace("\\", "/") for p in l2_files],
         "l3_files": [str(p.relative_to(l3_root)).replace("\\", "/") for p in l3_files],
