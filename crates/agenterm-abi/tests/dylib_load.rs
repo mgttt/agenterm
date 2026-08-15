@@ -1738,6 +1738,16 @@ fn a11y_tree_snapshot_roundtrip_when_available() {
         eprintln!("SKIP (runtime a11y unavailable): snapshot unsupported");
         return;
     }
+    #[cfg(target_os = "macos")]
+    if snap_st == AGT_FAILED {
+        let message = last_error_message(lib);
+        if message.contains("a11y_tree_empty") {
+            // Hosted macOS runners can expose the AX mechanism without an
+            // interactive desktop or any on-screen application windows.
+            eprintln!("SKIP (headless macOS AX desktop): {message}");
+            return;
+        }
+    }
     #[cfg(target_os = "windows")]
     if snap_st == AGT_FAILED {
         // HWND=0 deliberately targets the whole desktop. Shared Windows runners

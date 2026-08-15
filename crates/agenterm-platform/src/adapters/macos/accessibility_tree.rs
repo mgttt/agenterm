@@ -109,11 +109,7 @@ struct CfOwned(CfTypeRef);
 
 impl CfOwned {
     fn from_create(ptr: CfTypeRef) -> Option<Self> {
-        if ptr.is_null() {
-            None
-        } else {
-            Some(Self(ptr))
-        }
+        if ptr.is_null() { None } else { Some(Self(ptr)) }
     }
 
     fn retain(ptr: CfTypeRef) -> Option<Self> {
@@ -267,11 +263,7 @@ fn cf_i64(value: CfTypeRef) -> Option<i64> {
             &mut out32 as *mut i32 as *mut c_void,
         )
     };
-    if ok {
-        Some(i64::from(out32))
-    } else {
-        None
-    }
+    if ok { Some(i64::from(out32)) } else { None }
 }
 
 fn dict_get(dict: CfDictionaryRef, key: &str) -> CfTypeRef {
@@ -544,9 +536,7 @@ fn resolve_roots(
     }
 }
 
-fn all_on_screen_window_roots(
-    budget: &mut Budget,
-) -> Result<Vec<CfOwned>, AccessibilityTreeError> {
+fn all_on_screen_window_roots(budget: &mut Budget) -> Result<Vec<CfOwned>, AccessibilityTreeError> {
     let windows = enumerate_cg_windows()?;
     let mut roots = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1084,9 +1074,6 @@ mod tests {
     fn normalizes_ax_actions() {
         assert_eq!(normalize_action("AXPress").as_deref(), Some("click"));
         assert_eq!(normalize_action("AXRaise").as_deref(), Some("focus"));
-        assert_eq!(
-            normalize_action("AXShowMenu").as_deref(),
-            Some("show-menu")
-        );
+        assert_eq!(normalize_action("AXShowMenu").as_deref(), Some("show-menu"));
     }
 }

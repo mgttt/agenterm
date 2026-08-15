@@ -16009,7 +16009,11 @@ fn entry() {
         )
         .expect("transpile");
         assert_eq!(output.execution_mode, CdylibExecutionMode::Native);
-        assert!(output.rust.contains("rh_task_after(100)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_task_after(100)"),
+            "{}",
+            output.rust
+        );
         assert!(
             output
                 .rust
@@ -16017,9 +16021,21 @@ fn entry() {
             "{}",
             output.rust
         );
-        assert!(output.rust.contains("rh_task_wait(&mut fast, -1)"), "{}", output.rust);
-        assert!(output.rust.contains("rh_task_cancel(&mut slow)"), "{}", output.rust);
-        assert!(output.rust.contains("rh_task_done(&mut fast)"), "{}", output.rust);
+        assert!(
+            output.rust.contains("rh_task_wait(&mut fast, -1)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_task_cancel(&mut slow)"),
+            "{}",
+            output.rust
+        );
+        assert!(
+            output.rust.contains("rh_task_done(&mut fast)"),
+            "{}",
+            output.rust
+        );
         assert!(
             output.rust.contains("rh_task_cancelled(&mut slow)"),
             "{}",
