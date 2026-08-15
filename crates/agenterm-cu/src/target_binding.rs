@@ -14,6 +14,7 @@ use agenterm_platform::{CapabilityStatus, current_target_binding as platform_bin
 use crate::target::TargetRef;
 
 const MAX_OPAQUE_ID_BYTES: usize = 512;
+pub const TARGET_BINDING_VERSION: u16 = 1;
 
 /// Opaque identity of one verified target and one exact desktop session.
 ///

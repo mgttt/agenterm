@@ -94,9 +94,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   contention is typed and publishes nothing. This closes the local
   compare-to-rename race without claiming protection from non-cooperating
   writers, hostile sidecar replacement, cross-session Windows callers or
-  filesystems without coherent locking. This is not yet the production
-  authorization path: CLI/provider integration, verified target identity and
-  session-nonce invalidation remain open.
+  filesystems without coherent locking. Store schema 2 now accepts grant specs
+  and attempts only through the sealed verified binding type, persists an
+  explicit binding version, and requires exact fixed-prefix lowercase target
+  and session identifiers. Legacy schema 1 contained caller-provided identity;
+  it fails typed and remains byte-for-byte unchanged instead of being silently
+  reinterpreted as trusted. This is not yet the production authorization path:
+  CLI/executor integration and session-nonce invalidation remain open.
 - [~] A sealed `TargetBinding` contract now separates opaque provider identity
   and exact desktop-session identity from routing material. Current, SSH and
   VNC fail typed when no crate-owned verified provider is available; RDP stays

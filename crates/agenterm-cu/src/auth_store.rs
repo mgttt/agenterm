@@ -22,9 +22,12 @@ use serde::{Deserialize, Serialize};
 
 use agenterm_platform::locking::{LockErrorKind, PathLock};
 
-use crate::auth::Grant;
+use crate::{
+    auth::Grant,
+    target_binding::{TARGET_BINDING_VERSION, TargetBinding},
+};
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const MAX_RECORDS: usize = 4_096;
 const MAX_TEXT_BYTES: usize = 512;
 const MAX_OBSERVE_USES: u64 = 10_000;
@@ -35,6 +38,8 @@ const MAX_ACTUATE_LIFETIME_MS: i64 = 60 * 60 * 1_000;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GrantRecord {
+    #[serde(default)]
+    pub binding_version: u16,
     pub grant_id: String,
     pub target_id: String,
     pub tier: String,
@@ -53,22 +58,51 @@ pub struct GrantRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GrantSpec {
-    pub grant_id: String,
-    pub target_id: String,
-    pub tier: String,
-    pub session_binding: Option<String>,
-    pub scopes: BTreeSet<Grant>,
-    pub issued_at_utc_ms: i64,
-    pub not_before_utc_ms: i64,
-    pub expires_at_utc_ms: i64,
-    pub max_uses: u64,
-    pub one_shot: bool,
-    pub session_bound: bool,
+    binding_version: u16,
+    grant_id: String,
+    target_id: String,
+    tier: String,
+    session_binding: Option<String>,
+    scopes: BTreeSet<Grant>,
+    issued_at_utc_ms: i64,
+    not_before_utc_ms: i64,
+    expires_at_utc_ms: i64,
+    max_uses: u64,
+    one_shot: bool,
+    session_bound: bool,
+}
+
+impl GrantSpec {
+    pub fn new(
+        grant_id: impl Into<String>,
+        binding: &TargetBinding,
+        scopes: BTreeSet<Grant>,
+        issued_at_utc_ms: i64,
+        not_before_utc_ms: i64,
+        expires_at_utc_ms: i64,
+        max_uses: u64,
+    ) -> Self {
+        Self {
+            binding_version: TARGET_BINDING_VERSION,
+            grant_id: grant_id.into(),
+            target_id: binding.target_id().to_owned(),
+            tier: binding.tier().as_str().to_owned(),
+            session_binding: Some(binding.session_binding().to_owned()),
+            scopes,
+            issued_at_utc_ms,
+            not_before_utc_ms,
+            expires_at_utc_ms,
+            max_uses,
+            one_shot: max_uses == 1,
+            session_bound: true,
+        }
+    }
 }
 
 impl From<GrantSpec> for GrantRecord {
     fn from(spec: GrantSpec) -> Self {
         Self {
+            binding_version: spec.binding_version,
             grant_id: spec.grant_id,
             target_id: spec.target_id,
             tier: spec.tier,
@@ -89,11 +123,23 @@ impl From<GrantSpec> for GrantRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GrantAttempt {
-    pub grant_id: String,
-    pub target_id: String,
-    pub tier: String,
-    pub session_binding: Option<String>,
-    pub scope: Grant,
+    grant_id: String,
+    target_id: String,
+    tier: String,
+    session_binding: Option<String>,
+    scope: Grant,
+}
+
+impl GrantAttempt {
+    pub fn new(grant_id: impl Into<String>, binding: &TargetBinding, scope: Grant) -> Self {
+        Self {
+            grant_id: grant_id.into(),
+            target_id: binding.target_id().to_owned(),
+            tier: binding.tier().as_str().to_owned(),
+            session_binding: Some(binding.session_binding().to_owned()),
+            scope,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -147,6 +193,7 @@ pub enum AuthStoreErrorKind {
     GenerationOverflow,
     DuplicateGrant,
     GrantNotFound,
+    LegacyUnverified,
     LockContended,
     LockUnavailable,
 }
@@ -466,6 +513,12 @@ fn read_document(path: &Path) -> Result<Option<StoreDocument>, AuthStoreError> {
 }
 
 fn validate_document(document: &StoreDocument) -> Result<(), AuthStoreError> {
+    if document.schema_version == 1 {
+        return Err(AuthStoreError::new(
+            AuthStoreErrorKind::LegacyUnverified,
+            "grant store schema 1 contains unverified target identity and requires explicit migration",
+        ));
+    }
     if document.schema_version != SCHEMA_VERSION {
         return Err(AuthStoreError::new(
             AuthStoreErrorKind::Validate,
@@ -494,6 +547,12 @@ fn validate_document(document: &StoreDocument) -> Result<(), AuthStoreError> {
 }
 
 fn validate_record(record: &GrantRecord) -> Result<(), AuthStoreError> {
+    if record.binding_version != TARGET_BINDING_VERSION {
+        return Err(AuthStoreError::new(
+            AuthStoreErrorKind::Validate,
+            "grant binding version is unsupported",
+        ));
+    }
     for (name, value) in [
         ("grant_id", record.grant_id.as_str()),
         ("target_id", record.target_id.as_str()),
@@ -518,6 +577,20 @@ fn validate_record(record: &GrantRecord) -> Result<(), AuthStoreError> {
             "every grant must bind an exact target session identity",
         ));
     };
+    if !valid_binding_id(&record.target_id, "agt-cu-tgt-v1-")
+        || !valid_binding_id(binding, "agt-cu-ses-v1-")
+    {
+        return Err(AuthStoreError::new(
+            AuthStoreErrorKind::Validate,
+            "grant target/session identity is not a verified binding",
+        ));
+    }
+    if !record.session_bound {
+        return Err(AuthStoreError::new(
+            AuthStoreErrorKind::Validate,
+            "every grant must be session-bound",
+        ));
+    }
     if binding.trim().is_empty() || binding.len() > MAX_TEXT_BYTES {
         return Err(AuthStoreError::new(
             AuthStoreErrorKind::Validate,
@@ -587,6 +660,15 @@ fn validate_record(record: &GrantRecord) -> Result<(), AuthStoreError> {
         ));
     }
     Ok(())
+}
+
+fn valid_binding_id(value: &str, prefix: &str) -> bool {
+    value.strip_prefix(prefix).is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 fn publish_document(path: &Path, document: &StoreDocument) -> Result<(), AuthStoreError> {
@@ -706,31 +788,30 @@ impl Drop for TemporaryFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{target::TargetRef, target_binding::TargetBinding};
 
-    fn spec(id: &str, scopes: &[Grant], max_uses: u64) -> GrantSpec {
-        GrantSpec {
-            grant_id: id.into(),
-            target_id: "target-a".into(),
-            tier: "current".into(),
-            session_binding: Some("session-a".into()),
-            scopes: scopes.iter().copied().collect(),
-            issued_at_utc_ms: 1_000,
-            not_before_utc_ms: 1_100,
-            expires_at_utc_ms: 2_000,
-            max_uses,
-            one_shot: max_uses == 1,
-            session_bound: true,
+    fn binding() -> TargetBinding {
+        TargetBinding {
+            tier: TargetRef::Current,
+            target_id: format!("agt-cu-tgt-v1-{}", "1".repeat(64)),
+            session_binding: format!("agt-cu-ses-v1-{}", "2".repeat(64)),
         }
     }
 
+    fn spec(id: &str, scopes: &[Grant], max_uses: u64) -> GrantSpec {
+        GrantSpec::new(
+            id,
+            &binding(),
+            scopes.iter().copied().collect(),
+            1_000,
+            1_100,
+            2_000,
+            max_uses,
+        )
+    }
+
     fn attempt(id: &str, scope: Grant) -> GrantAttempt {
-        GrantAttempt {
-            grant_id: id.into(),
-            target_id: "target-a".into(),
-            tier: "current".into(),
-            session_binding: Some("session-a".into()),
-            scope,
-        }
+        GrantAttempt::new(id, &binding(), scope)
     }
 
     fn temporary_path(label: &str) -> PathBuf {
@@ -821,6 +902,57 @@ mod tests {
     }
 
     #[test]
+    fn legacy_unverified_schema_is_rejected_without_rewriting_bytes() {
+        let path = TestPath::new("legacy-schema");
+        let legacy = serde_json::json!({
+            "schema_version": 1,
+            "generation": 1,
+            "records": {
+                "legacy": {
+                    "grant_id": "legacy",
+                    "target_id": "caller-supplied-target",
+                    "tier": "current",
+                    "session_binding": "caller-supplied-session",
+                    "scopes": ["observe"],
+                    "issued_at_utc_ms": 1000,
+                    "not_before_utc_ms": 1000,
+                    "expires_at_utc_ms": 2000,
+                    "max_uses": 1,
+                    "consumed_uses": 0,
+                    "revocation_epoch": 0,
+                    "revoked_at_utc_ms": null,
+                    "one_shot": true,
+                    "session_bound": true
+                }
+            }
+        });
+        let bytes = serde_json::to_vec_pretty(&legacy).unwrap();
+        fs::write(&path.0, &bytes).unwrap();
+        assert_eq!(
+            AuthStore::open_at(&path.0).unwrap_err().kind,
+            AuthStoreErrorKind::LegacyUnverified
+        );
+        assert_eq!(fs::read(&path.0).unwrap(), bytes);
+    }
+
+    #[test]
+    fn schema_two_rejects_binding_text_that_did_not_come_from_the_sealed_provider() {
+        let path = TestPath::new("unverified-binding");
+        let mut record = GrantRecord::from(spec("grant", &[Grant::Observe], 1));
+        record.target_id = format!("agt-cu-tgt-v1-{}", "A".repeat(64));
+        let document = StoreDocument {
+            schema_version: SCHEMA_VERSION,
+            generation: 1,
+            records: BTreeMap::from([(record.grant_id.clone(), record)]),
+        };
+        fs::write(&path.0, serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(
+            AuthStore::open_at(&path.0).unwrap_err().kind,
+            AuthStoreErrorKind::Validate
+        );
+    }
+
+    #[test]
     fn one_shot_is_consumed_before_a_failed_effect_and_scopes_are_independent() {
         let path = TestPath::new("one-shot");
         let mut store = AuthStore::open_at(&path.0).unwrap();
@@ -857,7 +989,7 @@ mod tests {
         store.create(spec("grant", &[Grant::Observe], 2)).unwrap();
         let generation = store.generation();
         let mut wrong = attempt("grant", Grant::Observe);
-        wrong.session_binding = Some("session-b".into());
+        wrong.session_binding = Some(format!("agt-cu-ses-v1-{}", "3".repeat(64)));
         assert_eq!(
             store.reserve_attempt(&wrong, 1_200).unwrap(),
             denied("grant", GrantDenialKind::TargetMismatch)

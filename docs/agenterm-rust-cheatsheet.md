@@ -1898,6 +1898,14 @@ attached to the input desktop. Treat the domain-separated digest as an opaque
 equality identifier, not a MAC or credential, and report unsupported on peers
 whose equivalent session proof has not been implemented.
 
+When a persisted authorization format predates verified identity, version the
+trust boundary rather than only the JSON shape. New grant specs and attempts
+must be constructed from the sealed binding type, and the stored record must
+carry and validate that binding version plus its exact canonical encoding. A
+legacy record with caller-provided target/session strings cannot be silently
+migrated by adding a field or prefix: reject it typed, preserve its bytes, and
+require an explicit migration flow that obtains fresh identity proof.
+
 For window placement, compensation is a saga, never an atomicity claim. Read
 the exact native bounds, revalidate handle plus process/application identity,
 apply, independently read back the final rect, then publish cloned history.
