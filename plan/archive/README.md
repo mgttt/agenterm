@@ -16,6 +16,7 @@
 | `plan-v0.1.12.md` | **从未公开发布** | Candidate 被放弃/取代 |
 | `plan-v0.1.13.md` | **从未公开发布** | Candidate 被放弃，目标移至 v0.1.14；§10.2.1 坑清单已提炼 |
 | `plan-v0.1.14.md` | **已公开发布** | tag `8ff2b5a`；未完成叶 → `plan-v0.1.15.md` §一·五 **L′** |
+| `plan-v0.1.17.md` | **从未开工发布** | 2026-08-12 归档；未完成叶 upsert → `../plan-v0.1.18.md` §11 轨 B；不得复活该列车 |
 | `goal-v0.1.14.md` | 交接快照 | 发布 goal 历史；勿再执行 |
 | `goal-v0.1.15-server-instance-s-prime.md` | goal 完成 | S′ 形态已落地；进度见 plan-v0.1.15 §一·五 S′ |
 | `plan-agenterm-server-mode.md` | 已实现 | `agenterm server` 同 PE 子命令；契约 PRD_02_02 |
@@ -27,7 +28,7 @@
 | `design-agenterm-bin-separation.md` | 结论被推翻 | 同日"不能合并"分析；被落地实现证伪，保留论证过程 |
 | `agenterm-rhai-app.md` | superseded | Rhai product App 讨论稿；现行 QJS App 架构与 Phase 0 → `../plan-v0.1.18.md` |
 | `plan-agenterm-app-pack.md` | superseded | App Pack 完整推演已收敛进 `../plan-v0.1.18.md`；本文保留历史细节 |
-| `design-script-engine-subcommands.md` | 已实现 | SUB-M1～M4 已落地；公开入口/退役状态由 PRD 与 v0.1.17 E5 拥有 |
+| `design-script-engine-subcommands.md` | 已实现 | SUB-M1～M4 已落地；公开入口/退役状态由 PRD 与 `plan-v0.1.18` §11 E5 拥有 |
 | `design-dynacore-native-core.md` | 已实现后终止投入 | crate 保留；`dynacore` 当前方向为 `../design-dynacore-logic-pack.md` |
 | `design-*-experiment.md`（dynamic-core Q0–Q15） | 研究轨已封闭 | 15 份实验规格；综合结论与重开条件在 `research/dynamic-core/` |
 | `plan-rh-namespace-phase-c.md` + `rhai-trace-*.md` | 已完成 | M42f8 namespace/trace 迁移历史；现行证据为 `../plan-rh-3.md` + PRD |

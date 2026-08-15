@@ -1,8 +1,8 @@
 # AgenTerm v0.1.16 公开计划
 
-状态：**发布链修复中；产品尾叶已迁 v0.1.17**（2026-08-10）
+状态：**发布链修复中；本版是 Chassis-L1/L2/L3 后的第一发**（产品尾叶不阻塞本发）
 不创建 tag / Candidate / Release，除非人工明确授权。  
-版本列车仍停在 **0.1.15 代码线**；本文件是 **当前列车执行投影**，不替代 PRD。
+版本列车停在 **0.1.16 代码线**；本文件是 **当前列车执行投影**，不替代 PRD。
 
 **当前唯一收口主题：修复 v0.1.16 exact-SHA CI / Candidate 发布链；公开 Promotion
 仍需对具体 Candidate 的独立人工授权。**
@@ -12,10 +12,9 @@ Chassis 加速（不替代 Candidate 授权）：[`CI / chassis`](../.github/wor
 [`scripts/chassis-ci-pack.py`](../scripts/chassis-ci-pack.py)，**不编工作台 PE**。
 公开 Promotion 仍要独立人工授权。
 
-原计划中发布链证据（R′）、安装尾（G′′）、低成本尾账（L′）、脚本引擎深化
-（Rh-M23、QJS-M6）、控制台宿主余量（C10d）及跨版轨（M/N/CC/NET）已整体
-以及仍未完成的 **W1–W4、U2、O-evidence** 均迁入
-[`plan-v0.1.17.md`](archive/plan-v0.1.17.md)。v0.1.16 执行中超额完成的三轨
+未完成产品叶 **不再经过 v0.1.17 列车**。v0.1.17 未开工即归档；叶合同在
+[`plan-v0.1.18.md`](plan-v0.1.18.md) **§11 轨 B**（历史快照
+[`archive/plan-v0.1.17.md`](archive/plan-v0.1.17.md)）。v0.1.16 执行中超额完成的三轨
 （agenterm-con 产品化、QuickJS 引擎、跨引擎共享层 + SQL）保留为已完成事实，
 但不再消耗本版剩余工时。
 
@@ -24,8 +23,8 @@ Chassis 加速（不替代 Candidate 授权）：[`CI / chassis`](../.github/wor
 > **不是**抢唯一租约、也不是 handoff 到现有窗。
 
 上版工作树与证据：[`plan-v0.1.15.md`](plan-v0.1.15.md)（must-ship 主体已合 main；
-公开发版仍未授权）。下一版推迟项：[`plan-v0.1.17.md`](archive/plan-v0.1.17.md)。
-结构 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md)。
+公开发版仍未授权）。**本发之后的下一列**：[`plan-v0.1.18.md`](plan-v0.1.18.md)
+（不单开 v0.1.17）。结构 SSOT：[`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 ---
 
@@ -685,9 +684,9 @@ panic 位置同上。
   - **非目标**：不引入 `AllocConsole`，不把 mux/MCP 重新拆成独立 PE，不改变
     IPC 或 CLI 命令语义。
 
-### 已迁出项（完整内容见 [`plan-v0.1.17.md`](archive/plan-v0.1.17.md)）
+### 已迁出项（执行合同见 [`plan-v0.1.18.md`](plan-v0.1.18.md) §11；归档快照 [`archive/plan-v0.1.17.md`](archive/plan-v0.1.17.md)）
 
-以下整组已整体迁入 v0.1.17，本版不再认领：
+以下整组本版不再认领。历史迁出目标曾写 v0.1.17；该列车未开工，叶已 upsert 到 v0.1.18 轨 B：
 
 | 迁出组 | 内容 | 迁出原因 |
 |--------|------|----------|
@@ -920,6 +919,7 @@ W1–W4/U2/O-evidence 已迁 v0.1.17，不再阻塞本版发布链修复完成�
 | 2026-08-11 | **`--address` 被静默改道（真产品缺陷，fleet-smoke 抓对了）**：`cli --address <无 server 的地址> new-window` 会打印 "failed to launch independent AgenTerm server: refusing to start a second..."，然后**把窗口建到另一个活着的 server 上并退出 0**。实测：`--address 127.0.0.1:43004` 的窗口出现在 `43001`，stdout 给出窗口 id。位置 `src/client/mod.rs` 请求失败后按逻辑实例名找 live endpoint 改道重试的分支 —— 对隐式默认地址的 reopen 合理，对显式 `--address/--endpoint` 是错的。已加 `transport_was_pinned_explicitly()` 守卫（`--instance` 不算钉住）。注意：多实例本身是支持的（显式启两个不同地址+不同 workspace 的 server，`--address` 隔离实测正常），被拒的只是"自动起第二个"。 |
 | 2026-08-11 | **产品缺陷（用户现场报告）**：工具栏 [Control Center] 按了没反应。实为 CC 进程已起、窗口已建但 `IsWindowVisible=false`——两个 shell 都直接读**环境变量** `AGENTERM_NO_ACTIVATE` 而不只看 `--no-activate`，子进程继承之，于是"被自动化启动的 GUI"把无头设置交给了用户手点打开的 CC。同一 argv 实测：设变量 `visible=False`，不设 `visible=True`。修法：`apply_activation_environment` 在 `open_control_center` 处**决定**子进程的值（激活则清除、无头则显式设 1），不再继承。附注：`dist/agenterm-cc-web.exe` 来自独立工作区 `research/agenterm-webview/`，不由主构建产出，却在 `control_center_executable()` 里优先于 `agenterm-cc.exe`，容易长期停留在旧版本。 |
 | 2026-08-11 | **windows CI 红的五个真因已定位并修复**（linux 在 `eeeb7f40` 起转绿）：① AOT pack 有界 drain 超时后返回空串，把 xclip 挂死换成静默丢输出，下游表现为 `json_parse: EOF ... column 0`（codegen 93 改为快照式取回）；② `package-qualified-selftest` 的 4 条拒绝腿在进程内调用 `require(...)` 库，native pack 把它编译成 `rh_fail` 中止，自检自杀（改子进程）；③ `startup-smoke` 的 `run_cli_output` 漏了 `cli` 子命令（标准化二进制入口后的遗留），两次 30s `wait-ui` 实际只打印用法指引，且返回值被丢弃 → UI client 未就绪 → 服务器以 `ui_client_unavailable` 拒绝交接 → launcher 静默自开窗口不退出 → 只报一个 `:timeout`；④ `cli-smoke` 用 `type_of(x)=="()"` 探测缺字段，属解释器语义，native pack 里是 `rh_fail`，该 smoke 从来不可能以 native 通过；⑤ supply-chain 门只给任务 60s 而其 `cargo metadata` 子预算 45s，与同链 clippy/测试争 cargo package lock 时打穿。附带：windows smoke 步骤补上 `AGENTERM_SCRIPT_WORKER_STDERR: inherit`（失败任务的 STEP 轨迹此前全部丢弃，这是本轮每个诊断都必须本地复现的原因）；交接被拒绝不再静默。 |
+| 2026-08-15 | **下一列定为 v0.1.18**：v0.1.17 未开工、已归档；未完成叶合同只在 [`plan-v0.1.18.md`](plan-v0.1.18.md) §11。本版仍只收口 exact-SHA CI / Candidate；公开 Promotion 另授权。Chassis-L1/L2/L3 作为本发结构，不另开 0.1.17 |
 | 2026-08-10 | **所有未完成产品叶迁出**：用户要求 W1–W4、U2、O-evidence 与其它未完成债统一由 v0.1.17 接管；本版仅收口 exact-SHA CI / Candidate 可达性，不再以 6 个产品尾叶作为 must-ship |
 | 2026-08-10 | **发布链修复重新开启**：当前任务授权修复 v0.1.16 的 CI / Candidate / Promotion 链问题，但不等同于公开 Promotion 授权。先取得新 exact-SHA CI 全绿，再按 Candidate 合同封存六平台字节；公开 `publish-v0.1.16` 仍需用户对具体 Candidate 明确批准 |
 | 2026-08-10 | **v0.1.16 收窄**：R′/G′′/L′/U4/S4/Rh-M23/QJS-M6/C10d/M/N/CC/NET 整体迁入新建的 [`plan-v0.1.17.md`](archive/plan-v0.1.17.md)。v0.1.16 保留 W1–W4 + U2 + O-evidence 为 must-ship，已完成项（O-P2/P4/P3、C 组、CLI 组、Rh-M22f、QJS M0–M5d、Common M1–M7、SQL M0–M1）保留为已完成事实 |

@@ -8,7 +8,7 @@
 | 文件 | 角色 |
 |------|------|
 | [`plan-v0.1.16.md`](plan-v0.1.16.md) | **当前代码线/发布链修复**；是否发布仍服从 exact-SHA 授权 |
-| [`plan-v0.1.18.md`](plan-v0.1.18.md) | **在制唯一版本计划**，五条轨：A App Substrate、B v0.1.17 承接树、C `agenterm-con`、D `agenterm-cu`、E `libagenterm` 机制库 |
+| [`plan-v0.1.18.md`](plan-v0.1.18.md) | **v0.1.16 之后的下一列**（不单开 0.1.17）；五条轨：A App Substrate、B 承接树、C `agenterm-con`、D `agenterm-cu`、E `libagenterm` |
 | [`plan-v0.1.19.md`](plan-v0.1.19.md) | **预开草案**：CC Phase 1 + cu `window-place` / `cu hotkeys`（PRD 32；macOS 已部分落地） |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 代码分层、热文件与结构禁令 SSOT |
 | [`refactor-chassis-l1-l2-l3.md`](refactor-chassis-l1-l2-l3.md) | **薄 L1 底盘 / 可换 L2 宿主 ABI / L3 应用包** 执行树（chassis，避免和终端 shell 撞名）；L1 面 [`chassis-l1-surface.json`](chassis-l1-surface.json)；goal [`goal-chassis-l1-l2-l3.md`](goal-chassis-l1-l2-l3.md) |
