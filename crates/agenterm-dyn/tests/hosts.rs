@@ -1,8 +1,8 @@
 //! Host-table matrix tests — all six ISA×OS cells exist as explicit data.
 
 use agenterm_dyn::{
-    cell, live_cell, HostCell, SecondaryProbe, SizeProbe, SystemProbeStatus, ALL_CELLS,
-    LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, WINDOWS_AARCH64, WINDOWS_X86_64,
+    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
+    SizeProbe, SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
 };
 
 #[test]
@@ -174,14 +174,18 @@ fn additional_system_probes_are_live_on_linux_and_macos() {
     for c in [MACOS_X86_64, MACOS_AARCH64] {
         assert!(c.system_probes.iter().all(|probe| matches!(
             probe.status,
-            SystemProbeStatus::LiveDlcall { lib: "libSystem.B.dylib", .. }
+            SystemProbeStatus::LiveDlcall {
+                lib: "libSystem.B.dylib",
+                ..
+            }
         )));
     }
     for c in [WINDOWS_X86_64, WINDOWS_AARCH64] {
-        assert!(c
-            .system_probes
-            .iter()
-            .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder)));
+        assert!(
+            c.system_probes
+                .iter()
+                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
+        );
     }
 }
 
