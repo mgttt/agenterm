@@ -45,6 +45,12 @@ jobs:
         run: cargo test --locked -p agenterm-platform --lib --all-features
       - name: Test agenterm-dyn
         run: cargo test --locked -p agenterm-dyn
+      - name: Test chassis L1/L2/L3
+        run: cargo test --locked -p agenterm-chassis -- --test-threads=1
+      - name: Clippy chassis
+        run: cargo clippy --locked -p agenterm-chassis --all-targets -- -D warnings
+      - name: Pack chassis L2 across six cells without cargo
+        run: python3 scripts/chassis-ci-pack.py
       - name: Prove Rh AOT pack pipeline
         run: ./rh-check.sh
 

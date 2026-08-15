@@ -7,6 +7,11 @@
 **当前唯一收口主题：修复 v0.1.16 exact-SHA CI / Candidate 发布链；公开 Promotion
 仍需对具体 Candidate 的独立人工授权。**
 
+Chassis 加速（不替代 Candidate 授权）：[`CI / chassis`](../.github/workflows/ci-chassis.yml)
+只编 `agenterm-chassis` 六格；L2 跨架构打包走
+[`scripts/chassis-ci-pack.py`](../scripts/chassis-ci-pack.py)，**不编工作台 PE**。
+公开 Promotion 仍要独立人工授权。
+
 原计划中发布链证据（R′）、安装尾（G′′）、低成本尾账（L′）、脚本引擎深化
 （Rh-M23、QJS-M6）、控制台宿主余量（C10d）及跨版轨（M/N/CC/NET）已整体
 以及仍未完成的 **W1–W4、U2、O-evidence** 均迁入

@@ -5,6 +5,8 @@ static AGENTERM: LazyLock<String> =
 static CON: LazyLock<String> = LazyLock::new(|| {
     include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
 });
+static CHASSIS: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/ci-chassis.yml").replace("\r\n", "\n"));
 
 const CHECKOUT_SHA: &str = "08eba0b27e820071cde6df949e0beb9ba4906955";
 
@@ -18,7 +20,11 @@ fn product_ci_workflows_are_independent_and_sha_pinned() {
     assert!(!CON.contains("task run"));
     assert!(AGENTERM.contains("-p agenterm --all-targets"));
     assert!(AGENTERM.contains("./rh-check.sh"));
-    for source in [AGENTERM.as_str(), CON.as_str()] {
+    assert!(CHASSIS.contains("name: CI / chassis"));
+    assert!(CHASSIS.contains("-p agenterm-chassis"));
+    assert!(!CHASSIS.contains("-p agenterm --"));
+    assert!(!CHASSIS.contains("cargo xwin"));
+    for source in [AGENTERM.as_str(), CON.as_str(), CHASSIS.as_str()] {
         assert!(source.contains(CHECKOUT_SHA));
         assert!(source.contains("persist-credentials: false"));
         assert!(source.contains("permissions:\n  contents: read"));
@@ -47,6 +53,25 @@ fn both_products_cover_all_six_target_cells() {
     assert!(CON.contains("gcc-aarch64-linux-gnu"));
     assert!(AGENTERM.contains("runner: macos-15-intel"));
     assert!(CON.contains("runner: macos-15-intel"));
+}
+
+#[test]
+fn chassis_ci_covers_six_cells_and_packs_l2_without_cargo() {
+    for target in [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ] {
+        assert!(CHASSIS.contains(target), "chassis CI misses {target}");
+    }
+    assert!(CHASSIS.contains("python3 scripts/chassis-ci-pack.py"));
+    assert!(CHASSIS.contains("python3 scripts/chassis-compose-product-test.py"));
+    assert!(AGENTERM.contains("-p agenterm-chassis"));
+    assert!(AGENTERM.contains("python3 scripts/chassis-ci-pack.py"));
+    assert!(!CHASSIS.contains("-p agenterm --all-targets"));
 }
 
 #[test]

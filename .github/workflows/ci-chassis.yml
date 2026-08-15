@@ -1,0 +1,77 @@
+name: CI / chassis
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-chassis-${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  l1:
+    name: chassis L1 / ${{ matrix.cell }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cell: lnx-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            kind: test
+          - cell: lnx-aarch64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            kind: check
+          - cell: win-x86_64
+            runner: ubuntu-latest
+            target: x86_64-pc-windows-msvc
+            kind: check
+          - cell: win-aarch64
+            runner: ubuntu-latest
+            target: aarch64-pc-windows-msvc
+            kind: check
+          - cell: osx-aarch64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            kind: test
+          - cell: osx-x86_64
+            runner: macos-15
+            target: x86_64-apple-darwin
+            kind: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+      - name: Install Linux aarch64 linker
+        if: matrix.cell == 'lnx-aarch64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Test chassis on native cell
+        if: matrix.kind == 'test'
+        run: cargo test --locked -p agenterm-chassis --target ${{ matrix.target }} -- --test-threads=1
+      - name: Check chassis on cross cell
+        if: matrix.kind == 'check'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo check --locked -p agenterm-chassis --all-targets --target ${{ matrix.target }}
+
+  l2-pack:
+    name: chassis L2 cross-arch pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Pack L1 stubs + L2 ABI + L3 app without cargo
+        run: python3 scripts/chassis-ci-pack.py
+      - name: Prove compose black-box (no cargo)
+        run: python3 scripts/chassis-compose-product-test.py

@@ -68,7 +68,7 @@ W0  点名 L1 路径面（已做）
 W1  打包循环证明：合成器 + 黑盒测试，过程中不得调用 cargo（本增量）
 W2  独立 crate `agenterm-chassis`：compose/check/inspect + 冻结 Host ABI + 示例 L3（已做）
 W2b L2 bytecode VM（sibling agents 落实各模块）
-W3  第一份真实 L2 产物走合成器进「成品」夹具；cu 仍为独立 L2 PE
+W3  CI：`CI / chassis` 六格只编 L1 crate；`chassis-ci-pack.py` 跨架构打包 L2/L3（已做）
 W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 ```
 
