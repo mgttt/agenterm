@@ -213,6 +213,47 @@ fn dlcall_rejects_isize_type_before_arguments_or_library_load() {
 }
 
 #[test]
+fn dlcall_rejects_c_abi_aliases_before_arguments_or_library_load() {
+    // These familiar C spellings have target-dependent widths or signedness.  dlcall
+    // deliberately exposes only fixed-width integer and pointer ABI classes.
+    for unsupported in [
+        "long",
+        "unsigned long",
+        "size_t",
+        "ssize_t",
+        "intptr_t",
+        "uintptr_t",
+        "char",
+        "short",
+        "int",
+    ] {
+        let expected = || {
+            DynError::Type(format!(
+                "unsupported dlcall type `{unsupported}`; only void/integer/pointer types are supported"
+            ))
+        };
+        for script in [
+            format!(
+                r#"(dlcall "missing-library-for-c-alias-return" "unused" "{unsupported}"
+                    "i32" (set touched 1))"#
+            ),
+            format!(
+                r#"(dlcall "missing-library-for-c-alias-argument" "unused" "i32"
+                    "i32" (set touched 1) "{unsupported}" 0)"#
+            ),
+        ] {
+            let mut env = Dyn::new();
+            assert_eq!(env.eval(&script), Err(expected()), "{unsupported}");
+            assert_eq!(
+                env.eval("touched").unwrap_err(),
+                DynError::UnknownVar("touched".into()),
+                "{unsupported}"
+            );
+        }
+    }
+}
+
+#[test]
 fn dlcall_rejects_bool_type_before_arguments_or_library_load() {
     let expected = || {
         DynError::Type(

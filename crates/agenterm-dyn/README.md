@@ -118,6 +118,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [current working directory via `getcwd`](examples/getcwd.md)
 - [process CPU ticks via `times`](examples/times.md)
 - [this process's resource usage via `getrusage(RUSAGE_SELF, …)`](examples/getrusage.md)
+- [descriptor resource limits via `getrlimit(RLIMIT_NOFILE, …)`](examples/getrlimit.md)
 - [host page size via `sysconf`](examples/sysconf-pagesize.md)
 - [host page size via `getpagesize`](examples/getpagesize.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)

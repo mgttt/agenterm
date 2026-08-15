@@ -16,11 +16,13 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   unknown types (`f32` / `struct` / `f64` / `u128` / `usize` / `isize` / `bool`).
 - Linux live libc probes + paired S-expr examples (pid/uid/gid/pgid/sid/pgrp,
   sched/alarm, umask, descriptors, tty, access, sysconf pagesize, gethostid,
-  getdtablesize, getpagesize, `times`, `getrusage`, …).
+  getdtablesize, getpagesize, `times`, `getrusage`, `getrlimit`, …).
 - 255-byte library/symbol names reach native processing; 256-byte names reject
   before loading or argument evaluation.
 - Embedded NUL library and symbol names reject before loading or argument
   evaluation.
+- C spelling aliases outside the fixed-width ABI whitelist reject before
+  loading or argument evaluation.
 - Win/macOS six-cell rows stay `PLATFORM-CANDIDATE` placeholders.
 - Tests grew ~62 → ~113. Low-risk dyn commits go straight to `main` with `[skip ci]`.
 
@@ -37,9 +39,9 @@ accept / 256-byte reject boundary is pinned.
 ### 2. probes — Linux live only, pointer buffers next
 
 Integer/void libc rows are mostly filled. `getcwd`, `uname`, `times`, and
-  `clock_gettime`, and `getrusage` now prove caller-owned buffers through `ptr`.
-  Keep Win/macOS as placeholders. No C shim. Restore any process-global side
-  effect before the test ends (`umask` is the pattern).
+  `clock_gettime`, `getrusage`, and `getrlimit` now prove caller-owned buffers
+  through `ptr`. Keep Win/macOS as placeholders. No C shim. Restore any
+  process-global side effect before the test ends (`umask` is the pattern).
 
 ### 3. examples — pair every new live probe
 
