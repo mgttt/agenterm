@@ -5,6 +5,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod auth_store;
 #[cfg(target_os = "macos")]
 pub mod ax_guide;
 pub mod command;

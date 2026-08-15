@@ -75,6 +75,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   scope behind an explicit CLI `observe` placement attempt and proves the
   action remains refused with unchanged bounds. These remain ephemeral
   process inputs, not persisted or target-bound grants.
+- [~] A persisted bounded grant-store core now owns validated create/list,
+  pre-effect attempt reservation, revocation, expiry/not-before, exact
+  target+tier+session matching, generation conflict detection, and corrupt
+  store refusal. Observe grants are capped at 24 hours / 10,000 uses; any
+  grant containing Actuate is capped at 1 hour / 100 uses, and one-shot means
+  exactly one attempt even when the downstream mechanism fails. RDP cannot
+  receive a grant while its transport is unavailable. Publication uses a
+  flushed same-directory replacement snapshot. This is not yet the production
+  authorization path: CLI/provider integration, target identity resolution,
+  session-nonce invalidation, and a real cross-process lock remain open; bare
+  generation compare cannot close two processes racing between compare and
+  rename.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`

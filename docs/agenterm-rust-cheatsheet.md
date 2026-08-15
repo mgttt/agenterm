@@ -1849,6 +1849,18 @@ does not make a preceding window move or other OS action transactional. If the
 product requires all-or-nothing behavior across both, it needs an explicit
 prepare/commit or compensation contract and failure evidence for that boundary.
 
+Bounded one-shot authority must be durably reserved before the authorized
+side effect and must not be refunded merely because the downstream mechanism
+fails; refunding makes a failed attempt replayable. Validate target/session,
+scope, revocation, time bounds and remaining uses before cloning and publishing
+the next store generation. A generation comparison without a cross-process
+lock detects an already-published conflict but does not close the
+compare-to-rename race between two processes, so document that boundary and do
+not call it atomic authorization. On the pinned Windows Rust toolchain,
+`std::fs::rename` already requests replace-existing semantics; a manual
+destination-to-backup swap adds a crash interval and must not be used as an
+"atomic" fallback.
+
 For window placement, compensation is a saga, never an atomicity claim. Read
 the exact native bounds, revalidate handle plus process/application identity,
 apply, independently read back the final rect, then publish cloned history.

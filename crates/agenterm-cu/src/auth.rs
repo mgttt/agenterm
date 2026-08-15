@@ -2,6 +2,8 @@
 
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GrantParseErrorKind {
     EmptyToken,
@@ -49,7 +51,8 @@ pub struct EvaluatedGrants {
 }
 
 /// Least-capability grants: observation and actuation are distinct.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Grant {
     Observe,
     Actuate,
