@@ -10,6 +10,7 @@ use crate::value::Value;
 
 const MAX_ARGS: usize = 6;
 const MAX_LIBRARY_NAME_BYTES: usize = 255;
+const MAX_SYMBOL_NAME_BYTES: usize = 255;
 
 #[derive(Default)]
 pub(crate) struct LibraryCache {
@@ -165,6 +166,11 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     }
     if sym_name.trim().is_empty() {
         return Err(DynError::DlCall("symbol name must not be blank".into()));
+    }
+    if sym_name.len() > MAX_SYMBOL_NAME_BYTES {
+        return Err(DynError::DlCall(format!(
+            "symbol name exceeds {MAX_SYMBOL_NAME_BYTES}-byte limit"
+        )));
     }
     let c_name = CString::new(sym_name.as_str())
         .map_err(|_| DynError::DlCall("symbol name contains interior NUL".into()))?;

@@ -289,6 +289,26 @@ fn dlcall_rejects_overlong_library_before_arguments_or_load() {
 }
 
 #[test]
+fn dlcall_rejects_overlong_symbol_before_arguments_or_load() {
+    let symbol = "x".repeat(256);
+    let script = format!(
+        r#"(dlcall "missing-library-for-overlong-symbol" "{symbol}" "i32"
+            "i32" (set touched 1))"#
+    );
+    let mut env = Dyn::new();
+    assert_eq!(
+        env.eval(&script),
+        Err(DynError::DlCall(
+            "symbol name exceeds 255-byte limit".into()
+        ))
+    );
+    assert_eq!(
+        env.eval("touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
+}
+
+#[test]
 fn dlcall_rejects_library_with_interior_nul_before_loading() {
     let mut env = Dyn::new();
     let script = "(dlcall \"bad\0library\" \"unused\" \"i32\")";
