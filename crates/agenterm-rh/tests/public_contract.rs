@@ -137,8 +137,8 @@ fn assert_compile_code(error: RhError, expected_code: &str) {
 }
 
 #[test]
-fn public_codegen_revision_is_eighty_nine() {
-    assert_eq!(RH_CODEGEN_REVISION, 101);
+fn public_codegen_revision_is_pinned() {
+    assert_eq!(RH_CODEGEN_REVISION, 107);
 }
 
 #[test]

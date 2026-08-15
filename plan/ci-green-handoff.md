@@ -53,8 +53,8 @@ target 缓存(temp/agenterm-rh-pack-target-cg<rev>,冷编译 30s→5s),wave 10 �
 - 每轮:提标签 `gh run view --job <id> --log | Select-String rh_backend`;修;本地验证
   (`cargo test -p agenterm-rh` + 根级 rh 测试 + `cargo clippy --all-targets --all-features -- -D warnings`
   + `cargo fmt --all` + prd-alignment AOT 金丝雀);`git commit --only`;push;`gh run watch`。
-- 转译器发射变更必须 bump RH_CODEGEN_REVISION(现 87;四处钉:host_api.rs、public_contract.rs、
-  codegen_native_pack_fixtures.rs、tests/rh_codegen_fixtures.rs)。
+- 转译器发射变更必须 bump RH_CODEGEN_REVISION(现 107;三处钉:host_api.rs、
+  public_contract.rs、codegen_native_pack_fixtures.rs)。
 - `rh compile error: rh_fail: X` = AOT 包**运行期** rh_fail,不是编译错。
 - 本机 lua 构建前先 `Remove-Item env:NoDefaultCurrentDirectoryInExePath`。
 - gate 失败 payload:stdout/stderr 各自尾部 8K(别再合并截断)。
