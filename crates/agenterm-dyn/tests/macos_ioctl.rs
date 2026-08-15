@@ -8,9 +8,12 @@ mod macos {
 
     impl Drop for Fd {
         fn drop(&mut self) {
-            // SAFETY: this test owns the descriptors returned by `openpty`.
-            unsafe {
-                libc::close(self.0);
+            if self.0 >= 0 {
+                // SAFETY: this test owns descriptors initialized by `openpty`.
+                // A failed call may initialize either one, so both are guarded.
+                unsafe {
+                    libc::close(self.0);
+                }
             }
         }
     }
@@ -26,21 +29,23 @@ mod macos {
             ws_ypixel: 0,
         };
         // SAFETY: all out-pointers are valid for the duration of the call.
+        let status = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut requested,
+            )
+        };
+        // Take ownership before asserting: a failed openpty may still have
+        // initialized either output descriptor.
+        let _master = Fd(master);
+        let slave = Fd(slave);
         assert_eq!(
-            unsafe {
-                libc::openpty(
-                    &mut master,
-                    &mut slave,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    &mut requested,
-                )
-            },
-            0,
+            status, 0,
             "openpty must provide a slave for the Darwin ioctl smoke"
         );
-        let _master = Fd(master);
-        let _slave = Fd(slave);
 
         let mut observed: libc::winsize = unsafe { std::mem::zeroed() };
         let mut env = Dyn::new();
@@ -48,7 +53,8 @@ mod macos {
             .expect("bind caller-owned winsize");
         let result = env
             .eval(&format!(
-                r#"(dlcall "libSystem.B.dylib" "ioctl" "i32" "i32" {slave} "u64" {} "ptr" winsize)"#,
+                r#"(dlcall "libSystem.B.dylib" "ioctl" "i32" "i32" {} "u64" {} "ptr" winsize)"#,
+                slave.0,
                 libc::TIOCGWINSZ
             ))
             .expect("Darwin variadic ioctl dlcall");

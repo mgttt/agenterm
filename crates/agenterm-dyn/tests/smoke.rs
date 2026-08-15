@@ -64,6 +64,15 @@ mod linux {
         live_cell().expect("linux cell")
     }
 
+    fn run_isolated_test(child: &str) {
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args(["--exact", child, "--nocapture"])
+            .env("AGENTERM_DYN_ISOLATED_CHILD", child)
+            .status()
+            .expect("spawn isolated smoke child");
+        assert!(status.success(), "isolated child {child} failed: {status}");
+    }
+
     #[test]
     fn variadic_system_probes_are_catalogued_but_not_invoked() {
         for name in ["open_dev_null", "fcntl_stdin_getfd", "fcntl_stdin_getfl"] {
@@ -671,6 +680,16 @@ mod linux {
 
     #[test]
     fn dlcall_alarm_zero_returns_integer_and_leaves_none_pending() {
+        run_isolated_test("linux::dlcall_alarm_zero_child");
+    }
+
+    #[test]
+    fn dlcall_alarm_zero_child() {
+        if std::env::var("AGENTERM_DYN_ISOLATED_CHILD").ok().as_deref()
+            != Some("linux::dlcall_alarm_zero_child")
+        {
+            return;
+        }
         let probe = live_system_probe("alarm_zero");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
             unreachable!("live_system_probe validates status")
@@ -691,6 +710,16 @@ mod linux {
 
     #[test]
     fn dlcall_umask_reads_and_immediately_restores_current_mask() {
+        run_isolated_test("linux::dlcall_umask_child");
+    }
+
+    #[test]
+    fn dlcall_umask_child() {
+        if std::env::var("AGENTERM_DYN_ISOLATED_CHILD").ok().as_deref()
+            != Some("linux::dlcall_umask_child")
+        {
+            return;
+        }
         let probe = live_system_probe("umask");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
             unreachable!("live_system_probe validates status")
@@ -946,6 +975,15 @@ mod macos {
 
     fn cell() -> &'static HostCell {
         live_cell().expect("macos cell")
+    }
+
+    fn run_isolated_test(child: &str) {
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args(["--exact", child, "--nocapture"])
+            .env("AGENTERM_DYN_ISOLATED_CHILD", child)
+            .status()
+            .expect("spawn isolated smoke child");
+        assert!(status.success(), "isolated child {child} failed: {status}");
     }
 
     fn live_system_probe(name: &str) -> SystemProbe {
@@ -1385,32 +1423,55 @@ mod macos {
             Value::Int(i64::from(yld_direct))
         );
 
-        let prior = unsafe { libc::alarm(0) };
-        assert_eq!(
-            prior, 0,
-            "test process should start without a pending alarm"
-        );
+        run_isolated_test("macos::dlcall_alarm_zero_child");
+        run_isolated_test("macos::dlcall_umask_child");
+    }
+
+    #[test]
+    fn dlcall_alarm_zero_child() {
+        if std::env::var("AGENTERM_DYN_ISOLATED_CHILD").ok().as_deref()
+            != Some("macos::dlcall_alarm_zero_child")
+        {
+            return;
+        }
         let alarm = live_system_probe("alarm_zero");
         let SystemProbeStatus::LiveDlcall {
-            symbol: alarm_sym, ..
+            lib,
+            symbol: alarm_sym,
         } = alarm.status
         else {
             unreachable!()
         };
+        let prior = unsafe { libc::alarm(0) };
+        assert_eq!(
+            prior, 0,
+            "isolated test process should start without a pending alarm"
+        );
+        let mut env = Dyn::new();
         let got_alarm = env
             .eval(&format!(r#"(dlcall "{lib}" "{alarm_sym}" "u32" "u32" 0)"#))
             .expect("alarm");
         let remaining = unsafe { libc::alarm(0) };
         assert_eq!(got_alarm, Value::Int(0));
         assert_eq!(remaining, 0);
+    }
 
+    #[test]
+    fn dlcall_umask_child() {
+        if std::env::var("AGENTERM_DYN_ISOLATED_CHILD").ok().as_deref()
+            != Some("macos::dlcall_umask_child")
+        {
+            return;
+        }
         let umask = live_system_probe("umask");
         let SystemProbeStatus::LiveDlcall {
-            symbol: umask_sym, ..
+            lib,
+            symbol: umask_sym,
         } = umask.status
         else {
             unreachable!()
         };
+        let mut env = Dyn::new();
         let previous = env
             .eval(&format!(r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" 0)"#))
             .expect("umask(0)")
