@@ -115,6 +115,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [whether standard input is a terminal](examples/isatty-stdin.md)
 - [`open("/dev/null")` then `isatty` then `close`](examples/open-dev-null-isatty-close.md)
 - [`fcntl(0, F_GETFD)` descriptor flags](examples/fcntl-stdin-getfd.md)
+- [`lseek(0, 0, SEEK_CUR)` current offset](examples/lseek-stdin-current.md)
+- [`fcntl(0, F_GETFL)` status flags](examples/fcntl-stdin-getfl.md)
 - [`dup(0)` then `close`](examples/dup-stdin-close.md)
 - [`access("/", F_OK)` success](examples/access-root-f-ok.md)
 - [`access` missing-path failure](examples/access-missing-path.md)
