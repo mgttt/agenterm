@@ -14,14 +14,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Target family
 
-Branch status (cut 3.45 — crystal-clear stub vs proven):
+Branch status (cut 3.46 — RDP placeholder; 3.45 macOS AX observe stub unchanged):
 
 | Target | Status | Notes |
 |--------|--------|-------|
 | `current` | **[x]** | Local in-process; Linux/Windows evidence held |
 | `ssh` | **[x]** | OpenSSH exec of remote `--target current` |
 | `vnc` | **[x]** | RFB + local `--target current` worker |
-| `rdp` | **[ ]** | Empty — `TargetRef::parse("rdp")` is still `None`; no endpoint, transport, or executor branch |
+| `rdp` | **[~]** | PLACEHOLDER: `TargetRef::parse("rdp") == Some(Rdp)`; `--rdp HOST[:PORT]` / `--target rdp`; authorized commands return typed `rdp_unavailable` with no socket connect. Transport/session/live evidence empty |
 
 - [x] `current`, `ssh`, and `vnc` are tiers of one family sharing one
   command set. `current` is the **local degenerate tier** — transport is
@@ -31,8 +31,21 @@ Branch status (cut 3.45 — crystal-clear stub vs proven):
   first cut is RFB handshake to `--vnc <host[:port]>` (security type None /
   `x11vnc -nopw`) then a local `agenterm-cu --target current` worker against
   the shared session (`DISPLAY` / AT-SPI env; same verbs; no new verb).
-- [ ] `rdp` remains empty (parse still `None`). Do not invent an RDP verb or
-  endpoint in this module until a dedicated cut owns it.
+- [~] `rdp` (cut 3.46 PLACEHOLDER) is parseable and fail-closed. Purpose:
+  remote Windows desktops (and other RDP endpoints). Public surface:
+  `TargetRef::Rdp`, `as_str() == "rdp"`, `--rdp HOST[:PORT]` (implies
+  `--target rdp`; default port 3389 is syntax-only), and explicit
+  `--target rdp`. Any authorized RDP command (reserved first observe:
+  `tree --window HANDLE`) returns `ok:false`, `target:"rdp"`, the original
+  command name, and `error.code:"rdp_unavailable"` with **no** socket
+  connect, TLS/CredSSP/NLA, credential flag, screenshot, `--coords`, or
+  silent `ssh`/`vnc`/`current` reuse. `--target rdp` without `--rdp` is the
+  same typed `rdp_unavailable` family (precise missing-endpoint message),
+  not a generic usage/`current` fallback. Malformed ports remain
+  `invalid_input`. Transport, session lifecycle, authentication, and live
+  UIA-over-RDP evidence are **[ ]** — owned by a later Windows agent (see
+  Evidence handoff below). Windows UIA on `current` is a separate line and
+  is not promoted by this placeholder.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
   commands above it. `ssh` get-selection evidence reuses the #50 con-publish
@@ -102,13 +115,13 @@ targets / transports (30)                    legend: [x] shipped  [~] partial  [
 │   ├── current  [x]  local in-process (Linux/Windows live evidence held)
 │   ├── ssh      [x]  OpenSSH exec → remote --target current
 │   ├── vnc      [x]  RFB handshake → local --target current worker
-│   └── rdp      [ ]  EMPTY — TargetRef::parse("rdp") is None; no transport
+│   └── rdp      [~]  PLACEHOLDER: parseable + typed rdp_unavailable; transport/session/live evidence [ ]
 └── platform a11y backends (agenterm-platform)
     ├── Linux AT-SPI2                 [x] live evidence (cu-linux-smoke + named journeys)
-    ├── Windows UIA                   [~] existing tree evidence (cu-windows-smoke); not this cut
-    ├── macOS AX current tree         [~] PLACEHOLDER this cut (code present; live NOT claimed)
+    ├── Windows UIA                   [~] existing tree evidence (cu-windows-smoke); separate from rdp
+    ├── macOS AX current tree         [~] PLACEHOLDER cut 3.45 (code present; live NOT claimed)
     ├── macOS AX actuation            [ ] click / focus / value — not started
-    └── RDP remote control            [ ] not started
+    └── RDP remote desktop transport  [ ] not started (session + UIA-over-RDP later Windows cut)
 ```
 
 **Cut 3.45 boundary:** only the macOS AX **observe** path for
@@ -554,6 +567,44 @@ Canonical host mapping (approved product vocabulary):
   6. Permission denial must be typed (`a11y_permission_denied`); timeout /
      bound exhaustion remain typed. Never screenshot, OCR, CGEvent, or
      AT-SPI/UIA reuse. Worker JSON from a Linux box does not count.
+
+- [~] **RDP target PLACEHOLDER (cut 3.46) — live RDP / Windows evidence NOT
+  claimed.** Linux static proof only: `TargetRef::parse("rdp") ==
+  Some(Rdp)`, `as_str() == "rdp"`, `--rdp` / `--target rdp` CLI, and every
+  authorized RDP command returns `error.code:"rdp_unavailable"` without
+  dialing the endpoint (sentinel listener receives zero connections).
+  Worker JSON does not count; CEO owns the official placeholder check.
+  Transport, authentication, session lifecycle, and UIA-over-RDP remain
+  empty. **Handoff to a later Windows agent** (new cut, not 3.46):
+
+  1. Choose and document the real boundary: native RDP client/session API
+     or an explicitly managed external client; NLA/CredSSP and certificate
+     validation; username/domain/secret acquisition without argv leakage;
+     desktop/session lifecycle and teardown; cancellation/timeouts; and
+     whether a remote session worker is deployed or UIA runs inside the
+     logged-on Windows session. Do **not** silently map RDP to SSH, VNC,
+     local `current`, screenshots, or coordinates. Do not invent password
+     flags until secret-input policy is designed for that cut.
+  2. Controlled Windows host/VM with RDP enabled, dedicated test
+     account/session, and a cut-owned native fixture (unique title/PID;
+     seeded editable text e.g. `346RDPTREE`; named button e.g.
+     `Fixture Press`) visible to the remote interactive desktop's UIA.
+  3. Resolve `HANDLE` through the RDP target's own window enumeration, then
+     reuse the reserved first-observe argv:
+
+     ```sh
+     agenterm-cu --rdp "WINDOWS_HOST:3389" \
+       --grant observe tree --window "$HANDLE"
+     ```
+
+  4. Positive live acceptance: `ok:true`, `target:"rdp"`, `command:"tree"`,
+     `backend:"uia"`, unique native fixture nodes; session uniquely owned
+     by the gate; no screenshot/OCR/`--coords`/SSH/VNC/`current` fallback.
+  5. Negative typed failures (distinct codes as the surface lands): closed
+     endpoint, bad credentials, certificate rejection, lost session,
+     missing UIA, bogus handle, timeout, bound exhaustion. Until live
+     evidence lands, every RDP command remains `rdp_unavailable` and the
+     PRD branch stays `[~]` placeholder.
 
 - [ ] a cross-tier conformance test proves the same abstract command produces
   equivalent observable results on every tier that declares support for it.

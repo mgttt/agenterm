@@ -123,9 +123,10 @@ at call time and returns `a11y_node_not_found` when the path is stale.
 ## Authorization and audit
 
 Every command requires an explicit `--target current`, `--ssh <user@host>`
-(which implies `--target ssh`), or `--vnc <host[:port]>` (which implies
-`--target vnc`). Observation commands need the `observe` grant; actuation
-commands need `actuate`. Grants come from `--grant` or `AGENTERM_CU_GRANT`
+(which implies `--target ssh`), `--vnc <host[:port]>` (which implies
+`--target vnc`), or `--rdp <host[:port]>` (which implies `--target rdp`).
+Observation commands need the `observe` grant; actuation commands need
+`actuate`. Grants come from `--grant` or `AGENTERM_CU_GRANT`
 (comma-separated). Local `current` is not exempt.
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
@@ -167,6 +168,39 @@ non-empty selection `START..END` (gate precondition via already-landed
 remain valid too. Connect / protocol failures are typed (`vnc_unavailable` /
 `vnc_transport_failed` / `vnc_auth_failed`).
 
+The `rdp` tier is a **PLACEHOLDER** (cut 3.46), not an operational transport.
+`--rdp HOST[:PORT]` and `--target rdp` parse and select `target:"rdp"`, then
+any authorized command fails closed with `error.code:"rdp_unavailable"`
+before any socket connect, TLS/CredSSP/NLA, credential lookup, screenshot,
+`--coords`, or silent `ssh`/`vnc`/`current` reuse. Default port 3389 is
+syntax-only. Reserved first observe shape for a later Windows agent (live
+RDP + UIA-over-RDP evidence is **not** claimed here):
+
+```bash
+agenterm-cu --rdp "WINDOWS_HOST:3389" \
+  --grant observe tree --window "$HANDLE"
+```
+
+Canonical placeholder reply (message may include the non-secret endpoint):
+
+```json
+{
+  "ok": false,
+  "target": "rdp",
+  "command": "tree",
+  "error": {
+    "code": "rdp_unavailable",
+    "message": "RDP transport is reserved but not implemented"
+  }
+}
+```
+
+`--target rdp` without `--rdp` returns the same `rdp_unavailable` family
+with a missing-endpoint message. No password/username/domain flags in this
+cut. Windows UIA on `current` is a separate evidence line. A later Windows
+agent owns real session design and live gates (see
+`prd/PRD_02_30_cu_targets_transports.md` Evidence handoff).
+
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
 (`AGENTERM_CU_AUDIT_PATH`, default `~/.local/share/agenterm/cu-audit.jsonl`).
@@ -194,6 +228,10 @@ agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed2551
   --grant observe,actuate select --window HANDLE --name Command --start 0 --end 11
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
   get-selection --window HANDLE --name Command
+
+# RDP PLACEHOLDER only (cut 3.46): always rdp_unavailable; no connect.
+# Live RDP + UIA tree is a later Windows-agent cut.
+agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe tree --window HANDLE
 
 # List top-level windows
 agenterm-cu --target current --grant observe windows
