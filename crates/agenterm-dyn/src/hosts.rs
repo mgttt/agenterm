@@ -284,7 +284,7 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 69] = [
         },
     },
     SystemProbe {
-        name: "sched_yield_void",
+        name: "sched_yield",
         status: SystemProbeStatus::LiveDlcall {
             lib: "libc.so.6",
             symbol: "sched_yield",
@@ -429,7 +429,7 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 69] = [
     placeholder("fcntl_stdin_getfl"),
     macos_live("isatty_stdout", "isatty"),
     macos_live("isatty_stderr", "isatty"),
-    macos_live("sched_yield_void", "sched_yield"),
+    macos_live("sched_yield", "sched_yield"),
     macos_live("alarm_zero", "alarm"),
     macos_live("umask", "umask"),
     macos_live("getdtablesize", "getdtablesize"),
@@ -598,7 +598,7 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 69] = [
         status: SystemProbeStatus::Placeholder,
     },
     SystemProbe {
-        name: "sched_yield_void",
+        name: "sched_yield",
         status: SystemProbeStatus::Placeholder,
     },
     SystemProbe {

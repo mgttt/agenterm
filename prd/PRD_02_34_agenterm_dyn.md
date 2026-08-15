@@ -15,7 +15,7 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Signature hardening on main: void, arity, empty/blank/overlong names,
   unknown types (`f32` / `struct` / `f64` / `u128` / `usize` / `isize` / `bool`).
 - Linux live libc probes + paired S-expr examples (pid/uid/gid/pgid/sid/pgrp,
-  sched/alarm, umask, descriptors, tty, access, sysconf pagesize, gethostid,
+  `sched_yield` i32 status/alarm, umask, descriptors, tty, access, sysconf pagesize, gethostid,
   getdtablesize, getpagesize, `times`, `getrusage`, `getrlimit`, …).
 - 255-byte library/symbol names reach native processing; 256-byte names reject
   before loading or argument evaluation.

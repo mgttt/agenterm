@@ -655,16 +655,18 @@ mod linux {
     }
 
     #[test]
-    fn dlcall_sched_yield_as_void_completes() {
-        let probe = live_system_probe("sched_yield_void");
+    fn dlcall_sched_yield_matches_libc_status() {
+        let probe = live_system_probe("sched_yield");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
         let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "void")"#))
-            .expect("sched_yield void dlcall");
-        assert_eq!(got, Value::Nil);
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+            .expect("sched_yield i32 dlcall");
+        let direct = unsafe { libc::sched_yield() };
+        assert_eq!(direct, 0, "sched_yield direct status");
+        assert_eq!(got, Value::Int(i64::from(direct)));
     }
 
     #[test]
@@ -1368,17 +1370,19 @@ mod macos {
             .expect("nice");
         assert_eq!(got_nice, Value::Int(i64::from(unsafe { libc::nice(0) })));
 
-        let yld = live_system_probe("sched_yield_void");
+        let yld = live_system_probe("sched_yield");
         let SystemProbeStatus::LiveDlcall {
             symbol: yld_sym, ..
         } = yld.status
         else {
             unreachable!()
         };
+        let yld_direct = unsafe { libc::sched_yield() };
+        assert_eq!(yld_direct, 0, "sched_yield direct status");
         assert_eq!(
-            env.eval(&format!(r#"(dlcall "{lib}" "{yld_sym}" "void")"#))
+            env.eval(&format!(r#"(dlcall "{lib}" "{yld_sym}" "i32")"#))
                 .expect("sched_yield"),
-            Value::Nil
+            Value::Int(i64::from(yld_direct))
         );
 
         let prior = unsafe { libc::alarm(0) };

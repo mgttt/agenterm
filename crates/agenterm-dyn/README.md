@@ -228,7 +228,7 @@ real `getpriority(PRIO_PROCESS, 0)` and `nice(0)`; `getenv("DISPLAY")`; honest `
 `XOpenDisplay`; real `lseek(0, 0, SEEK_CUR)`; and AT-SPI
 library existence probes (no session a11y bus). `isatty(0/1/2)` records the real
 stdin/stdout/stderr state rather than requiring an interactive terminal. `sched_yield`
-exercises the void-return path; `alarm(0)` returns an integer and leaves no alarm pending.
+returns an `i32` status (`0` on success); `alarm(0)` returns an integer and leaves no alarm pending.
 The `umask` probe reads with `umask(0)` and immediately restores the returned mask.
 `times` writes a caller-owned `tms` and is compared with a later direct-libc
 baseline. `getrusage(RUSAGE_SELF, …)` writes a caller-owned `rusage` and its
