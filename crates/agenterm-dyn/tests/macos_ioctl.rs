@@ -1,11 +1,11 @@
-//! Darwin `ioctl` must use its variadic ABI, not dyn's fixed-arity trampoline.
+//! macOS `ioctl` must use Unix's variadic ABI, not dyn's fixed-arity trampoline.
 
 #[cfg(target_os = "macos")]
 mod macos {
     use agenterm_dyn::{Dyn, DynError, Value};
 
     fn eval_native(env: &mut Dyn, source: &str) -> Result<Value, DynError> {
-        // SAFETY: the test owns the `winsize` buffer and validates Darwin ioctl's ABI.
+        // SAFETY: the test owns the `winsize` buffer and validates Unix ioctl's ABI on macOS.
         unsafe { env.eval_native(source) }
     }
 
@@ -24,7 +24,7 @@ mod macos {
     }
 
     #[test]
-    fn dlcall_ioctl_reads_openpty_slave_winsize_through_darwin_variadic_abi() {
+    fn dlcall_ioctl_reads_openpty_slave_winsize_through_unix_variadic_abi() {
         let mut master = -1;
         let mut slave = -1;
         let mut requested = libc::winsize {
@@ -49,7 +49,7 @@ mod macos {
         let slave = Fd(slave);
         assert_eq!(
             status, 0,
-            "openpty must provide a slave for the Darwin ioctl smoke"
+            "openpty must provide a slave for the macOS ioctl smoke"
         );
 
         let mut observed: libc::winsize = unsafe { std::mem::zeroed() };
@@ -64,7 +64,7 @@ mod macos {
                 libc::TIOCGWINSZ
             ),
         )
-        .expect("Darwin variadic ioctl dlcall");
+        .expect("Unix variadic ioctl dlcall");
 
         assert_eq!(result, Value::Int(0));
         assert_eq!(observed.ws_row, 24);

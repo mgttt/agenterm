@@ -1618,7 +1618,7 @@ mod macos {
             format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {raw_fd} "u64" {request} "ptr" ws)"#);
         let ret = eval_native(&mut env, &script).expect("ioctl dlcall");
         let code = ret.as_int().expect("ioctl return code");
-        // The signature-gated Darwin path calls the loaded `ioctl` symbol
+        // The signature-gated Unix path calls the loaded `ioctl` symbol
         // through its variadic ABI. An owned pty is live evidence, so it
         // must round-trip both the successful status and its seeded geometry.
         if expect_pty_dims {

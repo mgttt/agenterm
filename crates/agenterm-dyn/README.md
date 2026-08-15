@@ -58,7 +58,7 @@ sign-extended and narrow unsigned inputs are zero-extended before that call.
 Floating-point values and aggregates have no supported ABI class. Variadic
 symbols are outside the contract because the fixed trampoline cannot reliably
 detect them, so callers must not use `printf` or another arbitrary variadic
-symbol. The only exception is Darwin `ioctl` with the validated
+symbol. The only exception is Unix `ioctl` (Linux and macOS) with the validated
 `(i32, u64|i32, ptr) -> i32` signature: it transmutes the loaded
 `libloading` pointer to `unsafe extern "C" fn(i32, u64, ...) -> i32`.
 This remains an ABI-compatibility boundary, not an authorization
@@ -69,7 +69,7 @@ the complete AST and returns `DynError::NativeRequiresUnsafe` for any `dlcall`,
 including a dead branch, before any expression runs. Native source must use
 `unsafe { Dyn::eval_native(..) }`. Its caller owns exact fixed C ABI selection,
 pointer validity/alignment/lifetime/aliasing, library availability,
-thread-affinity, and every resource or process side effect. Darwin `ioctl` is
+thread-affinity, and every resource or process side effect. Unix `ioctl` is
 the documented variadic compatibility exception, not a relaxation of those obligations.
 
 The language stores integer results as signed `i64`. A `u64` result therefore
@@ -104,7 +104,7 @@ native-door or caller authority semantics.
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
 | linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | fixed-ABI live rows include `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `access`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; variadic `open`/`fcntl` and Darwin-only rows are placeholders |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Unix's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -219,7 +219,7 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 | `language.rs` | comparisons, `not`, `and`/`or`, `+`/`-`, `repeat`, nested logic |
 | `errors.rs` | Bad S-exprs, unknown vars/forms, arity, overflow, repeat bounds |
 | `hosts.rs` | Six-cell matrix completeness, `live_cell()` selection, row well-formedness |
-| `macos_ioctl.rs` | Darwin variadic `ioctl(TIOCGWINSZ)` through the loaded libSystem symbol |
+| `macos_ioctl.rs` | macOS coverage of Unix variadic `ioctl(TIOCGWINSZ)` through the loaded libSystem symbol |
 | `macos_probes.rs` | Darwin-only live `dlcall` facts compared with later native calls |
 | `macos_resource.rs` | `mach_host_self` stays Placeholder and is never live-called |
 | `smoke.rs` | Real `dlcall` into host libraries per OS (`#[cfg]`-gated) |
@@ -271,7 +271,7 @@ buffers; the smoke checks only successful status and never observes entropy
 contents. `mach_host_self`
 remains intentionally uncalled because its returned send right has no dyn release
 owner. `ioctl(TIOCGWINSZ)` uses the resolved
-`libSystem.B.dylib` symbol through its signature-gated variadic ABI and an
+`libSystem.B.dylib` symbol through Unix's signature-gated variadic ABI and an
 owned pty must return the seeded 24×80 size. This records the CI-native smoke
 contract; it does not claim a local macOS-machine result. `access` missing-path uses
 `/tmp/…`, not `/proc`.

@@ -17,7 +17,7 @@ This note is the crate-side pointer so the next knife does not start from chat.
    reject 256 bytes. The parser accepts 256 nested lists and rejects 257 with
    `DynError::Parse` before evaluation.
 3. **probes** — Linux and macOS integer/void/ptr libc rows are live; Windows
-   extra probes remain explicit placeholders. Darwin `ioctl` remains variadic
+   extra probes remain explicit placeholders. Unix `ioctl` (Linux and macOS) remains variadic
    script data, not a claimed fixed-trampoline success. `umask` restores its
    side effect. Linux caller-owned-pointer coverage includes `getcwd`, `uname`,
    `times`, `clock_gettime`, `getrusage`, and `getrlimit`.
@@ -25,7 +25,7 @@ This note is the crate-side pointer so the next knife does not start from chat.
    README link.
 
 Current Linux evidence, not a portable estimate: Rust 1.97
-`cargo test --locked -p agenterm-dyn` passes **140** tests (20 unit, 39 errors,
+`cargo test --locked -p agenterm-dyn` passes **141** tests (21 unit, 39 errors,
 11 hosts, 22 language, 48 Linux smoke; 0 doctests).
 
 ## Later — requires explicit product authorization

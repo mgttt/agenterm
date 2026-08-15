@@ -15,7 +15,7 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `DynError::NativeRequiresUnsafe` before execution; `unsafe Dyn::eval_native`
   is the only native-capable entrance. Its caller owns exact fixed ABI,
   pointer validity/alignment/lifetime/aliasing, library/thread requirements,
-  resource cleanup and process side effects; Darwin `ioctl` is the documented
+  resource cleanup and process side effects; Unix `ioctl` is the documented
   variadic compatibility exception.
 - ioctl `TIOCGWINSZ` is the gate and is already in the crate (examples + smoke).
 - Signature hardening on main: void, arity, empty/blank/overlong names,
@@ -54,13 +54,13 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
-  release path for its send right. Darwin `ioctl` calls its resolved symbol through a
+  release path for its send right. Unix `ioctl` calls its resolved symbol through a
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
-  1.97: **140 passed** (20 unit + 39 errors + 11 hosts + 22 language + 48
+  1.97: **141 passed** (21 unit + 39 errors + 11 hosts + 22 language + 48
   cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory is
-  **154** (21 unit + 39 errors + 11 hosts + 22 language + 1 macos_ioctl +
+  **155** (22 unit + 39 errors + 11 hosts + 22 language + 1 macos_ioctl +
   32 macos_probes + 4 macos_resource + 24 cfg-gated macOS smoke; 0 doctests);
   native CI remains the evidence gate for current source. Wave 4–6 live rows were `dlcall`ed on the earlier
   Darwin CI host and compared to later native calls. Host-specific counts, not
@@ -97,7 +97,7 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 Mach send right. Windows extra probes stay placeholders. No
 C shim.
 Restore process-global side effects before the test ends (`umask` pattern).
-Darwin `ioctl` transmutes its already-resolved symbol only for the validated
+Unix `ioctl` (Linux and macOS) transmutes its already-resolved symbol only for the validated
 `(i32, u64|i32, ptr) -> i32` signature; the fixed trampoline remains for every
 other call and this does not authorize general variadic FFI.
 Linux caller-owned `ptr` coverage includes `getcwd`, `uname`, `times`,

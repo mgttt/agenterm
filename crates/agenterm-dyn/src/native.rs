@@ -210,8 +210,8 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     // Reject an uncached library before evaluating script argument expressions. `load` repeats
     // this check so future internal callers cannot bypass the resource bound.
     env.libs.ensure_capacity(&lib_name)?;
-    #[cfg(target_os = "macos")]
-    let darwin_ioctl = is_darwin_ioctl_signature(&sym_name, ret_ty, &arg_types);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let unix_ioctl = is_unix_ioctl_signature(&sym_name, ret_ty, &arg_types);
     let dyn_args = arg_types
         .iter()
         .copied()
@@ -236,12 +236,12 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         )));
     }
 
-    #[cfg(target_os = "macos")]
-    if darwin_ioctl {
-        // SAFETY: the resolved `ioctl` symbol has the one supported Darwin signature below;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if unix_ioctl {
+        // SAFETY: the resolved `ioctl` symbol has the one supported Unix signature below;
         // the script types were validated before argument evaluation. Its variadic ABI differs
         // from the general fixed-arity trampoline.
-        return unsafe { invoke_darwin_ioctl(func_ptr, &dyn_args, arg_types[1]) };
+        return unsafe { invoke_unix_ioctl(func_ptr, &dyn_args, arg_types[1]) };
     }
 
     // SAFETY: callers provide the native symbol's signature. `invoke` supports only the
@@ -249,8 +249,8 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     unsafe { invoke(func_ptr, &dyn_args, ret_ty) }
 }
 
-#[cfg(target_os = "macos")]
-fn is_darwin_ioctl_signature(sym_name: &str, ret_ty: SigType, arg_types: &[SigType]) -> bool {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn is_unix_ioctl_signature(sym_name: &str, ret_ty: SigType, arg_types: &[SigType]) -> bool {
     sym_name == "ioctl"
         && ret_ty == SigType::I32
         && matches!(
@@ -259,34 +259,34 @@ fn is_darwin_ioctl_signature(sym_name: &str, ret_ty: SigType, arg_types: &[SigTy
         )
 }
 
-#[cfg(target_os = "macos")]
-unsafe fn invoke_darwin_ioctl(
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe fn invoke_unix_ioctl(
     func_ptr: *const c_void,
     args: &[DynArg],
     request_type: SigType,
 ) -> Result<Value, DynError> {
     let [fd, request, pointer] = args else {
-        unreachable!("darwin ioctl signature checked before invocation");
+        unreachable!("unix ioctl signature checked before invocation");
     };
     type IoctlFn = unsafe extern "C" fn(i32, u64, ...) -> i32;
     // SAFETY: `func_ptr` was resolved from the requested library as `ioctl`, whose address
     // remains valid while `env.libs` owns the library. The signature gate established the typed
-    // `(i32, u64, ptr) -> i32` script contract and this function type supplies Darwin's ABI.
+    // `(i32, u64, ptr) -> i32` script contract and this function type supplies Unix's ABI.
     let ioctl: IoctlFn = unsafe { std::mem::transmute(func_ptr) };
-    // `DynArg::from_value(I32, ...)` sign-extends through `i64`; Darwin's `unsigned long`
+    // `DynArg::from_value(I32, ...)` sign-extends through `i64`; Unix's `unsigned long`
     // request parameter instead needs the i32 request's low 32 bits zero-extended to u64.
-    let request = darwin_ioctl_request(request_type, *request);
+    let request = unix_ioctl_request(request_type, *request);
     // SAFETY: `ioctl` and its three arguments satisfy the narrow contract above.
     let result = unsafe { ioctl(fd.0 as i32, request, pointer.0 as *mut c_void) };
     Ok(Value::Int(i64::from(result)))
 }
 
-#[cfg(target_os = "macos")]
-fn darwin_ioctl_request(request_type: SigType, request: DynArg) -> u64 {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn unix_ioctl_request(request_type: SigType, request: DynArg) -> u64 {
     match request_type {
         SigType::I32 => u64::from(request.0 as u32),
         SigType::U64 => request.0,
-        _ => unreachable!("darwin ioctl signature checked before invocation"),
+        _ => unreachable!("unix ioctl signature checked before invocation"),
     }
 }
 
@@ -474,14 +474,39 @@ mod tests {
         assert_eq!(env.libs.libs.len(), MAX_CACHED_LIBRARIES);
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    fn darwin_ioctl_i32_request_zero_extends_its_bit_pattern() {
+    fn unix_ioctl_signature_routes_only_the_narrow_variadic_contract() {
+        assert!(is_unix_ioctl_signature(
+            "ioctl",
+            SigType::I32,
+            &[SigType::I32, SigType::U64, SigType::Ptr]
+        ));
+        assert!(is_unix_ioctl_signature(
+            "ioctl",
+            SigType::I32,
+            &[SigType::I32, SigType::I32, SigType::Ptr]
+        ));
+        assert!(!is_unix_ioctl_signature(
+            "fcntl",
+            SigType::I32,
+            &[SigType::I32, SigType::U64, SigType::Ptr]
+        ));
+        assert!(!is_unix_ioctl_signature(
+            "ioctl",
+            SigType::I32,
+            &[SigType::I32, SigType::U64]
+        ));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn unix_ioctl_i32_request_zero_extends_its_bit_pattern() {
         let signed_request = DynArg::from_value(SigType::I32, Value::Int(-1))
             .expect("negative i32 request is representable");
         assert_eq!(signed_request.0, u64::MAX);
         assert_eq!(
-            darwin_ioctl_request(SigType::I32, signed_request),
+            unix_ioctl_request(SigType::I32, signed_request),
             u64::from(u32::MAX)
         );
     }

@@ -86,7 +86,7 @@ impl Dyn {
     ///
     /// # Safety
     /// The caller must supply the exact fixed, non-variadic C ABI for every
-    /// native symbol (except the documented Darwin `ioctl` compatibility
+    /// native symbol (except the documented Unix `ioctl` compatibility
     /// case). Every `ptr` argument and result must be valid, correctly
     /// aligned, live for the native call, and obey the callee's aliasing and
     /// mutability requirements. The caller also owns library availability,
