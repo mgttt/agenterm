@@ -6,7 +6,9 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-agenterm-con-${{ github.event.pull_request.number || github.ref }}
+  # An exact-SHA manual qualification must survive later main pushes. Ordinary
+  # push/PR feedback remains replaceable within its mutable ref.
+  group: ci-agenterm-con-${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:

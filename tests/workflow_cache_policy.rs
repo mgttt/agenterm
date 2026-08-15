@@ -5,16 +5,20 @@ static AGENTERM: LazyLock<String> =
 static CON: LazyLock<String> = LazyLock::new(|| {
     include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
 });
+static LIB: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/ci-libagenterm.yml").replace("\r\n", "\n"));
 
 #[test]
 fn split_feedback_ci_has_no_cross_product_cache_or_artifact_authority() {
-    for source in [AGENTERM.as_str(), CON.as_str()] {
+    for source in [AGENTERM.as_str(), CON.as_str(), LIB.as_str()] {
         assert!(!source.contains("actions/upload-artifact"));
         assert!(!source.contains("actions/download-artifact"));
         assert!(!source.contains("actions/cache"));
         assert!(!source.contains("target/qualification/receipt.json"));
         assert!(!source.contains("contents: write"));
         assert!(source.contains("cancel-in-progress: true"));
+        assert!(source.contains("github.event_name == 'workflow_dispatch' && github.sha"));
+        assert!(source.contains("github.event.pull_request.number || github.ref"));
     }
     assert!(!AGENTERM.contains("con-release-fast"));
     assert!(!CON.contains("check.cmd"));
