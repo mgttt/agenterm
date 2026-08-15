@@ -570,6 +570,39 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_sched_yield_as_void_completes() {
+        let probe = live_system_probe("sched_yield_void");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "void")"#))
+            .expect("sched_yield void dlcall");
+        assert_eq!(got, Value::Nil);
+    }
+
+    #[test]
+    fn dlcall_alarm_zero_returns_integer_and_leaves_none_pending() {
+        let probe = live_system_probe("alarm_zero");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let prior = unsafe { libc::alarm(0) };
+        assert_eq!(
+            prior, 0,
+            "test process should start without a pending alarm"
+        );
+
+        let mut env = Dyn::new();
+        let got = env.eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" 0)"#));
+        let remaining = unsafe { libc::alarm(0) };
+
+        assert_eq!(got.expect("alarm(0) dlcall"), Value::Int(0));
+        assert_eq!(remaining, 0, "alarm(0) should leave no alarm pending");
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {

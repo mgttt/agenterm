@@ -114,7 +114,9 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "lseek_stdin_cur",
                 "fcntl_stdin_getfl",
                 "isatty_stdout",
-                "isatty_stderr"
+                "isatty_stderr",
+                "sched_yield_void",
+                "alarm_zero"
             ]
         );
         assert_eq!(
@@ -150,6 +152,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("fcntl_stdin_getfl", "libc.so.6", "fcntl"),
                 ("isatty_stdout", "libc.so.6", "isatty"),
                 ("isatty_stderr", "libc.so.6", "isatty"),
+                ("sched_yield_void", "libc.so.6", "sched_yield"),
+                ("alarm_zero", "libc.so.6", "alarm"),
             ]
         );
     }
