@@ -1,29 +1,64 @@
 {
   "schema": 1,
-  "version": 2,
+  "version": 3,
   "layer": "chassis-l2",
-  "note": "Capability names L3 may call. impl=host means L1/workbench still implements the name (not a new native plugin). impl=chassis is answered by this crate. Daily L2 change is file replace + compose, not rustc.",
+  "capability_semantics": "discovery-and-compatibility-only-not-authorization",
+  "note": "Capability names L3 may call. Classification describes discovery and compatibility, never permission, approval, or sandbox policy. impl=host means the workbench currently implements the name across the Host ABI; it does not make the operation L1. impl=chassis is answered by this crate. Daily L2 change is file replace + compose, not rustc.",
+  "catalog": [
+    {
+      "family": "fleet.*",
+      "layer": "chassis-l2",
+      "delivery": "host-abi-and-bytecode",
+      "l1": false
+    },
+    {
+      "family": "tab",
+      "layer": "chassis-l2",
+      "delivery": "host-abi-and-bytecode",
+      "l1": false
+    },
+    {
+      "family": "clipboard",
+      "layer": "chassis-l2",
+      "delivery": "host-abi-and-bytecode",
+      "l1": false
+    },
+    {
+      "family": "control-center",
+      "layer": "chassis-l2",
+      "delivery": "host-abi-and-bytecode",
+      "l1": false
+    },
+    {
+      "family": "computer-use",
+      "layer": "chassis-l2",
+      "delivery": "rare-native-plugin",
+      "plugin": "cu",
+      "availability": "optional",
+      "l1": false
+    }
+  ],
   "capabilities": [
-    { "id": "protocol.info", "kind": "observe", "impl": "host" },
-    { "id": "ui.snapshot", "kind": "observe", "impl": "host" },
-    { "id": "ui.hello", "kind": "observe", "impl": "host" },
-    { "id": "ui.bootstrap", "kind": "observe", "impl": "host" },
-    { "id": "ui.deltas", "kind": "observe", "impl": "host" },
-    { "id": "workspace.info", "kind": "observe", "impl": "host" },
-    { "id": "tabs.list", "kind": "observe", "impl": "host" },
-    { "id": "tabs.active", "kind": "observe", "impl": "host" },
-    { "id": "pane.capture", "kind": "observe", "impl": "host" },
-    { "id": "events.read", "kind": "observe", "impl": "host" },
-    { "id": "events.wait", "kind": "observe", "impl": "host" },
-    { "id": "server.kill", "kind": "destructive", "impl": "host" },
-    { "id": "workspace.shutdown", "kind": "destructive", "impl": "host" },
-    { "id": "ui.tab.select", "kind": "control", "impl": "host" },
-    { "id": "ui.tab.new", "kind": "control", "impl": "host" },
-    { "id": "ui.tab.close", "kind": "destructive", "impl": "host" },
-    { "id": "terminal.copy-selection", "kind": "control", "impl": "host" },
-    { "id": "terminal.paste", "kind": "control", "impl": "host" },
-    { "id": "control-center.status", "kind": "observe", "impl": "host" },
-    { "id": "chassis.inspect", "kind": "observe", "impl": "chassis" },
-    { "id": "chassis.native-cell", "kind": "observe", "impl": "chassis" }
+    { "id": "protocol.info", "facade": "fleet.protocol.info", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.snapshot", "facade": "fleet.ui.snapshot", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.hello", "facade": "fleet.ui.hello", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.bootstrap", "facade": "fleet.ui.bootstrap", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.deltas", "facade": "fleet.ui.deltas", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "workspace.info", "facade": "fleet.workspace.info", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "tabs.list", "facade": "fleet.tabs.list", "family": "tab", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "tabs.active", "facade": "fleet.tabs.active", "family": "tab", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "pane.capture", "facade": "fleet.terminal.capture", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "events.read", "facade": "fleet.events.read", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "events.wait", "facade": "fleet.events.wait", "family": "fleet.*", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "server.kill", "facade": "fleet.server.kill", "family": "fleet.*", "kind": "destructive", "impl": "host", "layer": "chassis-l2" },
+    { "id": "workspace.shutdown", "facade": "fleet.workspace.shutdown", "family": "fleet.*", "kind": "destructive", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.tab.select", "facade": "fleet.ui.tab.select", "family": "tab", "kind": "control", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.tab.new", "facade": "fleet.ui.tab.new", "family": "tab", "kind": "control", "impl": "host", "layer": "chassis-l2" },
+    { "id": "ui.tab.close", "facade": "fleet.ui.tab.close", "family": "tab", "kind": "destructive", "impl": "host", "layer": "chassis-l2" },
+    { "id": "terminal.copy-selection", "facade": "fleet.terminal.copy_selection", "family": "clipboard", "kind": "control", "impl": "host", "layer": "chassis-l2" },
+    { "id": "terminal.paste", "facade": "fleet.terminal.paste", "family": "clipboard", "kind": "control", "impl": "host", "layer": "chassis-l2" },
+    { "id": "control-center.status", "facade": "fleet.control_center.status", "family": "control-center", "kind": "observe", "impl": "host", "layer": "chassis-l2" },
+    { "id": "chassis.inspect", "family": "chassis", "kind": "observe", "impl": "chassis", "layer": "chassis-l2" },
+    { "id": "chassis.native-cell", "family": "chassis", "kind": "observe", "impl": "chassis", "layer": "chassis-l2" }
   ]
 }
