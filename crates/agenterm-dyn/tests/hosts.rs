@@ -133,6 +133,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "arc4random",
                 "clock_gettime_nsec_np",
                 "sysctl",
+                "mach_timebase_info",
+                "pthread_main_np",
+                "getlogin_r",
                 "mach_host_self",
             ]
         );
@@ -212,10 +215,13 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "arc4random",
                 "clock_gettime_nsec_np",
                 "sysctl",
+                "mach_timebase_info",
+                "pthread_main_np",
+                "getlogin_r",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..45].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..48].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -223,7 +229,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[45].status,
+            c.system_probes[48].status,
             SystemProbeStatus::Placeholder
         ));
     }

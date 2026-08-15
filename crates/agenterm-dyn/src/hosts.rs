@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 46],
+    pub system_probes: [SystemProbe; 49],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 46] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 49] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -360,6 +360,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 46] = [
     },
     placeholder("clock_gettime_nsec_np"),
     placeholder("sysctl"),
+    placeholder("mach_timebase_info"),
+    placeholder("pthread_main_np"),
+    placeholder("getlogin_r"),
     placeholder("mach_host_self"),
 ];
 
@@ -380,7 +383,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 46] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 49] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -426,13 +429,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 46] = [
     macos_live("arc4random", "arc4random"),
     macos_live("clock_gettime_nsec_np", "clock_gettime_nsec_np"),
     macos_live("sysctl", "sysctl"),
+    macos_live("mach_timebase_info", "mach_timebase_info"),
+    macos_live("pthread_main_np", "pthread_main_np"),
+    macos_live("getlogin_r", "getlogin_r"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 46] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 49] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -607,6 +613,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 46] = [
     },
     placeholder("clock_gettime_nsec_np"),
     placeholder("sysctl"),
+    placeholder("mach_timebase_info"),
+    placeholder("pthread_main_np"),
+    placeholder("getlogin_r"),
     placeholder("mach_host_self"),
 ];
 

@@ -257,6 +257,12 @@ fn dlcall_rejects_c_abi_aliases_before_arguments_or_library_load() {
         "ino_t",
         "clockid_t",
         "sigset_t",
+        "blkcnt_t",
+        "nlink_t",
+        "suseconds_t",
+        "useconds_t",
+        "fsblkcnt_t",
+        "pthread_t",
     ] {
         let expected = || {
             DynError::Type(format!(

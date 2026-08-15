@@ -241,3 +241,84 @@ fn dlcall_sysctl_writes_ncpu_into_caller_buffer() {
     assert_eq!(direct_status, 0, "direct sysctl must succeed");
     assert_eq!(ncpu, direct);
 }
+
+#[test]
+fn dlcall_mach_timebase_info_writes_caller_owned_ratio() {
+    let symbol = live_symbol("mach_timebase_info");
+    let mut ratio = libc::mach_timebase_info { numer: 0, denom: 0 };
+    let mut env = Dyn::new();
+    env.bind(
+        "ratio",
+        (&mut ratio as *mut libc::mach_timebase_info).cast(),
+    )
+    .expect("bind timebase output");
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" ratio)"#))
+        .expect("mach_timebase_info dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!(ratio.numer > 0, "timebase numerator must be positive");
+    assert!(ratio.denom > 0, "timebase denominator must be positive");
+
+    let mut direct = libc::mach_timebase_info { numer: 0, denom: 0 };
+    let direct_status = unsafe { libc::mach_timebase_info(&mut direct) };
+    assert_eq!(direct_status, 0, "direct mach_timebase_info must succeed");
+    assert_eq!(ratio.numer, direct.numer);
+    assert_eq!(ratio.denom, direct.denom);
+}
+
+#[test]
+fn dlcall_pthread_main_np_matches_libc() {
+    let symbol = live_symbol("pthread_main_np");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+        .expect("pthread_main_np dlcall")
+        .as_int()
+        .expect("pthread_main_np integer");
+    let direct = unsafe { libc::pthread_main_np() };
+    assert!(matches!(got, 0 | 1), "pthread_main_np must be boolean");
+    assert_eq!(got, i64::from(direct));
+}
+
+#[test]
+fn dlcall_getlogin_r_matches_direct_c_buffer() {
+    unsafe extern "C" {
+        fn getlogin_r(name: *mut libc::c_char, name_len: usize) -> libc::c_int;
+    }
+
+    let symbol = live_symbol("getlogin_r");
+    let mut len = 256_usize;
+    let (got_status, got_buffer) = loop {
+        let mut buffer = vec![0_u8; len];
+        let mut env = Dyn::new();
+        env.bind("name", buffer.as_mut_ptr().cast())
+            .expect("bind login output");
+        let status = env
+            .eval(&format!(
+                r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "u64" {len})"#
+            ))
+            .expect("getlogin_r dlcall")
+            .as_int()
+            .expect("getlogin_r integer status");
+        if status == i64::from(libc::ERANGE) {
+            assert_eq!(len, 256, "only the initial buffer may be too small");
+            len = 1024;
+            continue;
+        }
+        break (status, buffer);
+    };
+    assert_eq!(got_status, 0, "getlogin_r must fill the caller buffer");
+
+    let mut direct_buffer = vec![0_u8; len];
+    let direct_status = unsafe { getlogin_r(direct_buffer.as_mut_ptr().cast(), len) };
+    assert_eq!(
+        direct_status, 0,
+        "direct getlogin_r must fill the caller buffer"
+    );
+    let got = CStr::from_bytes_until_nul(&got_buffer)
+        .expect("getlogin_r must NUL-terminate successful output");
+    let direct = CStr::from_bytes_until_nul(&direct_buffer)
+        .expect("direct getlogin_r must NUL-terminate successful output");
+    assert!(!got.to_bytes().is_empty(), "login name must be non-empty");
+    assert_eq!(got.to_bytes(), direct.to_bytes());
+}
