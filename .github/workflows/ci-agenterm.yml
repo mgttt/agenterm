@@ -41,8 +41,6 @@ jobs:
         run: cargo test --locked -p agenterm-ui-core --lib
       - name: Test platform contracts
         run: cargo test --locked -p agenterm-platform --lib --all-features
-      - name: Install libffi for agenterm-dyn
-        run: sudo apt-get update && sudo apt-get install -y libffi-dev
       - name: Test agenterm-dyn
         run: cargo test --locked -p agenterm-dyn
       - name: Prove Rh AOT pack pipeline
@@ -100,3 +98,16 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo check --locked -p agenterm --all-targets --target ${{ matrix.target }}
+      # The Linux x86_64 quality job runs the dyn test suite.  Exercise the three
+      # remaining native hosts here, and at least compile the two cross-only cells.
+      - name: Test agenterm-dyn on native host
+        if: matrix.kind == 'native' && matrix.cell != 'lnx-x86_64'
+        run: cargo test --locked -p agenterm-dyn --target ${{ matrix.target }}
+      - name: Check agenterm-dyn through cargo-xwin
+        if: matrix.kind == 'xwin'
+        run: cargo xwin check --locked -p agenterm-dyn --all-targets --target ${{ matrix.target }}
+      - name: Check agenterm-dyn Linux cross target
+        if: matrix.kind == 'linux-cross'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo check --locked -p agenterm-dyn --all-targets --target ${{ matrix.target }}
