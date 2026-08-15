@@ -7,6 +7,9 @@
 //! - `vnc`: RFB handshake to a VNC endpoint, then a local
 //!   `agenterm-cu --target current` worker against the shared session
 //!   (`vnc_transport`). Same verbs; transport only.
+//! - `rdp`: fail-closed placeholder (`rdp_transport`). Parseable target and
+//!   `--rdp host[:port]` endpoint only; every authorized command returns
+//!   `rdp_unavailable` with no socket I/O (cut 3.46).
 
 use std::{
     thread,
@@ -20,6 +23,7 @@ use crate::{
     auth::{Authorization, Grant},
     command::{Command, PointerButton, WaitCondition},
     mechanism,
+    rdp_transport::{self, RdpEndpoint},
     reply::{CuError, CuReply},
     ssh_transport::{self, SshEndpoint},
     target::TargetRef,
@@ -30,6 +34,7 @@ pub struct Executor {
     auth: Authorization,
     ssh: Option<SshEndpoint>,
     vnc: Option<VncEndpoint>,
+    rdp: Option<RdpEndpoint>,
 }
 
 impl Executor {
@@ -38,6 +43,7 @@ impl Executor {
             auth,
             ssh: None,
             vnc: None,
+            rdp: None,
         }
     }
 
@@ -48,6 +54,11 @@ impl Executor {
 
     pub fn with_vnc(mut self, endpoint: VncEndpoint) -> Self {
         self.vnc = Some(endpoint);
+        self
+    }
+
+    pub fn with_rdp(mut self, endpoint: RdpEndpoint) -> Self {
+        self.rdp = Some(endpoint);
         self
     }
 
@@ -76,6 +87,7 @@ impl Executor {
             TargetRef::Current => self.execute_current(command),
             TargetRef::Ssh => self.execute_ssh(command),
             TargetRef::Vnc => self.execute_vnc(command),
+            TargetRef::Rdp => self.execute_rdp(command),
         };
 
         if required == Grant::Actuate {
@@ -112,6 +124,25 @@ impl Executor {
             );
         };
         match vnc_transport::run_session(endpoint, command, &self.auth) {
+            Ok(reply) => reply,
+            Err(error) => CuReply::err(command, error),
+        }
+    }
+
+    fn execute_rdp(&self, command: &Command) -> CuReply {
+        // Missing endpoint and configured-but-unimplemented transport both
+        // fail closed as `rdp_unavailable` (cut 3.46). Authorization already
+        // ran above, so a missing observe/actuate grant stays `refused`.
+        let Some(endpoint) = self.rdp.as_ref() else {
+            return CuReply::err(
+                command,
+                CuError::new(
+                    "rdp_unavailable",
+                    "RDP target requires --rdp HOST[:PORT]; the RDP transport is not implemented",
+                ),
+            );
+        };
+        match rdp_transport::run_session(endpoint, command, &self.auth) {
             Ok(reply) => reply,
             Err(error) => CuReply::err(command, error),
         }
@@ -2901,5 +2932,91 @@ mod tests {
         };
         assert_eq!(get_text.verb(), "get-text");
         assert_eq!(get_text.required_grant(), Grant::Observe);
+    }
+
+    #[test]
+    fn rdp_tree_without_endpoint_is_rdp_unavailable() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Tree {
+            target: TargetRef::Rdp,
+            window: Some(0x1000),
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "tree");
+        assert_eq!(reply.error.as_ref().unwrap().code, "rdp_unavailable");
+        assert!(reply.data.is_none());
+    }
+
+    #[test]
+    fn rdp_tree_with_endpoint_is_rdp_unavailable_and_does_not_connect() {
+        use std::net::TcpListener;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::thread;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind sentinel");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking sentinel");
+        let addr = listener.local_addr().expect("local addr");
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_bg = Arc::clone(&hits);
+        let sentinel = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_millis(200);
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok(_) => {
+                        hits_bg.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let endpoint = RdpEndpoint {
+            host: addr.ip().to_string(),
+            port: addr.port(),
+        };
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth).with_rdp(endpoint);
+        let command = Command::Tree {
+            target: TargetRef::Rdp,
+            window: Some(0x1000),
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "tree");
+        assert_eq!(reply.error.as_ref().unwrap().code, "rdp_unavailable");
+
+        sentinel.join().expect("sentinel join");
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn rdp_missing_observe_grant_is_refused_not_rdp_unavailable() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth).with_rdp(RdpEndpoint {
+            host: "127.0.0.1".into(),
+            port: 3389,
+        });
+        let command = Command::Tree {
+            target: TargetRef::Rdp,
+            window: Some(1),
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "tree");
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
     }
 }

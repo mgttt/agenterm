@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use agenterm_cu::{
-    Authorization, Command, Executor, PointerButton, SshEndpoint, TargetRef, VncEndpoint,
-    WaitCondition,
+    Authorization, Command, Executor, PointerButton, RdpEndpoint, SshEndpoint, TargetRef,
+    VncEndpoint, WaitCondition,
 };
 
 fn main() {
@@ -48,6 +48,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     let mut vnc_port: Option<u16> = None;
     let mut vnc_cu: Option<PathBuf> = None;
     let mut vnc_env: Vec<(String, String)> = Vec::new();
+    let mut rdp_dest: Option<String> = None;
     while let Some(flag) = args.first() {
         match flag.as_str() {
             "--target" => {
@@ -58,7 +59,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 });
                 if target.is_none() {
                     return usage_err(
-                        "unknown --target value; supported: 'current', 'ssh', and 'vnc'",
+                        "unknown --target value; supported: 'current', 'ssh', 'vnc', and 'rdp'",
                     );
                 }
             }
@@ -139,6 +140,16 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 }
                 vnc_env.push((key.to_owned(), val.to_owned()));
             }
+            "--rdp" => {
+                let value = take_value(&mut args, "--rdp");
+                if value.is_empty() {
+                    return usage_err("--rdp requires <host[:port]>");
+                }
+                rdp_dest = Some(value);
+                if target.is_none() {
+                    target = Some(TargetRef::Rdp);
+                }
+            }
             "--grant" => {
                 grant = Some(take_value(&mut args, "--grant"));
             }
@@ -178,7 +189,7 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     let Some(target) = target else {
         eprint_usage();
         return usage_err(
-            "--target current, --ssh <user@host>, or --vnc <host[:port]> is required on every command",
+            "--target current, --ssh <user@host>, --vnc <host[:port]>, or --rdp <host[:port]> is required on every command",
         );
     };
 
@@ -188,11 +199,26 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     if target == TargetRef::Current && vnc_dest.is_some() {
         return usage_err("--vnc cannot be combined with --target current");
     }
+    if target == TargetRef::Current && rdp_dest.is_some() {
+        return usage_err("--rdp cannot be combined with --target current");
+    }
     if target == TargetRef::Ssh && vnc_dest.is_some() {
         return usage_err("--vnc cannot be combined with --target ssh / --ssh");
     }
+    if target == TargetRef::Ssh && rdp_dest.is_some() {
+        return usage_err("--rdp cannot be combined with --target ssh / --ssh");
+    }
     if target == TargetRef::Vnc && ssh_dest.is_some() {
         return usage_err("--ssh cannot be combined with --target vnc / --vnc");
+    }
+    if target == TargetRef::Vnc && rdp_dest.is_some() {
+        return usage_err("--rdp cannot be combined with --target vnc / --vnc");
+    }
+    if target == TargetRef::Rdp && ssh_dest.is_some() {
+        return usage_err("--ssh cannot be combined with --target rdp / --rdp");
+    }
+    if target == TargetRef::Rdp && vnc_dest.is_some() {
+        return usage_err("--vnc cannot be combined with --target rdp / --rdp");
     }
     if target == TargetRef::Ssh
         && ssh_dest.is_none()
@@ -214,6 +240,8 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
     if target == TargetRef::Vnc && vnc_dest.is_none() {
         return usage_err("vnc target requires --vnc <host[:port]> (or AGENTERM_CU_VNC)");
     }
+    // `--target rdp` without `--rdp` is not a usage error: the executor returns
+    // typed `rdp_unavailable` with command/target preserved (cut 3.46).
 
     let Some(verb) = args.first().cloned() else {
         eprint_usage();
@@ -613,6 +641,23 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             }
         }
     }
+    if target == TargetRef::Rdp {
+        if let Some(dest) = rdp_dest {
+            match RdpEndpoint::from_parts(dest) {
+                Ok(endpoint) => executor = executor.with_rdp(endpoint),
+                Err(error) => {
+                    return agenterm_cu::CuReply {
+                        ok: false,
+                        target: "rdp".into(),
+                        command: "usage".into(),
+                        data: None,
+                        error: Some(error),
+                    };
+                }
+            }
+        }
+        // No endpoint: Executor::execute_rdp returns rdp_unavailable.
+    }
     executor.execute(&command)
 }
 
@@ -758,18 +803,19 @@ fn run_x11_clipboard_owner() -> i32 {
 
 fn eprint_usage() {
     eprintln!(
-        r#"usage: agenterm-cu --target <current|ssh|vnc> [--grant observe,actuate] <command> [args...]
+        r#"usage: agenterm-cu --target <current|ssh|vnc|rdp> [--grant observe,actuate] <command> [args...]
        agenterm-cu --ssh <user@host> [--ssh-port N] [--ssh-identity PATH] [--ssh-cu PATH]
                    [--ssh-env KEY=VAL]... [--grant observe,actuate] <command> [args...]
        agenterm-cu --vnc <host[:port]> [--vnc-port N] [--vnc-cu PATH]
                    [--vnc-env KEY=VAL]... [--grant observe,actuate] <command> [args...]
+       agenterm-cu --rdp <host[:port]> [--grant observe,actuate] <command> [args...]
        agenterm-cu exec [--grant observe,actuate] --json '<command-json>'
        agenterm-cu exec [--grant observe,actuate] --json -   # JSON command on stdin
        agenterm-cu host                        desktop menu and global shortcuts
        agenterm-cu hotkeys                     compatibility alias for host
 
 Global:
-  --target current|ssh|vnc  explicit target reference (required unless --ssh/--vnc)
+  --target current|ssh|vnc|rdp  explicit target reference (required unless --ssh/--vnc/--rdp)
   --ssh <user@host>         ssh target destination (implies --target ssh)
   --ssh-port N              OpenSSH -p (or AGENTERM_CU_SSH_PORT)
   --ssh-identity PATH       OpenSSH -i (or AGENTERM_CU_SSH_IDENTITY)
@@ -779,6 +825,8 @@ Global:
   --vnc-port N              RFB TCP port when --vnc omits :port (or AGENTERM_CU_VNC_PORT; default 5900)
   --vnc-cu PATH             session worker agenterm-cu path (or AGENTERM_CU_VNC_CU; default: this exe)
   --vnc-env KEY=VAL         session env for the worker (repeatable; also AGENTERM_CU_VNC_ENV)
+  --rdp <host[:port]>       rdp endpoint syntax only (implies --target rdp; PLACEHOLDER —
+                            no connect / TLS / CredSSP; always rdp_unavailable)
   --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
@@ -797,6 +845,13 @@ Global:
   returns that range (via=get-selection; native AT-SPI GetNSelections +
   GetSelection(0); n==1 start/end equal precondition range; never screenshot /
   --coords / mouse-drag / RFB framebuffer OCR / cached setter reply).
+
+  rdp is a PLACEHOLDER (cut 3.46): --rdp HOST[:PORT] and --target rdp parse,
+  authorize, then fail closed with error.code=rdp_unavailable. No socket
+  connect, no TLS/CredSSP, no screenshot/--coords, no silent ssh/vnc/current
+  reuse. Reserved first observe argv for a later Windows agent:
+    agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe tree --window HANDLE
+  Live RDP session + UIA-over-RDP evidence is not claimed on this cut.
 
 Commands:
   capabilities
