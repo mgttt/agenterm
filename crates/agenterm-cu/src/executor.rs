@@ -8,8 +8,9 @@
 //!   `agenterm-cu --target current` worker against the shared session
 //!   (`vnc_transport`). Same verbs; transport only.
 //! - `rdp`: fail-closed placeholder (`rdp_transport`). Parseable target and
-//!   `--rdp host[:port]` endpoint only; every authorized command returns
-//!   `rdp_unavailable` with no socket I/O (cut 3.46).
+//!   `--rdp host[:port]` endpoint; `capabilities` declares the placeholder
+//!   truthfully with no socket I/O (cut 3.47); every other authorized
+//!   command returns `rdp_unavailable` with no socket I/O (cut 3.46).
 
 use std::{
     thread,
@@ -130,9 +131,19 @@ impl Executor {
     }
 
     fn execute_rdp(&self, command: &Command) -> CuReply {
+        // Cut 3.47: capabilities is the one observe path that succeeds for
+        // the RDP placeholder. It returns a static declaration (transport
+        // placeholder/unavailable; tree unsupported) and never dials.
+        // Authorization already ran above, so a missing observe grant stays
+        // `refused`. Missing endpoint still declares the tier truthfully.
+        if matches!(command, Command::Capabilities { .. }) {
+            return CuReply::ok(
+                command,
+                rdp_transport::capabilities_declaration(self.rdp.as_ref()),
+            );
+        }
         // Missing endpoint and configured-but-unimplemented transport both
-        // fail closed as `rdp_unavailable` (cut 3.46). Authorization already
-        // ran above, so a missing observe/actuate grant stays `refused`.
+        // fail closed as `rdp_unavailable` (cut 3.46).
         let Some(endpoint) = self.rdp.as_ref() else {
             return CuReply::err(
                 command,
@@ -268,9 +279,22 @@ fn capabilities_payload() -> serde_json::Value {
     } else {
         "Unsupported"
     };
+    let tree_verb_status = if tree_status == "Available" {
+        "available"
+    } else {
+        "unsupported"
+    };
+    // Host-specific tree mapping only. Do not list unproven peers (macOS AX
+    // live evidence, live RDP/UIA-over-RDP) as if this host ships them.
+    let tree_mapping = current_tree_mapping();
     serde_json::json!({
         "target": "current",
+        "transport": {
+            "status": "in_process",
+            "available": true,
+        },
         "mechanism": "libagenterm",
+        "mechanism_target": "current",
         "capabilities": {
             "windows": status(mechanism::Capability::WindowEnumerate),
             "tree": tree_status,
@@ -279,17 +303,43 @@ fn capabilities_payload() -> serde_json::Value {
             "window_place": status(mechanism::Capability::WindowOp),
             "desktop_host": status(mechanism::Capability::DesktopHost),
         },
+        "verbs": {
+            "capabilities": { "status": "available" },
+            "tree": { "status": tree_verb_status },
+        },
         "mapping": {
             "windows": "libagenterm agt_window_enumerate",
-            "tree": "libagenterm agt_a11y_* → Windows UIA / Linux AT-SPI2 / macOS AX",
+            "tree": tree_mapping,
             "window_place": "Spectacle catalog via libagenterm agt_native_window_*",
         },
         "gaps": {
             "windows": "none — shared agenterm.dll (milestone 46)",
             "screenshot": "none — shared agenterm.dll (milestone 46)",
             "input_degraded": "none — shared agenterm.dll (milestone 46)",
+            "rdp_live": "rdp tier is placeholder; never declared available on current",
+            "macos_ax_live": "macOS AX live evidence is a separate cut; not claimed here",
         }
     })
+}
+
+fn current_tree_mapping() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "libagenterm agt_a11y_* → Linux AT-SPI2"
+    }
+    #[cfg(windows)]
+    {
+        "libagenterm agt_a11y_* → Windows UIA"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Cut 3.45 placeholder: adapter exists; live AX evidence is not claimed.
+        "libagenterm agt_a11y_* → macOS AX (placeholder; live evidence not claimed)"
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+    {
+        "libagenterm agt_a11y_*"
+    }
 }
 
 fn tree_payload(window: Option<isize>) -> Result<serde_json::Value, CuError> {
@@ -2948,6 +2998,133 @@ mod tests {
         assert_eq!(reply.command, "tree");
         assert_eq!(reply.error.as_ref().unwrap().code, "rdp_unavailable");
         assert!(reply.data.is_none());
+    }
+
+    #[test]
+    fn rdp_capabilities_declares_placeholder_without_endpoint() {
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth);
+        let command = Command::Capabilities {
+            target: TargetRef::Rdp,
+        };
+        let reply = executor.execute(&command);
+        assert!(reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "capabilities");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "rdp");
+        assert_eq!(data["transport"]["status"], "placeholder");
+        assert_eq!(data["transport"]["available"], false);
+        assert_eq!(data["transport"]["reason"], "rdp_unavailable");
+        assert_eq!(data["verbs"]["capabilities"]["status"], "available");
+        assert_eq!(data["verbs"]["tree"]["status"], "unsupported");
+        assert_eq!(data["verbs"]["tree"]["reason"], "rdp_unavailable");
+    }
+
+    #[test]
+    fn rdp_capabilities_with_endpoint_does_not_connect() {
+        use std::net::TcpListener;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::thread;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind sentinel");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking sentinel");
+        let addr = listener.local_addr().expect("local addr");
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_bg = Arc::clone(&hits);
+        let sentinel = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_millis(200);
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok(_) => {
+                        hits_bg.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let endpoint = RdpEndpoint {
+            host: addr.ip().to_string(),
+            port: addr.port(),
+        };
+        let auth = Authorization::new([Grant::Observe].into_iter().collect());
+        let executor = Executor::new(auth).with_rdp(endpoint.clone());
+        let command = Command::Capabilities {
+            target: TargetRef::Rdp,
+        };
+        let reply = executor.execute(&command);
+        assert!(reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "capabilities");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "rdp");
+        assert_eq!(data["transport"]["reason"], "rdp_unavailable");
+        assert_eq!(
+            data["transport"]["endpoint"],
+            format!("{}:{}", addr.ip(), addr.port())
+        );
+        assert_eq!(data["verbs"]["tree"]["status"], "unsupported");
+
+        sentinel.join().expect("sentinel join");
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        // tree remains fail-closed after a successful capabilities declaration
+        let tree = executor.execute(&Command::Tree {
+            target: TargetRef::Rdp,
+            window: Some(1),
+        });
+        assert!(!tree.ok);
+        assert_eq!(tree.error.as_ref().unwrap().code, "rdp_unavailable");
+        let _ = endpoint;
+    }
+
+    #[test]
+    fn rdp_capabilities_missing_observe_grant_is_refused() {
+        let auth = Authorization::new(Default::default());
+        let executor = Executor::new(auth).with_rdp(RdpEndpoint {
+            host: "WINDOWS_HOST".into(),
+            port: 3389,
+        });
+        let command = Command::Capabilities {
+            target: TargetRef::Rdp,
+        };
+        let reply = executor.execute(&command);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "capabilities");
+        assert_eq!(reply.error.as_ref().unwrap().code, "refused");
+    }
+
+    #[test]
+    fn current_capabilities_names_current_target() {
+        let reply = observe_executor().execute(&Command::Capabilities {
+            target: TargetRef::Current,
+        });
+        assert!(reply.ok);
+        assert_eq!(reply.target, "current");
+        assert_eq!(reply.command, "capabilities");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "current");
+        assert_eq!(data["transport"]["status"], "in_process");
+        assert_eq!(data["transport"]["available"], true);
+        assert_eq!(data["verbs"]["capabilities"]["status"], "available");
+        // Must not declare live RDP or unproven Mac AX as available.
+        assert!(data["gaps"]["rdp_live"].as_str().is_some());
+        assert!(data["gaps"]["macos_ax_live"].as_str().is_some());
+        let mapping = data["mapping"]["tree"].as_str().unwrap_or("");
+        assert!(
+            !mapping.contains("RDP") && !mapping.to_lowercase().contains("rdp live"),
+            "current mapping must not claim live RDP: {mapping}"
+        );
     }
 
     #[test]

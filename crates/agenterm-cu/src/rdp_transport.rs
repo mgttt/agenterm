@@ -1,15 +1,18 @@
-//! RDP transport placeholder for the `rdp` target tier (PRD_02_30 cut 3.46).
+//! RDP transport placeholder for the `rdp` target tier (PRD_02_30 cut 3.46/3.47).
 //!
 //! Host `agenterm-cu --rdp <host[:port]>` accepts the endpoint syntax and
-//! selects `TargetRef::Rdp`, then every authorized command fails closed with
-//! `error.code = "rdp_unavailable"` before any socket, TLS/CredSSP/NLA,
-//! credential lookup, desktop attachment, screenshot, coordinate fallback,
-//! or silent SSH/VNC/`current` reuse.
+//! selects `TargetRef::Rdp`. Cut 3.47: the observe verb `capabilities`
+//! returns a static declaration that transport is placeholder/unavailable
+//! and `tree` is unsupported — with **zero** socket I/O. Every other
+//! authorized command still fails closed with `error.code =
+//! "rdp_unavailable"` before any socket, TLS/CredSSP/NLA, credential
+//! lookup, desktop attachment, screenshot, coordinate fallback, or silent
+//! SSH/VNC/`current` reuse.
 //!
 //! Default TCP port 3389 is syntax-only. This module never connects.
-//! `tree --window HANDLE` is the reserved first observe argv for a later
-//! Windows agent that owns real session + UIA-over-RDP evidence. Until that
-//! cut lands, no RDP capability is claimed.
+//! `tree --window HANDLE` remains the reserved first *live* observe argv
+//! for a later Windows agent that owns real session + UIA-over-RDP
+//! evidence. Until that cut lands, no RDP live capability is claimed.
 
 use crate::{
     auth::Authorization,
@@ -57,13 +60,47 @@ impl RdpEndpoint {
     }
 }
 
-/// Fail-closed RDP entry point. Never opens a socket, never rewrites the
-/// command to another target, never spawns a worker.
+/// Static per-target capabilities declaration for the RDP placeholder.
+/// Performs no DNS, TCP, TLS, CredSSP, UIA, accessibility, screenshot, or
+/// coordinate work. Optional `endpoint` is diagnostic only (never dialed).
+pub fn capabilities_declaration(endpoint: Option<&RdpEndpoint>) -> serde_json::Value {
+    let mut transport = serde_json::json!({
+        "status": "placeholder",
+        "available": false,
+        "reason": "rdp_unavailable",
+    });
+    if let Some(endpoint) = endpoint
+        && let Some(obj) = transport.as_object_mut()
+    {
+        obj.insert(
+            "endpoint".into(),
+            serde_json::Value::String(endpoint.address()),
+        );
+    }
+    serde_json::json!({
+        "target": "rdp",
+        "transport": transport,
+        "verbs": {
+            "capabilities": { "status": "available" },
+            "tree": { "status": "unsupported", "reason": "rdp_unavailable" },
+        },
+    })
+}
+
+/// RDP entry point. `capabilities` is the only successful path (static
+/// declaration, no I/O). Every other verb fails closed without a socket,
+/// rewrite, or worker.
 pub fn run_session(
     endpoint: &RdpEndpoint,
-    _command: &CuCommand,
+    command: &CuCommand,
     _auth: &Authorization,
 ) -> Result<CuReply, CuError> {
+    if matches!(command, CuCommand::Capabilities { .. }) {
+        return Ok(CuReply::ok(
+            command,
+            capabilities_declaration(Some(endpoint)),
+        ));
+    }
     Err(CuError::new(
         "rdp_unavailable",
         format!(
@@ -138,13 +175,7 @@ mod tests {
         assert_eq!(err.code, "invalid_input");
     }
 
-    #[test]
-    fn run_session_is_rdp_unavailable_without_connecting() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind sentinel");
-        listener
-            .set_nonblocking(true)
-            .expect("nonblocking sentinel");
-        let addr = listener.local_addr().expect("local addr");
+    fn spawn_sentinel(listener: TcpListener) -> (Arc<AtomicUsize>, thread::JoinHandle<()>) {
         let hits = Arc::new(AtomicUsize::new(0));
         let hits_bg = Arc::clone(&hits);
         let sentinel = thread::spawn(move || {
@@ -161,6 +192,17 @@ mod tests {
                 }
             }
         });
+        (hits, sentinel)
+    }
+
+    #[test]
+    fn run_session_tree_is_rdp_unavailable_without_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind sentinel");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking sentinel");
+        let addr = listener.local_addr().expect("local addr");
+        let (hits, sentinel) = spawn_sentinel(listener);
 
         let endpoint = RdpEndpoint {
             host: addr.ip().to_string(),
@@ -184,6 +226,60 @@ mod tests {
             hits.load(Ordering::SeqCst),
             0,
             "RDP placeholder must not open a TCP connection to the endpoint"
+        );
+    }
+
+    #[test]
+    fn capabilities_declaration_is_placeholder_and_tree_unsupported() {
+        let endpoint = RdpEndpoint {
+            host: "WINDOWS_HOST".into(),
+            port: 3389,
+        };
+        let data = capabilities_declaration(Some(&endpoint));
+        assert_eq!(data["target"], "rdp");
+        assert_eq!(data["transport"]["status"], "placeholder");
+        assert_eq!(data["transport"]["available"], false);
+        assert_eq!(data["transport"]["reason"], "rdp_unavailable");
+        assert_eq!(data["transport"]["endpoint"], "WINDOWS_HOST:3389");
+        assert_eq!(data["verbs"]["capabilities"]["status"], "available");
+        assert_eq!(data["verbs"]["tree"]["status"], "unsupported");
+        assert_eq!(data["verbs"]["tree"]["reason"], "rdp_unavailable");
+        // Live RDP / UIA / screenshots must not be declared available.
+        assert!(data["verbs"].get("screenshot").is_none());
+        assert!(data.pointer("/verbs/tree/available").is_none());
+    }
+
+    #[test]
+    fn run_session_capabilities_succeeds_without_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind sentinel");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking sentinel");
+        let addr = listener.local_addr().expect("local addr");
+        let (hits, sentinel) = spawn_sentinel(listener);
+
+        let endpoint = RdpEndpoint {
+            host: addr.ip().to_string(),
+            port: addr.port(),
+        };
+        let command = Command::Capabilities {
+            target: TargetRef::Rdp,
+        };
+        let auth = Authorization::from_cli_and_env(Some("observe"));
+        let reply = run_session(&endpoint, &command, &auth).expect("capabilities ok");
+        assert!(reply.ok);
+        assert_eq!(reply.target, "rdp");
+        assert_eq!(reply.command, "capabilities");
+        let data = reply.data.expect("data");
+        assert_eq!(data["target"], "rdp");
+        assert_eq!(data["transport"]["reason"], "rdp_unavailable");
+        assert_eq!(data["verbs"]["tree"]["status"], "unsupported");
+
+        sentinel.join().expect("sentinel join");
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "RDP capabilities must not open a TCP connection to the endpoint"
         );
     }
 }

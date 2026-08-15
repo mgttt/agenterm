@@ -298,8 +298,9 @@ pub fn run_remote(
         )
     })?;
     // Host identity of this command is the ssh tier even when the remote
-    // worker answered as target=current.
-    reply.target = "ssh".into();
+    // worker answered as target=current. Capabilities also restore
+    // data.target so callers do not see the worker's "current" leak.
+    restore_public_target(&mut reply, "ssh");
     if !output.status.success() && reply.ok {
         // Worker printed ok:true but process exit was non-zero — surface as
         // transport failure so callers do not treat it as success.
@@ -313,6 +314,55 @@ pub fn run_remote(
         ));
     }
     Ok(reply)
+}
+
+/// Public reply target is always the ssh tier. For `capabilities`, also
+/// restore `data.target` and attach transport facts owned by this tier
+/// without overwriting remote mechanism status from the worker.
+fn restore_public_target(reply: &mut CuReply, public: &str) {
+    reply.target = public.into();
+    if reply.command != "capabilities" {
+        return;
+    }
+    let Some(data) = reply.data.as_mut().and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    if let Some(prev) = data.get("target").cloned()
+        && prev.as_str() != Some(public)
+    {
+        data.entry("worker_target".to_owned()).or_insert(prev);
+    }
+    data.insert(
+        "target".to_owned(),
+        serde_json::Value::String(public.to_owned()),
+    );
+    // Public tier owns transport. Preserve the worker's in-process transport
+    // under worker_transport so mechanism facts stay inspectable.
+    if let Some(prev_transport) = data.remove("transport") {
+        data.entry("worker_transport".to_owned())
+            .or_insert(prev_transport);
+    }
+    data.insert(
+        "transport".to_owned(),
+        serde_json::json!({
+            "status": "available",
+            "available": true,
+            "kind": "openssh_exec",
+        }),
+    );
+    // Do not invent live RDP or unproven Mac AX claims on the ssh tier.
+    if let Some(gaps) = data.get_mut("gaps").and_then(|v| v.as_object_mut()) {
+        gaps.entry("rdp_live".to_owned()).or_insert_with(|| {
+            serde_json::Value::String(
+                "rdp tier is placeholder; never declared available on ssh".into(),
+            )
+        });
+        gaps.entry("macos_ax_live".to_owned()).or_insert_with(|| {
+            serde_json::Value::String(
+                "macOS AX live evidence is a separate cut; not claimed by ssh".into(),
+            )
+        });
+    }
 }
 
 fn rewrite_command_target_current(command: &CuCommand) -> Result<CuCommand, CuError> {
@@ -417,6 +467,57 @@ pub fn remote_cu_exists(path: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::{command::WaitCondition, target::TargetRef};
+
+    #[test]
+    fn capabilities_restore_public_target_does_not_leak_current() {
+        // Worker capabilities answer with data.target=current; host must
+        // restore public tier identity for both reply.target and data.target.
+        let mut reply = CuReply {
+            ok: true,
+            target: "current".into(),
+            command: "capabilities".into(),
+            data: Some(serde_json::json!({
+                "target": "current",
+                "mechanism": "libagenterm",
+                "capabilities": { "tree": "Available" },
+                "gaps": {},
+            })),
+            error: None,
+        };
+        restore_public_target(&mut reply, "ssh");
+        assert_eq!(reply.target, "ssh");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "ssh");
+        assert_eq!(data["worker_target"], "current");
+        assert_eq!(data["transport"]["available"], true);
+        assert_eq!(data["transport"]["kind"], "openssh_exec");
+        assert_eq!(data["transport"]["status"], "available");
+        // Worker in_process transport must not leak as the public tier status.
+        assert_ne!(data["transport"]["status"], "in_process");
+        assert_eq!(data["capabilities"]["tree"], "Available");
+        assert!(data["gaps"]["rdp_live"].as_str().is_some());
+        assert!(data["gaps"]["macos_ax_live"].as_str().is_some());
+    }
+
+    #[test]
+    fn capabilities_overwrites_worker_in_process_transport() {
+        let mut reply = CuReply {
+            ok: true,
+            target: "current".into(),
+            command: "capabilities".into(),
+            data: Some(serde_json::json!({
+                "target": "current",
+                "transport": { "status": "in_process", "available": true },
+                "gaps": {},
+            })),
+            error: None,
+        };
+        restore_public_target(&mut reply, "ssh");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "ssh");
+        assert_eq!(data["transport"]["kind"], "openssh_exec");
+        assert_eq!(data["worker_transport"]["status"], "in_process");
+    }
 
     #[test]
     fn rewrites_target_to_current_for_remote_worker() {

@@ -1397,6 +1397,32 @@ avatar PIDs. Connect / protocol / auth failures are typed
 missing `--vnc` on `--target vnc` is `invalid_input`. Do not implement
 vnc as a second control protocol or D-Bus port-forward in this cut.
 
+### Per-target `capabilities` (cut 3.47)
+
+`capabilities` is the existing observe verb only — no `targets` enumeration
+and no new command. Two distinct facts must not be conflated:
+
+1. **Public tier / transport** owned by CU (`current` in-process, `ssh`
+   OpenSSH exec, `vnc` RFB session worker, `rdp` placeholder).
+2. **Mechanism status** owned by the `current` worker / libagenterm.
+
+SSH/VNC rewrite the command to `target=current` for the worker. Restoring
+only `reply.target` is not enough for `capabilities`: the worker payload
+also carries `data.target:"current"` and often
+`transport.status:"in_process"`. Normalize both `reply.target` and
+`data.target` to the public tier, keep the worker identity as
+`worker_target` / `worker_transport`, and set the public `transport`
+(`openssh_exec` / `rfb_session_worker`). Otherwise callers see a ssh/vnc
+request that claims `data.target:"current"`.
+
+RDP is the static exception: `capabilities` succeeds with
+`transport.status:"placeholder"`, `available:false`,
+`reason:"rdp_unavailable"`, and `verbs.tree` unsupported — **zero** DNS
+or TCP to the endpoint. Every other RDP verb stays fail-closed
+`rdp_unavailable`. Discovery still requires the observe grant (`refused`
+without it) and grants no actuation right. Never declare live RDP or
+unproven macOS AX as available from this path.
+
 `cu scroll --name` is one-shot AT-SPI `Component.ScrollTo(TopEdge)`
 (`agt_a11y_node_scroll`). Success is `ok:true` / `via=scroll-to`.
 Missing / false / `UnknownMethod` typed-fails

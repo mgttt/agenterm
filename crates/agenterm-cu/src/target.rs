@@ -14,11 +14,11 @@ pub enum TargetRef {
     /// `agenterm-cu --target current` worker against the shared session
     /// (`DISPLAY` / AT-SPI env). Same abstract command set; transport only.
     Vnc,
-    /// Remote desktop reached by RDP (`--rdp host[:port]`). Cut 3.46 is a
-    /// parseable fail-closed placeholder: no socket connect, no TLS/CredSSP,
-    /// no session worker. Every authorized RDP command returns
-    /// `rdp_unavailable`. Live transport/session/UIA evidence is a later
-    /// Windows-agent cut.
+    /// Remote desktop reached by RDP (`--rdp host[:port]`). Cut 3.46/3.47 is
+    /// a parseable fail-closed placeholder: no socket connect, no TLS/CredSSP,
+    /// no session worker. `capabilities` declares the placeholder; every
+    /// other authorized RDP command returns `rdp_unavailable`. Live
+    /// transport/session/UIA evidence is a later Windows-agent cut.
     Rdp,
 }
 
