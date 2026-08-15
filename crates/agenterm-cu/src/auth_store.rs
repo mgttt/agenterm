@@ -930,11 +930,15 @@ mod tests {
             AuthStoreErrorKind::Prepare
         );
 
-        let root = std::env::temp_dir().join(format!(
+        let scratch = std::env::temp_dir().join(format!(
             "agenterm-cu-private-store-{}-{}",
             std::process::id(),
             NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
         ));
+        fs::create_dir_all(&scratch).unwrap();
+        // macOS temp roots commonly enter through `/var`, which is a symlink;
+        // the production guard correctly refuses that unresolved ancestry.
+        let root = fs::canonicalize(&scratch).unwrap();
         let path = root.join("private").join("cu-grants.json");
         let mut store = AuthStore::open_private_at(&path).unwrap();
         store.create(spec("grant", &[Grant::Observe], 1)).unwrap();
