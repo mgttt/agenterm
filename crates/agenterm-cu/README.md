@@ -37,6 +37,12 @@ press, release, click, drag, or scroll; those standalone verbs remain open.
 Coordinates are signed 32-bit ABI values; missing, duplicate, extra, or
 overflowing CLI values fail before native dispatch.
 
+`pointer-position` is the matching Observe command. ABI 1.11 reads absolute
+screen coordinates without injecting an event; older libraries fail typed
+unsupported rather than probing a missing symbol. Windows and X11 mechanisms
+are wired, while macOS remains typed unsupported. A real move/readback/restore
+receipt remains open until it runs on a controlled input desktop.
+
 ## Native accessibility mapping (按图索骥)
 
 | Concern | Windows | Linux (`current` slice) | macOS |
@@ -88,6 +94,7 @@ audited separately from AT-SPI actuation.
 | `focus --window --name PAT [--role ROLE]` | same unique-name matcher, then the `--node` AT-SPI focus path |
 | `click --coords X,Y --degraded` | XTest (explicit degraded mode only) |
 | `pointer-move --x X --y Y` | absolute pointer movement through `agt_input_pointer_move`; no button/wheel event |
+| `pointer-position` | independent absolute pointer observation through `agt_input_pointer_position`; no injected event |
 | `send-text` / `send-keys` without `--window` | XTest keyboard injection into whatever is focused |
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
 | `send-text --window HANDLE` (no `--name`) | same innermost focused Text node `get-text --window` reads, then `agt_a11y_node_set_text`; never XTest when `--window` is set. con `Command` after `focus --name` (`via=editable-text`); Chrome `GetTextField` after `focus --name`; Reasonix composer `Message Reasonix…` after `focus --name` / `click --name` (eval-helper set-value). Proof is independent `get-text --window` (no `--name`) |

@@ -630,6 +630,20 @@ mod tests {
     }
 
     #[test]
+    fn pointer_position_survives_vnc_target_rewrite() {
+        let command = CuCommand::PointerPosition {
+            target: TargetRef::Vnc,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert!(matches!(
+            remote,
+            CuCommand::PointerPosition {
+                target: TargetRef::Current
+            }
+        ));
+    }
+
+    #[test]
     fn split_host_port_parses_inline_port() {
         let (host, port) = split_host_port("127.0.0.1:5931").expect("parse");
         assert_eq!(host, "127.0.0.1");

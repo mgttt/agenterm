@@ -213,6 +213,7 @@ pub const AGT_NATIVE_WINDOW_RESTORE: i32 = 4;
 /// that gate failing first.
 const EXPECTED_ABI_MAJOR: u16 = 1;
 pub const WINDOW_PLACEMENT_ABI_MINOR: u16 = 10;
+pub const POINTER_POSITION_ABI_MINOR: u16 = 11;
 
 /// `agt_input_pointer_click` buttons.
 pub const AGT_INPUT_BUTTON_LEFT: i32 = 0;

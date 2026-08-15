@@ -40,6 +40,11 @@ pub enum Command {
         x: i32,
         y: i32,
     },
+    /// Observe the pointer's current absolute target-session screen
+    /// coordinates without injecting input.
+    PointerPosition {
+        target: TargetRef,
+    },
     Click {
         target: TargetRef,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,6 +323,7 @@ impl Command {
             Self::Tree { .. } => "tree".into(),
             Self::Screenshot { .. } => "screenshot".into(),
             Self::PointerMove { .. } => "pointer-move".into(),
+            Self::PointerPosition { .. } => "pointer-position".into(),
             Self::Click { .. } => "click".into(),
             Self::Focus { .. } => "focus".into(),
             Self::SendText { .. } => "send-text".into(),
@@ -344,6 +350,7 @@ impl Command {
             | Self::Tree { target, .. }
             | Self::Screenshot { target, .. }
             | Self::PointerMove { target, .. }
+            | Self::PointerPosition { target, .. }
             | Self::Click { target, .. }
             | Self::Focus { target, .. }
             | Self::SendText { target, .. }
@@ -429,5 +436,19 @@ mod tests {
                 y: 1440
             }
         ));
+    }
+
+    #[test]
+    fn pointer_position_is_target_neutral_observation() {
+        let command = Command::PointerPosition {
+            target: TargetRef::Vnc,
+        };
+        assert_eq!(command.verb(), "pointer-position");
+        assert_eq!(command.target(), TargetRef::Vnc);
+        assert_eq!(command.required_grant(), Grant::Observe);
+        assert_eq!(
+            serde_json::to_value(&command).expect("serialize"),
+            serde_json::json!({ "verb": "pointer-position", "target": "vnc" })
+        );
     }
 }

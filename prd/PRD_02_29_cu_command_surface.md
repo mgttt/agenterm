@@ -79,6 +79,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   open because the current ABI has no independent cursor-position observation;
   moving a real user pointer without a reliable read/restore circuit is not
   acceptable evidence. Pointer press/release, drag, and wheel remain planned.
+- [~] `pointer-position` supplies the independent observation half required by
+  a safe pointer-move receipt. ABI 1.11 adds a null-checked, non-injecting
+  query; CU requires that minor version and maps an old library or missing
+  symbol to typed unsupported. Windows `GetCursorPos` and X11 `QueryPointer`
+  are wired; macOS remains unsupported. Pure/ABI/transport evidence is closed,
+  but the move → independent readback → restore black box remains open because
+  this automation session cannot read its input desktop (`GetCursorPos`
+  returns a typed platform failure).
 
 ## Structured observation
 

@@ -590,7 +590,7 @@ pub mod window_op {
 // ---------------------------------------------------------------------------
 
 pub mod input_inject {
-    use super::{MechanismError, map_status};
+    use super::{MechanismError, last_mechanism_error, map_status};
     use crate::dynlib;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -615,6 +615,49 @@ pub mod input_inject {
         let f = super::call_sym::<super::PointerMove>(b"agt_input_pointer_move")?;
         let status = unsafe { f(x, y) };
         map_status("agt_input_pointer_move", status)
+    }
+
+    /// Read absolute screen coordinates without injecting input.
+    pub fn pointer_position() -> Result<(i32, i32), MechanismError> {
+        let lib = dynlib::load().map_err(|error| MechanismError::Failed {
+            code: "dylib_load".into(),
+            message: error.message.clone(),
+        })?;
+        let version = lib
+            .abi_version()
+            .map_err(|message| MechanismError::Failed {
+                code: "dylib_symbol".into(),
+                message,
+            })?;
+        require_pointer_position_abi(version)?;
+        let query = unsafe { lib.sym::<super::PointerPosition>(b"agt_input_pointer_position") }
+            .map_err(|_| MechanismError::Unsupported {
+                reason: "ABI 1.11 pointer-position symbol is unavailable".into(),
+            })?;
+        let mut x = 0;
+        let mut y = 0;
+        match unsafe { query(&mut x, &mut y) } {
+            dynlib::AGT_OK => Ok((x, y)),
+            dynlib::AGT_UNSUPPORTED => Err(MechanismError::Unsupported {
+                reason: "pointer-position is unavailable on this host".into(),
+            }),
+            _ => Err(last_mechanism_error("agt_input_pointer_position")),
+        }
+    }
+
+    pub(super) fn require_pointer_position_abi(version: u32) -> Result<(), MechanismError> {
+        let major = version >> 16;
+        let minor = (version & 0xffff) as u16;
+        if major == 1 && minor >= dynlib::POINTER_POSITION_ABI_MINOR {
+            Ok(())
+        } else {
+            Err(MechanismError::Unsupported {
+                reason: format!(
+                    "pointer-position requires ABI 1.{}, loaded library reports {major}.{minor}",
+                    dynlib::POINTER_POSITION_ABI_MINOR
+                ),
+            })
+        }
     }
 
     /// Click a pointer button at absolute screen coordinates.
@@ -1445,6 +1488,7 @@ type WindowRect = unsafe extern "C" fn(isize, *mut i32, *mut i32, *mut u32, *mut
 type WindowSetTopmost = unsafe extern "C" fn(isize, i32) -> i32;
 type WindowClose = unsafe extern "C" fn(isize) -> i32;
 type PointerMove = unsafe extern "C" fn(i32, i32) -> i32;
+type PointerPosition = unsafe extern "C" fn(*mut i32, *mut i32) -> i32;
 type PointerClick = unsafe extern "C" fn(i32, i32, i32, u32) -> i32;
 type InputTypeText = unsafe extern "C" fn(*const u8, usize) -> i32;
 type InputSendKeys = unsafe extern "C" fn(*const u8, usize) -> i32;
@@ -1602,6 +1646,13 @@ mod tests {
         let error = window_placement::require_placement_abi((1 << 16) | 9).unwrap_err();
         assert!(matches!(error, MechanismError::Unsupported { .. }));
         assert!(window_placement::require_placement_abi((1 << 16) | 10).is_ok());
+    }
+
+    #[test]
+    fn pointer_position_old_minor_is_typed_unsupported() {
+        let error = input_inject::require_pointer_position_abi((1 << 16) | 10).unwrap_err();
+        assert!(matches!(error, MechanismError::Unsupported { .. }));
+        assert!(input_inject::require_pointer_position_abi((1 << 16) | 11).is_ok());
     }
 
     #[cfg(windows)]

@@ -487,6 +487,20 @@ mod tests {
     }
 
     #[test]
+    fn pointer_position_survives_ssh_target_rewrite() {
+        let command = CuCommand::PointerPosition {
+            target: TargetRef::Ssh,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert!(matches!(
+            remote,
+            CuCommand::PointerPosition {
+                target: TargetRef::Current
+            }
+        ));
+    }
+
+    #[test]
     fn capabilities_restore_public_target_does_not_leak_current() {
         // Worker capabilities answer with data.target=current; host must
         // restore public tier identity for both reply.target and data.target.

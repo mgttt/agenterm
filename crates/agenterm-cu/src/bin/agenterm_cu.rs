@@ -284,6 +284,12 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             }
             Command::PointerMove { target, x, y }
         }
+        "pointer-position" => {
+            if !args.is_empty() {
+                return usage_err("pointer-position accepts no command arguments");
+            }
+            Command::PointerPosition { target }
+        }
         "click" => {
             let window = flag_isize(&mut args, "--window");
             let node = flag_value(&mut args, "--node");
@@ -934,6 +940,8 @@ Commands:
   screenshot --out PATH [--window HANDLE]
   pointer-move --x X --y Y moves to absolute screen coordinates without any
                               press/release/click/drag/wheel side effect
+  pointer-position            observes absolute screen coordinates without
+                              injecting any pointer event
   click (--window HANDLE --node ID | --window HANDLE --name PAT [--role ROLE] | --coords X,Y --degraded)
         [--button left|right|middle] [--clicks N]
                               --name reuses wait NodeNameContains matching, then the --node AT-SPI path
@@ -1094,6 +1102,18 @@ mod tests {
         assert_eq!(reply.target, "current");
         assert_eq!(reply.command, "pointer-move");
         assert_eq!(reply.error.expect("actuate refusal").code, "refused");
+    }
+
+    #[test]
+    fn pointer_position_cli_requires_observe_before_native_dispatch() {
+        let reply = dispatch(vec![
+            "--target".into(),
+            "current".into(),
+            "pointer-position".into(),
+        ]);
+        assert!(!reply.ok);
+        assert_eq!(reply.command, "pointer-position");
+        assert_eq!(reply.error.expect("observe refusal").code, "refused");
     }
 
     #[test]
