@@ -261,7 +261,8 @@ direct-libc baselines. Darwin-specific smokes cover `sysctlbyname`,
 `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
 `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`,
 `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
-`pthread_cpu_number_np`, `malloc_good_size`, `sysctlnametomib`, and `pthread_equal`;
+`pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`,
+`pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`;
 the caller-owned timebase, login, thread-id, thread-name, `proc_bsdinfo`, and
 `rusage_info_v4` buffers are compared with direct C baselines. The
 dynamic-loader image count is an instantaneous positive fact checked against a

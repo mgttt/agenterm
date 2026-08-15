@@ -58,12 +58,11 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
-  1.97: **122 passed** (12 unit + 38 errors + 10 hosts + 16 language + 46
-  cfg-gated Linux smoke; 0 doctests). The Darwin test inventory for this
-  source is **137** (13 unit + 38 errors + 10 hosts +
-  16 language + 1 macos_ioctl + 32 macos_probes + 4 macos_resource + 23
-  cfg-gated macOS smoke; 0 doctests); native CI remains the evidence gate for
-  this Wave 10 source. Wave 4–6 live rows were `dlcall`ed on the earlier
+  1.97: **140 passed** (20 unit + 39 errors + 11 hosts + 22 language + 48
+  cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory is
+  **154** (21 unit + 39 errors + 11 hosts + 22 language + 1 macos_ioctl +
+  32 macos_probes + 4 macos_resource + 24 cfg-gated macOS smoke; 0 doctests);
+  native CI remains the evidence gate for current source. Wave 4–6 live rows were `dlcall`ed on the earlier
   Darwin CI host and compared to later native calls. Host-specific counts, not
   a cross-platform estimate.
 
