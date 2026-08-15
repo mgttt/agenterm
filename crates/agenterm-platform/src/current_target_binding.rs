@@ -258,7 +258,12 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
+            // Some hosts expose temporary roots through symlinked aliases. The
+            // production contract correctly rejects link-like ancestors, so
+            // resolve only the test-owned root before constructing the fixture.
+            let temporary_root = fs::canonicalize(std::env::temp_dir())
+                .expect("resolve current target fixture root");
+            let path = temporary_root.join(format!(
                 "agenterm-platform-current-target-{}-{}",
                 std::process::id(),
                 NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
