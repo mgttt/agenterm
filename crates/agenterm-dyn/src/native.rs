@@ -217,9 +217,9 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
     #[cfg(target_os = "macos")]
     if darwin_ioctl {
         // SAFETY: the resolved `ioctl` symbol has the one supported Darwin signature below;
-        // the script types were validated before argument evaluation.  The foreign declaration
-        // preserves Darwin's variadic ABI, unlike the general fixed-arity trampoline.
-        return unsafe { invoke_darwin_ioctl(&dyn_args) };
+        // the script types were validated before argument evaluation. Its variadic ABI differs
+        // from the general fixed-arity trampoline.
+        return unsafe { invoke_darwin_ioctl(func_ptr, &dyn_args) };
     }
 
     // SAFETY: callers provide the native symbol's signature. `invoke` supports only the
@@ -238,19 +238,16 @@ fn is_darwin_ioctl_signature(sym_name: &str, ret_ty: SigType, arg_types: &[SigTy
 }
 
 #[cfg(target_os = "macos")]
-unsafe extern "C" {
-    /// Darwin's third `ioctl` parameter is variadic.  This declaration is deliberately
-    /// narrower than `dlcall`: it is only used for the explicitly recognised `ioctl` shape.
-    fn ioctl(fd: i32, request: u64, ...) -> i32;
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn invoke_darwin_ioctl(args: &[DynArg]) -> Result<Value, DynError> {
+unsafe fn invoke_darwin_ioctl(func_ptr: *const c_void, args: &[DynArg]) -> Result<Value, DynError> {
     let [fd, request, pointer] = args else {
         unreachable!("darwin ioctl signature checked before invocation");
     };
-    // SAFETY: `is_darwin_ioctl_signature` established the typed `(i32, u64, ptr) -> i32`
-    // script contract; this foreign declaration supplies the required variadic ABI.
+    type IoctlFn = unsafe extern "C" fn(i32, u64, ...) -> i32;
+    // SAFETY: `func_ptr` was resolved from the requested library as `ioctl`, whose address
+    // remains valid while `env.libs` owns the library. The signature gate established the typed
+    // `(i32, u64, ptr) -> i32` script contract and this function type supplies Darwin's ABI.
+    let ioctl: IoctlFn = unsafe { std::mem::transmute(func_ptr) };
+    // SAFETY: `ioctl` and its three arguments satisfy the narrow contract above.
     let result = unsafe { ioctl(fd.0 as i32, request.0, pointer.0 as *mut c_void) };
     Ok(Value::Int(i64::from(result)))
 }

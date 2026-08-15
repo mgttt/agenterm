@@ -110,3 +110,70 @@ fn dlcall_issetugid_matches_libc_boolean() {
     assert!(matches!(got, 0 | 1), "issetugid must be boolean");
     assert_eq!(got, i64::from(direct));
 }
+
+#[test]
+fn dlcall_nsget_executable_path_writes_a_caller_buffer() {
+    let symbol = live_symbol("nsget_executable_path");
+    let mut buffer = vec![0_u8; 4096];
+    let mut length = u32::try_from(buffer.len()).expect("test buffer fits u32");
+    let mut env = Dyn::new();
+    env.bind("path", buffer.as_mut_ptr().cast())
+        .expect("bind executable-path buffer");
+    env.bind("len", (&mut length as *mut u32).cast())
+        .expect("bind executable-path length");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" path "ptr" len)"#
+        ))
+        .expect("_NSGetExecutablePath dlcall");
+    assert_eq!(got, Value::Int(0));
+    let path = CStr::from_bytes_until_nul(&buffer)
+        .expect("_NSGetExecutablePath must NUL-terminate on success")
+        .to_bytes();
+    assert!(!path.is_empty(), "executable path must be non-empty");
+    let current = std::env::current_exe().expect("current executable path");
+    let current = current.as_os_str().as_encoded_bytes();
+    assert!(
+        path.starts_with(current) || current.starts_with(path),
+        "_NSGetExecutablePath and current_exe must identify the executable"
+    );
+}
+
+#[test]
+fn dlcall_proc_pidpath_writes_a_caller_buffer() {
+    let symbol = live_symbol("proc_pidpath");
+    let mut buffer = vec![0_u8; 4096];
+    let len = u32::try_from(buffer.len()).expect("test buffer fits u32");
+    let pid = unsafe { libc::getpid() };
+    let mut env = Dyn::new();
+    env.bind("path", buffer.as_mut_ptr().cast())
+        .expect("bind proc_pidpath buffer");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {} "ptr" path "u32" {len})"#,
+            pid
+        ))
+        .expect("proc_pidpath dlcall")
+        .as_int()
+        .expect("proc_pidpath integer result");
+    assert!(got > 0, "proc_pidpath must write at least one byte");
+    let path = CStr::from_bytes_until_nul(&buffer)
+        .expect("proc_pidpath must NUL-terminate its successful output")
+        .to_bytes();
+    assert!(!path.is_empty(), "proc_pidpath path must be non-empty");
+}
+
+#[test]
+fn dlcall_arc4random_returns_u32_values() {
+    let symbol = live_symbol("arc4random");
+    let mut env = Dyn::new();
+    let script = format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#);
+    for _ in 0..2 {
+        let value = env
+            .eval(&script)
+            .expect("arc4random dlcall")
+            .as_int()
+            .expect("arc4random integer result");
+        assert!((0..=i64::from(u32::MAX)).contains(&value));
+    }
+}

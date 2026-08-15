@@ -127,7 +127,10 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "sysctlbyname",
                 "mach_absolute_time",
                 "getprogname",
-                "issetugid"
+                "issetugid",
+                "nsget_executable_path",
+                "proc_pidpath",
+                "arc4random",
             ]
         );
         assert_eq!(
@@ -200,7 +203,10 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "sysctlbyname",
                 "mach_absolute_time",
                 "getprogname",
-                "issetugid"
+                "issetugid",
+                "nsget_executable_path",
+                "proc_pidpath",
+                "arc4random",
             ]
         );
         assert!(c.system_probes[36..].iter().all(|probe| matches!(

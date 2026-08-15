@@ -1538,17 +1538,21 @@ mod macos {
             format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd} "u64" {request} "ptr" ws)"#);
         let ret = env.eval(&script).expect("ioctl dlcall");
         let code = ret.as_int().expect("ioctl return code");
-        // Darwin `ioctl` is variadic. The bounded dlcall trampoline is
-        // fixed-arity `(i32, u64, ptr)` and does not match the arm64
-        // variadic slot, so the live call often returns -1 / EFAULT even
-        // when a typed `libc::ioctl` on the same fd succeeds.
-        assert!(
-            code == 0 || code == -1,
-            "ioctl dlcall should resolve; got {code}"
-        );
-        if code == 0 && expect_pty_dims {
+        // The signature-gated Darwin path calls the loaded `ioctl` symbol
+        // through its variadic ABI. An owned pty is live evidence, so it
+        // must round-trip both the successful status and its seeded geometry.
+        if expect_pty_dims {
+            assert_eq!(code, 0, "ioctl on owned pty slave should succeed");
             assert_eq!(ws.ws_row, 24, "pty rows");
             assert_eq!(ws.ws_col, 80, "pty cols");
+        } else {
+            // If openpty is unavailable, the fallback is an ambient tty (or
+            // stdin) whose geometry is not owned by this test. It may work or
+            // report the native non-terminal failure, but proves no 24x80 row.
+            assert!(
+                code == 0 || code == -1,
+                "fallback ioctl should return success or native failure; got {code}"
+            );
         }
         if fd > 2 {
             unsafe {

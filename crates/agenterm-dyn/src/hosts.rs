@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 40],
+    pub system_probes: [SystemProbe; 43],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 40] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 43] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -346,6 +346,18 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 40] = [
         name: "issetugid",
         status: SystemProbeStatus::Placeholder,
     },
+    SystemProbe {
+        name: "nsget_executable_path",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "proc_pidpath",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "arc4random",
+        status: SystemProbeStatus::Placeholder,
+    },
 ];
 
 const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
@@ -358,7 +370,7 @@ const fn macos_live(name: &'static str, symbol: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 40] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 43] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -399,9 +411,12 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 40] = [
     macos_live("mach_absolute_time", "mach_absolute_time"),
     macos_live("getprogname", "getprogname"),
     macos_live("issetugid", "issetugid"),
+    macos_live("nsget_executable_path", "_NSGetExecutablePath"),
+    macos_live("proc_pidpath", "proc_pidpath"),
+    macos_live("arc4random", "arc4random"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 40] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 43] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -560,6 +575,18 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 40] = [
     },
     SystemProbe {
         name: "issetugid",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "nsget_executable_path",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "proc_pidpath",
+        status: SystemProbeStatus::Placeholder,
+    },
+    SystemProbe {
+        name: "arc4random",
         status: SystemProbeStatus::Placeholder,
     },
 ];

@@ -91,8 +91,8 @@ deny, or otherwise change any native-door or caller authority semantics.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live first 36: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `open`/`access`/`fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; Darwin-only final four are placeholders |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | live first 36 matching-host rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, and `issetugid` |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live first 36: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `open`/`access`/`fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; Darwin-only final seven are placeholders |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | live first 36 matching-host rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, and `arc4random` |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -146,6 +146,9 @@ without wiring dyn into cu, platform, or the ABI:
 - [monotonic kernel ticks via `mach_absolute_time`](examples/mach-absolute-time.md) (macOS)
 - [program name pointer via `getprogname`](examples/getprogname.md) (macOS)
 - [set-id execution state via `issetugid`](examples/issetugid.md) (macOS)
+- [executable path via `_NSGetExecutablePath`](examples/nsget-executable-path.md) (macOS)
+- [process path via `proc_pidpath`](examples/proc-pidpath.md) (macOS)
+- [random word via `arc4random`](examples/arc4random.md) (macOS)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [whether standard input is a terminal](examples/isatty-stdin.md)
@@ -210,10 +213,12 @@ direct-libc baseline. `getdtablesize` returns the host descriptor-table limit as
 source defines the same integer/void/ptr libc rows as Linux against
 `libSystem.B.dylib`, including caller-owned-pointer `times`,
 `getrusage(RUSAGE_SELF, …)`, and `getrlimit(RLIMIT_NOFILE, …)` checks against
-direct-libc baselines. This records the CI-native smoke contract; it does not
-claim a local macOS-machine result. `ioctl(TIOCGWINSZ)` is invoked and must
-resolve, but success is not claimed on arm64 because Darwin `ioctl` is variadic
-and the bounded trampoline is fixed-arity. `access` missing-path uses
+direct-libc baselines. Darwin-specific smokes cover `sysctlbyname`,
+`mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
+`proc_pidpath`, and `arc4random`. `ioctl(TIOCGWINSZ)` uses the resolved
+`libSystem.B.dylib` symbol through its signature-gated variadic ABI and an
+owned pty must return the seeded 24×80 size. This records the CI-native smoke
+contract; it does not claim a local macOS-machine result. `access` missing-path uses
 `/tmp/…`, not `/proc`.
 
 **Windows** (local / CI when available): `GetCurrentProcessId`,

@@ -27,9 +27,11 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `DynError::Parse` before evaluation. This is a stack-resource bound, not a
   caller-policy boundary.
 - Win six-cell extra probes stay placeholders. **macOS** has the 36 shared
-  live libc rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, and
-  `issetugid` against `libSystem.B.dylib`. Darwin `ioctl` has a signature-gated
-  Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not general variadic FFI.
+  live libc rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`,
+  `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, and `arc4random` against
+  `libSystem.B.dylib`. Darwin `ioctl` calls its resolved symbol through a
+  signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
+  general variadic FFI.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **122 passed** (11 unit + 38 errors + 9 hosts + 16 language + 48
   cfg-gated Linux smoke; 0 doctests). This is a host-specific execution count,
@@ -53,10 +55,11 @@ deliberately small; this does not authorize a broader type system.
 
 Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 (`libSystem.B.dylib`); macOS additionally covers `sysctlbyname`,
-`mach_absolute_time`, `getprogname`, and `issetugid`. Windows extra probes
-stay placeholders. No C shim.
+`mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
+`proc_pidpath`, and `arc4random`. Windows extra probes stay placeholders. No
+C shim.
 Restore process-global side effects before the test ends (`umask` pattern).
-Darwin `ioctl` uses a narrow Rust variadic declaration only for the validated
+Darwin `ioctl` transmutes its already-resolved symbol only for the validated
 `(i32, u64|i32, ptr) -> i32` signature; the fixed trampoline remains for every
 other call and this does not authorize general variadic FFI.
 Linux caller-owned `ptr` coverage includes `getcwd`, `uname`, `times`,
