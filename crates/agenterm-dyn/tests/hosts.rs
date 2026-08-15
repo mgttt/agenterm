@@ -110,7 +110,9 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "fcntl_stdin_getfd",
                 "dup_stdin",
                 "getpriority_process",
-                "nice_zero"
+                "nice_zero",
+                "lseek_stdin_cur",
+                "fcntl_stdin_getfl"
             ]
         );
         assert_eq!(
@@ -142,6 +144,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("dup_stdin", "libc.so.6", "dup"),
                 ("getpriority_process", "libc.so.6", "getpriority"),
                 ("nice_zero", "libc.so.6", "nice"),
+                ("lseek_stdin_cur", "libc.so.6", "lseek"),
+                ("fcntl_stdin_getfl", "libc.so.6", "fcntl"),
             ]
         );
     }

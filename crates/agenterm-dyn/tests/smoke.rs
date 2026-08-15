@@ -497,6 +497,40 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_lseek_stdin_cur_matches_libc() {
+        let probe = live_system_probe("lseek_stdin_cur");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i64" "i32" 0 "i64" 0 "i32" {})"#,
+                libc::SEEK_CUR
+            ))
+            .expect("lseek(0, 0, SEEK_CUR) dlcall");
+        let real = unsafe { libc::lseek(0, 0, libc::SEEK_CUR) };
+        assert_eq!(got, Value::Int(real));
+    }
+
+    #[test]
+    fn dlcall_fcntl_stdin_getfl_matches_libc() {
+        let probe = live_system_probe("fcntl_stdin_getfl");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0 "i32" {})"#,
+                libc::F_GETFL
+            ))
+            .expect("fcntl(0, F_GETFL) dlcall");
+        let real = unsafe { libc::fcntl(0, libc::F_GETFL) };
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
