@@ -103,8 +103,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   machine-local product-data location, refuses bare filenames and link-like
   stores, protects the parent directory, and publishes every replacement from
   an exclusively created private temporary. The raw `open_at` remains only an
-  injected-path seam. This is not yet the production authorization path:
-  CLI/executor integration and session-nonce invalidation remain open.
+  injected-path seam. A current-only `grant create/list/revoke` management CLI
+  now uses that production path, generates opaque IDs from platform entropy,
+  explicitly enrolls and resolves the sealed binding, and projects records
+  without session identity. It rejects ambient authorization selectors and
+  sanitizes store failures. `--grant-id` command execution, executor/audit
+  decisions and session-nonce invalidation remain open, so management alone is
+  not an authority path.
 - [~] A sealed `TargetBinding` contract now separates opaque provider identity
   and exact desktop-session identity from routing material. Current, SSH and
   VNC fail typed when no crate-owned verified provider is available; RDP stays

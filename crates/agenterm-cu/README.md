@@ -150,7 +150,11 @@ Every command requires an explicit `--target current`, `--ssh <user@host>`
 `--target vnc`), or `--rdp <host[:port]>` (which implies `--target rdp`).
 Observation commands need the `observe` grant; actuation commands need
 `actuate`. Grants come from `--grant` or `AGENTERM_CU_GRANT`
-(comma-separated). Local `current` is not exempt.
+(comma-separated). Local `current` is not exempt. The local management surface
+can create, list, and revoke bounded current-session grants with `grant
+create|list|revoke`; it stores them in protected machine-local product data and
+never prints the session binding. Command execution through `--grant-id` is not
+wired yet, so these persisted records do not currently authorize a command.
 
 The `ssh` tier reuses the same verbs (observe and actuate). Host
 `agenterm-cu --ssh` rewrites the command to `target=current` and runs a remote

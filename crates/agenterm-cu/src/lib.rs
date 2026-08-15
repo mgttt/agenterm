@@ -11,6 +11,7 @@ pub mod ax_guide;
 pub mod command;
 pub mod dynlib;
 pub mod executor;
+pub mod grant_management;
 pub mod host_actions;
 pub mod hotkeys;
 pub mod mechanism;

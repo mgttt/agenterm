@@ -32,6 +32,19 @@ fn main() {
 }
 
 fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
+    let ambient_authority_present = std::env::vars_os().any(|(key, _)| {
+        key.to_str().is_some_and(|key| {
+            ["AGENTERM_CU_GRANT", "AGENTERM_CU_AUTH"]
+                .iter()
+                .any(|prefix| {
+                    key.get(..prefix.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+                })
+        })
+    });
+    if let Some(reply) = agenterm_cu::grant_management::dispatch(&args, ambient_authority_present) {
+        return reply;
+    }
     if args.is_empty() || matches!(args[0].as_str(), "help" | "--help" | "-h") {
         eprint_usage();
         return help_reply(true);
@@ -890,6 +903,10 @@ fn eprint_usage() {
        agenterm-cu --rdp <host[:port]> [--grant observe,actuate] <command> [args...]
        agenterm-cu exec [--grant observe,actuate] --json '<command-json>'
        agenterm-cu exec [--grant observe,actuate] --json -   # JSON command on stdin
+       agenterm-cu grant create --target current --scopes S --ttl-ms N
+                         (--one-shot|--max-uses N) [--grant-store PATH]
+       agenterm-cu grant list [--grant-store PATH]
+       agenterm-cu grant revoke --grant-id ID [--grant-store PATH]
        agenterm-cu host                        desktop menu and global shortcuts
        agenterm-cu hotkeys                     compatibility alias for host
 
@@ -908,6 +925,9 @@ Global:
                             no connect / TLS / CredSSP; always rdp_unavailable)
   --grant observe,actuate   strict authorization scopes; CLI wins over
                             AGENTERM_CU_GRANT and sources never union
+
+  grant management is local/current only. It refuses ambient AGENTERM_CU_GRANT*
+  and AGENTERM_CU_AUTH* selectors; --grant-store is an explicit test/admin seam.
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
   worker over OpenSSH stdio (no new verb). Get-selection evidence: loopback
