@@ -83,8 +83,8 @@ handle-valued native returns instead of declaring them as `u64`.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `getsid(0)`, `getpgid(0)`, `geteuid`, `getegid`, `getpriority(PRIO_PROCESS, 0)`, `nice(0)`, `sched_yield` as void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0/1/2)`, `open("/dev/null")` + `isatty` + `close`, `access` success/failure, `fcntl(0, F_GETFD)`, `fcntl(0, F_GETFL)`, `lseek(0, 0, SEEK_CUR)`, and `dup(0)` + `close` dlcalls |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` (script data; Darwin `ioctl` is variadic so the fixed dlcall trampoline may return `-1`/`EFAULT` on arm64) | `time` | live `time`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf` pagesize/clk_tck/nprocessors, `getcwd`, `isatty` 0/1/2, `open("/dev/null")`+`close`, `access`, `fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield` void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize` |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `getsid(0)`, `getpgid(0)`, `geteuid`, `getegid`, `getpriority(PRIO_PROCESS, 0)`, `nice(0)`, `sched_yield` as void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0/1/2)`, `open("/dev/null")` + `isatty` + `close`, `access` success/failure, `fcntl(0, F_GETFD)`, `fcntl(0, F_GETFL)`, `lseek(0, 0, SEEK_CUR)`, and `dup(0)` + `close` dlcalls |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` (script data; Darwin `ioctl` is variadic, so the fixed `dlcall` trampoline can return `-1`/`EFAULT` on arm64) | `time` | matching-host smoke candidates: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf` pagesize/clk_tck/nprocessors, `getcwd`, `isatty` 0/1/2, `open("/dev/null")`+`close`, `access`, `fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield` void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize` |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -173,7 +173,7 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 cargo test -p agenterm-dyn
 ```
 
-**Linux** (CI): `getpid` + `getppid` + `getpgrp` + `getsid(0)` + `getpgid(0)` +
+**Linux** (matching-host CI smoke): `getpid` + `getppid` + `getpgrp` + `getsid(0)` + `getpgid(0)` +
 `getuid` + `getgid` + `geteuid` + `getegid` cross-checked with libc; real headless
 `time(NULL)`, `clock_gettime(CLOCK_MONOTONIC)`, `uname`, `sysconf(_SC_PAGESIZE)`,
 `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, and `getcwd` dlcalls;
@@ -186,15 +186,23 @@ library existence probes (no session a11y bus). `isatty(0/1/2)` records the real
 stdin/stdout/stderr state rather than requiring an interactive terminal. `sched_yield`
 exercises the void-return path; `alarm(0)` returns an integer and leaves no alarm pending.
 The `umask` probe reads with `umask(0)` and immediately restores the returned mask.
-`getdtablesize` returns the host descriptor-table limit as a positive integer.
+`times` writes a caller-owned `tms` and is compared with a later direct-libc
+baseline. `getrusage(RUSAGE_SELF, …)` writes a caller-owned `rusage` and its
+CPU times are compared with a later direct-libc baseline. `getrlimit(RLIMIT_NOFILE,
+…)` writes a caller-owned `rlimit` whose soft and hard limits must equal the
+direct-libc baseline. `getdtablesize` returns the host descriptor-table limit as a positive integer.
 `gethostid` returns the host identifier as the native signed-long integer.
 `getpagesize` returns the positive page size and agrees with `sysconf(_SC_PAGESIZE)`.
 
-**macOS** (local / this crate’s aarch64 smoke): same integer/void/ptr libc
-rows as Linux, against `libSystem.B.dylib`, cross-checked with `libc`.
-`ioctl(TIOCGWINSZ)` is invoked and must resolve; success is not claimed on
-arm64 because Darwin `ioctl` is variadic and the bounded trampoline is
-fixed-arity. `access` missing-path uses `/tmp/…`, not `/proc`.
+**macOS** (matching-host native-test smoke): the `#[cfg(target_os = "macos")]`
+source defines the same integer/void/ptr libc rows as Linux against
+`libSystem.B.dylib`, including caller-owned-pointer `times`,
+`getrusage(RUSAGE_SELF, …)`, and `getrlimit(RLIMIT_NOFILE, …)` checks against
+direct-libc baselines. This records the CI-native smoke contract; it does not
+claim a local macOS-machine result. `ioctl(TIOCGWINSZ)` is invoked and must
+resolve, but success is not claimed on arm64 because Darwin `ioctl` is variadic
+and the bounded trampoline is fixed-arity. `access` missing-path uses
+`/tmp/…`, not `/proc`.
 
 **Windows** (local / CI when available): `GetCurrentProcessId`,
 `GetCurrentThreadId`, optional CRT `getenv("DISPLAY")`.
