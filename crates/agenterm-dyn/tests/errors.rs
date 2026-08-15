@@ -169,6 +169,28 @@ fn dlcall_rejects_unknown_argument_types_before_arguments_or_library_load() {
 }
 
 #[test]
+fn dlcall_rejects_usize_type_before_arguments_or_library_load() {
+    let expected = || {
+        DynError::Type(
+            "unsupported dlcall type `usize`; only void/integer/pointer types are supported".into(),
+        )
+    };
+    for script in [
+        r#"(dlcall "missing-library-for-usize-return" "unused" "usize"
+            "i32" (set touched 1))"#,
+        r#"(dlcall "missing-library-for-usize-argument" "unused" "i32"
+            "i32" (set touched 1) "usize" 0)"#,
+    ] {
+        let mut env = Dyn::new();
+        assert_eq!(env.eval(script), Err(expected()));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
+}
+
+#[test]
 fn dlcall_validates_entire_signature_before_evaluating_arguments() {
     let mut env = Dyn::new();
     let script = r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
