@@ -248,8 +248,9 @@ pub fn run_session(
         )
     })?;
     // Host identity of this command is the vnc tier even when the worker
-    // answered as target=current.
-    reply.target = "vnc".into();
+    // answered as target=current. Capabilities also restore data.target so
+    // callers do not see the worker's "current" leak.
+    restore_public_target(&mut reply, "vnc");
     if !output.status.success() && reply.ok {
         return Err(CuError::new(
             "vnc_transport_failed",
@@ -261,6 +262,55 @@ pub fn run_session(
         ));
     }
     Ok(reply)
+}
+
+/// Public reply target is always the vnc tier. For `capabilities`, also
+/// restore `data.target` and attach transport facts owned by this tier
+/// without overwriting session-worker mechanism status.
+fn restore_public_target(reply: &mut CuReply, public: &str) {
+    reply.target = public.into();
+    if reply.command != "capabilities" {
+        return;
+    }
+    let Some(data) = reply.data.as_mut().and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    if let Some(prev) = data.get("target").cloned()
+        && prev.as_str() != Some(public)
+    {
+        data.entry("worker_target".to_owned()).or_insert(prev);
+    }
+    data.insert(
+        "target".to_owned(),
+        serde_json::Value::String(public.to_owned()),
+    );
+    // Public tier owns transport. Preserve the session worker's in-process
+    // transport under worker_transport so mechanism facts stay inspectable.
+    if let Some(prev_transport) = data.remove("transport") {
+        data.entry("worker_transport".to_owned())
+            .or_insert(prev_transport);
+    }
+    data.insert(
+        "transport".to_owned(),
+        serde_json::json!({
+            "status": "available",
+            "available": true,
+            "kind": "rfb_session_worker",
+        }),
+    );
+    // Do not invent live RDP or unproven Mac AX claims on the vnc tier.
+    if let Some(gaps) = data.get_mut("gaps").and_then(|v| v.as_object_mut()) {
+        gaps.entry("rdp_live".to_owned()).or_insert_with(|| {
+            serde_json::Value::String(
+                "rdp tier is placeholder; never declared available on vnc".into(),
+            )
+        });
+        gaps.entry("macos_ax_live".to_owned()).or_insert_with(|| {
+            serde_json::Value::String(
+                "macOS AX live evidence is a separate cut; not claimed by vnc".into(),
+            )
+        });
+    }
 }
 
 /// TCP connect + minimal RFB version/security handshake (None only).
@@ -569,6 +619,56 @@ mod tests {
         let (host, port) = split_host_port("127.0.0.1").expect("parse");
         assert_eq!(host, "127.0.0.1");
         assert_eq!(port, None);
+    }
+
+    #[test]
+    fn capabilities_restore_public_target_does_not_leak_current() {
+        // Worker capabilities answer with data.target=current; host must
+        // restore public tier identity for both reply.target and data.target.
+        let mut reply = CuReply {
+            ok: true,
+            target: "current".into(),
+            command: "capabilities".into(),
+            data: Some(serde_json::json!({
+                "target": "current",
+                "mechanism": "libagenterm",
+                "capabilities": { "tree": "Available" },
+                "gaps": {},
+            })),
+            error: None,
+        };
+        restore_public_target(&mut reply, "vnc");
+        assert_eq!(reply.target, "vnc");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "vnc");
+        assert_eq!(data["worker_target"], "current");
+        assert_eq!(data["transport"]["available"], true);
+        assert_eq!(data["transport"]["kind"], "rfb_session_worker");
+        assert_eq!(data["transport"]["status"], "available");
+        assert_ne!(data["transport"]["status"], "in_process");
+        assert_eq!(data["capabilities"]["tree"], "Available");
+        assert!(data["gaps"]["rdp_live"].as_str().is_some());
+        assert!(data["gaps"]["macos_ax_live"].as_str().is_some());
+    }
+
+    #[test]
+    fn capabilities_overwrites_worker_in_process_transport() {
+        let mut reply = CuReply {
+            ok: true,
+            target: "current".into(),
+            command: "capabilities".into(),
+            data: Some(serde_json::json!({
+                "target": "current",
+                "transport": { "status": "in_process", "available": true },
+                "gaps": {},
+            })),
+            error: None,
+        };
+        restore_public_target(&mut reply, "vnc");
+        let data = reply.data.as_ref().expect("data");
+        assert_eq!(data["target"], "vnc");
+        assert_eq!(data["transport"]["kind"], "rfb_session_worker");
+        assert_eq!(data["worker_transport"]["status"], "in_process");
     }
 
     #[test]

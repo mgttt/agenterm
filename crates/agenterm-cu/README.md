@@ -168,20 +168,53 @@ non-empty selection `START..END` (gate precondition via already-landed
 remain valid too. Connect / protocol failures are typed (`vnc_unavailable` /
 `vnc_transport_failed` / `vnc_auth_failed`).
 
-The `rdp` tier is a **PLACEHOLDER** (cut 3.46), not an operational transport.
-`--rdp HOST[:PORT]` and `--target rdp` parse and select `target:"rdp"`, then
-any authorized command fails closed with `error.code:"rdp_unavailable"`
-before any socket connect, TLS/CredSSP/NLA, credential lookup, screenshot,
-`--coords`, or silent `ssh`/`vnc`/`current` reuse. Default port 3389 is
-syntax-only. Reserved first observe shape for a later Windows agent (live
-RDP + UIA-over-RDP evidence is **not** claimed here):
+The `rdp` tier is a **PLACEHOLDER** (cut 3.46 / 3.47), not an operational
+transport. `--rdp HOST[:PORT]` and `--target rdp` parse and select
+`target:"rdp"`. The observe verb `capabilities` (cut 3.47) succeeds with a
+static declaration: transport is placeholder/unavailable
+(`reason:"rdp_unavailable"`), `capabilities` itself is available locally,
+and `tree` is **not** declared supported. That path performs **zero** DNS,
+TCP, TLS/CredSSP, UIA, screenshot, or coordinate work. Every other
+authorized RDP command still fails closed with
+`error.code:"rdp_unavailable"` before any socket connect, credential
+lookup, screenshot, `--coords`, or silent `ssh`/`vnc`/`current` reuse.
+Default port 3389 is syntax-only. Reserved first *live* observe shape for a
+later Windows agent (live RDP + UIA-over-RDP evidence is **not** claimed
+here):
 
 ```bash
+# Per-tier declaration (no connect; tree not claimed available)
+agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe capabilities
+
+# Still fail-closed until a later Windows agent owns live RDP
 agenterm-cu --rdp "WINDOWS_HOST:3389" \
   --grant observe tree --window "$HANDLE"
 ```
 
-Canonical placeholder reply (message may include the non-secret endpoint):
+Canonical RDP `capabilities` declaration (endpoint field is diagnostic only):
+
+```json
+{
+  "ok": true,
+  "target": "rdp",
+  "command": "capabilities",
+  "data": {
+    "target": "rdp",
+    "transport": {
+      "status": "placeholder",
+      "available": false,
+      "reason": "rdp_unavailable"
+    },
+    "verbs": {
+      "capabilities": { "status": "available" },
+      "tree": { "status": "unsupported", "reason": "rdp_unavailable" }
+    }
+  }
+}
+```
+
+Canonical placeholder reply for non-capabilities verbs (message may include
+the non-secret endpoint):
 
 ```json
 {
@@ -195,11 +228,31 @@ Canonical placeholder reply (message may include the non-secret endpoint):
 }
 ```
 
-`--target rdp` without `--rdp` returns the same `rdp_unavailable` family
+`--target rdp` without `--rdp`: `capabilities` still declares the
+placeholder tier; other verbs return the same `rdp_unavailable` family
 with a missing-endpoint message. No password/username/domain flags in this
 cut. Windows UIA on `current` is a separate evidence line. A later Windows
 agent owns real session design and live gates (see
 `prd/PRD_02_30_cu_targets_transports.md` Evidence handoff).
+
+### `capabilities` per target (cut 3.47)
+
+`capabilities` is discovery, not authorization: it still requires
+`--grant observe` (missing grant → `refused`) and grants no right to
+actuate. Every successful reply keeps `ok:true`, `command:"capabilities"`,
+and the **requested public target** on both `reply.target` and
+`data.target`.
+
+| Tier | What is declared |
+|------|------------------|
+| `current` | `transport.status=in_process` + live libagenterm mechanism status |
+| `ssh` | public target `ssh` (not a leaked `current`); OpenSSH exec transport + remote worker mechanism facts |
+| `vnc` | public target `vnc`; RFB session-worker transport + session mechanism facts |
+| `rdp` | static placeholder: transport unavailable; `tree` unsupported |
+
+SSH/VNC may retain `worker_target:"current"` for the mechanism path. No tier
+declares live RDP or unproven macOS AX as available. Target enumeration is
+**not** a verb in this cut.
 
 Unauthorized actuation returns `refused`, distinct from `unsupported` and
 mechanism failures. Authorized actuation is appended to a JSONL audit log
@@ -209,8 +262,11 @@ If the audit path cannot be written, actuation does not execute.
 ## Examples
 
 ```bash
-# Declare capabilities (observe grant)
+# Declare capabilities (observe grant). data.target matches the requested tier.
 agenterm-cu --target current --grant observe capabilities
+agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe capabilities
+agenterm-cu --vnc 127.0.0.1:5947 --grant observe capabilities
+agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe capabilities
 
 # Same verbs over VNC/RFB (session agenterm-cu --target current worker).
 # Get-selection observe path: seed+range are gate preconditions (send-text +
@@ -229,8 +285,9 @@ agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --ssh-identity ~/.ssh/id_ed2551
 agenterm-cu --ssh user@127.0.0.1 --ssh-port 2222 --grant observe \
   get-selection --window HANDLE --name Command
 
-# RDP PLACEHOLDER only (cut 3.46): always rdp_unavailable; no connect.
+# RDP PLACEHOLDER: capabilities declares unavailable; other verbs rdp_unavailable.
 # Live RDP + UIA tree is a later Windows-agent cut.
+agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe capabilities
 agenterm-cu --rdp "WINDOWS_HOST:3389" --grant observe tree --window HANDLE
 
 # List top-level windows

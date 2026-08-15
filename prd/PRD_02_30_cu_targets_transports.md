@@ -14,14 +14,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Target family
 
-Branch status (cut 3.46 — RDP placeholder; 3.45 macOS AX observe stub unchanged):
+Branch status (cut 3.47 — per-target `capabilities`; 3.46 RDP placeholder; 3.45 macOS AX observe stub unchanged):
 
 | Target | Status | Notes |
 |--------|--------|-------|
-| `current` | **[x]** | Local in-process; Linux/Windows evidence held |
-| `ssh` | **[x]** | OpenSSH exec of remote `--target current` |
-| `vnc` | **[x]** | RFB + local `--target current` worker |
-| `rdp` | **[~]** | PLACEHOLDER: `TargetRef::parse("rdp") == Some(Rdp)`; `--rdp HOST[:PORT]` / `--target rdp`; authorized commands return typed `rdp_unavailable` with no socket connect. Transport/session/live evidence empty |
+| `current` | **[x]** | Local in-process; Linux/Windows evidence held; `capabilities` names `data.target:"current"` + live libagenterm status |
+| `ssh` | **[x]** | OpenSSH exec of remote `--target current`; `capabilities` restores public/`data.target:"ssh"` |
+| `vnc` | **[x]** | RFB + local `--target current` worker; `capabilities` restores public/`data.target:"vnc"` |
+| `rdp` | **[~]** | PLACEHOLDER: parseable; `capabilities` declares transport placeholder/unavailable + `tree` unsupported with zero I/O; other authorized commands typed `rdp_unavailable`. Transport/session/live evidence empty |
 
 - [x] `current`, `ssh`, and `vnc` are tiers of one family sharing one
   command set. `current` is the **local degenerate tier** — transport is
@@ -31,21 +31,27 @@ Branch status (cut 3.46 — RDP placeholder; 3.45 macOS AX observe stub unchange
   first cut is RFB handshake to `--vnc <host[:port]>` (security type None /
   `x11vnc -nopw`) then a local `agenterm-cu --target current` worker against
   the shared session (`DISPLAY` / AT-SPI env; same verbs; no new verb).
-- [~] `rdp` (cut 3.46 PLACEHOLDER) is parseable and fail-closed. Purpose:
-  remote Windows desktops (and other RDP endpoints). Public surface:
-  `TargetRef::Rdp`, `as_str() == "rdp"`, `--rdp HOST[:PORT]` (implies
-  `--target rdp`; default port 3389 is syntax-only), and explicit
-  `--target rdp`. Any authorized RDP command (reserved first observe:
-  `tree --window HANDLE`) returns `ok:false`, `target:"rdp"`, the original
-  command name, and `error.code:"rdp_unavailable"` with **no** socket
-  connect, TLS/CredSSP/NLA, credential flag, screenshot, `--coords`, or
-  silent `ssh`/`vnc`/`current` reuse. `--target rdp` without `--rdp` is the
-  same typed `rdp_unavailable` family (precise missing-endpoint message),
-  not a generic usage/`current` fallback. Malformed ports remain
-  `invalid_input`. Transport, session lifecycle, authentication, and live
-  UIA-over-RDP evidence are **[ ]** — owned by a later Windows agent (see
-  Evidence handoff below). Windows UIA on `current` is a separate line and
-  is not promoted by this placeholder.
+- [~] `rdp` (cut 3.46 PLACEHOLDER + cut 3.47 declaration) is parseable and
+  fail-closed for live work. Purpose: remote Windows desktops (and other
+  RDP endpoints). Public surface: `TargetRef::Rdp`, `as_str() == "rdp"`,
+  `--rdp HOST[:PORT]` (implies `--target rdp`; default port 3389 is
+  syntax-only), and explicit `--target rdp`. **`capabilities` (observe)**
+  succeeds with a static declaration: `data.target:"rdp"`, transport
+  `status:"placeholder"` / `available:false` / `reason:"rdp_unavailable"`,
+  verb `capabilities` available, verb `tree` **unsupported** with the same
+  reason — **no** socket connect, DNS, TLS/CredSSP, UIA, screenshot, or
+  `--coords`. Every other authorized RDP command (reserved first *live*
+  observe: `tree --window HANDLE`) returns `ok:false`, `target:"rdp"`, the
+  original command name, and `error.code:"rdp_unavailable"` with **no**
+  socket connect, TLS/CredSSP/NLA, credential flag, screenshot,
+  `--coords`, or silent `ssh`/`vnc`/`current` reuse. `--target rdp`
+  without `--rdp`: `capabilities` still declares the tier; other verbs
+  return the same typed `rdp_unavailable` family (precise
+  missing-endpoint message), not a generic usage/`current` fallback.
+  Malformed ports remain `invalid_input`. Transport, session lifecycle,
+  authentication, and live UIA-over-RDP evidence are **[ ]** — owned by a
+  later Windows agent (see Evidence handoff below). Windows UIA on
+  `current` is a separate line and is not promoted by this placeholder.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
   commands above it. `ssh` get-selection evidence reuses the #50 con-publish
@@ -75,12 +81,18 @@ Branch status (cut 3.46 — RDP placeholder; 3.45 macOS AX observe stub unchange
   `send-keys` (3.35), `copy` (3.34), `paste --text` (3.33), and
   `send-text` (3.32) over vnc still hold.
 - [ ] a target reference is explicit, addressable and stable for the lifetime of
-  its session. Enumerating targets and describing one target's declared
-  capabilities are themselves commands.
-- [ ] capability differences between tiers are **declared, not discovered by
-  failure**. A caller can ask what a target supports before acting, and an
-  unsupported command returns typed `Unsupported` rather than a fake success or
-  a silent coordinate fallback.
+  its session. Enumerating targets remains planned; describing one target's
+  declared capabilities is the existing `capabilities` observe verb (cut 3.47).
+- [~] capability differences between tiers are **declared, not discovered by
+  failure** (cut 3.47). A caller can ask `capabilities` what a target supports
+  before acting: `current` reports live libagenterm status;
+  `ssh`/`vnc` restore public/`data.target` to the requested tier while
+  retaining worker mechanism facts; `rdp` declares transport placeholder and
+  does **not** claim `tree` supported. Discovery still requires the observe
+  grant and grants no actuation right. Target enumeration and full
+  cross-tier conformance remain **[ ]**. An unsupported command returns
+  typed `Unsupported` / `rdp_unavailable` rather than a fake success or a
+  silent coordinate fallback.
 
 ## Platform backends
 
@@ -115,7 +127,7 @@ targets / transports (30)                    legend: [x] shipped  [~] partial  [
 │   ├── current  [x]  local in-process (Linux/Windows live evidence held)
 │   ├── ssh      [x]  OpenSSH exec → remote --target current
 │   ├── vnc      [x]  RFB handshake → local --target current worker
-│   └── rdp      [~]  PLACEHOLDER: parseable + typed rdp_unavailable; transport/session/live evidence [ ]
+│   └── rdp      [~]  PLACEHOLDER: capabilities declares unavailable; other verbs rdp_unavailable; live evidence [ ]
 └── platform a11y backends (agenterm-platform)
     ├── Linux AT-SPI2                 [x] live evidence (cu-linux-smoke + named journeys)
     ├── Windows UIA                   [~] existing tree evidence (cu-windows-smoke); separate from rdp
@@ -568,14 +580,16 @@ Canonical host mapping (approved product vocabulary):
      bound exhaustion remain typed. Never screenshot, OCR, CGEvent, or
      AT-SPI/UIA reuse. Worker JSON from a Linux box does not count.
 
-- [~] **RDP target PLACEHOLDER (cut 3.46) — live RDP / Windows evidence NOT
-  claimed.** Linux static proof only: `TargetRef::parse("rdp") ==
-  Some(Rdp)`, `as_str() == "rdp"`, `--rdp` / `--target rdp` CLI, and every
-  authorized RDP command returns `error.code:"rdp_unavailable"` without
-  dialing the endpoint (sentinel listener receives zero connections).
-  Worker JSON does not count; CEO owns the official placeholder check.
-  Transport, authentication, session lifecycle, and UIA-over-RDP remain
-  empty. **Handoff to a later Windows agent** (new cut, not 3.46):
+- [~] **RDP target PLACEHOLDER (cut 3.46) + declared `capabilities` (cut
+  3.47) — live RDP / Windows evidence NOT claimed.** Linux static proof:
+  `TargetRef::parse("rdp") == Some(Rdp)`, `as_str() == "rdp"`, `--rdp` /
+  `--target rdp` CLI; `capabilities` returns `ok:true` with transport
+  placeholder/`rdp_unavailable` and `tree` unsupported without dialing
+  (sentinel receives zero connections); every other authorized RDP command
+  returns `error.code:"rdp_unavailable"` without dialing. Worker JSON does
+  not count; CEO owns the official check. Transport, authentication,
+  session lifecycle, and UIA-over-RDP remain empty. **Handoff to a later
+  Windows agent** (new cut, not 3.46/3.47):
 
   1. Choose and document the real boundary: native RDP client/session API
      or an explicitly managed external client; NLA/CredSSP and certificate
@@ -603,10 +617,21 @@ Canonical host mapping (approved product vocabulary):
   5. Negative typed failures (distinct codes as the surface lands): closed
      endpoint, bad credentials, certificate rejection, lost session,
      missing UIA, bogus handle, timeout, bound exhaustion. Until live
-     evidence lands, every RDP command remains `rdp_unavailable` and the
-     PRD branch stays `[~]` placeholder.
+     evidence lands, every RDP command **except** the static
+     `capabilities` declaration remains `rdp_unavailable` and the PRD
+     branch stays `[~]` placeholder.
 
 - [ ] a cross-tier conformance test proves the same abstract command produces
   equivalent observable results on every tier that declares support for it.
-- [ ] capability declaration is tested against reality: a target that declares
-  support and then fails the command is a defect, not a runtime condition.
+- [~] **Per-target `capabilities` declaration (cut 3.47).** Existing observe
+  verb only (no new verb, no target enumeration). Load-bearing:
+  `--rdp … capabilities` → `ok:true` / `target:"rdp"` / transport
+  placeholder unavailable / `tree` not supported / zero sentinel
+  connections; `--rdp … tree` still `rdp_unavailable`; `current` /
+  loopback `ssh` / dedicated loopback `vnc` each name their public tier
+  on both reply and `data.target` (no `data.target:"current"` leak for
+  ssh/vnc requests); no tier declares unproven macOS AX or live RDP as
+  available; missing observe grant remains `refused`. Full
+  declare-vs-reality conformance across every verb remains **[ ]**: a
+  target that declares support and then fails the command is a defect,
+  not a runtime condition.
