@@ -170,12 +170,21 @@ fn dlcall_rejects_void_argument_before_arguments_or_library_load() {
 }
 
 #[test]
-fn dlcall_odd_arg_pairs() {
-    let mut env = Dyn::new();
-    let err = env
-        .eval(r#"(dlcall "libc.so.6" "getpid" "i32" "i32")"#)
-        .unwrap_err();
-    assert!(matches!(err, DynError::Type(_)));
+fn dlcall_rejects_argument_signature_arity_mismatch_before_evaluation_or_load() {
+    let expected = "dlcall expects argtype/arg pairs after return type";
+    for script in [
+        r#"(dlcall "missing-library-for-short-arguments" "unused" "i32"
+            "i32" (set touched 1) "i32")"#,
+        r#"(dlcall "missing-library-for-extra-argument" "unused" "i32"
+            "i32" (set touched 1) 0)"#,
+    ] {
+        let mut env = Dyn::new();
+        assert_eq!(env.eval(script), Err(DynError::Type(expected.into())));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
 }
 
 #[test]
