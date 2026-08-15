@@ -607,16 +607,31 @@ fn chassis_l1_surface_names_the_six_cell_candidate_tax() {
     let path = root.join("plan/chassis-l1-surface.json");
     let raw = fs::read_to_string(&path).expect("plan/chassis-l1-surface.json");
     let value: serde_json::Value = serde_json::from_str(&raw).expect("chassis-l1-surface JSON");
-    assert_eq!(value["schema"], 1);
-    let l1 = value["l1_path_prefixes"]
-        .as_array()
-        .expect("l1_path_prefixes");
-    let exact = value["l1_exact_paths"].as_array().expect("l1_exact_paths");
+    assert_eq!(value["schema"], 2);
+    let reasons = value["l1_reasons"].as_object().expect("l1_reasons");
+    let reason_keys: std::collections::BTreeSet<_> = reasons.keys().map(String::as_str).collect();
+    let expected_reason_keys = std::collections::BTreeSet::from(["loader", "window", "pty", "ipc"]);
+    assert_eq!(
+        reason_keys, expected_reason_keys,
+        "only the named loader/window/pty/ipc tax may justify a six-cell Candidate"
+    );
     let not_l1 = value["explicitly_not_l1"]
         .as_array()
         .expect("explicitly_not_l1");
-    assert!(!l1.is_empty(), "L1 prefix list must not be empty");
-    assert!(!exact.is_empty(), "L1 exact path list must not be empty");
+    let mut l1_paths = std::collections::BTreeSet::new();
+    for (reason, surface) in reasons {
+        let prefixes = surface["path_prefixes"].as_array().expect("path_prefixes");
+        let exact = surface["exact_paths"].as_array().expect("exact_paths");
+        assert!(
+            !prefixes.is_empty() || !exact.is_empty(),
+            "named L1 reason {reason} must contain at least one path"
+        );
+        for path in prefixes.iter().chain(exact.iter()) {
+            let path = path.as_str().expect("L1 path must be a string");
+            assert!(!path.is_empty(), "L1 paths must not be empty");
+            assert!(l1_paths.insert(path), "duplicate L1 path: {path}");
+        }
+    }
     assert!(
         not_l1.iter().any(|p| p.as_str() == Some("src/frontend/")),
         "product frontend must stay outside L1"
@@ -627,15 +642,19 @@ fn chassis_l1_surface_names_the_six_cell_candidate_tax() {
             .any(|p| p.as_str() == Some("crates/agenterm-cu/")),
         "computer-use must stay an L2 product, not L1"
     );
-    let l1_set: std::collections::BTreeSet<_> = l1
-        .iter()
-        .chain(exact.iter())
-        .filter_map(|v| v.as_str())
-        .collect();
     for excluded in not_l1.iter().filter_map(|v| v.as_str()) {
         assert!(
-            !l1_set.contains(excluded),
+            !l1_paths.contains(excluded),
             "{excluded} cannot be both L1 and explicitly-not-L1"
         );
     }
+    let notes = value["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().filter_map(|note| note.as_str()).any(|note| {
+            note.contains("frozen loader surface")
+                && note.contains("not a claim")
+                && note.contains("workbench PE")
+        }),
+        "surface must state that the named Candidate tax does not claim the workbench PE is thin"
+    );
 }
