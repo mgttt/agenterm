@@ -232,6 +232,7 @@ fn entry() {
     evidence_suites["control-center-smoke"] = true;
     evidence_suites["control-center-linux-smoke"] = true;
     evidence_suites["control-center-macos-smoke"] = true;
+    evidence_suites["cu-windows-smoke"] = true;
     evidence_suites["unix-frontend-linux-smoke"] = true;
     evidence_suites["unix-frontend-macos-smoke"] = true;
     evidence_suites["server-smoke"] = true;

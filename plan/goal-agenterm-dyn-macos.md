@@ -1,9 +1,8 @@
 # Goal: first-class `agenterm-dyn` on macOS (standing)
 
 Status: **active — do not stop between waves**  
-Owner: this session (`agenterm-osx`) + exclusive-file subagents **in background**  
-CWD: repository root. Paths: repo-relative or `~/...` only.  
-Git identity: `agenterm-osx <agenterm@mgttt.com>`.
+Execution: primary session + exclusive-file subagents **in background**.
+Paths: repository-relative or `~/...` only.
 
 The human does **not** need to re-send `/goal`. After I/P, immediately
 plan the next wave and spawn again until 政委 says stop.

@@ -146,6 +146,10 @@ AgenTerm — local agent & process fleet work OS
 │     ├─ Store apps             iOS / Android 占位（审核慢，不急开）
 │     └─ QR pairing             扫码绑定桌面客户端，先观察后协同
 │
+├─ 内部原生底座
+│  └─ 34 agenterm-dyn          publish=false 的极小 native door；当前授权范围持续收口
+│                             ISA folding / wasm export / libagenterm merge 仍未授权
+│
 └─ 未来面（里程碑 / 灵感）
    ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
    ├─ 19 Inspiration backlog      灵感花园、北极星层、晋升路径（非 shipped）
@@ -190,6 +194,7 @@ AgenTerm — local agent & process fleet work OS
 | 31 | [`agenterm-cu` authorization and safety](prd/PRD_02_31_cu_authorization_safety.md) | 高危能力面的授权模型、审计、拒绝语义、交付门 |
 | 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放与几何合同（Spectacle 收录）；macOS host 已落地，Windows desktop-host ABI 1.7 已通过本机 self-test，正式交付仍在 qualification |
 | 33 | [Mobile reach (`agenterm-mobile`)](prd/PRD_02_33_mobile_reach.md) | 手机接入端：PWA 先行（`https://agenterm.work/app`）、商店 App 占位、扫码绑定桌面；无版本承诺 |
+| 34 | [`agenterm-dyn` internal native door](prd/PRD_02_34_agenterm_dyn.md) | `publish = false` 的极小 S-expr / intern / bounded `dlcall` crate；当前授权范围持续收口，host-ISA folding、wasm export 与 libagenterm merge 仍未授权 |
 
 ## Non-negotiable invariants
 

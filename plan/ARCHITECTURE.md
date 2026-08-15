@@ -34,6 +34,10 @@
 crates/agenterm-platform     机制：窗口/输入/截图/进程/IPC/PTY/字体/shm…
                              typed Unsupported / Failed；无 AgenTerm 产品名
 
+crates/agenterm-dyn/         内部 `publish = false` 的极小 native door：
+                             intern + S-expr eval + bounded integer/pointer `dlcall`
+                             不属于 Script engine family，不接 cu/platform/libagenterm
+
 src/platform/                产品平台 glue：FrontendHost、目录名、快捷键/CC、能力/IPC 命名
   policy/                    host 无关产品策略表
     input.rs                 shortcut / empty-copy 输入策略（Win/Unix 共用）
@@ -99,8 +103,14 @@ crates/agenterm-con/         第二产品 package：Cargo.toml + build.rs + 自�
   bitmap_glyphs.in.rs        内嵌 ASCII 兜底字模
 ```
 
-**妥当**：分叉停在「主机如何画 / 如何收事件」。  
+**妥当**：分叉停在「主机如何画 / 如何收事件」。
 **不妥当**：分叉停在「点了 Tab 算不算选中」——产品规则只应有一份。
+
+`crates/agenterm-dyn` 只拥有小语言、资源上界、原生签名门和六格 host-fact
+目录。它的 public 证据是 package integration tests 与 CI native/cross cells，不是
+CU 命令或 Script Runtime API。当前边界禁止它导入 `agenterm-cu`、
+`agenterm-platform` 或 libagenterm；如果未来迁移 host facts 或合并 ABI，必须先在
+owning PRD 授权并同批更新本结构 SSOT。
 
 ---
 
