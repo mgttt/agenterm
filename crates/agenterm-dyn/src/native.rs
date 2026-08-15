@@ -384,6 +384,10 @@ mod tests {
         a + b + c + d + e + f
     }
 
+    unsafe extern "C" fn max_u64() -> u64 {
+        u64::MAX
+    }
+
     #[test]
     fn invoke_accepts_every_supported_arity() {
         unsafe extern "C" fn forty_two() -> i32 {
@@ -439,6 +443,15 @@ mod tests {
             Err(DynError::DlCall(
                 "7 arguments exceed the fixed limit of 6".into()
             ))
+        );
+    }
+
+    #[test]
+    fn invoke_rejects_u64_return_outside_language_integer_range() {
+        let result = unsafe { invoke(max_u64 as *const c_void, &[], SigType::U64) };
+        assert_eq!(
+            result,
+            Err(DynError::DlCall("u64 return does not fit in i64".into()))
         );
     }
 
