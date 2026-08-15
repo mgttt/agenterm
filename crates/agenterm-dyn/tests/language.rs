@@ -2,7 +2,7 @@
 
 use std::ffi::c_void;
 
-use agenterm_dyn::{Dyn, Value};
+use agenterm_dyn::{Dyn, DynError, MAX_BINDINGS, Value};
 
 #[test]
 fn intern_is_stable() {
@@ -74,6 +74,47 @@ fn bind_rejects_empty_name() {
         .bind("", std::ptr::null_mut::<c_void>())
         .expect_err("empty name");
     assert_eq!(err.to_string(), "binding name must not be empty");
+}
+
+#[test]
+fn bindings_are_bounded_and_existing_names_remain_replaceable() {
+    let mut env = Dyn::new();
+    for index in 0..MAX_BINDINGS {
+        env.bind(&format!("slot_{index}"), std::ptr::null_mut())
+            .expect("binding below the limit");
+    }
+
+    assert_eq!(
+        env.bind("overflow", std::ptr::null_mut()),
+        Err(DynError::StateLimit {
+            resource: "bindings",
+            limit: MAX_BINDINGS,
+        })
+    );
+    env.bind("slot_0", std::ptr::null_mut())
+        .expect("replacement at capacity");
+}
+
+#[test]
+fn set_rejects_a_new_binding_before_rhs_side_effects_at_capacity() {
+    let mut env = Dyn::new();
+    for index in 0..MAX_BINDINGS {
+        env.eval(&format!("(set slot_{index} 0)"))
+            .expect("binding below the limit");
+    }
+
+    assert_eq!(
+        env.eval("(set rejected (set touched 1))"),
+        Err(DynError::StateLimit {
+            resource: "bindings",
+            limit: MAX_BINDINGS,
+        })
+    );
+    assert_eq!(
+        env.eval("touched"),
+        Err(DynError::UnknownVar("touched".into()))
+    );
+    assert_eq!(env.eval("(set slot_0 1)"), Ok(Value::Int(1)));
 }
 
 #[test]

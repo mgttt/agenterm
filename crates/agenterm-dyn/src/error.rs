@@ -8,6 +8,11 @@ pub enum DynError {
     UnknownVar(String),
     #[error("binding name must not be empty")]
     InvalidBindingName,
+    #[error("state limit reached for {resource}: {limit}")]
+    StateLimit {
+        resource: &'static str,
+        limit: usize,
+    },
     #[error("arity mismatch in special form `{form}`: expected {expected}, got {got}")]
     Arity {
         form: &'static str,

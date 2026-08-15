@@ -331,6 +331,13 @@ evicted or unloaded while that environment lives, so an already cached exact nam
 at capacity. A 33rd distinct name returns a library error before its argument expressions run and
 before a loader call is attempted; create a fresh `Dyn` environment to use a different library set.
 
+### `agenterm-dyn` binding bound
+
+Each `Dyn` environment retains at most 4,096 distinct bindings, whether introduced through Rust
+`bind` or S-expression `set`. Replacing an existing name remains valid at capacity. A new name
+returns `DynError::StateLimit { resource: "bindings", limit: 4096 }`; `set` reports that error
+before evaluating its right-hand side, so a rejected assignment cannot run nested side effects.
+
 ## Placeholder TUI
 
 Run `agenterm tui` to open the initial terminal interface. It currently shows

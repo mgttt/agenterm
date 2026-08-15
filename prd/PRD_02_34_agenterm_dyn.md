@@ -24,6 +24,10 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Each `Dyn` retains at most 32 distinct `dlcall` library names. The cache never evicts or
   unloads entries, so an exact cached name remains usable at capacity; a new name rejects with
   `DynError::Library` before argument evaluation and before loading.
+- Each `Dyn` retains at most 4,096 distinct bindings across Rust `bind` and S-expression `set`.
+  Replacement of an existing name remains valid at capacity; a new `set` returns
+  `DynError::StateLimit` before evaluating its right-hand side, so rejection has no nested
+  assignment side effect. This does not constrain the public `intern` API.
 - C spelling aliases outside the fixed-width ABI whitelist reject before
   loading or argument evaluation.
 - The parser accepts exactly 256 nested lists; 257 nested lists return

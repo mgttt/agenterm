@@ -20,6 +20,9 @@ pub use hosts::{
 pub use sym::Symbol;
 pub use value::Value;
 
+/// Maximum number of distinct bindings retained by one [`Dyn`] environment.
+pub const MAX_BINDINGS: usize = 4_096;
+
 /// In-process live-native evaluation environment.
 pub struct Dyn {
     interner: sym::Interner,
@@ -46,9 +49,21 @@ impl Dyn {
         if name.is_empty() {
             return Err(DynError::InvalidBindingName);
         }
+        self.ensure_binding_capacity(name)?;
         self.bindings
             .insert(name.to_owned(), Value::Ptr(ptr as usize));
         Ok(())
+    }
+
+    /// Reject a new binding when the environment is full, while always permitting replacement.
+    pub(crate) fn ensure_binding_capacity(&self, name: &str) -> Result<(), DynError> {
+        if self.bindings.contains_key(name) || self.bindings.len() < MAX_BINDINGS {
+            return Ok(());
+        }
+        Err(DynError::StateLimit {
+            resource: "bindings",
+            limit: MAX_BINDINGS,
+        })
     }
 
     /// Evaluate S-expression `source` in this environment.
