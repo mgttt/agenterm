@@ -1697,6 +1697,71 @@ mod macos {
         let script = format!(r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#, c.pid_lib);
         eval_native(&mut env, &script).expect("getenv dlcall should resolve and run");
     }
+
+    #[test]
+    fn dlcall_gethostname_smoke() {
+        let probe = live_system_probe("gethostname");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut name = [0_u8; 256];
+        let mut env = Dyn::new();
+        env.bind("name", name.as_mut_ptr().cast())
+            .expect("bind hostname buffer");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" name "u64" 256)"#),
+        )
+        .expect("gethostname dlcall");
+        assert_eq!(got, Value::Int(0));
+        let end = name
+            .iter()
+            .position(|byte| *byte == 0)
+            .expect("gethostname result should be NUL terminated");
+        assert!(end > 0, "hostname must be non-empty");
+
+        let mut baseline = [0_u8; 256];
+        let status = unsafe { libc::gethostname(baseline.as_mut_ptr().cast(), baseline.len()) };
+        assert_eq!(status, 0, "direct libc gethostname baseline");
+        let baseline_end = baseline
+            .iter()
+            .position(|byte| *byte == 0)
+            .expect("libc gethostname result should be NUL terminated");
+        assert_eq!(&name[..end], &baseline[..baseline_end]);
+    }
+
+    #[test]
+    fn dlcall_clock_getres_smoke() {
+        let probe = live_system_probe("clock_getres");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut env = Dyn::new();
+        env.bind("ts", (&mut ts as *mut libc::timespec).cast())
+            .expect("bind timespec");
+        let got = eval_native(
+            &mut env,
+            &format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" ts)"#,
+                libc::CLOCK_MONOTONIC
+            ),
+        )
+        .expect("clock_getres dlcall");
+        assert_eq!(got, Value::Int(0));
+
+        let mut baseline = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let status = unsafe { libc::clock_getres(libc::CLOCK_MONOTONIC, &mut baseline) };
+        assert_eq!(status, 0, "direct libc clock_getres baseline");
+        assert_eq!(ts.tv_sec, baseline.tv_sec);
+        assert_eq!(ts.tv_nsec, baseline.tv_nsec);
+    }
 }
 
 #[cfg(target_os = "windows")]

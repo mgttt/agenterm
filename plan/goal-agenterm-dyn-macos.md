@@ -30,11 +30,19 @@ host.
   `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
   `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`,
   `mach_timebase_info`, `pthread_main_np`, `getlogin_r`,
-  `pthread_threadid_np`, `proc_pidinfo`, `_NSGetArgc`, `proc_pid_rusage`,
-  `_dyld_image_count`.
-- Darwin evidence (this host): `cargo test --locked -p agenterm-dyn` **121
-  passed** twice (13 unit + 38 errors + 9 hosts + 16 language + 1
-  macos_ioctl + 17 macos_probes + 4 macos_resource + 23 smoke).
+  `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`,
+  `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`,
+  `getentropy`, `proc_name`, `pthread_get_stackaddr_np`,
+  `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`,
+  `malloc_good_size`, `_NSGetProgname`, `proc_libversion`,
+  `pthread_jit_write_protect_supported_np`, `sysctlnametomib`,
+  `pthread_equal`, `gethostname`, `confstr`, `clock_getres`,
+  `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`,
+  `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`.
+- Darwin evidence (this host): `cargo test --locked -p agenterm-dyn` with
+  `CARGO_TARGET_DIR=target/dyn-wave7` **173 passed** (25 unit + 40
+  errors + 11 hosts + 26 language + 1 macos_ioctl + 39 macos_probes + 4
+  macos_resource + 27 smoke; 0 doctests).
 
 ## Wave 4 — shipped
 
@@ -53,10 +61,18 @@ Catalog is 52 rows. `pthread_threadid_np`, `proc_pidinfo`, and
 Catalog is 54 rows. `proc_pid_rusage` and `_dyld_image_count` are Darwin
 Live / Linux+Windows Placeholder. `mach_host_self` stays last Placeholder.
 
+## Wave 7 — shipped
+
+Catalog is 76 rows. `gethostname`, `confstr`, `clock_getres`,
+`pthread_is_threaded_np`, `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
+and `_dyld_get_image_vmaddr_slide` are Darwin Live / Linux+Windows
+Placeholder. `mach_host_self` stays last Placeholder.
+
 ## Next leak-free Darwin candidates
 
-`_NSGetArgv` / `_NSGetEnviron` (CRT pointers, same family as `_NSGetArgc`).
-Do not live-call Mach send rights.
+`os_proc_available_memory`, `dladdr`, `gethostuuid` (leak-free; no Mach
+send rights). Do not live-call Mach send rights. Keep `mach_host_self`
+Placeholder.
 
 ## Non-goals
 

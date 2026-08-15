@@ -197,6 +197,13 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_jit_write_protect_supported_np",
                 "sysctlnametomib",
                 "pthread_equal",
+                "gethostname",
+                "confstr",
+                "clock_getres",
+                "pthread_is_threaded_np",
+                "nsget_mach_execute_header",
+                "dyld_get_image_name",
+                "dyld_get_image_vmaddr_slide",
                 "mach_host_self",
             ]
         );
@@ -329,6 +336,13 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_jit_write_protect_supported_np",
                 "sysctlnametomib",
                 "pthread_equal",
+                "gethostname",
+                "confstr",
+                "clock_getres",
+                "pthread_is_threaded_np",
+                "nsget_mach_execute_header",
+                "dyld_get_image_name",
+                "dyld_get_image_vmaddr_slide",
                 "mach_host_self",
             ]
         );
@@ -381,6 +395,16 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
             ),
             ("sysctlnametomib", "sysctlnametomib"),
             ("pthread_equal", "pthread_equal"),
+            ("gethostname", "gethostname"),
+            ("confstr", "confstr"),
+            ("clock_getres", "clock_getres"),
+            ("pthread_is_threaded_np", "pthread_is_threaded_np"),
+            ("nsget_mach_execute_header", "_NSGetMachExecuteHeader"),
+            ("dyld_get_image_name", "_dyld_get_image_name"),
+            (
+                "dyld_get_image_vmaddr_slide",
+                "_dyld_get_image_vmaddr_slide",
+            ),
         ] {
             let probe = c
                 .system_probes

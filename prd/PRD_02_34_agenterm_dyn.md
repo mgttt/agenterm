@@ -60,7 +60,10 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`,
   `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
   `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`,
-  `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`
+  `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`,
+  `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
+  `_NSGetMachExecuteHeader`, `_dyld_get_image_name`, and
+  `_dyld_get_image_vmaddr_slide`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Unix `ioctl` calls its resolved symbol through a
@@ -68,11 +71,13 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **150 passed** (25 unit + 40 errors + 11 hosts + 26 language + 48
-  cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory is
-  **163** (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl +
-  32 macos_probes + 4 macos_resource + 24 cfg-gated macOS smoke; 0 doctests);
-  native CI remains the evidence gate for current source. Wave 4–6 live rows were `dlcall`ed on the earlier
-  Darwin CI host and compared to later native calls. Host-specific counts, not
+  cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory,
+  measured on this aarch64-apple-darwin host with Rust 1.97, is **173**
+  (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl + 39
+  macos_probes + 4 macos_resource + 27 cfg-gated macOS smoke; 0 doctests).
+  Wave 7 catalog rows are live `dlcall`s compared with later native calls.
+  Native CI remains the evidence gate for current source. Host-specific
+  counts, not
   a cross-platform estimate.
 
 ## Completed branch accounting
@@ -101,7 +106,10 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`,
 `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`,
 `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`,
-`pthread_jit_write_protect_supported_np`, `sysctlnametomib`, and `pthread_equal`.
+`pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`,
+`gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
+`_NSGetMachExecuteHeader`, `_dyld_get_image_name`, and
+`_dyld_get_image_vmaddr_slide`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.

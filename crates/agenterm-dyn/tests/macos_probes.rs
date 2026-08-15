@@ -813,3 +813,180 @@ fn dlcall_pthread_jit_write_protect_supported_np_matches_libc_boolean() {
     );
     assert_eq!(got, i64::from(direct));
 }
+
+#[test]
+fn dlcall_gethostname_writes_caller_buffer() {
+    let symbol = live_symbol("gethostname");
+    let mut buffer = [0_u8; 256];
+    let len = buffer.len();
+    let mut env = Dyn::new();
+    env.bind("buf", buffer.as_mut_ptr().cast())
+        .expect("bind hostname buffer");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" buf "u64" {len})"#),
+    )
+    .expect("gethostname dlcall");
+    assert_eq!(got, Value::Int(0));
+    let name = CStr::from_bytes_until_nul(&buffer)
+        .expect("gethostname must NUL-terminate on success")
+        .to_bytes();
+    assert!(!name.is_empty(), "hostname must be non-empty");
+
+    let mut direct = [0_u8; 256];
+    let direct_status = unsafe { libc::gethostname(direct.as_mut_ptr().cast(), direct.len()) };
+    assert_eq!(direct_status, 0, "direct gethostname must succeed");
+    let direct_name = CStr::from_bytes_until_nul(&direct)
+        .expect("direct gethostname must NUL-terminate on success")
+        .to_bytes();
+    assert_eq!(name, direct_name);
+}
+
+#[test]
+fn dlcall_confstr_writes_cs_path() {
+    let symbol = live_symbol("confstr");
+    let name = libc::_CS_PATH;
+    let mut buffer = [0_u8; 4096];
+    let len = buffer.len();
+    let mut env = Dyn::new();
+    env.bind("buf", buffer.as_mut_ptr().cast())
+        .expect("bind confstr buffer");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "u64" "i32" {name} "ptr" buf "u64" {len})"#),
+    )
+    .expect("confstr dlcall")
+    .as_int()
+    .expect("confstr size");
+    assert!(got > 1, "confstr(_CS_PATH) must write a non-empty path");
+
+    let mut direct = [0_u8; 4096];
+    let direct_len = unsafe { libc::confstr(name, direct.as_mut_ptr().cast(), direct.len()) };
+    assert_eq!(got, direct_len as i64);
+    assert_eq!(
+        CStr::from_bytes_until_nul(&buffer)
+            .expect("confstr must NUL-terminate successful output")
+            .to_bytes(),
+        CStr::from_bytes_until_nul(&direct)
+            .expect("direct confstr must NUL-terminate successful output")
+            .to_bytes()
+    );
+}
+
+#[test]
+fn dlcall_clock_getres_writes_monotonic_timespec() {
+    let symbol = live_symbol("clock_getres");
+    let clock = libc::CLOCK_MONOTONIC;
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let mut env = Dyn::new();
+    env.bind("ts", (&mut ts as *mut libc::timespec).cast())
+        .expect("bind clock_getres timespec");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {clock} "ptr" ts)"#),
+    )
+    .expect("clock_getres dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!(
+        (0..1_000_000_000).contains(&ts.tv_nsec),
+        "timespec nsec must be in 0..1e9"
+    );
+
+    let mut direct = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let direct_status = unsafe { libc::clock_getres(clock, &mut direct) };
+    assert_eq!(direct_status, 0, "direct clock_getres must succeed");
+    assert_eq!(ts.tv_sec, direct.tv_sec);
+    assert_eq!(ts.tv_nsec, direct.tv_nsec);
+}
+
+#[test]
+fn dlcall_pthread_is_threaded_np_matches_direct_c() {
+    unsafe extern "C" {
+        fn pthread_is_threaded_np() -> libc::c_int;
+    }
+
+    let symbol = live_symbol("pthread_is_threaded_np");
+    let mut env = Dyn::new();
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+        .expect("pthread_is_threaded_np dlcall")
+        .as_int()
+        .expect("pthread_is_threaded_np integer");
+    assert!(
+        matches!(got, 0 | 1),
+        "pthread_is_threaded_np must be 0 or 1"
+    );
+    let direct = unsafe { pthread_is_threaded_np() };
+    assert_eq!(got, i64::from(direct));
+}
+
+#[test]
+fn dlcall_nsget_mach_execute_header_matches_direct_c() {
+    unsafe extern "C" {
+        fn _NSGetMachExecuteHeader() -> *mut c_void;
+    }
+
+    let symbol = live_symbol("nsget_mach_execute_header");
+    let mut env = Dyn::new();
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+        .expect("_NSGetMachExecuteHeader dlcall")
+        .as_ptr()
+        .expect("_NSGetMachExecuteHeader pointer") as *mut c_void;
+    assert!(
+        !got.is_null(),
+        "_NSGetMachExecuteHeader must return a non-null header"
+    );
+    let direct = unsafe { _NSGetMachExecuteHeader() };
+    assert_eq!(got, direct);
+}
+
+#[test]
+fn dlcall_dyld_get_image_name_matches_image_zero() {
+    unsafe extern "C" {
+        fn _dyld_get_image_name(image_index: u32) -> *const libc::c_char;
+    }
+
+    let symbol = live_symbol("dyld_get_image_name");
+    let mut env = Dyn::new();
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr" "u32" 0)"#),
+    )
+    .expect("_dyld_get_image_name dlcall")
+    .as_ptr()
+    .expect("_dyld_get_image_name pointer") as *const libc::c_char;
+    assert!(
+        !got.is_null(),
+        "_dyld_get_image_name(0) must return a C string"
+    );
+    let direct = unsafe { _dyld_get_image_name(0) };
+    assert!(!direct.is_null(), "direct image-zero name must be non-null");
+    assert_eq!(
+        unsafe { CStr::from_ptr(got) }.to_bytes(),
+        unsafe { CStr::from_ptr(direct) }.to_bytes()
+    );
+}
+
+#[test]
+fn dlcall_dyld_get_image_vmaddr_slide_matches_image_zero() {
+    unsafe extern "C" {
+        fn _dyld_get_image_vmaddr_slide(image_index: u32) -> isize;
+    }
+
+    let symbol = live_symbol("dyld_get_image_vmaddr_slide");
+    let mut env = Dyn::new();
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr" "u32" 0)"#),
+    )
+    .expect("_dyld_get_image_vmaddr_slide dlcall")
+    .as_ptr()
+    .expect("_dyld_get_image_vmaddr_slide pointer") as *mut c_void;
+    let direct = unsafe { _dyld_get_image_vmaddr_slide(0) } as *mut c_void;
+    assert_eq!(got, direct);
+}

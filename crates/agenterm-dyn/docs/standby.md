@@ -26,7 +26,10 @@ This note is the crate-side pointer so the next knife does not start from chat.
    extra probes remain explicit placeholders. Unix `ioctl` (Linux and macOS) remains variadic
    script data, not a claimed fixed-trampoline success. `umask` restores its
    side effect. Linux caller-owned-pointer coverage includes `getcwd`, `uname`,
-   `times`, `clock_gettime`, `getrusage`, and `getrlimit`.
+   `times`, `clock_gettime`, `getrusage`, and `getrlimit`. Wave 7 Darwin
+   host/loader facts (`gethostname`, `confstr`, `clock_getres`,
+   `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
+   `_dyld_get_image_vmaddr_slide`) are catalogued; still no JIT, C, or libffi.
 4. **examples** — each shipped live probe has its paired S-expr document and
    README link.
 
