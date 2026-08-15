@@ -1,4 +1,7 @@
-//! Unix placeholder: accessibility tree is not wired on macOS yet (AX pending).
+//! Unix placeholder for hosts without a selected a11y adapter.
+//!
+//! Linux uses AT-SPI2 and macOS uses AX under `cfg` selection in
+//! `selected.rs`. This stub remains only for other Unix targets.
 
 use crate::CapabilityStatus;
 use crate::contract::accessibility_tree::{
