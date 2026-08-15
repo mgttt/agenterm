@@ -626,9 +626,13 @@ track remains planned, but every declared dependency must still pass.
   - [ ] execution SSOT: [`plan/plan-v0.1.18.md`](../plan/plan-v0.1.18.md);
     Script Runtime authority:
     [`PRD_02_10_rhai_scripting.md`](PRD_02_10_rhai_scripting.md)
-  - [ ] **Chassis L1 freeze (planned):** thin kernel vs replaceable Host ABI vs
-    app packs, so six-cell Candidate is not the default tax on every resource
-    or app change. Execution tree:
+  - [~] **Chassis L1 freeze (partial):** bounded L2 VM, versioned Host ABI,
+    L2 catalog/`active-tab`, fail-closed workbench image validation, and a
+    standalone loader that validates a composed image before native
+    presentation are present. The `agenterm` workbench PE is not replaced;
+    PTY/IPC/L2 Host ABI dispatch remains on the existing path. Portable QJS
+    `.agp` remains planned, so six-cell Candidate is not yet removed as the
+    default tax on every resource or app change. Execution tree:
     [`plan/refactor-chassis-l1-l2-l3.md`](../plan/refactor-chassis-l1-l2-l3.md)
   - [ ] v0.1.18 non-goals: remote channel/signature/apply, real CC authority
     migration, WASM product wiring, APE/polyglot loader, and npm dependencies

@@ -53,14 +53,22 @@ six-cell) and rare native L2 plugins (cu).
 - Rename: Shell-L* → Chassis-L*.
 - Independent `crates/agenterm-chassis`: compose/check/inspect, frozen L2
   host ABI, example L3 app. No workbench dependency.
+- W2b: bounded L2 bytecode VM with validation and fail-closed execution.
+- Versioned Host ABI plus the L2 catalog classify Fleet/tab/clipboard/Control
+  Center/computer-use at L2; `active-tab` is the first real replaceable L2
+  artifact.
+- Both workbench adapters fail closed on an invalid product image before
+  presentation. The standalone `agenterm-chassis-loader` validates a composed
+  image and then hands presentation to the native host.
 
-The live `agenterm` PE is not yet replaced by these loaders.
+This is a partial substrate. The live `agenterm` workbench PE is not yet
+replaced by these loaders, and PTY/IPC/L2 Host ABI dispatch has not migrated.
 
 ## Next (later waves)
 
-- **W2b** L2 bytecode VM (sibling agents implement modules).
-- Host ABI name table, cu as L2, first real L2 payload through the composer,
-  then v0.1.18 `.agp` as L3.
+- Replace the live workbench PE path and migrate PTY/IPC/L2 Host ABI dispatch.
+- Connect the replaceable L2 artifacts to production dispatch, then adopt the
+  planned v0.1.18 portable QJS `.agp` as L3.
 
 ## Non-goals
 
