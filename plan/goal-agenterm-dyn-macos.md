@@ -1,8 +1,7 @@
 # Goal: first-class `agenterm-dyn` on macOS
 
-Status: **complete snapshot — Wave 9 shipped with Darwin-native evidence**
-Execution: completed through Wave 9; this snapshot does not authorize another
-wave.
+Status: **active** — user re-authorized continuing past Wave 9
+Execution: Wave 10 shipped (catalog 85); next leak-free candidates below.
 Paths: repository-relative or `~/...` only.
 
 ## Outcome
@@ -36,7 +35,8 @@ host is not a substitute.
   `pthread_equal`, `gethostname`, `confstr`, `clock_getres`,
   `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`,
   `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`, `dladdr`,
-  `gethostuuid`, `_dyld_get_image_header`.
+  `gethostuuid`, `_dyld_get_image_header`, `arc4random_uniform`,
+  `getdomainname`, `statvfs`, `gettimeofday`, `getgroups`, `realpath`.
 - Wave 9 Darwin evidence: GitHub Actions `CI / agenterm` success run
   [31873334933](https://github.com/mgttt/agenterm/actions/runs/31873334933)
   at SHA `36e80aa9`, which contains Wave 9 commit `49d8c9af` as an ancestor.
@@ -92,6 +92,21 @@ compilation is not live evidence. Keep `mach_host_self` last and Placeholder.
 
 Do not live-call Mach send rights. Do not pick `os_proc_available_memory` —
 the macOS SDK marks that symbol unavailable.
+
+## Wave 10 — shipped
+
+Catalog is 85 rows. `gettimeofday`, `getgroups`, and `realpath` are Darwin
+Live / Linux+Windows Placeholder. `gettimeofday` writes a caller-owned
+`timeval` and uses a null timezone pointer; `getgroups` fills a caller-owned
+`gid_t` array up to the bound capacity; `realpath` writes a caller-owned
+`PATH_MAX` buffer. None allocates a descriptor or Mach right.
+`mach_host_self` stays last and Placeholder. Measured on this
+aarch64-apple-darwin host: **185 passed** (25 unit + 3 catalog/docs + 40
+errors + 11 hosts + 26 language + 1 macos_ioctl + 48 macos_probes + 4
+macos_resource + 27 smoke; 0 doctests).
+
+Next leak-free candidates: `ttyname_r`, `statfs`, `arc4random_buf`. Do not
+pick `os_proc_available_memory`. Do not live-call `mach_host_self`.
 
 ## Non-goals
 

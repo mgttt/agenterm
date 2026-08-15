@@ -61,6 +61,9 @@ const DARWIN_ONLY_LIVE_EXAMPLES: &[(&str, &str)] = &[
     ("arc4random_uniform", "arc4random-uniform.md"),
     ("getdomainname", "getdomainname.md"),
     ("statvfs", "statvfs.md"),
+    ("gettimeofday", "gettimeofday.md"),
+    ("getgroups", "getgroups.md"),
+    ("realpath", "realpath.md"),
 ];
 
 #[test]

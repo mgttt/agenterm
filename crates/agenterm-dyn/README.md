@@ -128,7 +128,7 @@ multiplicative nested-loop work and body-side effects on the rejected form.
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
 | linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | fixed-ABI live rows include `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `access`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; variadic `open`/`fcntl` and Darwin-only rows are placeholders |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Unix's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`, `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`, `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`, `_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, and `statvfs`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Unix's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_self`, `pthread_cpu_number_np`, `malloc_good_size`, `_NSGetProgname`, `proc_libversion`, `pthread_jit_write_protect_supported_np`, `sysctlnametomib`, `pthread_equal`, `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`, `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`, `_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, `statvfs`, `gettimeofday`, `getgroups`, and `realpath`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -225,6 +225,9 @@ without wiring dyn into cu, platform, or the ABI:
 - [bounded random word via `arc4random_uniform`](examples/arc4random-uniform.md) (macOS)
 - [domain name via `getdomainname`](examples/getdomainname.md) (macOS)
 - [filesystem facts via `statvfs`](examples/statvfs.md) (macOS)
+- [wall-clock time via `gettimeofday`](examples/gettimeofday.md) (macOS)
+- [supplementary groups via `getgroups`](examples/getgroups.md) (macOS)
+- [resolved path via `realpath`](examples/realpath.md) (macOS)
 - [`mach_host_self` resource-safety boundary](examples/mach-host-self.md) (macOS; intentionally not live)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
@@ -304,8 +307,8 @@ direct-libc baselines. Darwin-specific smokes cover `sysctlbyname`,
 `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
 `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
 `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`,
-`_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, and
-`statvfs`;
+`_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`,
+`statvfs`, `gettimeofday`, `getgroups`, and `realpath`;
 the caller-owned timebase, login, thread-id, thread-name, `proc_bsdinfo`, and
 `rusage_info_v4` buffers are compared with direct C baselines. Wave 8
 loader/uuid facts (`dladdr`, `gethostuuid`, `_dyld_get_image_header`) are live

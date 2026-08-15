@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 82],
+    pub system_probes: [SystemProbe; 85],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 82] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 85] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -391,6 +391,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 82] = [
     placeholder("arc4random_uniform"),
     placeholder("getdomainname"),
     placeholder("statvfs"),
+    placeholder("gettimeofday"),
+    placeholder("getgroups"),
+    placeholder("realpath"),
     placeholder("mach_host_self"),
 ];
 
@@ -411,7 +414,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 82] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 85] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -499,13 +502,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 82] = [
     macos_live("arc4random_uniform", "arc4random_uniform"),
     macos_live("getdomainname", "getdomainname"),
     macos_live("statvfs", "statvfs"),
+    macos_live("gettimeofday", "gettimeofday"),
+    macos_live("getgroups", "getgroups"),
+    macos_live("realpath", "realpath"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 82] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 85] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -716,6 +722,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 82] = [
     placeholder("arc4random_uniform"),
     placeholder("getdomainname"),
     placeholder("statvfs"),
+    placeholder("gettimeofday"),
+    placeholder("getgroups"),
+    placeholder("realpath"),
     placeholder("mach_host_self"),
 ];
 

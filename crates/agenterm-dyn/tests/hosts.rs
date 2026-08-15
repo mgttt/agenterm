@@ -210,6 +210,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "arc4random_uniform",
                 "getdomainname",
                 "statvfs",
+                "gettimeofday",
+                "getgroups",
+                "realpath",
                 "mach_host_self",
             ]
         );
@@ -355,6 +358,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "arc4random_uniform",
                 "getdomainname",
                 "statvfs",
+                "gettimeofday",
+                "getgroups",
+                "realpath",
                 "mach_host_self",
             ]
         );
@@ -423,6 +429,9 @@ fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
             ("arc4random_uniform", "arc4random_uniform"),
             ("getdomainname", "getdomainname"),
             ("statvfs", "statvfs"),
+            ("gettimeofday", "gettimeofday"),
+            ("getgroups", "getgroups"),
+            ("realpath", "realpath"),
         ] {
             let probe = c
                 .system_probes

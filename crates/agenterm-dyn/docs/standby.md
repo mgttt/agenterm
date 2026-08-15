@@ -1,8 +1,8 @@
 # Active handoff — Darwin probe waves
 
 Updated 2026-08-15. The first-cut and hardening baselines are complete; the
-authorized Darwin probe goal remains active. Wave 9 is implemented in source
-and awaits matching-host native evidence.
+authorized Darwin probe goal remains active. Wave 10 is catalogued; still no
+JIT, C, or libffi.
 
 Product remaining-work lives in [`prd/PRD_02_34_agenterm_dyn.md`](../../../prd/PRD_02_34_agenterm_dyn.md).
 This note is the crate-side pointer so the next knife does not start from chat.
@@ -33,17 +33,19 @@ This note is the crate-side pointer so the next knife does not start from chat.
    Wave 8 Darwin loader/uuid facts (`dladdr`, `gethostuuid`,
    `_dyld_get_image_header`) are catalogued. Wave 9 adds bounded random,
    domain-name, and filesystem facts (`arc4random_uniform`, `getdomainname`,
-   `statvfs`) without allocating a descriptor or Mach right. `mach_host_self`
-   stays Placeholder.
+   `statvfs`) without allocating a descriptor or Mach right. Wave 10
+   catalogued wall-clock, supplementary-group, and path-resolution facts
+   (`gettimeofday`, `getgroups`, `realpath`); still no JIT, C, or libffi.
+   `mach_host_self` stays Placeholder.
 4. **examples** — each shipped live probe has its paired S-expr document and
    README link.
 
 Last Linux Wave 8 evidence, not a portable estimate: Rust 1.97
 `cargo test --locked -p agenterm-dyn` passes **150** tests (25 unit, 40 errors,
 11 hosts, 26 language, 48 Linux smoke; 0 doctests). The portable
-`catalog_docs` gate adds 3 tests and passes on Windows. Wave 9 adds 3
-Darwin-only probe tests; 182 is the expected Darwin inventory, but the last
-matching-host receipt remains Wave 8's 176 until the native rerun completes.
+`catalog_docs` gate adds 3 tests and passes on Windows. Wave 9 Darwin-native
+receipt is **182**. Wave 10 catalogued `gettimeofday`, `getgroups`, and
+`realpath`; Darwin inventory measurement is pending.
 
 ## Later product branches — require explicit authorization
 

@@ -1,7 +1,7 @@
 # PRD 02.34 — agenterm-dyn（极小 / 动态 / 底层）
 
-Status: active product node — Wave 9 is host-evidenced and shipped; no later
-Darwin probe wave is authorized.
+Status: active product node — user re-authorized continuing past Wave 9;
+Wave 10 is shipped (catalog 85) with Darwin-native evidence.
 Owner: 政委定方向；主会话按独占文件域推进。
 
 Parallel crate `crates/agenterm-dyn`, not a fourth engine, not libagenterm, not cu.
@@ -65,8 +65,8 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
   `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
   `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`,
-  `_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, and
-  `statvfs`
+  `_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`,
+  `statvfs`, `gettimeofday`, `getgroups`, and `realpath`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Unix `ioctl` calls its resolved symbol through a
@@ -91,9 +91,12 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `dlcall_statvfs_matches_stable_root_filesystem_fields` each reported `ok`.
   Wave 9 is therefore host-evidenced and shipped; no Windows result is used as
   a substitute for that evidence.
-  Native CI remains the evidence gate for current source. Host-specific
-  counts, not
-  a cross-platform estimate.
+  Wave 10 adds `gettimeofday`, `getgroups`, and `realpath` to the Darwin live
+  catalog (85 rows). Measured on this aarch64-apple-darwin host with Rust 1.97:
+  **185 passed** (25 unit + 3 catalog/docs + 40 errors + 11 hosts + 26 language
+  + 1 macos_ioctl + 48 macos_probes + 4 macos_resource + 27 cfg-gated macOS
+  smoke; 0 doctests). Native CI remains the evidence gate for current source.
+  Host-specific counts, not a cross-platform estimate.
 
 ## Completed branch accounting
 
@@ -125,8 +128,8 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `gethostname`, `confstr`, `clock_getres`, `pthread_is_threaded_np`,
 `_NSGetMachExecuteHeader`, `_dyld_get_image_name`,
 `_dyld_get_image_vmaddr_slide`, `dladdr`, `gethostuuid`,
-`_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`, and
-`statvfs`.
+`_dyld_get_image_header`, `arc4random_uniform`, `getdomainname`,
+`statvfs`, `gettimeofday`, `getgroups`, and `realpath`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.

@@ -1163,3 +1163,113 @@ fn dlcall_statvfs_matches_stable_root_filesystem_fields() {
     assert_eq!(info.f_frsize, direct.f_frsize);
     assert_eq!(info.f_namemax, direct.f_namemax);
 }
+
+#[test]
+fn dlcall_gettimeofday_writes_caller_owned_timeval() {
+    let symbol = live_symbol("gettimeofday");
+    let mut tv = libc::timeval {
+        tv_sec: 0,
+        tv_usec: 0,
+    };
+    let mut env = Dyn::new();
+    env.bind("tv", (&mut tv as *mut libc::timeval).cast())
+        .expect("bind gettimeofday timeval");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" tv "ptr" 0)"#),
+    )
+    .expect("gettimeofday dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!(tv.tv_sec > 0, "tv_sec must be positive");
+
+    let mut later = libc::timeval {
+        tv_sec: 0,
+        tv_usec: 0,
+    };
+    let later_status = unsafe { libc::gettimeofday(&mut later, std::ptr::null_mut()) };
+    assert_eq!(later_status, 0, "direct gettimeofday must succeed");
+    assert!(
+        later.tv_sec > tv.tv_sec || (later.tv_sec == tv.tv_sec && later.tv_usec >= tv.tv_usec),
+        "later libc gettimeofday must not precede the dlcall timeval"
+    );
+}
+
+#[test]
+fn dlcall_getgroups_matches_later_native_set() {
+    let symbol = live_symbol("getgroups");
+    // libc 0.2 does not bind Darwin `NGROUPS_MAX` (syslimits.h: 16).
+    let ngroups_max = {
+        let n = unsafe { libc::sysconf(libc::_SC_NGROUPS_MAX) };
+        assert!(n > 0, "NGROUPS_MAX must be positive");
+        libc::c_int::try_from(n).expect("NGROUPS_MAX fits c_int")
+    };
+    let mut gids = vec![0 as libc::gid_t; ngroups_max as usize];
+    let mut env = Dyn::new();
+    env.bind("gids", gids.as_mut_ptr().cast())
+        .expect("bind getgroups output");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {ngroups_max} "ptr" gids)"#),
+    )
+    .expect("getgroups dlcall")
+    .as_int()
+    .expect("getgroups integer count");
+    assert!(got >= 0, "getgroups must return a non-negative count");
+    let count = usize::try_from(got).expect("getgroups count fits usize");
+    assert!(count <= gids.len(), "getgroups count must fit the buffer");
+
+    let mut later = vec![0 as libc::gid_t; ngroups_max as usize];
+    let later_count = unsafe { libc::getgroups(ngroups_max, later.as_mut_ptr()) };
+    assert!(later_count >= 0, "direct getgroups must succeed");
+    assert_eq!(
+        i64::from(later_count),
+        got,
+        "dlcall and later getgroups counts must agree"
+    );
+    let mut got_set = gids[..count].to_vec();
+    let mut later_set = later[..count].to_vec();
+    got_set.sort_unstable();
+    later_set.sort_unstable();
+    assert_eq!(got_set, later_set);
+}
+
+#[test]
+fn dlcall_realpath_resolves_root() {
+    let symbol = live_symbol("realpath");
+    let path = CString::new("/").expect("root path literal has no NUL");
+    let mut buf = vec![0_u8; libc::PATH_MAX as usize];
+    let bound_buf = buf.as_mut_ptr();
+    let mut env = Dyn::new();
+    env.bind("path", path.as_ptr().cast_mut().cast::<c_void>())
+        .expect("bind realpath input");
+    env.bind("buf", bound_buf.cast())
+        .expect("bind realpath output");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr" "ptr" path "ptr" buf)"#),
+    )
+    .expect("realpath dlcall")
+    .as_ptr()
+    .expect("realpath pointer");
+    assert_eq!(
+        got, bound_buf as usize,
+        "realpath must return the bound buffer"
+    );
+    let resolved =
+        CStr::from_bytes_until_nul(&buf).expect("realpath must NUL-terminate successful output");
+    assert_eq!(resolved.to_bytes(), b"/");
+
+    let mut later = vec![0_u8; libc::PATH_MAX as usize];
+    let later_ptr = unsafe { libc::realpath(path.as_ptr(), later.as_mut_ptr().cast()) };
+    assert_eq!(
+        later_ptr.cast::<u8>(),
+        later.as_mut_ptr(),
+        "direct realpath must return its caller buffer"
+    );
+    assert_eq!(
+        CStr::from_bytes_until_nul(&later)
+            .expect("direct realpath must NUL-terminate successful output")
+            .to_bytes(),
+        b"/"
+    );
+}
