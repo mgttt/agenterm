@@ -14,7 +14,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Target family
 
-- [~] `current`, `ssh`, `rdp` and `vnc` are tiers of one family sharing one
+Branch status (cut 3.45 — crystal-clear stub vs proven):
+
+| Target | Status | Notes |
+|--------|--------|-------|
+| `current` | **[x]** | Local in-process; Linux/Windows evidence held |
+| `ssh` | **[x]** | OpenSSH exec of remote `--target current` |
+| `vnc` | **[x]** | RFB + local `--target current` worker |
+| `rdp` | **[ ]** | Empty — `TargetRef::parse("rdp")` is still `None`; no endpoint, transport, or executor branch |
+
+- [x] `current`, `ssh`, and `vnc` are tiers of one family sharing one
   command set. `current` is the **local degenerate tier** — transport is
   in-process — not a temporary prototype to be replaced later. `ssh` first cut
   is OpenSSH `ssh` exec of a remote `agenterm-cu --target current` worker
@@ -22,7 +31,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   first cut is RFB handshake to `--vnc <host[:port]>` (security type None /
   `x11vnc -nopw`) then a local `agenterm-cu --target current` worker against
   the shared session (`DISPLAY` / AT-SPI env; same verbs; no new verb).
-  `rdp` remains planned.
+- [ ] `rdp` remains empty (parse still `None`). Do not invent an RDP verb or
+  endpoint in this module until a dedicated cut owns it.
 - [~] `current` ships first. Doing so is the cheapest way to pin the interface,
   because adding a remote transport afterwards changes transport only, not the
   commands above it. `ssh` get-selection evidence reuses the #50 con-publish
@@ -87,25 +97,36 @@ injection are separate platform mechanisms and remain **degraded fallbacks**
 only — never silent replacements when the a11y tree is unavailable.
 
 ```text
-targets / transports (30)
+targets / transports (30)                    legend: [x] shipped  [~] partial  [ ] planned
 ├── target family
-│   ├── current   (local, in-process — ships first)
-│   ├── ssh
-│   ├── rdp
-│   └── vnc
+│   ├── current  [x]  local in-process (Linux/Windows live evidence held)
+│   ├── ssh      [x]  OpenSSH exec → remote --target current
+│   ├── vnc      [x]  RFB handshake → local --target current worker
+│   └── rdp      [ ]  EMPTY — TargetRef::parse("rdp") is None; no transport
 └── platform a11y backends (agenterm-platform)
-    ├── Windows: native API + UIA
-    ├── macOS: AX (NSAccessibility)
-    └── Linux: AT-SPI2
+    ├── Linux AT-SPI2                 [x] live evidence (cu-linux-smoke + named journeys)
+    ├── Windows UIA                   [~] existing tree evidence (cu-windows-smoke); not this cut
+    ├── macOS AX current tree         [~] PLACEHOLDER this cut (code present; live NOT claimed)
+    ├── macOS AX actuation            [ ] click / focus / value — not started
+    └── RDP remote control            [ ] not started
 ```
+
+**Cut 3.45 boundary:** only the macOS AX **observe** path for
+`agenterm-cu --target current tree` is stubbed in `agenterm-platform`
+(`adapters/macos/accessibility_tree.rs`, backend string `"ax"`). Typed
+failures: `a11y_permission_denied`, `unsupported`, `a11y_tree_timeout`,
+bound exhaustion (`a11y_node_limit` / `a11y_depth_limit` / string limits).
+No screenshot, no `--coords`, no CGEvent fallback, no silent AT-SPI/UIA
+reuse. A unit mock is **not** a live gate. A later **macOS agent** owns
+live fixture evidence.
 
 Canonical host mapping (approved product vocabulary):
 
 | Host | Native accessibility stack | Structured `tree` source | Structured actuation |
 |------|---------------------------|--------------------------|----------------------|
 | Windows | native API + **UIA** | `IUIAutomation` control tree | UIA patterns / legacy accessible (`Invoke`, `LegacyIAccessible`) |
-| macOS | **AX** (`NSAccessibility`) | accessibility element tree | `AXPress`, `AXRaise`, editable value |
-| Linux | **AT-SPI2** (`at-spi2-core` / `org.a11y.atspi.*`) | AT-SPI accessible hierarchy | AT-SPI `Action` / `Component` / `EditableText` |
+| macOS | **AX** (`NSAccessibility`) | accessibility element tree — **PLACEHOLDER walk this cut** | `AXPress` / `AXRaise` / editable value — **not started** |
+| Linux | **AT-SPI2** (`at-spi2-core` / `org.a11y.atspi.*`) | AT-SPI accessible hierarchy — **live** | AT-SPI `Action` / `Component` / `EditableText` — **live** |
 
 ### Requirements by stack
 
@@ -409,8 +430,19 @@ Canonical host mapping (approved product vocabulary):
 
 **macOS — AX (NSAccessibility)**
 
-- [ ] AX-backed `tree` and structured `click` / `focus` on `current` through
-  `agenterm-platform`. Not claimed in the Linux-first slice.
+- [~] **PLACEHOLDER (cut 3.45):** AX-backed `tree` on `current` through
+  `agenterm-platform` (`adapters/macos/accessibility_tree.rs`). The adapter
+  resolves a `CGWindowID` handle to an application AX element, walks
+  `AXChildren` with node/depth/string/time bounds, and returns
+  `backend: "ax"` with path ids, role, name, states, bounds, text, and
+  declared actions. Missing Accessibility permission fails typed
+  (`a11y_permission_denied`); timeout and bound exhaustion fail typed;
+  unsupported AX availability is typed `Unsupported`. **Live black-box
+  evidence is NOT claimed** on this cut (Linux builder has no Mac window).
+  A unit mock does not count. No screenshot / `--coords` / CGEvent fallback
+  and no silent AT-SPI or UIA reuse.
+- [ ] AX structured `click` / `focus` / value actuation on `current`
+  (`AXPress` / `AXRaise` / editable value). Explicitly **not** this cut.
 
 ### Degraded fallbacks (never silent)
 
@@ -498,6 +530,31 @@ Canonical host mapping (approved product vocabulary):
   staged host/DLL load and cleanup, exact window identity, public UIA tree,
   name-addressed Value/GetText/Invoke journeys and bounded fixture cleanup; it
   does not prove Candidate qualification or release.
+- [~] **macOS AX `current tree` PLACEHOLDER (cut 3.45) — live evidence NOT
+  claimed.** Code path exists; a later macOS agent must live-test. Handoff
+  recipe (also in `scripts/cu-macos-smoke.sh`, not-yet-run on Darwin):
+
+  1. On a real macOS host, grant Accessibility to the process that will run
+     `agenterm-cu` (`AXIsProcessTrusted()` must be true).
+  2. Launch a cut-owned native fixture with a unique title and stable PID.
+     Hierarchy: one window, one labeled editable text seeded with
+     **`345AXTREE`**, one button named **`Fixture Press`**.
+  3. Resolve `HANDLE` via existing window enumeration
+     (`agenterm-cu --target current --grant observe windows`).
+  4. Canonical argv (observe only; no new verb):
+
+     ```sh
+     agenterm-cu --target current --grant observe tree --window "$HANDLE"
+     ```
+
+  5. Required reply fields: `ok: true`, `target: "current"`,
+     `command: "tree"`, data `backend: "ax"`, scoped to `HANDLE`, with
+     exactly one fixture text control whose text is `345AXTREE` and one
+     `Fixture Press` button under the fixture window.
+  6. Permission denial must be typed (`a11y_permission_denied`); timeout /
+     bound exhaustion remain typed. Never screenshot, OCR, CGEvent, or
+     AT-SPI/UIA reuse. Worker JSON from a Linux box does not count.
+
 - [ ] a cross-tier conformance test proves the same abstract command produces
   equivalent observable results on every tier that declares support for it.
 - [ ] capability declaration is tested against reality: a target that declares

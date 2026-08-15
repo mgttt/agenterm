@@ -458,7 +458,14 @@ pub(crate) mod accessibility_tree;
 #[path = "adapters/windows/accessibility_tree.rs"]
 pub(crate) mod accessibility_tree;
 
-#[cfg(all(feature = "a11y-tree", not(any(windows, target_os = "linux"))))]
+#[cfg(all(feature = "a11y-tree", target_os = "macos"))]
+#[path = "adapters/macos/accessibility_tree.rs"]
+pub(crate) mod accessibility_tree;
+
+#[cfg(all(
+    feature = "a11y-tree",
+    not(any(windows, target_os = "linux", target_os = "macos"))
+))]
 #[path = "adapters/unix/accessibility_tree.rs"]
 pub(crate) mod accessibility_tree;
 

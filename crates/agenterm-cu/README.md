@@ -25,14 +25,25 @@ follows the Spectacle catalog
 
 ## Native accessibility mapping (按图索骥)
 
-| Concern | Windows | Linux (`current` slice) | macOS (planned) |
-|---------|---------|------------------------|-----------------|
+| Concern | Windows | Linux (`current` slice) | macOS |
+|---------|---------|------------------------|-------|
 | Window list | Win32 `EnumWindows` | X11 `_NET_CLIENT_LIST` | `AXUIElement` application windows |
-| Control tree | **UIA** (`IUIAutomation`) | **AT-SPI2** (`org.a11y.atspi.*` on D-Bus) | **AX** (`NSAccessibility`) |
-| Node identity | automation id + runtime id + bounds | path id (`/0/2/5`) + role + name + bounds | AX path + role + title + bounds |
-| Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action` (`click`/`press`, else default `DoAction(0)`); no Action → Component `GetExtents` + `GenerateMouseEvent`; focus is `focus` / `Component::grab_focus` | `AXPress` / `AXRaise` |
-| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (`SetTextContents` / `InsertText`) for `--name`; `Text` + toolkit set-value when EditableText is absent (Chrome AX, WebKitGTK eval helper); `input-inject` only without `--name` | AX value + events |
+| Control tree | **UIA** (`IUIAutomation`) | **AT-SPI2** (`org.a11y.atspi.*` on D-Bus) | **AX** (`NSAccessibility`) — `current tree` **PLACEHOLDER** (cut 3.45; live evidence not claimed) |
+| Node identity | automation id + runtime id + bounds | path id (`/0/2/5`) + role + name + bounds | child-index path + role + title + bounds (`backend:"ax"`) |
+| Node click/focus | `InvokePattern` / `LegacyIAccessible` | AT-SPI `Action` (`click`/`press`, else default `DoAction(0)`); no Action → Component `GetExtents` + `GenerateMouseEvent`; focus is `focus` / `Component::grab_focus` | AX actuation **not started** (`AXPress` / `AXRaise` planned) |
+| Text entry | `ValuePattern` / `SendInput` | AT-SPI `EditableText` (`SetTextContents` / `InsertText`) for `--name`; `Text` + toolkit set-value when EditableText is absent (Chrome AX, WebKitGTK eval helper); `input-inject` only without `--name` | AX value write **not started** |
 | Screenshot | GDI native capture | typed `unsupported` (no OCR substitute) | typed `unsupported` (planned) |
+
+macOS `tree` uses **AX only** (`agenterm-platform` macOS adapter). Missing
+Accessibility permission fails typed (`a11y_permission_denied`); timeout and
+bound exhaustion fail typed. Never screenshot, `--coords`, CGEvent, or silent
+AT-SPI/UIA reuse. Live fixture gate is `scripts/cu-macos-smoke.sh` (Darwin
+only; not claimed from Linux). Canonical observe argv:
+
+```bash
+agenterm-cu --target current --grant observe tree --window "$HANDLE"
+# fixture seed text 345AXTREE + button "Fixture Press"; reply backend must be "ax"
+```
 
 Linux `tree` and structured `click` / `focus` use **AT-SPI2 only**. If the
 accessibility bus is unavailable (no session bus, headless without a11y), commands

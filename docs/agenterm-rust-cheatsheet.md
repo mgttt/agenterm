@@ -1873,6 +1873,22 @@ Proven on the `agenterm-cu host` / `AgentermCu.app` host (`scripts/install-cu-ho
 - No background TCC poll. Humans discover trust when they open the menu or
   press a hotkey.
 
+### macOS AX `current tree` (PLACEHOLDER cut 3.45)
+
+- Adapter: `crates/agenterm-platform/src/adapters/macos/accessibility_tree.rs`,
+  selected only under `cfg(target_os = "macos")` + feature `a11y-tree`.
+  Backend string is `"ax"`. Product command stays
+  `agenterm-cu --target current --grant observe tree --window HANDLE`.
+- Permission: `AXIsProcessTrusted() == false` or `AXErrorAPIDisabled`
+  → typed `a11y_permission_denied`. Wall-clock snapshot budget and
+  node/depth/string limits fail typed (`a11y_tree_timeout`,
+  `a11y_node_limit`, …). Never fall back to screenshot, coordinates, or
+  CGEvent while reporting structured success.
+- Actuation (click/focus/value) is explicitly unsupported in this cut.
+- Live evidence is **not** claimed from a Linux builder. Darwin recipe:
+  `scripts/cu-macos-smoke.sh` with fixture seed `345AXTREE` and button
+  `Fixture Press`. A unit mock is not a live gate.
+
 ### Compare when debugging
 
 ```bash
