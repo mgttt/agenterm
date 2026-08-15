@@ -102,6 +102,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [current PID](examples/getpid.md)
 - [parent process ID via `getppid`](examples/getppid.md)
 - [current process group via `getpgrp`](examples/getpgrp.md)
+- [current session via `getsid(0)`](examples/getsid-current.md)
+- [current process group via `getpgid(0)`](examples/getpgid-current.md)
 - [current user ID via `getuid`](examples/getuid.md)
 - [effective user ID via `geteuid`](examples/geteuid.md)
 - [effective group ID via `getegid`](examples/getegid.md)
