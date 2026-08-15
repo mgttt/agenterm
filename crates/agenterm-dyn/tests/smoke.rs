@@ -877,7 +877,15 @@ mod linux {
         let mut env = Dyn::new();
         let script = format!(r#"(dlcall "{lib}" "{sym}" "ptr" "ptr" 0)"#);
         match env.eval(&script) {
-            Ok(Value::Ptr(_)) | Ok(Value::Nil) => {}
+            Ok(Value::Ptr(display)) if display != 0 => {
+                let close = env
+                    .eval(&format!(
+                        r#"(dlcall "{lib}" "XCloseDisplay" "i32" "ptr" {display})"#
+                    ))
+                    .expect("XCloseDisplay dlcall");
+                assert_eq!(close, Value::Int(0), "XCloseDisplay should succeed");
+            }
+            Ok(Value::Ptr(0)) | Ok(Value::Nil) => {}
             Err(DynError::Library(msg)) => {
                 assert!(
                     msg.contains(lib),
@@ -911,6 +919,31 @@ mod macos {
         ws_col: u16,
         ws_xpixel: u16,
         ws_ypixel: u16,
+    }
+
+    /// Test-only owner for file descriptors opened by this smoke test.
+    ///
+    /// `openpty` can initialize either descriptor before reporting a failure,
+    /// while the ioctl assertions can panic after a successful call.  Scope
+    /// ownership covers both cases without ever closing borrowed stdin.
+    struct ProbeFd(libc::c_int);
+
+    impl ProbeFd {
+        fn as_i64(&self) -> i64 {
+            i64::from(self.0)
+        }
+    }
+
+    impl Drop for ProbeFd {
+        fn drop(&mut self) {
+            if self.0 >= 0 {
+                // SAFETY: the owner is constructed only from descriptors
+                // obtained by openpty or open in this test and closes once.
+                unsafe {
+                    libc::close(self.0);
+                }
+            }
+        }
     }
 
     fn cell() -> &'static HostCell {
@@ -1456,8 +1489,9 @@ mod macos {
         env.bind("ws", (&mut ws as *mut Winsize).cast())
             .expect("bind ws");
         let (fd, expect_pty_dims) = open_probe_fd();
+        let raw_fd = fd.as_ref().map_or(0, ProbeFd::as_i64);
         let script =
-            format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd} "u64" {request} "ptr" ws)"#);
+            format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {raw_fd} "u64" {request} "ptr" ws)"#);
         let ret = env.eval(&script).expect("ioctl dlcall");
         let code = ret.as_int().expect("ioctl return code");
         // The signature-gated Darwin path calls the loaded `ioctl` symbol
@@ -1476,14 +1510,9 @@ mod macos {
                 "fallback ioctl should return success or native failure; got {code}"
             );
         }
-        if fd > 2 {
-            unsafe {
-                libc::close(fd as libc::c_int);
-            }
-        }
     }
 
-    fn open_probe_fd() -> (i64, bool) {
+    fn open_probe_fd() -> (Option<ProbeFd>, bool) {
         unsafe {
             let mut master: libc::c_int = -1;
             let mut slave: libc::c_int = -1;
@@ -1493,24 +1522,27 @@ mod macos {
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             };
-            if libc::openpty(
+            let status = libc::openpty(
                 &mut master,
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 &mut win,
-            ) == 0
-            {
+            );
+            let master = ProbeFd(master);
+            let slave = ProbeFd(slave);
+            if status == 0 {
                 // Darwin TIOCGWINSZ is on the slave; master often returns -1.
-                libc::close(master);
-                return (i64::from(slave), true);
+                drop(master);
+                return (Some(slave), true);
             }
+            // Both owners fall out of scope on a partial openpty failure.
         }
         let fd = unsafe { libc::open(b"/dev/tty\0".as_ptr().cast(), libc::O_RDONLY) };
         if fd >= 0 {
-            (i64::from(fd), false)
+            (Some(ProbeFd(fd)), false)
         } else {
-            (0, false)
+            (None, false)
         }
     }
 
