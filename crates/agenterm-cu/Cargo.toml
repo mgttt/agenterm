@@ -10,10 +10,12 @@ repository = "https://github.com/mgttt/agenterm"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# `agenterm-cu` loads libagenterm at run time (dlopen / LoadLibrary) through
-# the shared `crate::dynlib` mechanism boundary. There is no platform/ABI
-# static dependency.
+# `agenterm-cu` loads desktop mechanisms from libagenterm at run time
+# (dlopen / LoadLibrary) through the shared `crate::dynlib` boundary. The
+# narrow static platform dependency below owns only the cross-process lock
+# used to serialize the product's persisted authorization store.
 libloading = "0.8"
+agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["locking"] }
 
 # These feature lists must stay complete on their own. Until milestone 46 the
 # crate also depended on `agenterm-platform`, whose winit tree enabled

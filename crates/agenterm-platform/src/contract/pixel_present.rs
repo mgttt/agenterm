@@ -1,5 +1,6 @@
 //! Typed, host-neutral accounting for native pixel presents.
 
+#[cfg(any(feature = "native-pixel-window", feature = "portable-pixel-window"))]
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,11 +55,21 @@ pub struct PixelPresentStats {
 }
 
 #[derive(Clone, Debug, Default)]
+#[cfg(any(
+    test,
+    feature = "native-pixel-window",
+    feature = "portable-pixel-window"
+))]
 pub(crate) struct PixelPresentLedger {
     stats: PixelPresentStats,
     last: Option<PixelPresentReceipt>,
 }
 
+#[cfg(any(
+    test,
+    feature = "native-pixel-window",
+    feature = "portable-pixel-window"
+))]
 impl PixelPresentLedger {
     pub(crate) const fn new() -> Self {
         Self {
@@ -147,6 +158,7 @@ impl PixelPresentLedger {
     }
 }
 
+#[cfg(any(feature = "native-pixel-window", feature = "portable-pixel-window"))]
 pub(crate) fn elapsed_ns_since(start: Instant) -> u64 {
     start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
 }

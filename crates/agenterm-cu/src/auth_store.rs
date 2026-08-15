@@ -1,10 +1,11 @@
 //! Persistent, bounded computer-use grants.
 //!
 //! Mutations use an explicit generation comparison and publish a fully
-//! validated document from a same-directory temporary file. The comparison
-//! and rename are not protected by a portable cross-process lock: two store
-//! handles can both observe the same generation before either publishes. A
-//! caller needing cross-process serialization must provide it above this API.
+//! validated document from a same-directory temporary file. Cooperating
+//! writers take a non-blocking cross-process lock on a stable sibling sidecar,
+//! then re-read the generation while holding that lock before publication.
+//! The sidecar is never renamed or removed: locking the JSON file itself would
+//! be incorrect on Unix because replacement changes the locked inode.
 //! Publication uses one same-directory replacement rename. On the pinned
 //! Windows toolchain `std::fs::rename` maps to replace-existing semantics;
 //! adding a destination-to-backup fallback would introduce a crash window.
@@ -18,6 +19,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+
+use agenterm_platform::locking::{LockErrorKind, PathLock};
 
 use crate::auth::Grant;
 
@@ -144,6 +147,8 @@ pub enum AuthStoreErrorKind {
     GenerationOverflow,
     DuplicateGrant,
     GrantNotFound,
+    LockContended,
+    LockUnavailable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -372,6 +377,18 @@ impl AuthStore {
         expected_generation: u64,
         mut candidate: StoreDocument,
     ) -> Result<(), AuthStoreError> {
+        let lock_path = lock_path(&self.path)?;
+        let _lock = PathLock::try_acquire(&lock_path).map_err(|error| {
+            let kind = if error.kind() == LockErrorKind::Contended {
+                AuthStoreErrorKind::LockContended
+            } else {
+                AuthStoreErrorKind::LockUnavailable
+            };
+            AuthStoreError::new(
+                kind,
+                format!("lock grant store {}: {}", self.path.display(), error),
+            )
+        })?;
         let actual_generation = read_document(&self.path)?
             .map(|document| document.generation)
             .unwrap_or(0);
@@ -402,6 +419,22 @@ impl AuthStore {
             Err(error) => Err(error),
         }
     }
+}
+
+fn lock_path(path: &Path) -> Result<PathBuf, AuthStoreError> {
+    let file_name = path.file_name().ok_or_else(|| {
+        AuthStoreError::new(
+            AuthStoreErrorKind::LockUnavailable,
+            "grant store file name required for lock sidecar",
+        )
+    })?;
+    let mut lock_name = file_name.to_os_string();
+    lock_name.push(".lock");
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    Ok(parent.join(lock_name))
 }
 
 fn denied(grant_id: &str, kind: GrantDenialKind) -> GrantDecision {
@@ -720,6 +753,9 @@ mod tests {
     impl Drop for TestPath {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.0);
+            if let Ok(lock) = lock_path(&self.0) {
+                let _ = fs::remove_file(lock);
+            }
         }
     }
 
@@ -886,6 +922,27 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.kind, AuthStoreErrorKind::GenerationConflict);
         assert!(stale.list().is_empty());
+        assert_eq!(AuthStore::open_at(&path.0).unwrap().list().len(), 1);
+    }
+
+    #[test]
+    fn contended_sidecar_fails_without_publishing_and_release_allows_retry() {
+        let path = TestPath::new("lock-contention");
+        let sidecar = lock_path(&path.0).unwrap();
+        let lock = PathLock::try_acquire(&sidecar).expect("own sidecar lock");
+        let mut store = AuthStore::open_at(&path.0).unwrap();
+
+        let error = store
+            .create(spec("blocked", &[Grant::Actuate], 1))
+            .unwrap_err();
+        assert_eq!(error.kind, AuthStoreErrorKind::LockContended);
+        assert!(!path.0.exists(), "contended writer must not publish");
+        assert!(store.list().is_empty(), "contended writer must not mutate");
+
+        drop(lock);
+        store
+            .create(spec("committed", &[Grant::Actuate], 1))
+            .expect("released sidecar permits one commit");
         assert_eq!(AuthStore::open_at(&path.0).unwrap().list().len(), 1);
     }
 }

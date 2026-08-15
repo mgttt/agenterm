@@ -1856,7 +1856,15 @@ scope, revocation, time bounds and remaining uses before cloning and publishing
 the next store generation. A generation comparison without a cross-process
 lock detects an already-published conflict but does not close the
 compare-to-rename race between two processes, so document that boundary and do
-not call it atomic authorization. On the pinned Windows Rust toolchain,
+not call it atomic authorization. Close that race for cooperating writers with
+a stable sibling lock sidecar: take a non-blocking cross-process lock, re-read
+the generation while holding it, and retain the guard through replacement,
+parent sync and the in-memory commit. Never lock the replaceable JSON itself;
+Unix `flock` follows the opened inode, so a rename would let a new opener bypass
+the old guard. The sidecar must remain stable and must not be deleted or
+replaced while the store is live. This does not protect against non-cooperating
+writers, hostile directory mutation or filesystems without coherent local lock
+semantics. On the pinned Windows Rust toolchain,
 `std::fs::rename` already requests replace-existing semantics; a manual
 destination-to-backup swap adds a crash interval and must not be used as an
 "atomic" fallback.

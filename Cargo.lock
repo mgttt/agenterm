@@ -88,6 +88,7 @@ dependencies = [
 name = "agenterm-cu"
 version = "0.1.16"
 dependencies = [
+ "agenterm-platform",
  "libloading 0.8.9",
  "objc2 0.5.2",
  "objc2-app-kit",

@@ -82,11 +82,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   grant containing Actuate is capped at 1 hour / 100 uses, and one-shot means
   exactly one attempt even when the downstream mechanism fails. RDP cannot
   receive a grant while its transport is unavailable. Publication uses a
-  flushed same-directory replacement snapshot. This is not yet the production
-  authorization path: CLI/provider integration, target identity resolution,
-  session-nonce invalidation, and a real cross-process lock remain open; bare
-  generation compare cannot close two processes racing between compare and
-  rename.
+  flushed same-directory replacement snapshot. Cooperating writers now take a
+  zero-wait platform lock on a stable sibling sidecar, re-read generation while
+  holding it, and retain the guard through replacement and durability handling;
+  contention is typed and publishes nothing. This closes the local
+  compare-to-rename race without claiming protection from non-cooperating
+  writers, hostile sidecar replacement, cross-session Windows callers or
+  filesystems without coherent locking. This is not yet the production
+  authorization path: CLI/provider integration, verified target identity and
+  session-nonce invalidation remain open.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`
