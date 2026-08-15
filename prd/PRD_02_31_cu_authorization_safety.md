@@ -109,9 +109,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   session identifiers, positive WTS active/logon evidence, and the current
   input desktop. Session zero, a disconnected or changed desktop, unsafe key
   state, and unavailable proof fail typed. The digest is only an opaque
-  equality identifier, not an authenticator. Linux and macOS providers remain
-  explicitly unsupported, and the Windows provider is not yet connected to
-  the CU store, CLI or per-command executor decision. No persisted grant is
+  equality identifier, not an authenticator. CU now adapts those two opaque
+  32-byte identities into its sealed, fixed-prefix target/session binding;
+  resolution never creates state, while a separate explicit enrollment call
+  owns first installation. Linux and macOS providers remain explicitly
+  unsupported. The verified binding is not yet accepted by the grant-store
+  schema, CLI or per-command executor decision, so no persisted grant is
   executable through this mechanism yet.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
