@@ -24,6 +24,22 @@ pub(crate) enum SExpr {
     List(Vec<SExpr>),
 }
 
+/// Return whether any executable expression in this parsed tree is `dlcall`.
+///
+/// This deliberately walks every branch, including unreachable `if` and
+/// short-circuit branches. `Dyn::eval` is the safe entry point, so it must
+/// reject a native form before evaluating *any* sibling that could mutate the
+/// environment.
+pub(crate) fn contains_dlcall(expr: &SExpr) -> bool {
+    match expr {
+        SExpr::List(items) => {
+            matches!(items.first(), Some(SExpr::Sym(form)) if form == "dlcall")
+                || items.iter().any(contains_dlcall)
+        }
+        SExpr::Int(_) | SExpr::Str(_) | SExpr::Sym(_) => false,
+    }
+}
+
 pub(crate) fn parse(source: &str) -> Result<SExpr, DynError> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(DynError::Parse(format!(

@@ -45,7 +45,7 @@ Items tagged **`PLATFORM-CANDIDATE`** in `src/hosts.rs` (and listed in
 symbols, ioctl request codes, console probes, and CU-adjacent probe rows — that
 may move to `agenterm-platform` when that crate grows an equivalent contract.
 They are **not** imported from platform today. What stays in dyn: `intern` /
-`bind` / `eval`, bounded native `dlcall`, value/error/parse, and the rule that
+`bind` / safe `eval` / unsafe `eval_native`, bounded native `dlcall`, value/error/parse, and the rule that
 OS names remain opaque script data at the eval boundary.
 
 `dlcall` is an ABI-limited native door, not a general FFI. It targets only
@@ -63,6 +63,14 @@ symbol. The only exception is Darwin `ioctl` with the validated
 `libloading` pointer to `unsafe extern "C" fn(i32, u64, ...) -> i32`.
 This remains an ABI-compatibility boundary, not an authorization
 or safety policy; library names and symbols remain caller-supplied script data.
+
+`Dyn::eval` is the safe pure-language entry point. It recursively preflights
+the complete AST and returns `DynError::NativeRequiresUnsafe` for any `dlcall`,
+including a dead branch, before any expression runs. Native source must use
+`unsafe { Dyn::eval_native(..) }`. Its caller owns exact fixed C ABI selection,
+pointer validity/alignment/lifetime/aliasing, library availability,
+thread-affinity, and every resource or process side effect. Darwin `ioctl` is
+the documented variadic compatibility exception, not a relaxation of those obligations.
 
 The language stores integer results as signed `i64`. A `u64` result therefore
 returns an error when it exceeds `i64::MAX`; use `ptr` for address- or
@@ -82,8 +90,9 @@ native-door or caller authority semantics.
 | API | Role |
 |-----|------|
 | `Dyn::intern` | Intern a string into a stable `Symbol` |
-| `Dyn::bind` | Hand an existing pointer/handle into the environment |
-| `Dyn::eval` | Evaluate S-expr source (`do`, `set`, `if`, comparisons, `not`, `and`/`or`, `+`/`-`, `repeat`, `dlcall`) |
+| `Dyn::bind` | Safely hand an existing pointer/handle into the environment; native pointer obligations begin only at `eval_native` |
+| `Dyn::eval` | Safely evaluate pure S-expr source; rejects any AST containing `dlcall` before execution |
+| `Dyn::eval_native` | Unsafe native-capable evaluation; caller upholds ABI, pointer, aliasing, lifetime, library, thread, and side-effect contracts |
 | `dlcall` | Only native primitive — invoked from lists, not a verb table |
 | `hosts::*` | Six-cell host table + CU-adjacent catalog (`PLATFORM-CANDIDATE`) |
 
@@ -114,7 +123,9 @@ Bind a buffer from Rust, then pass it to `ioctl`:
 
 ```rust
 dyn_env.bind("ws", ws_ptr)?;
-dyn_env.eval(r#"(dlcall "libc.so.6" "ioctl" "i32" "i32" 0 "u64" 21523 "ptr" ws)"#)?;
+unsafe {
+    dyn_env.eval_native(r#"(dlcall "libc.so.6" "ioctl" "i32" "i32" 0 "u64" 21523 "ptr" ws)"#)?;
+}
 ```
 
 ## CU-adjacent script examples
@@ -195,7 +206,7 @@ without wiring dyn into cu, platform, or the ABI:
 
 These examples rely only on the currently shipped list-language parser. Where
 C requires a pointer or writable structure, the example names the value that
-the embedding Rust host must bind before calling `Dyn::eval`. The interior-NUL
+the embedding Rust host must bind before calling `Dyn::eval_native`. The interior-NUL
 example uses visible `␀` notation for an actual NUL source byte because the
 language deliberately has no string escapes.
 

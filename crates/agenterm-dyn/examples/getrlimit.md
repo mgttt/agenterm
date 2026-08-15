@@ -8,13 +8,13 @@ wiring.
 
 Linux example. Before evaluation, the Rust host allocates native
 `libc::rlimit` storage, binds its writable address as `limits`, and keeps that
-storage alive through `Dyn::eval`. `RLIMIT_NOFILE` is selector `7` on Linux.
+storage alive through unsafe `Dyn::eval_native`. `RLIMIT_NOFILE` is selector `7` on Linux.
 
 ```rust
 let mut limits = std::mem::MaybeUninit::<libc::rlimit>::uninit();
 dyn_env.bind("limits", limits.as_mut_ptr().cast())?;
 
-let status = dyn_env.eval(SCRIPT)?;
+let status = unsafe { dyn_env.eval_native(SCRIPT)? };
 if status.as_int()? == 0 {
     let limits = unsafe { limits.assume_init() };
     // The host interprets limits.rlim_cur and limits.rlim_max here.

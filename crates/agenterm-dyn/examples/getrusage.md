@@ -8,13 +8,13 @@ cu/platform wiring.
 
 Linux example. Before evaluation, the Rust host allocates the native
 `libc::rusage`, binds its writable address as `usage`, and keeps that storage
-alive through `Dyn::eval`. `RUSAGE_SELF` is `0` on Linux.
+alive through unsafe `Dyn::eval_native`. `RUSAGE_SELF` is `0` on Linux.
 
 ```rust
 let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
 dyn_env.bind("usage", usage.as_mut_ptr().cast())?;
 
-let status = dyn_env.eval(SCRIPT)?;
+let status = unsafe { dyn_env.eval_native(SCRIPT)? };
 if status.as_int()? == 0 {
     let usage = unsafe { usage.assume_init() };
     // The host interprets `usage` after successful native initialization.

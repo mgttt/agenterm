@@ -341,6 +341,11 @@ unsafe fn invoke(
 mod tests {
     use super::*;
 
+    fn eval_native(env: &mut Dyn, source: &str) -> Result<Value, DynError> {
+        // SAFETY: unit fixtures never dereference a caller pointer.
+        unsafe { env.eval_native(source) }
+    }
+
     #[cfg(unix)]
     fn current_process_library() -> Library {
         Library::from(libloading::os::unix::Library::this())
@@ -453,7 +458,8 @@ mod tests {
         env.libs = full_cache();
 
         assert_eq!(
-            env.eval(
+            eval_native(
+                &mut env,
                 r#"(dlcall "test-new-library-after-limit" "unused" "i32"
                     "i32" (set touched 1))"#
             ),
@@ -462,8 +468,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            env.eval("touched")
-                .expect_err("argument expression must not execute"),
+            eval_native(&mut env, "touched").expect_err("argument expression must not execute"),
             DynError::UnknownVar("touched".into())
         );
         assert_eq!(env.libs.libs.len(), MAX_CACHED_LIBRARIES);

@@ -8,7 +8,7 @@ probe because dyn has no cu provider registry, error envelope, or get-text wirin
 
 The current language has no string escape syntax. In the readable form below,
 `␀` visibly marks the position occupied by one actual U+0000 character in the
-source buffer passed to `Dyn::eval`; the glyph itself is not language syntax.
+source buffer passed to unsafe `Dyn::eval_native`; the glyph itself is not language syntax.
 
 ```lisp
 (do

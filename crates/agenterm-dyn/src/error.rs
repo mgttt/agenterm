@@ -8,6 +8,8 @@ pub enum DynError {
     UnknownVar(String),
     #[error("binding name must not be empty")]
     InvalidBindingName,
+    #[error("native dlcall requires unsafe Dyn::eval_native")]
+    NativeRequiresUnsafe,
     #[error("state limit reached for {resource}: {limit}")]
     StateLimit {
         resource: &'static str,

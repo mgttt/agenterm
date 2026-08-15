@@ -4,17 +4,22 @@ use std::ffi::c_void;
 
 use agenterm_dyn::{Dyn, DynError, REPEAT_MAX};
 
+fn eval_native(env: &mut Dyn, source: &str) -> Result<agenterm_dyn::Value, DynError> {
+    // SAFETY: error fixtures intentionally exercise native validation only.
+    unsafe { env.eval_native(source) }
+}
+
 #[test]
 fn parse_unclosed_list() {
     let mut env = Dyn::new();
-    let err = env.eval("(do (set x 1").unwrap_err();
+    let err = eval_native(&mut env, "(do (set x 1").unwrap_err();
     assert!(matches!(err, DynError::Parse(_)));
 }
 
 #[test]
 fn parse_trailing_tokens() {
     let mut env = Dyn::new();
-    let err = env.eval("1 2").unwrap_err();
+    let err = eval_native(&mut env, "1 2").unwrap_err();
     assert!(matches!(err, DynError::Parse(_)));
 }
 
@@ -31,7 +36,7 @@ fn parse_rejects_excessively_nested_legal_sexpression_at_public_eval_boundary() 
         ")".repeat(EXCESSIVE_NESTING)
     );
     let mut env = Dyn::new();
-    let err = env.eval(&source).unwrap_err();
+    let err = eval_native(&mut env, &source).unwrap_err();
     assert!(matches!(err, DynError::Parse(_)));
 }
 
@@ -49,13 +54,13 @@ fn parse_resource_rejection_at_public_eval_boundary_has_no_side_effects() {
 
     let mut env = Dyn::new();
     assert_eq!(
-        env.eval(&source),
+        eval_native(&mut env, &source),
         Err(DynError::Parse(
             "maximum AST node count (4096) exceeded".into()
         ))
     );
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -63,35 +68,35 @@ fn parse_resource_rejection_at_public_eval_boundary_has_no_side_effects() {
 #[test]
 fn parse_bare_string_not_a_value() {
     let mut env = Dyn::new();
-    let err = env.eval(r#""hello""#).unwrap_err();
+    let err = eval_native(&mut env, r#""hello""#).unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
 }
 
 #[test]
 fn unknown_variable() {
     let mut env = Dyn::new();
-    let err = env.eval("missing").unwrap_err();
+    let err = eval_native(&mut env, "missing").unwrap_err();
     assert_eq!(err, DynError::UnknownVar("missing".into()));
 }
 
 #[test]
 fn unknown_special_form() {
     let mut env = Dyn::new();
-    let err = env.eval("(lambda x x)").unwrap_err();
+    let err = eval_native(&mut env, "(lambda x x)").unwrap_err();
     assert_eq!(err, DynError::UnknownForm("lambda".into()));
 }
 
 #[test]
 fn arity_set() {
     let mut env = Dyn::new();
-    let err = env.eval("(set x)").unwrap_err();
+    let err = eval_native(&mut env, "(set x)").unwrap_err();
     assert!(matches!(err, DynError::Arity { form: "set", .. }));
 }
 
 #[test]
 fn arity_if() {
     let mut env = Dyn::new();
-    let err = env.eval("(if 1 2)").unwrap_err();
+    let err = eval_native(&mut env, "(if 1 2)").unwrap_err();
     assert!(matches!(err, DynError::Arity { form: "if", .. }));
 }
 
@@ -104,7 +109,7 @@ fn arity_dlcall() {
     ] {
         let mut env = Dyn::new();
         assert_eq!(
-            env.eval(source).unwrap_err(),
+            eval_native(&mut env, source).unwrap_err(),
             DynError::Arity {
                 form: "dlcall",
                 expected: 3,
@@ -117,9 +122,7 @@ fn arity_dlcall() {
 #[test]
 fn bad_ffi_return_type() {
     let mut env = Dyn::new();
-    let err = env
-        .eval(r#"(dlcall "libc.so.6" "getpid" "notatype")"#)
-        .unwrap_err();
+    let err = eval_native(&mut env, r#"(dlcall "libc.so.6" "getpid" "notatype")"#).unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
     assert!(err.to_string().contains("notatype"));
 }
@@ -127,9 +130,8 @@ fn bad_ffi_return_type() {
 #[test]
 fn bad_ffi_argument_type() {
     let mut env = Dyn::new();
-    let err = env
-        .eval(r#"(dlcall "libc.so.6" "getpid" "i32" "float" 0)"#)
-        .unwrap_err();
+    let err =
+        eval_native(&mut env, r#"(dlcall "libc.so.6" "getpid" "i32" "float" 0)"#).unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
 }
 
@@ -143,7 +145,7 @@ fn dlcall_rejects_float_struct_and_varargs_types() {
             ),
         ] {
             let mut env = Dyn::new();
-            let err = env.eval(&script).unwrap_err();
+            let err = eval_native(&mut env, &script).unwrap_err();
             assert!(matches!(err, DynError::Type(_)), "{unsupported}: {err}");
             assert!(
                 err.to_string().contains(unsupported),
@@ -165,9 +167,9 @@ fn dlcall_rejects_unknown_signature_types_before_arguments_or_library_load() {
             r#"(dlcall "missing-library-for-unknown-return" "unused" "{unsupported}"
                 "i32" (set touched 1))"#
         );
-        assert_eq!(return_env.eval(&return_script), Err(expected));
+        assert_eq!(eval_native(&mut return_env, &return_script), Err(expected));
         assert_eq!(
-            return_env.eval("touched").unwrap_err(),
+            eval_native(&mut return_env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
 
@@ -177,13 +179,13 @@ fn dlcall_rejects_unknown_signature_types_before_arguments_or_library_load() {
                 "i32" (set touched 1) "{unsupported}" 0)"#
         );
         assert_eq!(
-            argument_env.eval(&argument_script),
+            eval_native(&mut argument_env, &argument_script),
             Err(DynError::Type(format!(
                 "unsupported dlcall type `{unsupported}`; only void/integer/pointer types are supported"
             )))
         );
         assert_eq!(
-            argument_env.eval("touched").unwrap_err(),
+            eval_native(&mut argument_env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -198,13 +200,13 @@ fn dlcall_rejects_unknown_argument_types_before_arguments_or_library_load() {
                 "i32" (set touched 1) "{unsupported}" 0)"#
         );
         assert_eq!(
-            env.eval(&script),
+            eval_native(&mut env, &script),
             Err(DynError::Type(format!(
                 "unsupported dlcall type `{unsupported}`; only void/integer/pointer types are supported"
             )))
         );
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -224,9 +226,9 @@ fn dlcall_rejects_usize_type_before_arguments_or_library_load() {
             "i32" (set touched 1) "usize" 0)"#,
     ] {
         let mut env = Dyn::new();
-        assert_eq!(env.eval(script), Err(expected()));
+        assert_eq!(eval_native(&mut env, script), Err(expected()));
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -246,9 +248,9 @@ fn dlcall_rejects_isize_type_before_arguments_or_library_load() {
             "i32" (set touched 1) "isize" 0)"#,
     ] {
         let mut env = Dyn::new();
-        assert_eq!(env.eval(script), Err(expected()));
+        assert_eq!(eval_native(&mut env, script), Err(expected()));
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -305,9 +307,13 @@ fn dlcall_rejects_c_abi_aliases_before_arguments_or_library_load() {
             ),
         ] {
             let mut env = Dyn::new();
-            assert_eq!(env.eval(&script), Err(expected()), "{unsupported}");
             assert_eq!(
-                env.eval("touched").unwrap_err(),
+                eval_native(&mut env, &script),
+                Err(expected()),
+                "{unsupported}"
+            );
+            assert_eq!(
+                eval_native(&mut env, "touched").unwrap_err(),
                 DynError::UnknownVar("touched".into()),
                 "{unsupported}"
             );
@@ -329,9 +335,9 @@ fn dlcall_rejects_bool_type_before_arguments_or_library_load() {
             "i32" (set touched 1) "bool" 0)"#,
     ] {
         let mut env = Dyn::new();
-        assert_eq!(env.eval(script), Err(expected()));
+        assert_eq!(eval_native(&mut env, script), Err(expected()));
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -342,10 +348,10 @@ fn dlcall_validates_entire_signature_before_evaluating_arguments() {
     let mut env = Dyn::new();
     let script = r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
         "i32" (set touched 1) "struct" 0)"#;
-    let err = env.eval(script).unwrap_err();
+    let err = eval_native(&mut env, script).unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -356,11 +362,11 @@ fn dlcall_rejects_void_argument_before_arguments_or_library_load() {
     let script = r#"(dlcall "missing-library-for-void-argument" "unused" "void"
         "i32" (set touched 1) "void" 0)"#;
     assert_eq!(
-        env.eval(script),
+        eval_native(&mut env, script),
         Err(DynError::Type("void cannot be an argument type".into()))
     );
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -375,9 +381,12 @@ fn dlcall_rejects_argument_signature_arity_mismatch_before_evaluation_or_load() 
             "i32" (set touched 1) 0)"#,
     ] {
         let mut env = Dyn::new();
-        assert_eq!(env.eval(script), Err(DynError::Type(expected.into())));
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, script),
+            Err(DynError::Type(expected.into()))
+        );
+        assert_eq!(
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -386,13 +395,13 @@ fn dlcall_rejects_argument_signature_arity_mismatch_before_evaluation_or_load() 
 #[test]
 fn dlcall_rejects_more_than_six_arguments() {
     let mut env = Dyn::new();
-    let err = env
-        .eval(
-            r#"(dlcall "libc.so.6" "getpid" "i32"
+    let err = eval_native(
+        &mut env,
+        r#"(dlcall "libc.so.6" "getpid" "i32"
                 "i32" 0 "i32" 0 "i32" 0 "i32" 0
                 "i32" 0 "i32" 0 "i32" 0)"#,
-        )
-        .unwrap_err();
+    )
+    .unwrap_err();
     assert!(matches!(err, DynError::DlCall(_)));
     assert!(err.to_string().contains("fixed limit of 6"));
 }
@@ -411,9 +420,9 @@ fn dlcall_rejects_empty_library_or_symbol_before_arguments_or_load() {
         ),
     ] {
         let mut env = Dyn::new();
-        assert_eq!(env.eval(script), Err(expected));
+        assert_eq!(eval_native(&mut env, script), Err(expected));
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -432,9 +441,9 @@ fn dlcall_rejects_blank_library_or_symbol_before_arguments_or_load() {
         ),
     ] {
         let mut env = Dyn::new();
-        assert_eq!(env.eval(script), Err(expected));
+        assert_eq!(eval_native(&mut env, script), Err(expected));
         assert_eq!(
-            env.eval("touched").unwrap_err(),
+            eval_native(&mut env, "touched").unwrap_err(),
             DynError::UnknownVar("touched".into())
         );
     }
@@ -446,13 +455,13 @@ fn dlcall_rejects_overlong_library_before_arguments_or_load() {
     let script = format!(r#"(dlcall "{library}" "unused" "i32" "i32" (set touched 1))"#);
     let mut env = Dyn::new();
     assert_eq!(
-        env.eval(&script),
+        eval_native(&mut env, &script),
         Err(DynError::Library(
             "library name exceeds 255-byte limit".into()
         ))
     );
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -466,13 +475,13 @@ fn dlcall_rejects_overlong_symbol_before_arguments_or_load() {
     );
     let mut env = Dyn::new();
     assert_eq!(
-        env.eval(&script),
+        eval_native(&mut env, &script),
         Err(DynError::DlCall(
             "symbol name exceeds 255-byte limit".into()
         ))
     );
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -482,10 +491,10 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
     let library = "x".repeat(255);
     let mut library_env = Dyn::new();
     let library_script = format!(r#"(dlcall "{library}" "unused" "i32" "i32" (set touched 1))"#);
-    let library_err = library_env.eval(&library_script).unwrap_err();
+    let library_err = eval_native(&mut library_env, &library_script).unwrap_err();
     assert!(matches!(library_err, DynError::Library(message) if message.starts_with(&library)));
     assert_eq!(
-        library_env.eval("touched").unwrap(),
+        eval_native(&mut library_env, "touched").unwrap(),
         agenterm_dyn::Value::Int(1)
     );
 
@@ -500,7 +509,7 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
     let mut symbol_env = Dyn::new();
     let symbol_script =
         format!(r#"(dlcall "{native_library}" "{symbol}" "i32" "i32" (set touched 1))"#);
-    let symbol_err = symbol_env.eval(&symbol_script).unwrap_err();
+    let symbol_err = eval_native(&mut symbol_env, &symbol_script).unwrap_err();
     // Reaching the native resolver is the contract here.  The loader's diagnostic text is
     // platform-specific: macOS does not prefix its `dlsym` error with the symbol name.
     assert!(matches!(symbol_err, DynError::DlCall(_)));
@@ -509,7 +518,7 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
         DynError::DlCall("symbol name exceeds 255-byte limit".into())
     );
     assert_eq!(
-        symbol_env.eval("touched").unwrap(),
+        eval_native(&mut symbol_env, "touched").unwrap(),
         agenterm_dyn::Value::Int(1)
     );
 }
@@ -519,13 +528,13 @@ fn dlcall_rejects_nul_library_before_arguments_or_library_load() {
     let mut env = Dyn::new();
     let script = "(dlcall \"bad\0library\" \"unused\" \"i32\" \"i32\" (set touched 1))";
     assert_eq!(
-        env.eval(script),
+        eval_native(&mut env, script),
         Err(DynError::Library(
             "library name contains interior NUL".into()
         ))
     );
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -535,11 +544,11 @@ fn dlcall_rejects_nul_symbol_before_arguments_or_library_load() {
     let mut env = Dyn::new();
     let script = "(dlcall \"missing-library-for-nul-symbol\" \"bad\0symbol\" \"i32\" \"i32\" (set touched 1))";
     assert_eq!(
-        env.eval(script),
+        eval_native(&mut env, script),
         Err(DynError::DlCall("symbol name contains interior NUL".into()))
     );
     assert_eq!(
-        env.eval("touched").unwrap_err(),
+        eval_native(&mut env, "touched").unwrap_err(),
         DynError::UnknownVar("touched".into())
     );
 }
@@ -547,9 +556,11 @@ fn dlcall_rejects_nul_symbol_before_arguments_or_library_load() {
 #[test]
 fn missing_library() {
     let mut env = Dyn::new();
-    let err = env
-        .eval(r#"(dlcall "libtotally_missing_agenterm_dyn_test.so" "foo" "i32")"#)
-        .unwrap_err();
+    let err = eval_native(
+        &mut env,
+        r#"(dlcall "libtotally_missing_agenterm_dyn_test.so" "foo" "i32")"#,
+    )
+    .unwrap_err();
     assert!(matches!(err, DynError::Library(_)));
 }
 
@@ -564,7 +575,7 @@ fn missing_symbol() {
         "libc.so.6"
     };
     let script = format!(r#"(dlcall "{lib}" "agenterm_dyn_no_such_symbol_xyz" "i32")"#);
-    let err = env.eval(&script).unwrap_err();
+    let err = eval_native(&mut env, &script).unwrap_err();
     assert!(matches!(err, DynError::DlCall(_)));
 }
 
@@ -573,14 +584,14 @@ fn comparison_requires_two_int_operands() {
     let mut env = Dyn::new();
     env.bind("p", std::ptr::dangling_mut::<c_void>())
         .expect("bind ptr");
-    let err = env.eval("(= 1 p)").unwrap_err();
+    let err = eval_native(&mut env, "(= 1 p)").unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
 }
 
 #[test]
 fn comparison_arity_mismatch() {
     let mut env = Dyn::new();
-    let err = env.eval("(= 1)").unwrap_err();
+    let err = eval_native(&mut env, "(= 1)").unwrap_err();
     assert!(matches!(
         err,
         DynError::Arity {
@@ -595,7 +606,7 @@ fn comparison_arity_mismatch() {
 fn and_and_or_require_at_least_one_operand() {
     let mut env = Dyn::new();
     assert!(matches!(
-        env.eval("(and)").unwrap_err(),
+        eval_native(&mut env, "(and)").unwrap_err(),
         DynError::Arity {
             form: "and",
             expected: 1,
@@ -603,7 +614,7 @@ fn and_and_or_require_at_least_one_operand() {
         }
     ));
     assert!(matches!(
-        env.eval("(or)").unwrap_err(),
+        eval_native(&mut env, "(or)").unwrap_err(),
         DynError::Arity {
             form: "or",
             expected: 1,
@@ -616,7 +627,7 @@ fn and_and_or_require_at_least_one_operand() {
 fn not_requires_exactly_one_operand() {
     let mut env = Dyn::new();
     assert!(matches!(
-        env.eval("(not)").unwrap_err(),
+        eval_native(&mut env, "(not)").unwrap_err(),
         DynError::Arity {
             form: "not",
             expected: 1,
@@ -624,7 +635,7 @@ fn not_requires_exactly_one_operand() {
         }
     ));
     assert!(matches!(
-        env.eval("(not 0 1)").unwrap_err(),
+        eval_native(&mut env, "(not 0 1)").unwrap_err(),
         DynError::Arity {
             form: "not",
             expected: 1,
@@ -638,23 +649,21 @@ fn arithmetic_type_and_overflow_errors() {
     let mut env = Dyn::new();
     env.bind("z", std::ptr::null_mut::<c_void>()).expect("bind");
     assert!(matches!(
-        env.eval("(+ 1 z)").unwrap_err(),
+        eval_native(&mut env, "(+ 1 z)").unwrap_err(),
         DynError::Type(_)
     ));
     let huge = format!("(+ {} 1)", i64::MAX);
-    let err = env.eval(&huge).unwrap_err();
+    let err = eval_native(&mut env, &huge).unwrap_err();
     assert!(matches!(err, DynError::Type(_)));
 }
 
 #[test]
 fn repeat_rejects_negative_and_over_cap() {
     let mut env = Dyn::new();
-    let neg = env.eval("(repeat -1 1)").unwrap_err();
+    let neg = eval_native(&mut env, "(repeat -1 1)").unwrap_err();
     assert!(matches!(neg, DynError::Type(_)));
 
-    let over = env
-        .eval(&format!("(repeat {} 1)", REPEAT_MAX + 1))
-        .unwrap_err();
+    let over = eval_native(&mut env, &format!("(repeat {} 1)", REPEAT_MAX + 1)).unwrap_err();
     assert!(matches!(over, DynError::Type(_)));
 }
 
@@ -662,7 +671,7 @@ fn repeat_rejects_negative_and_over_cap() {
 fn repeat_arity_mismatch() {
     let mut env = Dyn::new();
     assert!(matches!(
-        env.eval("(repeat 1)").unwrap_err(),
+        eval_native(&mut env, "(repeat 1)").unwrap_err(),
         DynError::Arity {
             form: "repeat",
             expected: 2,

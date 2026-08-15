@@ -11,6 +11,12 @@ First cut is the body: S-expr + intern + `if` / `set` / `do` + comparisons +
 fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 
 - `dlcall` is a Rust integer/pointer trampoline + `libloading`. No C, no libffi.
+- `Dyn::eval` is pure and rejects any parsed `dlcall` with
+  `DynError::NativeRequiresUnsafe` before execution; `unsafe Dyn::eval_native`
+  is the only native-capable entrance. Its caller owns exact fixed ABI,
+  pointer validity/alignment/lifetime/aliasing, library/thread requirements,
+  resource cleanup and process side effects; Darwin `ioctl` is the documented
+  variadic compatibility exception.
 - ioctl `TIOCGWINSZ` is the gate and is already in the crate (examples + smoke).
 - Signature hardening on main: void, arity, empty/blank/overlong names,
   unknown types (`f32` / `struct` / `f64` / `u128` / `usize` / `isize` / `bool`).

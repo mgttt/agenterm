@@ -77,6 +77,54 @@ fn bind_rejects_empty_name() {
 }
 
 #[test]
+fn safe_eval_rejects_direct_dlcall_before_native_dispatch() {
+    let mut env = Dyn::new();
+    assert_eq!(
+        env.eval(r#"(dlcall "missing-library" "unused" "i32")"#),
+        Err(DynError::NativeRequiresUnsafe)
+    );
+}
+
+#[test]
+fn safe_eval_rejects_nested_dlcall_before_any_set_side_effect() {
+    let mut env = Dyn::new();
+    assert_eq!(
+        env.eval(r#"(do (set touched 1) (+ 1 (dlcall "missing-library" "unused" "i32")))"#),
+        Err(DynError::NativeRequiresUnsafe)
+    );
+    assert_eq!(
+        env.eval("touched"),
+        Err(DynError::UnknownVar("touched".into()))
+    );
+}
+
+#[test]
+fn safe_eval_rejects_dead_branch_dlcall_before_any_set_side_effect() {
+    let mut env = Dyn::new();
+    assert_eq!(
+        env.eval(r#"(do (set touched 1) (if 1 7 (dlcall "missing-library" "unused" "i32")))"#),
+        Err(DynError::NativeRequiresUnsafe)
+    );
+    assert_eq!(
+        env.eval("touched"),
+        Err(DynError::UnknownVar("touched".into()))
+    );
+}
+
+#[test]
+fn unsafe_native_entry_executes_native_and_preserves_native_errors() {
+    let mut env = Dyn::new();
+    let result = unsafe { env.eval_native(r#"(dlcall "libc.so.6" "getpid" "i32")"#) };
+    #[cfg(unix)]
+    assert_eq!(result, Ok(Value::Int(i64::from(unsafe { libc::getpid() }))));
+    #[cfg(not(unix))]
+    assert!(result.is_err());
+
+    let error = unsafe { env.eval_native(r#"(dlcall "missing-library" "unused" "i32")"#) };
+    assert!(matches!(error, Err(DynError::Library(_))));
+}
+
+#[test]
 fn bindings_are_bounded_and_existing_names_remain_replaceable() {
     let mut env = Dyn::new();
     for index in 0..MAX_BINDINGS {

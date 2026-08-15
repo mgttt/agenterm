@@ -10,6 +10,11 @@ use agenterm_dyn::{
     CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, SecondaryProbe, Value, live_cell,
 };
 
+fn eval_native(env: &mut Dyn, source: &str) -> Result<Value, DynError> {
+    // SAFETY: each smoke owns any bound storage and asserts the documented ABI.
+    unsafe { env.eval_native(source) }
+}
+
 #[test]
 fn cu_adjacent_catalog_has_six_cells() {
     assert_eq!(CU_ADJACENT_PROBE_CATALOG.len(), 6);
@@ -97,7 +102,7 @@ mod linux {
     fn dlcall_getpid_matches_libc() {
         let mut env = Dyn::new();
         let script = getpid_script();
-        let got = env.eval(&script).expect("getpid dlcall");
+        let got = eval_native(&mut env, &script).expect("getpid dlcall");
         let real = unsafe { libc::getpid() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -106,8 +111,8 @@ mod linux {
     fn dlcall_getpid_is_stable_across_cached_library_calls() {
         let mut env = Dyn::new();
         let script = getpid_script();
-        let first = env.eval(&script).expect("first getpid dlcall");
-        let second = env.eval(&script).expect("cached-library getpid dlcall");
+        let first = eval_native(&mut env, &script).expect("first getpid dlcall");
+        let second = eval_native(&mut env, &script).expect("cached-library getpid dlcall");
         assert_eq!(first, second, "cached libc must not change symbol results");
     }
 
@@ -117,13 +122,11 @@ mod linux {
         let missing_symbol = "agenterm_dyn_missing_before_getpid";
         let missing = format!(r#"(dlcall "{}" "{missing_symbol}" "i32")"#, c.pid_lib);
         let mut env = Dyn::new();
-        let err = env.eval(&missing).unwrap_err();
+        let err = eval_native(&mut env, &missing).unwrap_err();
         assert!(matches!(err, DynError::DlCall(_)));
         assert!(err.to_string().contains(missing_symbol));
 
-        let got = env
-            .eval(&getpid_script())
-            .expect("getpid after missing symbol");
+        let got = eval_native(&mut env, &getpid_script()).expect("getpid after missing symbol");
         let real = unsafe { libc::getpid() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -146,7 +149,7 @@ mod linux {
         );
         let mut env = Dyn::new();
         let script = format!(r#"(dlcall "{lib}" "{symbol}" "{ret_type}")"#);
-        let got = env.eval(&script).expect("getppid dlcall");
+        let got = eval_native(&mut env, &script).expect("getppid dlcall");
         let real = unsafe { libc::getppid() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -158,8 +161,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
             .expect("getpgrp dlcall");
         let real = unsafe { libc::getpgrp() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -172,9 +174,11 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
-            .expect("getsid(0) dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#),
+        )
+        .expect("getsid(0) dlcall");
         let real = unsafe { libc::getsid(0) };
         assert!(real > 0, "current session id should be positive");
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -187,9 +191,11 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
-            .expect("getpgid(0) dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#),
+        )
+        .expect("getpgid(0) dlcall");
         let real = unsafe { libc::getpgid(0) };
         assert!(real > 0, "current process group id should be positive");
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -198,8 +204,7 @@ mod linux {
     #[test]
     fn dlcall_time_matches_libc() {
         let mut env = Dyn::new();
-        let got = env
-            .eval(r#"(dlcall "libc.so.6" "time" "i64" "ptr" 0)"#)
+        let got = eval_native(&mut env, r#"(dlcall "libc.so.6" "time" "i64" "ptr" 0)"#)
             .expect("time dlcall")
             .as_int()
             .expect("time return value");
@@ -226,11 +231,13 @@ mod linux {
         env.bind("tms", (&mut dlcall_tms as *mut libc::tms).cast())
             .expect("bind caller-owned tms");
 
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#))
-            .expect("times dlcall")
-            .as_int()
-            .expect("times return value");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#),
+        )
+        .expect("times dlcall")
+        .as_int()
+        .expect("times return value");
 
         let mut libc_tms = libc::tms {
             tms_utime: 0,
@@ -265,12 +272,14 @@ mod linux {
         env.bind("usage", (&mut dlcall_usage as *mut libc::rusage).cast())
             .expect("bind caller-owned rusage");
 
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" usage)"#,
                 libc::RUSAGE_SELF
-            ))
-            .expect("getrusage dlcall");
+            ),
+        )
+        .expect("getrusage dlcall");
         assert_eq!(got, Value::Int(0));
 
         let mut libc_usage: libc::rusage = unsafe { std::mem::zeroed() };
@@ -294,12 +303,14 @@ mod linux {
         env.bind("limit", (&mut dlcall_limit as *mut libc::rlimit).cast())
             .expect("bind caller-owned rlimit");
 
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" limit)"#,
                 libc::RLIMIT_NOFILE
-            ))
-            .expect("getrlimit dlcall");
+            ),
+        )
+        .expect("getrlimit dlcall");
         assert_eq!(got, Value::Int(0));
 
         let mut libc_limit: libc::rlimit = unsafe { std::mem::zeroed() };
@@ -322,8 +333,7 @@ mod linux {
     #[test]
     fn dlcall_void_return_maps_to_nil() {
         let mut env = Dyn::new();
-        let got = env
-            .eval(r#"(dlcall "libc.so.6" "free" "void" "ptr" 0)"#)
+        let got = eval_native(&mut env, r#"(dlcall "libc.so.6" "free" "void" "ptr" 0)"#)
             .expect("free(NULL) dlcall");
         assert_eq!(got, Value::Nil);
     }
@@ -337,9 +347,11 @@ mod linux {
         let mut env = Dyn::new();
         env.bind("ts", (&mut ts as *mut libc::timespec).cast())
             .expect("bind timespec");
-        let got = env
-            .eval(r#"(dlcall "libc.so.6" "clock_gettime" "i32" "i32" 1 "ptr" ts)"#)
-            .expect("clock_gettime dlcall");
+        let got = eval_native(
+            &mut env,
+            r#"(dlcall "libc.so.6" "clock_gettime" "i32" "i32" 1 "ptr" ts)"#,
+        )
+        .expect("clock_gettime dlcall");
         assert_eq!(got, Value::Int(0));
         assert!(ts.tv_sec > 0);
         assert!((0..1_000_000_000).contains(&ts.tv_nsec));
@@ -351,8 +363,7 @@ mod linux {
         let mut env = Dyn::new();
         env.bind("uts", uts.as_mut_ptr().cast())
             .expect("bind utsname");
-        let got = env
-            .eval(r#"(dlcall "libc.so.6" "uname" "i32" "ptr" uts)"#)
+        let got = eval_native(&mut env, r#"(dlcall "libc.so.6" "uname" "i32" "ptr" uts)"#)
             .expect("uname dlcall");
         assert_eq!(got, Value::Int(0));
         let uts = unsafe { uts.assume_init() };
@@ -377,8 +388,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
             .expect("getuid dlcall");
         let real = unsafe { libc::getuid() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -391,8 +401,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
             .expect("getgid dlcall");
         let real = unsafe { libc::getgid() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -405,8 +414,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
             .expect("geteuid dlcall");
         let real = unsafe { libc::geteuid() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -419,8 +427,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "u32")"#))
             .expect("getegid dlcall");
         let real = unsafe { libc::getegid() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -433,12 +440,14 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {})"#,
                 libc::_SC_PAGESIZE
-            ))
-            .expect("sysconf(_SC_PAGESIZE) dlcall");
+            ),
+        )
+        .expect("sysconf(_SC_PAGESIZE) dlcall");
         let real = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
         assert!(real > 0, "host page size should be positive");
         assert_eq!(got, Value::Int(real));
@@ -451,12 +460,14 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {})"#,
                 libc::_SC_CLK_TCK
-            ))
-            .expect("sysconf(_SC_CLK_TCK) dlcall");
+            ),
+        )
+        .expect("sysconf(_SC_CLK_TCK) dlcall");
         let real = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
         assert!(real > 0, "host clock ticks per second should be positive");
         assert_eq!(got, Value::Int(real));
@@ -469,12 +480,14 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {})"#,
                 libc::_SC_NPROCESSORS_ONLN
-            ))
-            .expect("sysconf(_SC_NPROCESSORS_ONLN) dlcall");
+            ),
+        )
+        .expect("sysconf(_SC_NPROCESSORS_ONLN) dlcall");
         let real = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
         assert!(real > 0, "online processor count should be positive");
         assert_eq!(got, Value::Int(real));
@@ -492,12 +505,14 @@ mod linux {
         let buffer_ptr = buffer.as_mut_ptr();
         let mut env = Dyn::new();
         env.bind("cwd", buffer_ptr.cast()).expect("bind cwd buffer");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "ptr" "ptr" cwd "u64" {})"#,
                 buffer.len()
-            ))
-            .expect("getcwd dlcall");
+            ),
+        )
+        .expect("getcwd dlcall");
         assert_eq!(got, Value::Ptr(buffer_ptr as usize));
         let end = buffer
             .iter()
@@ -514,9 +529,11 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
-            .expect("isatty(0) dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#),
+        )
+        .expect("isatty(0) dlcall");
         let real = unsafe { libc::isatty(0) };
         assert!(matches!(real, 0 | 1));
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -532,12 +549,14 @@ mod linux {
         let mut env = Dyn::new();
         env.bind("root", path.as_ptr().cast_mut().cast())
             .expect("bind root path");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" root "i32" {})"#,
                 libc::F_OK
-            ))
-            .expect("access(\"/\", F_OK) dlcall");
+            ),
+        )
+        .expect("access(\"/\", F_OK) dlcall");
         assert_eq!(got, Value::Int(0));
     }
 
@@ -552,12 +571,14 @@ mod linux {
         let mut env = Dyn::new();
         env.bind("missing", path.as_ptr().cast_mut().cast())
             .expect("bind missing path");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" missing "i32" {})"#,
                 libc::F_OK
-            ))
-            .expect("access(missing, F_OK) dlcall");
+            ),
+        )
+        .expect("access(missing, F_OK) dlcall");
         assert_eq!(got, Value::Int(-1));
     }
 
@@ -568,13 +589,19 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let fd = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
-            .expect("dup(0) dlcall")
-            .as_int()
-            .expect("dup return code");
-        let close =
-            (fd >= 0).then(|| env.eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#)));
+        let fd = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#),
+        )
+        .expect("dup(0) dlcall")
+        .as_int()
+        .expect("dup return code");
+        let close = (fd >= 0).then(|| {
+            eval_native(
+                &mut env,
+                &format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#),
+            )
+        });
 
         assert!(fd >= 0, "dup(0) returned {fd}");
         assert_eq!(
@@ -592,12 +619,14 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "u32" {} "u32" 0)"#,
                 libc::PRIO_PROCESS
-            ))
-            .expect("getpriority(PRIO_PROCESS, 0) dlcall");
+            ),
+        )
+        .expect("getpriority(PRIO_PROCESS, 0) dlcall");
         let real = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -609,9 +638,11 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
-            .expect("nice(0) dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#),
+        )
+        .expect("nice(0) dlcall");
         let real = unsafe { libc::nice(0) };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -623,12 +654,14 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i64" "i32" 0 "i64" 0 "i32" {})"#,
                 libc::SEEK_CUR
-            ))
-            .expect("lseek(0, 0, SEEK_CUR) dlcall");
+            ),
+        )
+        .expect("lseek(0, 0, SEEK_CUR) dlcall");
         let real = unsafe { libc::lseek(0, 0, libc::SEEK_CUR) };
         assert_eq!(got, Value::Int(real));
     }
@@ -640,9 +673,11 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 1)"#))
-            .expect("isatty(1) dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 1)"#),
+        )
+        .expect("isatty(1) dlcall");
         let real = unsafe { libc::isatty(1) };
         assert!(matches!(real, 0 | 1));
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -655,9 +690,11 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 2)"#))
-            .expect("isatty(2) dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 2)"#),
+        )
+        .expect("isatty(2) dlcall");
         let real = unsafe { libc::isatty(2) };
         assert!(matches!(real, 0 | 1));
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -670,8 +707,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
             .expect("sched_yield i32 dlcall");
         let direct = unsafe { libc::sched_yield() };
         assert_eq!(direct, 0, "sched_yield direct status");
@@ -701,7 +737,10 @@ mod linux {
         );
 
         let mut env = Dyn::new();
-        let got = env.eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" 0)"#));
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" 0)"#),
+        );
         let remaining = unsafe { libc::alarm(0) };
 
         assert_eq!(got.expect("alarm(0) dlcall"), Value::Int(0));
@@ -725,16 +764,18 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let previous = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" 0)"#))
-            .expect("umask(0) dlcall")
-            .as_int()
-            .expect("umask return value");
-        let restored = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{symbol}" "u32" "u32" {previous})"#
-            ))
-            .expect("umask(previous) restore dlcall");
+        let previous = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" 0)"#),
+        )
+        .expect("umask(0) dlcall")
+        .as_int()
+        .expect("umask return value");
+        let restored = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "u32" "u32" {previous})"#),
+        )
+        .expect("umask(previous) restore dlcall");
 
         assert_eq!(
             restored,
@@ -755,8 +796,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
             .expect("getdtablesize dlcall");
         let real = unsafe { libc::getdtablesize() };
         assert!(real > 0, "descriptor table size should be positive");
@@ -770,8 +810,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "i64")"#))
             .expect("gethostid dlcall");
         let real = unsafe { libc::gethostid() };
         assert_eq!(got, Value::Int(real));
@@ -784,8 +823,7 @@ mod linux {
             unreachable!("live_system_probe validates status")
         };
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
             .expect("getpagesize dlcall");
         let sysconf = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
         assert!(sysconf > 0, "page size should be positive");
@@ -818,7 +856,7 @@ mod linux {
         let raw_fd = fd.as_ref().map_or(0, ProbeFd::as_i64);
         let script =
             format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {raw_fd} "u64" {request} "ptr" ws)"#);
-        let ret = env.eval(&script).expect("ioctl dlcall");
+        let ret = eval_native(&mut env, &script).expect("ioctl dlcall");
         let code = ret.as_int().expect("ioctl return code");
         if expect_pty_dims {
             assert_eq!(code, 0, "ioctl on pty master should succeed");
@@ -874,7 +912,7 @@ mod linux {
             "#,
             c.pid_lib, c.pid_symbol, c.pid_ret_type
         );
-        let v = env.eval(script.trim()).expect("do/dlcall");
+        let v = eval_native(&mut env, script.trim()).expect("do/dlcall");
         let real = unsafe { libc::getpid() };
         assert_eq!(v, Value::Int(i64::from(real)));
     }
@@ -888,8 +926,7 @@ mod linux {
             .expect("bind env_key");
 
         let script = format!(r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#, c.pid_lib);
-        env.eval(&script)
-            .expect("getenv dlcall should resolve and run");
+        eval_native(&mut env, &script).expect("getenv dlcall should resolve and run");
     }
 
     #[test]
@@ -903,13 +940,13 @@ mod linux {
 
         let mut env = Dyn::new();
         let script = format!(r#"(dlcall "{lib}" "{sym}" "ptr" "ptr" 0)"#);
-        match env.eval(&script) {
+        match eval_native(&mut env, &script) {
             Ok(Value::Ptr(display)) if display != 0 => {
-                let close = env
-                    .eval(&format!(
-                        r#"(dlcall "{lib}" "XCloseDisplay" "i32" "ptr" {display})"#
-                    ))
-                    .expect("XCloseDisplay dlcall");
+                let close = eval_native(
+                    &mut env,
+                    &format!(r#"(dlcall "{lib}" "XCloseDisplay" "i32" "ptr" {display})"#),
+                )
+                .expect("XCloseDisplay dlcall");
                 assert_eq!(close, Value::Int(0), "XCloseDisplay should succeed");
             }
             Ok(Value::Ptr(0)) | Ok(Value::Nil) => {}
@@ -1008,8 +1045,8 @@ mod macos {
     fn dlcall_getpid_matches_libc_and_second_dlcall() {
         let mut env = Dyn::new();
         let script = getpid_script();
-        let got = env.eval(&script).expect("getpid dlcall");
-        let again = env.eval(&script).expect("second getpid dlcall");
+        let got = eval_native(&mut env, &script).expect("getpid dlcall");
+        let again = eval_native(&mut env, &script).expect("second getpid dlcall");
         assert_eq!(got, again);
         let real = unsafe { libc::getpid() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -1021,12 +1058,10 @@ mod macos {
         let missing_symbol = "agenterm_dyn_missing_before_getpid";
         let missing = format!(r#"(dlcall "{}" "{missing_symbol}" "i32")"#, c.pid_lib);
         let mut env = Dyn::new();
-        let err = env.eval(&missing).unwrap_err();
+        let err = eval_native(&mut env, &missing).unwrap_err();
         assert!(matches!(err, DynError::DlCall(_)));
         assert!(err.to_string().contains(missing_symbol));
-        let got = env
-            .eval(&getpid_script())
-            .expect("getpid after missing symbol");
+        let got = eval_native(&mut env, &getpid_script()).expect("getpid after missing symbol");
         let real = unsafe { libc::getpid() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -1039,7 +1074,7 @@ mod macos {
         };
         let mut env = Dyn::new();
         let script = format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" 0)"#);
-        let got = env.eval(&script).expect("time dlcall");
+        let got = eval_native(&mut env, &script).expect("time dlcall");
         let t = got.as_int().expect("time return");
         let real = unsafe { libc::time(std::ptr::null_mut()) };
         assert!(
@@ -1058,11 +1093,13 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("tms", (&mut dlcall_tms as *mut libc::tms).cast())
             .expect("bind caller-owned tms");
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#))
-            .expect("times dlcall")
-            .as_int()
-            .expect("times return value");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#),
+        )
+        .expect("times dlcall")
+        .as_int()
+        .expect("times return value");
 
         let mut libc_tms: libc::tms = unsafe { std::mem::zeroed() };
         let baseline = unsafe { libc::times(&mut libc_tms) };
@@ -1090,12 +1127,14 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("usage", (&mut dlcall_usage as *mut libc::rusage).cast())
             .expect("bind caller-owned rusage");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" usage)"#,
                 libc::RUSAGE_SELF
-            ))
-            .expect("getrusage dlcall");
+            ),
+        )
+        .expect("getrusage dlcall");
         assert_eq!(got, Value::Int(0));
 
         let mut libc_usage: libc::rusage = unsafe { std::mem::zeroed() };
@@ -1118,12 +1157,14 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("limit", (&mut dlcall_limit as *mut libc::rlimit).cast())
             .expect("bind caller-owned rlimit");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" limit)"#,
                 libc::RLIMIT_NOFILE
-            ))
-            .expect("getrlimit dlcall");
+            ),
+        )
+        .expect("getrlimit dlcall");
         assert_eq!(got, Value::Int(0));
 
         let mut libc_limit: libc::rlimit = unsafe { std::mem::zeroed() };
@@ -1156,12 +1197,14 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("ts", (&mut ts as *mut libc::timespec).cast())
             .expect("bind timespec");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" ts)"#,
                 libc::CLOCK_MONOTONIC
-            ))
-            .expect("clock_gettime dlcall");
+            ),
+        )
+        .expect("clock_gettime dlcall");
         assert_eq!(got, Value::Int(0));
         assert!(ts.tv_sec > 0);
         assert!((0..1_000_000_000).contains(&ts.tv_nsec));
@@ -1177,9 +1220,11 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("uts", uts.as_mut_ptr().cast())
             .expect("bind utsname");
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" uts)"#))
-            .expect("uname dlcall");
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" uts)"#),
+        )
+        .expect("uname dlcall");
         assert_eq!(got, Value::Int(0));
         let uts = unsafe { uts.assume_init() };
         let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()) };
@@ -1201,8 +1246,7 @@ mod macos {
                 unreachable!()
             };
             let mut env = Dyn::new();
-            let got = env
-                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "{ret}")"#))
+            let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "{ret}")"#))
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             let real = match name {
                 "getuid" => i64::from(unsafe { libc::getuid() }),
@@ -1225,9 +1269,11 @@ mod macos {
                 unreachable!()
             };
             let mut env = Dyn::new();
-            let got = env
-                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let got = eval_native(
+                &mut env,
+                &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#),
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
             let real = if name == "getsid" {
                 unsafe { libc::getsid(0) }
             } else {
@@ -1250,9 +1296,11 @@ mod macos {
                 unreachable!()
             };
             let mut env = Dyn::new();
-            let got = env
-                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {key})"#))
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let got = eval_native(
+                &mut env,
+                &format!(r#"(dlcall "{lib}" "{symbol}" "i64" "i32" {key})"#),
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
             let real = unsafe { libc::sysconf(key) };
             assert!(real > 0, "{name} should be positive");
             assert_eq!(got, Value::Int(real), "{name}");
@@ -1270,12 +1318,14 @@ mod macos {
         let buffer_ptr = buffer.as_mut_ptr();
         let mut env = Dyn::new();
         env.bind("cwd", buffer_ptr.cast()).expect("bind cwd buffer");
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "ptr" "ptr" cwd "u64" {})"#,
                 buffer.len()
-            ))
-            .expect("getcwd dlcall");
+            ),
+        )
+        .expect("getcwd dlcall");
         assert_eq!(got, Value::Ptr(buffer_ptr as usize));
         let end = buffer
             .iter()
@@ -1297,9 +1347,11 @@ mod macos {
                 unreachable!()
             };
             let mut env = Dyn::new();
-            let got = env
-                .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd})"#))
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let got = eval_native(
+                &mut env,
+                &format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {fd})"#),
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
             let real = unsafe { libc::isatty(fd) };
             assert!(matches!(real, 0 | 1));
             assert_eq!(got, Value::Int(i64::from(real)), "{name}");
@@ -1319,18 +1371,22 @@ mod macos {
             .expect("bind root");
         env.bind("missing", missing.as_ptr().cast_mut().cast())
             .expect("bind missing");
-        let ok = env
-            .eval(&format!(
+        let ok = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" root "i32" {})"#,
                 libc::F_OK
-            ))
-            .expect("access /");
-        let miss = env
-            .eval(&format!(
+            ),
+        )
+        .expect("access /");
+        let miss = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" missing "i32" {})"#,
                 libc::F_OK
-            ))
-            .expect("access missing");
+            ),
+        )
+        .expect("access missing");
         assert_eq!(ok, Value::Int(0));
         assert_eq!(miss, Value::Int(-1));
     }
@@ -1346,15 +1402,19 @@ mod macos {
         else {
             unreachable!()
         };
-        let fd = env
-            .eval(&format!(r#"(dlcall "{lib}" "{dup_sym}" "i32" "i32" 0)"#))
-            .expect("dup")
-            .as_int()
-            .expect("dup int");
+        let fd = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{dup_sym}" "i32" "i32" 0)"#),
+        )
+        .expect("dup")
+        .as_int()
+        .expect("dup int");
         assert!(fd >= 0, "dup(0) returned {fd}");
-        let close = env
-            .eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#))
-            .expect("close");
+        let close = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#),
+        )
+        .expect("close");
         assert_eq!(close, Value::Int(0));
 
         let lseek = live_system_probe("lseek_stdin_cur");
@@ -1364,12 +1424,14 @@ mod macos {
         else {
             unreachable!()
         };
-        let got_off = env
-            .eval(&format!(
+        let got_off = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{lseek_sym}" "i64" "i32" 0 "i64" 0 "i32" {})"#,
                 libc::SEEK_CUR
-            ))
-            .expect("lseek");
+            ),
+        )
+        .expect("lseek");
         assert_eq!(
             got_off,
             Value::Int(unsafe { libc::lseek(0, 0, libc::SEEK_CUR) })
@@ -1383,12 +1445,14 @@ mod macos {
         let SystemProbeStatus::LiveDlcall { lib, symbol } = prio.status else {
             unreachable!()
         };
-        let got = env
-            .eval(&format!(
+        let got = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "{lib}" "{symbol}" "i32" "u32" {} "u32" 0)"#,
                 libc::PRIO_PROCESS
-            ))
-            .expect("getpriority");
+            ),
+        )
+        .expect("getpriority");
         assert_eq!(
             got,
             Value::Int(i64::from(unsafe {
@@ -1403,9 +1467,11 @@ mod macos {
         else {
             unreachable!()
         };
-        let got_nice = env
-            .eval(&format!(r#"(dlcall "{lib}" "{nice_sym}" "i32" "i32" 0)"#))
-            .expect("nice");
+        let got_nice = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{nice_sym}" "i32" "i32" 0)"#),
+        )
+        .expect("nice");
         assert_eq!(got_nice, Value::Int(i64::from(unsafe { libc::nice(0) })));
 
         let yld = live_system_probe("sched_yield");
@@ -1418,7 +1484,7 @@ mod macos {
         let yld_direct = unsafe { libc::sched_yield() };
         assert_eq!(yld_direct, 0, "sched_yield direct status");
         assert_eq!(
-            env.eval(&format!(r#"(dlcall "{lib}" "{yld_sym}" "i32")"#))
+            eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{yld_sym}" "i32")"#))
                 .expect("sched_yield"),
             Value::Int(i64::from(yld_direct))
         );
@@ -1448,9 +1514,11 @@ mod macos {
             "isolated test process should start without a pending alarm"
         );
         let mut env = Dyn::new();
-        let got_alarm = env
-            .eval(&format!(r#"(dlcall "{lib}" "{alarm_sym}" "u32" "u32" 0)"#))
-            .expect("alarm");
+        let got_alarm = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{alarm_sym}" "u32" "u32" 0)"#),
+        )
+        .expect("alarm");
         let remaining = unsafe { libc::alarm(0) };
         assert_eq!(got_alarm, Value::Int(0));
         assert_eq!(remaining, 0);
@@ -1472,16 +1540,18 @@ mod macos {
             unreachable!()
         };
         let mut env = Dyn::new();
-        let previous = env
-            .eval(&format!(r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" 0)"#))
-            .expect("umask(0)")
-            .as_int()
-            .expect("umask int");
-        let restored = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" {previous})"#
-            ))
-            .expect("umask restore");
+        let previous = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" 0)"#),
+        )
+        .expect("umask(0)")
+        .as_int()
+        .expect("umask int");
+        let restored = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{lib}" "{umask_sym}" "u32" "u32" {previous})"#),
+        )
+        .expect("umask restore");
         assert_eq!(restored, Value::Int(0));
         assert_eq!(previous & !0o777, 0);
     }
@@ -1493,8 +1563,7 @@ mod macos {
         let SystemProbeStatus::LiveDlcall { lib, symbol } = dt.status else {
             unreachable!()
         };
-        let got = env
-            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+        let got = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
             .expect("getdtablesize");
         let real = unsafe { libc::getdtablesize() };
         assert!(real > 0);
@@ -1507,8 +1576,7 @@ mod macos {
         else {
             unreachable!()
         };
-        let got_id = env
-            .eval(&format!(r#"(dlcall "{lib}" "{hid_sym}" "i64")"#))
+        let got_id = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{hid_sym}" "i64")"#))
             .expect("gethostid");
         assert_eq!(got_id, Value::Int(unsafe { libc::gethostid() }));
 
@@ -1516,8 +1584,7 @@ mod macos {
         let SystemProbeStatus::LiveDlcall { symbol: ps_sym, .. } = ps.status else {
             unreachable!()
         };
-        let got_ps = env
-            .eval(&format!(r#"(dlcall "{lib}" "{ps_sym}" "i32")"#))
+        let got_ps = eval_native(&mut env, &format!(r#"(dlcall "{lib}" "{ps_sym}" "i32")"#))
             .expect("getpagesize");
         let sysconf = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
         assert!(sysconf > 0);
@@ -1549,7 +1616,7 @@ mod macos {
         let raw_fd = fd.as_ref().map_or(0, ProbeFd::as_i64);
         let script =
             format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {raw_fd} "u64" {request} "ptr" ws)"#);
-        let ret = env.eval(&script).expect("ioctl dlcall");
+        let ret = eval_native(&mut env, &script).expect("ioctl dlcall");
         let code = ret.as_int().expect("ioctl return code");
         // The signature-gated Darwin path calls the loaded `ioctl` symbol
         // through its variadic ABI. An owned pty is live evidence, so it
@@ -1615,7 +1682,7 @@ mod macos {
             "#,
             c.pid_lib, c.pid_symbol, c.pid_ret_type
         );
-        let v = env.eval(script.trim()).expect("do/dlcall");
+        let v = eval_native(&mut env, script.trim()).expect("do/dlcall");
         let real = unsafe { libc::getpid() };
         assert_eq!(v, Value::Int(i64::from(real)));
     }
@@ -1628,8 +1695,7 @@ mod macos {
         env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
             .expect("bind env_key");
         let script = format!(r#"(dlcall "{}" "getenv" "ptr" "ptr" env_key)"#, c.pid_lib);
-        env.eval(&script)
-            .expect("getenv dlcall should resolve and run");
+        eval_native(&mut env, &script).expect("getenv dlcall should resolve and run");
     }
 }
 
@@ -1651,8 +1717,8 @@ mod windows {
             r#"(dlcall "{}" "{}" "{}")"#,
             c.pid_lib, c.pid_symbol, c.pid_ret_type
         );
-        let got = env.eval(&script).expect("GetCurrentProcessId dlcall");
-        let again = env.eval(&script).expect("second dlcall");
+        let got = eval_native(&mut env, &script).expect("GetCurrentProcessId dlcall");
+        let again = eval_native(&mut env, &script).expect("second dlcall");
         assert_eq!(got, again);
         let real = unsafe { GetCurrentProcessId() };
         assert_eq!(got, Value::Int(i64::from(real)));
@@ -1671,7 +1737,7 @@ mod windows {
         };
         let mut env = Dyn::new();
         let script = format!(r#"(dlcall "{lib}" "{symbol}" "{ret_type}")"#);
-        let got = env.eval(&script).expect("GetCurrentThreadId dlcall");
+        let got = eval_native(&mut env, &script).expect("GetCurrentThreadId dlcall");
         let real = unsafe { GetCurrentThreadId() };
         assert_eq!(got, Value::Int(i64::from(real)));
     }
@@ -1682,11 +1748,17 @@ mod windows {
         let key = CString::new("DISPLAY").expect("DISPLAY key");
         env.bind("env_key", key.as_ptr().cast::<c_void>() as *mut c_void)
             .expect("bind env_key");
-        match env.eval(r#"(dlcall "ucrtbase.dll" "getenv" "ptr" "ptr" env_key)"#) {
+        match eval_native(
+            &mut env,
+            r#"(dlcall "ucrtbase.dll" "getenv" "ptr" "ptr" env_key)"#,
+        ) {
             Ok(_) => {}
             Err(DynError::Library(_)) => {
-                env.eval(r#"(dlcall "msvcrt.dll" "getenv" "ptr" "ptr" env_key)"#)
-                    .expect("getenv via msvcrt when ucrtbase is absent");
+                eval_native(
+                    &mut env,
+                    r#"(dlcall "msvcrt.dll" "getenv" "ptr" "ptr" env_key)"#,
+                )
+                .expect("getenv via msvcrt when ucrtbase is absent");
             }
             Err(other) => panic!("unexpected getenv probe error: {other:?}"),
         }

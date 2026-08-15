@@ -2,7 +2,12 @@
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use agenterm_dyn::{Dyn, Value};
+    use agenterm_dyn::{Dyn, DynError, Value};
+
+    fn eval_native(env: &mut Dyn, source: &str) -> Result<Value, DynError> {
+        // SAFETY: the test owns the `winsize` buffer and validates Darwin ioctl's ABI.
+        unsafe { env.eval_native(source) }
+    }
 
     struct Fd(libc::c_int);
 
@@ -51,13 +56,15 @@ mod macos {
         let mut env = Dyn::new();
         env.bind("winsize", (&mut observed as *mut libc::winsize).cast())
             .expect("bind caller-owned winsize");
-        let result = env
-            .eval(&format!(
+        let result = eval_native(
+            &mut env,
+            &format!(
                 r#"(dlcall "libSystem.B.dylib" "ioctl" "i32" "i32" {} "u64" {} "ptr" winsize)"#,
                 slave.0,
                 libc::TIOCGWINSZ
-            ))
-            .expect("Darwin variadic ioctl dlcall");
+            ),
+        )
+        .expect("Darwin variadic ioctl dlcall");
 
         assert_eq!(result, Value::Int(0));
         assert_eq!(observed.ws_row, 24);

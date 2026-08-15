@@ -6,7 +6,7 @@ a Linux script probe: dyn has no process record, typed `tms` owner, or cu wiring
 # Read process CPU ticks with `times`
 
 Linux example. Before evaluation, the Rust host allocates a native `libc::tms`,
-binds its writable address as `tms`, and keeps it alive until `Dyn::eval`
+binds its writable address as `tms`, and keeps it alive until unsafe `Dyn::eval_native`
 returns. `times(struct tms *) -> clock_t` uses the existing `i64` result type on
 the supported Linux targets.
 

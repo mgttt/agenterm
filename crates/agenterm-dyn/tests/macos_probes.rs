@@ -8,6 +8,11 @@ use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
 
 const LIB: &str = "libSystem.B.dylib";
 
+fn eval_native(env: &mut Dyn, source: &str) -> Result<Value, agenterm_dyn::DynError> {
+    // SAFETY: each probe documents its C ABI and owns every writable buffer.
+    unsafe { env.eval_native(source) }
+}
+
 fn live_symbol(name: &str) -> &'static str {
     let probe = live_cell()
         .expect("macOS host cell")
@@ -34,11 +39,13 @@ fn dlcall_sysctlbyname_writes_ncpu_into_caller_buffer() {
         .expect("bind CPU output");
     env.bind("len", (&mut len as *mut usize).cast())
         .expect("bind CPU output length");
-    let got = env
-        .eval(&format!(
+    let got = eval_native(
+        &mut env,
+        &format!(
             r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "ptr" value "ptr" len "ptr" 0 "u64" 0)"#
-        ))
-        .expect("sysctlbyname dlcall");
+        ),
+    )
+    .expect("sysctlbyname dlcall");
     assert_eq!(got, Value::Int(0));
     assert_eq!(len, std::mem::size_of_val(&ncpu));
     assert!(ncpu >= 1, "hw.ncpu must be positive");
@@ -71,8 +78,8 @@ fn dlcall_mach_absolute_time_is_monotonic_against_libc() {
     let symbol = live_symbol("mach_absolute_time");
     let mut env = Dyn::new();
     let script = format!(r#"(dlcall "{LIB}" "{symbol}" "i64")"#);
-    let first = env.eval(&script).expect("first mach_absolute_time dlcall");
-    let second = env.eval(&script).expect("second mach_absolute_time dlcall");
+    let first = eval_native(&mut env, &script).expect("first mach_absolute_time dlcall");
+    let second = eval_native(&mut env, &script).expect("second mach_absolute_time dlcall");
     let first = first.as_int().expect("integer tick result") as u64;
     let second = second.as_int().expect("integer tick result") as u64;
     let direct = unsafe { libc::mach_absolute_time() };
@@ -84,8 +91,7 @@ fn dlcall_mach_absolute_time_is_monotonic_against_libc() {
 fn dlcall_getprogname_matches_libc_c_string() {
     let symbol = live_symbol("getprogname");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
         .expect("getprogname dlcall")
         .as_ptr()
         .expect("program name pointer") as *const libc::c_char;
@@ -101,8 +107,7 @@ fn dlcall_getprogname_matches_libc_c_string() {
 fn dlcall_issetugid_matches_libc_boolean() {
     let symbol = live_symbol("issetugid");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
         .expect("issetugid dlcall")
         .as_int()
         .expect("issetugid integer");
@@ -121,11 +126,11 @@ fn dlcall_nsget_executable_path_writes_a_caller_buffer() {
         .expect("bind executable-path buffer");
     env.bind("len", (&mut length as *mut u32).cast())
         .expect("bind executable-path length");
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" path "ptr" len)"#
-        ))
-        .expect("_NSGetExecutablePath dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" path "ptr" len)"#),
+    )
+    .expect("_NSGetExecutablePath dlcall");
     assert_eq!(got, Value::Int(0));
     let path = CStr::from_bytes_until_nul(&buffer)
         .expect("_NSGetExecutablePath must NUL-terminate on success")
@@ -148,14 +153,16 @@ fn dlcall_proc_pidpath_writes_a_caller_buffer() {
     let mut env = Dyn::new();
     env.bind("path", buffer.as_mut_ptr().cast())
         .expect("bind proc_pidpath buffer");
-    let got = env
-        .eval(&format!(
+    let got = eval_native(
+        &mut env,
+        &format!(
             r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {} "ptr" path "u32" {len})"#,
             pid
-        ))
-        .expect("proc_pidpath dlcall")
-        .as_int()
-        .expect("proc_pidpath integer result");
+        ),
+    )
+    .expect("proc_pidpath dlcall")
+    .as_int()
+    .expect("proc_pidpath integer result");
     assert!(got > 0, "proc_pidpath must write at least one byte");
     let path = CStr::from_bytes_until_nul(&buffer)
         .expect("proc_pidpath must NUL-terminate its successful output")
@@ -169,8 +176,7 @@ fn dlcall_arc4random_returns_u32_values() {
     let mut env = Dyn::new();
     let script = format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#);
     for _ in 0..2 {
-        let value = env
-            .eval(&script)
+        let value = eval_native(&mut env, &script)
             .expect("arc4random dlcall")
             .as_int()
             .expect("arc4random integer result");
@@ -184,12 +190,8 @@ fn dlcall_clock_gettime_nsec_np_is_monotonic_against_libc() {
     let clock = i64::from(libc::CLOCK_UPTIME_RAW);
     let mut env = Dyn::new();
     let script = format!(r#"(dlcall "{LIB}" "{symbol}" "u64" "i32" {clock})"#);
-    let first = env
-        .eval(&script)
-        .expect("first clock_gettime_nsec_np dlcall");
-    let second = env
-        .eval(&script)
-        .expect("second clock_gettime_nsec_np dlcall");
+    let first = eval_native(&mut env, &script).expect("first clock_gettime_nsec_np dlcall");
+    let second = eval_native(&mut env, &script).expect("second clock_gettime_nsec_np dlcall");
     let first = first.as_int().expect("integer nsec result") as u64;
     let second = second.as_int().expect("integer nsec result") as u64;
     // libc 0.2 does not bind clock_gettime_nsec_np; call the same Darwin symbol.
@@ -217,8 +219,7 @@ fn dlcall_sysctl_writes_ncpu_into_caller_buffer() {
         .expect("bind ncpu output");
     env.bind("oldlenp", (&mut oldlen as *mut usize).cast())
         .expect("bind ncpu output length");
-    let got = env
-        .eval(&format!(
+    let got = eval_native(&mut env, &format!(
             r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" mib "u32" 2 "ptr" oldp "ptr" oldlenp "ptr" 0 "u64" 0)"#
         ))
         .expect("sysctl dlcall");
@@ -263,11 +264,11 @@ fn dlcall_sysctlnametomib_writes_caller_owned_mib() {
         .expect("bind MIB output");
     env.bind("len", (&mut len as *mut usize).cast())
         .expect("bind MIB output length");
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "ptr" mib "ptr" len)"#
-        ))
-        .expect("sysctlnametomib dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "ptr" mib "ptr" len)"#),
+    )
+    .expect("sysctlnametomib dlcall");
     assert_eq!(got, Value::Int(0));
     assert!((1..=mib.len()).contains(&len), "MIB length must fit output");
 
@@ -286,13 +287,13 @@ fn dlcall_pthread_equal_recognizes_current_thread() {
     let first = unsafe { libc::pthread_self() } as u64;
     let second = unsafe { libc::pthread_self() } as u64;
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "u64" {first} "u64" {second})"#
-        ))
-        .expect("pthread_equal dlcall")
-        .as_int()
-        .expect("pthread_equal integer result");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "u64" {first} "u64" {second})"#),
+    )
+    .expect("pthread_equal dlcall")
+    .as_int()
+    .expect("pthread_equal integer result");
     assert_ne!(got, 0, "dlcall must recognize the current thread");
     let direct =
         unsafe { libc::pthread_equal(first as libc::pthread_t, second as libc::pthread_t) };
@@ -315,9 +316,11 @@ fn dlcall_mach_timebase_info_writes_caller_owned_ratio() {
     let mut env = Dyn::new();
     env.bind("ratio", (&mut ratio as *mut Timebase).cast())
         .expect("bind timebase output");
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" ratio)"#))
-        .expect("mach_timebase_info dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" ratio)"#),
+    )
+    .expect("mach_timebase_info dlcall");
     assert_eq!(got, Value::Int(0));
     assert!(ratio.numer > 0, "timebase numerator must be positive");
     assert!(ratio.denom > 0, "timebase denominator must be positive");
@@ -333,8 +336,7 @@ fn dlcall_mach_timebase_info_writes_caller_owned_ratio() {
 fn dlcall_pthread_main_np_matches_libc() {
     let symbol = live_symbol("pthread_main_np");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
         .expect("pthread_main_np dlcall")
         .as_int()
         .expect("pthread_main_np integer");
@@ -356,13 +358,13 @@ fn dlcall_getlogin_r_matches_direct_c_buffer() {
         let mut env = Dyn::new();
         env.bind("name", buffer.as_mut_ptr().cast())
             .expect("bind login output");
-        let status = env
-            .eval(&format!(
-                r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "u64" {len})"#
-            ))
-            .expect("getlogin_r dlcall")
-            .as_int()
-            .expect("getlogin_r integer status");
+        let status = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" name "u64" {len})"#),
+        )
+        .expect("getlogin_r dlcall")
+        .as_int()
+        .expect("getlogin_r integer status");
         if status == i64::from(libc::ERANGE) {
             assert_eq!(len, 256, "only the initial buffer may be too small");
             len = 1024;
@@ -394,11 +396,11 @@ fn dlcall_pthread_threadid_np_matches_libc_current_thread() {
     let mut env = Dyn::new();
     env.bind("tid", (&mut tid as *mut u64).cast())
         .expect("bind thread-id output");
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" 0 "ptr" tid)"#
-        ))
-        .expect("pthread_threadid_np dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" 0 "ptr" tid)"#),
+    )
+    .expect("pthread_threadid_np dlcall");
     assert_eq!(got, Value::Int(0));
     assert_ne!(tid, 0, "current thread id must be non-zero");
 
@@ -417,14 +419,16 @@ fn dlcall_pthread_getname_np_matches_libc_current_thread() {
     let mut env = Dyn::new();
     env.bind("name", name.as_mut_ptr().cast())
         .expect("bind thread-name buffer");
-    let got = env
-        .eval(&format!(
+    let got = eval_native(
+        &mut env,
+        &format!(
             r#"(dlcall "{LIB}" "{symbol}" "i32" "u64" {thread} "ptr" name "u64" {})"#,
             name.len()
-        ))
-        .expect("pthread_getname_np dlcall")
-        .as_int()
-        .expect("pthread_getname_np integer status") as i32;
+        ),
+    )
+    .expect("pthread_getname_np dlcall")
+    .as_int()
+    .expect("pthread_getname_np integer status") as i32;
 
     let mut direct = [0_i8; 64];
     let direct_status = unsafe {
@@ -450,8 +454,7 @@ fn dlcall_proc_pidinfo_writes_caller_owned_bsdinfo() {
     let mut env = Dyn::new();
     env.bind("info", (&raw mut info).cast())
         .expect("bind proc_bsdinfo");
-    let got = env
-        .eval(&format!(
+    let got = eval_native(&mut env, &format!(
             r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "u64" 0 "ptr" info "i32" {bufsize})"#
         ))
         .expect("proc_pidinfo dlcall")
@@ -476,8 +479,7 @@ fn dlcall_proc_pidinfo_writes_caller_owned_bsdinfo() {
 fn dlcall_nsget_argc_matches_libc_pointer_and_count() {
     let symbol = live_symbol("nsget_argc");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
         .expect("_NSGetArgc dlcall")
         .as_ptr()
         .expect("_NSGetArgc pointer") as *mut i32;
@@ -496,8 +498,7 @@ fn dlcall_nsget_argc_matches_libc_pointer_and_count() {
 fn dlcall_nsget_argv_matches_libc_borrowed_pointer() {
     let symbol = live_symbol("nsget_argv");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
         .expect("_NSGetArgv dlcall")
         .as_ptr()
         .expect("_NSGetArgv pointer") as *mut *mut *mut libc::c_char;
@@ -517,8 +518,7 @@ fn dlcall_nsget_argv_matches_libc_borrowed_pointer() {
 fn dlcall_nsget_environ_matches_libc_borrowed_pointer() {
     let symbol = live_symbol("nsget_environ");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
         .expect("_NSGetEnviron dlcall")
         .as_ptr()
         .expect("_NSGetEnviron pointer") as *mut *mut *mut libc::c_char;
@@ -545,11 +545,11 @@ fn dlcall_proc_pid_rusage_writes_caller_owned_v4() {
     let mut env = Dyn::new();
     env.bind("ri", (&raw mut ri).cast())
         .expect("bind rusage_info_v4");
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "ptr" ri)"#
-        ))
-        .expect("proc_pid_rusage dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "ptr" ri)"#),
+    )
+    .expect("proc_pid_rusage dlcall");
     assert_eq!(got, Value::Int(0));
 
     let mut direct = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
@@ -569,8 +569,7 @@ fn dlcall_dyld_image_count_matches_direct_c() {
 
     let symbol = live_symbol("dyld_image_count");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#))
         .expect("_dyld_image_count dlcall")
         .as_int()
         .expect("_dyld_image_count integer");
@@ -588,11 +587,11 @@ fn dlcall_getentropy_fills_caller_owned_buffer() {
     let mut env = Dyn::new();
     env.bind("bytes", bytes.as_mut_ptr().cast())
         .expect("bind entropy output");
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" bytes "u64" {BYTES})"#
-        ))
-        .expect("getentropy dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" bytes "u64" {BYTES})"#),
+    )
+    .expect("getentropy dlcall");
     assert_eq!(got, Value::Int(0));
 
     let mut direct = [0_u8; BYTES];
@@ -608,14 +607,16 @@ fn dlcall_proc_name_matches_direct_c_current_process_name() {
     let mut env = Dyn::new();
     env.bind("name", name.as_mut_ptr().cast())
         .expect("bind process-name buffer");
-    let got = env
-        .eval(&format!(
+    let got = eval_native(
+        &mut env,
+        &format!(
             r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "ptr" name "u32" {})"#,
             name.len()
-        ))
-        .expect("proc_name dlcall")
-        .as_int()
-        .expect("proc_name byte count") as i32;
+        ),
+    )
+    .expect("proc_name dlcall")
+    .as_int()
+    .expect("proc_name byte count") as i32;
     assert!(got > 0, "proc_name must write a current-process name");
     let got = unsafe { CStr::from_ptr(name.as_ptr()) };
 
@@ -640,13 +641,13 @@ fn dlcall_pthread_get_stackaddr_np_matches_libc_current_thread() {
     let symbol = live_symbol("pthread_get_stackaddr_np");
     let thread = unsafe { libc::pthread_self() } as u64;
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "ptr" "u64" {thread})"#
-        ))
-        .expect("pthread_get_stackaddr_np dlcall")
-        .as_ptr()
-        .expect("pthread_get_stackaddr_np pointer") as *mut c_void;
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr" "u64" {thread})"#),
+    )
+    .expect("pthread_get_stackaddr_np dlcall")
+    .as_ptr()
+    .expect("pthread_get_stackaddr_np pointer") as *mut c_void;
     let direct = unsafe { libc::pthread_get_stackaddr_np(libc::pthread_self()) };
     assert!(
         !got.is_null(),
@@ -664,13 +665,13 @@ fn dlcall_pthread_get_stacksize_np_matches_libc_current_thread() {
     let symbol = live_symbol("pthread_get_stacksize_np");
     let thread = unsafe { libc::pthread_self() } as u64;
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "u64" "u64" {thread})"#
-        ))
-        .expect("pthread_get_stacksize_np dlcall")
-        .as_int()
-        .expect("pthread_get_stacksize_np size") as u64;
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "u64" "u64" {thread})"#),
+    )
+    .expect("pthread_get_stacksize_np dlcall")
+    .as_int()
+    .expect("pthread_get_stacksize_np size") as u64;
     let direct = unsafe { libc::pthread_get_stacksize_np(libc::pthread_self()) } as u64;
     assert!(got > 0, "current thread stack size must be positive");
     assert!(direct > 0, "direct thread stack size must be positive");
@@ -681,8 +682,7 @@ fn dlcall_pthread_get_stacksize_np_matches_libc_current_thread() {
 fn dlcall_pthread_self_matches_libc_current_thread() {
     let symbol = live_symbol("pthread_self");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "u64")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "u64")"#))
         .expect("pthread_self dlcall")
         .as_int()
         .expect("pthread_self thread handle") as u64;
@@ -704,9 +704,11 @@ fn dlcall_pthread_cpu_number_np_writes_current_cpu() {
     let mut env = Dyn::new();
     env.bind("cpu", (&mut cpu as *mut u64).cast())
         .expect("bind current CPU output");
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" cpu)"#))
-        .expect("pthread_cpu_number_np dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" cpu)"#),
+    )
+    .expect("pthread_cpu_number_np dlcall");
     assert_eq!(got, Value::Int(0));
     let ncpu = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
     assert!(ncpu > 0, "online CPU count must be positive");
@@ -730,13 +732,13 @@ fn dlcall_malloc_good_size_matches_direct_c_for_requests() {
     let symbol = live_symbol("malloc_good_size");
     for request in [1_u64, 4097] {
         let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
-                r#"(dlcall "{LIB}" "{symbol}" "u64" "u64" {request})"#
-            ))
-            .expect("malloc_good_size dlcall")
-            .as_int()
-            .expect("malloc_good_size allocation size") as u64;
+        let got = eval_native(
+            &mut env,
+            &format!(r#"(dlcall "{LIB}" "{symbol}" "u64" "u64" {request})"#),
+        )
+        .expect("malloc_good_size dlcall")
+        .as_int()
+        .expect("malloc_good_size allocation size") as u64;
         let direct = unsafe { malloc_good_size(request as usize) } as u64;
         assert!(got >= request, "good allocation size must cover request");
         assert_eq!(got, direct);
@@ -747,8 +749,7 @@ fn dlcall_malloc_good_size_matches_direct_c_for_requests() {
 fn dlcall_nsget_progname_matches_libc_outer_pointer_and_c_string() {
     let symbol = live_symbol("nsget_progname");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
         .expect("_NSGetProgname dlcall")
         .as_ptr()
         .expect("_NSGetProgname outer pointer") as *mut *mut libc::c_char;
@@ -781,11 +782,11 @@ fn dlcall_proc_libversion_writes_caller_owned_version() {
         .expect("bind proc_libversion major output");
     env.bind("minor", (&mut minor as *mut i32).cast())
         .expect("bind proc_libversion minor output");
-    let got = env
-        .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" major "ptr" minor)"#
-        ))
-        .expect("proc_libversion dlcall");
+    let got = eval_native(
+        &mut env,
+        &format!(r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" major "ptr" minor)"#),
+    )
+    .expect("proc_libversion dlcall");
     assert_eq!(got, Value::Int(0));
     assert!(major >= 1, "libproc major version must be positive");
 
@@ -801,8 +802,7 @@ fn dlcall_proc_libversion_writes_caller_owned_version() {
 fn dlcall_pthread_jit_write_protect_supported_np_matches_libc_boolean() {
     let symbol = live_symbol("pthread_jit_write_protect_supported_np");
     let mut env = Dyn::new();
-    let got = env
-        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
+    let got = eval_native(&mut env, &format!(r#"(dlcall "{LIB}" "{symbol}" "i32")"#))
         .expect("pthread_jit_write_protect_supported_np dlcall")
         .as_int()
         .expect("pthread_jit_write_protect_supported_np integer");
