@@ -106,6 +106,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [current process group via `getpgid(0)`](examples/getpgid-current.md)
 - [current user ID via `getuid`](examples/getuid.md)
 - [effective user ID via `geteuid`](examples/geteuid.md)
+- [current group ID via `getgid`](examples/getgid.md)
 - [effective group ID via `getegid`](examples/getegid.md)
 - [current priority via `getpriority(0, 0)`](examples/getpriority-current.md)
 - [current nice value via `nice(0)`](examples/nice-zero.md)
