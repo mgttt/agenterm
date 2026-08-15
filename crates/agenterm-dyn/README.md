@@ -107,6 +107,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [current user ID via `getuid`](examples/getuid.md)
 - [effective user ID via `geteuid`](examples/geteuid.md)
 - [effective group ID via `getegid`](examples/getegid.md)
+- [current priority via `getpriority(0, 0)`](examples/getpriority-current.md)
+- [current nice value via `nice(0)`](examples/nice-zero.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
