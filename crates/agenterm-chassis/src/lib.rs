@@ -2,7 +2,10 @@
 //!
 //! This crate does not depend on the workbench `agenterm` package. Compose
 //! copies frozen L1 loader bytes and validates that L3 only names L2
-//! capabilities.
+//! capabilities. L2 programs AOT to a tiny bytecode ISA (`bytecode`, `vm`).
+
+pub mod bytecode;
+pub mod vm;
 
 use std::fs;
 use std::io;
@@ -70,6 +73,8 @@ pub struct HostAbi {
 pub struct Capability {
     pub id: String,
     pub kind: String,
+    #[serde(default, rename = "impl")]
+    pub impl_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

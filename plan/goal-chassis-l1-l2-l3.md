@@ -17,6 +17,19 @@ Apps (Chassis-L3) call a versioned Host ABI (Chassis-L2). L2 updates do not rebu
 the Base PE. Daily work packs frozen L1 loaders with L2/L3; it does not rustc
 the workspace.
 
+## L2 execution (decision)
+
+L2 is stronger as a **tiny custom-ISA AOT → bytecode → bounded VM**. Not:
+
+- libtcc / an embedded C compiler
+- rustc of L2 on the daily path
+- cranelift / LLVM JIT
+- dyn `dlcall` from L3
+
+Why: tcc-like *economics* (small, fast turnaround, tiny size) without pulling
+a C compiler into the chassis. rustc remains only for Chassis-L1 (rare,
+six-cell) and rare native L2 plugins (cu).
+
 ## Done
 
 - W0: L1 path surface named.
@@ -32,10 +45,12 @@ The live `agenterm` PE is not yet replaced by these loaders.
 
 ## Next (later waves)
 
-Host ABI name table, cu as L2, first real L2 payload through the composer,
-then v0.1.18 `.agp` as L3.
+- **W2b** L2 bytecode VM (sibling agents implement modules).
+- Host ABI name table, cu as L2, first real L2 payload through the composer,
+  then v0.1.18 `.agp` as L3.
 
 ## Non-goals
 
 Electron in the official PE. App-level `dlcall`. A second platform inside dyn.
-Renaming the script L1/L2/L3 documents away.
+Renaming the script L1/L2/L3 documents away. libtcc / embedded C as L2.
+cranelift / LLVM JIT. rustc of L2 on the daily path.

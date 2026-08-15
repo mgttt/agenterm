@@ -24,6 +24,18 @@
 L1 不是一个文件，是 **六份冻底盘**（win/lnx/osx × x86_64/aarch64）。  
 日常加速靠第二条循环占满。
 
+### L2 执行（已定）
+
+L2 更强靠 **tiny custom-ISA AOT → bytecode → bounded VM**，不是：
+
+- libtcc / 嵌 C 编译器
+- 日常路径 rustc L2
+- cranelift / LLVM JIT
+- L3 dyn `dlcall`
+
+要 tcc 的经济（小、周转快、体积小），不把 C 编译器拉进底盘。  
+rustc 只留给 Chassis-L1（少见、六格）和少见的原生 L2 插件（cu）。
+
 成品：
 
 ```text
@@ -55,6 +67,7 @@ L2 若还是半个 `agenterm.exe`，打包循环是假的。
 W0  点名 L1 路径面（已做）
 W1  打包循环证明：合成器 + 黑盒测试，过程中不得调用 cargo（本增量）
 W2  独立 crate `agenterm-chassis`：compose/check/inspect + 冻结 Host ABI + 示例 L3（已做）
+W2b L2 bytecode VM（sibling agents 落实各模块）
 W3  第一份真实 L2 产物走合成器进「成品」夹具；cu 仍为独立 L2 PE
 W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 ```
@@ -70,9 +83,11 @@ W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 
 ## 4. 非目标
 
-- 用 libtcc / 嵌编译器
+- 用 libtcc / 嵌编译器当 L2
+- 日常路径 rustc L2
+- cranelift / LLVM JIT
 - Electron 进正式 PE
-- L3 直接 `dlcall`
+- L3 直接 `dlcall` / dyn `dlcall`
 - 本波改 GitHub Actions 矩阵
 - 重开 ape 编译拆分当热更
 

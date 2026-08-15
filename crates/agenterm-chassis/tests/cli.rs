@@ -90,6 +90,30 @@ fn cli_compose_check_inspect_round_trip() {
 }
 
 #[test]
+fn cli_eval_l2_adds_without_cargo() {
+    let tmp = std::env::temp_dir().join(format!("chassis-eval-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).expect("tmp");
+    let prog = tmp.join("add.json");
+    fs::write(prog.as_path(), include_str!("../l2/programs/add.json")).expect("prog");
+    let out = Command::new(bin())
+        .args(["eval-l2", prog.to_str().expect("utf8")])
+        .output()
+        .expect("eval-l2");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("\"value\": 3") || stdout.contains("\"value\":3"),
+        "{stdout}"
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn crate_is_not_the_workbench() {
     let manifest = include_str!("../Cargo.toml");
     assert!(

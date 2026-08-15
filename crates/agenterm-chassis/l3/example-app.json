@@ -2,5 +2,10 @@
   "schema": 1,
   "layer": "chassis-l3",
   "name": "example.app",
-  "capabilities": ["protocol.info", "tabs.list", "workspace.info"]
+  "capabilities": [
+    "protocol.info",
+    "tabs.list",
+    "workspace.info",
+    "chassis.inspect"
+  ]
 }
