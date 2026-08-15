@@ -324,6 +324,13 @@ authentication.
 - [Coding-agent guide](AGENTS.md)
 - [Build and install a local macOS app](docs/macos-local-build.md)
 
+### `agenterm-dyn` library cache bound
+
+Each `Dyn` environment retains at most 32 distinct `dlcall` library names. Entries are never
+evicted or unloaded while that environment lives, so an already cached exact name remains usable
+at capacity. A 33rd distinct name returns a library error before its argument expressions run and
+before a loader call is attempted; create a fresh `Dyn` environment to use a different library set.
+
 ## Placeholder TUI
 
 Run `agenterm tui` to open the initial terminal interface. It currently shows

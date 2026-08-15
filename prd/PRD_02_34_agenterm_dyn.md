@@ -21,6 +21,9 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   before loading or argument evaluation.
 - Embedded NUL library and symbol names reject before loading or argument
   evaluation.
+- Each `Dyn` retains at most 32 distinct `dlcall` library names. The cache never evicts or
+  unloads entries, so an exact cached name remains usable at capacity; a new name rejects with
+  `DynError::Library` before argument evaluation and before loading.
 - C spelling aliases outside the fixed-width ABI whitelist reject before
   loading or argument evaluation.
 - The parser accepts exactly 256 nested lists; 257 nested lists return

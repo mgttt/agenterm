@@ -9,6 +9,12 @@ use crate::parse::SExpr;
 use crate::value::Value;
 
 const MAX_ARGS: usize = 6;
+/// Maximum number of distinct dynamic-library names retained by one [`Dyn`].
+///
+/// Entries are never evicted: a cached library keeps its symbols loaded for the lifetime of the
+/// environment.  Consequently a cached name remains usable after the limit is reached, while a
+/// new name is rejected before its arguments are evaluated or loading is attempted.
+const MAX_CACHED_LIBRARIES: usize = 32;
 const MAX_LIBRARY_NAME_BYTES: usize = 255;
 const MAX_SYMBOL_NAME_BYTES: usize = 255;
 
@@ -22,14 +28,27 @@ impl LibraryCache {
         Self::default()
     }
 
+    fn ensure_capacity(&self, path: &str) -> Result<(), DynError> {
+        if self.libs.contains_key(path) || self.libs.len() < MAX_CACHED_LIBRARIES {
+            return Ok(());
+        }
+        Err(DynError::Library(format!(
+            "library cache limit of {MAX_CACHED_LIBRARIES} distinct libraries reached"
+        )))
+    }
+
     fn load(&mut self, path: &str) -> Result<&Library, DynError> {
         if !self.libs.contains_key(path) {
+            self.ensure_capacity(path)?;
             // SAFETY: loading a host dynamic library by path; callers supply OS-specific names.
             let lib = unsafe { Library::new(path) }
                 .map_err(|e| DynError::Library(format!("{path}: {e}")))?;
             self.libs.insert(path.to_owned(), lib);
         }
-        Ok(self.libs.get(path).expect("library just inserted"))
+        Ok(self
+            .libs
+            .get(path)
+            .expect("library was just inserted or already cached"))
     }
 }
 
@@ -188,6 +207,9 @@ pub(crate) fn eval_dlcall(env: &mut Dyn, args: &[SExpr]) -> Result<Value, DynErr
         .chunks_exact(2)
         .map(|pair| SigType::parse_arg(&expect_string(&pair[0], "dlcall argument type")?))
         .collect::<Result<Vec<_>, _>>()?;
+    // Reject an uncached library before evaluating script argument expressions. `load` repeats
+    // this check so future internal callers cannot bypass the resource bound.
+    env.libs.ensure_capacity(&lib_name)?;
     #[cfg(target_os = "macos")]
     let darwin_ioctl = is_darwin_ioctl_signature(&sym_name, ret_ty, &arg_types);
     let dyn_args = arg_types
@@ -319,6 +341,31 @@ unsafe fn invoke(
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn current_process_library() -> Library {
+        Library::from(libloading::os::unix::Library::this())
+    }
+
+    #[cfg(windows)]
+    fn current_process_library() -> Library {
+        Library::from(
+            libloading::os::windows::Library::this()
+                .expect("current process must be available as a dynamic library"),
+        )
+    }
+
+    #[cfg(any(unix, windows))]
+    fn full_cache() -> LibraryCache {
+        let mut cache = LibraryCache::new();
+        for index in 0..MAX_CACHED_LIBRARIES {
+            cache.libs.insert(
+                format!("test-cached-library-{index}"),
+                current_process_library(),
+            );
+        }
+        cache
+    }
+
     unsafe extern "C" fn sum_six(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64 {
         a + b + c + d + e + f
     }
@@ -379,6 +426,47 @@ mod tests {
                 "7 arguments exceed the fixed limit of 6".into()
             ))
         );
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn library_cache_rejects_new_keys_without_evicting_cached_libraries() {
+        let mut cache = full_cache();
+        assert_eq!(cache.libs.len(), MAX_CACHED_LIBRARIES);
+
+        // A full cache continues to serve its exact existing names without another load.
+        assert!(cache.load("test-cached-library-0").is_ok());
+        let error = cache
+            .load("test-new-library-after-limit")
+            .expect_err("an uncached name must not grow a full cache");
+        assert_eq!(
+            error,
+            DynError::Library("library cache limit of 32 distinct libraries reached".into())
+        );
+        assert_eq!(cache.libs.len(), MAX_CACHED_LIBRARIES);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn dlcall_rejects_full_cache_before_evaluating_arguments() {
+        let mut env = Dyn::new();
+        env.libs = full_cache();
+
+        assert_eq!(
+            env.eval(
+                r#"(dlcall "test-new-library-after-limit" "unused" "i32"
+                    "i32" (set touched 1))"#
+            ),
+            Err(DynError::Library(
+                "library cache limit of 32 distinct libraries reached".into()
+            ))
+        );
+        assert_eq!(
+            env.eval("touched")
+                .expect_err("argument expression must not execute"),
+            DynError::UnknownVar("touched".into())
+        );
+        assert_eq!(env.libs.libs.len(), MAX_CACHED_LIBRARIES);
     }
 
     #[cfg(target_os = "macos")]
