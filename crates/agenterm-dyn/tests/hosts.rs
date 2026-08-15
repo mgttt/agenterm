@@ -117,7 +117,8 @@ fn additional_system_probes_are_live_only_on_linux() {
                 "isatty_stderr",
                 "sched_yield_void",
                 "alarm_zero",
-                "umask"
+                "umask",
+                "getdtablesize"
             ]
         );
         assert_eq!(
@@ -156,6 +157,7 @@ fn additional_system_probes_are_live_only_on_linux() {
                 ("sched_yield_void", "libc.so.6", "sched_yield"),
                 ("alarm_zero", "libc.so.6", "alarm"),
                 ("umask", "libc.so.6", "umask"),
+                ("getdtablesize", "libc.so.6", "getdtablesize"),
             ]
         );
     }

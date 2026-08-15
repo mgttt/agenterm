@@ -633,6 +633,21 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_getdtablesize_matches_libc() {
+        let probe = live_system_probe("getdtablesize");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32")"#))
+            .expect("getdtablesize dlcall");
+        let real = unsafe { libc::getdtablesize() };
+        assert!(real > 0, "descriptor table size should be positive");
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_ioctl_winsize() {
         let c = cell();
         let SizeProbe::IoctlTiocgwinsz {
