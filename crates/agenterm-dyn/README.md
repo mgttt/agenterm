@@ -70,7 +70,7 @@ supported and fail explicitly.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `getsid(0)`, `getpgid(0)`, `geteuid`, `getegid`, `getpriority(PRIO_PROCESS, 0)`, `nice(0)`, `sched_yield` as void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0/1/2)`, `open("/dev/null")` + `isatty` + `close`, `access` success/failure, `fcntl(0, F_GETFD)`, `fcntl(0, F_GETFL)`, `lseek(0, 0, SEEK_CUR)`, and `dup(0)` + `close` dlcalls |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `getsid(0)`, `getpgid(0)`, `geteuid`, `getegid`, `getpriority(PRIO_PROCESS, 0)`, `nice(0)`, `sched_yield` as void, `alarm(0)`, `umask` read/restore, `getdtablesize`, `gethostid`, `getpagesize`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0/1/2)`, `open("/dev/null")` + `isatty` + `close`, `access` success/failure, `fcntl(0, F_GETFD)`, `fcntl(0, F_GETFL)`, `lseek(0, 0, SEEK_CUR)`, and `dup(0)` + `close` dlcalls |
 | macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` | `time` | placeholders only |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
@@ -116,6 +116,8 @@ without wiring dyn into cu, platform, or the ABI:
 - [descriptor-table limit via `getdtablesize`](examples/getdtablesize.md)
 - [current host ID via `gethostid`](examples/gethostid.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
+- [host page size via `sysconf`](examples/sysconf-pagesize.md)
+- [host page size via `getpagesize`](examples/getpagesize.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
 - [whether standard input is a terminal](examples/isatty-stdin.md)
@@ -169,6 +171,8 @@ stdin/stdout/stderr state rather than requiring an interactive terminal. `sched_
 exercises the void-return path; `alarm(0)` returns an integer and leaves no alarm pending.
 The `umask` probe reads with `umask(0)` and immediately restores the returned mask.
 `getdtablesize` returns the host descriptor-table limit as a positive integer.
+`gethostid` returns the host identifier as the native signed-long integer.
+`getpagesize` returns the positive page size and agrees with `sysconf(_SC_PAGESIZE)`.
 
 **macOS** (local / CI when available): `getpid`, `time(NULL)`, optional
 `ioctl` on `/dev/tty`, `getenv("DISPLAY")`.
