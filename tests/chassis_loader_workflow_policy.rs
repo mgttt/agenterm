@@ -179,7 +179,7 @@ fn validate_chain(s: &Sources) -> Result<(), String> {
         "chassis image is not an installed directory",
         "extract a Candidate .tgz before launch",
         "root.join(\"l1\").join(native_cell).join(\"loader\")",
-        "native chassis loader for cell {cell} is not an executable image",
+        "agenterm_platform::chassis_loader::validate_executable(loader, &bytes)",
     ] {
         require(
             &s.workbench_image,
@@ -250,7 +250,12 @@ fn deleting_any_delivery_link_is_rejected() {
         (
             "workbench installed typed loader",
             "workbench installed typed loader",
-            |s| remove_once(&mut s.workbench_image, "if !root.is_dir()"),
+            |s| {
+                remove_once(
+                    &mut s.workbench_image,
+                    "agenterm_platform::chassis_loader::validate_executable(loader, &bytes)",
+                )
+            },
         ),
         ("Promotion human trigger", "Promotion human trigger", |s| {
             remove_once(&mut s.promotion, "  workflow_dispatch:\n")
