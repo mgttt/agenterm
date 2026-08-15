@@ -64,6 +64,18 @@ mod linux {
         live_cell().expect("linux cell")
     }
 
+    #[test]
+    fn variadic_system_probes_are_catalogued_but_not_invoked() {
+        for name in ["open_dev_null", "fcntl_stdin_getfd", "fcntl_stdin_getfl"] {
+            let probe = cell()
+                .system_probes
+                .into_iter()
+                .find(|probe| probe.name == name)
+                .unwrap_or_else(|| panic!("missing system probe {name}"));
+            assert!(matches!(probe.status, SystemProbeStatus::Placeholder));
+        }
+    }
+
     fn getpid_script() -> String {
         let c = cell();
         format!(
@@ -506,33 +518,6 @@ mod linux {
     }
 
     #[test]
-    fn dlcall_open_dev_null_is_not_tty_and_closes_fd() {
-        let probe = live_system_probe("open_dev_null");
-        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
-            unreachable!("live_system_probe validates status")
-        };
-        let path = CString::new("/dev/null").expect("/dev/null path");
-        let mut env = Dyn::new();
-        env.bind("dev_null", path.as_ptr().cast_mut().cast())
-            .expect("bind /dev/null path");
-        let fd = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" dev_null "i32" {})"#,
-                libc::O_RDONLY
-            ))
-            .expect("open(/dev/null) dlcall")
-            .as_int()
-            .expect("open return code");
-        assert!(fd >= 0, "open(/dev/null) returned {fd}");
-
-        let isatty = env.eval(&format!(r#"(dlcall "{lib}" "isatty" "i32" "i32" {fd})"#));
-        let close = env.eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#));
-
-        assert_eq!(isatty.expect("isatty(/dev/null) dlcall"), Value::Int(0));
-        assert_eq!(close.expect("close(/dev/null) dlcall"), Value::Int(0));
-    }
-
-    #[test]
     fn dlcall_access_root_f_ok_succeeds() {
         let probe = live_system_probe("access_root");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
@@ -569,23 +554,6 @@ mod linux {
             ))
             .expect("access(missing, F_OK) dlcall");
         assert_eq!(got, Value::Int(-1));
-    }
-
-    #[test]
-    fn dlcall_fcntl_stdin_getfd_matches_libc() {
-        let probe = live_system_probe("fcntl_stdin_getfd");
-        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
-            unreachable!("live_system_probe validates status")
-        };
-        let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0 "i32" {})"#,
-                libc::F_GETFD
-            ))
-            .expect("fcntl(0, F_GETFD) dlcall");
-        let real = unsafe { libc::fcntl(0, libc::F_GETFD) };
-        assert_eq!(got, Value::Int(i64::from(real)));
     }
 
     #[test]
@@ -658,23 +626,6 @@ mod linux {
             .expect("lseek(0, 0, SEEK_CUR) dlcall");
         let real = unsafe { libc::lseek(0, 0, libc::SEEK_CUR) };
         assert_eq!(got, Value::Int(real));
-    }
-
-    #[test]
-    fn dlcall_fcntl_stdin_getfl_matches_libc() {
-        let probe = live_system_probe("fcntl_stdin_getfl");
-        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
-            unreachable!("live_system_probe validates status")
-        };
-        let mut env = Dyn::new();
-        let got = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0 "i32" {})"#,
-                libc::F_GETFL
-            ))
-            .expect("fcntl(0, F_GETFL) dlcall");
-        let real = unsafe { libc::fcntl(0, libc::F_GETFL) };
-        assert_eq!(got, Value::Int(i64::from(real)));
     }
 
     #[test]
@@ -1291,31 +1242,6 @@ mod macos {
     }
 
     #[test]
-    fn dlcall_open_dev_null_is_not_tty_and_closes_fd() {
-        let probe = live_system_probe("open_dev_null");
-        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
-            unreachable!()
-        };
-        let path = CString::new("/dev/null").expect("/dev/null path");
-        let mut env = Dyn::new();
-        env.bind("dev_null", path.as_ptr().cast_mut().cast())
-            .expect("bind /dev/null path");
-        let fd = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{symbol}" "i32" "ptr" dev_null "i32" {})"#,
-                libc::O_RDONLY
-            ))
-            .expect("open(/dev/null) dlcall")
-            .as_int()
-            .expect("open return code");
-        assert!(fd >= 0, "open(/dev/null) returned {fd}");
-        let isatty = env.eval(&format!(r#"(dlcall "{lib}" "isatty" "i32" "i32" {fd})"#));
-        let close = env.eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#));
-        assert_eq!(isatty.expect("isatty(/dev/null) dlcall"), Value::Int(0));
-        assert_eq!(close.expect("close(/dev/null) dlcall"), Value::Int(0));
-    }
-
-    #[test]
     fn dlcall_access_root_and_missing() {
         let root_probe = live_system_probe("access_root");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = root_probe.status else {
@@ -1345,44 +1271,26 @@ mod macos {
     }
 
     #[test]
-    fn dlcall_fcntl_dup_lseek_match_libc() {
+    fn dlcall_dup_lseek_match_libc() {
         let mut env = Dyn::new();
-        let getfd = live_system_probe("fcntl_stdin_getfd");
+        let dup = live_system_probe("dup_stdin");
         let SystemProbeStatus::LiveDlcall {
             lib,
-            symbol: getfd_sym,
-        } = getfd.status
+            symbol: dup_sym,
+        } = dup.status
         else {
             unreachable!()
         };
-        let got_fd = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{getfd_sym}" "i32" "i32" 0 "i32" {})"#,
-                libc::F_GETFD
-            ))
-            .expect("F_GETFD");
-        assert_eq!(
-            got_fd,
-            Value::Int(i64::from(unsafe { libc::fcntl(0, libc::F_GETFD) }))
-        );
-
-        let getfl = live_system_probe("fcntl_stdin_getfl");
-        let SystemProbeStatus::LiveDlcall {
-            symbol: getfl_sym, ..
-        } = getfl.status
-        else {
-            unreachable!()
-        };
-        let got_fl = env
-            .eval(&format!(
-                r#"(dlcall "{lib}" "{getfl_sym}" "i32" "i32" 0 "i32" {})"#,
-                libc::F_GETFL
-            ))
-            .expect("F_GETFL");
-        assert_eq!(
-            got_fl,
-            Value::Int(i64::from(unsafe { libc::fcntl(0, libc::F_GETFL) }))
-        );
+        let fd = env
+            .eval(&format!(r#"(dlcall "{lib}" "{dup_sym}" "i32" "i32" 0)"#))
+            .expect("dup")
+            .as_int()
+            .expect("dup int");
+        assert!(fd >= 0, "dup(0) returned {fd}");
+        let close = env
+            .eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#))
+            .expect("close");
+        assert_eq!(close, Value::Int(0));
 
         let lseek = live_system_probe("lseek_stdin_cur");
         let SystemProbeStatus::LiveDlcall {
@@ -1401,24 +1309,6 @@ mod macos {
             got_off,
             Value::Int(unsafe { libc::lseek(0, 0, libc::SEEK_CUR) })
         );
-
-        let dup = live_system_probe("dup_stdin");
-        let SystemProbeStatus::LiveDlcall {
-            symbol: dup_sym, ..
-        } = dup.status
-        else {
-            unreachable!()
-        };
-        let fd = env
-            .eval(&format!(r#"(dlcall "{lib}" "{dup_sym}" "i32" "i32" 0)"#))
-            .expect("dup")
-            .as_int()
-            .expect("dup int");
-        assert!(fd >= 0, "dup(0) returned {fd}");
-        let close = env
-            .eval(&format!(r#"(dlcall "{lib}" "close" "i32" "i32" {fd})"#))
-            .expect("close");
-        assert_eq!(close, Value::Int(0));
     }
 
     #[test]

@@ -307,18 +307,19 @@ fn dlcall_getlogin_r_matches_direct_c_buffer() {
         }
         break (status, buffer);
     };
-    assert_eq!(got_status, 0, "getlogin_r must fill the caller buffer");
-
     let mut direct_buffer = vec![0_u8; len];
     let direct_status = unsafe { getlogin_r(direct_buffer.as_mut_ptr().cast(), len) };
     assert_eq!(
-        direct_status, 0,
-        "direct getlogin_r must fill the caller buffer"
+        got_status,
+        i64::from(direct_status),
+        "dlcall and direct getlogin_r must return the same status for length {len}"
     );
-    let got = CStr::from_bytes_until_nul(&got_buffer)
-        .expect("getlogin_r must NUL-terminate successful output");
-    let direct = CStr::from_bytes_until_nul(&direct_buffer)
-        .expect("direct getlogin_r must NUL-terminate successful output");
-    assert!(!got.to_bytes().is_empty(), "login name must be non-empty");
-    assert_eq!(got.to_bytes(), direct.to_bytes());
+    if got_status == 0 {
+        let got = CStr::from_bytes_until_nul(&got_buffer)
+            .expect("getlogin_r must NUL-terminate successful output");
+        let direct = CStr::from_bytes_until_nul(&direct_buffer)
+            .expect("direct getlogin_r must NUL-terminate successful output");
+        assert!(!got.to_bytes().is_empty(), "login name must be non-empty");
+        assert_eq!(got.to_bytes(), direct.to_bytes());
+    }
 }

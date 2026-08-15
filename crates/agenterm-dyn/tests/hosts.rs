@@ -142,6 +142,12 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
         assert_eq!(
             c.system_probes[..36]
                 .iter()
+                .filter(|probe| {
+                    !matches!(
+                        probe.name,
+                        "open_dev_null" | "fcntl_stdin_getfd" | "fcntl_stdin_getfl"
+                    )
+                })
                 .map(|probe| match probe.status {
                     SystemProbeStatus::LiveDlcall { lib, symbol } => (probe.name, lib, symbol),
                     SystemProbeStatus::Placeholder => panic!("Linux probe must be live"),
@@ -167,15 +173,12 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 ("sysconf_nprocessors_onln", "libc.so.6", "sysconf"),
                 ("getcwd", "libc.so.6", "getcwd"),
                 ("isatty_stdin", "libc.so.6", "isatty"),
-                ("open_dev_null", "libc.so.6", "open"),
                 ("access_root", "libc.so.6", "access"),
                 ("access_missing", "libc.so.6", "access"),
-                ("fcntl_stdin_getfd", "libc.so.6", "fcntl"),
                 ("dup_stdin", "libc.so.6", "dup"),
                 ("getpriority_process", "libc.so.6", "getpriority"),
                 ("nice_zero", "libc.so.6", "nice"),
                 ("lseek_stdin_cur", "libc.so.6", "lseek"),
-                ("fcntl_stdin_getfl", "libc.so.6", "fcntl"),
                 ("isatty_stdout", "libc.so.6", "isatty"),
                 ("isatty_stderr", "libc.so.6", "isatty"),
                 ("sched_yield_void", "libc.so.6", "sched_yield"),
@@ -186,6 +189,16 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 ("getpagesize", "libc.so.6", "getpagesize"),
             ]
         );
+        for name in ["open_dev_null", "fcntl_stdin_getfd", "fcntl_stdin_getfl"] {
+            assert!(matches!(
+                c.system_probes
+                    .iter()
+                    .find(|probe| probe.name == name)
+                    .expect("variadic probe is catalogued")
+                    .status,
+                SystemProbeStatus::Placeholder
+            ));
+        }
         assert!(
             c.system_probes[36..]
                 .iter()
@@ -193,13 +206,28 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
         );
     }
     for c in [MACOS_X86_64, MACOS_AARCH64] {
-        assert!(c.system_probes[..36].iter().all(|probe| matches!(
-            probe.status,
-            SystemProbeStatus::LiveDlcall {
-                lib: "libSystem.B.dylib",
-                ..
-            }
-        )));
+        assert!(c.system_probes[..36].iter().all(|probe| {
+            matches!(
+                probe.name,
+                "open_dev_null" | "fcntl_stdin_getfd" | "fcntl_stdin_getfl"
+            ) || matches!(
+                probe.status,
+                SystemProbeStatus::LiveDlcall {
+                    lib: "libSystem.B.dylib",
+                    ..
+                }
+            )
+        }));
+        for name in ["open_dev_null", "fcntl_stdin_getfd", "fcntl_stdin_getfl"] {
+            assert!(matches!(
+                c.system_probes
+                    .iter()
+                    .find(|probe| probe.name == name)
+                    .expect("variadic probe is catalogued")
+                    .status,
+                SystemProbeStatus::Placeholder
+            ));
+        }
         assert_eq!(
             c.system_probes[36..]
                 .iter()

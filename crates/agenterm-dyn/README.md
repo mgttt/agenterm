@@ -92,8 +92,8 @@ deny, or otherwise change any native-door or caller authority semantics.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live first 36: `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `open`/`access`/`fcntl`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; Darwin-only final thirteen are placeholders |
-| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | live first 36 matching-host rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, and `getlogin_r`; `mach_host_self` remains a placeholder because its send right needs explicit release |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | fixed-ABI live rows include `time`, caller-owned-pointer `times`, `getrusage(RUSAGE_SELF, …)`, `getrlimit(RLIMIT_NOFILE, …)`, `clock_gettime`, `uname`, uid/gid/pid group, `sysconf`, `getcwd`, `isatty`, `access`/`dup`/`lseek`, `getpriority`/`nice`, `sched_yield`, `alarm`, `umask`, `getdtablesize`, `gethostid`, `getpagesize`; variadic `open`/`fcntl` and Darwin-only rows are placeholders |
+| macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | signature-gated loaded-symbol `ioctl(TIOCGWINSZ)` through Darwin's variadic ABI | `time` | shared fixed-ABI live rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`, and `getlogin_r`; variadic `open`/`fcntl` and `mach_host_self` are placeholders |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
 All six rows compile as data on every host. `live_cell()` selects the row
@@ -161,10 +161,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [whether standard input is a terminal](examples/isatty-stdin.md)
 - [whether standard output is a terminal](examples/isatty-stdout.md)
 - [whether standard error is a terminal](examples/isatty-stderr.md)
-- [`open("/dev/null")` then `isatty` then `close`](examples/open-dev-null-isatty-close.md)
-- [`fcntl(0, F_GETFD)` descriptor flags](examples/fcntl-stdin-getfd.md)
 - [`lseek(0, 0, SEEK_CUR)` current offset](examples/lseek-stdin-current.md)
-- [`fcntl(0, F_GETFL)` status flags](examples/fcntl-stdin-getfl.md)
 - [`dup(0)` then `close`](examples/dup-stdin-close.md)
 - [`access("/", F_OK)` success](examples/access-root-f-ok.md)
 - [`access` missing-path failure](examples/access-missing-path.md)
@@ -199,11 +196,11 @@ cargo test -p agenterm-dyn
 `getuid` + `getgid` + `geteuid` + `getegid` cross-checked with libc; real headless
 `time(NULL)`, `clock_gettime(CLOCK_MONOTONIC)`, `uname`, `sysconf(_SC_PAGESIZE)`,
 `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, and `getcwd` dlcalls;
-real `isatty(0)` plus `open("/dev/null")` / `isatty` / `close`; `ioctl(TIOCGWINSZ)`
+real `isatty(0)`; `ioctl(TIOCGWINSZ)`
 on a 24×80 pty when `openpty` succeeds; real `access("/", F_OK)` success and
-missing-path failure; real `fcntl(0, F_GETFD)` and `dup(0)` / `close`;
+missing-path failure; real `dup(0)` / `close`;
 real `getpriority(PRIO_PROCESS, 0)` and `nice(0)`; `getenv("DISPLAY")`; honest `libX11`
-`XOpenDisplay`; real `lseek(0, 0, SEEK_CUR)` and `fcntl(0, F_GETFL)`; and AT-SPI
+`XOpenDisplay`; real `lseek(0, 0, SEEK_CUR)`; and AT-SPI
 library existence probes (no session a11y bus). `isatty(0/1/2)` records the real
 stdin/stdout/stderr state rather than requiring an interactive terminal. `sched_yield`
 exercises the void-return path; `alarm(0)` returns an integer and leaves no alarm pending.

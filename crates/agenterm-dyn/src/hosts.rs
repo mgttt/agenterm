@@ -213,10 +213,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 49] = [
     },
     SystemProbe {
         name: "open_dev_null",
-        status: SystemProbeStatus::LiveDlcall {
-            lib: "libc.so.6",
-            symbol: "open",
-        },
+        // `open` has an optional mode argument, so the fixed-arity dlcall
+        // ABI must not present it as a safe live probe.
+        status: SystemProbeStatus::Placeholder,
     },
     SystemProbe {
         name: "access_root",
@@ -234,10 +233,8 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 49] = [
     },
     SystemProbe {
         name: "fcntl_stdin_getfd",
-        status: SystemProbeStatus::LiveDlcall {
-            lib: "libc.so.6",
-            symbol: "fcntl",
-        },
+        // `fcntl` is variadic even when this particular command takes none.
+        status: SystemProbeStatus::Placeholder,
     },
     SystemProbe {
         name: "dup_stdin",
@@ -269,10 +266,8 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 49] = [
     },
     SystemProbe {
         name: "fcntl_stdin_getfl",
-        status: SystemProbeStatus::LiveDlcall {
-            lib: "libc.so.6",
-            symbol: "fcntl",
-        },
+        // `fcntl` is variadic even when this particular command takes none.
+        status: SystemProbeStatus::Placeholder,
     },
     SystemProbe {
         name: "isatty_stdout",
@@ -403,15 +398,15 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 49] = [
     macos_live("sysconf_nprocessors_onln", "sysconf"),
     macos_live("getcwd", "getcwd"),
     macos_live("isatty_stdin", "isatty"),
-    macos_live("open_dev_null", "open"),
+    placeholder("open_dev_null"),
     macos_live("access_root", "access"),
     macos_live("access_missing", "access"),
-    macos_live("fcntl_stdin_getfd", "fcntl"),
+    placeholder("fcntl_stdin_getfd"),
     macos_live("dup_stdin", "dup"),
     macos_live("getpriority_process", "getpriority"),
     macos_live("nice_zero", "nice"),
     macos_live("lseek_stdin_cur", "lseek"),
-    macos_live("fcntl_stdin_getfl", "fcntl"),
+    placeholder("fcntl_stdin_getfl"),
     macos_live("isatty_stdout", "isatty"),
     macos_live("isatty_stderr", "isatty"),
     macos_live("sched_yield_void", "sched_yield"),
