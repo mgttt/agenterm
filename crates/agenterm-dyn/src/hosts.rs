@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 56],
+    pub system_probes: [SystemProbe; 57],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 56] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 57] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -359,6 +359,7 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 56] = [
     placeholder("pthread_main_np"),
     placeholder("getlogin_r"),
     placeholder("pthread_threadid_np"),
+    placeholder("pthread_getname_np"),
     placeholder("proc_pidinfo"),
     placeholder("nsget_argc"),
     placeholder("nsget_argv"),
@@ -385,7 +386,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 56] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 57] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -435,6 +436,7 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 56] = [
     macos_live("pthread_main_np", "pthread_main_np"),
     macos_live("getlogin_r", "getlogin_r"),
     macos_live("pthread_threadid_np", "pthread_threadid_np"),
+    macos_live("pthread_getname_np", "pthread_getname_np"),
     macos_live("proc_pidinfo", "proc_pidinfo"),
     macos_live("nsget_argc", "_NSGetArgc"),
     macos_live("nsget_argv", "_NSGetArgv"),
@@ -447,7 +449,7 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 56] = [
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 56] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 57] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -626,6 +628,7 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 56] = [
     placeholder("pthread_main_np"),
     placeholder("getlogin_r"),
     placeholder("pthread_threadid_np"),
+    placeholder("pthread_getname_np"),
     placeholder("proc_pidinfo"),
     placeholder("nsget_argc"),
     placeholder("nsget_argv"),

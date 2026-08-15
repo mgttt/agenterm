@@ -353,6 +353,35 @@ fn dlcall_pthread_threadid_np_matches_libc_current_thread() {
 }
 
 #[test]
+fn dlcall_pthread_getname_np_matches_libc_current_thread() {
+    let symbol = live_symbol("pthread_getname_np");
+    let thread = unsafe { libc::pthread_self() };
+    let mut name = [0_i8; 64];
+    let mut env = Dyn::new();
+    env.bind("name", name.as_mut_ptr().cast())
+        .expect("bind thread-name buffer");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "u64" {thread} "ptr" name "u64" {})"#,
+            name.len()
+        ))
+        .expect("pthread_getname_np dlcall")
+        .as_int()
+        .expect("pthread_getname_np integer status") as i32;
+
+    let mut direct = [0_i8; 64];
+    let direct_status = unsafe {
+        libc::pthread_getname_np(libc::pthread_self(), direct.as_mut_ptr(), direct.len())
+    };
+    assert_eq!(got, direct_status, "dlcall and direct statuses must agree");
+    if got == 0 {
+        let got = unsafe { CStr::from_ptr(name.as_ptr()) };
+        let direct = unsafe { CStr::from_ptr(direct.as_ptr()) };
+        assert_eq!(got.to_bytes(), direct.to_bytes());
+    }
+}
+
+#[test]
 fn dlcall_proc_pidinfo_writes_caller_owned_bsdinfo() {
     let symbol = live_symbol("proc_pidinfo");
     let pid = unsafe { libc::getpid() };

@@ -137,6 +137,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_main_np",
                 "getlogin_r",
                 "pthread_threadid_np",
+                "pthread_getname_np",
                 "proc_pidinfo",
                 "nsget_argc",
                 "nsget_argv",
@@ -254,6 +255,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_main_np",
                 "getlogin_r",
                 "pthread_threadid_np",
+                "pthread_getname_np",
                 "proc_pidinfo",
                 "nsget_argc",
                 "nsget_argv",
@@ -263,7 +265,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..55].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..56].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -271,7 +273,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[55].status,
+            c.system_probes[56].status,
             SystemProbeStatus::Placeholder
         ));
     }
