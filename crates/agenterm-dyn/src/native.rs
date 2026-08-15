@@ -388,6 +388,37 @@ mod tests {
         u64::MAX
     }
 
+    // These fixtures deliberately use the narrow C parameter types.  `call_fixed!` is the
+    // project's fixed u64-slot trampoline: the platform integer ABI carries the value in the
+    // low bits of the slot, which the callee then interprets at its declared width.
+    unsafe extern "C" fn take_i8(value: i8) -> i64 {
+        i64::from(value)
+    }
+
+    unsafe extern "C" fn take_u8(value: u8) -> i64 {
+        i64::from(value)
+    }
+
+    unsafe extern "C" fn take_i16(value: i16) -> i64 {
+        i64::from(value)
+    }
+
+    unsafe extern "C" fn take_u16(value: u16) -> i64 {
+        i64::from(value)
+    }
+
+    unsafe extern "C" fn take_i32(value: i32) -> i64 {
+        i64::from(value)
+    }
+
+    unsafe extern "C" fn take_u32(value: u32) -> i64 {
+        i64::from(value)
+    }
+
+    unsafe extern "C" fn take_ptr(value: *mut c_void) -> *mut c_void {
+        value
+    }
+
     #[test]
     fn invoke_accepts_every_supported_arity() {
         unsafe extern "C" fn forty_two() -> i32 {
@@ -452,6 +483,69 @@ mod tests {
         assert_eq!(
             result,
             Err(DynError::DlCall("u64 return does not fit in i64".into()))
+        );
+    }
+
+    #[test]
+    fn fixed_u64_slots_deliver_narrow_integer_boundaries_to_c_abi() {
+        let cases = [
+            (
+                SigType::I8,
+                Value::Int(i64::from(i8::MIN)),
+                take_i8 as *const c_void,
+                i64::from(i8::MIN),
+            ),
+            (
+                SigType::U8,
+                Value::Int(i64::from(u8::MAX)),
+                take_u8 as *const c_void,
+                i64::from(u8::MAX),
+            ),
+            (
+                SigType::I16,
+                Value::Int(i64::from(i16::MIN)),
+                take_i16 as *const c_void,
+                i64::from(i16::MIN),
+            ),
+            (
+                SigType::U16,
+                Value::Int(i64::from(u16::MAX)),
+                take_u16 as *const c_void,
+                i64::from(u16::MAX),
+            ),
+            (
+                SigType::I32,
+                Value::Int(i64::from(i32::MIN)),
+                take_i32 as *const c_void,
+                i64::from(i32::MIN),
+            ),
+            (
+                SigType::U32,
+                Value::Int(i64::from(u32::MAX)),
+                take_u32 as *const c_void,
+                i64::from(u32::MAX),
+            ),
+        ];
+
+        for (sig, value, fixture, expected) in cases {
+            let arg = DynArg::from_value(sig, value).expect("boundary fits declared type");
+            // SAFETY: each fixture is a one-argument C ABI function; its declared narrow
+            // parameter receives the low bits of the trampoline's one u64 argument slot.
+            let actual = unsafe { invoke(fixture, &[arg], SigType::I64) };
+            assert_eq!(actual.expect("narrow C ABI call"), Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn fixed_u64_slot_delivers_pointer_to_c_abi() {
+        let pointer = std::ptr::dangling_mut::<c_void>();
+        let arg = DynArg::from_value(SigType::Ptr, Value::Ptr(pointer as usize))
+            .expect("pointer fits u64 slot on supported targets");
+        // SAFETY: the fixture only returns the pointer and never dereferences it.
+        let actual = unsafe { invoke(take_ptr as *const c_void, &[arg], SigType::Ptr) };
+        assert_eq!(
+            actual.expect("pointer C ABI call"),
+            Value::Ptr(pointer as usize)
         );
     }
 
