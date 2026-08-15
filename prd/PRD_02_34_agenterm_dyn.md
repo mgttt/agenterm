@@ -1,7 +1,7 @@
 # PRD 02.34 — agenterm-dyn（极小 / 动态 / 底层）
 
-Status: active — authorized Darwin probe waves continue under
-`plan/goal-agenterm-dyn-macos.md`.
+Status: active product node — Wave 9 is host-evidenced and shipped; no later
+Darwin probe wave is authorized.
 Owner: 政委定方向；主会话按独占文件域推进。
 
 Parallel crate `crates/agenterm-dyn`, not a fourth engine, not libagenterm, not cu.
@@ -74,20 +74,23 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Last Linux Wave 8 evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **150 passed** (25 unit + 40 errors + 11 hosts + 26 language + 48
-  cfg-gated Linux smoke; 0 doctests). The current Darwin test inventory,
-  last measured on an aarch64-apple-darwin host with Rust 1.97 for Wave 8,
-  is **176**
-  (25 unit + 40 errors + 11 hosts + 26 language + 1 macos_ioctl + 42
-  macos_probes + 4 macos_resource + 27 cfg-gated macOS smoke; 0 doctests).
-  A later portable catalog/documentation gate adds 3 tests and passes on
-  Windows. Wave 9 adds 3 Darwin probe tests, so the next Darwin rerun is
-  expected to report 182, but 176 remains the last host-measured Darwin
-  receipt until that rerun occurs.
+  cfg-gated Linux smoke; 0 doctests). Wave 9 Darwin-native evidence is GitHub
+  Actions `CI / agenterm` success run
+  [31873334933](https://github.com/mgttt/agenterm/actions/runs/31873334933)
+  at SHA `36e80aa9`, which contains Wave 9 commit `49d8c9af` as an ancestor.
+  Native `aarch64-apple-darwin` and `x86_64-apple-darwin` jobs each reported
+  **182 passed, 0 failed**: 25 unit + 3 catalog/docs + 40 errors + 11 hosts +
+  26 language + 1 macos_ioctl + 45 macos_probes + 4 macos_resource + 27
+  cfg-gated macOS smoke; 0 doctests.
   Wave 8 catalog rows (`dladdr`, `gethostuuid`, `_dyld_get_image_header`)
   are live `dlcall`s compared with later native calls.
   Wave 9 adds `arc4random_uniform`, `getdomainname`, and `statvfs` plus a
-  portable catalog/documentation gate. Its Darwin-native run remains required;
-  no Windows result substitutes for that evidence.
+  portable catalog/documentation gate. On both Darwin architectures,
+  `dlcall_arc4random_uniform_respects_each_upper_bound`,
+  `dlcall_getdomainname_matches_independent_caller_buffer`, and
+  `dlcall_statvfs_matches_stable_root_filesystem_fields` each reported `ok`.
+  Wave 9 is therefore host-evidenced and shipped; no Windows result is used as
+  a substitute for that evidence.
   Native CI remains the evidence gate for current source. Host-specific
   counts, not
   a cross-platform estimate.

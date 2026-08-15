@@ -1,11 +1,9 @@
-# Goal: first-class `agenterm-dyn` on macOS (standing)
+# Goal: first-class `agenterm-dyn` on macOS
 
-Status: **active — Wave 9 implemented; Darwin-native evidence pending**
-Execution: primary session + exclusive-file subagents **in background**.
+Status: **complete snapshot — Wave 9 shipped with Darwin-native evidence**
+Execution: completed through Wave 9; this snapshot does not authorize another
+wave.
 Paths: repository-relative or `~/...` only.
-
-The human does **not** need to re-send `/goal`. After I/P, immediately
-plan the next wave and spawn again until 政委 says stop.
 
 ## Outcome
 
@@ -13,8 +11,8 @@ Tiny intern/eval/`dlcall` door. Darwin is first-class and honest: live
 integer/ptr facts, no leaked Mach rights / fds, ioctl only via the
 loaded-symbol variadic gate. Windows stays placeholder.
 
-Evidence every wave: `cargo test -p agenterm-dyn` on this aarch64-apple-darwin
-host.
+Native Darwin evidence is required for a wave to ship; compilation on another
+host is not a substitute.
 
 ## Invariants
 
@@ -39,12 +37,13 @@ host.
   `pthread_is_threaded_np`, `_NSGetMachExecuteHeader`,
   `_dyld_get_image_name`, `_dyld_get_image_vmaddr_slide`, `dladdr`,
   `gethostuuid`, `_dyld_get_image_header`.
-- Darwin evidence (this host): `cargo test --locked -p agenterm-dyn` with
-  `CARGO_TARGET_DIR=target/dyn-macos-docs8` **176 passed** (25 unit + 40
-  errors + 11 hosts + 26 language + 1 macos_ioctl + 42 macos_probes + 4
-  macos_resource + 27 smoke; 0 doctests). The later portable `catalog_docs`
-  gate adds 3 tests and passes on Windows. Wave 9 adds 3 Darwin-only probe
-  tests, so 182 is the expected next Darwin total, not yet a Darwin receipt.
+- Wave 9 Darwin evidence: GitHub Actions `CI / agenterm` success run
+  [31873334933](https://github.com/mgttt/agenterm/actions/runs/31873334933)
+  at SHA `36e80aa9`, which contains Wave 9 commit `49d8c9af` as an ancestor.
+  Native `aarch64-apple-darwin` and `x86_64-apple-darwin` jobs each reported
+  **182 passed, 0 failed**: 25 unit + 3 catalog/docs + 40 errors + 11 hosts +
+  26 language + 1 macos_ioctl + 45 macos_probes + 4 macos_resource + 27
+  cfg-gated macOS smoke; 0 doctests.
 
 ## Wave 4 — shipped
 
@@ -76,17 +75,20 @@ Catalog is 79 rows. `dladdr`, `gethostuuid`, and `_dyld_get_image_header`
 are Darwin Live / Linux+Windows Placeholder. `mach_host_self` stays last
 Placeholder.
 
-## Wave 9 — implemented; native gate pending
+## Wave 9 — shipped
 
 Catalog is 82 rows. `arc4random_uniform`, `getdomainname`, and `statvfs`
 are Darwin Live / Linux+Windows Placeholder. `arc4random_uniform` is checked
 by its bound rather than equality across random calls; `getdomainname` uses
 Darwin's `i32` length and independent caller buffers; `statvfs` compares only
 stable filesystem fields because capacity counters can change between calls.
-The portable catalog/documentation gate runs on every host. A matching Darwin
-`cargo test --locked -p agenterm-dyn` run is still required before this wave is
-called shipped; Windows compilation is not live evidence. Keep
-`mach_host_self` last and Placeholder.
+The portable catalog/documentation gate runs on every host. In success run
+[31873334933](https://github.com/mgttt/agenterm/actions/runs/31873334933), both
+Darwin architectures reported
+`dlcall_arc4random_uniform_respects_each_upper_bound`,
+`dlcall_getdomainname_matches_independent_caller_buffer`, and
+`dlcall_statvfs_matches_stable_root_filesystem_fields` as `ok`. Windows
+compilation is not live evidence. Keep `mach_host_self` last and Placeholder.
 
 Do not live-call Mach send rights. Do not pick `os_proc_available_memory` —
 the macOS SDK marks that symbol unavailable.
