@@ -2,9 +2,9 @@
 
 #![cfg(target_os = "macos")]
 
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 
-use agenterm_dyn::{live_cell, Dyn, SystemProbeStatus, Value};
+use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
 
 const LIB: &str = "libSystem.B.dylib";
 

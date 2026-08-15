@@ -1,8 +1,8 @@
 //! Host-table matrix tests — all six ISA×OS cells exist as explicit data.
 
 use agenterm_dyn::{
-    cell, live_cell, HostCell, SecondaryProbe, SizeProbe, SystemProbeStatus, ALL_CELLS,
-    LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, WINDOWS_AARCH64, WINDOWS_X86_64,
+    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
+    SizeProbe, SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
 };
 
 #[test]
@@ -183,9 +183,11 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 ("getpagesize", "libc.so.6", "getpagesize"),
             ]
         );
-        assert!(c.system_probes[36..]
-            .iter()
-            .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder)));
+        assert!(
+            c.system_probes[36..]
+                .iter()
+                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
+        );
     }
     for c in [MACOS_X86_64, MACOS_AARCH64] {
         assert!(c.system_probes[..36].iter().all(|probe| matches!(
@@ -222,10 +224,11 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
         )));
     }
     for c in [WINDOWS_X86_64, WINDOWS_AARCH64] {
-        assert!(c
-            .system_probes
-            .iter()
-            .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder)));
+        assert!(
+            c.system_probes
+                .iter()
+                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
+        );
     }
 }
 
