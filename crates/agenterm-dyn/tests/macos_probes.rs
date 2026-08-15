@@ -405,3 +405,54 @@ fn dlcall_nsget_argc_matches_libc_pointer_and_count() {
     assert_eq!(got, direct);
     assert_eq!(argc, unsafe { *direct });
 }
+
+#[test]
+fn dlcall_proc_pid_rusage_writes_caller_owned_v4() {
+    let symbol = live_symbol("proc_pid_rusage");
+    let pid = unsafe { libc::getpid() };
+    let flavor = libc::RUSAGE_INFO_V4;
+    let mut ri = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
+    let mut env = Dyn::new();
+    env.bind("ri", (&raw mut ri).cast())
+        .expect("bind rusage_info_v4");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "ptr" ri)"#
+        ))
+        .expect("proc_pid_rusage dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert_eq!(
+        ri.ri_proc_exit_abstime, 0,
+        "live process must not have an exit time"
+    );
+    assert!(
+        ri.ri_wired_size > 0 || ri.ri_resident_size > 0 || ri.ri_phys_footprint > 0,
+        "at least one size field must be positive"
+    );
+
+    let mut direct = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
+    let direct_status = unsafe {
+        libc::proc_pid_rusage(pid, flavor, (&raw mut direct).cast::<libc::rusage_info_t>())
+    };
+    assert_eq!(direct_status, 0, "direct proc_pid_rusage must succeed");
+    assert_eq!(ri.ri_uuid, direct.ri_uuid);
+    assert_eq!(ri.ri_proc_start_abstime, direct.ri_proc_start_abstime);
+}
+
+#[test]
+fn dlcall_dyld_image_count_matches_direct_c() {
+    unsafe extern "C" {
+        fn _dyld_image_count() -> u32;
+    }
+
+    let symbol = live_symbol("dyld_image_count");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#))
+        .expect("_dyld_image_count dlcall")
+        .as_int()
+        .expect("_dyld_image_count integer");
+    assert!(got >= 1, "loaded image count must be at least 1");
+    let direct = unsafe { _dyld_image_count() };
+    assert_eq!(got, i64::from(direct));
+}

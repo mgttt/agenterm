@@ -139,6 +139,8 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_threadid_np",
                 "proc_pidinfo",
                 "nsget_argc",
+                "proc_pid_rusage",
+                "dyld_image_count",
                 "mach_host_self",
             ]
         );
@@ -250,10 +252,12 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "pthread_threadid_np",
                 "proc_pidinfo",
                 "nsget_argc",
+                "proc_pid_rusage",
+                "dyld_image_count",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..51].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..53].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -261,7 +265,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[51].status,
+            c.system_probes[53].status,
             SystemProbeStatus::Placeholder
         ));
     }
