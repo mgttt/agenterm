@@ -521,6 +521,8 @@ runtime consumer of the `libagenterm` dynamic library.
 macOS hosts the placement catalog in `AgentermCu.app`. Windows desktop-host ABI
 1.7 now implements a notification-area menu, `RegisterHotKey`, event polling
 and cleanup for 18 placement actions plus Quit. Native `target/abi-dev`
-`host --self-test --json` reports `actions=19` and `cleaned_up=true`. Formal
+`host --self-test --json` reports `actions=19`, proves shared
+`Command`/`Executor` dispatch through an expected authorization refusal, and
+reports `cleaned_up=true`. Formal
 `dist` staging and Candidate qualification are still in progress, so Windows
 delivery remains partial.

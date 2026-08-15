@@ -1804,6 +1804,11 @@ what each action means. Keep these recurring rules together:
 - The ABI must not embed a placement catalog, Quit policy or other product
   semantics. It transports opaque numeric action IDs; `agenterm-cu` assigns
   their meaning.
+- Give every menu, global-shortcut and native callback one product-owned
+  `action_id -> Command -> Executor` function. Black-box self-test should call
+  that exact function with insufficient authority and require a typed refusal:
+  this proves dispatch without moving the user's window, and catches a host
+  path that silently reimplements command meaning or bypasses authorization.
 
 ## Windows UIA clients keep identity, apartments and actuation separate
 

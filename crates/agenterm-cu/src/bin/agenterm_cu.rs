@@ -641,23 +641,23 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
             }
         }
     }
-    if target == TargetRef::Rdp {
-        if let Some(dest) = rdp_dest {
-            match RdpEndpoint::from_parts(dest) {
-                Ok(endpoint) => executor = executor.with_rdp(endpoint),
-                Err(error) => {
-                    return agenterm_cu::CuReply {
-                        ok: false,
-                        target: "rdp".into(),
-                        command: "usage".into(),
-                        data: None,
-                        error: Some(error),
-                    };
-                }
+    if target == TargetRef::Rdp
+        && let Some(dest) = rdp_dest
+    {
+        match RdpEndpoint::from_parts(dest) {
+            Ok(endpoint) => executor = executor.with_rdp(endpoint),
+            Err(error) => {
+                return agenterm_cu::CuReply {
+                    ok: false,
+                    target: "rdp".into(),
+                    command: "usage".into(),
+                    data: None,
+                    error: Some(error),
+                };
             }
         }
-        // No endpoint: Executor::execute_rdp returns rdp_unavailable.
     }
+    // No endpoint: Executor::execute_rdp returns rdp_unavailable.
     executor.execute(&command)
 }
 
