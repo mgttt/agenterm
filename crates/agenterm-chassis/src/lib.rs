@@ -5,6 +5,7 @@
 //! capabilities. L2 programs AOT to a tiny bytecode ISA (`bytecode`, `vm`).
 
 pub mod bytecode;
+pub mod l2_dispatch;
 pub mod vm;
 
 use std::fs;
