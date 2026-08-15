@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 57],
+    pub system_probes: [SystemProbe; 58],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 57] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 58] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -366,6 +366,7 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 57] = [
     placeholder("nsget_environ"),
     placeholder("proc_pid_rusage"),
     placeholder("dyld_image_count"),
+    placeholder("getentropy"),
     placeholder("mach_host_self"),
 ];
 
@@ -386,7 +387,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 57] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 58] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -443,13 +444,14 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 57] = [
     macos_live("nsget_environ", "_NSGetEnviron"),
     macos_live("proc_pid_rusage", "proc_pid_rusage"),
     macos_live("dyld_image_count", "_dyld_image_count"),
+    macos_live("getentropy", "getentropy"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 57] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 58] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -635,6 +637,7 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 57] = [
     placeholder("nsget_environ"),
     placeholder("proc_pid_rusage"),
     placeholder("dyld_image_count"),
+    placeholder("getentropy"),
     placeholder("mach_host_self"),
 ];
 

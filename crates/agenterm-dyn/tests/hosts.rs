@@ -144,6 +144,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "nsget_environ",
                 "proc_pid_rusage",
                 "dyld_image_count",
+                "getentropy",
                 "mach_host_self",
             ]
         );
@@ -262,10 +263,11 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "nsget_environ",
                 "proc_pid_rusage",
                 "dyld_image_count",
+                "getentropy",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..56].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..57].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -273,7 +275,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[56].status,
+            c.system_probes[57].status,
             SystemProbeStatus::Placeholder
         ));
     }

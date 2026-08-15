@@ -521,3 +521,26 @@ fn dlcall_dyld_image_count_matches_direct_c() {
     let direct = unsafe { _dyld_image_count() };
     assert!(direct >= 1, "direct image count must be at least 1");
 }
+
+#[test]
+fn dlcall_getentropy_fills_caller_owned_buffer() {
+    const BYTES: usize = 16;
+
+    let symbol = live_symbol("getentropy");
+    let mut bytes = [0_u8; BYTES];
+    let mut env = Dyn::new();
+    env.bind("bytes", bytes.as_mut_ptr().cast())
+        .expect("bind entropy output");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" bytes "u64" {BYTES})"#
+        ))
+        .expect("getentropy dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert!(bytes.iter().any(|byte| *byte != 0));
+
+    let mut direct = [0_u8; BYTES];
+    let direct_status = unsafe { libc::getentropy(direct.as_mut_ptr().cast(), BYTES) };
+    assert_eq!(direct_status, 0, "direct getentropy must succeed");
+    assert!(direct.iter().any(|byte| *byte != 0));
+}
