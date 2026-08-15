@@ -100,6 +100,8 @@ same native facts that cu's windows, focus, and get-text hands may consume,
 without wiring dyn into cu, platform, or the ABI:
 
 - [current PID](examples/getpid.md)
+- [parent process ID via `getppid`](examples/getppid.md)
+- [current process group via `getpgrp`](examples/getpgrp.md)
 - [current user ID via `getuid`](examples/getuid.md)
 - [effective user ID via `geteuid`](examples/geteuid.md)
 - [effective group ID via `getegid`](examples/getegid.md)
