@@ -346,7 +346,7 @@ fn dlcall_pthread_threadid_np_matches_libc() {
     assert_ne!(thread_id, 0, "current thread ID must be non-zero");
 
     let mut direct = 0_u64;
-    let direct_status = unsafe { libc::pthread_threadid_np(std::ptr::null_mut(), &mut direct) };
+    let direct_status = unsafe { libc::pthread_threadid_np(0, &mut direct) };
     assert_eq!(direct_status, 0, "direct pthread_threadid_np must succeed");
     assert_eq!(thread_id, direct);
 }
