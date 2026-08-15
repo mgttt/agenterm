@@ -3,26 +3,28 @@
 //! Each supported OS module uses [`agenterm_dyn::live_cell`] script data and
 //! cross-checks results with a second `dlcall` where possible.
 
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 
 use agenterm_dyn::DynError;
 use agenterm_dyn::{
-    live_cell, Dyn, HostArch, HostOs, SecondaryProbe, Value, CU_ADJACENT_PROBE_CATALOG,
+    CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, SecondaryProbe, Value, live_cell,
 };
 
 #[test]
 fn cu_adjacent_catalog_has_six_cells() {
     assert_eq!(CU_ADJACENT_PROBE_CATALOG.len(), 6);
-    assert!(CU_ADJACENT_PROBE_CATALOG
-        .iter()
-        .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64));
+    assert!(
+        CU_ADJACENT_PROBE_CATALOG
+            .iter()
+            .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64)
+    );
 }
 
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
     use agenterm_dyn::{
-        HostCell, SizeProbe, SystemProbe, SystemProbeStatus, LINUX_ATSPI_EXISTENCE_LIBS,
+        HostCell, LINUX_ATSPI_EXISTENCE_LIBS, SizeProbe, SystemProbe, SystemProbeStatus,
     };
 
     #[repr(C)]
