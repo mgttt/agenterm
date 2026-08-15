@@ -117,10 +117,14 @@ without wiring dyn into cu, platform, or the ABI:
 - [terminal window size via `ioctl`](examples/ioctl-window-size.md)
 - [`DISPLAY` via `getenv`](examples/getenv-display.md)
 - [explicit missing-symbol failure](examples/failure-missing-symbol.md)
+- [empty library-name failure](examples/failure-empty-library.md)
+- [interior-NUL library-name failure](examples/failure-library-interior-nul.md)
 
-The fenced forms contain only the currently shipped list language. Where C
-requires a pointer or writable structure, the example names the value that the
-embedding Rust host must bind before calling `Dyn::eval`.
+These examples rely only on the currently shipped list-language parser. Where
+C requires a pointer or writable structure, the example names the value that
+the embedding Rust host must bind before calling `Dyn::eval`. The interior-NUL
+example uses visible `␀` notation for an actual NUL source byte because the
+language deliberately has no string escapes.
 
 ## Test suite
 
