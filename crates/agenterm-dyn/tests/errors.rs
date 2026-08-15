@@ -112,6 +112,36 @@ fn dlcall_rejects_float_struct_and_varargs_types() {
 }
 
 #[test]
+fn dlcall_rejects_unknown_signature_types_before_arguments_or_library_load() {
+    for unsupported in ["f32", "struct"] {
+        let expected = DynError::Type(format!(
+            "unsupported dlcall type `{unsupported}`; only void/integer/pointer types are supported"
+        ));
+
+        let mut return_env = Dyn::new();
+        let return_script =
+            format!(r#"(dlcall "missing-library-for-unknown-return" "unused" "{unsupported}")"#);
+        assert_eq!(return_env.eval(&return_script), Err(expected));
+
+        let mut argument_env = Dyn::new();
+        let argument_script = format!(
+            r#"(dlcall "missing-library-for-unknown-argument" "unused" "i32"
+                "i32" (set touched 1) "{unsupported}" 0)"#
+        );
+        assert_eq!(
+            argument_env.eval(&argument_script),
+            Err(DynError::Type(format!(
+                "unsupported dlcall type `{unsupported}`; only void/integer/pointer types are supported"
+            )))
+        );
+        assert_eq!(
+            argument_env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
+}
+
+#[test]
 fn dlcall_validates_entire_signature_before_evaluating_arguments() {
     for rejected in ["struct", "void"] {
         let mut env = Dyn::new();
