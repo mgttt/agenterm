@@ -35,6 +35,12 @@ The repository is pinned by `rust-toolchain.toml`. Do not solve a compiler
 failure by silently changing the toolchain, edition, target, linker, or global
 Cargo jobs.
 
+Treat generated-code cache identity as one atomic contract. Any transpiler
+emission change that bumps `RH_CODEGEN_REVISION` must update the public-contract
+and native-pack fixture pins in the same commit; run both owning tests before
+the broad AOT pipeline. A stale pin is a delivery failure, not evidence that
+the new emitter should reuse an old cache revision.
+
 ---
 
 ## 1. Pick the correct layer
