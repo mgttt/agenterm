@@ -1,11 +1,12 @@
-# Read the current thread ID with `pthread_threadid_np`
+# Read the current thread id with `pthread_threadid_np`
 
-macOS example. Pass a null thread pointer to select the current thread, and
-bind caller-owned `u64` storage for the resulting thread ID.
+macOS example. Bind a caller-owned `u64` slot as `tid`. Pass a null thread
+pointer as `0` so the call names the current thread; do not spell `pthread_t`
+in the S-expr.
 
 ```lisp
-(dlcall "libSystem.B.dylib" "pthread_threadid_np" "i32" "ptr" 0 "ptr" thread_id)
+(dlcall "libSystem.B.dylib" "pthread_threadid_np" "i32" "ptr" 0 "ptr" tid)
 ```
 
-A zero status means `thread_id` was written. This observes one thread; it does
-not allocate a Mach right or change scheduling.
+A zero status means `tid` now holds a non-zero kernel thread id. The host owns
+that integer slot; dyn does not retain it.

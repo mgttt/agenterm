@@ -2,9 +2,9 @@
 
 #![cfg(target_os = "macos")]
 
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{c_void, CStr, CString};
 
-use agenterm_dyn::{Dyn, SystemProbeStatus, Value, live_cell};
+use agenterm_dyn::{live_cell, Dyn, SystemProbeStatus, Value};
 
 const LIB: &str = "libSystem.B.dylib";
 
@@ -331,77 +331,128 @@ fn dlcall_getlogin_r_matches_direct_c_buffer() {
 }
 
 #[test]
-fn dlcall_pthread_threadid_np_matches_libc() {
+fn dlcall_pthread_threadid_np_matches_libc_current_thread() {
     let symbol = live_symbol("pthread_threadid_np");
-    let mut thread_id = 0_u64;
+    let mut tid: u64 = 0;
     let mut env = Dyn::new();
-    env.bind("thread_id", (&mut thread_id as *mut u64).cast())
-        .expect("bind thread id output");
+    env.bind("tid", (&mut tid as *mut u64).cast())
+        .expect("bind thread-id output");
     let got = env
         .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" 0 "ptr" thread_id)"#
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "ptr" 0 "ptr" tid)"#
         ))
         .expect("pthread_threadid_np dlcall");
     assert_eq!(got, Value::Int(0));
-    assert_ne!(thread_id, 0, "current thread ID must be non-zero");
+    assert_ne!(tid, 0, "current thread id must be non-zero");
 
-    let mut direct = 0_u64;
+    let mut direct: u64 = 0;
+    // Darwin pthread_t is usize; a typed null pointer does not coerce.
     let direct_status = unsafe { libc::pthread_threadid_np(0, &mut direct) };
     assert_eq!(direct_status, 0, "direct pthread_threadid_np must succeed");
-    assert_eq!(thread_id, direct);
+    assert_eq!(tid, direct);
 }
 
 #[test]
-fn dlcall_proc_pidinfo_writes_caller_owned_bsd_info() {
+fn dlcall_proc_pidinfo_writes_caller_owned_bsdinfo() {
     let symbol = live_symbol("proc_pidinfo");
     let pid = unsafe { libc::getpid() };
+    let ppid = unsafe { libc::getppid() };
+    let flavor = libc::PROC_PIDTBSDINFO;
     let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
-    let size = libc::c_int::try_from(std::mem::size_of_val(&info)).expect("bsd info fits c_int");
+    let bufsize =
+        i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).expect("struct fits i32");
     let mut env = Dyn::new();
-    env.bind("info", (&mut info as *mut libc::proc_bsdinfo).cast())
-        .expect("bind bsd info output");
+    env.bind("info", (&raw mut info).cast())
+        .expect("bind proc_bsdinfo");
     let got = env
         .eval(&format!(
-            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {} "u64" 0 "ptr" info "i32" {size})"#,
-            libc::PROC_PIDTBSDINFO
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "u64" 0 "ptr" info "i32" {bufsize})"#
         ))
         .expect("proc_pidinfo dlcall")
         .as_int()
         .expect("proc_pidinfo byte count");
-    assert_eq!(got, i64::from(size));
+    assert_eq!(got, i64::from(bufsize));
     assert_eq!(info.pbi_pid, pid as u32);
-    assert_eq!(info.pbi_ppid, unsafe { libc::getppid() } as u32);
+    assert_eq!(info.pbi_ppid, ppid as u32);
 
     let mut direct = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
-    let direct_size = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            (&mut direct as *mut libc::proc_bsdinfo).cast(),
-            size,
-        )
-    };
-    assert_eq!(direct_size, size, "direct proc_pidinfo must fill bsd info");
+    let direct_bytes =
+        unsafe { libc::proc_pidinfo(pid, flavor, 0, (&raw mut direct).cast(), bufsize) };
+    assert_eq!(
+        direct_bytes, bufsize,
+        "direct proc_pidinfo must fill struct"
+    );
     assert_eq!(info.pbi_pid, direct.pbi_pid);
     assert_eq!(info.pbi_ppid, direct.pbi_ppid);
 }
 
 #[test]
-fn dlcall_nsget_argc_matches_libc() {
+fn dlcall_nsget_argc_matches_libc_pointer_and_count() {
     let symbol = live_symbol("nsget_argc");
     let mut env = Dyn::new();
     let got = env
         .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "ptr")"#))
         .expect("_NSGetArgc dlcall")
         .as_ptr()
-        .expect("argc pointer") as *const libc::c_int;
-    let direct = unsafe { libc::_NSGetArgc() };
-    assert!(!got.is_null(), "_NSGetArgc must return a non-null pointer");
+        .expect("_NSGetArgc pointer") as *mut i32;
     assert!(
-        !direct.is_null(),
-        "direct _NSGetArgc must return a non-null pointer"
+        !got.is_null(),
+        "_NSGetArgc must return a non-null int pointer"
     );
-    assert!(unsafe { *got } >= 1, "process argc must be positive");
-    assert_eq!(unsafe { *got }, unsafe { *direct });
+    let argc = unsafe { *got };
+    assert!(argc >= 1, "process argc must be at least 1");
+    let direct = unsafe { libc::_NSGetArgc() };
+    assert_eq!(got, direct);
+    assert_eq!(argc, unsafe { *direct });
+}
+
+#[test]
+fn dlcall_proc_pid_rusage_writes_caller_owned_v4() {
+    let symbol = live_symbol("proc_pid_rusage");
+    let pid = unsafe { libc::getpid() };
+    let flavor = libc::RUSAGE_INFO_V4;
+    let mut ri = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
+    let mut env = Dyn::new();
+    env.bind("ri", (&raw mut ri).cast())
+        .expect("bind rusage_info_v4");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "i32" {flavor} "ptr" ri)"#
+        ))
+        .expect("proc_pid_rusage dlcall");
+    assert_eq!(got, Value::Int(0));
+    assert_eq!(
+        ri.ri_proc_exit_abstime, 0,
+        "live process must not have an exit time"
+    );
+    assert!(
+        ri.ri_wired_size > 0 || ri.ri_resident_size > 0 || ri.ri_phys_footprint > 0,
+        "at least one size field must be positive"
+    );
+
+    let mut direct = unsafe { std::mem::zeroed::<libc::rusage_info_v4>() };
+    let direct_status = unsafe {
+        libc::proc_pid_rusage(pid, flavor, (&raw mut direct).cast::<libc::rusage_info_t>())
+    };
+    assert_eq!(direct_status, 0, "direct proc_pid_rusage must succeed");
+    assert_eq!(ri.ri_uuid, direct.ri_uuid);
+    assert_eq!(ri.ri_proc_start_abstime, direct.ri_proc_start_abstime);
+}
+
+#[test]
+fn dlcall_dyld_image_count_matches_direct_c() {
+    unsafe extern "C" {
+        fn _dyld_image_count() -> u32;
+    }
+
+    let symbol = live_symbol("dyld_image_count");
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(r#"(dlcall "{LIB}" "{symbol}" "u32")"#))
+        .expect("_dyld_image_count dlcall")
+        .as_int()
+        .expect("_dyld_image_count integer");
+    assert!(got >= 1, "loaded image count must be at least 1");
+    let direct = unsafe { _dyld_image_count() };
+    assert_eq!(got, i64::from(direct));
 }
