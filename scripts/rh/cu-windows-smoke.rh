@@ -544,7 +544,9 @@ fn entry() {
                 ensure(
                     ("" + record.target) == "current"
                         && ("" + record.verb) == "window-place"
-                        && ("" + record.grant) == "actuate",
+                        && ("" + record.grant) == "actuate"
+                        && ("" + record.decision) == "authorized"
+                        && ("" + record.authority_scope) == "process",
                     "cu_windows_smoke_window_place_audit_scope:" + line
                 );
                 let outcome = "" + record.outcome;
@@ -665,7 +667,7 @@ fn cc_lines() {
         "public name addressing uses ValuePattern, GetText, and Invoke",
         "observe-only window placement is refused without changing bounds",
         "authorized left-half placement matches independent window bounds",
-        "isolated window-placement audit records attempt and success without sensitive fields",
+        "isolated window-placement audit records authorization decision, attempt, and success without sensitive fields",
         "owned no-activate fixture exits normally with bounded cleanup proof"
     ]
 }

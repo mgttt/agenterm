@@ -17,6 +17,8 @@ struct AuditRecord<'a> {
     target: &'a str,
     verb: &'a str,
     grant: &'a str,
+    decision: &'a str,
+    authority_scope: &'a str,
     outcome: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<serde_json::Value>,
@@ -104,6 +106,8 @@ impl AuditLog {
                 Grant::Observe => "observe",
                 Grant::Actuate => "actuate",
             },
+            decision: "authorized",
+            authority_scope: "process",
             outcome,
             detail,
         };
@@ -268,6 +272,8 @@ mod tests {
             .collect();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0]["outcome"], "attempt");
+        assert_eq!(records[0]["decision"], "authorized");
+        assert_eq!(records[0]["authority_scope"], "process");
         assert_eq!(records[1]["outcome"], "ok");
         drop(audit);
         remove_scratch(&path);

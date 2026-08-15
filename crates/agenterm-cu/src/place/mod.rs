@@ -12,4 +12,4 @@ pub use apply::{apply_rect, read_rect, rect_from_bounds, screen_from_info};
 
 pub use action::PlaceAction;
 pub use geometry::{Rect, Screen, place};
-pub use history::PlaceHistory;
+pub use history::{HistorySaveError, PlaceHistory};

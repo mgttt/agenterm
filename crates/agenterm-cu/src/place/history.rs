@@ -32,9 +32,42 @@ struct Store {
     apps: BTreeMap<String, AppStack>,
 }
 
+#[derive(Clone)]
 pub struct PlaceHistory {
     path: PathBuf,
     store: Store,
+}
+
+#[derive(Debug)]
+pub struct HistorySaveError {
+    message: String,
+    published: bool,
+}
+
+impl HistorySaveError {
+    fn before_publish(message: String) -> Self {
+        Self {
+            message,
+            published: false,
+        }
+    }
+
+    fn after_publish(message: String) -> Self {
+        Self {
+            message,
+            published: true,
+        }
+    }
+
+    pub fn published(&self) -> bool {
+        self.published
+    }
+}
+
+impl std::fmt::Display for HistorySaveError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
 }
 
 impl PlaceHistory {
@@ -57,7 +90,7 @@ impl PlaceHistory {
         Ok(Self { path, store })
     }
 
-    pub fn record(&mut self, app_key: &str, handle: isize, before: Rect, after: Rect) {
+    fn record(&mut self, app_key: &str, handle: isize, before: Rect, after: Rect) {
         let stack = self.store.apps.entry(app_key.to_string()).or_default();
         if stack.items.is_empty() {
             stack.items.push(item(handle, before));
@@ -73,7 +106,25 @@ impl PlaceHistory {
         }
     }
 
-    pub fn undo(&mut self, app_key: &str) -> Option<(isize, Rect)> {
+    pub fn plan_record(&self, app_key: &str, handle: isize, before: Rect, after: Rect) -> Self {
+        let mut planned = self.clone();
+        planned.record(app_key, handle, before, after);
+        planned
+    }
+
+    pub fn plan_undo(&self, app_key: &str) -> Option<(Self, Rect)> {
+        let mut planned = self.clone();
+        let (_, rect) = planned.undo(app_key)?;
+        Some((planned, rect))
+    }
+
+    pub fn plan_redo(&self, app_key: &str) -> Option<(Self, Rect)> {
+        let mut planned = self.clone();
+        let (_, rect) = planned.redo(app_key)?;
+        Some((planned, rect))
+    }
+
+    fn undo(&mut self, app_key: &str) -> Option<(isize, Rect)> {
         let stack = self.store.apps.get_mut(app_key)?;
         if stack.index == 0 || stack.items.is_empty() {
             return None;
@@ -82,7 +133,7 @@ impl PlaceHistory {
         Some(from_item(&stack.items[stack.index]))
     }
 
-    pub fn redo(&mut self, app_key: &str) -> Option<(isize, Rect)> {
+    fn redo(&mut self, app_key: &str) -> Option<(isize, Rect)> {
         let stack = self.store.apps.get_mut(app_key)?;
         if stack.index + 1 >= stack.items.len() {
             return None;
@@ -91,11 +142,11 @@ impl PlaceHistory {
         Some(from_item(&stack.items[stack.index]))
     }
 
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> Result<(), HistorySaveError> {
         self.save_with(write_prepared, publish_prepared)
     }
 
-    fn save_with<W, F>(&self, write: W, publish: F) -> Result<(), String>
+    fn save_with<W, F>(&self, write: W, publish: F) -> Result<(), HistorySaveError>
     where
         W: FnOnce(&mut File, &[u8]) -> io::Result<()>,
         F: FnOnce(&Path, &Path) -> io::Result<()>,
@@ -105,19 +156,26 @@ impl PlaceHistory {
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("create {}: {error}", parent.display()))?;
-        let raw = serde_json::to_string_pretty(&self.store).map_err(|e| e.to_string())?;
-        let (temporary, mut file) = create_temporary(parent, &self.path)
-            .map_err(|error| format!("prepare {}: {error}", self.path.display()))?;
+        fs::create_dir_all(parent).map_err(|error| {
+            HistorySaveError::before_publish(format!("create {}: {error}", parent.display()))
+        })?;
+        let raw = serde_json::to_string_pretty(&self.store)
+            .map_err(|error| HistorySaveError::before_publish(error.to_string()))?;
+        let (temporary, mut file) = create_temporary(parent, &self.path).map_err(|error| {
+            HistorySaveError::before_publish(format!("prepare {}: {error}", self.path.display()))
+        })?;
         let mut cleanup = TemporaryFile::new(temporary.clone());
-        write(&mut file, raw.as_bytes())
-            .map_err(|error| format!("write {}: {error}", temporary.display()))?;
+        write(&mut file, raw.as_bytes()).map_err(|error| {
+            HistorySaveError::before_publish(format!("write {}: {error}", temporary.display()))
+        })?;
         drop(file);
-        publish(&temporary, &self.path)
-            .map_err(|error| format!("publish {}: {error}", self.path.display()))?;
+        publish(&temporary, &self.path).map_err(|error| {
+            HistorySaveError::before_publish(format!("publish {}: {error}", self.path.display()))
+        })?;
         cleanup.disarm();
-        sync_parent(parent).map_err(|error| format!("sync {}: {error}", parent.display()))
+        sync_parent(parent).map_err(|error| {
+            HistorySaveError::after_publish(format!("sync {}: {error}", parent.display()))
+        })
     }
 }
 
@@ -309,6 +367,28 @@ mod tests {
     }
 
     #[test]
+    fn undo_plan_advances_only_the_cloned_history() {
+        let directory = TestDirectory::new();
+        let history_path = directory.history();
+        let mut history = PlaceHistory::open_at(history_path).expect("open history");
+        history.record("editor", 7, rect(0), rect(1));
+
+        let (planned, target) = history.plan_undo("editor").expect("undo plan");
+        assert_eq!(target, rect(0));
+        assert!(history.plan_redo("editor").is_none());
+        assert_eq!(
+            history.plan_undo("editor").map(|(_, rect)| rect),
+            Some(rect(0)),
+            "planning must not advance the source cursor"
+        );
+        assert_eq!(
+            planned.plan_redo("editor").map(|(_, rect)| rect),
+            Some(rect(1)),
+            "the cloned plan owns the advanced cursor"
+        );
+    }
+
+    #[test]
     fn record_caps_each_application_at_forty_items() {
         let directory = TestDirectory::new();
         let mut history = PlaceHistory::open_at(directory.history()).expect("open history");
@@ -368,7 +448,8 @@ mod tests {
                 Err(io::Error::other("injected publication failure"))
             })
             .expect_err("injected publication failure must surface");
-        assert!(error.contains("injected publication failure"));
+        assert!(error.to_string().contains("injected publication failure"));
+        assert!(!error.published());
         assert_eq!(fs::read(&path).expect("read retained history"), valid);
         assert_eq!(
             fs::read_dir(&directory.0).expect("list fixture").count(),
@@ -396,7 +477,8 @@ mod tests {
                 publish_prepared,
             )
             .expect_err("injected write failure must surface");
-        assert!(error.contains("injected partial write failure"));
+        assert!(error.to_string().contains("injected partial write failure"));
+        assert!(!error.published());
         assert_eq!(fs::read(&path).expect("read retained history"), valid);
         assert_eq!(
             fs::read_dir(&directory.0).expect("list fixture").count(),

@@ -12,6 +12,10 @@ pub struct CuError {
     /// nodes matched without parsing the message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
+    /// Structured effect/recovery context for failures that may follow an
+    /// external side effect. Callers must not infer this state from prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
 }
 
 impl CuError {
@@ -20,11 +24,17 @@ impl CuError {
             code: code.into(),
             message: message.into(),
             count: None,
+            detail: None,
         }
     }
 
     pub fn with_count(mut self, count: usize) -> Self {
         self.count = Some(count);
+        self
+    }
+
+    pub fn with_detail(mut self, detail: serde_json::Value) -> Self {
+        self.detail = Some(detail);
         self
     }
 }

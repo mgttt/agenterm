@@ -71,8 +71,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`
-  JSONL record through an isolated audit path, and independent window
-  enumeration confirms the reported placement.
+  JSONL record through one retained audit handle; each record names the
+  `authorized` decision and process-bounded authority scope. Independent
+  window enumeration confirms the reported placement, and the smoke rejects
+  credential-like fields from the published audit records.
 - [ ] This checkpoint does not prove per-target expiry/revocation, every
   actuation verb, credential absence from every published artifact, Windows
   ARM64, another OS, or the required remote-transport security review. The

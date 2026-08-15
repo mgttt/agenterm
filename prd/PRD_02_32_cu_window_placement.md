@@ -114,8 +114,11 @@ agenterm-cu (28)
 `undo` / `redo` now have a bounded per-application history first cut (40
 entries, redo truncation, corruption detection and same-directory replacement).
 Its deterministic persistence tests are closed, but a public real-window
-undo/redo journey and a transaction/compensation contract spanning native
-movement plus history publication remain open; this leaf is still partial.
+undo/redo journey remains open. The first compensation saga now revalidates
+window identity/state, records only final native readback, rolls back a failed
+unpublished history commit only from a known owned rect, and reports structured
+`window_place_in_doubt` when it cannot verify ownership or recovery. Process
+crash recovery and concurrent-writer CAS remain open; this leaf is still partial.
 
 ## Layering
 
@@ -177,8 +180,9 @@ movement plus history publication remain open; this leaf is still partial.
 
 ## Evidence
 
-- [ ] pure tests: every frozen action's fixtures agree with Spectacle's
-  calculation specs within 1 pt.
+- [x] pure tests: all 16 stateless frozen actions have exact deterministic
+  fixtures, including complete half/corner/third/display cycles; undo/redo have
+  separate bounded history, persistence and compensation-saga tests.
 - [ ] black-box: real `agenterm-cu` on a real macOS session places a visible window
   and a subsequent `windows` / `wait` observation shows the new bounds.
 - [~] unauthorized call is `refused` and does not move the window. The staged

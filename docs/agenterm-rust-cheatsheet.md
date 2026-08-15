@@ -1849,6 +1849,17 @@ does not make a preceding window move or other OS action transactional. If the
 product requires all-or-nothing behavior across both, it needs an explicit
 prepare/commit or compensation contract and failure evidence for that boundary.
 
+For window placement, compensation is a saga, never an atomicity claim. Read
+the exact native bounds, revalidate handle plus process/application identity,
+apply, independently read back the final rect, then publish cloned history.
+Only roll back a history-publication failure when the current identity and rect
+still equal that transaction's known successful readback. If the native apply
+itself failed after a possible partial move, its last owned rect is unknown;
+do not overwrite a stable-looking rect that may belong to a concurrent user
+move. Return structured `possibly_applied` / `in_doubt` instead. A rollback
+must itself be read back exactly, and failures after a successful rename must
+distinguish published-but-durability-uncertain state from an unpublished file.
+
 ## Windows UIA clients keep identity, apartments and actuation separate
 
 The Windows accessibility adapter established a reusable native-FFI rule set.
