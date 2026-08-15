@@ -233,10 +233,6 @@ mod linux {
 
         assert!(got >= 0, "times dlcall should return elapsed clock ticks");
         assert!(
-            baseline >= 0,
-            "libc times should return elapsed clock ticks"
-        );
-        assert!(
             baseline >= got,
             "later libc baseline must not precede dlcall result"
         );
@@ -1031,10 +1027,6 @@ mod macos {
         let mut libc_tms: libc::tms = unsafe { std::mem::zeroed() };
         let baseline = unsafe { libc::times(&mut libc_tms) };
         assert!(got >= 0, "times dlcall should return elapsed clock ticks");
-        assert!(
-            baseline >= 0,
-            "libc times should return elapsed clock ticks"
-        );
         assert!(
             baseline as i64 >= got,
             "later libc baseline must not precede dlcall result"
