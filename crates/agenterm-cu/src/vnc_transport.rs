@@ -373,7 +373,8 @@ pub fn rfb_handshake(endpoint: &VncEndpoint) -> Result<(), CuError> {
         ));
     }
     // Prefer 3.8; accept whatever major.minor the server offered when parseable.
-    let client_version = if &version[4..11] >= b"003.008" {
+    let major_minor = &version[4..11];
+    let client_version = if major_minor >= &b"003.008"[..] {
         *b"RFB 003.008\n"
     } else {
         version
@@ -386,8 +387,7 @@ pub fn rfb_handshake(endpoint: &VncEndpoint) -> Result<(), CuError> {
     })?;
 
     // Protocol 3.7+ security-types list; 3.3 sends a single u32 type.
-    let major_minor = &version[4..11];
-    if major_minor < b"003.007" {
+    if major_minor < &b"003.007"[..] {
         let mut sec = [0u8; 4];
         stream.read_exact(&mut sec).map_err(|error| {
             CuError::new(
