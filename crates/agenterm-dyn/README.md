@@ -70,10 +70,12 @@ handle-valued native returns instead of declaring them as `u64`.
 
 ## Parser resource bound
 
-The list-language parser accepts at most 256 nested lists. Source that exceeds
-that depth returns a `DynError::Parse` before evaluation, rather than consuming
-unbounded parser stack. This is a robustness limit only: it does not grant,
-deny, or otherwise change any native-door or caller authority semantics.
+The list-language parser accepts at most 64 KiB of UTF-8 source, 4,096 AST
+nodes (each list and scalar expression counts), and 256 nested lists. Source
+that exceeds any bound returns a `DynError::Parse` before evaluation, rather
+than consuming unbounded parser input, allocation, or stack. This is a
+robustness limit only: it does not grant, deny, or otherwise change any
+native-door or caller authority semantics.
 
 ## Public surface
 

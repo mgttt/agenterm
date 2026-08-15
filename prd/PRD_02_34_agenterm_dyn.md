@@ -26,6 +26,10 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - The parser accepts exactly 256 nested lists; 257 nested lists return
   `DynError::Parse` before evaluation. This is a stack-resource bound, not a
   caller-policy boundary.
+- Parser input is bounded before evaluation: exactly 65,536 UTF-8 bytes and
+  4,096 AST nodes (every list and scalar expression counts) accept; the next
+  byte or node returns `DynError::Parse`. These parser bounds do not add
+  authority semantics or persistent environment quotas.
 - Win six-cell extra probes stay placeholders. **macOS** has the shared
   fixed-ABI live libc rows plus `sysctlbyname`, `mach_absolute_time`, `getprogname`,
   `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`,

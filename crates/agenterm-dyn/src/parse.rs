@@ -6,6 +6,16 @@ use crate::error::DynError;
 /// call stack before evaluation can apply its own limits.
 pub(crate) const MAX_LIST_DEPTH: usize = 256;
 
+/// Maximum UTF-8 source size accepted before parsing begins.
+pub(crate) const MAX_SOURCE_BYTES: usize = 64 * 1024;
+
+/// Maximum AST nodes accepted by one source expression.
+///
+/// Lists and scalar expressions each count as one node. Keeping this bounded
+/// prevents a shallow but extremely wide expression from consuming unbounded
+/// parser allocation even when it stays within the nesting limit.
+pub(crate) const MAX_AST_NODES: usize = 4_096;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SExpr {
     Int(i64),
@@ -15,6 +25,11 @@ pub(crate) enum SExpr {
 }
 
 pub(crate) fn parse(source: &str) -> Result<SExpr, DynError> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(DynError::Parse(format!(
+            "source exceeds maximum size ({MAX_SOURCE_BYTES} bytes)"
+        )));
+    }
     let mut parser = Parser::new(source);
     let expr = parser.parse_expr(0)?;
     parser.skip_ws();
@@ -27,11 +42,16 @@ pub(crate) fn parse(source: &str) -> Result<SExpr, DynError> {
 struct Parser<'a> {
     input: &'a str,
     pos: usize,
+    ast_nodes: usize,
 }
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
-        Self { input, pos: 0 }
+        Self {
+            input,
+            pos: 0,
+            ast_nodes: 0,
+        }
     }
 
     fn is_eof(&self) -> bool {
@@ -61,15 +81,43 @@ impl<'a> Parser<'a> {
     fn parse_expr(&mut self, list_depth: usize) -> Result<SExpr, DynError> {
         self.skip_ws();
         match self.peek() {
-            Some('(') => self.parse_list(list_depth),
-            Some('"') => self.parse_string(),
-            Some('-') if self.peek_next_is_digit() => self.parse_int(),
-            Some('-') => Ok(SExpr::Sym(self.parse_symbol()?)),
-            Some('0'..='9') => self.parse_int(),
-            Some(ch) if is_sym_start(ch) => Ok(SExpr::Sym(self.parse_symbol()?)),
+            Some('(') => {
+                self.reserve_ast_node()?;
+                self.parse_list(list_depth)
+            }
+            Some('"') => {
+                self.reserve_ast_node()?;
+                self.parse_string()
+            }
+            Some('-') if self.peek_next_is_digit() => {
+                self.reserve_ast_node()?;
+                self.parse_int()
+            }
+            Some('-') => {
+                self.reserve_ast_node()?;
+                Ok(SExpr::Sym(self.parse_symbol()?))
+            }
+            Some('0'..='9') => {
+                self.reserve_ast_node()?;
+                self.parse_int()
+            }
+            Some(ch) if is_sym_start(ch) => {
+                self.reserve_ast_node()?;
+                Ok(SExpr::Sym(self.parse_symbol()?))
+            }
             Some(ch) => Err(DynError::Parse(format!("unexpected character `{ch}`"))),
             None => Err(DynError::Parse("unexpected end of input".into())),
         }
+    }
+
+    fn reserve_ast_node(&mut self) -> Result<(), DynError> {
+        if self.ast_nodes >= MAX_AST_NODES {
+            return Err(DynError::Parse(format!(
+                "maximum AST node count ({MAX_AST_NODES}) exceeded"
+            )));
+        }
+        self.ast_nodes += 1;
+        Ok(())
     }
 
     fn peek_next_is_digit(&self) -> bool {
@@ -208,6 +256,10 @@ mod tests {
         format!("{}0{}", "(".repeat(depth), ")".repeat(depth))
     }
 
+    fn flat_list_source(item_count: usize) -> String {
+        format!("({})", "1 ".repeat(item_count))
+    }
+
     #[test]
     fn accepts_maximum_list_nesting_depth() {
         parse(&nested_list_source(MAX_LIST_DEPTH)).expect("maximum nesting parses");
@@ -219,6 +271,38 @@ mod tests {
             parse(&nested_list_source(MAX_LIST_DEPTH + 1)),
             Err(DynError::Parse(format!(
                 "maximum list nesting depth ({MAX_LIST_DEPTH}) exceeded"
+            )))
+        );
+    }
+
+    #[test]
+    fn accepts_maximum_source_bytes() {
+        parse(&format!("1{}", " ".repeat(MAX_SOURCE_BYTES - 1)))
+            .expect("maximum source size parses");
+    }
+
+    #[test]
+    fn rejects_source_bytes_beyond_maximum() {
+        assert_eq!(
+            parse(&format!("1{}", " ".repeat(MAX_SOURCE_BYTES))),
+            Err(DynError::Parse(format!(
+                "source exceeds maximum size ({MAX_SOURCE_BYTES} bytes)"
+            )))
+        );
+    }
+
+    #[test]
+    fn accepts_maximum_ast_nodes() {
+        // The list is one node; its scalar items consume the remaining budget.
+        parse(&flat_list_source(MAX_AST_NODES - 1)).expect("maximum AST nodes parse");
+    }
+
+    #[test]
+    fn rejects_ast_nodes_beyond_maximum() {
+        assert_eq!(
+            parse(&flat_list_source(MAX_AST_NODES)),
+            Err(DynError::Parse(format!(
+                "maximum AST node count ({MAX_AST_NODES}) exceeded"
             )))
         );
     }

@@ -36,6 +36,31 @@ fn parse_rejects_excessively_nested_legal_sexpression_at_public_eval_boundary() 
 }
 
 #[test]
+fn parse_resource_rejection_at_public_eval_boundary_has_no_side_effects() {
+    // One outer list plus `(set touched 1)` and `do` is six nodes; the trailing scalar
+    // expressions make the source exceed the parser's fixed AST budget before
+    // eval can run the preceding set form.
+    const EXCESSIVE_AST_NODES: usize = 4_097;
+    const PREFIX_NODES: usize = 6;
+    let source = format!(
+        "(do (set touched 1) {} )",
+        "1 ".repeat(EXCESSIVE_AST_NODES - PREFIX_NODES)
+    );
+
+    let mut env = Dyn::new();
+    assert_eq!(
+        env.eval(&source),
+        Err(DynError::Parse(
+            "maximum AST node count (4096) exceeded".into()
+        ))
+    );
+    assert_eq!(
+        env.eval("touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
+    );
+}
+
+#[test]
 fn parse_bare_string_not_a_value() {
     let mut env = Dyn::new();
     let err = env.eval(r#""hello""#).unwrap_err();
