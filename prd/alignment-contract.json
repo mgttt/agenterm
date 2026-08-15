@@ -3,6 +3,22 @@
   "planned_command_roots": ["agenterm-bash"],
   "capabilities": [
     {
+      "id": "computer-use.windows-current",
+      "kind": "behavior",
+      "status": "partial",
+      "evidence_mode": "black-box-partial",
+      "prd": "On Windows, the product `Command`/`Executor` path consumes UIA tree",
+      "evidence_ids": [
+        "cu.windows-host-self-test",
+        "cu.libagenterm-load-cleanup",
+        "cu.windows-uia-window-identity",
+        "cu.windows-uia-tree",
+        "cu.windows-uia-name-actuation",
+        "cu.windows-uia-value-wait",
+        "cu.windows-uia-cleanup"
+      ]
+    },
+    {
       "id": "computer-use.windows-window-placement",
       "kind": "behavior",
       "status": "partial",
