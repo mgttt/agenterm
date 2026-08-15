@@ -48,10 +48,23 @@ They are **not** imported from platform today. What stays in dyn: `intern` /
 `bind` / `eval`, bounded native `dlcall`, value/error/parse, and the rule that
 OS names remain opaque script data at the eval boundary.
 
-`dlcall` accepts fixed signatures with at most six arguments. Supported ABI
-types are `void` (return only), `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`,
-`u64`, and `ptr`. Floating-point values, aggregates, and variadic calls are not
-supported and fail explicitly.
+`dlcall` is an ABI-limited native door, not a general FFI. It targets only
+`x86_64` and `aarch64`, and accepts fixed, non-variadic C signatures with at
+most six integer or pointer arguments. The trampoline passes every input in a
+`u64` slot; its supported types are `void` (return only), `i8`, `u8`, `i16`,
+`u16`, `i32`, `u32`, `i64`, `u64`, and `ptr`. Narrow signed inputs are
+sign-extended and narrow unsigned inputs are zero-extended before that call.
+
+Floating-point values and aggregates have no supported ABI class. Variadic
+symbols are also outside the contract: the fixed trampoline cannot reliably
+detect that a resolved symbol is variadic, so callers must not use one (for
+example `printf`, or a platform's variadic `ioctl`). This is an ABI-compatibility
+boundary, not an authorization or safety policy; library names and symbols
+remain caller-supplied script data.
+
+The language stores integer results as signed `i64`. A `u64` result therefore
+returns an error when it exceeds `i64::MAX`; use `ptr` for address- or
+handle-valued native returns instead of declaring them as `u64`.
 
 ## Public surface
 

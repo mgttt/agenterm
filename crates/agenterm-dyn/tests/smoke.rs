@@ -995,6 +995,105 @@ mod macos {
     }
 
     #[test]
+    fn dlcall_times_writes_caller_owned_tms_and_matches_libc_baseline() {
+        let probe = live_system_probe("times");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let mut dlcall_tms: libc::tms = unsafe { std::mem::zeroed() };
+        let mut env = Dyn::new();
+        env.bind("tms", (&mut dlcall_tms as *mut libc::tms).cast())
+            .expect("bind caller-owned tms");
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i64" "ptr" tms)"#))
+            .expect("times dlcall")
+            .as_int()
+            .expect("times return value");
+
+        let mut libc_tms: libc::tms = unsafe { std::mem::zeroed() };
+        let baseline = unsafe { libc::times(&mut libc_tms) };
+        assert!(got >= 0, "times dlcall should return elapsed clock ticks");
+        assert!(
+            baseline >= 0,
+            "libc times should return elapsed clock ticks"
+        );
+        assert!(
+            baseline as i64 >= got,
+            "later libc baseline must not precede dlcall result"
+        );
+        assert!(
+            libc_tms.tms_utime >= dlcall_tms.tms_utime
+                && libc_tms.tms_stime >= dlcall_tms.tms_stime
+                && libc_tms.tms_cutime >= dlcall_tms.tms_cutime
+                && libc_tms.tms_cstime >= dlcall_tms.tms_cstime,
+            "times fields must be initialized by dlcall and monotonic at the later libc baseline"
+        );
+    }
+
+    #[test]
+    fn dlcall_getrusage_writes_caller_owned_rusage_and_matches_libc_baseline() {
+        let probe = live_system_probe("getrusage");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let mut dlcall_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let mut env = Dyn::new();
+        env.bind("usage", (&mut dlcall_usage as *mut libc::rusage).cast())
+            .expect("bind caller-owned rusage");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" usage)"#,
+                libc::RUSAGE_SELF
+            ))
+            .expect("getrusage dlcall");
+        assert_eq!(got, Value::Int(0));
+
+        let mut libc_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let baseline = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut libc_usage) };
+        assert_eq!(baseline, 0, "direct libc getrusage baseline");
+        assert!(
+            timeval_at_most(dlcall_usage.ru_utime, libc_usage.ru_utime)
+                && timeval_at_most(dlcall_usage.ru_stime, libc_usage.ru_stime),
+            "later direct libc baseline must not precede dlcall CPU usage"
+        );
+    }
+
+    #[test]
+    fn dlcall_getrlimit_nofile_writes_caller_owned_rlimit_and_matches_libc_baseline() {
+        let probe = live_system_probe("getrlimit_nofile");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!()
+        };
+        let mut dlcall_limit: libc::rlimit = unsafe { std::mem::zeroed() };
+        let mut env = Dyn::new();
+        env.bind("limit", (&mut dlcall_limit as *mut libc::rlimit).cast())
+            .expect("bind caller-owned rlimit");
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" limit)"#,
+                libc::RLIMIT_NOFILE
+            ))
+            .expect("getrlimit dlcall");
+        assert_eq!(got, Value::Int(0));
+
+        let mut libc_limit: libc::rlimit = unsafe { std::mem::zeroed() };
+        let baseline = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut libc_limit) };
+        assert_eq!(baseline, 0, "direct libc getrlimit baseline");
+        assert_eq!(
+            dlcall_limit.rlim_cur, libc_limit.rlim_cur,
+            "getrlimit dlcall soft limit must match the direct libc baseline"
+        );
+        assert_eq!(
+            dlcall_limit.rlim_max, libc_limit.rlim_max,
+            "getrlimit dlcall hard limit must match the direct libc baseline"
+        );
+    }
+
+    fn timeval_at_most(left: libc::timeval, right: libc::timeval) -> bool {
+        (left.tv_sec, left.tv_usec) <= (right.tv_sec, right.tv_usec)
+    }
+
+    #[test]
     fn dlcall_clock_gettime_writes_timespec() {
         let probe = live_system_probe("clock_gettime");
         let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
