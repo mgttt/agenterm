@@ -133,6 +133,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "png",
  "serde",
+ "sha2 0.11.0",
  "softbuffer",
  "tokio",
  "windows-sys 0.61.2",

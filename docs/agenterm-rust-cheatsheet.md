@@ -1885,6 +1885,19 @@ provider, expose no arbitrary-string constructor, and fail closed when the
 provider or session proof is unavailable. A placeholder transport remains
 unsupported even if some caller offers identity-shaped data.
 
+Separate installation identity enrollment from ordinary load/query. Enrollment
+may exclusively create one random key while holding a stable key sidecar lock;
+load and query must never replace missing, short, corrupt, linked or
+permission-unsafe state. Re-read and compare a newly published key before
+deriving its provider ID. A session binding must combine that provider with
+native login and interactive-desktop facts, and it must be resolved again at
+the side-effect boundary rather than treated as a process-lifetime snapshot.
+On Windows, token SID plus authentication/session IDs are insufficient alone:
+require a positive active WTS session with logon time and prove the caller is
+attached to the input desktop. Treat the domain-separated digest as an opaque
+equality identifier, not a MAC or credential, and report unsupported on peers
+whose equivalent session proof has not been implemented.
+
 For window placement, compensation is a saga, never an atomicity claim. Read
 the exact native bounds, revalidate handle plus process/application identity,
 apply, independently read back the final rect, then publish cloned history.

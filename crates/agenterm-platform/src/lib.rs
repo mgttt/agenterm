@@ -36,6 +36,7 @@ pub enum Capability {
     Entropy,
     ConsoleInterrupt,
     ConsoleLineEditor,
+    CurrentTargetBinding,
     UserIdentity,
     ProcessControl,
     ProcessObservation,
@@ -102,6 +103,9 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ConsoleInterrupt => (cfg!(feature = "console-interrupt"), true),
         Capability::ConsoleLineEditor => (cfg!(feature = "console-line-editor"), true),
+        Capability::CurrentTargetBinding => {
+            (cfg!(feature = "current-target-binding"), cfg!(windows))
+        }
         Capability::UserIdentity => (cfg!(feature = "user-identity"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
@@ -214,6 +218,8 @@ pub mod host_memory;
 #[cfg(feature = "storage")]
 pub mod storage;
 
+#[cfg(feature = "current-target-binding")]
+pub mod current_target_binding;
 #[cfg(feature = "entropy")]
 pub mod entropy;
 

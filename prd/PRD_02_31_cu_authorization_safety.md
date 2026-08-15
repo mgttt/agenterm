@@ -102,7 +102,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   VNC fail typed when no crate-owned verified provider is available; RDP stays
   `unsupported` even if a provider is offered. The public resolver accepts no
   hostname, IP, user, port, `DISPLAY` or arbitrary binding-string constructor.
-  Real per-OS identity providers and their secret persistence remain open.
+  `agenterm-platform` now provides the first Windows `current` identity
+  mechanism: enrollment creates one locked, current-user-only 32-byte install
+  key, while load/query never rotate missing or corrupt state. The session
+  digest binds the opaque provider to token SID, authentication and terminal
+  session identifiers, positive WTS active/logon evidence, and the current
+  input desktop. Session zero, a disconnected or changed desktop, unsafe key
+  state, and unavailable proof fail typed. The digest is only an opaque
+  equality identifier, not an authenticator. Linux and macOS providers remain
+  explicitly unsupported, and the Windows provider is not yet connected to
+  the CU store, CLI or per-command executor decision. No persisted grant is
+  executable through this mechanism yet.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`

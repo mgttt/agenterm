@@ -14,6 +14,8 @@ pub mod console_interrupt;
 pub mod console_line_editor;
 #[cfg(all(feature = "window", feature = "input"))]
 pub mod control_window;
+#[cfg(feature = "current-target-binding")]
+pub mod current_target_binding;
 #[cfg(feature = "desktop-host")]
 pub mod desktop_host;
 #[cfg(feature = "entropy")]

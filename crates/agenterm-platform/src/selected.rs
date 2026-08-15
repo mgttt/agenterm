@@ -824,3 +824,14 @@ pub mod console_surface {
         }
     }
 }
+#[cfg(all(feature = "current-target-binding", windows))]
+#[path = "adapters/windows/current_target_binding.rs"]
+pub(crate) mod current_target_binding;
+
+#[cfg(all(feature = "current-target-binding", target_os = "linux"))]
+#[path = "adapters/linux/current_target_binding.rs"]
+pub(crate) mod current_target_binding;
+
+#[cfg(all(feature = "current-target-binding", target_os = "macos"))]
+#[path = "adapters/macos/current_target_binding.rs"]
+pub(crate) mod current_target_binding;
