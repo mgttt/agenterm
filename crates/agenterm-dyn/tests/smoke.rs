@@ -120,6 +120,36 @@ mod linux {
     }
 
     #[test]
+    fn dlcall_getsid_zero_matches_libc() {
+        let probe = live_system_probe("getsid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
+            .expect("getsid(0) dlcall");
+        let real = unsafe { libc::getsid(0) };
+        assert!(real > 0, "current session id should be positive");
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
+    fn dlcall_getpgid_zero_matches_libc() {
+        let probe = live_system_probe("getpgid");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut env = Dyn::new();
+        let got = env
+            .eval(&format!(r#"(dlcall "{lib}" "{symbol}" "i32" "i32" 0)"#))
+            .expect("getpgid(0) dlcall");
+        let real = unsafe { libc::getpgid(0) };
+        assert!(real > 0, "current process group id should be positive");
+        assert_eq!(got, Value::Int(i64::from(real)));
+    }
+
+    #[test]
     fn dlcall_time_matches_libc() {
         let mut env = Dyn::new();
         let got = env

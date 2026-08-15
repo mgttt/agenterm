@@ -70,7 +70,7 @@ supported and fail explicitly.
 
 | Cell | PID library | PID symbol | Size probe | Secondary probe | Additional headless probes |
 |------|-------------|------------|------------|-----------------|----------------------------|
-| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `geteuid`, `getegid`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0)`, `open("/dev/null")` + `isatty` + `close`, and `access` success/failure dlcalls |
+| linux × x86_64/aarch64 | `libc.so.6` | `getpid` | `ioctl(TIOCGWINSZ)` | `getppid` | live `time`, `clock_gettime`, `uname`, `getuid`, `getgid`, `getppid`, `getpgrp`, `getsid(0)`, `getpgid(0)`, `geteuid`, `getegid`, `sysconf(_SC_PAGESIZE)`, `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, `getcwd`, `isatty(0)`, `open("/dev/null")` + `isatty` + `close`, and `access` success/failure dlcalls |
 | macos × x86_64/aarch64 | `libSystem.B.dylib` | `getpid` | `ioctl(TIOCGWINSZ)` | `time` | placeholders only |
 | windows × x86_64/aarch64 | `kernel32.dll` | `GetCurrentProcessId` | `GetConsoleScreenBufferInfo` | `GetCurrentThreadId` | placeholders only |
 
@@ -135,8 +135,8 @@ Independent integration tests live under `crates/agenterm-dyn/tests/`:
 cargo test -p agenterm-dyn
 ```
 
-**Linux** (CI): `getpid` + `getppid` + `getpgrp` + `getuid` + `getgid` +
-`geteuid` + `getegid` cross-checked with libc; real headless
+**Linux** (CI): `getpid` + `getppid` + `getpgrp` + `getsid(0)` + `getpgid(0)` +
+`getuid` + `getgid` + `geteuid` + `getegid` cross-checked with libc; real headless
 `time(NULL)`, `clock_gettime(CLOCK_MONOTONIC)`, `uname`, `sysconf(_SC_PAGESIZE)`,
 `sysconf(_SC_CLK_TCK)`, `sysconf(_SC_NPROCESSORS_ONLN)`, and `getcwd` dlcalls;
 real `isatty(0)` plus `open("/dev/null")` / `isatty` / `close`; `ioctl(TIOCGWINSZ)`
