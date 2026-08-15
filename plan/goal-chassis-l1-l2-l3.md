@@ -5,6 +5,19 @@ Execution: [`refactor-chassis-l1-l2-l3.md`](refactor-chassis-l1-l2-l3.md)
 Surface: [`chassis-l1-surface.json`](chassis-l1-surface.json)  
 Paths: repository-relative or `~/...` only.
 
+## 0.1.16 parallel DAG
+
+1. `sync` (primary): confirm clean `main` at the unpublished 0.1.16 baseline.
+2. `identity-pack` (lane A): own release/pack entrypoints and focused tests; depends on `sync`.
+3. `l1-gate` (lane B): own L1-change classification and focused tests; depends on `sync`.
+4. `l2-artifact` (lane C): own `crates/agenterm-chassis/l2/**` plus new isolated tests; depends on `sync`.
+5. `catalog` (lane C): classify Fleet/tab/clipboard/CC/CU as L2; CU stays a rare native plugin.
+6. `workbench-loader` (later lane): own shared frontend image-load contract, then both adapters; depends on image format stability.
+7. `docs-contract` (primary): own PRD/architecture/status convergence after behavior is proven.
+8. `review` (primary): inspect each unstaged handoff and reject scope/file-owner overlap.
+9. `verify` (primary): run redaction, `./lint.sh`, targeted chassis tests, and compose/pack evidence serially.
+10. `deliver` (primary): small pathspec commits, then pull-rebase and push each green slice.
+
 **Chassis** = the product frame you bolt packs onto. It is not a command-line
 shell and not the script L1/L2/L3 boundary.
 
