@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+use agenterm_chassis::bytecode::{L2Source, Program, assemble};
+use agenterm_chassis::l2_dispatch::{Dispatcher, HostCallback};
 
 const MAX_NATIVE_LOADER_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -20,6 +24,9 @@ pub(crate) struct LoadedChassisImage {
     pub(crate) root: PathBuf,
     pub(crate) native_loader: PathBuf,
     pub(crate) l3_name: String,
+    active_tab_program: Program,
+    host_abi: String,
+    declared_capabilities: Vec<String>,
 }
 
 static LOADED_IMAGE: OnceLock<LoadedChassisImage> = OnceLock::new();
@@ -65,11 +72,52 @@ pub(crate) fn load_image(root: &Path) -> Result<LoadedChassisImage, String> {
     validate_native_loader(root, native_cell, &native_loader)?;
     let app = agenterm_chassis::load_app(&root.join("l3/app.json"))
         .map_err(|error| format!("cannot load chassis L3 manifest: {error}"))?;
+    let host_abi = std::fs::read_to_string(root.join("l2/host-abi.json"))
+        .map_err(|error| format!("cannot read chassis L2 Host ABI: {error}"))?;
+    Dispatcher::from_host_abi_json(&host_abi, &app.capabilities, ValidationOnlyHost)
+        .map_err(|error| format!("cannot validate chassis L2 Host ABI: {error}"))?;
+    let source: L2Source = serde_json::from_slice(
+        &std::fs::read(root.join("l2/programs/active-tab.json"))
+            .map_err(|error| format!("cannot read chassis L2 active-tab program: {error}"))?,
+    )
+    .map_err(|error| format!("cannot parse chassis L2 active-tab program: {error}"))?;
+    let active_tab_program = assemble(&source, Some(&app.capabilities))
+        .map_err(|error| format!("cannot assemble chassis L2 active-tab program: {error}"))?;
     Ok(LoadedChassisImage {
         root: root.to_path_buf(),
         native_loader,
         l3_name: app.name,
+        active_tab_program,
+        host_abi,
+        declared_capabilities: app.capabilities,
     })
+}
+
+/// Run the checked image's first-window L2 artifact against the live product host.
+///
+/// Callers invoke this only after their real IPC server and first PTY exist.
+pub(crate) fn eval_active_tab<H: HostCallback>(
+    image: &LoadedChassisImage,
+    host: H,
+) -> Result<(i64, H), String> {
+    let mut dispatcher =
+        Dispatcher::from_host_abi_json(&image.host_abi, &image.declared_capabilities, host)
+            .map_err(|error| error.to_string())?;
+    let value = agenterm_chassis::vm::run(
+        &image.active_tab_program,
+        &mut dispatcher,
+        agenterm_chassis::vm::DEFAULT_MAX_STEPS,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((value, dispatcher.into_host()))
+}
+
+struct ValidationOnlyHost;
+
+impl HostCallback for ValidationOnlyHost {
+    fn call(&mut self, _capability: &str, _parameters: &Value) -> Result<Value, String> {
+        Err("validation-only host must not be called".to_owned())
+    }
 }
 
 fn validate_native_loader(root: &Path, cell: &str, loader: &Path) -> Result<(), String> {
@@ -174,18 +222,23 @@ mod tests {
                 serde_json::Value::String(sha256_hex(&bytes)),
             );
         }
-        fs::create_dir_all(root.join("l2")).expect("l2");
+        fs::create_dir_all(root.join("l2/programs")).expect("l2");
         fs::write(
             root.join("l2/host-abi.json"),
             include_str!("../../crates/agenterm-chassis/l2/host-abi.json"),
         )
         .expect("abi");
+        fs::write(
+            root.join("l2/programs/active-tab.json"),
+            include_str!("../../crates/agenterm-chassis/l2/programs/active-tab.json"),
+        )
+        .expect("program");
         fs::create_dir_all(root.join("l3")).expect("l3");
         let note = l3_note.unwrap_or("");
         fs::write(
             root.join("l3/app.json"),
             format!(
-                r#"{{"schema":1,"name":"workbench","capabilities":["tabs.list"],"note":"{note}"}}"#
+                r#"{{"schema":1,"name":"workbench","capabilities":["tabs.active"],"note":"{note}"}}"#
             ),
         )
         .expect("app");

@@ -583,19 +583,18 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
         };
     if let Some(image) = selected_image {
         eprintln!(
-            "Starting chassis L3 {} through selected native loader {}",
+            "Starting first workbench window from chassis L3 {} with native cell {}",
             image.l3_name,
             image.native_loader.display()
         );
-        if let Err(error) = run_selected_chassis_loader(&image.native_loader, &image.root) {
-            eprintln!("AgenTerm GUI failed to start selected chassis loader: {error}");
-            return GuiLaunchResult::StartupFailed(error);
-        }
-        return GuiLaunchResult::Launched;
     }
     let no_activate = options.no_activate || no_activate_from_environment();
 
-    match attempt_gui_handoff(no_activate, true) {
+    match if selected_image.is_some() {
+        GuiHandoffResult::Continue
+    } else {
+        attempt_gui_handoff(no_activate, true)
+    } {
         GuiHandoffResult::HandedOff => return GuiLaunchResult::Reused,
         GuiHandoffResult::Continue => {}
         GuiHandoffResult::Blocked(error) => {
@@ -615,7 +614,7 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
         return GuiLaunchResult::StartupFailed("no graphical display was detected".to_owned());
     }
 
-    match run_gui(no_activate) {
+    match run_gui(no_activate, selected_image) {
         Ok(()) => GuiLaunchResult::Launched,
         Err(error) => {
             eprintln!("AgenTerm GUI failed: {error:#}");
@@ -624,33 +623,14 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     }
 }
 
-fn run_selected_chassis_loader(loader: &Path, image_root: &Path) -> Result<(), String> {
-    run_selected_chassis_loader_with(loader, image_root, |loader, image_root| {
-        std::process::Command::new(loader)
-            .arg(image_root)
-            .status()
-            .map(|status| status.success())
-            .map_err(|error| format!("cannot start selected native chassis loader: {error}"))
-    })
-}
-
-fn run_selected_chassis_loader_with(
-    loader: &Path,
-    image_root: &Path,
-    launch: impl FnOnce(&Path, &Path) -> Result<bool, String>,
-) -> Result<(), String> {
-    if launch(loader, image_root)? {
-        Ok(())
-    } else {
-        Err("selected native chassis loader exited unsuccessfully".to_owned())
-    }
-}
-
 fn display_available() -> bool {
     !agenterm_platform::window::display_backend_facts().headless
 }
 
-fn run_gui(no_activate: bool) -> anyhow::Result<()> {
+fn run_gui(
+    no_activate: bool,
+    chassis_image: Option<&'static crate::frontend::chassis_image::LoadedChassisImage>,
+) -> anyhow::Result<()> {
     let config = load_config();
     let instance_label = resolved_ipc_endpoint()
         .ok()
@@ -673,6 +653,7 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
         wake_signal,
         ipc_server,
         session_name,
+        chassis_image,
     );
     let options = PixelWindowOptions::new(
         title,
@@ -693,6 +674,7 @@ struct UnixApp {
     wake_signal: Arc<WakeSignal>,
     ipc_server: IpcServer,
     session_name: String,
+    chassis_image: Option<&'static crate::frontend::chassis_image::LoadedChassisImage>,
     started_at: SystemTime,
     event_journal: EventJournal,
     named_buffers: crate::named_buffer::NamedBufferStore,
@@ -808,6 +790,7 @@ impl UnixApp {
         wake_signal: Arc<WakeSignal>,
         ipc_server: IpcServer,
         session_name: String,
+        chassis_image: Option<&'static crate::frontend::chassis_image::LoadedChassisImage>,
     ) -> Self {
         let config = load_config();
         Self {
@@ -816,6 +799,7 @@ impl UnixApp {
             wake_signal,
             ipc_server,
             session_name,
+            chassis_image,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
             named_buffers: crate::named_buffer::NamedBufferStore::new(),
@@ -4310,6 +4294,13 @@ impl UnixApp {
                 serde_json::json!({}),
             );
         }
+        if let Some(image) = self.chassis_image {
+            let (active_tab, _) = crate::frontend::chassis_image::eval_active_tab(
+                image, &mut *self,
+            )
+            .map_err(|error| PixelWindowError::failed("chassis_l2_first_window_failed", error))?;
+            self.set_status_message(format!("Chassis L2 active tab @{active_tab}"));
+        }
         self.load_composer_buffer_from_tab();
         self.sync_grid_from_tab();
         Ok(())
@@ -5368,6 +5359,22 @@ fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
         ToolbarHit::ToggleLocale => crate::frontend::action::TOGGLE_LOCALE,
         ToolbarHit::FontDecrease => crate::frontend::action::FONT_DECREASE,
         ToolbarHit::FontIncrease => crate::frontend::action::FONT_INCREASE,
+    }
+}
+
+impl agenterm_chassis::l2_dispatch::HostCallback for &mut UnixApp {
+    fn call(
+        &mut self,
+        capability: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        if capability != "tabs.active" || parameters != &serde_json::json!({}) {
+            return Err(format!("unsupported live chassis call `{capability}`"));
+        }
+        self.active
+            .and_then(|id| i64::try_from(id).ok())
+            .map(serde_json::Value::from)
+            .ok_or_else(|| "live workbench has no active PTY tab".to_owned())
     }
 }
 
@@ -6768,36 +6775,17 @@ mod system_menu_tests {
     use super::{
         GuiLaunchResult, RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure,
         UNIX_GUI_LAUNCH_POLICY, UNIX_GUI_USAGE, UnixFocusSurface, compact_cwd_for_status,
-        gui_help_result, parse_gui_launch_target, run_selected_chassis_loader_with,
-        scale_frame_nearest, scale_rect_to_frame, shift_extend_anchor, terminal_paste_bytes,
-        terminal_paste_target_is_current, workspace_toolbar_snapshot_json,
+        gui_help_result, parse_gui_launch_target, scale_frame_nearest, scale_rect_to_frame,
+        shift_extend_anchor, terminal_paste_bytes, terminal_paste_target_is_current,
+        workspace_toolbar_snapshot_json,
     };
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
     use crate::frontend::selection::{TerminalPoint, TerminalSelection};
     use std::{
-        cell::Cell,
         path::Path,
         time::{Duration, Instant},
     };
-
-    #[test]
-    fn selected_chassis_loader_runs_once_and_propagates_failure() {
-        let calls = Cell::new(0);
-        run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
-            calls.set(calls.get() + 1);
-            Ok(true)
-        })
-        .expect("selected loader");
-        assert_eq!(calls.get(), 1);
-
-        let error =
-            run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
-                Ok(false)
-            })
-            .expect_err("unsuccessful loader");
-        assert!(error.contains("exited unsuccessfully"));
-    }
 
     #[test]
     fn gui_launch_help_is_supported_by_frontend_contract() {

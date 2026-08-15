@@ -1,65 +1,46 @@
-//! Source-order lock for both host adapters' Chassis-L1 selection boundary.
+//! Both real host adapters continue from a checked image into PTY/IPC-backed L2.
 
 const UNIX_FRONTEND: &str = include_str!("../src/platform/adapters/unix/frontend/mod.rs");
 const WINDOWS_FRONTEND: &str = include_str!("../src/platform/adapters/windows/frontend.rs");
 
 #[test]
-fn both_hosts_execute_the_validated_loader_instead_of_the_fat_workbench() {
-    for source in [UNIX_FRONTEND, WINDOWS_FRONTEND] {
-        let load = source
-            .find("chassis_image::load_selected_image")
-            .expect("validate composed image");
-        let select = source[load..]
-            .find("run_selected_chassis_loader(&image.native_loader, &image.root)")
-            .map(|offset| load + offset)
-            .expect("select validated native loader");
-        let selected_return = source[select..]
-            .find("return GuiLaunchResult::Launched")
-            .map(|offset| select + offset)
-            .expect("native loader owns the selected launch");
-        let fat_gui = source[load..]
-            .find("attempt_gui_handoff")
-            .map(|offset| load + offset)
-            .expect("legacy workbench fallback");
+fn unix_first_window_checks_image_then_starts_ipc_pty_and_l2() {
+    let load = UNIX_FRONTEND
+        .find("chassis_image::load_selected_image")
+        .expect("validate composed image");
+    let ipc = UNIX_FRONTEND[load..]
+        .find("start_ipc_server(0")
+        .map(|offset| load + offset)
+        .expect("start real IPC server after image check");
+    let pty = UNIX_FRONTEND[ipc..]
+        .find("TerminalTab::spawn")
+        .map(|offset| ipc + offset)
+        .expect("spawn real PTY after IPC");
+    let l2 = UNIX_FRONTEND[pty..]
+        .find("chassis_image::eval_active_tab")
+        .map(|offset| pty + offset)
+        .expect("dispatch checked L2 after first PTY");
 
-        assert!(load < select);
-        assert!(select < selected_return);
-        assert!(selected_return < fat_gui);
-        assert!(source.contains("std::process::Command::new(loader)"));
-        assert!(source.contains(".arg(image_root)"));
-        assert!(!source.contains("Loaded chassis L3"));
-    }
+    assert!(load < ipc && ipc < pty && pty < l2);
+    assert!(UNIX_FRONTEND.contains("capability != \"tabs.active\""));
+    assert!(UNIX_FRONTEND.contains("live workbench has no active PTY tab"));
 }
 
 #[test]
-fn invalid_or_valid_loader_selection_never_falls_through_to_gui_pty_or_ipc() {
-    #[derive(Default)]
-    struct Calls {
-        loader: usize,
-        gui: usize,
-        pty: usize,
-        ipc: usize,
+fn windows_first_window_checks_image_then_uses_real_server_ipc_for_l2() {
+    assert!(WINDOWS_FRONTEND.contains("chassis_image::load_selected_image"));
+    assert!(WINDOWS_FRONTEND.contains("connect_or_start_frontend_gui_client"));
+    assert!(WINDOWS_FRONTEND.contains("client.snapshot().active_tab_id.clone()"));
+    assert!(WINDOWS_FRONTEND.contains("chassis_image::eval_active_tab"));
+    assert!(WINDOWS_FRONTEND.contains("capability != \"tabs.active\""));
+    assert!(WINDOWS_FRONTEND.contains("run_remote_gui(no_activate)"));
+}
+
+#[test]
+fn both_hosts_reject_the_old_fat_spawn_and_return_fallback() {
+    for source in [UNIX_FRONTEND, WINDOWS_FRONTEND] {
+        assert!(!source.contains("run_selected_chassis_loader"));
+        assert!(!source.contains("std::process::Command::new(loader)"));
+        assert!(!source.contains("return GuiLaunchResult::Launched;"));
     }
-
-    fn selected_path(calls: &mut Calls, loader_ok: bool) -> Result<(), &'static str> {
-        calls.loader += 1;
-        if !loader_ok {
-            return Err("loader failed");
-        }
-        Ok(())
-    }
-
-    let mut valid = Calls::default();
-    selected_path(&mut valid, true).expect("valid native loader");
-    assert_eq!(
-        (valid.loader, valid.gui, valid.pty, valid.ipc),
-        (1, 0, 0, 0)
-    );
-
-    let mut invalid = Calls::default();
-    selected_path(&mut invalid, false).expect_err("invalid loader");
-    assert_eq!(
-        (invalid.loader, invalid.gui, invalid.pty, invalid.ipc),
-        (1, 0, 0, 0)
-    );
 }

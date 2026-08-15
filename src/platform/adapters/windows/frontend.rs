@@ -5,7 +5,6 @@ use crate::frontend::{
 };
 use crate::wake_signal::WakeSignal;
 use std::env;
-use std::path::Path;
 
 /// Wake the Win32 message loop without posting one message per producer event.
 pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) -> GuiWakeResult {
@@ -56,22 +55,26 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     };
     if let Some(image) = selected_image {
         write_best_effort_stderr(&format!(
-            "Starting chassis L3 {} through selected native loader {}",
+            "Starting first workbench window from chassis L3 {} with native cell {}",
             image.l3_name,
             image.native_loader.display()
         ));
-        if let Err(error) = run_selected_chassis_loader(&image.native_loader, &image.root) {
-            show_startup_error(&anyhow::anyhow!(error.clone()));
-            return GuiLaunchResult::StartupFailed(error);
+        match run_live_chassis_l2(image) {
+            Ok(active_tab) => write_best_effort_stderr(&format!(
+                "Chassis L2 selected live PTY tab @{active_tab} through IPC"
+            )),
+            Err(error) => {
+                show_startup_error(&anyhow::anyhow!(error.clone()));
+                return GuiLaunchResult::StartupFailed(error);
+            }
         }
-        return GuiLaunchResult::Launched;
     }
     let no_activate = launch_options.no_activate || crate::client::no_activate_from_environment();
     write_best_effort_stderr(&gui_console_summary(&crate::ipc_address()));
 
     // Preserve the historical launcher handoff when a compatible GUI/lease
     // already owns this server.
-    if !launch_options.ui_client {
+    if !launch_options.ui_client && selected_image.is_none() {
         match attempt_gui_handoff(no_activate, true) {
             GuiHandoffResult::HandedOff => return GuiLaunchResult::Reused,
             GuiHandoffResult::Continue => {}
@@ -101,25 +104,39 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
     GuiLaunchResult::Launched
 }
 
-fn run_selected_chassis_loader(loader: &Path, image_root: &Path) -> Result<(), String> {
-    run_selected_chassis_loader_with(loader, image_root, |loader, image_root| {
-        std::process::Command::new(loader)
-            .arg(image_root)
-            .status()
-            .map(|status| status.success())
-            .map_err(|error| format!("cannot start selected native chassis loader: {error}"))
-    })
+fn run_live_chassis_l2(
+    image: &crate::frontend::chassis_image::LoadedChassisImage,
+) -> Result<i64, String> {
+    let client_id = format!("agenterm-chassis:{}", std::process::id());
+    let mut client = crate::frontend_server::connect_or_start_frontend_gui_client(&client_id)?;
+    let active_tab = client.snapshot().active_tab_id.clone();
+    client
+        .detach()
+        .map_err(|error| format!("cannot detach chassis bootstrap IPC client: {error}"))?;
+    let (value, _) =
+        crate::frontend::chassis_image::eval_active_tab(image, LiveWindowsHost { active_tab })?;
+    Ok(value)
 }
 
-fn run_selected_chassis_loader_with(
-    loader: &Path,
-    image_root: &Path,
-    launch: impl FnOnce(&Path, &Path) -> Result<bool, String>,
-) -> Result<(), String> {
-    if launch(loader, image_root)? {
-        Ok(())
-    } else {
-        Err("selected native chassis loader exited unsuccessfully".to_owned())
+struct LiveWindowsHost {
+    active_tab: Option<String>,
+}
+
+impl agenterm_chassis::l2_dispatch::HostCallback for LiveWindowsHost {
+    fn call(
+        &mut self,
+        capability: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        if capability != "tabs.active" || parameters != &serde_json::json!({}) {
+            return Err(format!("unsupported live chassis call `{capability}`"));
+        }
+        self.active_tab
+            .as_deref()
+            .and_then(|id| id.strip_prefix('@'))
+            .and_then(|id| id.parse::<i64>().ok())
+            .map(serde_json::Value::from)
+            .ok_or_else(|| "live workbench IPC snapshot has no active PTY tab".to_owned())
     }
 }
 
@@ -147,28 +164,8 @@ fn show_startup_error(error: &anyhow::Error) {
 mod tests {
     use super::{
         GuiLaunchResult, WINDOWS_GUI_LAUNCH_POLICY, WINDOWS_GUI_USAGE, gui_help_result,
-        parse_gui_launch_target, run_selected_chassis_loader_with,
+        parse_gui_launch_target,
     };
-    use std::cell::Cell;
-    use std::path::Path;
-
-    #[test]
-    fn selected_chassis_loader_runs_once_and_propagates_failure() {
-        let calls = Cell::new(0);
-        run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
-            calls.set(calls.get() + 1);
-            Ok(true)
-        })
-        .expect("selected loader");
-        assert_eq!(calls.get(), 1);
-
-        let error =
-            run_selected_chassis_loader_with(Path::new("loader"), Path::new("image"), |_, _| {
-                Ok(false)
-            })
-            .expect_err("unsuccessful loader");
-        assert!(error.contains("exited unsuccessfully"));
-    }
 
     #[test]
     fn gui_launcher_accepts_no_activate_and_address_in_either_order() {

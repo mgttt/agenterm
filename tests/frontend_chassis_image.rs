@@ -33,16 +33,21 @@ fn write_installed_image(root: &Path) {
             serde_json::Value::String(sha256_hex(&bytes)),
         );
     }
-    fs::create_dir_all(root.join("l2")).expect("l2");
+    fs::create_dir_all(root.join("l2/programs")).expect("l2");
     fs::write(
         root.join("l2/host-abi.json"),
         include_str!("../crates/agenterm-chassis/l2/host-abi.json"),
     )
     .expect("host ABI");
+    fs::write(
+        root.join("l2/programs/active-tab.json"),
+        include_str!("../crates/agenterm-chassis/l2/programs/active-tab.json"),
+    )
+    .expect("active-tab program");
     fs::create_dir_all(root.join("l3")).expect("l3");
     fs::write(
         root.join("l3/app.json"),
-        r#"{"schema":1,"name":"workbench","capabilities":["tabs.list"]}"#,
+        r#"{"schema":1,"name":"workbench","capabilities":["tabs.active"]}"#,
     )
     .expect("app manifest");
     fs::write(
