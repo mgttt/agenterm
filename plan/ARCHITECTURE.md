@@ -39,6 +39,9 @@ crates/agenterm-dyn/         内部 `publish = false` 的极小 native door：
                              intern + S-expr eval + bounded integer/pointer `dlcall`
                              不属于 Script engine family，不接 cu/platform/libagenterm
 
+crates/agenterm-chassis/     Chassis-L1/L2/L3 独立合成：冻 loader 字节 + host-abi + app
+                             不依赖工作台 `agenterm` 包；日常 compose/check，不编六格 PE
+
 src/platform/                产品平台 glue：FrontendHost、目录名、快捷键/CC、能力/IPC 命名
   policy/                    host 无关产品策略表
     input.rs                 shortcut / empty-copy 输入策略（Win/Unix 共用）

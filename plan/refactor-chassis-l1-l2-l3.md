@@ -54,8 +54,8 @@ L2 若还是半个 `agenterm.exe`，打包循环是假的。
 ```text
 W0  点名 L1 路径面（已做）
 W1  打包循环证明：合成器 + 黑盒测试，过程中不得调用 cargo（本增量）
-W2  Host ABI 名字表；cu 登记为 L2
-W3  第一份真实 L2 产物走合成器进「成品」夹具
+W2  独立 crate `agenterm-chassis`：compose/check/inspect + 冻结 Host ABI + 示例 L3（已做）
+W3  第一份真实 L2 产物走合成器进「成品」夹具；cu 仍为独立 L2 PE
 W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 ```
 
@@ -78,4 +78,6 @@ W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 
 ## 5. 现行对照
 
-今天改 frontend 仍可能拖进同一份 PE 的编译。W1 只建立 **旁边的** 打包证明，让后面把真 L2/L3 往这条循环迁。
+今天改 frontend 仍可能拖进同一份 PE 的编译。`crates/agenterm-chassis` 是拆出来的
+底盘：不链工作台，能 compose/check 一份 L1+L2+L3 镜像。工作台 PE 尚未被这些
+loader 替换。

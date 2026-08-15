@@ -24,10 +24,11 @@ the workspace.
   copies frozen six-cell L1 loaders plus L2/L3 into a deterministic archive
   without cargo; `scripts/chassis-compose-product-test.py` proves L1 SHA
   identity, determinism, and a PATH with no working cargo.
-- Rename: Shell-L* → Chassis-L* to drop the terminal-shell clash.
+- Rename: Shell-L* → Chassis-L*.
+- Independent `crates/agenterm-chassis`: compose/check/inspect, frozen L2
+  host ABI, example L3 app. No workbench dependency.
 
-This increment proves the economic model. It does **not** split the live
-`agenterm` PE.
+The live `agenterm` PE is not yet replaced by these loaders.
 
 ## Next (later waves)
 

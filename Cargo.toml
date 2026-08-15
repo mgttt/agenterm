@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "examples/size-probe", "crates/agenterm-con", "crates/agenterm-cu", "crates/agenterm-platform", "crates/agenterm-abi", "crates/agenterm-ui-core", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-wasmcore", "crates/agenterm-dyn"]
+members = [".", "examples/size-probe", "crates/agenterm-con", "crates/agenterm-cu", "crates/agenterm-platform", "crates/agenterm-abi", "crates/agenterm-ui-core", "crates/agenterm-script-common", "crates/agenterm-rh", "crates/agenterm-lua", "crates/agenterm-qjs", "crates/agenterm-sql", "crates/agenterm-wasmcore", "crates/agenterm-dyn", "crates/agenterm-chassis"]
 resolver = "2"
 
 [package]

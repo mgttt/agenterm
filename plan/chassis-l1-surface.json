@@ -19,7 +19,8 @@
     "src/server_app.rs",
     "src/terminal_runtime.rs",
     "src/terminal_lifecycle.rs",
-    "crates/agenterm-dyn/src/native.rs"
+    "crates/agenterm-dyn/src/native.rs",
+    "crates/agenterm-chassis/src/"
   ],
   "explicitly_not_l1": [
     "src/frontend/",
@@ -28,6 +29,8 @@
     "src/theme.rs",
     "src/locale.rs",
     "crates/agenterm-cu/",
+    "crates/agenterm-chassis/l2/",
+    "crates/agenterm-chassis/l3/",
     "crates/agenterm-dyn/src/hosts.rs",
     "crates/agenterm-dyn/examples/",
     "crates/agenterm-dyn/tests/",

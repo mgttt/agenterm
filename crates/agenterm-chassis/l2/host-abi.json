@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "version": 1,
+  "layer": "chassis-l2",
+  "note": "Capability names L3 may call. Implementation stays in the current workbench/cu until those move out of the fat PE. This file is the L2 contract artifact.",
+  "capabilities": [
+    { "id": "protocol.info", "kind": "observe" },
+    { "id": "ui.snapshot", "kind": "observe" },
+    { "id": "ui.hello", "kind": "observe" },
+    { "id": "ui.bootstrap", "kind": "observe" },
+    { "id": "ui.deltas", "kind": "observe" },
+    { "id": "workspace.info", "kind": "observe" },
+    { "id": "tabs.list", "kind": "observe" },
+    { "id": "tabs.active", "kind": "observe" },
+    { "id": "pane.capture", "kind": "observe" },
+    { "id": "events.read", "kind": "observe" },
+    { "id": "events.wait", "kind": "observe" },
+    { "id": "server.kill", "kind": "destructive" },
+    { "id": "workspace.shutdown", "kind": "destructive" }
+  ]
+}
