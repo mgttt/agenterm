@@ -101,12 +101,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Test chassis on native cell
         if: matrix.kind == 'test'
-        run: cargo test --locked -p agenterm-chassis --target ${{ matrix.target }} -- --test-threads=1
+        run: cargo test --locked -p agenterm-chassis --features loader --target ${{ matrix.target }} -- --test-threads=1
       - name: Check chassis on cross cell
         if: matrix.kind == 'check'
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo check --locked -p agenterm-chassis --all-targets --target ${{ matrix.target }}
+        run: cargo check --locked -p agenterm-chassis --features loader --all-targets --target ${{ matrix.target }}
 
   l2-pack:
     name: chassis L2 cross-arch pack

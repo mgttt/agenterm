@@ -50,6 +50,7 @@ fn six_cell_l1_is_conditional_while_l2_pack_always_runs() {
     assert!(l1.contains("needs: classify"));
     assert!(l1.contains("if: needs.classify.outputs.requires_l1_candidate == 'true'"));
     assert_eq!(l1.matches("target:").count(), 6);
+    assert_eq!(l1.matches("--features loader").count(), 2);
 
     let l2 = WORKFLOW
         .split("\n  l2-pack:\n")
