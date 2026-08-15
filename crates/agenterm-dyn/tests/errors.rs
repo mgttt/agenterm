@@ -119,9 +119,15 @@ fn dlcall_rejects_unknown_signature_types_before_arguments_or_library_load() {
         ));
 
         let mut return_env = Dyn::new();
-        let return_script =
-            format!(r#"(dlcall "missing-library-for-unknown-return" "unused" "{unsupported}")"#);
+        let return_script = format!(
+            r#"(dlcall "missing-library-for-unknown-return" "unused" "{unsupported}"
+                "i32" (set touched 1))"#
+        );
         assert_eq!(return_env.eval(&return_script), Err(expected));
+        assert_eq!(
+            return_env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
 
         let mut argument_env = Dyn::new();
         let argument_script = format!(
