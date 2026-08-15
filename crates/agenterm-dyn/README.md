@@ -112,6 +112,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [current nice value via `nice(0)`](examples/nice-zero.md)
 - [yield the current thread via `sched_yield`](examples/sched-yield.md)
 - [cancel and observe the process alarm via `alarm(0)`](examples/alarm-zero.md)
+- [read and immediately restore the process `umask`](examples/umask-read-restore.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
