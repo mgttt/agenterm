@@ -7305,7 +7305,10 @@ impl RemoteWindowState {
         let Some(name) = windows_terminal_named_key(key) else {
             return false;
         };
-        if let Some(bytes) = tmux_key_bytes_with_modifiers(name, modifiers) {
+        let application_cursor = self
+            .active_tab()
+            .is_some_and(|tab| tab.screen.application_cursor);
+        if let Some(bytes) = terminal_named_key_bytes(name, modifiers, application_cursor) {
             self.terminal_input(&bytes);
             true
         } else {
@@ -8366,6 +8369,24 @@ fn windows_terminal_named_key(key: u16) -> Option<&'static str> {
         KEY_F12 => Some("F12"),
         _ => None,
     }
+}
+
+fn terminal_named_key_bytes(
+    name: &str,
+    modifiers: input::ModifierState,
+    application_cursor: bool,
+) -> Option<Vec<u8>> {
+    if application_cursor && !modifiers.control && !modifiers.alt && !modifiers.shift {
+        let suffix = match name {
+            "Up" => b'A',
+            "Down" => b'B',
+            "Right" => b'C',
+            "Left" => b'D',
+            _ => return tmux_key_bytes_with_modifiers(name, modifiers),
+        };
+        return Some(vec![0x1b, b'O', suffix]);
+    }
+    tmux_key_bytes_with_modifiers(name, modifiers)
 }
 
 fn normalized_virtual_key(key: &input::LogicalKey) -> Option<u32> {
@@ -9514,6 +9535,14 @@ mod tests {
         assert!(terminal_char_is_named_key_echo(0x09));
         assert!(terminal_char_is_named_key_echo(0x1b));
         assert!(!terminal_char_is_named_key_echo(u16::from(b'A')));
+        assert_eq!(
+            terminal_named_key_bytes("Left", input::ModifierState::default(), false),
+            Some(b"\x1b[D".to_vec())
+        );
+        assert_eq!(
+            terminal_named_key_bytes("Right", input::ModifierState::default(), true),
+            Some(b"\x1bOC".to_vec())
+        );
     }
 
     #[test]
