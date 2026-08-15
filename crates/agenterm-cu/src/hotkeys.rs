@@ -399,10 +399,9 @@ mod macos {
         let Some(action) = host_actions::by_id(hot_id.id) else {
             return 0;
         };
-        let Some(command) = host_actions::command(hot_id.id) else {
+        let Some(reply) = host_actions::execute(&host.executor, hot_id.id) else {
             return 0;
         };
-        let reply = host.executor.execute(&command);
         if !reply.ok
             && let Some(error) = reply.error
         {
@@ -467,8 +466,19 @@ mod windows {
     }
 
     fn self_test(host: DesktopHost, hotkeys_active: bool) -> i32 {
+        let executor = Executor::new(Authorization::new([Grant::Observe].into_iter().collect()));
+        let dispatch = host_actions::execute(&executor, PLACEMENT_ACTIONS[0].id);
+        let dispatch_shared = dispatch.as_ref().is_some_and(|reply| {
+            !reply.ok
+                && reply.command == "window-place"
+                && reply.target == "current"
+                && reply
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.code == "refused")
+        });
         match host.close() {
-            Ok(()) => {
+            Ok(()) if dispatch_shared => {
                 if std::env::args().any(|arg| arg == "--json") {
                     println!(
                         "{}",
@@ -477,6 +487,9 @@ mod windows {
                             "host": "windows-notification-area",
                             "actions": PLACEMENT_ACTIONS.len() + 1,
                             "hotkeys_active": hotkeys_active,
+                            "shared_executor": true,
+                            "dispatch_command": "window-place",
+                            "dispatch_refused": true,
                             "cleaned_up": true
                         })
                     );
@@ -484,6 +497,12 @@ mod windows {
                     eprintln!("agenterm-cu host --self-test: open and cleanup ok");
                 }
                 0
+            }
+            Ok(()) => {
+                eprintln!(
+                    "agenterm-cu host --self-test: host action did not traverse Command/Executor"
+                );
+                1
             }
             Err(error) => report("close", &error),
         }
@@ -504,11 +523,10 @@ mod windows {
                     Err(error) => report("close", &error),
                 };
             }
-            let Some(command) = host_actions::command(action_id) else {
+            let Some(reply) = host_actions::execute(&executor, action_id) else {
                 eprintln!("agenterm-cu host: unknown action id {action_id}");
                 continue;
             };
-            let reply = executor.execute(&command);
             if !reply.ok
                 && let Some(error) = reply.error
             {

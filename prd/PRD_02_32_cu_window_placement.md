@@ -190,7 +190,10 @@ that `agenterm-cu` does not yet own. The ids stay reserved; v0.1.19 may return
   Quit. The platform/ABI layer transports numeric actions but does not assign
   their product meaning.
 - [x] Native `target/abi-dev` `agenterm-cu host --self-test --json` evidence
-  reports `actions=19` and `cleaned_up=true`.
+  reports `actions=19`, `shared_executor=true`, a refused side-effect-free
+  `window-place` dispatch, and `cleaned_up=true`. The same
+  `host_actions::execute` function owns Windows menu/global-shortcut and macOS
+  callback dispatch, so host modes cannot bypass command authorization/audit.
 - [x] The staged `dist/agenterm-cu.exe` beside its exact `dist/agenterm.dll`
   passes `cu-windows-smoke`: version probe, dynamic load, 19 actions and
   deterministic host cleanup.

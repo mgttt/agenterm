@@ -185,10 +185,12 @@ independent implementation.
   proves the command set end to end on one platform with public black-box
   evidence. Individual child leaves may record `[~]` / `[x]` when their own
   evidence arrives; a partial platform slice does not promote the subtree root.
-- [~] Linux `current` has first black-box evidence for AT-SPI2 `tree` and
-  structured `click` / `focus` by node path (`scripts/cu-linux-smoke.sh` against
-  the real `agenterm-cu` binary). Windows UIA and macOS AX are not claimed in
-  this slice.
+- [~] Linux `current` has black-box AT-SPI2 `tree` and structured actuation
+  evidence. Windows `current` has staged public UIA tree, stable window/node
+  identity, name-addressed Value/GetText/Invoke actuation, desktop-host cleanup,
+  and shared host `Command`/`Executor` dispatch evidence in
+  `scripts/rh/cu-windows-smoke.rh`. macOS AX remains a separate placement slice;
+  Candidate qualification is still required before root promotion.
 - [ ] the subtree root still has no shipped version. Roadmap ownership is
   [18 Focused product roadmap](PRD_02_18_roadmap.md). Window placement
   ([32](PRD_02_32_cu_window_placement.md)) opened under the v0.1.19 draft and

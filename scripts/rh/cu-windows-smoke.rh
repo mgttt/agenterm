@@ -221,7 +221,10 @@ fn entry() {
         ensure(
             host.ok != 0
                 && ("" + host.host) == "windows-notification-area"
-                && host.actions > 1
+                && host.actions == 19
+                && host.shared_executor != 0
+                && ("" + host.dispatch_command) == "window-place"
+                && host.dispatch_refused != 0
                 && host.cleaned_up != 0,
             "cu_windows_smoke_host_contract:" + host_text
         );

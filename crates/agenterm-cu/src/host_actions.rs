@@ -5,7 +5,7 @@
 //! the public CLI.
 
 use crate::place::PlaceAction;
-use crate::{Command, TargetRef};
+use crate::{Command, CuReply, Executor, TargetRef};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostAction {
@@ -163,9 +163,17 @@ pub fn command(id: u32) -> Option<Command> {
     })
 }
 
+/// Executes one desktop-host action through the same public command executor
+/// used by the CLI. Native menu/hotkey hosts transport only the numeric id;
+/// product meaning, authorization, audit and mechanism selection stay here.
+pub fn execute(executor: &Executor, id: u32) -> Option<CuReply> {
+    command(id).map(|command| executor.execute(&command))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Authorization, Grant};
     use std::collections::BTreeSet;
 
     #[test]
@@ -182,5 +190,19 @@ mod tests {
         }
         assert!(!ids.contains(&0));
         assert!(!ids.contains(&QUIT_ACTION_ID));
+    }
+
+    #[test]
+    fn host_action_dispatches_through_command_authorization() {
+        let executor = Executor::new(Authorization::new([Grant::Observe].into_iter().collect()));
+        let reply = execute(&executor, PLACEMENT_ACTIONS[0].id).expect("known host action");
+        assert!(!reply.ok);
+        assert_eq!(reply.command, "window-place");
+        assert_eq!(reply.target, "current");
+        assert_eq!(
+            reply.error.as_ref().map(|error| error.code.as_str()),
+            Some("refused")
+        );
+        assert!(execute(&executor, u32::MAX).is_none());
     }
 }

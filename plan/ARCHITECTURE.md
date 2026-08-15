@@ -755,7 +755,9 @@ catalog and Quit. `libagenterm`/`agenterm-platform` own native mechanisms. ABI
 their product meaning. On Windows that mechanism is a notification-area menu,
 `RegisterHotKey`, same-thread polling and deterministic cleanup. Native
 `target/abi-dev` and colocated `dist/agenterm-cu.exe` + `agenterm.dll` self-test
-evidence is available; Candidate qualification remains incomplete, so
+evidence includes one side-effect-free refused placement routed through the
+same `host_actions::execute` → `Command` → `Executor` chain used by real menu
+and shortcut events. Candidate qualification remains incomplete, so
 architecture status is partial.
 
 The Windows accessibility call chain follows the same boundary:
