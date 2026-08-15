@@ -31,20 +31,22 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
   `issetugid`, `_NSGetExecutablePath`, `proc_pidpath`, `arc4random`,
   `clock_gettime_nsec_np`, `sysctl`, `mach_timebase_info`, `pthread_main_np`,
   `getlogin_r`, `pthread_threadid_np`, `pthread_getname_np`, `proc_pidinfo`, `_NSGetArgc`,
-  `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, and `getentropy`
+  `_NSGetArgv`, `_NSGetEnviron`, `proc_pid_rusage`, `_dyld_image_count`, `getentropy`,
+  `proc_name`, `pthread_get_stackaddr_np`, and `pthread_get_stacksize_np`
   against `libSystem.B.dylib`.
   `mach_host_self` stays a placeholder because dyn has no ownership-aware
   release path for its send right. Darwin `ioctl` calls its resolved symbol through a
   signature-gated Rust variadic path for `(i32, u64|i32, ptr) -> i32`, not
   general variadic FFI. CU-adjacent macOS notes name AX as a cu live hand.
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
-  1.97: **121 passed** (12 unit + 38 errors + 9 hosts + 16 language + 46
-  cfg-gated Linux smoke; 0 doctests). Current Darwin evidence on this
-  aarch64-apple-darwin host: **121 passed** (13 unit + 38 errors + 9 hosts +
-  16 language + 1 macos_ioctl + 17 macos_probes + 4 macos_resource + 23
-  cfg-gated macOS smoke; 0 doctests). Wave 4–6 live rows were `dlcall`ed
-  here and compared to later native calls. Host-specific counts, not a
-  cross-platform estimate.
+  1.97: **122 passed** (12 unit + 38 errors + 10 hosts + 16 language + 46
+  cfg-gated Linux smoke; 0 doctests). The Darwin test inventory for this
+  source is **129** (13 unit + 38 errors + 10 hosts +
+  16 language + 1 macos_ioctl + 24 macos_probes + 4 macos_resource + 23
+  cfg-gated macOS smoke; 0 doctests); native CI remains the evidence gate for
+  this Wave 10 source. Wave 4–6 live rows were `dlcall`ed on the earlier
+  Darwin CI host and compared to later native calls. Host-specific counts, not
+  a cross-platform estimate.
 
 ## Completed branch accounting
 
@@ -69,7 +71,8 @@ Integer/void/ptr libc rows are live on Linux (`libc.so.6`) and macOS
 `mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`,
 `pthread_getname_np`,
 `proc_pidinfo`, `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
-`proc_pid_rusage`, `_dyld_image_count`, and `getentropy`.
+`proc_pid_rusage`, `_dyld_image_count`, `getentropy`, `proc_name`,
+`pthread_get_stackaddr_np`, and `pthread_get_stacksize_np`.
 `mach_host_self` remains a placeholder because dyn cannot release its returned
 Mach send right. Windows extra probes stay placeholders. No
 C shim.

@@ -145,6 +145,9 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "proc_pid_rusage",
                 "dyld_image_count",
                 "getentropy",
+                "proc_name",
+                "pthread_get_stackaddr_np",
+                "pthread_get_stacksize_np",
                 "mach_host_self",
             ]
         );
@@ -264,10 +267,13 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 "proc_pid_rusage",
                 "dyld_image_count",
                 "getentropy",
+                "proc_name",
+                "pthread_get_stackaddr_np",
+                "pthread_get_stacksize_np",
                 "mach_host_self",
             ]
         );
-        assert!(c.system_probes[36..57].iter().all(|probe| matches!(
+        assert!(c.system_probes[36..60].iter().all(|probe| matches!(
             probe.status,
             SystemProbeStatus::LiveDlcall {
                 lib: "libSystem.B.dylib",
@@ -275,7 +281,7 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
             }
         )));
         assert!(matches!(
-            c.system_probes[57].status,
+            c.system_probes[60].status,
             SystemProbeStatus::Placeholder
         ));
     }
@@ -285,6 +291,35 @@ fn additional_system_probes_use_explicit_live_and_placeholder_statuses() {
                 .iter()
                 .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
         );
+    }
+}
+
+#[test]
+fn darwin_system_probe_symbols_preserve_exact_c_spellings() {
+    for c in [MACOS_X86_64, MACOS_AARCH64] {
+        for (name, symbol) in [
+            ("nsget_executable_path", "_NSGetExecutablePath"),
+            ("nsget_argc", "_NSGetArgc"),
+            ("nsget_argv", "_NSGetArgv"),
+            ("nsget_environ", "_NSGetEnviron"),
+            ("dyld_image_count", "_dyld_image_count"),
+            ("proc_name", "proc_name"),
+            ("pthread_get_stackaddr_np", "pthread_get_stackaddr_np"),
+            ("pthread_get_stacksize_np", "pthread_get_stacksize_np"),
+        ] {
+            let probe = c
+                .system_probes
+                .iter()
+                .find(|probe| probe.name == name)
+                .expect("Darwin probe is catalogued");
+            assert!(matches!(
+                probe.status,
+                SystemProbeStatus::LiveDlcall {
+                    lib: "libSystem.B.dylib",
+                    symbol: actual,
+                } if actual == symbol
+            ));
+        }
     }
 }
 

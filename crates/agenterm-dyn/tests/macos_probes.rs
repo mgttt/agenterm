@@ -544,3 +544,80 @@ fn dlcall_getentropy_fills_caller_owned_buffer() {
     assert_eq!(direct_status, 0, "direct getentropy must succeed");
     assert!(direct.iter().any(|byte| *byte != 0));
 }
+
+#[test]
+fn dlcall_proc_name_matches_direct_c_current_process_name() {
+    let symbol = live_symbol("proc_name");
+    let pid = unsafe { libc::getpid() };
+    let mut name = [0_i8; libc::PROC_PIDPATHINFO_MAXSIZE];
+    let mut env = Dyn::new();
+    env.bind("name", name.as_mut_ptr().cast())
+        .expect("bind process-name buffer");
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "i32" "i32" {pid} "ptr" name "u32" {})"#,
+            name.len()
+        ))
+        .expect("proc_name dlcall")
+        .as_int()
+        .expect("proc_name byte count") as i32;
+    assert!(got > 0, "proc_name must write a current-process name");
+    let got = unsafe { CStr::from_ptr(name.as_ptr()) };
+
+    let mut direct_name = [0_i8; libc::PROC_PIDPATHINFO_MAXSIZE];
+    let direct_status = unsafe {
+        libc::proc_name(
+            pid,
+            direct_name.as_mut_ptr().cast(),
+            direct_name.len() as u32,
+        )
+    };
+    assert!(
+        direct_status > 0,
+        "direct proc_name must write a process name"
+    );
+    let direct = unsafe { CStr::from_ptr(direct_name.as_ptr()) };
+    assert_eq!(got.to_bytes(), direct.to_bytes());
+}
+
+#[test]
+fn dlcall_pthread_get_stackaddr_np_matches_libc_current_thread() {
+    let symbol = live_symbol("pthread_get_stackaddr_np");
+    let thread = unsafe { libc::pthread_self() } as u64;
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "ptr" "u64" {thread})"#
+        ))
+        .expect("pthread_get_stackaddr_np dlcall")
+        .as_ptr()
+        .expect("pthread_get_stackaddr_np pointer") as *mut c_void;
+    let direct = unsafe { libc::pthread_get_stackaddr_np(libc::pthread_self()) };
+    assert!(
+        !got.is_null(),
+        "current thread stack address must be non-null"
+    );
+    assert!(
+        !direct.is_null(),
+        "direct thread stack address must be non-null"
+    );
+    assert_eq!(got, direct);
+}
+
+#[test]
+fn dlcall_pthread_get_stacksize_np_matches_libc_current_thread() {
+    let symbol = live_symbol("pthread_get_stacksize_np");
+    let thread = unsafe { libc::pthread_self() } as u64;
+    let mut env = Dyn::new();
+    let got = env
+        .eval(&format!(
+            r#"(dlcall "{LIB}" "{symbol}" "u64" "u64" {thread})"#
+        ))
+        .expect("pthread_get_stacksize_np dlcall")
+        .as_int()
+        .expect("pthread_get_stacksize_np size") as u64;
+    let direct = unsafe { libc::pthread_get_stacksize_np(libc::pthread_self()) } as u64;
+    assert!(got > 0, "current thread stack size must be positive");
+    assert!(direct > 0, "direct thread stack size must be positive");
+    assert_eq!(got, direct);
+}

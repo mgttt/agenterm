@@ -51,7 +51,7 @@ pub struct HostCell {
     pub secondary_probe: SecondaryProbe,
     /// Headless system-call smoke candidates. Linux and macOS are live; Windows
     /// rows stay placeholders.
-    pub system_probes: [SystemProbe; 58],
+    pub system_probes: [SystemProbe; 61],
 }
 
 // PLATFORM-CANDIDATE: headless native-call smoke contract per OS.
@@ -77,7 +77,7 @@ pub enum SystemProbeStatus {
     Placeholder,
 }
 
-const LINUX_SYSTEM_PROBES: [SystemProbe; 58] = [
+const LINUX_SYSTEM_PROBES: [SystemProbe; 61] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::LiveDlcall {
@@ -367,6 +367,9 @@ const LINUX_SYSTEM_PROBES: [SystemProbe; 58] = [
     placeholder("proc_pid_rusage"),
     placeholder("dyld_image_count"),
     placeholder("getentropy"),
+    placeholder("proc_name"),
+    placeholder("pthread_get_stackaddr_np"),
+    placeholder("pthread_get_stacksize_np"),
     placeholder("mach_host_self"),
 ];
 
@@ -387,7 +390,7 @@ const fn placeholder(name: &'static str) -> SystemProbe {
     }
 }
 
-const MACOS_SYSTEM_PROBES: [SystemProbe; 58] = [
+const MACOS_SYSTEM_PROBES: [SystemProbe; 61] = [
     macos_live("time", "time"),
     macos_live("times", "times"),
     macos_live("getrusage", "getrusage"),
@@ -445,13 +448,16 @@ const MACOS_SYSTEM_PROBES: [SystemProbe; 58] = [
     macos_live("proc_pid_rusage", "proc_pid_rusage"),
     macos_live("dyld_image_count", "_dyld_image_count"),
     macos_live("getentropy", "getentropy"),
+    macos_live("proc_name", "proc_name"),
+    macos_live("pthread_get_stackaddr_np", "pthread_get_stackaddr_np"),
+    macos_live("pthread_get_stacksize_np", "pthread_get_stacksize_np"),
     // `mach_host_self` allocates a send right. `dlcall` intentionally has no
     // ownership-aware Mach API to release that right, so it is catalogued but
     // never invoked by the headless probe suite.
     placeholder("mach_host_self"),
 ];
 
-const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 58] = [
+const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 61] = [
     SystemProbe {
         name: "time",
         status: SystemProbeStatus::Placeholder,
@@ -638,6 +644,9 @@ const PLACEHOLDER_SYSTEM_PROBES: [SystemProbe; 58] = [
     placeholder("proc_pid_rusage"),
     placeholder("dyld_image_count"),
     placeholder("getentropy"),
+    placeholder("proc_name"),
+    placeholder("pthread_get_stackaddr_np"),
+    placeholder("pthread_get_stacksize_np"),
     placeholder("mach_host_self"),
 ];
 
