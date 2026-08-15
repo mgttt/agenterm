@@ -68,6 +68,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Windows current checkpoint
 
+- [~] Legacy `--grant` / `AGENTERM_CU_GRANT` selection is now strict and
+  single-source: a present CLI value wins without union or fallback, and an
+  empty or unknown scope returns typed `invalid_authorization` without echoing
+  the supplied token. The Windows smoke supplies an environment `actuate`
+  scope behind an explicit CLI `observe` placement attempt and proves the
+  action remains refused with unchanged bounds. These remain ephemeral
+  process inputs, not persisted or target-bound grants.
 - [x] The staged Windows x86_64 `cu-windows-smoke` proves an observe-only
   `window-place` is typed `refused` and leaves the owned fixture bounds
   unchanged. The authorized call writes exactly one `attempt` and one `ok`

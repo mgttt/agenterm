@@ -81,6 +81,13 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// Read the target session's native Unicode-text clipboard directly.
+    /// This is independent of accessibility-node `copy` / `paste`; absence
+    /// of Unicode text is a successful empty string and the native ABI owns
+    /// the bounded whole-payload read.
+    ClipboardRead {
+        target: TargetRef,
+    },
     /// Copy AT-SPI `Text.GetText` onto the native clipboard
     /// (`agt_clipboard_set_text`). With `--name`, the unique showing named
     /// node. With `--window` and no `--name`, the showing focused node
@@ -306,6 +313,7 @@ impl Command {
             Self::Click { .. } => "click".into(),
             Self::Focus { .. } => "focus".into(),
             Self::SendText { .. } => "send-text".into(),
+            Self::ClipboardRead { .. } => "clipboard-read".into(),
             Self::Copy { .. } => "copy".into(),
             Self::Paste { .. } => "paste".into(),
             Self::SendKeys { .. } => "send-keys".into(),
@@ -330,6 +338,7 @@ impl Command {
             | Self::Click { target, .. }
             | Self::Focus { target, .. }
             | Self::SendText { target, .. }
+            | Self::ClipboardRead { target, .. }
             | Self::Copy { target, .. }
             | Self::Paste { target, .. }
             | Self::SendKeys { target, .. }
@@ -359,5 +368,25 @@ impl Command {
             | Self::WindowPlace { .. } => crate::auth::Grant::Actuate,
             _ => crate::auth::Grant::Observe,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::Grant;
+
+    #[test]
+    fn clipboard_read_is_target_neutral_observation() {
+        let command = Command::ClipboardRead {
+            target: TargetRef::Vnc,
+        };
+        assert_eq!(command.verb(), "clipboard-read");
+        assert_eq!(command.target(), TargetRef::Vnc);
+        assert_eq!(command.required_grant(), Grant::Observe);
+        assert_eq!(
+            serde_json::to_value(&command).expect("serialize"),
+            serde_json::json!({ "verb": "clipboard-read", "target": "vnc" })
+        );
     }
 }

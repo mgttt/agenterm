@@ -132,6 +132,7 @@ fn entry() {
     if args.len == 1 && args[0] == "--list-evidence" {
         print("cu.windows-host-self-test");
         print("cu.libagenterm-load-cleanup");
+        print("cu.windows-clipboard-read");
         print("cu.windows-uia-window-identity");
         print("cu.windows-uia-tree");
         print("cu.windows-uia-name-actuation");
@@ -230,6 +231,77 @@ fn entry() {
                 && host.dispatch_refused != 0
                 && host.cleaned_up != 0,
             "cu_windows_smoke_host_contract:" + host_text
+        );
+
+        print("STEP standalone clipboard-read matches a non-mutating native snapshot");
+        // Keep the user's complete clipboard untouched: even restoring saved
+        // Unicode text would destroy unrelated native formats. The snapshot
+        // remains in memory and is never included in diagnostics or evidence.
+        let clipboard_snapshot = rh::clipboard::get_text();
+        let clipboard_audit_path = std::path::join(
+            run_directory,
+            "clipboard-read-audit.jsonl"
+        ).display;
+        std::fs::try_remove_file(clipboard_audit_path);
+
+        let refused_clipboard = std::process::command(executable);
+        refused_clipboard.args([
+            "--target", "current", "clipboard-read"
+        ]);
+        refused_clipboard.current_dir(run_directory);
+        refused_clipboard.env("AGENTERM_CU_AUDIT_PATH", clipboard_audit_path);
+        refused_clipboard.timeout(std::time::Duration::from_secs(30));
+        refused_clipboard.capture_limit(262144);
+        let refused_clipboard_output = refused_clipboard.output();
+        ensure(
+            refused_clipboard_output.success != 0,
+            "cu_windows_smoke_clipboard_refusal_process"
+        );
+        let refused_clipboard_text = refused_clipboard_output.stdout_text();
+        let refused_clipboard_reply = rh::json::parse(refused_clipboard_text);
+        ensure(
+            refused_clipboard_reply.ok == 0
+                && ("" + refused_clipboard_reply.target) == "current"
+                && ("" + refused_clipboard_reply.command) == "clipboard-read"
+                && ("" + refused_clipboard_reply.error.code) == "refused",
+            "cu_windows_smoke_clipboard_refusal_contract"
+        );
+
+        let read_clipboard = std::process::command(executable);
+        read_clipboard.args([
+            "--target", "current", "--grant", "observe", "clipboard-read"
+        ]);
+        read_clipboard.current_dir(run_directory);
+        read_clipboard.env("AGENTERM_CU_AUDIT_PATH", clipboard_audit_path);
+        read_clipboard.timeout(std::time::Duration::from_secs(30));
+        read_clipboard.capture_limit(262144);
+        let read_clipboard_output = read_clipboard.output();
+        ensure(
+            read_clipboard_output.success != 0,
+            "cu_windows_smoke_clipboard_read_process"
+        );
+        let read_clipboard_text = read_clipboard_output.stdout_text();
+        let read_clipboard_reply = rh::json::parse(read_clipboard_text);
+        ensure(
+            read_clipboard_reply.ok != 0
+                && ("" + read_clipboard_reply.target) == "current"
+                && ("" + read_clipboard_reply.command) == "clipboard-read",
+            "cu_windows_smoke_clipboard_read_envelope"
+        );
+        let observed_clipboard_text = "" + read_clipboard_reply.data.text;
+        let observed_clipboard_bytes = 0 + read_clipboard_reply.data.bytes;
+        ensure(
+            observed_clipboard_text == clipboard_snapshot
+                && observed_clipboard_bytes == clipboard_snapshot.len
+                && ("" + read_clipboard_reply.data.format)
+                    == "text/plain;charset=utf-8"
+                && ("" + read_clipboard_reply.data.mechanism)
+                    == "libagenterm",
+            "cu_windows_smoke_clipboard_read_contract"
+        );
+        ensure(
+            !std::fs::exists(clipboard_audit_path),
+            "cu_windows_smoke_clipboard_read_wrote_audit"
         );
 
         print("STEP compile and start owned no-activate Win32 UIA fixture");
@@ -383,6 +455,9 @@ fn entry() {
             "--window", handle_text
         ]);
         refused_command.env("AGENTERM_CU_AUDIT_PATH", audit_path);
+        // A present CLI grant is the only selected source. The environment
+        // must not union its broader scope into this observe-only command.
+        refused_command.env("AGENTERM_CU_GRANT", "actuate");
         refused_command.current_dir(run_directory);
         refused_command.timeout(std::time::Duration::from_secs(30));
         refused_command.capture_limit(262144);
@@ -647,6 +722,7 @@ fn entry() {
     );
     print("EVIDENCE cu.windows-host-self-test");
     print("EVIDENCE cu.libagenterm-load-cleanup");
+    print("EVIDENCE cu.windows-clipboard-read");
     print("EVIDENCE cu.windows-uia-window-identity");
     print("EVIDENCE cu.windows-uia-tree");
     print("EVIDENCE cu.windows-uia-name-actuation");
@@ -665,6 +741,7 @@ fn cc_lines() {
     [
         "staged agenterm-cu and agenterm.dll are colocated",
         "Windows desktop host self-test closes registered resources",
+        "standalone clipboard-read matches a non-mutating native Unicode-text snapshot without persisting its content",
         "public UIA tree exposes unique named edit and button controls",
         "public name addressing uses ValuePattern, GetText, and Invoke",
         "observe-only window placement is refused without changing bounds",

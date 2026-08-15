@@ -333,6 +333,12 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
                 role,
             }
         }
+        "clipboard-read" => {
+            if !args.is_empty() {
+                return usage_err("clipboard-read accepts no command arguments");
+            }
+            Command::ClipboardRead { target }
+        }
         "copy" => {
             let window = flag_isize(&mut args, "--window");
             let name = flag_value(&mut args, "--name");
@@ -609,7 +615,18 @@ fn dispatch(mut args: Vec<String>) -> agenterm_cu::CuReply {
         other => return usage_err(format!("unknown command '{other}'")),
     };
 
-    let auth = Authorization::from_cli_and_env(grant.as_deref());
+    let auth = match resolve_authorization(grant.as_deref()) {
+        Ok(auth) => auth,
+        Err(error) => {
+            return agenterm_cu::CuReply {
+                ok: false,
+                target: command.target().as_str().into(),
+                command: command.verb(),
+                data: None,
+                error: Some(error),
+            };
+        }
+    };
     let mut executor = Executor::new(auth);
     if target == TargetRef::Ssh {
         let dest = ssh_dest.expect("ssh destination checked above");
@@ -721,8 +738,37 @@ fn dispatch_json(args: &[String]) -> agenterm_cu::CuReply {
         Ok(command) => command,
         Err(error) => return usage_err(format!("invalid JSON command: {error}")),
     };
-    let auth = Authorization::from_cli_and_env(grant.as_deref());
+    let auth = match resolve_authorization(grant.as_deref()) {
+        Ok(auth) => auth,
+        Err(error) => {
+            return agenterm_cu::CuReply {
+                ok: false,
+                target: command.target().as_str().into(),
+                command: command.verb(),
+                data: None,
+                error: Some(error),
+            };
+        }
+    };
     Executor::new(auth).execute(&command)
+}
+
+fn resolve_authorization(cli_grant: Option<&str>) -> Result<Authorization, agenterm_cu::CuError> {
+    let environment_grant = if cli_grant.is_none() {
+        std::env::var("AGENTERM_CU_GRANT").ok()
+    } else {
+        None
+    };
+    Authorization::try_from_sources(cli_grant, environment_grant.as_deref()).map_err(|error| {
+        let problem = match error.kind {
+            agenterm_cu::auth::GrantParseErrorKind::EmptyToken => "is empty",
+            agenterm_cu::auth::GrantParseErrorKind::UnknownToken => "is unknown",
+        };
+        agenterm_cu::CuError::new(
+            "invalid_authorization",
+            format!("grant scope token {} {problem}", error.token_index),
+        )
+    })
 }
 
 fn take_value(args: &mut Vec<String>, flag: &str) -> String {
@@ -827,7 +873,8 @@ Global:
   --vnc-env KEY=VAL         session env for the worker (repeatable; also AGENTERM_CU_VNC_ENV)
   --rdp <host[:port]>       rdp endpoint syntax only (implies --target rdp; PLACEHOLDER —
                             no connect / TLS / CredSSP; always rdp_unavailable)
-  --grant observe,actuate   authorization scopes (or AGENTERM_CU_GRANT)
+  --grant observe,actuate   strict authorization scopes; CLI wins over
+                            AGENTERM_CU_GRANT and sources never union
 
   ssh transport runs the same verbs on a remote agenterm-cu --target current
   worker over OpenSSH stdio (no new verb). Get-selection evidence: loopback
@@ -874,6 +921,10 @@ Commands:
                               --window is set. Without --window stays the
                               plain type-into-focused inject.
                               `--` ends flag parsing
+  clipboard-read              reads the target session's native Unicode-text
+                              clipboard as bounded UTF-8. Requires observe;
+                              empty text is successful. Independent of node
+                              copy / paste and never writes an audit payload.
   copy --window HANDLE [--name PAT [--role ROLE]]
                               copies AT-SPI Text.GetText onto the native
                               clipboard (Linux X11: SetSelectionOwner, not
@@ -993,4 +1044,52 @@ Commands:
 All replies are JSON on stdout: {{"ok":bool,"target":..,"command":..,"data":..,"error":..}}
 "#
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clipboard_read_cli_requires_observe_before_native_dispatch() {
+        let reply = dispatch(vec![
+            "--target".into(),
+            "current".into(),
+            "clipboard-read".into(),
+        ]);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "current");
+        assert_eq!(reply.command, "clipboard-read");
+        assert_eq!(reply.error.expect("typed refusal").code, "refused");
+    }
+
+    #[test]
+    fn clipboard_read_cli_rejects_extra_arguments() {
+        let reply = dispatch(vec![
+            "--target".into(),
+            "current".into(),
+            "clipboard-read".into(),
+            "unexpected".into(),
+        ]);
+        assert!(!reply.ok);
+        assert_eq!(reply.command, "usage");
+        assert_eq!(reply.error.expect("typed usage error").code, "usage");
+    }
+
+    #[test]
+    fn malformed_grant_is_typed_without_echoing_its_value() {
+        let reply = dispatch(vec![
+            "--target".into(),
+            "current".into(),
+            "--grant".into(),
+            "credential-shaped-value".into(),
+            "clipboard-read".into(),
+        ]);
+        assert!(!reply.ok);
+        assert_eq!(reply.target, "current");
+        assert_eq!(reply.command, "clipboard-read");
+        let error = reply.error.expect("typed authorization error");
+        assert_eq!(error.code, "invalid_authorization");
+        assert!(!error.message.contains("credential-shaped-value"));
+    }
 }

@@ -255,6 +255,7 @@
       "evidence": [
         "cu.windows-host-self-test",
         "cu.libagenterm-load-cleanup",
+        "cu.windows-clipboard-read",
         "cu.windows-uia-window-identity",
         "cu.windows-uia-tree",
         "cu.windows-uia-name-actuation",

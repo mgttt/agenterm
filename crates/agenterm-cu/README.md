@@ -23,6 +23,13 @@ follows the Spectacle catalog
 ([PRD 32](../../prd/PRD_02_32_cu_window_placement.md)). Apply uses
 `libagenterm` `agt_native_window_*` (runtime dynamic library). Requires `--grant actuate`.
 
+`clipboard-read` is the standalone observe command for the target session's
+native Unicode-text clipboard. It returns bounded UTF-8 `text`, `bytes`,
+`format`, and `mechanism` fields through the command's JSON stdout only; it is
+independent of accessible-node `copy` / `paste`. The Windows public smoke is
+non-mutating: it compares an in-memory native text snapshot with the command
+reply and never prints or persists the clipboard content.
+
 ## Native accessibility mapping (按图索骥)
 
 | Concern | Windows | Linux (`current` slice) | macOS |
@@ -76,6 +83,7 @@ audited separately from AT-SPI actuation.
 | `send-text` / `send-keys` without `--window` | XTest keyboard injection into whatever is focused |
 | `send-text --window --name PAT [--role ROLE]` | same unique-name matcher, then native AT-SPI `EditableText` (`SetTextContents` / `InsertText`); Chrome/WebKitGTK named fields expose `Text` but not `EditableText` — those write through AT-SPI `Text` + toolkit set-value and are confirmed by `GetText`; no writeable text interface → typed `a11y_text_unavailable` (never XTest) |
 | `send-text --window HANDLE` (no `--name`) | same innermost focused Text node `get-text --window` reads, then `agt_a11y_node_set_text`; never XTest when `--window` is set. con `Command` after `focus --name` (`via=editable-text`); Chrome `GetTextField` after `focus --name`; Reasonix composer `Message Reasonix…` after `focus --name` / `click --name` (eval-helper set-value). Proof is independent `get-text --window` (no `--name`) |
+| `clipboard-read` | standalone native Unicode-text clipboard observation through bounded `agt_clipboard_get_text`; empty text is success. Reply text is emitted only on command stdout, never in audit or evidence receipts |
 | `copy --window --name PAT [--role ROLE]` | same unique-name matcher, then AT-SPI `Text.GetText` published onto the native clipboard (`agt_clipboard_set_text`; Linux X11 `SetSelectionOwner`, not xclip); no Text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |
 | `copy --window HANDLE` (no `--name`) | same innermost focused Text node `get-text --window` reads, then GetText published onto native CLIPBOARD (`agt_clipboard_set_text`, `via=gettext`); never XTest when `--window` is set. con `Command` after `focus --name` (`via=gettext`, second con only — never steal the resident control socket); Chrome `GetTextField` after `focus --name`; Reasonix composer `Message Reasonix…` after `focus --name` under `scripts/reasonix-desktop-a11y.sh` (`via=gettext`). Proof is independent seed → focused copy → clear → focused paste → `get-text --window` (no `--name`) equal to the seeded string |
 | `paste --window --name PAT [--role ROLE] [--text TEXT]` | same unique-name matcher, then clipboard (`agt_clipboard_get_text`, optional `--text` seed) written through that same AT-SPI `EditableText` / `Text` path; no writeable text interface → typed `a11y_text_unavailable` (never XTest / `--coords`) |

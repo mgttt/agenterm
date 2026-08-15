@@ -56,6 +56,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   [26](PRD_02_26_con_control_cli.md).
 - [ ] machine-readable output is the primary interface and the human rendering
   is derived from it, never the reverse.
+- [~] standalone `clipboard-read` is target-neutral and requires the Observe
+  grant. `current` reads the native Unicode-text clipboard through bounded
+  `agt_clipboard_get_text`; success returns only `text`, UTF-8 `bytes`,
+  `format`, and `mechanism` in the command JSON stdout. Empty text is success.
+  It is independent of accessible-node `copy` / `paste`; clipboard content is
+  absent from audit and evidence receipts. The Windows public smoke is
+  non-mutating: it keeps one native Unicode-text snapshot only in memory,
+  compares the command result, and never prints or persists the content. It
+  does not seed then restore text because that would destroy unrelated native
+  clipboard formats. Standalone write, remote live evidence, and other
+  platforms remain open.
 
 ## Structured observation
 

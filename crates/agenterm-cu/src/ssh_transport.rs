@@ -542,6 +542,17 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_read_observe_survives_target_rewrite() {
+        let command = CuCommand::ClipboardRead {
+            target: TargetRef::Ssh,
+        };
+        let remote = rewrite_command_target_current(&command).expect("rewrite");
+        assert_eq!(remote.verb(), "clipboard-read");
+        assert_eq!(remote.target(), TargetRef::Current);
+        assert!(matches!(remote, CuCommand::ClipboardRead { .. }));
+    }
+
+    #[test]
     fn wait_contains_survives_target_rewrite() {
         let command = CuCommand::Wait {
             target: TargetRef::Ssh,

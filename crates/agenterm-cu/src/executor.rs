@@ -285,6 +285,7 @@ impl Executor {
                 role,
                 ..
             } => send_text(text, *window, name.as_deref(), role.as_deref()),
+            Command::ClipboardRead { .. } => clipboard_read(),
             Command::Copy {
                 window, name, role, ..
             } => copy(*window, name.as_deref(), role.as_deref()),
@@ -340,6 +341,21 @@ impl Executor {
             Command::WindowPlace { action, window, .. } => window_place(action, *window),
         }
     }
+}
+
+/// Read the target session's native Unicode-text clipboard through the
+/// existing bounded libagenterm two-stage ABI. The payload is returned only
+/// in this observe command's reply; audit records never receive it because
+/// they are restricted to authorized actuation metadata.
+fn clipboard_read() -> Result<serde_json::Value, CuError> {
+    let text = mechanism::clipboard::get_text().map_err(map_mechanism_err)?;
+    let bytes = text.len();
+    Ok(serde_json::json!({
+        "text": text,
+        "bytes": bytes,
+        "format": "text/plain;charset=utf-8",
+        "mechanism": "libagenterm",
+    }))
 }
 
 fn capabilities_payload() -> serde_json::Value {
