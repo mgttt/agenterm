@@ -39,13 +39,11 @@ fixnum `+` `-` + bounded `repeat` + one hand (`dlcall`).
 - Current Linux evidence is `cargo test --locked -p agenterm-dyn` with Rust
   1.97: **121 passed** (12 unit + 38 errors + 9 hosts + 16 language + 46
   cfg-gated Linux smoke; 0 doctests). Current Darwin evidence on this
-  aarch64-apple-darwin host: **116 passed** (13 unit + 38 errors + 9 hosts +
-  16 language + 1 macos_ioctl + 12 macos_probes + 4 macos_resource + 23
-  cfg-gated macOS smoke; 0 doctests). The Wave 4 `mach_timebase_info`,
-  `pthread_main_np`, and `getlogin_r` rows were live-`dlcall`ed here and
-  compared to later native calls. Wave 5 `pthread_threadid_np`,
-  `proc_pidinfo`, and `_NSGetArgc` require the next matching-host CI result.
-  Host-specific counts, not a cross-platform estimate.
+  aarch64-apple-darwin host: **119 passed** (13 unit + 38 errors + 9 hosts +
+  16 language + 1 macos_ioctl + 15 macos_probes + 4 macos_resource + 23
+  cfg-gated macOS smoke; 0 doctests). Wave 4 and Wave 5 live rows were
+  `dlcall`ed here and compared to later native calls. Host-specific counts,
+  not a cross-platform estimate.
 
 ## Completed branch accounting
 

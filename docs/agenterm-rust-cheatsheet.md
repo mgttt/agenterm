@@ -1970,3 +1970,7 @@ leak a send right.
 baseline, declare the `#[repr(C)]` layout and `unsafe extern "C"` symbol
 locally (same pattern as `clock_gettime_nsec_np`) and compare `Dyn::eval`
 against that later native call.
+
+On Darwin, `pthread_t` is `usize`. `libc::pthread_threadid_np(std::ptr::null_mut(), …)`
+does not type-check; pass integer `0` for the current thread. Never spell
+`pthread_t` as a `dlcall` type name — it is a rejected C alias.

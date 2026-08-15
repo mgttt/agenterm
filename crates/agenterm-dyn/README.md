@@ -155,9 +155,9 @@ without wiring dyn into cu, platform, or the ABI:
 - [Mach tick-to-nanosecond ratio via `mach_timebase_info`](examples/mach-timebase-info.md) (macOS)
 - [main-thread predicate via `pthread_main_np`](examples/pthread-main-np.md) (macOS)
 - [login name via `getlogin_r`](examples/getlogin-r.md) (macOS)
-- [current thread ID via `pthread_threadid_np`](examples/pthread-threadid-np.md) (macOS)
+- [current thread id via `pthread_threadid_np`](examples/pthread-threadid-np.md) (macOS)
 - [BSD process facts via `proc_pidinfo`](examples/proc-pidinfo.md) (macOS)
-- [startup argument count via `_NSGetArgc`](examples/nsget-argc.md) (macOS)
+- [process argc pointer via `_NSGetArgc`](examples/nsget-argc.md) (macOS)
 - [`mach_host_self` resource-safety boundary](examples/mach-host-self.md) (macOS; intentionally not live)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)
 - [online processor count via `sysconf`](examples/sysconf-nprocessors-onln.md)
@@ -226,11 +226,11 @@ source defines the same integer/void/ptr libc rows as Linux against
 direct-libc baselines. Darwin-specific smokes cover `sysctlbyname`,
 `mach_absolute_time`, `getprogname`, `issetugid`, `_NSGetExecutablePath`,
 `proc_pidpath`, `arc4random`, `clock_gettime_nsec_np`, `sysctl`,
-`mach_timebase_info`, `pthread_main_np`, and `getlogin_r`; the caller-owned
-timebase and login buffers are compared with direct C baselines. They also cover
-`pthread_threadid_np`, caller-owned `proc_pidinfo`, and borrowed `_NSGetArgc`
-results against later native calls. `mach_host_self` remains intentionally
-uncalled because its returned send right has no dyn release owner. `ioctl(TIOCGWINSZ)` uses the resolved
+`mach_timebase_info`, `pthread_main_np`, `getlogin_r`, `pthread_threadid_np`,
+`proc_pidinfo`, and `_NSGetArgc`; the caller-owned timebase, login, thread-id,
+and `proc_bsdinfo` buffers are compared with direct C baselines. `mach_host_self`
+remains intentionally uncalled because its returned send right has no dyn release
+owner. `ioctl(TIOCGWINSZ)` uses the resolved
 `libSystem.B.dylib` symbol through its signature-gated variadic ABI and an
 owned pty must return the seeded 24×80 size. This records the CI-native smoke
 contract; it does not claim a local macOS-machine result. `access` missing-path uses
