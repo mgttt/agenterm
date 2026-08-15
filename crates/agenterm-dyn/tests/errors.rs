@@ -213,6 +213,28 @@ fn dlcall_rejects_isize_type_before_arguments_or_library_load() {
 }
 
 #[test]
+fn dlcall_rejects_bool_type_before_arguments_or_library_load() {
+    let expected = || {
+        DynError::Type(
+            "unsupported dlcall type `bool`; only void/integer/pointer types are supported".into(),
+        )
+    };
+    for script in [
+        r#"(dlcall "missing-library-for-bool-return" "unused" "bool"
+            "i32" (set touched 1))"#,
+        r#"(dlcall "missing-library-for-bool-argument" "unused" "i32"
+            "i32" (set touched 1) "bool" 0)"#,
+    ] {
+        let mut env = Dyn::new();
+        assert_eq!(env.eval(script), Err(expected()));
+        assert_eq!(
+            env.eval("touched").unwrap_err(),
+            DynError::UnknownVar("touched".into())
+        );
+    }
+}
+
+#[test]
 fn dlcall_validates_entire_signature_before_evaluating_arguments() {
     let mut env = Dyn::new();
     let script = r#"(dlcall "missing-library-for-signature-validation" "unused" "i32"
