@@ -37,7 +37,7 @@ pub mod chassis_loader {
 }
 
 /// Minimal native presentation used by the Chassis-L1 loader.
-#[cfg(all(feature = "chassis-present", target_os = "linux"))]
+#[cfg(feature = "chassis-present")]
 pub mod chassis_present {
     pub use crate::contract::chassis_present::{ChassisPresentError, ChassisPresentOptions};
 

@@ -7,7 +7,7 @@ pub mod accessibility_tree;
 pub mod activation;
 pub mod cache_hierarchy;
 pub mod chassis_loader;
-#[cfg(all(feature = "chassis-present", target_os = "linux"))]
+#[cfg(feature = "chassis-present")]
 pub mod chassis_present;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;

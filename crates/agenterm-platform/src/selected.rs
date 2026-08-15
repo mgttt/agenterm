@@ -635,6 +635,18 @@ pub(crate) const fn desktop_host_supported() -> bool {
 #[path = "adapters/linux/chassis_present.rs"]
 pub(crate) mod chassis_present;
 
+#[cfg(all(feature = "chassis-present", not(target_os = "linux")))]
+pub(crate) mod chassis_present {
+    use crate::contract::chassis_present::{ChassisPresentError, ChassisPresentOptions};
+
+    pub(crate) fn present(_options: &ChassisPresentOptions) -> Result<(), ChassisPresentError> {
+        Err(ChassisPresentError::failed(
+            "chassis_present_unsupported",
+            "native chassis presentation is only available on Linux",
+        ))
+    }
+}
+
 #[cfg(all(feature = "activation", windows))]
 #[path = "adapters/windows/activation.rs"]
 pub(crate) mod activation;
