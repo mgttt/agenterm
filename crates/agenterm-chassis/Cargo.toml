@@ -1,6 +1,6 @@
 [package]
 name = "agenterm-chassis"
-version = "0.1.0"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
 description = "Chassis-L1 loader + L2 host ABI + L3 app image: pack, do not recompile the workbench"

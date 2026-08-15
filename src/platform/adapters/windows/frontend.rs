@@ -44,6 +44,20 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
             return GuiLaunchResult::UsageError;
         }
     };
+    match crate::frontend::chassis_image::load_selected_image(
+        launch_options.chassis_image.as_deref(),
+    ) {
+        Ok(Some(image)) => write_best_effort_stderr(&format!(
+            "Loaded chassis L3 {} through {}",
+            image.l3_name,
+            image.native_loader.display()
+        )),
+        Ok(None) => {}
+        Err(error) => {
+            show_startup_error(&anyhow::anyhow!(error.clone()));
+            return GuiLaunchResult::StartupFailed(error);
+        }
+    }
     let no_activate = launch_options.no_activate || crate::client::no_activate_from_environment();
     write_best_effort_stderr(&gui_console_summary(&crate::ipc_address()));
 

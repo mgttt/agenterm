@@ -13,6 +13,7 @@ use crate::ui_command::{UI_CLIENT_COMMAND_FOCUS, UI_CLIENT_COMMAND_SHOW_NO_ACTIV
 use crate::wake_signal::WakeSignal;
 
 pub(crate) mod action;
+pub(crate) mod chassis_image;
 pub(crate) mod close_confirmation;
 pub(crate) mod composer;
 pub(crate) mod control_center;
@@ -35,12 +36,12 @@ pub(crate) mod window_close;
 
 // Shared GUI launch usage for both platform frontends.
 pub(crate) const WINDOWS_GUI_USAGE: &str = "\
-Usage: agenterm.exe [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\n\
-Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help\n\n\
+Usage: agenterm.exe [--no-activate] [--chassis-image IMAGE] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\n\
+Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  --chassis-image IMAGE Load a composed Chassis-L1/L2/L3 image directory\n  -h, --help            Show this help\n\n\
 This binary is the GUI launcher. For command operations use agenterm cli.";
 pub(crate) const UNIX_GUI_USAGE: &str = "\
-Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\
-Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  -h, --help            Show this help";
+Usage: agenterm [--no-activate] [--chassis-image IMAGE] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]\n\
+Options:\n  --endpoint ENDPOINT   Select a typed local IPC endpoint\n  --address HOST:PORT   Select a legacy loopback TCP endpoint\n  --instance NAME       Select a logical instance (main, dev, or a custom name)\n  --no-activate         Open without taking foreground focus\n  --not-foreground      Alias for --no-activate\n  --chassis-image IMAGE Load a composed Chassis-L1/L2/L3 image directory\n  -h, --help            Show this help";
 
 pub(crate) const WINDOWS_GUI_CLI_NAME: &str = "agenterm cli";
 pub(crate) const UNIX_GUI_CLI_NAME: &str = "agenterm cli";
@@ -171,14 +172,21 @@ pub(crate) struct ParsedGuiLaunch {
     pub no_activate: bool,
     pub ui_client: bool,
     pub selectors: EndpointSelectorArgs,
+    pub chassis_image: Option<std::path::PathBuf>,
 }
 
 impl ParsedGuiLaunch {
-    const fn new(no_activate: bool, ui_client: bool, selectors: EndpointSelectorArgs) -> Self {
+    const fn new(
+        no_activate: bool,
+        ui_client: bool,
+        selectors: EndpointSelectorArgs,
+        chassis_image: Option<std::path::PathBuf>,
+    ) -> Self {
         Self {
             no_activate,
             ui_client,
             selectors,
+            chassis_image,
         }
     }
 }
@@ -188,6 +196,7 @@ pub(crate) struct GuiLaunchOptions {
     pub no_activate: bool,
     pub ui_client: bool,
     pub selectors: EndpointSelectorArgs,
+    pub chassis_image: Option<std::path::PathBuf>,
 }
 
 pub(crate) fn parse_gui_launch_arguments(
@@ -197,6 +206,7 @@ pub(crate) fn parse_gui_launch_arguments(
     let mut no_activate = false;
     let mut ui_client = false;
     let mut selectors = EndpointSelectorArgs::default();
+    let mut chassis_image = None;
     let mut position = 0;
 
     while position < arguments.len() {
@@ -226,6 +236,25 @@ pub(crate) fn parse_gui_launch_arguments(
                     "{name} --ui-client may be specified only when supported by platform",
                     name = policy.launcher_name
                 ));
+            }
+            "--chassis-image" => {
+                if chassis_image.is_some() {
+                    return Err(format!(
+                        "{name} --chassis-image may be specified only once",
+                        name = policy.launcher_name
+                    ));
+                }
+                let value = arguments
+                    .get(position + 1)
+                    .filter(|value| !value.starts_with("--"))
+                    .ok_or_else(|| {
+                        format!(
+                            "{name} --chassis-image requires IMAGE",
+                            name = policy.launcher_name
+                        )
+                    })?;
+                chassis_image = Some(std::path::PathBuf::from(value));
+                position += 2;
             }
             "--address" => {
                 if selectors.address.is_some() {
@@ -314,7 +343,12 @@ pub(crate) fn parse_gui_launch_arguments(
         ));
     }
 
-    Ok(ParsedGuiLaunch::new(no_activate, ui_client, selectors))
+    Ok(ParsedGuiLaunch::new(
+        no_activate,
+        ui_client,
+        selectors,
+        chassis_image,
+    ))
 }
 
 pub(crate) fn parse_gui_launch_target(
@@ -325,12 +359,14 @@ pub(crate) fn parse_gui_launch_target(
         no_activate,
         ui_client,
         selectors,
+        chassis_image,
     } = parse_gui_launch_arguments(arguments, policy).map_err(|error| error.to_string())?;
     set_ipc_selectors(selectors.clone()).map_err(|error| error.to_string())?;
     Ok(GuiLaunchOptions {
         no_activate,
         ui_client,
         selectors,
+        chassis_image,
     })
 }
 
@@ -507,6 +543,35 @@ mod tests {
         assert_eq!(parsed.selectors.address.as_deref(), Some("127.0.0.1:48815"));
         assert!(parsed.selectors.endpoint.is_none());
         assert!(parsed.selectors.instance.is_none());
+    }
+
+    #[test]
+    fn shared_gui_launch_parser_accepts_one_chassis_image() {
+        let parsed = parse_gui_launch_arguments(
+            &[
+                "--chassis-image".to_owned(),
+                "dist/chassis-product".to_owned(),
+            ],
+            UNIX_GUI_LAUNCH_POLICY,
+        )
+        .expect("chassis image path");
+        assert_eq!(
+            parsed.chassis_image.as_deref(),
+            Some(std::path::Path::new("dist/chassis-product"))
+        );
+
+        for arguments in [
+            vec!["--chassis-image"],
+            vec!["--chassis-image", "one", "--chassis-image", "two"],
+        ] {
+            assert!(
+                parse_gui_launch_arguments(
+                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    UNIX_GUI_LAUNCH_POLICY,
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

@@ -38,6 +38,7 @@ name = "agenterm"
 version = "0.1.16"
 dependencies = [
  "ab_glyph",
+ "agenterm-chassis",
  "agenterm-lua",
  "agenterm-platform",
  "agenterm-qjs",
@@ -72,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "agenterm-chassis"
-version = "0.1.0"
+version = "0.1.16"
 dependencies = [
  "serde",
  "serde_json",

@@ -572,6 +572,18 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
             return GuiLaunchResult::UsageError;
         }
     };
+    match crate::frontend::chassis_image::load_selected_image(options.chassis_image.as_deref()) {
+        Ok(Some(image)) => eprintln!(
+            "Loaded chassis L3 {} through {}",
+            image.l3_name,
+            image.native_loader.display()
+        ),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("AgenTerm GUI failed to load chassis image: {error}");
+            return GuiLaunchResult::StartupFailed(error);
+        }
+    }
     let no_activate = options.no_activate || no_activate_from_environment();
 
     match attempt_gui_handoff(no_activate, true) {
