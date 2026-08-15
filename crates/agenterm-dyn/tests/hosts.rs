@@ -1,8 +1,8 @@
 //! Host-table matrix tests — all six ISA×OS cells exist as explicit data.
 
 use agenterm_dyn::{
-    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
-    SizeProbe, SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
+    cell, live_cell, HostCell, SecondaryProbe, SizeProbe, SystemProbeStatus, ALL_CELLS,
+    LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, WINDOWS_AARCH64, WINDOWS_X86_64,
 };
 
 #[test]
@@ -83,7 +83,7 @@ fn windows_cells_share_kernel32_names() {
 }
 
 #[test]
-fn additional_system_probes_are_live_only_on_linux() {
+fn additional_system_probes_are_live_on_linux_and_macos() {
     for c in [LINUX_X86_64, LINUX_AARCH64] {
         assert_eq!(
             c.system_probes.map(|probe| probe.name),
@@ -165,12 +165,54 @@ fn additional_system_probes_are_live_only_on_linux() {
             ]
         );
     }
-    for c in [MACOS_X86_64, MACOS_AARCH64, WINDOWS_X86_64, WINDOWS_AARCH64] {
-        assert!(
-            c.system_probes
-                .iter()
-                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
+    for c in [MACOS_X86_64, MACOS_AARCH64] {
+        assert_eq!(
+            c.system_probes.map(|probe| match probe.status {
+                SystemProbeStatus::LiveDlcall { lib, symbol } => (probe.name, lib, symbol),
+                SystemProbeStatus::Placeholder => panic!("macOS probe must be live"),
+            }),
+            [
+                ("time", "libSystem.B.dylib", "time"),
+                ("clock_gettime", "libSystem.B.dylib", "clock_gettime"),
+                ("uname", "libSystem.B.dylib", "uname"),
+                ("getuid", "libSystem.B.dylib", "getuid"),
+                ("getgid", "libSystem.B.dylib", "getgid"),
+                ("getppid", "libSystem.B.dylib", "getppid"),
+                ("getpgrp", "libSystem.B.dylib", "getpgrp"),
+                ("getsid", "libSystem.B.dylib", "getsid"),
+                ("getpgid", "libSystem.B.dylib", "getpgid"),
+                ("geteuid", "libSystem.B.dylib", "geteuid"),
+                ("getegid", "libSystem.B.dylib", "getegid"),
+                ("sysconf_pagesize", "libSystem.B.dylib", "sysconf"),
+                ("sysconf_clk_tck", "libSystem.B.dylib", "sysconf"),
+                ("sysconf_nprocessors_onln", "libSystem.B.dylib", "sysconf"),
+                ("getcwd", "libSystem.B.dylib", "getcwd"),
+                ("isatty_stdin", "libSystem.B.dylib", "isatty"),
+                ("open_dev_null", "libSystem.B.dylib", "open"),
+                ("access_root", "libSystem.B.dylib", "access"),
+                ("access_missing", "libSystem.B.dylib", "access"),
+                ("fcntl_stdin_getfd", "libSystem.B.dylib", "fcntl"),
+                ("dup_stdin", "libSystem.B.dylib", "dup"),
+                ("getpriority_process", "libSystem.B.dylib", "getpriority"),
+                ("nice_zero", "libSystem.B.dylib", "nice"),
+                ("lseek_stdin_cur", "libSystem.B.dylib", "lseek"),
+                ("fcntl_stdin_getfl", "libSystem.B.dylib", "fcntl"),
+                ("isatty_stdout", "libSystem.B.dylib", "isatty"),
+                ("isatty_stderr", "libSystem.B.dylib", "isatty"),
+                ("sched_yield_void", "libSystem.B.dylib", "sched_yield"),
+                ("alarm_zero", "libSystem.B.dylib", "alarm"),
+                ("umask", "libSystem.B.dylib", "umask"),
+                ("getdtablesize", "libSystem.B.dylib", "getdtablesize"),
+                ("gethostid", "libSystem.B.dylib", "gethostid"),
+                ("getpagesize", "libSystem.B.dylib", "getpagesize"),
+            ]
         );
+    }
+    for c in [WINDOWS_X86_64, WINDOWS_AARCH64] {
+        assert!(c
+            .system_probes
+            .iter()
+            .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder)));
     }
 }
 
