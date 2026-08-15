@@ -1,8 +1,8 @@
 //! Host-table matrix tests — all six ISA×OS cells exist as explicit data.
 
 use agenterm_dyn::{
-    ALL_CELLS, HostCell, LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, SecondaryProbe,
-    SizeProbe, SystemProbeStatus, WINDOWS_AARCH64, WINDOWS_X86_64, cell, live_cell,
+    cell, live_cell, HostCell, SecondaryProbe, SizeProbe, SystemProbeStatus, ALL_CELLS,
+    LINUX_AARCH64, LINUX_X86_64, MACOS_AARCH64, MACOS_X86_64, WINDOWS_AARCH64, WINDOWS_X86_64,
 };
 
 #[test]
@@ -90,6 +90,7 @@ fn additional_system_probes_are_live_only_on_linux() {
             [
                 "time",
                 "times",
+                "getrusage",
                 "clock_gettime",
                 "uname",
                 "getuid",
@@ -132,6 +133,7 @@ fn additional_system_probes_are_live_only_on_linux() {
             [
                 ("time", "libc.so.6", "time"),
                 ("times", "libc.so.6", "times"),
+                ("getrusage", "libc.so.6", "getrusage"),
                 ("clock_gettime", "libc.so.6", "clock_gettime"),
                 ("uname", "libc.so.6", "uname"),
                 ("getuid", "libc.so.6", "getuid"),
@@ -168,11 +170,10 @@ fn additional_system_probes_are_live_only_on_linux() {
         );
     }
     for c in [MACOS_X86_64, MACOS_AARCH64, WINDOWS_X86_64, WINDOWS_AARCH64] {
-        assert!(
-            c.system_probes
-                .iter()
-                .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder))
-        );
+        assert!(c
+            .system_probes
+            .iter()
+            .all(|probe| matches!(probe.status, SystemProbeStatus::Placeholder)));
     }
 }
 

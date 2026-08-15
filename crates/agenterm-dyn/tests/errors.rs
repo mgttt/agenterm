@@ -398,13 +398,18 @@ fn dlcall_accepts_255_byte_library_and_symbol_names_until_native_processing() {
 }
 
 #[test]
-fn dlcall_rejects_library_with_interior_nul_before_loading() {
+fn dlcall_rejects_nul_library_before_arguments_or_library_load() {
     let mut env = Dyn::new();
-    let script = "(dlcall \"bad\0library\" \"unused\" \"i32\")";
-    let err = env.eval(script).unwrap_err();
+    let script = "(dlcall \"bad\0library\" \"unused\" \"i32\" \"i32\" (set touched 1))";
     assert_eq!(
-        err,
-        DynError::Library("library name contains interior NUL".into())
+        env.eval(script),
+        Err(DynError::Library(
+            "library name contains interior NUL".into()
+        ))
+    );
+    assert_eq!(
+        env.eval("touched").unwrap_err(),
+        DynError::UnknownVar("touched".into())
     );
 }
 

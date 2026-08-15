@@ -117,6 +117,7 @@ without wiring dyn into cu, platform, or the ABI:
 - [current host ID via `gethostid`](examples/gethostid.md)
 - [current working directory via `getcwd`](examples/getcwd.md)
 - [process CPU ticks via `times`](examples/times.md)
+- [this process's resource usage via `getrusage(RUSAGE_SELF, …)`](examples/getrusage.md)
 - [host page size via `sysconf`](examples/sysconf-pagesize.md)
 - [host page size via `getpagesize`](examples/getpagesize.md)
 - [clock ticks per second via `sysconf`](examples/sysconf-clk-tck.md)

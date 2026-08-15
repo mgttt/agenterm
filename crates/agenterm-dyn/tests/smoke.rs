@@ -3,28 +3,26 @@
 //! Each supported OS module uses [`agenterm_dyn::live_cell`] script data and
 //! cross-checks results with a second `dlcall` where possible.
 
-use std::ffi::{CString, c_void};
+use std::ffi::{c_void, CString};
 
 use agenterm_dyn::DynError;
 use agenterm_dyn::{
-    CU_ADJACENT_PROBE_CATALOG, Dyn, HostArch, HostOs, SecondaryProbe, Value, live_cell,
+    live_cell, Dyn, HostArch, HostOs, SecondaryProbe, Value, CU_ADJACENT_PROBE_CATALOG,
 };
 
 #[test]
 fn cu_adjacent_catalog_has_six_cells() {
     assert_eq!(CU_ADJACENT_PROBE_CATALOG.len(), 6);
-    assert!(
-        CU_ADJACENT_PROBE_CATALOG
-            .iter()
-            .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64)
-    );
+    assert!(CU_ADJACENT_PROBE_CATALOG
+        .iter()
+        .any(|cell| cell.os == HostOs::Linux && cell.arch == HostArch::X86_64));
 }
 
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
     use agenterm_dyn::{
-        HostCell, LINUX_ATSPI_EXISTENCE_LIBS, SizeProbe, SystemProbe, SystemProbeStatus,
+        HostCell, SizeProbe, SystemProbe, SystemProbeStatus, LINUX_ATSPI_EXISTENCE_LIBS,
     };
 
     #[repr(C)]
@@ -210,6 +208,39 @@ mod linux {
                 && libc_tms.tms_cstime >= dlcall_tms.tms_cstime,
             "times fields must be initialized by dlcall and monotonic at the later libc baseline"
         );
+    }
+
+    #[test]
+    fn dlcall_getrusage_writes_caller_owned_rusage_and_matches_libc_baseline() {
+        let probe = live_system_probe("getrusage");
+        let SystemProbeStatus::LiveDlcall { lib, symbol } = probe.status else {
+            unreachable!("live_system_probe validates status")
+        };
+        let mut dlcall_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let mut env = Dyn::new();
+        env.bind("usage", (&mut dlcall_usage as *mut libc::rusage).cast())
+            .expect("bind caller-owned rusage");
+
+        let got = env
+            .eval(&format!(
+                r#"(dlcall "{lib}" "{symbol}" "i32" "i32" {} "ptr" usage)"#,
+                libc::RUSAGE_SELF
+            ))
+            .expect("getrusage dlcall");
+        assert_eq!(got, Value::Int(0));
+
+        let mut libc_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let baseline = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut libc_usage) };
+        assert_eq!(baseline, 0, "direct libc getrusage baseline");
+        assert!(
+            timeval_at_most(dlcall_usage.ru_utime, libc_usage.ru_utime)
+                && timeval_at_most(dlcall_usage.ru_stime, libc_usage.ru_stime),
+            "later direct libc baseline must not precede dlcall CPU usage"
+        );
+    }
+
+    fn timeval_at_most(left: libc::timeval, right: libc::timeval) -> bool {
+        (left.tv_sec, left.tv_usec) <= (right.tv_sec, right.tv_usec)
     }
 
     #[test]
