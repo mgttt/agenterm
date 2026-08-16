@@ -25,6 +25,9 @@ use std::fmt;
 pub const WASM_MAX_DEPTH: usize = 1_024;
 /// Max executed instructions per top-level [`Module::invoke`].
 pub const WASM_MAX_STEPS: u64 = 16_000_000;
+/// WebAssembly linear-memory page size (64 KiB). This cut allocates exactly one
+/// page per invocation; growth and a module memory section come later.
+pub const WASM_PAGE_SIZE: usize = 65_536;
 
 /// A decode-time or run-time WebAssembly fault.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +57,12 @@ enum Op {
     I32Add,
     I32Sub,
     I32Eqz,
+    /// `i32.load` — pop address, push 4 little-endian bytes at `addr + offset`.
+    /// The memarg alignment hint is decoded and ignored (a valid MVP choice).
+    I32Load { offset: u32 },
+    /// `i32.store` — pop value then address; write 4 little-endian bytes at
+    /// `addr + offset`. Alignment hint decoded and ignored.
+    I32Store { offset: u32 },
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -152,6 +161,19 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x6A => ops.push(Op::I32Add),
             0x6B => ops.push(Op::I32Sub),
             0x45 => ops.push(Op::I32Eqz),
+            0x28 => {
+                // memarg = align (LEB u32, ignored) then offset (LEB u32)
+                let (_align, n1) = leb_u32(body, i)?;
+                let (offset, n2) = leb_u32(body, n1)?;
+                i = n2;
+                ops.push(Op::I32Load { offset });
+            }
+            0x36 => {
+                let (_align, n1) = leb_u32(body, i)?;
+                let (offset, n2) = leb_u32(body, n1)?;
+                i = n2;
+                ops.push(Op::I32Store { offset });
+            }
             0x20 => {
                 let (x, ni) = leb_u32(body, i)?;
                 i = ni;
@@ -271,9 +293,14 @@ impl Module {
     }
 
     /// Invoke function `idx` with `args`, returning its result values.
+    ///
+    /// A fresh single-page (64 KiB) zero-initialised linear memory is allocated
+    /// for the call and shared across every nested `call`; it is discarded when
+    /// the top-level invocation returns.
     pub fn invoke(&self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
         let mut steps: u64 = 0;
-        self.invoke_inner(idx, args, 0, &mut steps)
+        let mut mem = vec![0u8; WASM_PAGE_SIZE];
+        self.invoke_inner(idx, args, 0, &mut steps, &mut mem)
     }
 
     fn invoke_inner(
@@ -282,6 +309,7 @@ impl Module {
         args: &[i32],
         depth: usize,
         steps: &mut u64,
+        mem: &mut [u8],
     ) -> Result<Vec<i32>, WasmError> {
         if depth > WASM_MAX_DEPTH {
             return Err(WasmError::Trap(format!(
@@ -339,6 +367,15 @@ impl Module {
                     let a = pop(&mut stack)?;
                     stack.push(i32::from(a == 0));
                 }
+                Op::I32Load { offset } => {
+                    let addr = pop(&mut stack)?;
+                    stack.push(mem_read_i32(mem, addr, offset)?);
+                }
+                Op::I32Store { offset } => {
+                    let value = pop(&mut stack)?;
+                    let addr = pop(&mut stack)?;
+                    mem_write_i32(mem, addr, offset, value)?;
+                }
                 Op::LocalGet(l) => {
                     let v = *locals
                         .get(l as usize)
@@ -365,7 +402,7 @@ impl Module {
                         )));
                     }
                     let cargs = stack.split_off(stack.len() - n);
-                    let res = self.invoke_inner(f as usize, &cargs, depth + 1, steps)?;
+                    let res = self.invoke_inner(f as usize, &cargs, depth + 1, steps, mem)?;
                     stack.extend(res);
                 }
                 Op::Block { arity, end } => control.push(Frame {
@@ -405,6 +442,37 @@ impl Module {
             }
         }
     }
+}
+
+/// Effective address `addr as u32 + offset`, bounds-checked for a 4-byte i32
+/// access. Alignment is not checked (MVP). Out of range is a loud trap.
+fn effective_range(mem_len: usize, addr: i32, offset: u32) -> Result<usize, WasmError> {
+    let ea = (addr as u32 as usize)
+        .checked_add(offset as usize)
+        .ok_or_else(|| WasmError::Trap("i32 memory address overflow".into()))?;
+    let end = ea
+        .checked_add(4)
+        .ok_or_else(|| WasmError::Trap("i32 memory access overflow".into()))?;
+    if end > mem_len {
+        return Err(WasmError::Trap(format!(
+            "i32 memory access [{ea}, {end}) out of bounds for {mem_len}-byte memory"
+        )));
+    }
+    Ok(ea)
+}
+
+fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
+    let ea = effective_range(mem.len(), addr, offset)?;
+    let bytes: [u8; 4] = mem[ea..ea + 4]
+        .try_into()
+        .expect("range is exactly 4 bytes");
+    Ok(i32::from_le_bytes(bytes))
+}
+
+fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(), WasmError> {
+    let ea = effective_range(mem.len(), addr, offset)?;
+    mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
+    Ok(())
 }
 
 fn pop(stack: &mut Vec<i32>) -> Result<i32, WasmError> {
@@ -548,6 +616,77 @@ mod tests {
         let eqz9 = m.add_function(0, 0, 1, &[0x41, 0x09, 0x45, 0x0B]).unwrap();
         assert_eq!(m.invoke(eqz0, &[]).unwrap(), vec![1]);
         assert_eq!(m.invoke(eqz9, &[]).unwrap(), vec![0]);
+    }
+
+    // Acceptance (tinyvm.5): linear memory store/load round-trips.
+    #[test]
+    fn memory_store_then_load_returns_42() {
+        // i32.const 0 ; i32.const 42 ; i32.store 0 0 ; i32.const 0 ; i32.load 0 0 ; end
+        let body = [
+            0x41, 0x00, // i32.const 0   (addr)
+            0x41, 0x2A, // i32.const 42  (value)
+            0x36, 0x00, 0x00, // i32.store align=0 offset=0
+            0x41, 0x00, // i32.const 0   (addr)
+            0x28, 0x00, 0x00, // i32.load align=0 offset=0
+            0x0B, // end
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[]).unwrap(), vec![42]);
+    }
+
+    // Acceptance (tinyvm.5): a second address is independent; the first survives.
+    #[test]
+    fn memory_two_addresses_are_independent() {
+        // store 42@0 ; store 99@4 ; load@0 ; load@4 ; (result arity 2 -> [42, 99])
+        // Note: i32.const 99 is LEB128 `E3 00` (99 >= 64, so a single 0x63 byte
+        // would sign-extend to -29).
+        let body = [
+            0x41, 0x00, 0x41, 0x2A, 0x36, 0x00, 0x00, // mem[0] = 42
+            0x41, 0x04, 0x41, 0xE3, 0x00, 0x36, 0x00, 0x00, // mem[4] = 99
+            0x41, 0x00, 0x28, 0x00, 0x00, // load mem[0]
+            0x41, 0x04, 0x28, 0x00, 0x00, // load mem[4]
+            0x0B, // end
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 2, &body).unwrap();
+        assert_eq!(m.invoke(f, &[]).unwrap(), vec![42, 99]);
+    }
+
+    #[test]
+    fn out_of_bounds_load_traps() {
+        // i32.const 65534 ; i32.load 0 0  -> reads [65534, 65538) > 65536
+        let body = [0x41, 0xFE, 0xFF, 0x03, 0x28, 0x00, 0x00, 0x0B];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert!(matches!(m.invoke(f, &[]), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn out_of_bounds_store_traps() {
+        // i32.const 65534 ; i32.const 1 ; i32.store 0 0  -> writes past the page
+        let body = [
+            0x41, 0xFE, 0xFF, 0x03, // i32.const 65534
+            0x41, 0x01, // i32.const 1
+            0x36, 0x00, 0x00, // i32.store
+            0x0B,
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 0, &body).unwrap();
+        assert!(matches!(m.invoke(f, &[]), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn store_uses_offset_immediate() {
+        // store value 7 at addr 0 with memarg offset 4 -> mem[4]; load addr 4 -> 7
+        let body = [
+            0x41, 0x00, 0x41, 0x07, 0x36, 0x00, 0x04, // i32.store offset=4 -> mem[4]=7
+            0x41, 0x04, 0x28, 0x00, 0x00, // load mem[4]
+            0x0B,
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[]).unwrap(), vec![7]);
     }
 
     #[test]
