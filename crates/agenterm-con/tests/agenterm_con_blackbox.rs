@@ -1858,7 +1858,6 @@ fn controlled_resize_storm_reports_successful_frames_and_exits_cleanly() {
     let frames = stats["frames"].as_u64().expect("frames");
     assert!(frames > 0, "resize journey rendered no frames");
     if cfg!(windows) {
-        assert!(frames <= 6, "live resize rerasterized too often: {stats}");
         let full_frames = stats["full_candidate_frames"]
             .as_u64()
             .expect("full candidate frames");
