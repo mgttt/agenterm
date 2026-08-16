@@ -235,6 +235,83 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
     Ok(ops)
 }
 
+/// Skip `n` value-type bytes, bounds-checked.
+fn skip_valtypes(p: &[u8], i: usize, n: u32) -> Result<usize, WasmError> {
+    let end = i
+        .checked_add(n as usize)
+        .filter(|&e| e <= p.len())
+        .ok_or_else(|| WasmError::Decode("value-type list runs past section".into()))?;
+    Ok(end)
+}
+
+/// Parse the type section into `(n_params, n_results)` per function type.
+fn parse_type_section(p: &[u8]) -> Result<Vec<(usize, usize)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let form = *p
+            .get(i)
+            .ok_or_else(|| WasmError::Decode("truncated func type".into()))?;
+        i += 1;
+        if form != 0x60 {
+            return Err(WasmError::Decode(format!(
+                "unsupported type form 0x{form:02x} (only func 0x60)"
+            )));
+        }
+        let (n_params, ni) = leb_u32(p, i)?;
+        i = skip_valtypes(p, ni, n_params)?;
+        let (n_results, ni) = leb_u32(p, i)?;
+        i = skip_valtypes(p, ni, n_results)?;
+        out.push((n_params as usize, n_results as usize));
+    }
+    Ok(out)
+}
+
+/// Parse the function section into a type index per function.
+fn parse_func_section(p: &[u8]) -> Result<Vec<usize>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let (tidx, ni) = leb_u32(p, i)?;
+        i = ni;
+        out.push(tidx as usize);
+    }
+    Ok(out)
+}
+
+/// Parse the code section into `(n_locals, expr_bytes)` per function.
+fn parse_code_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let (body_size, ni) = leb_u32(p, i)?;
+        let bstart = ni;
+        let bend = bstart
+            .checked_add(body_size as usize)
+            .filter(|&e| e <= p.len())
+            .ok_or_else(|| WasmError::Decode("code entry runs past section".into()))?;
+        let body = &p[bstart..bend];
+
+        // locals: vec of (count, valtype)
+        let (n_decls, mut j) = leb_u32(body, 0)?;
+        let mut n_locals: usize = 0;
+        for _ in 0..n_decls {
+            let (n, nj) = leb_u32(body, j)?;
+            j = nj;
+            // one value-type byte follows
+            body.get(j)
+                .ok_or_else(|| WasmError::Decode("truncated local declaration".into()))?;
+            j += 1;
+            n_locals = n_locals
+                .checked_add(n as usize)
+                .ok_or_else(|| WasmError::Decode("local count overflow".into()))?;
+        }
+        out.push((n_locals, body[j..].to_vec()));
+        i = bend;
+    }
+    Ok(out)
+}
+
 /// A registered function: its param/local/result counts and decoded body.
 #[derive(Debug, Clone)]
 struct Func {
@@ -290,6 +367,74 @@ impl Module {
             code,
         });
         Ok(idx)
+    }
+
+    /// Load a standard `.wasm` **module** (magic `\0asm` + version 1) with a
+    /// minimal set of sections: type (1), function (3), and code (10). Other
+    /// sections (custom, import, export, memory, …) are skipped. Suitable for a
+    /// `wat2wasm` product of a single function with no imports.
+    ///
+    /// Function bodies are decoded with the same instruction subset as
+    /// [`Module::add_function`]; result/param counts come from the type section
+    /// and local counts from each code entry.
+    pub fn from_bytes(wasm: &[u8]) -> Result<Module, WasmError> {
+        if wasm.len() < 8 || &wasm[0..4] != b"\0asm" {
+            return Err(WasmError::Decode("not a wasm module (bad magic)".into()));
+        }
+        if wasm[4..8] != [0x01, 0x00, 0x00, 0x00] {
+            return Err(WasmError::Decode(
+                "unsupported wasm version (expected 1)".into(),
+            ));
+        }
+
+        let mut types: Vec<(usize, usize)> = Vec::new();
+        let mut func_types: Vec<usize> = Vec::new();
+        let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
+
+        let mut i = 8;
+        while i < wasm.len() {
+            let id = wasm[i];
+            i += 1;
+            let (size, ni) = leb_u32(wasm, i)?;
+            i = ni;
+            let start = i;
+            let end = start
+                .checked_add(size as usize)
+                .filter(|&e| e <= wasm.len())
+                .ok_or_else(|| WasmError::Decode("section runs past end of module".into()))?;
+            let payload = &wasm[start..end];
+            match id {
+                1 => types = parse_type_section(payload)?,
+                3 => func_types = parse_func_section(payload)?,
+                10 => codes = parse_code_section(payload)?,
+                _ => {} // custom / import / export / memory / … : skipped
+            }
+            i = end;
+        }
+
+        if func_types.len() != codes.len() {
+            return Err(WasmError::Decode(format!(
+                "function count {} does not match code count {}",
+                func_types.len(),
+                codes.len()
+            )));
+        }
+
+        let mut module = Module::new();
+        for (fi, &tidx) in func_types.iter().enumerate() {
+            let (n_params, n_results) = *types
+                .get(tidx)
+                .ok_or_else(|| WasmError::Decode(format!("function {fi} references missing type")))?;
+            let (n_locals, expr) = &codes[fi];
+            let code = decode(expr)?;
+            module.funcs.push(Func {
+                n_params,
+                n_locals: *n_locals,
+                arity: n_results,
+                code,
+            });
+        }
+        Ok(module)
     }
 
     /// Invoke function `idx` with `args`, returning its result values.
@@ -687,6 +832,61 @@ mod tests {
         let mut m = Module::new();
         let f = m.add_function(0, 0, 1, &body).unwrap();
         assert_eq!(m.invoke(f, &[]).unwrap(), vec![7]);
+    }
+
+    // Acceptance (tinyvm.6): load a standard .wasm module and invoke.
+    //
+    // Equivalent to:  (module (func (result i32) i32.const 42))
+    #[test]
+    fn module_from_bytes_returns_42() {
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // \0asm, version 1
+            // type section: 1 type, func () -> (i32)
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function section: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // code section: 1 body: 0 locals, i32.const 42, end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B,
+        ];
+        let m = Module::from_bytes(&wasm).unwrap();
+        assert_eq!(m.invoke(0, &[]).unwrap(), vec![42]);
+    }
+
+    // A module that also carries an export section — which must be skipped —
+    // and whose function takes a param and adds a local: (func (param i32)
+    // (result i32) local.get 0 i32.const 1 i32.add). Section order: type(1),
+    // func(3), export(7), code(10).
+    #[test]
+    fn module_skips_export_section_and_uses_params() {
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            // type: func (i32) -> (i32)
+            0x01, 0x06, 0x01, 0x60, 0x01, 0x7F, 0x01, 0x7F,
+            // func: type 0
+            0x03, 0x02, 0x01, 0x00,
+            // export "inc" func 0  -> skipped
+            0x07, 0x07, 0x01, 0x03, 0x69, 0x6E, 0x63, 0x00, 0x00,
+            // code: 0 locals, local.get 0, i32.const 1, i32.add, end
+            0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x41, 0x01, 0x6A, 0x0B,
+        ];
+        let m = Module::from_bytes(&wasm).unwrap();
+        assert_eq!(m.invoke(0, &[41]).unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn module_bad_magic_fails_to_decode() {
+        assert!(matches!(
+            Module::from_bytes(&[0x00, 0x61, 0x73, 0x00, 0x01, 0x00, 0x00, 0x00]),
+            Err(WasmError::Decode(_))
+        ));
+    }
+
+    #[test]
+    fn module_bad_version_fails_to_decode() {
+        assert!(matches!(
+            Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
+            Err(WasmError::Decode(_))
+        ));
     }
 
     #[test]
