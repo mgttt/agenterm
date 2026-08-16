@@ -36,6 +36,9 @@ use std::fmt;
 mod asm;
 pub use asm::{AsmError, assemble};
 
+pub mod wasm;
+pub use wasm::{Module as WasmModule, WasmError};
+
 /// One bytecode instruction.
 ///
 /// Branch and call targets are absolute instruction indices into the program
