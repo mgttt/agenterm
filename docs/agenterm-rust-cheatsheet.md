@@ -1657,6 +1657,14 @@ encoder has completed and can surface valid in-progress output as
 its contract; a direct native test helper without that publication boundary may
 not borrow the same assumption.
 
+## `#[cfg(unix)]` is not one library name
+
+A test gated `all(unix, target_arch = "x86_64")` still runs on macOS x86_64.
+`libc.so.6` exists only on Linux; macOS needs `libSystem.B.dylib`. CI run
+`31953163587` job `agenterm / osx-x86_64` failed `exec_base` on that dlopen
+after the dyn exec-base merge. Pick the soname from `target_os`, not from
+"unix".
+
 ## Native consumers must match the Rust target ABI
 
 Do not select a C or C++ compiler merely because it appears first on the host

@@ -12,12 +12,12 @@ mod sym;
 mod value;
 
 pub use error::DynError;
+pub use eval::{MAX_TOTAL_REPEAT_ITERATIONS, REPEAT_MAX};
 #[cfg(unix)]
 pub use exec::{
     BufferState, CodeBuffer, NameEntry, NameTable, aarch64_mov_x0_ret, x86_64_call_thunk,
     x86_64_mov_rax_ret,
 };
-pub use eval::{MAX_TOTAL_REPEAT_ITERATIONS, REPEAT_MAX};
 pub use hosts::{
     ALL_CELLS, CU_ADJACENT_PROBE_CATALOG, CuAdjacentProbeCell, HostArch, HostCell, HostOs,
     LAYER3_CANDIDATES, LINUX_AARCH64, LINUX_ATSPI_EXISTENCE_LIBS, LINUX_X86_64, MACOS_AARCH64,

@@ -9,6 +9,14 @@
 
 use agenterm_dyn::{BufferState, CodeBuffer, NameTable, x86_64_call_thunk, x86_64_mov_rax_ret};
 
+fn host_libc_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "libSystem.B.dylib"
+    } else {
+        "libc.so.6"
+    }
+}
+
 #[test]
 fn acceptance_1_mov_rax_42_ret() {
     let mut buf = CodeBuffer::new(64).expect("map code buffer");
@@ -30,7 +38,7 @@ fn acceptance_1_mov_rax_42_ret() {
 fn acceptance_2_call_getpid_matches_direct() {
     // Resolve getpid as a dlsym address and record it in the name table as a
     // foreign (outward call-gate) entry.
-    let lib = unsafe { libloading::Library::new("libc.so.6") }.expect("load libc");
+    let lib = unsafe { libloading::Library::new(host_libc_name()) }.expect("load libc");
     let getpid: libloading::Symbol<unsafe extern "C" fn() -> libc::pid_t> =
         unsafe { lib.get(b"getpid\0") }.expect("resolve getpid");
     let getpid_addr = unsafe { getpid.into_raw() }.into_raw() as usize;
