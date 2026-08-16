@@ -37,7 +37,7 @@ mod asm;
 pub use asm::{AsmError, assemble};
 
 pub mod wasm;
-pub use wasm::{Module as WasmModule, WasmError};
+pub use wasm::{Module as WasmModule, Val, WasmError};
 
 /// One bytecode instruction.
 ///

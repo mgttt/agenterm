@@ -31,6 +31,16 @@ pub const WASM_PAGE_SIZE: usize = 65_536;
 /// Maximum pages `memory.grow` will allocate (the spec's 32-bit maximum).
 pub const WASM_MAX_PAGES: usize = 65_536;
 
+/// A tagged WebAssembly value. The operand stack, locals, arguments, and
+/// results are all sequences of these so the four numeric types can coexist.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Val {
+    I32(i32),
+    I64(i64),
+    F32(f32),
+    F64(f64),
+}
+
 /// A decode-time or run-time WebAssembly fault.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WasmError {
@@ -722,6 +732,23 @@ impl Module {
     /// for the call and shared across every nested `call`; it is discarded when
     /// the top-level invocation returns.
     pub fn invoke(&self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
+        let vals: Vec<Val> = args.iter().map(|&a| Val::I32(a)).collect();
+        let results = self.invoke_val(idx, &vals)?;
+        results
+            .into_iter()
+            .map(|v| match v {
+                Val::I32(n) => Ok(n),
+                other => Err(WasmError::Trap(format!(
+                    "invoke: expected i32 result, got {other:?}"
+                ))),
+            })
+            .collect()
+    }
+
+    /// Invoke function `idx` with typed [`Val`] arguments, returning typed
+    /// results. This is the full entry point; [`Module::invoke`] is the i32
+    /// convenience wrapper over it.
+    pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
         let mut mem = vec![0u8; WASM_PAGE_SIZE];
         self.call_any(idx, args, 0, &mut steps, &mut mem)
@@ -743,11 +770,11 @@ impl Module {
     fn call_any(
         &self,
         idx: usize,
-        args: &[i32],
+        args: &[Val],
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
-    ) -> Result<Vec<i32>, WasmError> {
+    ) -> Result<Vec<Val>, WasmError> {
         if idx < self.hosts.len() {
             let host = &self.hosts[idx];
             if args.len() != host.n_params {
@@ -757,7 +784,17 @@ impl Module {
                     args.len()
                 )));
             }
-            let res = (host.f)(args, mem)?;
+            // Host functions use an i32 ABI: every arg/result must be i32.
+            let i32_args: Vec<i32> = args
+                .iter()
+                .map(|v| match v {
+                    Val::I32(n) => Ok(*n),
+                    other => Err(WasmError::Trap(format!(
+                        "host function {idx} takes i32 args, got {other:?}"
+                    ))),
+                })
+                .collect::<Result<_, _>>()?;
+            let res = (host.f)(&i32_args, mem)?;
             if res.len() != host.n_results {
                 return Err(WasmError::Trap(format!(
                     "host function {idx} returned {} results, expected {}",
@@ -765,7 +802,7 @@ impl Module {
                     host.n_results
                 )));
             }
-            return Ok(res);
+            return Ok(res.into_iter().map(Val::I32).collect());
         }
         self.run_defined(idx - self.hosts.len(), args, depth, steps, mem)
     }
@@ -773,11 +810,11 @@ impl Module {
     fn run_defined(
         &self,
         def_idx: usize,
-        args: &[i32],
+        args: &[Val],
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
-    ) -> Result<Vec<i32>, WasmError> {
+    ) -> Result<Vec<Val>, WasmError> {
         if depth > WASM_MAX_DEPTH {
             return Err(WasmError::Trap(format!(
                 "call depth {WASM_MAX_DEPTH} exceeded"
@@ -795,9 +832,11 @@ impl Module {
             )));
         }
 
-        let mut locals = args.to_vec();
-        locals.resize(func.n_params + func.n_locals, 0);
-        let mut stack: Vec<i32> = Vec::new();
+        let mut locals: Vec<Val> = args.to_vec();
+        // Declared locals default to i32 zero (local value types are not tracked
+        // in this cut; pass non-i32 locals as parameters via invoke_val).
+        locals.resize(func.n_params + func.n_locals, Val::I32(0));
+        let mut stack: Vec<Val> = Vec::new();
         let mut control: Vec<Frame> = vec![Frame {
             base: 0,
             branch_arity: func.arity,
@@ -819,20 +858,20 @@ impl Module {
             let op = func.code[pc].clone();
             pc += 1;
             match op {
-                Op::I32Const(v) => stack.push(v),
+                Op::I32Const(v) => stack.push(Val::I32(v)),
                 Op::I32Add => {
                     let b = pop(&mut stack)?;
                     let a = pop(&mut stack)?;
-                    stack.push(a.wrapping_add(b));
+                    stack.push(Val::I32(a.wrapping_add(b)));
                 }
                 Op::I32Sub => {
                     let b = pop(&mut stack)?;
                     let a = pop(&mut stack)?;
-                    stack.push(a.wrapping_sub(b));
+                    stack.push(Val::I32(a.wrapping_sub(b)));
                 }
                 Op::I32Eqz => {
                     let a = pop(&mut stack)?;
-                    stack.push(i32::from(a == 0));
+                    stack.push(Val::I32(i32::from(a == 0)));
                 }
                 Op::I32Eq => bin_i32(&mut stack, |a, b| i32::from(a == b))?,
                 Op::I32Ne => bin_i32(&mut stack, |a, b| i32::from(a != b))?,
@@ -891,7 +930,7 @@ impl Module {
                 }
                 Op::I32Load { offset } => {
                     let addr = pop(&mut stack)?;
-                    stack.push(mem_read_i32(mem, addr, offset)?);
+                    stack.push(Val::I32(mem_read_i32(mem, addr, offset)?));
                 }
                 Op::I32Store { offset } => {
                     let value = pop(&mut stack)?;
@@ -900,19 +939,19 @@ impl Module {
                 }
                 Op::I32Load8S { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    stack.push(mem[ea] as i8 as i32);
+                    stack.push(Val::I32(mem[ea] as i8 as i32));
                 }
                 Op::I32Load8U { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    stack.push(mem[ea] as i32);
+                    stack.push(Val::I32(mem[ea] as i32));
                 }
                 Op::I32Load16S { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    stack.push(i16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32);
+                    stack.push(Val::I32(i16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32));
                 }
                 Op::I32Load16U { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    stack.push(u16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32);
+                    stack.push(Val::I32(u16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32));
                 }
                 Op::I32Store8 { offset } => {
                     let value = pop(&mut stack)?;
@@ -924,16 +963,16 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
                     mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
-                Op::MemorySize => stack.push((mem.len() / WASM_PAGE_SIZE) as i32),
+                Op::MemorySize => stack.push(Val::I32((mem.len() / WASM_PAGE_SIZE) as i32)),
                 Op::MemoryGrow => {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let old_pages = mem.len() / WASM_PAGE_SIZE;
                     let new_pages = old_pages.saturating_add(delta);
                     if new_pages > WASM_MAX_PAGES {
-                        stack.push(-1);
+                        stack.push(Val::I32(-1));
                     } else {
                         mem.resize(new_pages * WASM_PAGE_SIZE, 0);
-                        stack.push(old_pages as i32);
+                        stack.push(Val::I32(old_pages as i32));
                     }
                 }
                 Op::LocalGet(l) => {
@@ -943,7 +982,7 @@ impl Module {
                     stack.push(v);
                 }
                 Op::LocalSet(l) => {
-                    let v = pop(&mut stack)?;
+                    let v = pop_val(&mut stack)?;
                     let cell = locals
                         .get_mut(l as usize)
                         .ok_or_else(|| WasmError::Trap(format!("local.set {l} out of range")))?;
@@ -1028,12 +1067,12 @@ impl Module {
                 }
                 Op::Nop => {}
                 Op::Drop => {
-                    pop(&mut stack)?;
+                    pop_val(&mut stack)?;
                 }
                 Op::Select => {
                     let c = pop(&mut stack)?;
-                    let b = pop(&mut stack)?;
-                    let a = pop(&mut stack)?;
+                    let b = pop_val(&mut stack)?;
+                    let a = pop_val(&mut stack)?;
                     stack.push(if c != 0 { a } else { b });
                 }
                 Op::LocalTee(l) => {
@@ -1096,39 +1135,75 @@ fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(
 }
 
 /// Pop `b` then `a` and push `f(a, b)` — the shape of every binary i32 op.
-fn bin_i32(stack: &mut Vec<i32>, f: impl FnOnce(i32, i32) -> i32) -> Result<(), WasmError> {
+fn bin_i32(stack: &mut Vec<Val>, f: impl FnOnce(i32, i32) -> i32) -> Result<(), WasmError> {
     let b = pop(stack)?;
     let a = pop(stack)?;
-    stack.push(f(a, b));
+    stack.push(Val::I32(f(a, b)));
     Ok(())
 }
 
 /// Like [`bin_i32`] but the operation may trap (e.g. divide by zero).
 fn bin_i32_try(
-    stack: &mut Vec<i32>,
+    stack: &mut Vec<Val>,
     f: impl FnOnce(i32, i32) -> Result<i32, WasmError>,
 ) -> Result<(), WasmError> {
     let b = pop(stack)?;
     let a = pop(stack)?;
     let r = f(a, b)?;
-    stack.push(r);
+    stack.push(Val::I32(r));
     Ok(())
 }
 
 /// Pop `a` and push `f(a)` — the shape of every unary i32 op.
-fn un_i32(stack: &mut Vec<i32>, f: impl FnOnce(i32) -> i32) -> Result<(), WasmError> {
+fn un_i32(stack: &mut Vec<Val>, f: impl FnOnce(i32) -> i32) -> Result<(), WasmError> {
     let a = pop(stack)?;
-    stack.push(f(a));
+    stack.push(Val::I32(f(a)));
     Ok(())
 }
 
-fn pop(stack: &mut Vec<i32>) -> Result<i32, WasmError> {
+/// Pop any value.
+fn pop_val(stack: &mut Vec<Val>) -> Result<Val, WasmError> {
     stack
         .pop()
         .ok_or_else(|| WasmError::Trap("operand stack underflow".into()))
 }
 
-fn take_results(stack: &mut Vec<i32>, arity: usize) -> Result<Vec<i32>, WasmError> {
+/// Pop a value expected to be an `i32`.
+fn pop(stack: &mut Vec<Val>) -> Result<i32, WasmError> {
+    match pop_val(stack)? {
+        Val::I32(v) => Ok(v),
+        other => Err(WasmError::Trap(format!("expected i32 on stack, got {other:?}"))),
+    }
+}
+
+/// Pop a value expected to be an `i64`.
+#[allow(dead_code)]
+fn pop_i64(stack: &mut Vec<Val>) -> Result<i64, WasmError> {
+    match pop_val(stack)? {
+        Val::I64(v) => Ok(v),
+        other => Err(WasmError::Trap(format!("expected i64 on stack, got {other:?}"))),
+    }
+}
+
+/// Pop a value expected to be an `f32`.
+#[allow(dead_code)]
+fn pop_f32(stack: &mut Vec<Val>) -> Result<f32, WasmError> {
+    match pop_val(stack)? {
+        Val::F32(v) => Ok(v),
+        other => Err(WasmError::Trap(format!("expected f32 on stack, got {other:?}"))),
+    }
+}
+
+/// Pop a value expected to be an `f64`.
+#[allow(dead_code)]
+fn pop_f64(stack: &mut Vec<Val>) -> Result<f64, WasmError> {
+    match pop_val(stack)? {
+        Val::F64(v) => Ok(v),
+        other => Err(WasmError::Trap(format!("expected f64 on stack, got {other:?}"))),
+    }
+}
+
+fn take_results(stack: &mut Vec<Val>, arity: usize) -> Result<Vec<Val>, WasmError> {
     if stack.len() < arity {
         return Err(WasmError::Trap(format!(
             "result arity {arity} exceeds stack height {}",
@@ -1142,7 +1217,7 @@ fn take_results(stack: &mut Vec<i32>, arity: usize) -> Result<Vec<i32>, WasmErro
 /// unwind the operand stack to the label's base, unwind the control stack, and
 /// return the resume program counter. For a loop the label stays (back-edge);
 /// for a block it is exited.
-fn do_branch(stack: &mut Vec<i32>, control: &mut Vec<Frame>, l: u32) -> Result<usize, WasmError> {
+fn do_branch(stack: &mut Vec<Val>, control: &mut Vec<Frame>, l: u32) -> Result<usize, WasmError> {
     let l = l as usize;
     let idx = control
         .len()
@@ -1355,6 +1430,19 @@ mod tests {
         let mut m = Module::new();
         let f = m.add_function(0, 0, 1, &body).unwrap();
         m.invoke(f, &[]).unwrap()[0]
+    }
+
+    // Gate (tinyvm.12): the tagged Val stack; invoke_val carries typed args/results.
+    #[test]
+    fn invoke_val_roundtrips_typed_i32() {
+        let mut m = Module::new();
+        // (param i32)(result i32): local.get 0 ; i32.const 1 ; i32.add
+        let f = m
+            .add_function(1, 0, 1, &[0x20, 0x00, 0x41, 0x01, 0x6A, 0x0B])
+            .unwrap();
+        assert_eq!(m.invoke_val(f, &[Val::I32(41)]).unwrap(), vec![Val::I32(42)]);
+        // The i32 convenience wrapper still works.
+        assert_eq!(m.invoke(f, &[41]).unwrap(), vec![42]);
     }
 
     // Family 1: i32 comparisons — signed vs unsigned must differ, true/false both.
