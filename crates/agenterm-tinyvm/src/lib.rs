@@ -341,7 +341,10 @@ impl Vm {
                     pc = *target;
                 }
                 Instr::Ret => {
-                    pc = self.call.pop().ok_or(VmError::ReturnWithoutCall { pc: here })?;
+                    pc = self
+                        .call
+                        .pop()
+                        .ok_or(VmError::ReturnWithoutCall { pc: here })?;
                 }
                 Instr::Halt => return Ok(self.stack.last().copied()),
             }
@@ -357,9 +360,7 @@ impl Vm {
     }
 
     fn pop(&mut self, pc: usize, op: &'static str) -> Result<i64, VmError> {
-        self.stack
-            .pop()
-            .ok_or(VmError::StackUnderflow { pc, op })
+        self.stack.pop().ok_or(VmError::StackUnderflow { pc, op })
     }
 
     fn binop(
@@ -415,12 +416,12 @@ mod tests {
     fn conditional_selects_branch() {
         // if 0: push 111 else push 222  -> since top is 0, Jz taken -> 111
         let prog = [
-            Instr::Push(0),  // 0
-            Instr::Jz(4),    // 1: pop 0 -> jump to 4
-            Instr::Push(222),// 2
-            Instr::Halt,     // 3
-            Instr::Push(111),// 4
-            Instr::Halt,     // 5
+            Instr::Push(0),   // 0
+            Instr::Jz(4),     // 1: pop 0 -> jump to 4
+            Instr::Push(222), // 2
+            Instr::Halt,      // 3
+            Instr::Push(111), // 4
+            Instr::Halt,      // 5
         ];
         let mut vm = Vm::new(4);
         assert_eq!(vm.run(&prog).unwrap(), Some(111));
@@ -561,9 +562,7 @@ mod tests {
         let mut vm = Vm::new(4);
         vm.eval("push 99").unwrap();
         // run() clears the value stack, so the earlier 99 does not survive.
-        let r = vm
-            .run(&[Instr::Push(7), Instr::Halt])
-            .unwrap();
+        let r = vm.run(&[Instr::Push(7), Instr::Halt]).unwrap();
         assert_eq!(r, Some(7));
         assert_eq!(vm.stack(), &[7]);
     }

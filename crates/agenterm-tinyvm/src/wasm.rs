@@ -58,10 +58,16 @@ enum Op {
     LocalSet(u32),
     Call(u32),
     /// `arity` is the block's result count (0 or 1); `end` indexes its `End`.
-    Block { arity: u32, end: usize },
+    Block {
+        arity: u32,
+        end: usize,
+    },
     /// `arity` is the loop's result count; the back-edge arity is always 0
     /// (MVP loops take no inputs). `end` indexes its `End`.
-    Loop { arity: u32, end: usize },
+    Loop {
+        arity: u32,
+        end: usize,
+    },
     Br(u32),
     BrIf(u32),
     Return,

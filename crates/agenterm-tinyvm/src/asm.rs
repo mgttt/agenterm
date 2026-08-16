@@ -89,7 +89,12 @@ fn parse_one(mnem: &str, operand: Option<&str>, line: usize) -> Result<Instr, As
     Ok(instr)
 }
 
-fn nullary(instr: Instr, mnem: &str, operand: Option<&str>, line: usize) -> Result<Instr, AsmError> {
+fn nullary(
+    instr: Instr,
+    mnem: &str,
+    operand: Option<&str>,
+    line: usize,
+) -> Result<Instr, AsmError> {
     match operand {
         None => Ok(instr),
         Some(tok) => Err(AsmError {
