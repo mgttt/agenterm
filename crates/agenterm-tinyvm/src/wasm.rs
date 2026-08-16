@@ -52,6 +52,8 @@ impl std::error::Error for WasmError {}
 enum Op {
     I32Const(i32),
     I32Add,
+    I32Sub,
+    I32Eqz,
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -142,6 +144,8 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 ops.push(Op::I32Const(v));
             }
             0x6A => ops.push(Op::I32Add),
+            0x6B => ops.push(Op::I32Sub),
+            0x45 => ops.push(Op::I32Eqz),
             0x20 => {
                 let (x, ni) = leb_u32(body, i)?;
                 i = ni;
@@ -320,6 +324,15 @@ impl Module {
                     let a = pop(&mut stack)?;
                     stack.push(a.wrapping_add(b));
                 }
+                Op::I32Sub => {
+                    let b = pop(&mut stack)?;
+                    let a = pop(&mut stack)?;
+                    stack.push(a.wrapping_sub(b));
+                }
+                Op::I32Eqz => {
+                    let a = pop(&mut stack)?;
+                    stack.push(i32::from(a == 0));
+                }
                 Op::LocalGet(l) => {
                     let v = *locals
                         .get(l as usize)
@@ -474,6 +487,63 @@ mod tests {
         assert_eq!(m.invoke(f, &[1]).unwrap(), vec![1]);
     }
 
+    // Acceptance (tinyvm.4): a proper while loop (test at the top) that is
+    // correct for n == 0 as well as n > 0, using i32.eqz + br_if to exit and
+    // i32.sub to decrement.
+    #[test]
+    fn while_sum_is_correct_including_zero() {
+        // local0 = n, local1 = acc
+        // block
+        //   loop
+        //     local.get0 i32.eqz br_if 1        ; if n==0, exit block
+        //     local.get1 local.get0 i32.add local.set1   ; acc += n
+        //     local.get0 i32.const 1 i32.sub local.set0  ; n -= 1
+        //     br 0                              ; continue loop
+        //   end
+        // end
+        // local.get1                            ; result acc
+        let body = [
+            0x02, 0x40, // block
+            0x03, 0x40, // loop
+            0x20, 0x00, // local.get 0
+            0x45, // i32.eqz
+            0x0D, 0x01, // br_if 1  (exit block when n==0)
+            0x20, 0x01, // local.get 1
+            0x20, 0x00, // local.get 0
+            0x6A, // i32.add
+            0x21, 0x01, // local.set 1
+            0x20, 0x00, // local.get 0
+            0x41, 0x01, // i32.const 1
+            0x6B, // i32.sub
+            0x21, 0x00, // local.set 0
+            0x0C, 0x00, // br 0  (loop)
+            0x0B, // end (loop)
+            0x0B, // end (block)
+            0x20, 0x01, // local.get 1
+            0x0B, // end (func)
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(1, 1, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[0]).unwrap(), vec![0]);
+        assert_eq!(m.invoke(f, &[5]).unwrap(), vec![15]);
+        assert_eq!(m.invoke(f, &[10]).unwrap(), vec![55]);
+    }
+
+    #[test]
+    fn i32_sub_and_eqz_basics() {
+        let mut m = Module::new();
+        // i32.const 10 ; i32.const 3 ; i32.sub -> 7
+        let sub = m
+            .add_function(0, 0, 1, &[0x41, 0x0A, 0x41, 0x03, 0x6B, 0x0B])
+            .unwrap();
+        assert_eq!(m.invoke(sub, &[]).unwrap(), vec![7]);
+        // i32.const 0 ; i32.eqz -> 1 ; and i32.const 9 ; i32.eqz -> 0
+        let eqz0 = m.add_function(0, 0, 1, &[0x41, 0x00, 0x45, 0x0B]).unwrap();
+        let eqz9 = m.add_function(0, 0, 1, &[0x41, 0x09, 0x45, 0x0B]).unwrap();
+        assert_eq!(m.invoke(eqz0, &[]).unwrap(), vec![1]);
+        assert_eq!(m.invoke(eqz9, &[]).unwrap(), vec![0]);
+    }
+
     #[test]
     fn call_invokes_another_function() {
         let mut m = Module::new();
@@ -530,9 +600,9 @@ mod tests {
     #[test]
     fn unsupported_opcode_fails_to_decode() {
         let mut m = Module::new();
-        // 0x6B is i32.sub, deliberately outside this subset.
+        // 0x6C is i32.mul, deliberately outside this subset.
         assert!(matches!(
-            m.add_function(0, 0, 1, &[0x6B, 0x0B]),
+            m.add_function(0, 0, 1, &[0x6C, 0x0B]),
             Err(WasmError::Decode(_))
         ));
     }
