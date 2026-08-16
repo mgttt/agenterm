@@ -35,4 +35,6 @@ pub enum DynError {
     DlCall(String),
     #[error("library error: {0}")]
     Library(String),
+    #[error("exec base error: {0}")]
+    Exec(String),
 }
