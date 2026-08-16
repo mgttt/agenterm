@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repository": "mgttt/agenterm",
-  "purpose": "Exact published archives used by the native IPC compatibility smoke; binaries are downloaded into the invocation-owned run and are never checked in.",
+  "purpose": "Exact archives used by the native IPC compatibility smoke; the unpublished Windows x86_64 baseline is a repository fixture and published baselines are downloaded into the invocation-owned run.",
   "releases": [
     {
       "version": "0.1.10",
@@ -58,13 +58,14 @@
       "version": "0.1.11",
       "tag": "v0.1.11",
       "commit": "53f3036a1450e12429e5be12b8f4d3db237a943d",
-      "acquisition": "github_release_authenticated",
+      "acquisition": "repository_fixture",
       "native_server_platforms": ["windows", "linux", "macos"],
       "assets": [
         {
           "os": "windows",
           "arch": "x86_64",
           "name": "agenterm-0.1.11-windows-x86_64.zip",
+          "path": "fixtures/native-ipc-compat/agenterm-0.1.11-windows-x86_64.zip",
           "size": 4005143,
           "sha256": "31b6eea1cd2d3173edaa4ce5394c835f93d3b988fadd474d8c949c4e875ce7cf"
         },

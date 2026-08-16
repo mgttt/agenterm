@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use sha2::Digest as _;
+
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -1164,25 +1166,38 @@ fn native_ipc_compat_smoke_uses_bundled_pack() {
         .find(|release| release["version"] == "0.1.11")
         .expect("v0.1.11 catalog entry");
     assert_eq!(release_110["acquisition"], "public_url");
-    assert_eq!(release_111["acquisition"], "github_release_authenticated");
+    assert_eq!(release_111["acquisition"], "repository_fixture");
+    assert_eq!(
+        release_111["assets"][0]["path"],
+        "fixtures/native-ipc-compat/agenterm-0.1.11-windows-x86_64.zip"
+    );
     assert_eq!(release_111["assets"][0]["size"], 4_005_143);
     assert_eq!(
         release_111["assets"][0]["sha256"],
         "31b6eea1cd2d3173edaa4ce5394c835f93d3b988fadd474d8c949c4e875ce7cf"
     );
 
-    let gh_arguments = source
-        .split("let gh_arguments = [")
-        .nth(1)
-        .and_then(|tail| tail.split("];\n").next())
-        .expect("gh release download argv");
-    assert!(gh_arguments.contains("\"release\", \"download\""));
-    assert!(gh_arguments.contains("\"--repo\""));
-    assert!(gh_arguments.contains("\"--pattern\""));
-    assert!(gh_arguments.contains("\"--dir\""));
-    assert!(!gh_arguments.contains("GH_TOKEN"));
-    assert!(!gh_arguments.to_ascii_lowercase().contains("token"));
-    assert!(source.contains("std::env::has(\"GH_TOKEN\")"));
+    let fixture_path = repo().join(
+        release_111["assets"][0]["path"]
+            .as_str()
+            .expect("v0.1.11 fixture path"),
+    );
+    let fixture = std::fs::read(&fixture_path).expect("read v0.1.11 fixture");
+    assert_eq!(fixture.len(), 4_005_143);
+    let fixture_digest = sha2::Sha256::digest(&fixture);
+    assert_eq!(
+        &fixture_digest[..],
+        &[
+            0x31, 0xb6, 0xee, 0xa1, 0xcd, 0x2d, 0x31, 0x73, 0xed, 0xaa, 0x4c, 0xe5, 0x39, 0x4c,
+            0x83, 0x5f, 0x93, 0xd3, 0xb9, 0x88, 0xfa, 0xdd, 0x47, 0x4d, 0x8c, 0x94, 0x9c, 0x4e,
+            0x87, 0x5c, 0xe7, 0xcf,
+        ]
+    );
+    assert!(source.contains("acquisition == \"repository_fixture\""));
+    assert!(source.contains("std::fs::copy(fixture, archive)"));
+    assert!(!source.contains("gh release"));
+    assert!(!source.contains("releases/assets/"));
+    assert!(!source.contains("GH_TOKEN"));
     assert!(source.contains("acquisition == \"public_url\""));
     assert!(source.contains("command_output(\n            context,\n            curl,"));
     assert!(source.contains("native_ipc_compat_download_file_set:"));
@@ -1191,6 +1206,7 @@ fn native_ipc_compat_smoke_uses_bundled_pack() {
 
     let candidate = std::fs::read_to_string(repo().join(".github/workflows/candidate.yml"))
         .expect("read Candidate workflow");
+    assert!(!candidate.contains("contents: write"));
     let quality_step = candidate
         .split("- name: Run release quality gate")
         .nth(1)
@@ -1199,7 +1215,13 @@ fn native_ipc_compat_smoke_uses_bundled_pack() {
                 .next()
         })
         .expect("Candidate quality step");
-    assert!(quality_step.contains("GH_TOKEN: ${{ github.token }}"));
+    assert!(!quality_step.contains("GH_TOKEN"));
+    let build_job = candidate
+        .split("  build:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("  aggregate:\n").next())
+        .expect("Candidate build job");
+    assert!(!build_job.contains("GH_TOKEN"));
 
     assert_bundled_pack_builds("scripts/rh/native-ipc-compat-smoke.rh");
 }
