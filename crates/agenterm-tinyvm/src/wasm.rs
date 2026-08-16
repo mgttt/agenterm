@@ -156,6 +156,30 @@ enum Op {
     I64ShrU,
     I64Rotl,
     I64Rotr,
+    // --- f64 family (const stored as raw bits) ---
+    F64Const(u64),
+    F64Eq,
+    F64Ne,
+    F64Lt,
+    F64Gt,
+    F64Le,
+    F64Ge,
+    F64Abs,
+    F64Neg,
+    F64Ceil,
+    F64Floor,
+    F64Trunc,
+    F64Nearest,
+    F64Sqrt,
+    F64Add,
+    F64Sub,
+    F64Mul,
+    F64Div,
+    F64Min,
+    F64Max,
+    F64Copysign,
+    F64Load { offset: u32 },
+    F64Store { offset: u32 },
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -558,6 +582,45 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x88 => ops.push(Op::I64ShrU),
             0x89 => ops.push(Op::I64Rotl),
             0x8A => ops.push(Op::I64Rotr),
+            0x44 => {
+                let bytes: [u8; 8] = body
+                    .get(i..i + 8)
+                    .ok_or_else(|| WasmError::Decode("truncated f64.const immediate".into()))?
+                    .try_into()
+                    .expect("slice of length 8 converts to [u8; 8]");
+                i += 8;
+                ops.push(Op::F64Const(u64::from_le_bytes(bytes)));
+            }
+            0x61 => ops.push(Op::F64Eq),
+            0x62 => ops.push(Op::F64Ne),
+            0x63 => ops.push(Op::F64Lt),
+            0x64 => ops.push(Op::F64Gt),
+            0x65 => ops.push(Op::F64Le),
+            0x66 => ops.push(Op::F64Ge),
+            0x99 => ops.push(Op::F64Abs),
+            0x9A => ops.push(Op::F64Neg),
+            0x9B => ops.push(Op::F64Ceil),
+            0x9C => ops.push(Op::F64Floor),
+            0x9D => ops.push(Op::F64Trunc),
+            0x9E => ops.push(Op::F64Nearest),
+            0x9F => ops.push(Op::F64Sqrt),
+            0xA0 => ops.push(Op::F64Add),
+            0xA1 => ops.push(Op::F64Sub),
+            0xA2 => ops.push(Op::F64Mul),
+            0xA3 => ops.push(Op::F64Div),
+            0xA4 => ops.push(Op::F64Min),
+            0xA5 => ops.push(Op::F64Max),
+            0xA6 => ops.push(Op::F64Copysign),
+            0x2B => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::F64Load { offset });
+            }
+            0x39 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::F64Store { offset });
+            }
             other => {
                 return Err(WasmError::Decode(format!(
                     "unsupported opcode 0x{other:02x} in this subset"
@@ -1096,6 +1159,110 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
                     mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
+                Op::F64Const(bits) => stack.push(Val::F64(f64::from_bits(bits))),
+                Op::F64Eq => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::I32((a == b) as i32));
+                }
+                Op::F64Ne => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::I32((a != b) as i32));
+                }
+                Op::F64Lt => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::I32((a < b) as i32));
+                }
+                Op::F64Gt => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::I32((a > b) as i32));
+                }
+                Op::F64Le => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::I32((a <= b) as i32));
+                }
+                Op::F64Ge => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::I32((a >= b) as i32));
+                }
+                Op::F64Abs => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.abs()));
+                }
+                Op::F64Neg => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(-a));
+                }
+                Op::F64Ceil => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.ceil()));
+                }
+                Op::F64Floor => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.floor()));
+                }
+                Op::F64Trunc => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.trunc()));
+                }
+                Op::F64Nearest => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.round_ties_even()));
+                }
+                Op::F64Sqrt => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.sqrt()));
+                }
+                Op::F64Add => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a + b));
+                }
+                Op::F64Sub => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a - b));
+                }
+                Op::F64Mul => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a * b));
+                }
+                Op::F64Div => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a / b));
+                }
+                Op::F64Min => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(wasm_min_f64(a, b)));
+                }
+                Op::F64Max => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(wasm_max_f64(a, b)));
+                }
+                Op::F64Copysign => {
+                    let b = pop_f64(&mut stack)?;
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F64(a.copysign(b)));
+                }
+                Op::F64Load { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
+                    let bytes: [u8; 8] = mem[ea..ea + 8].try_into().expect("8 bytes");
+                    stack.push(Val::F64(f64::from_le_bytes(bytes)));
+                }
+                Op::F64Store { offset } => {
+                    let value = pop_f64(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
+                    mem[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
+                }
                 Op::MemorySize => stack.push(Val::I32((mem.len() / WASM_PAGE_SIZE) as i32)),
                 Op::MemoryGrow => {
                     let delta = pop(&mut stack)? as u32 as usize;
@@ -1382,6 +1549,32 @@ fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(
     let ea = mem_ea(mem.len(), addr, offset, 4)?;
     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+/// WASM `f64.min`: either NaN yields NaN; `min(-0.0, +0.0)` is `-0.0`.
+fn wasm_min_f64(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        f64::NAN
+    } else if a == b {
+        if a.is_sign_negative() { a } else { b }
+    } else if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// WASM `f64.max`: either NaN yields NaN; `max(-0.0, +0.0)` is `+0.0`.
+fn wasm_max_f64(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        f64::NAN
+    } else if a == b {
+        if a.is_sign_negative() { b } else { a }
+    } else if a > b {
+        a
+    } else {
+        b
+    }
 }
 
 /// Decode a signed LEB128 up to 64 bits (like [`leb_s32`] but wider).
@@ -2084,6 +2277,71 @@ mod tests {
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
         ));
+    }
+
+    // Family: f64.
+    fn f64_const_bytes(v: f64) -> Vec<u8> {
+        let mut b = vec![0x44];
+        b.extend_from_slice(&v.to_le_bytes());
+        b
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn f64_add_two_constants() {
+        let mut body = f64_const_bytes(1.5);
+        body.extend_from_slice(&f64_const_bytes(2.5));
+        body.push(0xA0); // f64.add
+        body.push(0x0B);
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke_val(f, &[]).unwrap(), vec![Val::F64(4.0)]);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn f64_compare_unary_binary_goldens() {
+        let run = |body: &[u8]| {
+            let mut m = Module::new();
+            let f = m.add_function(0, 0, 1, body).unwrap();
+            m.invoke_val(f, &[]).unwrap()
+        };
+        let bin = |a: f64, b: f64, op: u8| {
+            let mut body = f64_const_bytes(a);
+            body.extend_from_slice(&f64_const_bytes(b));
+            body.push(op);
+            body.push(0x0B);
+            run(&body)
+        };
+        let un = |a: f64, op: u8| {
+            let mut body = f64_const_bytes(a);
+            body.push(op);
+            body.push(0x0B);
+            run(&body)
+        };
+        assert_eq!(bin(1.5, 2.5, 0x63), vec![Val::I32(1)]); // lt true
+        assert_eq!(bin(2.5, 1.5, 0x63), vec![Val::I32(0)]); // lt false
+        assert_eq!(un(4.0, 0x9F), vec![Val::F64(2.0)]); // sqrt
+        assert_eq!(un(-3.0, 0x99), vec![Val::F64(3.0)]); // abs
+        assert_eq!(un(3.0, 0x9A), vec![Val::F64(-3.0)]); // neg
+        assert_eq!(bin(1.0, 2.0, 0xA4), vec![Val::F64(1.0)]); // min
+        assert_eq!(bin(1.0, 2.0, 0xA5), vec![Val::F64(2.0)]); // max
+        assert_eq!(bin(3.0, -1.0, 0xA6), vec![Val::F64(-3.0)]); // copysign
+        // NaN + signed zero semantics for min/max
+        assert!(matches!(bin(f64::NAN, 1.0, 0xA4)[0], Val::F64(x) if x.is_nan()));
+        assert!(matches!(bin(-0.0, 0.0, 0xA4)[0], Val::F64(x) if x == 0.0 && x.is_sign_negative()));
+        assert!(matches!(bin(-0.0, 0.0, 0xA5)[0], Val::F64(x) if x == 0.0 && x.is_sign_positive()));
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn f64_store_load_roundtrip() {
+        let mut body = vec![0x41, 0x00];
+        body.extend_from_slice(&f64_const_bytes(3.25));
+        body.extend_from_slice(&[0x39, 0x00, 0x00, 0x41, 0x00, 0x2B, 0x00, 0x00, 0x0B]);
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke_val(f, &[]).unwrap(), vec![Val::F64(3.25)]);
     }
 
     // Family: i64 integer ops.
