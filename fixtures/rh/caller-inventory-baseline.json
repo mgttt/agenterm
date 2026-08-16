@@ -2,20 +2,20 @@
   "schema_version": 1,
   "kind": "agenterm-rh-caller-inventory-baseline",
   "needle": "agenterm-rhai",
-  "min_hit_count": 190,
+  "min_hit_count": 90,
   "min_categories": {
     "bootstrap": 5
   },
   "max_categories": {
     "ci": 0
   },
-  "observed_at_commit": "b0045922",
-  "observed_hit_count": 211,
-  "observed_scanned_files": 1205,
+  "observed_at_commit": "6f596a81",
+  "observed_hit_count": 99,
+  "observed_scanned_files": 1325,
   "observed_categories": {
     "bootstrap": 6,
-    "documentation": 180,
-    "other": 6,
+    "documentation": 63,
+    "other": 11,
     "rust-crate": 5,
     "rust-test": 14
   }

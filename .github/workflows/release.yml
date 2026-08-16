@@ -212,7 +212,7 @@ jobs:
             .schema_version == 1
             and .kind == "agenterm-releases-index"
             and (.releases | length) == 1
-            and (.releases[0].artifacts | length) == 6
+            and (.releases[0].artifacts | length) == 7
           ' candidate/releases.json >/dev/null
           {
             echo "### H1 releases.json"

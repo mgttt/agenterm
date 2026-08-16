@@ -26,7 +26,9 @@ fn candidate_is_manual_exact_sha_and_has_no_publish_authority() {
     assert!(CANDIDATE.contains("[[ \"$SOURCE_SHA\" =~ ^[0-9a-f]{40}$ ]]"));
     assert!(CANDIDATE.contains("[[ \"$GITHUB_SHA\" == \"$SOURCE_SHA\" ]]"));
     assert!(CANDIDATE.contains("git merge-base --is-ancestor"));
-    assert!(CANDIDATE.contains("for workflow in ci-agenterm.yml ci-agenterm-con.yml"));
+    assert!(CANDIDATE.contains(
+        "for workflow in ci-agenterm.yml ci-agenterm-con.yml ci-libagenterm.yml ci-chassis.yml"
+    ));
     assert!(CANDIDATE.contains("workflows/$workflow/runs?head_sha=$SOURCE_SHA&status=success"));
     assert!(CANDIDATE.contains("ref: ${{ inputs.source_sha }}"));
     assert!(CANDIDATE.contains("AGENTERM_CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}"));
@@ -34,7 +36,7 @@ fn candidate_is_manual_exact_sha_and_has_no_publish_authority() {
 }
 
 #[test]
-fn candidate_runs_one_full_gate_and_seals_six_platform_parts() {
+fn candidate_runs_one_full_gate_and_seals_six_platform_parts_plus_chassis_product() {
     assert_eq!(
         CANDIDATE
             .matches("check.cmd --release --include-stress")
@@ -60,6 +62,12 @@ fn candidate_runs_one_full_gate_and_seals_six_platform_parts() {
     assert!(CANDIDATE.contains("name: Stage flat candidate part"));
     assert!(CANDIDATE.contains("path: candidate-part/"));
     assert!(CANDIDATE.contains("candidate-aggregate.rh"));
+    assert!(CANDIDATE.contains("python3 scripts/chassis-candidate-pack.py"));
+    assert!(CANDIDATE.contains("candidate-input/agenterm-$version-chassis-product.tgz"));
+    assert!(CANDIDATE.contains("name: Build thin Chassis-L1 loader"));
+    assert!(CANDIDATE.contains("--features loader"));
+    assert!(CANDIDATE.contains("python3 scripts/chassis-stage-l1-loader.py"));
+    assert!(CANDIDATE.contains("--loader target/chassis-l1-loader"));
     assert!(CANDIDATE.contains("--project-root . --"));
     assert!(CANDIDATE.contains("path: candidate-output/"));
     assert!(!CANDIDATE.contains(".agenterm-rhai.bin"));
@@ -140,7 +148,8 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(INTEGRITY.contains("echo releases.json"));
     assert!(INTEGRITY.contains("agenterm-releases-index"));
     assert!(INTEGRITY.contains(".source.manifest_sha256 == $manifest_sha"));
-    assert!(INTEGRITY.contains("(.releases[0].artifacts | length) == 6"));
+    assert!(PROMOTION.contains("(.releases[0].artifacts | length) == 7"));
+    assert!(INTEGRITY.contains("(.releases[0].artifacts | length) == 7"));
     assert!(PROMOTION.contains("environment: release"));
     assert!(PROMOTION.contains("contents: write"));
     assert!(PROMOTION.contains("repos/$GITHUB_REPOSITORY/git/refs"));

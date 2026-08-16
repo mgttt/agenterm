@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "name": "active-tab",
+  "layer": "chassis-l2",
+  "format": "chassis-l2-ir-v1",
+  "entry": "return-active-tab-result",
+  "expected_bytecode_hex": "070009",
+  "caps": ["tabs.active"],
+  "ops": [
+    ["call", "tabs.active"],
+    ["halt"]
+  ]
+}

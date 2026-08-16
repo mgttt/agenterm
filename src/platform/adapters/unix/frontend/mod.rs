@@ -572,9 +572,29 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
             return GuiLaunchResult::UsageError;
         }
     };
+    let selected_image =
+        match crate::frontend::chassis_image::load_selected_image(options.chassis_image.as_deref())
+        {
+            Ok(image) => image,
+            Err(error) => {
+                eprintln!("AgenTerm GUI failed to load chassis image: {error}");
+                return GuiLaunchResult::StartupFailed(error);
+            }
+        };
+    if let Some(image) = selected_image {
+        eprintln!(
+            "Starting first workbench window from chassis L3 {} with native cell {}",
+            image.l3_name,
+            image.native_loader.display()
+        );
+    }
     let no_activate = options.no_activate || no_activate_from_environment();
 
-    match attempt_gui_handoff(no_activate, true) {
+    match if selected_image.is_some() {
+        GuiHandoffResult::Continue
+    } else {
+        attempt_gui_handoff(no_activate, true)
+    } {
         GuiHandoffResult::HandedOff => return GuiLaunchResult::Reused,
         GuiHandoffResult::Continue => {}
         GuiHandoffResult::Blocked(error) => {
@@ -594,7 +614,7 @@ pub(crate) fn run_gui_entry_result() -> GuiLaunchResult {
         return GuiLaunchResult::StartupFailed("no graphical display was detected".to_owned());
     }
 
-    match run_gui(no_activate) {
+    match run_gui(no_activate, selected_image) {
         Ok(()) => GuiLaunchResult::Launched,
         Err(error) => {
             eprintln!("AgenTerm GUI failed: {error:#}");
@@ -607,7 +627,10 @@ fn display_available() -> bool {
     !agenterm_platform::window::display_backend_facts().headless
 }
 
-fn run_gui(no_activate: bool) -> anyhow::Result<()> {
+fn run_gui(
+    no_activate: bool,
+    chassis_image: Option<&'static crate::frontend::chassis_image::LoadedChassisImage>,
+) -> anyhow::Result<()> {
     let config = load_config();
     let instance_label = resolved_ipc_endpoint()
         .ok()
@@ -630,6 +653,7 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
         wake_signal,
         ipc_server,
         session_name,
+        chassis_image,
     );
     let options = PixelWindowOptions::new(
         title,
@@ -650,6 +674,7 @@ struct UnixApp {
     wake_signal: Arc<WakeSignal>,
     ipc_server: IpcServer,
     session_name: String,
+    chassis_image: Option<&'static crate::frontend::chassis_image::LoadedChassisImage>,
     started_at: SystemTime,
     event_journal: EventJournal,
     named_buffers: crate::named_buffer::NamedBufferStore,
@@ -765,6 +790,7 @@ impl UnixApp {
         wake_signal: Arc<WakeSignal>,
         ipc_server: IpcServer,
         session_name: String,
+        chassis_image: Option<&'static crate::frontend::chassis_image::LoadedChassisImage>,
     ) -> Self {
         let config = load_config();
         Self {
@@ -773,6 +799,7 @@ impl UnixApp {
             wake_signal,
             ipc_server,
             session_name,
+            chassis_image,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
             named_buffers: crate::named_buffer::NamedBufferStore::new(),
@@ -4267,6 +4294,13 @@ impl UnixApp {
                 serde_json::json!({}),
             );
         }
+        if let Some(image) = self.chassis_image {
+            let (active_tab, _) = crate::frontend::chassis_image::eval_active_tab(
+                image, &mut *self,
+            )
+            .map_err(|error| PixelWindowError::failed("chassis_l2_first_window_failed", error))?;
+            self.set_status_message(format!("Chassis L2 active tab @{active_tab}"));
+        }
         self.load_composer_buffer_from_tab();
         self.sync_grid_from_tab();
         Ok(())
@@ -5325,6 +5359,22 @@ fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
         ToolbarHit::ToggleLocale => crate::frontend::action::TOGGLE_LOCALE,
         ToolbarHit::FontDecrease => crate::frontend::action::FONT_DECREASE,
         ToolbarHit::FontIncrease => crate::frontend::action::FONT_INCREASE,
+    }
+}
+
+impl agenterm_chassis::l2_dispatch::HostCallback for &mut UnixApp {
+    fn call(
+        &mut self,
+        capability: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        if capability != "tabs.active" || parameters != &serde_json::json!({}) {
+            return Err(format!("unsupported live chassis call `{capability}`"));
+        }
+        self.active
+            .and_then(|id| i64::try_from(id).ok())
+            .map(serde_json::Value::from)
+            .ok_or_else(|| "live workbench has no active PTY tab".to_owned())
     }
 }
 

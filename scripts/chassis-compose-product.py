@@ -38,12 +38,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def add_file(tar: tarfile.TarFile, dest: str, src: Path) -> None:
+def add_file(tar: tarfile.TarFile, dest: str, src: Path, mode: int = 0o644) -> None:
     info = tarfile.TarInfo(name=dest)
     data = src.read_bytes()
     info.size = len(data)
     info.mtime = FIXED_MTIME
-    info.mode = 0o644
+    info.mode = mode
     info.uid = 0
     info.gid = 0
     info.uname = FIXED_UNAME
@@ -91,6 +91,7 @@ def compose(src: Path, dest: Path) -> dict:
         "compile": False,
         "invokes_cargo": False,
         "cells": list(CELLS),
+        "native_cell": None,
         "l1_sha256": l1_sha,
         "l2_files": [str(p.relative_to(l2_root)).replace("\\", "/") for p in l2_files],
         "l3_files": [str(p.relative_to(l3_root)).replace("\\", "/") for p in l3_files],
@@ -100,7 +101,7 @@ def compose(src: Path, dest: Path) -> dict:
     with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         add_bytes(tar, "manifest.json", json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n")
         for cell in CELLS:
-            add_file(tar, f"l1/{cell}/loader", l1_root / cell / "loader")
+            add_file(tar, f"l1/{cell}/loader", l1_root / cell / "loader", mode=0o755)
         for path in l2_files:
             rel = path.relative_to(l2_root).as_posix()
             add_file(tar, f"l2/{rel}", path)

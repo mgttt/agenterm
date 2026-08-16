@@ -37,21 +37,20 @@ Use `/` after `~/` even on Windows. Real names and `<name>` placeholders both co
 
 | Host form (do not leave in tree) | Write as |
 |----------------------------------|----------|
-| `/Users/<name>/...` (Darwin) | `~/...` |
-| `/home/<name>/...` (Linux) | `~/...` |
-| `%USERPROFILE%\...` or `%UserProfile%\...` | `~/...` |
-| `$env:USERPROFILE\...` (PowerShell) | `~/...` |
-| `C:\Users\<name>\...` (and other drive letters) | `~/...` |
-| `$HOME/...` when used as a *documented path* | prefer `~/...` |
+| Darwin home root + account + `/...` | `~/...` |
+| Linux home root + account + `/...` | `~/...` |
+| Windows user-profile environment expansion + `\...` | `~/...` |
+| Windows drive + user-profile root + account + `\...` | `~/...` |
+| Shell home-variable expansion + `/...` in documentation | prefer `~/...` |
 
 Examples:
 
 | Before | After |
 |--------|--------|
-| `/Users/<name>/.local/share/agenterm` | `~/.local/share/agenterm` |
-| `/home/<name>/.config/agenterm` | `~/.config/agenterm` |
-| `%USERPROFILE%\AppData\Local\agenterm` | `~/AppData/Local/agenterm` |
-| `C:\Users\<name>\.local\share\agenterm` | `~/.local/share/agenterm` |
+| Darwin/Linux home + `/.local/share/agenterm` | `~/.local/share/agenterm` |
+| Darwin/Linux home + `/.config/agenterm` | `~/.config/agenterm` |
+| Windows user profile + `\AppData\Local\agenterm` | `~/AppData/Local/agenterm` |
+| Windows user profile + `\.local\share\agenterm` | `~/.local/share/agenterm` |
 | absolute path *into this clone* | repo-relative (`src/...`), not `~/...` |
 
 | Class | Action |
@@ -160,6 +159,12 @@ review it before validation. Run the final formatting, Clippy, unit-test,
 artifact, and full public-interface gates serially on the integrated tree so the
 result represents one reproducible source state.
 
+When a **supervisor** session drives a **named tmux executor** that must itself
+spawn background subagents, follow the settled playbook
+[`docs/tmux-executor-supervision.md`](docs/tmux-executor-supervision.md)
+(short pane nudges, NOT-DONE boxes, worker refill, redacted session log). Do
+not paste host-home paths or mail into that file or into handoff prompts.
+
 ## Rust engineering — read the condensed manual before editing Rust
 
 Repository Rust work repeatedly crosses feature graphs, six target cells,
@@ -245,70 +250,39 @@ Windows bootstrap remains necessary, add the equivalent `.sh` entry and cover
 the pair in the cross-platform automation audit and Linux/macOS CI.
 
 Formal delivery is an exact-SHA two-stage GitHub Actions contract.
-Before Candidate, Promotion, release authentication, or Actions babysitting,
-read `skills/agenterm-release/SKILL.md` and its authentication reference.
-`Release Candidate` performs the one stress-inclusive Windows qualification
-and builds/seals all six platform artifacts before a tag exists. `Release`
-accepts an exact Candidate run plus explicit `publish-vX.Y.Z` confirmation,
-revalidates the sealed bytes, creates only the exact tag, and promotes through
-a recoverable unpublished draft without Cargo, tests, packaging, signing,
-notarization, or overwrite. `release.cmd`
-validates or rehearses only and intentionally refuses local publication.
-Candidate dispatch is a mechanical action that may be automated after an
-explicit exact-SHA request; public Promotion is the human release-authority
-boundary. Version 0.1.7 remains an internal qualification baseline and must
-never receive a tag or public Release.
+Before Candidate, Promotion, release authentication, dispatch, or monitoring,
+read [`skills/agenterm-release/SKILL.md`](skills/agenterm-release/SKILL.md) and
+the references it requires. The stable contract is:
+
+- `Release Candidate` qualifies the exact current `main` SHA, including the
+  single stress-inclusive Windows gate, then builds and seals all six platform
+  artifacts before any tag exists. Dispatch is allowed only after an explicit
+  exact-SHA Candidate request.
+- `Release` promotes one exact successful Candidate without rebuilding its
+  bytes. It requires explicit human approval for the version and
+  `publish-vX.Y.Z` confirmation, creates only the exact tag, and preserves
+  no-overwrite and integrity guarantees.
+- `release.cmd` and `release.sh` validate or rehearse only; they never publish.
+
+Public Promotion is always the human release-authority boundary. Keep changing
+operational procedure, authentication routing, and diagnostic steps in the
+release skill rather than duplicating them here.
 
 ## GitHub Actions observation
 
-Treat Actions observation as a bounded read-only operation, not a continuous
-15-second public-API poll. A previous multi-agent Candidate watch exhausted
-GitHub's anonymous REST allowance because every observer behind the same shared
-NAT consumed the same low-rate source; the run itself remained healthy, but
-status, jobs, logs, and artifacts became temporarily unobservable. The failure
-tree is:
+Actions observation is bounded and read-only. Resolve a run once, retain its
+`run_id` and `run_attempt`, and assign one observer; never fan polling out
+across agents. Prefer an authenticated GitHub connector or existing `gh`
+session, use public REST only as a bounded fallback, back off while state is
+unchanged, honor rate-limit responses, and fetch logs or artifacts only when
+their owning job reaches a relevant state. Observation loss is not workflow
+failure.
 
-- duplicated observers or lost run identity cause repeated search/list calls;
-- fixed short intervals amplify calls while long matrix jobs are unchanged;
-- anonymous REST shares an IP-based budget across agents and unrelated users;
-- missing rate-limit handling turns temporary observation loss into API
-  hammering, misleading failure reports, and unnecessary human intervention.
-
-Use observation channels in this order:
-
-1. the connected GitHub application/connector for authenticated run, job, log,
-   and artifact reads;
-2. an already authenticated `gh` session, without extracting or printing its
-   token;
-3. public REST only for a small bounded fallback probe;
-4. browser/manual inspection when no programmatic authenticated reader exists,
-   or when an explicitly human-authorized mutation such as dispatch is needed.
-
-Resolve the workflow run once, retain its `run_id` and `run_attempt`, and query
-that run directly thereafter. Do not repeatedly search by branch, SHA, or
-workflow name. Keep one observer owner per run and share its last structured
-result with other agents. Cache unchanged job/log/artifact results where the
-reader permits it, use conditional requests (`ETag`/`If-None-Match`) for public
-REST, and fetch logs or artifacts only after the owning job reaches a relevant
-terminal state.
-
-Polling must be finite and state-aware: start no faster than 30 seconds, apply
-exponential backoff with jitter up to at least 2 minutes while state is
-unchanged, reset only on a meaningful state transition, and stop at an explicit
-deadline or terminal conclusion. Honor `Retry-After`,
-`X-RateLimit-Remaining`, and `X-RateLimit-Reset`; near exhaustion, stop public
-REST calls until reset and switch to an authenticated channel or report that
-observation—not the workflow—is temporarily unavailable. Never fan out polling
-across subagents.
-
-Git transport authentication and GitHub API authentication are separate
-authorities. GCM credentials are for Git fetch/push and must never be queried,
-decoded, copied into `GH_TOKEN`, logged, or reused to manufacture API access.
-Likewise, connector or `gh` credentials must not be written into Git remotes.
-If dispatch or another mutation is unavailable through the connected channel,
-pause and give the human the exact workflow, immutable SHA/run identity, fields,
-and expected effect; do not probe credential stores or expose tokens to avoid
-that human-in-the-loop boundary.
+Git transport and GitHub API authentication are separate authorities. Never
+extract, print, copy, or repurpose credentials to manufacture API access. If an
+authorized mutation is unavailable, stop and give the human the immutable run
+identity, required fields, and expected effect. The release skill owns detailed
+monitoring cadence, fallback order, authentication, and failure diagnosis.
 
 Use a validation ladder instead of running the largest gate after every edit:
 run `check.cmd --quick` once after a coherent implementation, then `build.bat`
@@ -417,9 +391,9 @@ ready.
 
 ## Terminal interaction engineering
 
-PuTTY is the local professional-terminal reference implementation. The reviewed
-baseline is `D:\dev\putty` commit
-`61574e2e98f7d262dea4ff6380e167541518aedf` (2026-07-25). Use it to check
+PuTTY is the professional-terminal reference implementation. The reviewed
+baseline is upstream commit `61574e2e98f7d262dea4ff6380e167541518aedf`.
+Use it to check
 interaction invariants and edge cases, not as a source for blind code copying.
 Its permissive licence still requires preserving its notice with any substantial
 copied portion; prefer independent Rust implementations based on observed
@@ -540,20 +514,14 @@ remote frontend and OSX/Lnx agents re-implement later. Default path:
    migration; this catalog is the interim set-diff gate, not the final
    ActionId enum.
 
-## Cursor Cloud specific instructions
+## Cross-platform build and test contract
 
-The cloud VM is **Linux**, but the native Windows GUI/runtime (`windows-sys`,
-ConPTY, MSVC target) and its orchestration (`build.bat`, `check.cmd`, and
-`release.cmd`) do not run there;
-repository lint and all smoke logic are Rhai-owned. For the authoritative
-Windows dev loop see the sections above and `README.md`. On the Linux VM,
-build/lint/test Windows targets by cross-compiling
-with `cargo-xwin`. The snapshot already has Rust 1.97.0 (pinned by
-`rust-toolchain.toml`, with clippy + rustfmt). Cross targets are installed
-explicitly by the owning build or CI job so an ordinary host build does not
-download all six matrix standard libraries. The snapshot also has `cargo-xwin`,
-LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
-(`/usr/bin/clang-cl` -> `clang-18`), and Wine.
+The native Windows GUI/runtime (`windows-sys`, ConPTY, MSVC target) and its
+orchestration (`build.bat`, `check.cmd`, and `release.cmd`) require Windows for
+authoritative runtime qualification. Linux can build, lint, and unit-test the
+Windows targets with `cargo-xwin` and Wine. Use the toolchain pinned by
+`rust-toolchain.toml`; each owning build or CI job installs the cross target it
+needs rather than making ordinary host builds download the full matrix.
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
 build commands per cell. `src/bin/` currently holds **four** product binaries
@@ -575,7 +543,7 @@ Clippy: append `-- -D warnings` to the matching `cargo clippy` or
 `--all-targets` rather than repeating `--bin` filters, so every binary and
 test target is linted. On Linux, `cargo fmt --check` runs natively.
 
-**Windows x86_64 on Linux** (primary cloud loop):
+**Windows x86_64 on Linux**:
 
 - Lint: `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings`
 - Build: `cargo xwin build --target x86_64-pc-windows-msvc` →
@@ -583,13 +551,10 @@ test target is linted. On Linux, `cargo fmt --check` runs natively.
 - Unit tests: `cargo xwin test --target x86_64-pc-windows-msvc` compiles for
   Windows and runs the test exes under Wine. Do not treat any pass count as an
   expected value — the suite grows; read the command's own output.
-  Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
+  Set `WINEPREFIX=~/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
 - Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm-com.exe cli --help`.
-  Launching `agenterm.exe` on `DISPLAY=:1` starts a working IPC server:
-  `server-list`, `ui-snapshot`, `new-window`, `inspect`, `save-workspace`, etc.
-  all round-trip.
 
-**Linux clients on this VM**:
+**Linux clients**:
 
 - x86_64: `./scripts/build-linux-clients.sh` (or set `AGENTERM_BUILD_PROFILE=release`)
 - aarch64: install `gcc-aarch64-linux-gnu`, then
@@ -598,64 +563,19 @@ test target is linted. On Linux, `cargo fmt --check` runs natively.
 - Native GUI packages needed for `agenterm` / `agenterm-cc` on X11 (see README):
   `libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcb1 libxcb-xkb1`.
   Missing `libxkbcommon-x11-0` panics in `xkbcommon-dl` at window open.
-- Native desktop smoke on `DISPLAY=:1` (TigerVNC/XFCE) or CI Xvfb:
+- Native desktop smoke on a real X11 display or CI Xvfb:
   `AGENTERM_NO_ACTIVATE=1 AGENTERM_BOOTSTRAP_TASK=control-center-linux-smoke ./scripts/bootstrap.sh --backend x11`
   and `...=unix-frontend-linux-smoke ./scripts/bootstrap.sh <gui> <cli> --platform linux`.
-  If XFCE `Xft/DPI` is `-1` on a VNC screen that reports `0mm×0mm`, winit can
-  emit `scale_factor≈0.99` and fail `control_center_linux_renderer_evidence`
-  (`scale_factor >= 1.0`). Fix with `echo 'Xft.dpi: 96' | xrdb -merge` and
-  `xfconf-query -c xsettings -p /Xft/DPI -s 96` before the smoke.
 
 **Wine / ConPTY limits**: Wine cannot sustain an interactive ConPTY shell — a
 tab's `cmd.exe` starts and immediately exits `dead`, so live terminal I/O,
 `capture-pane` output, and the GUI smoke suites (`scripts/rh/*-smoke.rh`)
 cannot pass on Linux.
 Interactive-terminal and rendering work must be validated on a real Windows host
-(that is what CI on `windows-latest` covers). Treat Linux Wine here as a fast
+(that is what CI on `windows-latest` covers). Treat Linux Wine as a fast
 Windows-target lint/build/unit-test and control-plane sanity loop; native Linux
-GUI/PTY smokes use the real `DISPLAY=:1` desktop or CI Xvfb instead.
+GUI/PTY smokes use a real display or CI Xvfb instead.
 
 Rhai REPL and `agenterm cli script repl` were removed with Phase C Wave 4.5 —
 invoke `agenterm-rh` for `.rh` check, eval, task, and run. Instance discovery uses
 `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).
-
-## Reasonix dispatch and local skill index
-
-本机 Reasonix 可用于派单开工与经验检索(与 agenterm 自身 tooling 无关,供跨 agent 协作):
-
-- **CLI**: `E:\app\Reasonix-windows-amd64\reasonix-cli.exe`(v1.24.1;用户 PATH 已含该目录,`reasonix` 命令可用)。
-- **派单**: `reasonix run --permission-mode bypassPermissions --dir "<desktop 项目>" -p "<任务>" --output-format json`(headless 一次性会话;**必须带 `--dir` 指向 desktop 已打开的项目,否则会话不落盘、桌面看不到**)。
-  **`--auto` 不足以让它写文件**(2026-08-13 实测):`--auto` = `--permission-mode auto`,
-  配 `--preset delivery` 时会话会落到 `constraint=no-mutation`,`read_file` 可用但
-  `write_file`/`edit_file`/`bash` 全被拒,报
-  `blocked: the current task policy forbids workspace modifications (user constraint or plan mode)`。
-  症状是"洋洋洒洒写完补丁却零文件落盘",容易误判成执行方能力问题。
-  **根因是长 brief 被内联进 `-p`**(2026-08-13 用排除法定位):
-  同一份 brief 内联派单 4/4 全部锁死,而**同一份 brief 改成按文件引用派单立刻正常落盘**。
-  已排除的错误猜想:权限 flag(全程 `bypassPermissions`)、
-  `--preset delivery` 的 planner(`--ablate planner` 照样锁)、
-  "会话随机"(同一 brief 4/4 必现)、环境/时段(同期一条短 prompt 探针写入成功)、
-  某个具体措辞(改写后照样锁)。
-  **正确做法:brief 落到 `.reasonix-dispatch/*.brief.md`,`-p` 只传一句"读 <路径> 并按其执行"**,
-  让执行方自己去读。短任务直接内联无妨。
-  判断依据:轨迹里出现 `constraint=no-mutation` 即中招(它在第一个 reasoning token 就在了,
-  说明是建会话时按 prompt 定的,不是执行中变的)。
-  **派单后立刻数轨迹里 `blocked: ` 的条数并分辨类型**:
-  - `delivery-first mode requires acceptance criteria...` —— **良性**,执行方写完
-    `todo_write` 验收标准即自动放行。
-  - `the current task policy forbids workspace modifications` —— **致命**,该会话再也写不了,
-    还会连带 `skipped because an earlier modification in this tool batch failed`。
-    立刻 kill 重派(新会话通常正常),不要等它自愈——它只会反复试探 `use_capability` 烧完预算。
-  被 block 但已在回答里产出完整补丁的会话,可 `--resume "<session.jsonl>"` 复用,不必重跑。
-  另:PATH 里是 `reasonix.cmd` shim,**Git Bash 解析不了**(`command not found`),
-  请从 PowerShell 用全路径调用;`cmd > out; echo EXIT=$?` 会把失败掩盖成成功。快捷入口:`D:\skillseasonix-dispatch\dispatch.cmd "<任务>" [项目路径] [模型]`(自动落盘会话 + 写回执到 `D:\skillseasonix-dispatcheceipts\`)。
-- **常驻**: `reasonix serve --addr 127.0.0.1:8787`(默认 auth none,仅回环;`--auth token` 可收紧)。
-
-本地技能库 `D:\skills\`(reasonix 已注册为 skill 根,`[skills].paths = ["D:/skills"]`):
-
-| 技能 | 用途 |
-|---|---|
-| `reasonix-dispatch` | 调 reasonix 派单的接口/命令/注意事项(4 条本地接口可用性) |
-| `agenterm-cu` | 本仓 Rust computer-use(`cu.exe` + platform 的 window-enum/window-op/input-inject) |
-| `windows-control` | PowerShell 零依赖窗口/进程控制(无编译环境兜底) |
-| `deepseek-pro-flash-mix` | reasonix 模型分工(executor=flash / planner=pro / review·research=pro) |

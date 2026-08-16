@@ -1,16 +1,35 @@
 [package]
 name = "agenterm-chassis"
-version = "0.1.0"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.97"
 description = "Chassis-L1 loader + L2 host ABI + L3 app image: pack, do not recompile the workbench"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = []
+loader = ["dep:agenterm-platform"]
+
 [[bin]]
 name = "agenterm-chassis"
 path = "src/bin/agenterm-chassis.rs"
 
+[[bin]]
+name = "agenterm-chassis-loader"
+path = "src/bin/agenterm-chassis-loader.rs"
+required-features = ["loader"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+agenterm-platform = { path = "../agenterm-platform", optional = true, default-features = false, features = ["chassis-present"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+agenterm-platform = { path = "../agenterm-platform", optional = true, default-features = false, features = [
+    "ime",
+    "input",
+    "portable-pixel-window",
+] }

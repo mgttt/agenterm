@@ -1062,6 +1062,11 @@ layered deployment productization are **not** in v0.1.15 scope. Design SSOT:
     Current execution plan: [`plan/plan-v0.1.18.md`](../plan/plan-v0.1.18.md).
     Chassis-layer split (thin L1 / Host ABI L2 / app L3) so Base CI stays cold:
     [`plan/refactor-chassis-l1-l2-l3.md`](../plan/refactor-chassis-l1-l2-l3.md).
+    The Chassis substrate is partial: the bounded L2 VM, versioned Host ABI,
+    L2 catalog/`active-tab` artifact, workbench fail-closed image validation,
+    and standalone loader validation followed by native presentation are real.
+    The `agenterm` workbench PE is not replaced; PTY/IPC/L2 Host ABI dispatch
+    has not migrated. Portable QJS `.agp` adoption remains planned.
   - Control Center remains a separate PE and will obtain cacheable static App
     semantics from the server's single Engine over IPC; PTY/parser/render/Fleet
     authority remain native. Phase 0 does not yet migrate real CC behavior.

@@ -3028,11 +3028,15 @@ mod tests {
 
     fn audit_scratch(label: &str) -> PathBuf {
         let sequence = NEXT_AUDIT_SCRATCH.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir()
-            .join(format!(
-                "agenterm-cu-executor-audit-{label}-{}-{sequence}",
-                std::process::id()
-            ))
+        let scratch = std::env::temp_dir().join(format!(
+            "agenterm-cu-executor-audit-{label}-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&scratch).expect("create audit scratch root");
+        // Resolve the macOS `/var` temp-root symlink before exercising the
+        // production store's fail-closed ancestry check.
+        std::fs::canonicalize(scratch)
+            .expect("canonicalize audit scratch root")
             .join("audit.jsonl")
     }
 

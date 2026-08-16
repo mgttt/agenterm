@@ -11,6 +11,41 @@ pub mod adapters;
 pub mod byte_search;
 pub mod numeric;
 
+/// Selected-host inspection and installation mechanics for a Chassis-L1 loader.
+pub mod chassis_loader {
+    use std::path::Path;
+
+    pub use crate::contract::chassis_loader::NativeLoaderError;
+
+    #[must_use]
+    pub fn native_cell() -> Option<&'static str> {
+        crate::selected::chassis_loader::native_cell()
+    }
+
+    pub fn validate_executable(path: &Path, bytes: &[u8]) -> Result<(), NativeLoaderError> {
+        crate::selected::chassis_loader::validate_executable(path, bytes)
+    }
+
+    pub fn make_executable(path: &Path) -> Result<(), NativeLoaderError> {
+        crate::selected::chassis_loader::make_executable(path)
+    }
+
+    #[must_use]
+    pub const fn native_executable_header() -> &'static [u8] {
+        crate::selected::chassis_loader::native_executable_header()
+    }
+}
+
+/// Minimal native presentation used by the Chassis-L1 loader.
+#[cfg(feature = "chassis-present")]
+pub mod chassis_present {
+    pub use crate::contract::chassis_present::{ChassisPresentError, ChassisPresentOptions};
+
+    pub fn present(options: &ChassisPresentOptions) -> Result<(), ChassisPresentError> {
+        crate::selected::chassis_present::present(options)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum PlatformKind {
@@ -103,9 +138,10 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ConsoleInterrupt => (cfg!(feature = "console-interrupt"), true),
         Capability::ConsoleLineEditor => (cfg!(feature = "console-line-editor"), true),
-        Capability::CurrentTargetBinding => {
-            (cfg!(feature = "current-target-binding"), cfg!(windows))
-        }
+        Capability::CurrentTargetBinding => (
+            cfg!(feature = "current-target-binding"),
+            crate::selected::current_target_binding_supported(),
+        ),
         Capability::UserIdentity => (cfg!(feature = "user-identity"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),

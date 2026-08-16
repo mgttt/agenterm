@@ -5,8 +5,37 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use agenterm::script_backend::{RhInvocationOptions, try_execute_rh_invocation};
+use agenterm::script_protocol::ScriptOperation;
+use sha2::Digest as _;
+
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn rh_function_source<'a>(source: &'a str, name: &str) -> &'a str {
+    let marker = format!("fn {name}(");
+    let start = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing Rh function {name}"));
+    let open = source[start..]
+        .find('{')
+        .map(|offset| start + offset)
+        .unwrap_or_else(|| panic!("missing Rh function body {name}"));
+    let mut depth = 0usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[start..=open + offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated Rh function {name}");
 }
 
 // Unreferenced since the wave that trimmed this suite's transpile-shape
@@ -180,6 +209,26 @@ fn script_smoke_uses_bundled_pack() {
 #[test]
 fn remote_ui_smoke_uses_bundled_pack() {
     assert_bundled_pack_builds("scripts/rh/remote-ui-smoke.rh");
+}
+
+#[test]
+fn remote_ui_unattended_pastes_use_the_explicit_non_review_action() {
+    let source = std::fs::read_to_string(repo().join("scripts/rh/remote-ui-smoke.rh"))
+        .expect("read remote UI smoke");
+    assert_eq!(
+        source
+            .matches("json_cli(context, cli, [\"ui-action\", \"terminal-paste\"])")
+            .count(),
+        2,
+        "both unattended paste journeys must use the explicit non-review action"
+    );
+    assert!(
+        !source.contains("window_message(0x0112, 0x1F10, 0)"),
+        "an unattended smoke must not open the human terminal-paste review dialog"
+    );
+    assert!(source.contains("selection_completed.system_menu.paste.enabled"));
+    assert!(source.contains("remote_ui_async_terminal_paste_timeout"));
+    assert!(source.contains("remote_ui_bracketed_paste_framing_invalid"));
 }
 
 #[test]
@@ -1147,7 +1196,141 @@ fn theme_smoke_uses_native_bundled_pack() {
 
 #[test]
 fn native_ipc_compat_smoke_uses_bundled_pack() {
-    // Still host-eval (closure HE>1); pack build is the Phase B gate.
+    let source = std::fs::read_to_string(repo().join("scripts/rh/native-ipc-compat-smoke.rh"))
+        .expect("read native IPC compatibility smoke");
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(repo().join("scripts/native-ipc-compat-assets.json"))
+            .expect("read native IPC compatibility asset catalog"),
+    )
+    .expect("parse native IPC compatibility asset catalog");
+    let releases = catalog["releases"].as_array().expect("catalog releases");
+    let release_110 = releases
+        .iter()
+        .find(|release| release["version"] == "0.1.10")
+        .expect("v0.1.10 catalog entry");
+    let release_111 = releases
+        .iter()
+        .find(|release| release["version"] == "0.1.11")
+        .expect("v0.1.11 catalog entry");
+    assert_eq!(release_110["acquisition"], "public_url");
+    assert_eq!(release_111["acquisition"], "repository_fixture");
+    assert_eq!(
+        release_111["assets"][0]["path"],
+        "fixtures/native-ipc-compat/agenterm-0.1.11-windows-x86_64.zip"
+    );
+    assert_eq!(release_111["assets"][0]["size"], 4_005_143);
+    assert_eq!(
+        release_111["assets"][0]["sha256"],
+        "31b6eea1cd2d3173edaa4ce5394c835f93d3b988fadd474d8c949c4e875ce7cf"
+    );
+
+    let fixture_path = repo().join(
+        release_111["assets"][0]["path"]
+            .as_str()
+            .expect("v0.1.11 fixture path"),
+    );
+    let fixture = std::fs::read(&fixture_path).expect("read v0.1.11 fixture");
+    assert_eq!(fixture.len(), 4_005_143);
+    let fixture_digest = sha2::Sha256::digest(&fixture);
+    assert_eq!(
+        &fixture_digest[..],
+        &[
+            0x31, 0xb6, 0xee, 0xa1, 0xcd, 0x2d, 0x31, 0x73, 0xed, 0xaa, 0x4c, 0xe5, 0x39, 0x4c,
+            0x83, 0x5f, 0x93, 0xd3, 0xb9, 0x88, 0xfa, 0xdd, 0x47, 0x4d, 0x8c, 0x94, 0x9c, 0x4e,
+            0x87, 0x5c, 0xe7, 0xcf,
+        ]
+    );
+    assert!(source.contains("acquisition == \"repository_fixture\""));
+    assert!(source.contains("std::fs::copy(fixture, archive)"));
+    assert!(!source.contains("gh release"));
+    assert!(!source.contains("releases/assets/"));
+    assert!(!source.contains("GH_TOKEN"));
+    assert!(source.contains("acquisition == \"public_url\""));
+    assert!(source.contains("command_output(\n            context,\n            curl,"));
+    assert!(source.contains("native_ipc_compat_download_file_set:"));
+    assert!(source.contains("native_ipc_compat_archive_size:"));
+    assert!(source.contains("native_ipc_compat_archive_hash:"));
+
+    let isolation_root = tempfile::tempdir().expect("native IPC acquisition isolation root");
+    let selftest_source = format!(
+        "fn require(condition, message) {{ if condition == 0 {{ throw message; }} else {{ 0; }} }}\n{}\n{}\n{}\n{}\n{}\n{}\nfn entry() {{ acquisition_isolation_selftest(args[0], args[1]); }}",
+        rh_function_source(&source, "catch_text"),
+        rh_function_source(&source, "expected_asset_name"),
+        rh_function_source(&source, "acquisition_paths"),
+        rh_function_source(&source, "verify_download_file_set"),
+        rh_function_source(&source, "verify_archive"),
+        rh_function_source(&source, "acquisition_isolation_selftest"),
+    )
+    .replace("test_harness::require", "require");
+    let run_selftest = |root: &std::path::Path, mode: &str| {
+        try_execute_rh_invocation(
+            ScriptOperation::Run,
+            &selftest_source,
+            RhInvocationOptions {
+                project_root: Some(repo()),
+                arguments: Some(serde_json::json!([root.to_string_lossy(), mode])),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        )
+    };
+    let result = run_selftest(isolation_root.path(), "clean")
+        .expect("run clean native IPC acquisition isolation selftest")
+        .expect("Rh backend handles native IPC acquisition isolation selftest");
+    assert_eq!(result.value, Some(serde_json::json!(0)));
+    let polluted_root = tempfile::tempdir().expect("native IPC polluted acquisition root");
+    let polluted = match run_selftest(polluted_root.path(), "pollution") {
+        Err(error) => error,
+        Ok(_) => panic!("polluted acquisition directory must fail closed"),
+    };
+    assert!(
+        polluted
+            .to_string()
+            .contains("native_ipc_compat_download_file_set:0.1.10"),
+        "{polluted}"
+    );
+    let tampered_root = tempfile::tempdir().expect("native IPC tampered acquisition root");
+    let tampered = match run_selftest(tampered_root.path(), "tamper") {
+        Err(error) => error,
+        Ok(_) => panic!("tampered acquisition archive must fail closed"),
+    };
+    assert!(
+        tampered
+            .to_string()
+            .contains("native_ipc_compat_archive_hash:0.1.11"),
+        "{tampered}"
+    );
+    let traversal_root = tempfile::tempdir().expect("native IPC traversal acquisition root");
+    let traversal = match run_selftest(traversal_root.path(), "traversal") {
+        Err(error) => error,
+        Ok(_) => panic!("traversing acquisition asset must fail closed"),
+    };
+    assert!(
+        traversal
+            .to_string()
+            .contains("native_ipc_compat_release_path_asset:0.1.10"),
+        "{traversal}"
+    );
+
+    let candidate = std::fs::read_to_string(repo().join(".github/workflows/candidate.yml"))
+        .expect("read Candidate workflow");
+    assert!(!candidate.contains("contents: write"));
+    let quality_step = candidate
+        .split("- name: Run release quality gate")
+        .nth(1)
+        .and_then(|tail| {
+            tail.split("- name: Upload failed quality-gate diagnostics")
+                .next()
+        })
+        .expect("Candidate quality step");
+    assert!(!quality_step.contains("GH_TOKEN"));
+    let build_job = candidate
+        .split("  build:\n")
+        .nth(1)
+        .and_then(|tail| tail.split("  aggregate:\n").next())
+        .expect("Candidate build job");
+    assert!(!build_job.contains("GH_TOKEN"));
+
     assert_bundled_pack_builds("scripts/rh/native-ipc-compat-smoke.rh");
 }
 #[test]

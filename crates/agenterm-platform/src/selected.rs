@@ -1,5 +1,13 @@
 //! The only compile-time native adapter selection for enabled capabilities.
 
+#[cfg(windows)]
+#[path = "adapters/windows/chassis_loader.rs"]
+pub(crate) mod chassis_loader;
+
+#[cfg(not(windows))]
+#[path = "adapters/unix/chassis_loader.rs"]
+pub(crate) mod chassis_loader;
+
 pub(crate) const fn platform_kind() -> crate::PlatformKind {
     #[cfg(windows)]
     {
@@ -24,6 +32,59 @@ pub(crate) const fn app_container_process_supported() -> bool {
     {
         false
     }
+}
+
+pub(crate) const fn current_target_binding_supported() -> bool {
+    #[cfg(windows)]
+    {
+        true
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(feature = "current-target-binding")]
+pub(crate) fn validate_private_key_metadata(
+    metadata: &std::fs::Metadata,
+) -> Result<(), crate::contract::current_target_binding::CurrentTargetBindingError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+
+        use crate::contract::current_target_binding::{
+            CurrentTargetBindingError, CurrentTargetBindingErrorKind,
+        };
+
+        let current = crate::user_identity::current_user_identity().map_err(|_| {
+            CurrentTargetBindingError::new(
+                CurrentTargetBindingErrorKind::Native,
+                "install-key-owner-unavailable",
+                "current key owner could not be determined",
+            )
+        })?;
+        let credentials = current.posix_credentials().ok_or_else(|| {
+            CurrentTargetBindingError::new(
+                CurrentTargetBindingErrorKind::Native,
+                "install-key-owner-unavailable",
+                "current key owner could not be determined",
+            )
+        })?;
+        if metadata.uid() != credentials.effective_user_id
+            || metadata.mode() & 0o777 != 0o600
+            || metadata.nlink() != 1
+        {
+            return Err(CurrentTargetBindingError::new(
+                CurrentTargetBindingErrorKind::Permission,
+                "install-key-permissions",
+                "installation key ownership, permissions, or link count are unsafe",
+            ));
+        }
+    }
+    #[cfg(windows)]
+    let _ = metadata;
+    Ok(())
 }
 
 pub(crate) const fn app_container_profile_supported() -> bool {
@@ -568,6 +629,22 @@ pub(crate) mod desktop_host;
 
 pub(crate) const fn desktop_host_supported() -> bool {
     cfg!(all(feature = "desktop-host", windows))
+}
+
+#[cfg(all(feature = "chassis-present", target_os = "linux"))]
+#[path = "adapters/linux/chassis_present.rs"]
+pub(crate) mod chassis_present;
+
+#[cfg(all(feature = "chassis-present", not(target_os = "linux")))]
+pub(crate) mod chassis_present {
+    use crate::contract::chassis_present::{ChassisPresentError, ChassisPresentOptions};
+
+    pub(crate) fn present(_options: &ChassisPresentOptions) -> Result<(), ChassisPresentError> {
+        Err(ChassisPresentError::failed(
+            "chassis_present_unsupported",
+            "native chassis presentation is only available on Linux",
+        ))
+    }
 }
 
 #[cfg(all(feature = "activation", windows))]

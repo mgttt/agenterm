@@ -5,6 +5,7 @@
 //! capabilities. L2 programs AOT to a tiny bytecode ISA (`bytecode`, `vm`).
 
 pub mod bytecode;
+pub mod l2_dispatch;
 pub mod vm;
 
 use std::fs;
@@ -90,7 +91,8 @@ pub struct ProductManifest {
     pub compile: bool,
     pub invokes_cargo: bool,
     pub cells: Vec<String>,
-    pub native_cell: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_cell: Option<String>,
 }
 
 pub fn native_cell() -> &'static str {
@@ -123,6 +125,29 @@ pub fn load_app(path: &Path) -> Result<AppManifest, ChassisError> {
     Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
 }
 
+pub fn check_product_image(root: &Path) -> Result<ProductManifest, ChassisError> {
+    let manifest: ProductManifest =
+        serde_json::from_str(&fs::read_to_string(root.join("manifest.json"))?)?;
+    if manifest.schema != 1 {
+        return Err(ChassisError::Check(format!(
+            "unsupported product manifest schema {}",
+            manifest.schema
+        )));
+    }
+    if manifest.compile || manifest.invokes_cargo {
+        return Err(ChassisError::Check(
+            "product image must be composed without compile or cargo".into(),
+        ));
+    }
+    if manifest.cells != CELLS {
+        return Err(ChassisError::Check(
+            "product image must name the canonical six L1 cells".into(),
+        ));
+    }
+    check_layout(root)?;
+    Ok(manifest)
+}
+
 pub fn compose(from: &Path, out: &Path) -> Result<ProductManifest, ChassisError> {
     let l1 = from.join("l1");
     for cell in CELLS {
@@ -153,7 +178,7 @@ pub fn compose(from: &Path, out: &Path) -> Result<ProductManifest, ChassisError>
         compile: false,
         invokes_cargo: false,
         cells: CELLS.iter().map(|cell| (*cell).to_string()).collect(),
-        native_cell: native_cell().to_string(),
+        native_cell: Some(native_cell().to_string()),
     };
     fs::create_dir_all(out)?;
     fs::write(
@@ -317,6 +342,28 @@ mod tests {
         .expect("write");
         let err = check_layout(&tmp).expect_err("unknown");
         assert!(format!("{err}").contains("not.a.capability"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn product_image_requires_compose_manifest() {
+        let tmp = std::env::temp_dir().join(format!("chassis-product-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        write_ok_layout(&tmp);
+        let error = check_product_image(&tmp).expect_err("missing manifest");
+        assert!(matches!(error, ChassisError::Io(_)));
+        fs::write(
+            tmp.join("manifest.json"),
+            serde_json::json!({
+                "schema": 1,
+                "compile": false,
+                "invokes_cargo": false,
+                "cells": CELLS,
+            })
+            .to_string(),
+        )
+        .expect("manifest");
+        check_product_image(&tmp).expect("product image");
         let _ = fs::remove_dir_all(&tmp);
     }
 

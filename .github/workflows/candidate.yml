@@ -38,7 +38,7 @@ jobs:
           [[ "$GITHUB_SHA" == "$SOURCE_SHA" ]]
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$SOURCE_SHA" origin/main
-          for workflow in ci-agenterm.yml ci-agenterm-con.yml ci-libagenterm.yml; do
+          for workflow in ci-agenterm.yml ci-agenterm-con.yml ci-libagenterm.yml ci-chassis.yml; do
             success_count="$(
               gh api \
                 "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?head_sha=$SOURCE_SHA&status=success&per_page=20" \
@@ -589,11 +589,57 @@ jobs:
           ./scripts/bootstrap.sh "$VERSION" macos x86_64 \
             target/x86_64-apple-darwin/release --unsigned-preview
 
+      - name: Build thin Chassis-L1 loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform_id }}" in
+            windows-x86_64)
+              cargo build --locked -p agenterm-chassis --features loader \
+                --bin agenterm-chassis-loader --release
+              loader="target/release/agenterm-chassis-loader.exe"
+              ;;
+            windows-aarch64)
+              cargo xwin build --locked -p agenterm-chassis --features loader \
+                --bin agenterm-chassis-loader --release \
+                --target aarch64-pc-windows-msvc
+              loader="target/aarch64-pc-windows-msvc/release/agenterm-chassis-loader.exe"
+              ;;
+            linux-x86_64)
+              cargo build --locked -p agenterm-chassis --features loader \
+                --bin agenterm-chassis-loader --release \
+                --target x86_64-unknown-linux-gnu
+              loader="target/x86_64-unknown-linux-gnu/release/agenterm-chassis-loader"
+              ;;
+            linux-aarch64)
+              CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+                cargo build --locked -p agenterm-chassis --features loader \
+                  --bin agenterm-chassis-loader --release \
+                  --target aarch64-unknown-linux-gnu
+              loader="target/aarch64-unknown-linux-gnu/release/agenterm-chassis-loader"
+              ;;
+            macos-aarch64)
+              cargo build --locked -p agenterm-chassis --features loader \
+                --bin agenterm-chassis-loader --release \
+                --target aarch64-apple-darwin
+              loader="target/aarch64-apple-darwin/release/agenterm-chassis-loader"
+              ;;
+            macos-x86_64)
+              cargo build --locked -p agenterm-chassis --features loader \
+                --bin agenterm-chassis-loader --release \
+                --target x86_64-apple-darwin
+              loader="target/x86_64-apple-darwin/release/agenterm-chassis-loader"
+              ;;
+          esac
+          test -f "$loader"
+          cp "$loader" target/chassis-l1-loader
+
       - name: Stage flat candidate part
         shell: bash
         env:
           PLATFORM_ID: ${{ matrix.platform_id }}
           SIGNED_MACOS: ${{ vars.ENABLE_SIGNED_MACOS_RELEASE }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
           version="$(
@@ -603,22 +649,27 @@ jobs:
           mkdir -p "$stage"
           case "$PLATFORM_ID" in
             windows-x86_64)
+              cell="win-x86_64"
               archive="dist/agenterm-$version-windows-x86_64.zip"
               cp target/qualification/receipt.json \
                 "$stage/qualification-receipt.json"
               cp "dist/agenterm-$version-sbom.spdx.json" "$stage/"
               ;;
             windows-aarch64)
+              cell="win-aarch64"
               archive="dist/agenterm-$version-windows-aarch64.zip"
               ;;
             linux-x86_64)
+              cell="lnx-x86_64"
               archive="dist/agenterm-$version-linux-x86_64.tar.gz"
               ;;
             linux-aarch64)
+              cell="lnx-aarch64"
               archive="dist/agenterm-$version-linux-aarch64.tar.gz"
               ;;
             macos-aarch64|macos-x86_64)
               arch="${PLATFORM_ID#macos-}"
+              cell="osx-$arch"
               if [[ "$SIGNED_MACOS" == "true" ]]; then
                 archive="dist/agenterm-$version-macos-$arch.zip"
               else
@@ -638,6 +689,12 @@ jobs:
           test -f "$archive.sha256"
           test -f "$archive.provenance.json"
           cp "$archive" "$archive.sha256" "$archive.provenance.json" "$stage/"
+          python3 scripts/chassis-stage-l1-loader.py \
+            --loader target/chassis-l1-loader \
+            --cell "$cell" \
+            --version "$version" \
+            --source-sha "$SOURCE_SHA" \
+            --out "$stage"
 
       - name: Upload flat candidate part
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -704,6 +761,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/agenterm-candidate-tool"
           tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-candidate-tool"
           chmod +x "$RUNNER_TEMP/agenterm-candidate-tool/agenterm"
+
+      - name: Compose Candidate chassis product without Cargo
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version candidate-metadata.json)"
+          python3 scripts/chassis-candidate-pack.py \
+            --candidate-input candidate-input \
+            --version "$version" \
+            --source-sha "$SOURCE_SHA" \
+            --out "candidate-input/agenterm-$version-chassis-product.tgz"
 
       - name: Seal exact candidate bundle
         run: |

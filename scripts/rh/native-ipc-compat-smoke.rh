@@ -1,7 +1,8 @@
-// Prove published v0.1.10/v0.1.11 control clients and servers remain
+// Prove v0.1.10/v0.1.11 control clients and servers remain
 // compatible with the exact staged HEAD bytes across the TCP-to-native IPC
-// migration. Published archives are acquired by exact hash at invocation time;
-// no historical executable is stored in the repository.
+// migration. The unpublished Windows x86_64 baseline is an exact repository
+// fixture; published assets retain their public URL path. Every selected
+// archive is still constrained by its catalog size and SHA-256.
 //
 // Args:
 //   --list-evidence
@@ -126,39 +127,72 @@ fn platform_asset(release, facts) {
     matches[0]
 }
 
-fn acquire_release(context, catalog, release, asset, facts) {
-    let downloads = std::path::join(
-        context.run_directory,
-        "published-downloads"
-    ).display;
-    let extracted = std::path::join(
-        context.run_directory,
-        "published-" + release.version
-    ).display;
-    std::fs::create_dir_all(downloads);
-    std::fs::create_dir_all(extracted);
-    let archive = std::path::join(downloads, asset.name).display;
-    let url = "https://github.com/" + catalog.repository +
-        "/releases/download/" + release.tag + "/" + asset.name;
-    let curl = "curl";
-    if facts.os == "windows" {
-        curl = "curl.exe";
-    }
-    let max_filesize = "" + asset.size;
-    let archive_output = "" + archive;
-    command_output(
-        context,
-        curl,
-        [
-            "--fail", "--location", "--silent", "--show-error",
-            "--max-time", "120",
-            "--max-filesize", max_filesize,
-            "--output", archive_output,
-            url
-        ],
-        false,
-        130
+fn expected_asset_name(version, os_name, arch) {
+    test_harness::require(
+        version == "0.1.10" || version == "0.1.11",
+        "native_ipc_compat_release_path_version:" + version
     );
+    test_harness::require(
+        os_name == "windows" || os_name == "linux" || os_name == "macos",
+        "native_ipc_compat_release_path_os:" + os_name
+    );
+    test_harness::require(
+        arch == "x86_64" || arch == "aarch64",
+        "native_ipc_compat_release_path_arch:" + arch
+    );
+    let suffix = ".tar.gz";
+    if os_name == "windows" {
+        suffix = ".zip";
+    } else if os_name == "macos" {
+        suffix = "-unsigned-preview.zip";
+    }
+    "agenterm-" + version + "-" + os_name + "-" + arch + suffix
+}
+
+fn acquisition_paths(context, release, asset) {
+    let version = "" + release.version;
+    let tag = "" + release.tag;
+    let os_name = "" + asset.os;
+    let arch = "" + asset.arch;
+    let asset_name = "" + asset.name;
+    let expected_name = expected_asset_name(version, os_name, arch);
+    test_harness::require(
+        tag == "v" + version,
+        "native_ipc_compat_release_path_tag:" + version
+    );
+    test_harness::require(
+        asset_name == expected_name
+            && std::path::PathBuf::from(asset_name).file_name == asset_name
+            && !asset_name.contains("/")
+            && !asset_name.contains("\\"),
+        "native_ipc_compat_release_path_asset:" + version
+    );
+    let owner = std::path::join(
+        context.run_directory,
+        "published-" + version + "-" + asset_name
+    ).display;
+    #{
+        downloads: std::path::join(owner, "downloads").display,
+        extracted: std::path::join(owner, "extracted").display
+    }
+}
+
+fn verify_download_file_set(downloads, release, asset) {
+    let downloaded_names = [];
+    for entry in std::fs::read_dir(downloads) {
+        test_harness::require(
+            entry.is_file,
+            "native_ipc_compat_download_not_file:" + release.version
+        );
+        downloaded_names.push("" + entry.file_name);
+    }
+    test_harness::require(
+        downloaded_names.len == 1 && downloaded_names[0] == asset.name,
+        "native_ipc_compat_download_file_set:" + release.version
+    );
+}
+
+fn verify_archive(archive, release, asset) {
     // Hoist INT locals: comparing metadata.len to a JSON field otherwise
     // selects the string-ops lane via prefers_string_ops and breaks emit.
     let archive_len = std::fs::metadata(archive).len;
@@ -171,6 +205,55 @@ fn acquire_release(context, catalog, release, asset, facts) {
         rh::crypto::sha256_file(archive) == asset.sha256,
         "native_ipc_compat_archive_hash:" + release.version
     );
+}
+
+fn acquire_release(context, repo, catalog, release, asset, facts) {
+    let paths = acquisition_paths(context, release, asset);
+    let downloads = "" + paths.downloads;
+    let extracted = "" + paths.extracted;
+    std::fs::create_dir_all(downloads);
+    std::fs::create_dir_all(extracted);
+    let archive = std::path::join(downloads, asset.name).display;
+    let acquisition = "" + release.acquisition;
+    if acquisition == "repository_fixture" {
+        let fixture_path = "" + asset.path;
+        test_harness::require(
+            fixture_path == "fixtures/native-ipc-compat/" + asset.name,
+            "native_ipc_compat_fixture_path:" + release.version
+        );
+        let fixture = std::path::join(repo, fixture_path).display;
+        test_harness::require(
+            std::fs::exists(fixture) && std::fs::metadata(fixture).is_file,
+            "native_ipc_compat_fixture_missing:" + release.version
+        );
+        std::fs::copy(fixture, archive);
+    } else if acquisition == "public_url" {
+        let url = "https://github.com/" + catalog.repository +
+            "/releases/download/" + release.tag + "/" + asset.name;
+        let curl = "curl";
+        if facts.os == "windows" {
+            curl = "curl.exe";
+        }
+        let max_filesize = "" + asset.size;
+        let archive_output = "" + archive;
+        command_output(
+            context,
+            curl,
+            [
+                "--fail", "--location", "--silent", "--show-error",
+                "--max-time", "120",
+                "--max-filesize", max_filesize,
+                "--output", archive_output,
+                url
+            ],
+            false,
+            130
+        );
+    } else {
+        throw "native_ipc_compat_acquisition:" + acquisition;
+    }
+    verify_download_file_set(downloads, release, asset);
+    verify_archive(archive, release, asset);
     let tar = "tar";
     if facts.os == "windows" {
         tar = "tar.exe";
@@ -227,6 +310,69 @@ fn acquire_release(context, catalog, release, asset, facts) {
         "native_ipc_compat_published_version:" + release_version
     );
     #{ server: server, cli: cli }
+}
+
+fn acquisition_isolation_selftest(root, mode) {
+    let context = #{ run_directory: std::path::absolute(root).display };
+    let release_110 = #{ version: "0.1.10", tag: "v0.1.10" };
+    let release_111 = #{ version: "0.1.11", tag: "v0.1.11" };
+    let asset_110 = #{
+        os: "windows",
+        arch: "x86_64",
+        name: "agenterm-0.1.10-windows-x86_64.zip",
+        size: 4,
+        sha256: "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c"
+    };
+    let asset_111 = #{
+        os: "windows",
+        arch: "x86_64",
+        name: "agenterm-0.1.11-windows-x86_64.zip",
+        size: 4,
+        sha256: "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c"
+    };
+    if mode == "traversal" {
+        asset_110.name = "../agenterm-0.1.10-windows-x86_64.zip";
+    }
+    let paths_110 = acquisition_paths(context, release_110, asset_110);
+    let paths_111 = acquisition_paths(context, release_111, asset_111);
+    test_harness::require(
+        paths_110.downloads != paths_111.downloads
+            && paths_110.extracted != paths_111.extracted,
+        "native_ipc_compat_acquisition_directory_isolation"
+    );
+    std::fs::create_dir_all(paths_110.downloads);
+    std::fs::create_dir_all(paths_111.downloads);
+    let archive_110 = std::path::join(
+        paths_110.downloads,
+        asset_110.name
+    ).display;
+    let archive_111 = std::path::join(
+        paths_111.downloads,
+        asset_111.name
+    ).display;
+    std::fs::write(archive_110, "good");
+    std::fs::write(archive_111, "good");
+    verify_download_file_set(paths_110.downloads, release_110, asset_110);
+    verify_download_file_set(paths_111.downloads, release_111, asset_111);
+    verify_archive(archive_110, release_110, asset_110);
+    verify_archive(archive_111, release_111, asset_111);
+
+    if mode == "pollution" {
+        let pollution_path = std::path::join(
+            paths_110.downloads,
+            "pollution.zip"
+        ).display;
+        std::fs::write(pollution_path, "bad");
+        verify_download_file_set(paths_110.downloads, release_110, asset_110);
+    } else if mode == "tamper" {
+        std::fs::write(archive_111, "evil");
+        verify_archive(archive_111, release_111, asset_111);
+    } else {
+        test_harness::require(
+            mode == "clean",
+            "native_ipc_compat_selftest_mode:" + mode
+        );
+    }
 }
 
 fn git_head(context, repo) {
@@ -544,7 +690,6 @@ fn entry() {
         print("control.native-ipc-published-compatibility");
         return;
     }
-
     test_harness::require(args.len >= 1, "expected: REPO [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
 let catalog_path = std::path::join(
@@ -656,6 +801,7 @@ try {
 
     let published_111 = acquire_release(
         context,
+        repo,
         catalog,
         release_111,
         asset_111,
@@ -667,6 +813,7 @@ try {
         let asset_110 = platform_asset(release_110, facts);
         let published_110 = acquire_release(
             context,
+            repo,
             catalog,
             release_110,
             asset_110,

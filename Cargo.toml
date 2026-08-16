@@ -34,6 +34,7 @@ script-wasmcore = ["agenterm-wasmcore"]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("agenterm-lua", "agenterm-qjs", "agenterm-sql", "agenterm-wasmcore", "default", "script-lua", "script-qjs", "script-sql", "script-wasmcore"))'] }
 
 [dependencies]
+agenterm-chassis = { path = "crates/agenterm-chassis" }
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "portable-pixel-window", "process", "pty", "screenshot", "serde", "webview", "window"] }
 agenterm-ui-core = { path = "crates/agenterm-ui-core", features = ["terminal-selection"] }
 agenterm-rh = { path = "crates/agenterm-rh" }

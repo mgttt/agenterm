@@ -3077,6 +3077,10 @@ try {
         selection_completed.system_menu.copy.enabled,
         "remote_ui_terminal_selection_copy_not_enabled"
     );
+    test_harness::require(
+        selection_completed.system_menu.paste.enabled,
+        "remote_ui_terminal_system_menu_paste_not_enabled"
+    );
     let copy_input_before_text = text_cli(
         context,
         cli,
@@ -3127,7 +3131,11 @@ try {
     );
     paste_input_before_text = trimmed(paste_input_before_text);
     let paste_input_before = parse_int_text(paste_input_before_text);
-    replacement_gui.window_message(0x0112, 0x1F10, 0);
+    // Menu/Ctrl+V paste intentionally opens a human review dialog. The
+    // explicit UI action is the unattended contract: it still reads the real
+    // clipboard on the worker and sends through the same terminal path, but
+    // does not deadlock the release smoke waiting for a human confirmation.
+    json_cli(context, cli, ["ui-action", "terminal-paste"]);
     wait_pane_input_bytes(
         context,
         cli,
@@ -3271,43 +3279,7 @@ try {
         ]
     );
     rh::clipboard::set_text(bracketed_payload);
-    let bracketed_input_before_text = text_cli(
-        context,
-        cli,
-        ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
-    );
-    bracketed_input_before_text = trimmed(bracketed_input_before_text);
-    let bracketed_input_before = parse_int_text(bracketed_input_before_text);
-    // Paste delivery has been observed to be lost outright on loaded CI
-    // runners: the result file never appears and the pane input counter
-    // never moves. Re-issue the paste only while nothing at all has been
-    // delivered; once any byte reaches the pane a duplicate paste would
-    // corrupt the framing comparison, so from then on just wait.
-    let bracketed_delivered = 0;
-    for paste_attempt in 0..6 {
-        replacement_gui.window_message(0x0112, 0x1F10, 0);
-        for poll in 0..40 {
-            if std::fs::exists(bracketed_result) {
-                bracketed_delivered = 1;
-                break;
-            }
-            let bracketed_input_now = text_cli(
-                context,
-                cli,
-                ["list-panes", "-t", bracketed_id, "-F", "#{pane_input_bytes}"]
-            );
-            bracketed_input_now = trimmed(bracketed_input_now);
-            let bracketed_input_now_bytes = parse_int_text(bracketed_input_now);
-            if bracketed_input_now_bytes > bracketed_input_before {
-                bracketed_delivered = 1;
-                break;
-            }
-            rh::task::sleep(std::time::Duration::from_millis(25));
-        }
-        if bracketed_delivered {
-            break;
-        }
-    }
+    json_cli(context, cli, ["ui-action", "terminal-paste"]);
     wait_file_text(
         bracketed_result,
         "ok",

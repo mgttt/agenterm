@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **状态** | active — 执行投影 |
+| **状态** | active — partial 执行投影 |
 | **结构 SSOT** | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | **产品归属** | [`prd/PRD_02_10_rhai_scripting.md`](../prd/PRD_02_10_rhai_scripting.md) Layered deployment；[`prd/PRD_02_18_roadmap.md`](../prd/PRD_02_18_roadmap.md) M15 |
 | **L1 面** | [`chassis-l1-surface.json`](chassis-l1-surface.json) |
@@ -65,9 +65,10 @@ L2 若还是半个 `agenterm.exe`，打包循环是假的。
 
 ```text
 W0  点名 L1 路径面（已做）
-W1  打包循环证明：合成器 + 黑盒测试，过程中不得调用 cargo（本增量）
+W1  打包循环证明：合成器 + 黑盒测试，过程中不得调用 cargo（已做）
 W2  独立 crate `agenterm-chassis`：compose/check/inspect + 冻结 Host ABI + 示例 L3（已做）
-W2b L2 bytecode VM（sibling agents 落实各模块）
+W2b L2 bytecode VM：有界执行、校验与失败关闭（已做）
+W2c 独立薄 loader：校验 composed image 后交给 native host 呈窗（partial）
 W3  CI：`CI / chassis` 六格只编 L1 crate；`chassis-ci-pack.py` 跨架构打包 L2/L3（已做）
 W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 ```
@@ -80,6 +81,15 @@ W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
   - 六个 cell 的 `l1/<cell>/loader` SHA 与输入相同；
   - 两遍成品 SHA 相同。
 - 本波 **不** 把现行 `agenterm` PE 拆成真 loader。证明的是循环，不是已经瘦身。
+
+## 3.1 已交付的 partial 底座
+
+- W2b bounded VM 已落地；版本化 Host ABI、L2 catalog 与首个 `active-tab`
+  artifact 可随镜像替换。
+- 两端 workbench adapter 在呈窗前执行共享 image 校验并 fail closed；独立
+  `agenterm-chassis-loader` 同样先校验 composed image，再交给 native host 呈窗。
+- 这些证据不等于产品替换完成：现行 `agenterm` workbench PE 尚未被 loader
+  替换，PTY/IPC 与 L2 Host ABI dispatch 尚未迁移。
 
 ## 4. 非目标
 
@@ -94,5 +104,6 @@ W4  接 v0.1.18 `.agp` 当 L3，不重开轨 A
 ## 5. 现行对照
 
 今天改 frontend 仍可能拖进同一份 PE 的编译。`crates/agenterm-chassis` 是拆出来的
-底盘：不链工作台，能 compose/check 一份 L1+L2+L3 镜像。工作台 PE 尚未被这些
-loader 替换。
+底盘：默认不链工作台，能 compose/check 一份 L1+L2+L3 镜像；可选薄 loader
+校验镜像后使用 native host 呈窗。工作台 PE 尚未被这些 loader 替换，PTY/IPC
+与 L2 Host ABI dispatch 仍在现行产品路径。
