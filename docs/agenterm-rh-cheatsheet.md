@@ -76,6 +76,11 @@ task at 620s (`tail=<no output>`). The named-task budget and `check.rh`
 smoke timeout must both exceed those fixture compiles; inherit worker
 stderr or a timeout has no STEP trail.
 
+A pointer-down selection smoke must wait for `phase=prepared` *before*
+`send-keys`. Candidate `31958506441` posted down then immediately typed
+`SEL_DELTA`; the snapshot stayed `selection:null` for 20s. The reconcile
+survival check still runs, but only after Prepared is observed.
+
 ---
 
 ## 1. Skeleton

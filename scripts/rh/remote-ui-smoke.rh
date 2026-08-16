@@ -2999,6 +2999,17 @@ try {
             + ((0 + marker_column) + (0 + copy_marker.len) - 1) * cell_width
             + (cell_width / 2);
     replacement_gui.window_pointer("down", selection_start_x, selection_y);
+    // Wait for Prepared *before* the screen-generation probe. Candidate
+    // 31958506441 saw `selection:null` after send-keys raced ahead of the
+    // pointer-down message, so the 20s wait never observed a gesture.
+    let selection_armed = wait_terminal_selection(
+        context,
+        cli,
+        "prepared",
+        1,
+        0,
+        "remote_ui_terminal_selection_prepared_timeout"
+    );
     // Selection ownership must survive a real screen-generation advance while
     // the mouse gesture is active.  Typing at the prompt changes another row
     // without moving the marker row, and reproduces the live dogfood failure
@@ -3025,6 +3036,10 @@ try {
         1,
         0,
         "remote_ui_terminal_selection_prepared_timeout"
+    );
+    test_harness::require(
+        selection_armed.event_position == selection_prepared.event_position,
+        "remote_ui_terminal_selection_prepared_moved_after_delta"
     );
     let selection_prepared_png = std::path::join(
         context.run_directory,
