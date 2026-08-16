@@ -207,6 +207,32 @@ enum Op {
     F32Copysign,
     F32Load { offset: u32 },
     F32Store { offset: u32 },
+    // --- numeric conversion family (0xA7..=0xBF) ---
+    I32WrapI64,
+    I64ExtendI32S,
+    I64ExtendI32U,
+    I32TruncF32S,
+    I32TruncF32U,
+    I32TruncF64S,
+    I32TruncF64U,
+    I64TruncF32S,
+    I64TruncF32U,
+    I64TruncF64S,
+    I64TruncF64U,
+    F32ConvertI32S,
+    F32ConvertI32U,
+    F32ConvertI64S,
+    F32ConvertI64U,
+    F32DemoteF64,
+    F64ConvertI32S,
+    F64ConvertI32U,
+    F64ConvertI64S,
+    F64ConvertI64U,
+    F64PromoteF32,
+    I32ReinterpretF32,
+    I64ReinterpretF64,
+    F32ReinterpretI32,
+    F64ReinterpretI64,
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -687,6 +713,31 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 i = ni;
                 ops.push(Op::F32Store { offset });
             }
+            0xA7 => ops.push(Op::I32WrapI64),
+            0xA8 => ops.push(Op::I32TruncF32S),
+            0xA9 => ops.push(Op::I32TruncF32U),
+            0xAA => ops.push(Op::I32TruncF64S),
+            0xAB => ops.push(Op::I32TruncF64U),
+            0xAC => ops.push(Op::I64ExtendI32S),
+            0xAD => ops.push(Op::I64ExtendI32U),
+            0xAE => ops.push(Op::I64TruncF32S),
+            0xAF => ops.push(Op::I64TruncF32U),
+            0xB0 => ops.push(Op::I64TruncF64S),
+            0xB1 => ops.push(Op::I64TruncF64U),
+            0xB2 => ops.push(Op::F32ConvertI32S),
+            0xB3 => ops.push(Op::F32ConvertI32U),
+            0xB4 => ops.push(Op::F32ConvertI64S),
+            0xB5 => ops.push(Op::F32ConvertI64U),
+            0xB6 => ops.push(Op::F32DemoteF64),
+            0xB7 => ops.push(Op::F64ConvertI32S),
+            0xB8 => ops.push(Op::F64ConvertI32U),
+            0xB9 => ops.push(Op::F64ConvertI64S),
+            0xBA => ops.push(Op::F64ConvertI64U),
+            0xBB => ops.push(Op::F64PromoteF32),
+            0xBC => ops.push(Op::I32ReinterpretF32),
+            0xBD => ops.push(Op::I64ReinterpretF64),
+            0xBE => ops.push(Op::F32ReinterpretI32),
+            0xBF => ops.push(Op::F64ReinterpretI64),
             other => {
                 return Err(WasmError::Decode(format!(
                     "unsupported opcode 0x{other:02x} in this subset"
@@ -1225,6 +1276,106 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
                     mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
+                Op::I32WrapI64 => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::I32(a as i32));
+                }
+                Op::I64ExtendI32S => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::I64(a as i64));
+                }
+                Op::I64ExtendI32U => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::I64((a as u32) as i64));
+                }
+                Op::I32TruncF32S => {
+                    let x = pop_f32(&mut stack)?;
+                    stack.push(Val::I32(trunc_f32_to_i32_s(x)?));
+                }
+                Op::I32TruncF32U => {
+                    let x = pop_f32(&mut stack)?;
+                    stack.push(Val::I32(trunc_f32_to_i32_u(x)?));
+                }
+                Op::I32TruncF64S => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I32(trunc_f64_to_i32_s(x)?));
+                }
+                Op::I32TruncF64U => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I32(trunc_f64_to_i32_u(x)?));
+                }
+                Op::I64TruncF32S => {
+                    let x = pop_f32(&mut stack)?;
+                    stack.push(Val::I64(trunc_f32_to_i64_s(x)?));
+                }
+                Op::I64TruncF32U => {
+                    let x = pop_f32(&mut stack)?;
+                    stack.push(Val::I64(trunc_f32_to_i64_u(x)?));
+                }
+                Op::I64TruncF64S => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I64(trunc_f64_to_i64_s(x)?));
+                }
+                Op::I64TruncF64U => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I64(trunc_f64_to_i64_u(x)?));
+                }
+                Op::F32ConvertI32S => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::F32(a as f32));
+                }
+                Op::F32ConvertI32U => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::F32((a as u32) as f32));
+                }
+                Op::F32ConvertI64S => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::F32(a as f32));
+                }
+                Op::F32ConvertI64U => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::F32((a as u64) as f32));
+                }
+                Op::F32DemoteF64 => {
+                    let a = pop_f64(&mut stack)?;
+                    stack.push(Val::F32(a as f32));
+                }
+                Op::F64ConvertI32S => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::F64(a as f64));
+                }
+                Op::F64ConvertI32U => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::F64((a as u32) as f64));
+                }
+                Op::F64ConvertI64S => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::F64(a as f64));
+                }
+                Op::F64ConvertI64U => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::F64((a as u64) as f64));
+                }
+                Op::F64PromoteF32 => {
+                    let a = pop_f32(&mut stack)?;
+                    stack.push(Val::F64(a as f64));
+                }
+                Op::I32ReinterpretF32 => {
+                    let f = pop_f32(&mut stack)?;
+                    stack.push(Val::I32(f.to_bits() as i32));
+                }
+                Op::I64ReinterpretF64 => {
+                    let f = pop_f64(&mut stack)?;
+                    stack.push(Val::I64(f.to_bits() as i64));
+                }
+                Op::F32ReinterpretI32 => {
+                    let a = pop(&mut stack)?;
+                    stack.push(Val::F32(f32::from_bits(a as u32)));
+                }
+                Op::F64ReinterpretI64 => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::F64(f64::from_bits(a as u64)));
+                }
                 Op::F32Const(v) => stack.push(Val::F32(v)),
                 Op::F32Eq => bin_f32_cmp(&mut stack, |a, b| a == b)?,
                 Op::F32Ne => bin_f32_cmp(&mut stack, |a, b| a != b)?,
@@ -1646,6 +1797,101 @@ fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(
     let ea = mem_ea(mem.len(), addr, offset, 4)?;
     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+/// Trap for a float that cannot be truncated into the target integer type
+/// (NaN, infinity, or out of range). WASM boundaries (±2^31, 2^32, ±2^63, 2^64)
+/// are exact powers of two, so the valid range is the half-open `[lo, hi)`.
+fn trunc_trap(op: &str) -> WasmError {
+    WasmError::Trap(format!("{op}: float is NaN, infinite, or out of range"))
+}
+
+fn trunc_f32_to_i32_s(x: f32) -> Result<i32, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i32.trunc_f32_s"));
+    }
+    let t = x.trunc();
+    if !(-2147483648.0f32..2147483648.0f32).contains(&t) {
+        return Err(trunc_trap("i32.trunc_f32_s"));
+    }
+    Ok(t as i32)
+}
+
+fn trunc_f32_to_i32_u(x: f32) -> Result<i32, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i32.trunc_f32_u"));
+    }
+    let t = x.trunc();
+    if !(0.0f32..4294967296.0f32).contains(&t) {
+        return Err(trunc_trap("i32.trunc_f32_u"));
+    }
+    Ok((t as u32) as i32)
+}
+
+fn trunc_f64_to_i32_s(x: f64) -> Result<i32, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i32.trunc_f64_s"));
+    }
+    let t = x.trunc();
+    if !(-2147483648.0f64..2147483648.0f64).contains(&t) {
+        return Err(trunc_trap("i32.trunc_f64_s"));
+    }
+    Ok(t as i32)
+}
+
+fn trunc_f64_to_i32_u(x: f64) -> Result<i32, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i32.trunc_f64_u"));
+    }
+    let t = x.trunc();
+    if !(0.0f64..4294967296.0f64).contains(&t) {
+        return Err(trunc_trap("i32.trunc_f64_u"));
+    }
+    Ok((t as u32) as i32)
+}
+
+fn trunc_f32_to_i64_s(x: f32) -> Result<i64, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i64.trunc_f32_s"));
+    }
+    let t = x.trunc();
+    if !(-9223372036854775808.0f32..9223372036854775808.0f32).contains(&t) {
+        return Err(trunc_trap("i64.trunc_f32_s"));
+    }
+    Ok(t as i64)
+}
+
+fn trunc_f32_to_i64_u(x: f32) -> Result<i64, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i64.trunc_f32_u"));
+    }
+    let t = x.trunc();
+    if !(0.0f32..18446744073709551616.0f32).contains(&t) {
+        return Err(trunc_trap("i64.trunc_f32_u"));
+    }
+    Ok((t as u64) as i64)
+}
+
+fn trunc_f64_to_i64_s(x: f64) -> Result<i64, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i64.trunc_f64_s"));
+    }
+    let t = x.trunc();
+    if !(-9223372036854775808.0f64..9223372036854775808.0f64).contains(&t) {
+        return Err(trunc_trap("i64.trunc_f64_s"));
+    }
+    Ok(t as i64)
+}
+
+fn trunc_f64_to_i64_u(x: f64) -> Result<i64, WasmError> {
+    if x.is_nan() || x.is_infinite() {
+        return Err(trunc_trap("i64.trunc_f64_u"));
+    }
+    let t = x.trunc();
+    if !(0.0f64..18446744073709551616.0f64).contains(&t) {
+        return Err(trunc_trap("i64.trunc_f64_u"));
+    }
+    Ok((t as u64) as i64)
 }
 
 /// Pop `b` then `a` and push `f(a, b)` — the shape of every binary f32 op.
@@ -2423,6 +2669,52 @@ mod tests {
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
         ));
+    }
+
+    // Family: numeric conversions. Source value arrives as a typed param, so
+    // no float/i64 const opcodes are needed: body = local.get 0 ; <op> ; end.
+    fn conv1(op: u8, arg: Val) -> Result<Vec<Val>, WasmError> {
+        let mut m = Module::new();
+        let f = m.add_function(1, 0, 1, &[0x20, 0x00, op, 0x0B])?;
+        m.invoke_val(f, &[arg])
+    }
+
+    #[test]
+    fn conv_wrap_extend_reinterpret() {
+        // i32.wrap_i64: low 32 bits of 0x1_0000_002A = 42
+        assert_eq!(conv1(0xA7, Val::I64(0x1_0000_002A)).unwrap(), vec![Val::I32(42)]);
+        // i64.extend_i32_s(-1) = -1 ; extend_i32_u(-1) = 0xFFFFFFFF
+        assert_eq!(conv1(0xAC, Val::I32(-1)).unwrap(), vec![Val::I64(-1)]);
+        assert_eq!(conv1(0xAD, Val::I32(-1)).unwrap(), vec![Val::I64(4294967295)]);
+        // i32.reinterpret_f32(1.0) = 0x3F800000 ; and back
+        assert_eq!(conv1(0xBC, Val::F32(1.0)).unwrap(), vec![Val::I32(0x3F80_0000)]);
+        assert_eq!(conv1(0xBE, Val::I32(0x3F80_0000)).unwrap(), vec![Val::F32(1.0)]);
+        assert_eq!(
+            conv1(0xBD, Val::F64(1.5)).unwrap(),
+            vec![Val::I64(0x3FF8_0000_0000_0000u64 as i64)]
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn conv_int_float_roundtrips() {
+        assert_eq!(conv1(0xB2, Val::I32(42)).unwrap(), vec![Val::F32(42.0)]); // f32.convert_i32_s
+        assert_eq!(conv1(0xB3, Val::I32(-1)).unwrap(), vec![Val::F32(4294967295.0)]); // convert_i32_u
+        assert_eq!(conv1(0xB9, Val::I64(-5)).unwrap(), vec![Val::F64(-5.0)]); // f64.convert_i64_s
+        assert_eq!(conv1(0xBB, Val::F32(1.5)).unwrap(), vec![Val::F64(1.5)]); // promote
+        assert_eq!(conv1(0xB6, Val::F64(1.5)).unwrap(), vec![Val::F32(1.5)]); // demote
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn conv_trunc_happy_and_traps() {
+        assert_eq!(conv1(0xA8, Val::F32(42.9)).unwrap(), vec![Val::I32(42)]); // happy
+        assert!(matches!(conv1(0xA8, Val::F32(f32::NAN)), Err(WasmError::Trap(_))));
+        assert!(matches!(conv1(0xA8, Val::F32(3e9)), Err(WasmError::Trap(_)))); // > i32::MAX
+        assert!(matches!(conv1(0xA8, Val::F32(f32::INFINITY)), Err(WasmError::Trap(_))));
+        assert!(matches!(conv1(0xA9, Val::F32(-1.5)), Err(WasmError::Trap(_)))); // u: past -1
+        assert_eq!(conv1(0xA9, Val::F32(-0.5)).unwrap(), vec![Val::I32(0)]); // (-1,0] -> 0
+        assert!(matches!(conv1(0xAF, Val::F32(1.9e19)), Err(WasmError::Trap(_)))); // i64.trunc_f32_u > 2^64
     }
 
     // Family: f32.
