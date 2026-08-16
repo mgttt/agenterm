@@ -200,6 +200,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "agenterm-tinyvm"
+version = "0.1.0"
+
+[[package]]
 name = "agenterm-ui-core"
 version = "0.1.16"
 dependencies = [

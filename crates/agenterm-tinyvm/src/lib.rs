@@ -1,0 +1,494 @@
+//! agenterm-tinyvm — a tiny stack-based bytecode VM.
+//!
+//! A **new, independent path**: a small VM that interprets a compact bytecode,
+//! so it runs anywhere — including platforms that forbid or lack JIT (iOS,
+//! `wasm32`). It is its own crate and its own product line; it is *not* a layer
+//! of `agenterm-dyn`. dyn remains desktop live-assembly (host-ISA bytes on the
+//! real CPU), which iOS walls off — and no interpreter is being pushed into
+//! dyn. (Swapping this VM's interpreter engine for an AOT/JIT-accelerated
+//! backend on desktop is a possible later step, deliberately not done here.)
+//!
+//! Properties, on purpose:
+//! - **Zero dependencies, pure `std`, no `unsafe`, no `mmap`.** It runs on any
+//!   target Rust can build — including platforms that forbid runtime-generated
+//!   native code (iOS, `wasm32`), where L1's JIT cannot run at all.
+//! - **Turing-complete** in the usual bounded-by-memory sense: a value stack, a
+//!   linear memory (load/store), integer arithmetic, and a data-dependent
+//!   conditional branch (`Jz`) — enough to express loops and recursion.
+//! - **Loud failure, never silent or hung.** Stack underflow, division by
+//!   zero, out-of-range memory/branch, and a runaway program (step budget) all
+//!   return a [`VmError`]; the VM never corrupts silently and never spins
+//!   forever.
+//!
+//! It does not link, import, or otherwise touch `agenterm-dyn`, `agenterm-cu`,
+//! or `agenterm-chassis`.
+//!
+//! # Example — 40 + 2
+//! ```
+//! use agenterm_tinyvm::{Instr, Vm};
+//! let mut vm = Vm::new(16);
+//! let result = vm.run(&[Instr::Push(40), Instr::Push(2), Instr::Add, Instr::Halt]);
+//! assert_eq!(result.unwrap(), Some(42));
+//! ```
+
+use std::fmt;
+
+/// One bytecode instruction.
+///
+/// Branch and call targets are absolute instruction indices into the program
+/// slice passed to [`Vm::run`]. Memory addresses index the VM's linear memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Instr {
+    // -- stack shuffling --
+    /// Push an immediate onto the value stack.
+    Push(i64),
+    /// Discard the top of stack.
+    Pop,
+    /// Duplicate the top of stack.
+    Dup,
+    /// Swap the top two stack values.
+    Swap,
+
+    // -- integer arithmetic (wrapping add/sub/mul; checked div/mod) --
+    /// `a b -> a+b`
+    Add,
+    /// `a b -> a-b`
+    Sub,
+    /// `a b -> a*b`
+    Mul,
+    /// `a b -> a/b` (errors on `b == 0`)
+    Div,
+    /// `a b -> a%b` (errors on `b == 0`)
+    Mod,
+
+    // -- comparisons and logic (push 1 for true, 0 for false) --
+    /// `a b -> (a==b)`
+    Eq,
+    /// `a b -> (a<b)`
+    Lt,
+    /// `a b -> (a>b)`
+    Gt,
+    /// `a -> (a==0)`
+    Not,
+
+    // -- linear memory --
+    /// Push `mem[addr]`.
+    Load(usize),
+    /// Pop into `mem[addr]`.
+    Store(usize),
+
+    // -- control flow --
+    /// Unconditional jump to instruction `target`.
+    Jmp(usize),
+    /// Pop; if it is zero, jump to instruction `target`.
+    Jz(usize),
+    /// Push the return address and jump to instruction `target`.
+    Call(usize),
+    /// Pop the return address and jump back to it.
+    Ret,
+    /// Stop; the result is the current top of stack (if any).
+    Halt,
+}
+
+/// A run-time fault. Every one is loud: the VM stops and returns it rather than
+/// corrupting state or hanging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VmError {
+    /// An op needed more stack values than were present.
+    StackUnderflow { pc: usize, op: &'static str },
+    /// The value stack exceeded its limit.
+    StackOverflow { pc: usize },
+    /// The call stack exceeded its depth limit.
+    CallOverflow { pc: usize },
+    /// `Div`/`Mod` by zero.
+    DivideByZero { pc: usize },
+    /// A memory address was outside the linear memory.
+    MemoryOutOfRange { pc: usize, addr: usize },
+    /// A branch/call/return target was outside the program.
+    BranchOutOfRange { pc: usize, target: usize },
+    /// `Ret` with an empty call stack.
+    ReturnWithoutCall { pc: usize },
+    /// The program ran past its last instruction without halting.
+    RanOffEnd { pc: usize },
+    /// The step budget was exhausted (runaway loop/recursion).
+    StepBudgetExceeded { limit: u64 },
+}
+
+impl fmt::Display for VmError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StackUnderflow { pc, op } => {
+                write!(f, "stack underflow at pc {pc} in `{op}`")
+            }
+            Self::StackOverflow { pc } => write!(f, "value-stack overflow at pc {pc}"),
+            Self::CallOverflow { pc } => write!(f, "call-stack overflow at pc {pc}"),
+            Self::DivideByZero { pc } => write!(f, "divide by zero at pc {pc}"),
+            Self::MemoryOutOfRange { pc, addr } => {
+                write!(f, "memory address {addr} out of range at pc {pc}")
+            }
+            Self::BranchOutOfRange { pc, target } => {
+                write!(f, "branch target {target} out of range at pc {pc}")
+            }
+            Self::ReturnWithoutCall { pc } => write!(f, "ret without matching call at pc {pc}"),
+            Self::RanOffEnd { pc } => write!(f, "ran off the end of the program at pc {pc}"),
+            Self::StepBudgetExceeded { limit } => {
+                write!(f, "step budget {limit} exceeded (runaway program)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for VmError {}
+
+/// Default cap on executed instructions per [`Vm::run`] call.
+pub const DEFAULT_MAX_STEPS: u64 = 16_000_000;
+/// Default cap on value-stack depth.
+pub const DEFAULT_STACK_LIMIT: usize = 65_536;
+/// Default cap on call-stack depth.
+pub const DEFAULT_CALL_LIMIT: usize = 8_192;
+
+/// A tiny stack machine with a fixed-size zero-initialised linear memory.
+#[derive(Debug, Clone)]
+pub struct Vm {
+    stack: Vec<i64>,
+    mem: Vec<i64>,
+    call: Vec<usize>,
+    max_steps: u64,
+    stack_limit: usize,
+    call_limit: usize,
+}
+
+impl Vm {
+    /// Create a VM with `mem_cells` words of zeroed linear memory and default
+    /// resource bounds.
+    pub fn new(mem_cells: usize) -> Self {
+        Self {
+            stack: Vec::new(),
+            mem: vec![0; mem_cells],
+            call: Vec::new(),
+            max_steps: DEFAULT_MAX_STEPS,
+            stack_limit: DEFAULT_STACK_LIMIT,
+            call_limit: DEFAULT_CALL_LIMIT,
+        }
+    }
+
+    /// Override the step budget (runaway-program guard).
+    pub fn with_max_steps(mut self, max_steps: u64) -> Self {
+        self.max_steps = max_steps;
+        self
+    }
+
+    /// Read a cell of linear memory (for inspecting results after a run).
+    pub fn mem(&self, addr: usize) -> Option<i64> {
+        self.mem.get(addr).copied()
+    }
+
+    /// A view of the current value stack.
+    pub fn stack(&self) -> &[i64] {
+        &self.stack
+    }
+
+    /// Execute `program` from instruction 0 until [`Instr::Halt`].
+    ///
+    /// Returns the top of the value stack at halt (`None` if the stack is
+    /// empty), or a [`VmError`] on any fault. The VM's stack and call stack are
+    /// reset at entry; its linear memory persists across runs so a caller can
+    /// seed inputs and read outputs.
+    pub fn run(&mut self, program: &[Instr]) -> Result<Option<i64>, VmError> {
+        self.stack.clear();
+        self.call.clear();
+        let mut pc: usize = 0;
+        let mut steps: u64 = 0;
+
+        loop {
+            steps += 1;
+            if steps > self.max_steps {
+                return Err(VmError::StepBudgetExceeded {
+                    limit: self.max_steps,
+                });
+            }
+            let instr = program.get(pc).ok_or(VmError::RanOffEnd { pc })?;
+            let here = pc;
+            pc += 1;
+
+            match instr {
+                Instr::Push(v) => self.push(here, *v)?,
+                Instr::Pop => {
+                    self.pop(here, "pop")?;
+                }
+                Instr::Dup => {
+                    let v = *self.stack.last().ok_or(VmError::StackUnderflow {
+                        pc: here,
+                        op: "dup",
+                    })?;
+                    self.push(here, v)?;
+                }
+                Instr::Swap => {
+                    let n = self.stack.len();
+                    if n < 2 {
+                        return Err(VmError::StackUnderflow {
+                            pc: here,
+                            op: "swap",
+                        });
+                    }
+                    self.stack.swap(n - 1, n - 2);
+                }
+                Instr::Add => self.binop(here, "add", |a, b| Ok(a.wrapping_add(b)))?,
+                Instr::Sub => self.binop(here, "sub", |a, b| Ok(a.wrapping_sub(b)))?,
+                Instr::Mul => self.binop(here, "mul", |a, b| Ok(a.wrapping_mul(b)))?,
+                Instr::Div => self.binop(here, "div", |a, b| {
+                    if b == 0 {
+                        Err(VmError::DivideByZero { pc: here })
+                    } else {
+                        Ok(a.wrapping_div(b))
+                    }
+                })?,
+                Instr::Mod => self.binop(here, "mod", |a, b| {
+                    if b == 0 {
+                        Err(VmError::DivideByZero { pc: here })
+                    } else {
+                        Ok(a.wrapping_rem(b))
+                    }
+                })?,
+                Instr::Eq => self.binop(here, "eq", |a, b| Ok(i64::from(a == b)))?,
+                Instr::Lt => self.binop(here, "lt", |a, b| Ok(i64::from(a < b)))?,
+                Instr::Gt => self.binop(here, "gt", |a, b| Ok(i64::from(a > b)))?,
+                Instr::Not => {
+                    let a = self.pop(here, "not")?;
+                    self.push(here, i64::from(a == 0))?;
+                }
+                Instr::Load(addr) => {
+                    let v = *self.mem.get(*addr).ok_or(VmError::MemoryOutOfRange {
+                        pc: here,
+                        addr: *addr,
+                    })?;
+                    self.push(here, v)?;
+                }
+                Instr::Store(addr) => {
+                    let v = self.pop(here, "store")?;
+                    let cell = self.mem.get_mut(*addr).ok_or(VmError::MemoryOutOfRange {
+                        pc: here,
+                        addr: *addr,
+                    })?;
+                    *cell = v;
+                }
+                Instr::Jmp(target) => {
+                    Self::check_target(here, *target, program.len())?;
+                    pc = *target;
+                }
+                Instr::Jz(target) => {
+                    let v = self.pop(here, "jz")?;
+                    if v == 0 {
+                        Self::check_target(here, *target, program.len())?;
+                        pc = *target;
+                    }
+                }
+                Instr::Call(target) => {
+                    Self::check_target(here, *target, program.len())?;
+                    if self.call.len() >= self.call_limit {
+                        return Err(VmError::CallOverflow { pc: here });
+                    }
+                    self.call.push(pc);
+                    pc = *target;
+                }
+                Instr::Ret => {
+                    pc = self.call.pop().ok_or(VmError::ReturnWithoutCall { pc: here })?;
+                }
+                Instr::Halt => return Ok(self.stack.last().copied()),
+            }
+        }
+    }
+
+    fn push(&mut self, pc: usize, v: i64) -> Result<(), VmError> {
+        if self.stack.len() >= self.stack_limit {
+            return Err(VmError::StackOverflow { pc });
+        }
+        self.stack.push(v);
+        Ok(())
+    }
+
+    fn pop(&mut self, pc: usize, op: &'static str) -> Result<i64, VmError> {
+        self.stack
+            .pop()
+            .ok_or(VmError::StackUnderflow { pc, op })
+    }
+
+    fn binop(
+        &mut self,
+        pc: usize,
+        op: &'static str,
+        f: impl FnOnce(i64, i64) -> Result<i64, VmError>,
+    ) -> Result<(), VmError> {
+        let b = self.pop(pc, op)?;
+        let a = self.pop(pc, op)?;
+        let r = f(a, b)?;
+        self.push(pc, r)
+    }
+
+    fn check_target(pc: usize, target: usize, len: usize) -> Result<(), VmError> {
+        if target >= len {
+            Err(VmError::BranchOutOfRange { pc, target })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arithmetic_returns_42() {
+        let mut vm = Vm::new(4);
+        let r = vm.run(&[Instr::Push(40), Instr::Push(2), Instr::Add, Instr::Halt]);
+        assert_eq!(r.unwrap(), Some(42));
+    }
+
+    #[test]
+    fn subtraction_and_division_order() {
+        let mut vm = Vm::new(4);
+        // (10 - 3) then (that) / 2  ->  7 / 2 = 3
+        let r = vm
+            .run(&[
+                Instr::Push(10),
+                Instr::Push(3),
+                Instr::Sub,
+                Instr::Push(2),
+                Instr::Div,
+                Instr::Halt,
+            ])
+            .unwrap();
+        assert_eq!(r, Some(3));
+    }
+
+    #[test]
+    fn conditional_selects_branch() {
+        // if 0: push 111 else push 222  -> since top is 0, Jz taken -> 111
+        let prog = [
+            Instr::Push(0),  // 0
+            Instr::Jz(4),    // 1: pop 0 -> jump to 4
+            Instr::Push(222),// 2
+            Instr::Halt,     // 3
+            Instr::Push(111),// 4
+            Instr::Halt,     // 5
+        ];
+        let mut vm = Vm::new(4);
+        assert_eq!(vm.run(&prog).unwrap(), Some(111));
+    }
+
+    /// Loop with memory: sum 1..=5 via a countdown. Proves branch + memory +
+    /// arithmetic compose into real (Turing-complete-class) computation.
+    #[test]
+    fn loop_sums_one_through_five() {
+        let prog = [
+            Instr::Push(0),
+            Instr::Store(1), // 1: acc = 0
+            Instr::Push(5),
+            Instr::Store(0), // 3: i = 5
+            Instr::Load(0),  // 4: L
+            Instr::Jz(15),   // 5: if i==0 -> END
+            Instr::Load(1),
+            Instr::Load(0),
+            Instr::Add,
+            Instr::Store(1), // 9: acc += i
+            Instr::Load(0),
+            Instr::Push(1),
+            Instr::Sub,
+            Instr::Store(0), // 13: i -= 1
+            Instr::Jmp(4),   // 14: loop
+            Instr::Load(1),  // 15: END -> push acc
+            Instr::Halt,     // 16
+        ];
+        let mut vm = Vm::new(4);
+        assert_eq!(vm.run(&prog).unwrap(), Some(15));
+        assert_eq!(vm.mem(1), Some(15));
+    }
+
+    /// Factorial(5) = 120 — the same loop shape with Mul.
+    #[test]
+    fn loop_computes_factorial_five() {
+        let prog = [
+            Instr::Push(1),
+            Instr::Store(1), // acc = 1
+            Instr::Push(5),
+            Instr::Store(0), // i = 5
+            Instr::Load(0),  // 4: L
+            Instr::Jz(15),   // 5: END if i==0
+            Instr::Load(1),
+            Instr::Load(0),
+            Instr::Mul,
+            Instr::Store(1), // acc *= i
+            Instr::Load(0),
+            Instr::Push(1),
+            Instr::Sub,
+            Instr::Store(0), // i -= 1
+            Instr::Jmp(4),
+            Instr::Load(1), // 15: END
+            Instr::Halt,
+        ];
+        let mut vm = Vm::new(4);
+        assert_eq!(vm.run(&prog).unwrap(), Some(120));
+    }
+
+    /// A called subroutine that squares the top of stack, via Call/Ret.
+    #[test]
+    fn call_and_ret_run_a_subroutine() {
+        // main: push 9; call square; halt.  square: dup; mul; ret.
+        let prog = [
+            Instr::Push(9), // 0
+            Instr::Call(4), // 1 -> square
+            Instr::Halt,    // 2
+            Instr::Halt,    // 3 (padding, unreachable)
+            Instr::Dup,     // 4: square
+            Instr::Mul,     // 5
+            Instr::Ret,     // 6
+        ];
+        let mut vm = Vm::new(4);
+        assert_eq!(vm.run(&prog).unwrap(), Some(81));
+    }
+
+    #[test]
+    fn divide_by_zero_is_loud() {
+        let mut vm = Vm::new(4);
+        let e = vm
+            .run(&[Instr::Push(1), Instr::Push(0), Instr::Div, Instr::Halt])
+            .unwrap_err();
+        assert!(matches!(e, VmError::DivideByZero { .. }));
+    }
+
+    #[test]
+    fn stack_underflow_is_loud() {
+        let mut vm = Vm::new(4);
+        let e = vm.run(&[Instr::Add, Instr::Halt]).unwrap_err();
+        assert!(matches!(e, VmError::StackUnderflow { .. }));
+    }
+
+    #[test]
+    fn memory_out_of_range_is_loud() {
+        let mut vm = Vm::new(2);
+        let e = vm.run(&[Instr::Load(99), Instr::Halt]).unwrap_err();
+        assert!(matches!(e, VmError::MemoryOutOfRange { .. }));
+    }
+
+    #[test]
+    fn branch_out_of_range_is_loud() {
+        let mut vm = Vm::new(2);
+        let e = vm.run(&[Instr::Jmp(99), Instr::Halt]).unwrap_err();
+        assert!(matches!(e, VmError::BranchOutOfRange { .. }));
+    }
+
+    #[test]
+    fn runaway_loop_hits_step_budget_not_hang() {
+        let mut vm = Vm::new(2).with_max_steps(10_000);
+        let e = vm.run(&[Instr::Jmp(0)]).unwrap_err();
+        assert!(matches!(e, VmError::StepBudgetExceeded { .. }));
+    }
+
+    #[test]
+    fn program_without_halt_fails_loudly() {
+        let mut vm = Vm::new(2);
+        let e = vm.run(&[Instr::Push(1)]).unwrap_err();
+        assert!(matches!(e, VmError::RanOffEnd { .. }));
+    }
+}
