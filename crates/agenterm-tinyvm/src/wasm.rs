@@ -112,6 +112,19 @@ enum Op {
     MemorySize,
     /// `memory.grow` — pop delta pages, grow, push old size (or -1 on failure).
     MemoryGrow,
+    /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
+    I64Load { offset: u32 },
+    I64Store { offset: u32 },
+    /// Narrow i64 loads (sign/zero extended to i64) and stores (low bytes).
+    I64Load8S { offset: u32 },
+    I64Load8U { offset: u32 },
+    I64Load16S { offset: u32 },
+    I64Load16U { offset: u32 },
+    I64Load32S { offset: u32 },
+    I64Load32U { offset: u32 },
+    I64Store8 { offset: u32 },
+    I64Store16 { offset: u32 },
+    I64Store32 { offset: u32 },
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -424,6 +437,61 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                         *end = end_idx;
                     }
                 }
+            }
+            0x29 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load { offset });
+            }
+            0x37 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Store { offset });
+            }
+            0x30 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load8S { offset });
+            }
+            0x31 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load8U { offset });
+            }
+            0x32 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load16S { offset });
+            }
+            0x33 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load16U { offset });
+            }
+            0x34 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load32S { offset });
+            }
+            0x35 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Load32U { offset });
+            }
+            0x3C => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Store8 { offset });
+            }
+            0x3D => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Store16 { offset });
+            }
+            0x3E => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I64Store32 { offset });
             }
             other => {
                 return Err(WasmError::Decode(format!(
@@ -974,6 +1042,57 @@ impl Module {
                         mem.resize(new_pages * WASM_PAGE_SIZE, 0);
                         stack.push(Val::I32(old_pages as i32));
                     }
+                }
+                Op::I64Load { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
+                    let bytes: [u8; 8] = mem[ea..ea + 8].try_into().expect("8 bytes");
+                    stack.push(Val::I64(i64::from_le_bytes(bytes)));
+                }
+                Op::I64Store { offset } => {
+                    let value = pop_i64(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
+                    mem[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
+                }
+                Op::I64Load8S { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
+                    stack.push(Val::I64(mem[ea] as i8 as i64));
+                }
+                Op::I64Load8U { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
+                    stack.push(Val::I64(mem[ea] as u64 as i64));
+                }
+                Op::I64Load16S { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                    stack.push(Val::I64(i16::from_le_bytes([mem[ea], mem[ea + 1]]) as i64));
+                }
+                Op::I64Load16U { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                    stack.push(Val::I64(u16::from_le_bytes([mem[ea], mem[ea + 1]]) as u64 as i64));
+                }
+                Op::I64Load32S { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
+                    let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
+                    stack.push(Val::I64(i32::from_le_bytes(bytes) as i64));
+                }
+                Op::I64Load32U { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
+                    let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
+                    stack.push(Val::I64(u32::from_le_bytes(bytes) as u64 as i64));
+                }
+                Op::I64Store8 { offset } => {
+                    let value = pop_i64(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
+                    mem[ea] = value as u8;
+                }
+                Op::I64Store16 { offset } => {
+                    let value = pop_i64(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                    mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
+                }
+                Op::I64Store32 { offset } => {
+                    let value = pop_i64(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
+                    mem[ea..ea + 4].copy_from_slice(&(value as u32).to_le_bytes());
                 }
                 Op::LocalGet(l) => {
                     let v = *locals
@@ -1774,6 +1893,56 @@ mod tests {
         assert!(matches!(
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
+        ));
+    }
+
+    // Family: i64 linear memory (values supplied as params via invoke_val).
+    #[test]
+    fn i64_store_then_load_returns_42() {
+        let body = [
+            0x41, 0x00, 0x20, 0x00, 0x37, 0x00, 0x00, 0x41, 0x00, 0x29, 0x00, 0x00, 0x0B,
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(1, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke_val(f, &[Val::I64(42)]).unwrap(), vec![Val::I64(42)]);
+    }
+
+    #[test]
+    fn i64_narrow_store_load_sign_vs_zero() {
+        // store8 then load8_u / load8_s of -1 -> 255 / -1
+        let b8 = [
+            0x41, 0x00, 0x20, 0x00, 0x3C, 0x00, 0x00, 0x41, 0x00, 0x31, 0x00, 0x00, 0x41, 0x00,
+            0x30, 0x00, 0x00, 0x0B,
+        ];
+        // store32 then load32_u / load32_s of -1 -> 4294967295 / -1
+        let b32 = [
+            0x41, 0x00, 0x20, 0x00, 0x3E, 0x00, 0x00, 0x41, 0x00, 0x35, 0x00, 0x00, 0x41, 0x00,
+            0x34, 0x00, 0x00, 0x0B,
+        ];
+        let mut m = Module::new();
+        let f8 = m.add_function(1, 0, 2, &b8).unwrap();
+        let f32_ = m.add_function(1, 0, 2, &b32).unwrap();
+        assert_eq!(
+            m.invoke_val(f8, &[Val::I64(-1)]).unwrap(),
+            vec![Val::I64(255), Val::I64(-1)]
+        );
+        assert_eq!(
+            m.invoke_val(f32_, &[Val::I64(-1)]).unwrap(),
+            vec![Val::I64(4294967295), Val::I64(-1)]
+        );
+    }
+
+    #[test]
+    fn i64_memory_out_of_bounds_traps() {
+        let load = [0x41, 0xFA, 0xFF, 0x03, 0x29, 0x00, 0x00, 0x0B];
+        let store = [0x41, 0xFA, 0xFF, 0x03, 0x20, 0x00, 0x37, 0x00, 0x00, 0x0B];
+        let mut m = Module::new();
+        let fl = m.add_function(0, 0, 1, &load).unwrap();
+        let fs = m.add_function(1, 0, 0, &store).unwrap();
+        assert!(matches!(m.invoke_val(fl, &[]), Err(WasmError::Trap(_))));
+        assert!(matches!(
+            m.invoke_val(fs, &[Val::I64(1)]),
+            Err(WasmError::Trap(_))
         ));
     }
 
