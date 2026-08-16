@@ -212,6 +212,26 @@ fn remote_ui_smoke_uses_bundled_pack() {
 }
 
 #[test]
+fn remote_ui_unattended_pastes_use_the_explicit_non_review_action() {
+    let source = std::fs::read_to_string(repo().join("scripts/rh/remote-ui-smoke.rh"))
+        .expect("read remote UI smoke");
+    assert_eq!(
+        source
+            .matches("json_cli(context, cli, [\"ui-action\", \"terminal-paste\"])")
+            .count(),
+        2,
+        "both unattended paste journeys must use the explicit non-review action"
+    );
+    assert!(
+        !source.contains("window_message(0x0112, 0x1F10, 0)"),
+        "an unattended smoke must not open the human terminal-paste review dialog"
+    );
+    assert!(source.contains("selection_completed.system_menu.paste.enabled"));
+    assert!(source.contains("remote_ui_async_terminal_paste_timeout"));
+    assert!(source.contains("remote_ui_bracketed_paste_framing_invalid"));
+}
+
+#[test]
 fn fresh_clone_rehearsal_uses_native_bundled_execution() {
     let (source, output) = transpile_project_entry("scripts/rh/fresh-clone-rehearsal.rh");
     assert!(source.contains("fn entry("));
