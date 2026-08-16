@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 mod error;
+#[cfg(unix)]
+mod encoder;
+#[cfg(unix)]
+mod engine;
 mod eval;
 #[cfg(unix)]
 mod exec;
@@ -12,6 +16,10 @@ mod sym;
 mod value;
 
 pub use error::DynError;
+#[cfg(unix)]
+pub use encoder::{Encoded, Fixup, Op, encode};
+#[cfg(unix)]
+pub use engine::{Engine, MAX_LABELS as ENGINE_MAX_LABELS, MAX_PENDING_FIXUPS};
 #[cfg(unix)]
 pub use exec::{
     BufferState, CodeBuffer, NameEntry, NameTable, aarch64_mov_x0_ret, x86_64_call_thunk,

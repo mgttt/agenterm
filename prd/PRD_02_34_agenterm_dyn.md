@@ -16,6 +16,17 @@ Parallel crate `crates/agenterm-dyn`, not a fourth engine, not libagenterm, not 
 表、不删 S 式解释器与现有测试、不产 ELF/APE、不管 Windows 执行、不接 cu/chassis**。
 `dlcall` 跳板原样保留；新路径是「名字表条目 + 发射的 call」，非删门。
 
+## Live assembly (dyn.2, 2026-08-16) — 时间轴身份
+
+第二刀把时间轴做真：运行中还能长，新旧能互指（`src/encoder.rs` + `src/engine.rs`，
+unix-gated）。最小编码表只 4 条（`Label` / `MovRaxImm` / `Call(name)` / `Ret`），
+数据驱动、每条对 golden 字节，**不是通用汇编器**。`Engine` 叠上第五块——补丁表：
+名字可**先用后定义**，未定义的 `call` 记为 pending，后续 `assemble` 定义该名字时按
+rel32 回填；名字跨 append 存活，第二次 append 能叫第一次的名字。W^X 全程保持
+（回填也走写态→执态翻转，永不 RWX）；rel32 溢出、label/pending 超限**响亮失败**。
+上层 API 是「汇编级操作序列（`Op`）落地成字节再 enter」，S 式作后话拼写、执行层仍字节。
+本刀**不加第三类指令、不引 DynASM/sljit/#78、不产 ELF、不接 cu/chassis**。
+
 ## Current authorized scope
 
 First cut is the body: S-expr + intern + `if` / `set` / `do` + comparisons +
