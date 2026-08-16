@@ -27,6 +27,17 @@ rel32 回填；名字跨 append 存活，第二次 append 能叫第一次的名�
 上层 API 是「汇编级操作序列（`Op`）落地成字节再 enter」，S 式作后话拼写、执行层仍字节。
 本刀**不加第三类指令、不引 DynASM/sljit/#78、不产 ELF、不接 cu/chassis**。
 
+## Op-IR portable backend (dyn.3, 2026-08-16) — 便携后端 / iOS 地板
+
+同一条 `Op` 流，两种执行模式：JIT 后端（`engine.rs`，unix）把它降成宿主字节**跳入**；
+解释后端（`src/interp.rs`，**不设 unix 门**）保留软 PC **读**同一条 `Op` 流。**无 mmap、
+无 W^X、无 unsafe**，凡 Rust 能编到的目标就能跑——含 **iOS**（`aarch64-apple-ios` 已 `cargo check`
+通过）等**禁运行期生成原生码**的平台。身份不变：`Op` 流仍是程序，iOS 只是禁「跳入」降下来的字节，
+于是这里**读**它。解释后端与 JIT 后端时间轴行为一致（名字先用后定义、跨 append 存活），
+沿用响亮失败纪律（未解析调用 / 步数预算 / 调用深度超限即报错，不静默不挂死）。
+`Op` 枚举与 `encode()` 从 unix 门下移出（纯数据）。**WASM 不作核心 IR**（那是「便携包装」，
+偏离直面最底层的身份）；WASM 仅可作后话导出目标。本刀不加指令、不接 cu/chassis、不产 ELF。
+
 ## Current authorized scope
 
 First cut is the body: S-expr + intern + `if` / `set` / `do` + comparisons +

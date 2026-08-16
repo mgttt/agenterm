@@ -37,4 +37,6 @@ pub enum DynError {
     Library(String),
     #[error("exec base error: {0}")]
     Exec(String),
+    #[error("interpreter error: {0}")]
+    Interp(String),
 }
