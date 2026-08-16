@@ -257,10 +257,16 @@ fn five_task_extra(first, second, third, fourth, fifth) {
 }
 
 fn smoke_timeout_ms(id) {
+    if id == "script-smoke" {
+        // Candidate 31954795648: the Windows quality gate killed
+        // `rh task run script-smoke` at 620s with no output. The suite
+        // now waits up to 180s per HTTP fixture pack compile (two
+        // fixtures) plus the rest of the journey.
+        return 1200000;
+    }
     if id == "remote-ui-smoke"
             || id == "cli-smoke"
-            || id == "fleet-smoke"
-            || id == "script-smoke" {
+            || id == "fleet-smoke" {
         return 600000;
     }
     300000
@@ -2086,7 +2092,10 @@ timing = map_timing(ordinary);
 sequence = map_sequence(ordinary);
 
 if skip_smoke == 0 {
-    let no_activate = #{"AGENTERM_NO_ACTIVATE":"1"};
+    let no_activate = #{
+        "AGENTERM_NO_ACTIVATE": "1",
+        "AGENTERM_SCRIPT_WORKER_STDERR": "inherit"
+    };
     let smoke_ids = [];
     smoke_ids.push("startup-smoke");
     smoke_ids.push("wake-smoke");

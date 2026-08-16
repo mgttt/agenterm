@@ -70,7 +70,11 @@ from that process then loads the parent pack and ignores the child source
 `rh eval` of a different file must `env_remove("AGENTERM_RH_PACK")`. Ready-wait
 for such a child must cover pack compile, not just `entry()`; Candidate run
 `31940530325` failed `script_smoke_http_fixture_early_exit` because the HTTP
-fixture child was polled for 3s and its Command timeout was 60s.
+fixture child was polled for 3s and its Command timeout was 60s. After that
+wait rose to 180s, Candidate `31954795648` killed the whole `script-smoke`
+task at 620s (`tail=<no output>`). The named-task budget and `check.rh`
+smoke timeout must both exceed those fixture compiles; inherit worker
+stderr or a timeout has no STEP trail.
 
 ---
 
