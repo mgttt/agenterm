@@ -3,6 +3,8 @@ use std::ffi::c_void;
 
 mod error;
 mod eval;
+#[cfg(unix)]
+mod exec;
 mod hosts;
 mod native;
 mod parse;
@@ -10,6 +12,11 @@ mod sym;
 mod value;
 
 pub use error::DynError;
+#[cfg(unix)]
+pub use exec::{
+    BufferState, CodeBuffer, NameEntry, NameTable, aarch64_mov_x0_ret, x86_64_call_thunk,
+    x86_64_mov_rax_ret,
+};
 pub use eval::{MAX_TOTAL_REPEAT_ITERATIONS, REPEAT_MAX};
 pub use hosts::{
     ALL_CELLS, CU_ADJACENT_PROBE_CATALOG, CuAdjacentProbeCell, HostArch, HostCell, HostOs,

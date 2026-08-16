@@ -11,6 +11,9 @@ publish = false
 libloading = "0.8"
 thiserror = "2"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
 libloading = "0.8"
