@@ -437,6 +437,48 @@ fn skip_valtypes(p: &[u8], i: usize, n: u32) -> Result<usize, WasmError> {
     Ok(end)
 }
 
+/// Skip a name (LEB length + that many bytes).
+fn skip_name(p: &[u8], i: usize) -> Result<usize, WasmError> {
+    let (len, ni) = leb_u32(p, i)?;
+    ni.checked_add(len as usize)
+        .filter(|&e| e <= p.len())
+        .ok_or_else(|| WasmError::Decode("name runs past section".into()))
+}
+
+/// Parse the import section, returning `(n_params, n_results)` for each
+/// imported **function** in order. Only function imports are supported here.
+fn parse_import_section(
+    p: &[u8],
+    types: &[(usize, usize)],
+) -> Result<Vec<(usize, usize)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        i = skip_name(p, i)?; // module name
+        i = skip_name(p, i)?; // field name
+        let kind = *p
+            .get(i)
+            .ok_or_else(|| WasmError::Decode("truncated import".into()))?;
+        i += 1;
+        match kind {
+            0x00 => {
+                let (tidx, ni) = leb_u32(p, i)?;
+                i = ni;
+                let t = types.get(tidx as usize).ok_or_else(|| {
+                    WasmError::Decode("imported function references missing type".into())
+                })?;
+                out.push(*t);
+            }
+            other => {
+                return Err(WasmError::Decode(format!(
+                    "unsupported import kind 0x{other:02x} (only functions)"
+                )));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Parse the type section into `(n_params, n_results)` per function type.
 fn parse_type_section(p: &[u8]) -> Result<Vec<(usize, usize)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
@@ -527,9 +569,24 @@ struct Frame {
     is_loop: bool,
 }
 
-/// A collection of function bodies that can call one another by index.
-#[derive(Debug, Clone, Default)]
+/// A registered host (native) function callable from WASM via an import index.
+struct HostFunc {
+    n_params: usize,
+    n_results: usize,
+    #[allow(clippy::type_complexity)]
+    f: Box<dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>>,
+}
+
+/// A collection of function bodies that can call one another (and registered
+/// host functions) by index.
+///
+/// The function index space places **host/imported functions first** (indices
+/// `0..hosts.len()`), then WASM-defined functions. So when there are no host
+/// functions, a defined function's index equals its position — matching the
+/// pre-host behaviour.
+#[derive(Default)]
 pub struct Module {
+    hosts: Vec<HostFunc>,
     funcs: Vec<Func>,
 }
 
@@ -552,14 +609,34 @@ impl Module {
         body: &[u8],
     ) -> Result<usize, WasmError> {
         let code = decode(body)?;
-        let idx = self.funcs.len();
+        let combined = self.hosts.len() + self.funcs.len();
         self.funcs.push(Func {
             n_params,
             n_locals,
             arity: result_arity,
             code,
         });
-        Ok(idx)
+        Ok(combined)
+    }
+
+    /// Register a native host function and return its function index.
+    ///
+    /// WASM code reaches it via `call <index>`. The closure receives the popped
+    /// i32 arguments and a mutable view of the invocation's linear memory (so it
+    /// can read what WASM stored or write results back), and returns the result
+    /// values. **Register host functions before defined functions** so indices
+    /// line up with a module's import-first ordering.
+    pub fn add_host_function<F>(&mut self, n_params: usize, n_results: usize, f: F) -> usize
+    where
+        F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
+    {
+        let idx = self.hosts.len();
+        self.hosts.push(HostFunc {
+            n_params,
+            n_results,
+            f: Box::new(f),
+        });
+        idx
     }
 
     /// Load a standard `.wasm` **module** (magic `\0asm` + version 1) with a
@@ -581,6 +658,7 @@ impl Module {
         }
 
         let mut types: Vec<(usize, usize)> = Vec::new();
+        let mut imports: Vec<(usize, usize)> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
 
@@ -598,9 +676,10 @@ impl Module {
             let payload = &wasm[start..end];
             match id {
                 1 => types = parse_type_section(payload)?,
+                2 => imports = parse_import_section(payload, &types)?,
                 3 => func_types = parse_func_section(payload)?,
                 10 => codes = parse_code_section(payload)?,
-                _ => {} // custom / import / export / memory / … : skipped
+                _ => {} // custom / export / memory / … : skipped
             }
             i = end;
         }
@@ -614,6 +693,13 @@ impl Module {
         }
 
         let mut module = Module::new();
+        // Imported functions occupy the low indices; without a bound host
+        // implementation they trap loudly if actually called.
+        for (np, nr) in &imports {
+            module.add_host_function(*np, *nr, |_args, _mem| {
+                Err(WasmError::Trap("call to unbound imported function".into()))
+            });
+        }
         for (fi, &tidx) in func_types.iter().enumerate() {
             let (n_params, n_results) = *types
                 .get(tidx)
@@ -638,12 +724,55 @@ impl Module {
     pub fn invoke(&self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
         let mut steps: u64 = 0;
         let mut mem = vec![0u8; WASM_PAGE_SIZE];
-        self.invoke_inner(idx, args, 0, &mut steps, &mut mem)
+        self.call_any(idx, args, 0, &mut steps, &mut mem)
     }
 
-    fn invoke_inner(
+    /// Number of parameters a function index (host or defined) expects.
+    fn param_count(&self, idx: usize) -> Result<usize, WasmError> {
+        if idx < self.hosts.len() {
+            Ok(self.hosts[idx].n_params)
+        } else {
+            self.funcs
+                .get(idx - self.hosts.len())
+                .map(|f| f.n_params)
+                .ok_or_else(|| WasmError::Trap(format!("call to unknown function {idx}")))
+        }
+    }
+
+    /// Dispatch a call by combined index to a host function or a defined one.
+    fn call_any(
         &self,
         idx: usize,
+        args: &[i32],
+        depth: usize,
+        steps: &mut u64,
+        mem: &mut Vec<u8>,
+    ) -> Result<Vec<i32>, WasmError> {
+        if idx < self.hosts.len() {
+            let host = &self.hosts[idx];
+            if args.len() != host.n_params {
+                return Err(WasmError::Trap(format!(
+                    "host function {idx} expects {} args, got {}",
+                    host.n_params,
+                    args.len()
+                )));
+            }
+            let res = (host.f)(args, mem)?;
+            if res.len() != host.n_results {
+                return Err(WasmError::Trap(format!(
+                    "host function {idx} returned {} results, expected {}",
+                    res.len(),
+                    host.n_results
+                )));
+            }
+            return Ok(res);
+        }
+        self.run_defined(idx - self.hosts.len(), args, depth, steps, mem)
+    }
+
+    fn run_defined(
+        &self,
+        def_idx: usize,
         args: &[i32],
         depth: usize,
         steps: &mut u64,
@@ -656,11 +785,11 @@ impl Module {
         }
         let func = self
             .funcs
-            .get(idx)
-            .ok_or_else(|| WasmError::Trap(format!("call to unknown function {idx}")))?;
+            .get(def_idx)
+            .ok_or_else(|| WasmError::Trap(format!("call to unknown function {def_idx}")))?;
         if args.len() != func.n_params {
             return Err(WasmError::Trap(format!(
-                "function {idx} expects {} args, got {}",
+                "function {def_idx} expects {} args, got {}",
                 func.n_params,
                 args.len()
             )));
@@ -821,11 +950,8 @@ impl Module {
                     *cell = v;
                 }
                 Op::Call(f) => {
-                    let callee = self
-                        .funcs
-                        .get(f as usize)
-                        .ok_or_else(|| WasmError::Trap(format!("call to unknown function {f}")))?;
-                    let n = callee.n_params;
+                    let combined = f as usize;
+                    let n = self.param_count(combined)?;
                     if stack.len() < n {
                         return Err(WasmError::Trap(format!(
                             "call {f}: stack has {} values, needs {n}",
@@ -833,7 +959,7 @@ impl Module {
                         )));
                     }
                     let cargs = stack.split_off(stack.len() - n);
-                    let res = self.invoke_inner(f as usize, &cargs, depth + 1, steps, mem)?;
+                    let res = self.call_any(combined, &cargs, depth + 1, steps, mem)?;
                     stack.extend(res);
                 }
                 Op::Block { arity, end } => control.push(Frame {
@@ -1450,6 +1576,62 @@ mod tests {
         // i32.const 65536 ; i32.load8_u -> [65536, 65537) > one page
         let body = [0x41, 0x80, 0x80, 0x04, 0x2D, 0x00, 0x00, 0x0B];
         assert!(matches!(run_body(0, 1, &body), Err(WasmError::Trap(_))));
+    }
+
+    // Family 5: host imports.
+    #[test]
+    fn wasm_calls_host_and_gets_return_value() {
+        let mut m = Module::new();
+        // host 0: increment its argument
+        let _h = m.add_host_function(1, 1, |args, _mem| Ok(vec![args[0] + 1]));
+        // defined func (index 1): local.get 0 ; call 0 ; end
+        let f = m
+            .add_function(1, 0, 1, &[0x20, 0x00, 0x10, 0x00, 0x0B])
+            .unwrap();
+        assert_eq!(f, 1); // host is 0, defined func is 1
+        assert_eq!(m.invoke(f, &[41]).unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn host_reads_linear_memory_written_by_wasm() {
+        let mut m = Module::new();
+        // host 0: read i32 at mem[0] and return it
+        let _h = m.add_host_function(0, 1, |_args, mem| {
+            Ok(vec![i32::from_le_bytes([mem[0], mem[1], mem[2], mem[3]])])
+        });
+        // defined func: i32.const 0 ; i32.const 42 ; i32.store ; call 0 ; end
+        let f = m
+            .add_function(
+                0,
+                0,
+                1,
+                &[
+                    0x41, 0x00, 0x41, 0x2A, 0x36, 0x00, 0x00, // mem[0] = 42
+                    0x10, 0x00, // call host 0 -> reads mem[0]
+                    0x0B,
+                ],
+            )
+            .unwrap();
+        assert_eq!(m.invoke(f, &[]).unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn module_with_import_section_traps_when_unbound() {
+        // (module (import "env" "h" (func (result i32))) (func (result i32) call 0))
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            // type: func () -> (i32)
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // import: "env"."h" func type 0
+            0x02, 0x09, 0x01, 0x03, 0x65, 0x6E, 0x76, 0x01, 0x68, 0x00, 0x00,
+            // func: type 0 (the defined function, index 1)
+            0x03, 0x02, 0x01, 0x00,
+            // code: call 0 (the import) ; end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        ];
+        let m = Module::from_bytes(&wasm).unwrap();
+        // defined function is index 1 (import occupies 0)
+        assert!(matches!(m.invoke(1, &[]), Err(WasmError::Trap(_))));
     }
 
     // Acceptance (tinyvm.6): load a standard .wasm module and invoke.
