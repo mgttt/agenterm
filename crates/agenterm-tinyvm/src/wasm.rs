@@ -768,6 +768,38 @@ fn skip_name(p: &[u8], i: usize) -> Result<usize, WasmError> {
         .ok_or_else(|| WasmError::Decode("name runs past section".into()))
 }
 
+/// Read a UTF-8 name (LEB length + bytes), returning it and the next offset.
+fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
+    let (len, ni) = leb_u32(p, i)?;
+    let end = ni
+        .checked_add(len as usize)
+        .filter(|&e| e <= p.len())
+        .ok_or_else(|| WasmError::Decode("name runs past section".into()))?;
+    let s = std::str::from_utf8(&p[ni..end])
+        .map_err(|_| WasmError::Decode("name is not valid UTF-8".into()))?
+        .to_owned();
+    Ok((s, end))
+}
+
+/// Parse the export section into `(name, kind, index)` triples, keeping only
+/// function exports (`kind == 0x00`).
+fn parse_export_section(p: &[u8]) -> Result<Vec<(String, usize)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let (name, ni) = read_name(p, i)?;
+        let kind = *p
+            .get(ni)
+            .ok_or_else(|| WasmError::Decode("truncated export".into()))?;
+        let (index, nj) = leb_u32(p, ni + 1)?;
+        i = nj;
+        if kind == 0x00 {
+            out.push((name, index as usize));
+        }
+    }
+    Ok(out)
+}
+
 /// Parse the import section, returning `(n_params, n_results)` for each
 /// imported **function** in order. Only function imports are supported here.
 fn parse_import_section(
@@ -911,6 +943,9 @@ struct HostFunc {
 pub struct Module {
     hosts: Vec<HostFunc>,
     funcs: Vec<Func>,
+    /// Exported function names -> combined function index (from a module's
+    /// export section, or registered via [`Module::export`]).
+    exports: std::collections::HashMap<String, usize>,
 }
 
 impl Module {
@@ -984,6 +1019,7 @@ impl Module {
         let mut imports: Vec<(usize, usize)> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
+        let mut exports: Vec<(String, usize)> = Vec::new();
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1001,8 +1037,9 @@ impl Module {
                 1 => types = parse_type_section(payload)?,
                 2 => imports = parse_import_section(payload, &types)?,
                 3 => func_types = parse_func_section(payload)?,
+                7 => exports = parse_export_section(payload)?,
                 10 => codes = parse_code_section(payload)?,
-                _ => {} // custom / export / memory / … : skipped
+                _ => {} // custom / memory / global / … : skipped
             }
             i = end;
         }
@@ -1036,7 +1073,30 @@ impl Module {
                 code,
             });
         }
+        for (name, index) in exports {
+            module.exports.insert(name, index);
+        }
         Ok(module)
+    }
+
+    /// Record `name` as an exported function index (for [`Module::invoke_by_name`]).
+    pub fn export(&mut self, name: &str, func_index: usize) {
+        self.exports.insert(name.to_owned(), func_index);
+    }
+
+    /// Resolve an exported function name to its index, if present.
+    pub fn export_index(&self, name: &str) -> Option<usize> {
+        self.exports.get(name).copied()
+    }
+
+    /// Invoke an exported function by name with typed [`Val`] arguments.
+    pub fn invoke_by_name(&self, name: &str, args: &[Val]) -> Result<Vec<Val>, WasmError> {
+        let idx = self
+            .exports
+            .get(name)
+            .copied()
+            .ok_or_else(|| WasmError::Trap(format!("no exported function named `{name}`")))?;
+        self.invoke_val(idx, args)
     }
 
     /// Invoke function `idx` with `args`, returning its result values.
@@ -2668,6 +2728,27 @@ mod tests {
         assert!(matches!(
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
+        ));
+    }
+
+    // Gate (tinyvm.18): resolve and invoke an exported function by name.
+    #[test]
+    fn invoke_exported_function_by_name() {
+        // (module (func (export "answer") (result i32) i32.const 42))
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // type () -> i32
+            0x03, 0x02, 0x01, 0x00, // func: type 0
+            // export "answer" func 0
+            0x07, 0x0A, 0x01, 0x06, 0x61, 0x6E, 0x73, 0x77, 0x65, 0x72, 0x00, 0x00,
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B, // code: i32.const 42
+        ];
+        let m = Module::from_bytes(&wasm).unwrap();
+        assert_eq!(m.export_index("answer"), Some(0));
+        assert_eq!(m.invoke_by_name("answer", &[]).unwrap(), vec![Val::I32(42)]);
+        assert!(matches!(
+            m.invoke_by_name("missing", &[]),
+            Err(WasmError::Trap(_))
         ));
     }
 
