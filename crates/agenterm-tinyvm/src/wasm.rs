@@ -105,6 +105,28 @@ enum Op {
     },
     Br(u32),
     BrIf(u32),
+    /// `br_table` — pop an index; branch to `targets[index]` or `default`.
+    BrTable { targets: Vec<u32>, default: u32 },
+    /// `if` — pop a condition; run the then-body when nonzero, else the
+    /// else-body. `else_pc` indexes the [`Op::Else`] (if any); `end` indexes the
+    /// matching `End`.
+    If {
+        arity: u32,
+        else_pc: Option<usize>,
+        end: usize,
+    },
+    /// `else` — end of the then-body; `end` indexes the `if`'s matching `End`.
+    Else { end: usize },
+    /// `unreachable` — always traps.
+    Unreachable,
+    /// `nop` — does nothing.
+    Nop,
+    /// `drop` — discard the top of stack.
+    Drop,
+    /// `select` — pop c, b, a; push `a` if `c != 0` else `b`.
+    Select,
+    /// `local.tee` — like `local.set` but leaves the value on the stack.
+    LocalTee(u32),
     Return,
     End,
 }
@@ -263,14 +285,69 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 i = ni;
                 ops.push(Op::BrIf(x));
             }
+            0x0E => {
+                let (count, n1) = leb_u32(body, i)?;
+                let mut cur = n1;
+                let mut targets = Vec::with_capacity(count as usize);
+                for _ in 0..count {
+                    let (t, ni) = leb_u32(body, cur)?;
+                    cur = ni;
+                    targets.push(t);
+                }
+                let (default, ni) = leb_u32(body, cur)?;
+                i = ni;
+                ops.push(Op::BrTable { targets, default });
+            }
+            0x04 => {
+                let (arity, ni) = block_arity(body, i)?;
+                i = ni;
+                open.push(ops.len());
+                ops.push(Op::If {
+                    arity,
+                    else_pc: None,
+                    end: 0,
+                });
+            }
+            0x05 => {
+                let else_idx = ops.len();
+                let open_idx = *open
+                    .last()
+                    .ok_or_else(|| WasmError::Decode("else without matching if".into()))?;
+                match &mut ops[open_idx] {
+                    Op::If { else_pc, .. } => *else_pc = Some(else_idx),
+                    _ => return Err(WasmError::Decode("else not inside an if".into())),
+                }
+                ops.push(Op::Else { end: 0 });
+            }
+            0x00 => ops.push(Op::Unreachable),
+            0x01 => ops.push(Op::Nop),
+            0x1A => ops.push(Op::Drop),
+            0x1B => ops.push(Op::Select),
+            0x22 => {
+                let (x, ni) = leb_u32(body, i)?;
+                i = ni;
+                ops.push(Op::LocalTee(x));
+            }
             0x0F => ops.push(Op::Return),
             0x0B => {
                 let end_idx = ops.len();
                 ops.push(Op::End);
                 if let Some(open_idx) = open.pop() {
-                    match &mut ops[open_idx] {
-                        Op::Block { end, .. } | Op::Loop { end, .. } => *end = end_idx,
-                        _ => unreachable!("open index always points at a block or loop"),
+                    let else_pc = match &mut ops[open_idx] {
+                        Op::Block { end, .. } | Op::Loop { end, .. } => {
+                            *end = end_idx;
+                            None
+                        }
+                        Op::If { end, else_pc, .. } => {
+                            *end = end_idx;
+                            *else_pc
+                        }
+                        _ => unreachable!("open index always points at a block, loop, or if"),
+                    };
+                    if let Some(e) = else_pc {
+                        if let Op::Else { end } = &mut ops[e] {
+                            *end = end_idx;
+                        }
                     }
                 }
             }
@@ -684,6 +761,62 @@ impl Module {
                         }
                     }
                 }
+                Op::BrTable { targets, default } => {
+                    let idx = pop(&mut stack)? as u32 as usize;
+                    let label = targets.get(idx).copied().unwrap_or(default);
+                    pc = do_branch(&mut stack, &mut control, label)?;
+                    if control.is_empty() {
+                        return take_results(&mut stack, func.arity);
+                    }
+                }
+                Op::If {
+                    arity,
+                    else_pc,
+                    end,
+                } => {
+                    let cond = pop(&mut stack)?;
+                    control.push(Frame {
+                        base: stack.len(),
+                        branch_arity: arity as usize,
+                        cont: end + 1,
+                        is_loop: false,
+                    });
+                    if cond == 0 {
+                        // Skip the then-body: jump to the else-body if present,
+                        // otherwise to the `End` (which pops this frame).
+                        pc = match else_pc {
+                            Some(e) => e + 1,
+                            None => end,
+                        };
+                    }
+                }
+                Op::Else { end } => {
+                    // Reached only by falling through the then-body; skip the
+                    // else-body by jumping to the matching `End`.
+                    pc = end;
+                }
+                Op::Unreachable => {
+                    return Err(WasmError::Trap("unreachable executed".into()));
+                }
+                Op::Nop => {}
+                Op::Drop => {
+                    pop(&mut stack)?;
+                }
+                Op::Select => {
+                    let c = pop(&mut stack)?;
+                    let b = pop(&mut stack)?;
+                    let a = pop(&mut stack)?;
+                    stack.push(if c != 0 { a } else { b });
+                }
+                Op::LocalTee(l) => {
+                    let v = *stack
+                        .last()
+                        .ok_or_else(|| WasmError::Trap("local.tee on empty stack".into()))?;
+                    let cell = locals
+                        .get_mut(l as usize)
+                        .ok_or_else(|| WasmError::Trap(format!("local.tee {l} out of range")))?;
+                    *cell = v;
+                }
                 Op::Return => return take_results(&mut stack, func.arity),
                 Op::End => {
                     control.pop();
@@ -1048,6 +1181,105 @@ mod tests {
         let mut m = Module::new();
         let f = m.add_function(0, 0, 1, &body).unwrap();
         assert!(matches!(m.invoke(f, &[]), Err(WasmError::Trap(_))));
+    }
+
+    // Family 3: control flow.
+    #[test]
+    fn if_else_selects_branch() {
+        // (param i32)(result i32): local.get0 ; if (result i32) 10 else 20 end
+        let body = [
+            0x20, 0x00, // local.get 0
+            0x04, 0x7F, // if (result i32)
+            0x41, 0x0A, // i32.const 10
+            0x05, // else
+            0x41, 0x14, // i32.const 20
+            0x0B, // end (if)
+            0x0B, // end (func)
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(1, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[1]).unwrap(), vec![10]); // true -> then
+        assert_eq!(m.invoke(f, &[0]).unwrap(), vec![20]); // false -> else
+    }
+
+    #[test]
+    fn if_without_else_runs_or_skips() {
+        // (param i32)(result i32): base 7; if (no result) then set local via... keep simple:
+        // i32.const 7 ; local.get0 ; if  (empty)  i32.const 0 drop  end ; end -> always 7
+        // Simpler: prove skip doesn't corrupt: push 7, if(empty){ nop }, return 7.
+        let body = [
+            0x41, 0x07, // i32.const 7
+            0x20, 0x00, // local.get 0 (condition)
+            0x04, 0x40, // if (empty)
+            0x01, // nop
+            0x0B, // end if
+            0x0B, // end func
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(1, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[1]).unwrap(), vec![7]); // cond true, runs nop
+        assert_eq!(m.invoke(f, &[0]).unwrap(), vec![7]); // cond false, skips
+    }
+
+    #[test]
+    fn drop_discards_top() {
+        // i32.const 5 ; i32.const 9 ; drop -> 5
+        let body = [0x41, 0x05, 0x41, 0x09, 0x1A, 0x0B];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[]).unwrap(), vec![5]);
+    }
+
+    #[test]
+    fn select_picks_by_condition() {
+        // a=11, b=22 ; select on c
+        let make = |c: u8| [0x41, 0x0B, 0x41, 0x16, 0x41, c, 0x1B, 0x0B];
+        let mut m = Module::new();
+        let t = m.add_function(0, 0, 1, &make(0x01)).unwrap();
+        let e = m.add_function(0, 0, 1, &make(0x00)).unwrap();
+        assert_eq!(m.invoke(t, &[]).unwrap(), vec![11]); // c!=0 -> a
+        assert_eq!(m.invoke(e, &[]).unwrap(), vec![22]); // c==0 -> b
+    }
+
+    #[test]
+    fn local_tee_writes_and_keeps() {
+        // i32.const 7 ; local.tee 0 ; drop ; local.get 0 -> 7 (proves the write)
+        let body = [0x41, 0x07, 0x22, 0x00, 0x1A, 0x20, 0x00, 0x0B];
+        let mut m = Module::new();
+        let f = m.add_function(0, 1, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[]).unwrap(), vec![7]);
+    }
+
+    #[test]
+    fn unreachable_traps() {
+        let body = [0x00, 0x0B];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 0, &body).unwrap();
+        assert!(matches!(m.invoke(f, &[]), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn br_table_switches() {
+        // switch(local0) { 0 -> 10, 1 -> 20, default -> 30 } via three nested blocks
+        let body = [
+            0x02, 0x40, // block (label 2 / default)
+            0x02, 0x40, // block (label 1)
+            0x02, 0x40, // block (label 0)
+            0x20, 0x00, // local.get 0
+            0x0E, 0x02, 0x00, 0x01, 0x02, // br_table [0,1] default 2
+            0x0B, // end block0
+            0x41, 0x0A, 0x0F, // i32.const 10 ; return
+            0x0B, // end block1
+            0x41, 0x14, 0x0F, // i32.const 20 ; return
+            0x0B, // end block2
+            0x41, 0x1E, 0x0F, // i32.const 30 ; return
+            0x0B, // end func
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(1, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke(f, &[0]).unwrap(), vec![10]);
+        assert_eq!(m.invoke(f, &[1]).unwrap(), vec![20]);
+        assert_eq!(m.invoke(f, &[7]).unwrap(), vec![30]);
     }
 
     // Acceptance (tinyvm.6): load a standard .wasm module and invoke.
