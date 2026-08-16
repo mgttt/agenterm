@@ -125,6 +125,37 @@ enum Op {
     I64Store8 { offset: u32 },
     I64Store16 { offset: u32 },
     I64Store32 { offset: u32 },
+    // --- i64 integer family ---
+    I64Const(i64),
+    I64Eqz,
+    I64Eq,
+    I64Ne,
+    I64LtS,
+    I64LtU,
+    I64GtS,
+    I64GtU,
+    I64LeS,
+    I64LeU,
+    I64GeS,
+    I64GeU,
+    I64Clz,
+    I64Ctz,
+    I64Popcnt,
+    I64Add,
+    I64Sub,
+    I64Mul,
+    I64DivS,
+    I64DivU,
+    I64RemS,
+    I64RemU,
+    I64And,
+    I64Or,
+    I64Xor,
+    I64Shl,
+    I64ShrS,
+    I64ShrU,
+    I64Rotl,
+    I64Rotr,
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -493,6 +524,40 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 i = ni;
                 ops.push(Op::I64Store32 { offset });
             }
+            0x42 => {
+                let (v, ni) = leb_s64(body, i)?;
+                i = ni;
+                ops.push(Op::I64Const(v));
+            }
+            0x50 => ops.push(Op::I64Eqz),
+            0x51 => ops.push(Op::I64Eq),
+            0x52 => ops.push(Op::I64Ne),
+            0x53 => ops.push(Op::I64LtS),
+            0x54 => ops.push(Op::I64LtU),
+            0x55 => ops.push(Op::I64GtS),
+            0x56 => ops.push(Op::I64GtU),
+            0x57 => ops.push(Op::I64LeS),
+            0x58 => ops.push(Op::I64LeU),
+            0x59 => ops.push(Op::I64GeS),
+            0x5A => ops.push(Op::I64GeU),
+            0x79 => ops.push(Op::I64Clz),
+            0x7A => ops.push(Op::I64Ctz),
+            0x7B => ops.push(Op::I64Popcnt),
+            0x7C => ops.push(Op::I64Add),
+            0x7D => ops.push(Op::I64Sub),
+            0x7E => ops.push(Op::I64Mul),
+            0x7F => ops.push(Op::I64DivS),
+            0x80 => ops.push(Op::I64DivU),
+            0x81 => ops.push(Op::I64RemS),
+            0x82 => ops.push(Op::I64RemU),
+            0x83 => ops.push(Op::I64And),
+            0x84 => ops.push(Op::I64Or),
+            0x85 => ops.push(Op::I64Xor),
+            0x86 => ops.push(Op::I64Shl),
+            0x87 => ops.push(Op::I64ShrS),
+            0x88 => ops.push(Op::I64ShrU),
+            0x89 => ops.push(Op::I64Rotl),
+            0x8A => ops.push(Op::I64Rotr),
             other => {
                 return Err(WasmError::Decode(format!(
                     "unsupported opcode 0x{other:02x} in this subset"
@@ -1094,6 +1159,72 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
                     mem[ea..ea + 4].copy_from_slice(&(value as u32).to_le_bytes());
                 }
+                Op::I64Const(v) => stack.push(Val::I64(v)),
+                Op::I64Eqz => {
+                    let a = pop_i64(&mut stack)?;
+                    stack.push(Val::I32(i32::from(a == 0)));
+                }
+                Op::I64Eq => cmp_i64(&mut stack, |a, b| a == b)?,
+                Op::I64Ne => cmp_i64(&mut stack, |a, b| a != b)?,
+                Op::I64LtS => cmp_i64(&mut stack, |a, b| a < b)?,
+                Op::I64LtU => cmp_i64(&mut stack, |a, b| (a as u64) < (b as u64))?,
+                Op::I64GtS => cmp_i64(&mut stack, |a, b| a > b)?,
+                Op::I64GtU => cmp_i64(&mut stack, |a, b| (a as u64) > (b as u64))?,
+                Op::I64LeS => cmp_i64(&mut stack, |a, b| a <= b)?,
+                Op::I64LeU => cmp_i64(&mut stack, |a, b| (a as u64) <= (b as u64))?,
+                Op::I64GeS => cmp_i64(&mut stack, |a, b| a >= b)?,
+                Op::I64GeU => cmp_i64(&mut stack, |a, b| (a as u64) >= (b as u64))?,
+                Op::I64Clz => un_i64(&mut stack, |a| (a as u64).leading_zeros() as i64)?,
+                Op::I64Ctz => un_i64(&mut stack, |a| (a as u64).trailing_zeros() as i64)?,
+                Op::I64Popcnt => un_i64(&mut stack, |a| (a as u64).count_ones() as i64)?,
+                Op::I64Add => bin_i64(&mut stack, |a, b| a.wrapping_add(b))?,
+                Op::I64Sub => bin_i64(&mut stack, |a, b| a.wrapping_sub(b))?,
+                Op::I64Mul => bin_i64(&mut stack, |a, b| a.wrapping_mul(b))?,
+                Op::I64DivS => bin_i64_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i64.div_s by zero".into()))
+                    } else {
+                        a.checked_div(b)
+                            .ok_or_else(|| WasmError::Trap("i64.div_s overflow".into()))
+                    }
+                })?,
+                Op::I64DivU => bin_i64_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i64.div_u by zero".into()))
+                    } else {
+                        Ok(((a as u64) / (b as u64)) as i64)
+                    }
+                })?,
+                Op::I64RemS => bin_i64_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i64.rem_s by zero".into()))
+                    } else {
+                        Ok(a.wrapping_rem(b))
+                    }
+                })?,
+                Op::I64RemU => bin_i64_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i64.rem_u by zero".into()))
+                    } else {
+                        Ok(((a as u64) % (b as u64)) as i64)
+                    }
+                })?,
+                Op::I64And => bin_i64(&mut stack, |a, b| a & b)?,
+                Op::I64Or => bin_i64(&mut stack, |a, b| a | b)?,
+                Op::I64Xor => bin_i64(&mut stack, |a, b| a ^ b)?,
+                Op::I64Shl => bin_i64(&mut stack, |a, b| ((a as u64) << ((b as u64) & 63)) as i64)?,
+                Op::I64ShrS => bin_i64(&mut stack, |a, b| a >> ((b as u64) & 63))?,
+                Op::I64ShrU => bin_i64(&mut stack, |a, b| ((a as u64) >> ((b as u64) & 63)) as i64)?,
+                Op::I64Rotl => {
+                    bin_i64(&mut stack, |a, b| {
+                        (a as u64).rotate_left((b as u64 & 63) as u32) as i64
+                    })?
+                }
+                Op::I64Rotr => {
+                    bin_i64(&mut stack, |a, b| {
+                        (a as u64).rotate_right((b as u64 & 63) as u32) as i64
+                    })?
+                }
                 Op::LocalGet(l) => {
                     let v = *locals
                         .get(l as usize)
@@ -1250,6 +1381,65 @@ fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
 fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(), WasmError> {
     let ea = mem_ea(mem.len(), addr, offset, 4)?;
     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+/// Decode a signed LEB128 up to 64 bits (like [`leb_s32`] but wider).
+fn leb_s64(bytes: &[u8], mut i: usize) -> Result<(i64, usize), WasmError> {
+    let mut result: i64 = 0;
+    let mut shift = 0u32;
+    loop {
+        let byte = *bytes
+            .get(i)
+            .ok_or_else(|| WasmError::Decode("truncated signed LEB128".into()))?;
+        i += 1;
+        result |= i64::from(byte & 0x7f) << shift;
+        shift += 7;
+        if byte & 0x80 == 0 {
+            if shift < 64 && (byte & 0x40) != 0 {
+                result |= (-1i64) << shift;
+            }
+            break;
+        }
+        if shift >= 70 {
+            return Err(WasmError::Decode("signed LEB128 too long".into()));
+        }
+    }
+    Ok((result, i))
+}
+
+/// Pop `b` then `a` and push `f(a, b)` — the shape of every binary i64 op.
+fn bin_i64(stack: &mut Vec<Val>, f: impl FnOnce(i64, i64) -> i64) -> Result<(), WasmError> {
+    let b = pop_i64(stack)?;
+    let a = pop_i64(stack)?;
+    stack.push(Val::I64(f(a, b)));
+    Ok(())
+}
+
+/// Like [`bin_i64`] but the operation may trap (e.g. divide by zero).
+fn bin_i64_try(
+    stack: &mut Vec<Val>,
+    f: impl FnOnce(i64, i64) -> Result<i64, WasmError>,
+) -> Result<(), WasmError> {
+    let b = pop_i64(stack)?;
+    let a = pop_i64(stack)?;
+    let r = f(a, b)?;
+    stack.push(Val::I64(r));
+    Ok(())
+}
+
+/// Pop `b` then `a` and push an i32 boolean — the shape of every i64 comparison.
+fn cmp_i64(stack: &mut Vec<Val>, f: impl FnOnce(i64, i64) -> bool) -> Result<(), WasmError> {
+    let b = pop_i64(stack)?;
+    let a = pop_i64(stack)?;
+    stack.push(Val::I32(i32::from(f(a, b))));
+    Ok(())
+}
+
+/// Pop `a` and push `f(a)` — the shape of every unary i64 op.
+fn un_i64(stack: &mut Vec<Val>, f: impl FnOnce(i64) -> i64) -> Result<(), WasmError> {
+    let a = pop_i64(stack)?;
+    stack.push(Val::I64(f(a)));
     Ok(())
 }
 
@@ -1896,6 +2086,72 @@ mod tests {
         ));
     }
 
+    // Family: i64 integer ops.
+    fn run_i64(body: &[u8]) -> i64 {
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, body).unwrap();
+        match m.invoke_val(f, &[]).unwrap().as_slice() {
+            [Val::I64(v)] => *v,
+            other => panic!("expected one i64 result, got {other:?}"),
+        }
+    }
+    fn run_i32_res(body: &[u8]) -> i32 {
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, body).unwrap();
+        match m.invoke_val(f, &[]).unwrap().as_slice() {
+            [Val::I32(v)] => *v,
+            other => panic!("expected one i32 result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn i64_const_add_returns_43() {
+        // i64.const 42 ; i64.const 1 ; i64.add
+        assert_eq!(run_i64(&[0x42, 0x2A, 0x42, 0x01, 0x7C, 0x0B]), 43);
+    }
+
+    #[test]
+    fn i64_compare_and_eqz() {
+        assert_eq!(run_i32_res(&[0x42, 0x05, 0x42, 0x05, 0x51, 0x0B]), 1); // eq true
+        assert_eq!(run_i32_res(&[0x42, 0x05, 0x42, 0x06, 0x52, 0x0B]), 1); // ne true
+        assert_eq!(run_i32_res(&[0x42, 0x7F, 0x42, 0x01, 0x53, 0x0B]), 1); // lt_s(-1,1)
+        assert_eq!(run_i32_res(&[0x42, 0x7F, 0x42, 0x01, 0x54, 0x0B]), 0); // lt_u(-1,1)
+        assert_eq!(run_i32_res(&[0x42, 0x00, 0x50, 0x0B]), 1); // eqz 0
+        assert_eq!(run_i32_res(&[0x42, 0x01, 0x50, 0x0B]), 0); // eqz 1
+    }
+
+    #[test]
+    fn i64_arith_shift_bitcount_golden() {
+        assert_eq!(run_i64(&[0x42, 0x06, 0x42, 0x07, 0x7E, 0x0B]), 42); // mul
+        assert_eq!(run_i64(&[0x42, 0x79, 0x42, 0x02, 0x7F, 0x0B]), -3); // div_s(-7,2)
+        assert_eq!(run_i64(&[0x42, 0x06, 0x42, 0x03, 0x85, 0x0B]), 5); // xor
+        assert_eq!(run_i64(&[0x42, 0x01, 0x42, 0x04, 0x86, 0x0B]), 16); // shl
+        assert_eq!(run_i64(&[0x42, 0x78, 0x42, 0x01, 0x87, 0x0B]), -4); // shr_s
+        assert_eq!(run_i64(&[0x42, 0x7F, 0x42, 0x3F, 0x88, 0x0B]), 1); // shr_u(-1,63)
+        assert_eq!(run_i64(&[0x42, 0x01, 0x42, 0x01, 0x8A, 0x0B]), i64::MIN); // rotr(1,1)
+        assert_eq!(run_i64(&[0x42, 0x01, 0x79, 0x0B]), 63); // clz
+        assert_eq!(run_i64(&[0x42, 0x08, 0x7A, 0x0B]), 3); // ctz
+        assert_eq!(run_i64(&[0x42, 0x7F, 0x7B, 0x0B]), 64); // popcnt(-1)
+    }
+
+    #[test]
+    fn i64_div_rem_by_zero_and_overflow_trap() {
+        let mut m = Module::new();
+        for op in [0x7F, 0x80, 0x81, 0x82] {
+            let f = m
+                .add_function(0, 0, 1, &[0x42, 0x01, 0x42, 0x00, op, 0x0B])
+                .unwrap();
+            assert!(matches!(m.invoke_val(f, &[]), Err(WasmError::Trap(_))));
+        }
+        // i64::MIN / -1 overflow: const LEB = nine 0x80 then 0x7F.
+        let min = [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x7F];
+        let mut body = vec![0x42];
+        body.extend_from_slice(&min);
+        body.extend_from_slice(&[0x42, 0x7F, 0x7F, 0x0B]); // i64.const -1 ; div_s ; end
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert!(matches!(m.invoke_val(f, &[]), Err(WasmError::Trap(_))));
+    }
+
     // Family: i64 linear memory (values supplied as params via invoke_val).
     #[test]
     fn i64_store_then_load_returns_42() {
@@ -2002,9 +2258,9 @@ mod tests {
     #[test]
     fn unsupported_opcode_fails_to_decode() {
         let mut m = Module::new();
-        // 0x7C is i64.add, deliberately outside this cut's subset.
+        // 0xC0 is i32.extend8_s (sign-extension proposal), outside this cut.
         assert!(matches!(
-            m.add_function(0, 0, 1, &[0x7C, 0x0B]),
+            m.add_function(0, 0, 1, &[0xC0, 0x0B]),
             Err(WasmError::Decode(_))
         ));
     }
