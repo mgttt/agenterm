@@ -64,6 +64,14 @@ When a task fails without useful output, the worker's stderr is `Stdio::null()`
 by default. Set `AGENTERM_SCRIPT_WORKER_STDERR=inherit` or you lose the whole
 `STEP` trail.
 
+A native-pack task process may inherit `AGENTERM_RH_PACK`. `rh run other.rh`
+from that process then loads the parent pack and ignores the child source
+(`resolve_rh_pack` prefers the env pack whenever it is set). Child `rh run` /
+`rh eval` of a different file must `env_remove("AGENTERM_RH_PACK")`. Ready-wait
+for such a child must cover pack compile, not just `entry()`; Candidate run
+`31940530325` failed `script_smoke_http_fixture_early_exit` because the HTTP
+fixture child was polled for 3s and its Command timeout was 60s.
+
 ---
 
 ## 1. Skeleton

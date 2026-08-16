@@ -307,7 +307,7 @@ fn start_http_fixture(
     log_path,
     stop_path
 ) {
-    configured_program(
+    let command = configured_program(
         context,
         script,
         [
@@ -318,7 +318,7 @@ fn start_http_fixture(
             "--project-root",
             repo,
             "--timeout-ms",
-            "20000",
+            "180000",
             "--max-operations",
             "10000000",
             "--",
@@ -330,22 +330,32 @@ fn start_http_fixture(
         ],
         "",
         #{}
-    ).start()
+    );
+    command.env_remove("AGENTERM_RH_PACK");
+    command.timeout(std::time::Duration::from_secs(180));
+    command.start()
 }
 
 fn wait_http_ready(child, ready_path, timeout_ms) {
-    let attempts = timeout_ms / 5;
+    let attempts = timeout_ms / 50;
+    if attempts < 1 {
+        throw "script_smoke_http_fixture_ready_timeout";
+    }
     for attempt in 0..attempts {
         if std::fs::exists(ready_path) {
             return rh::json::parse_file(ready_path);
         }
-        require(
-            child.state != "exited",
-            "script_smoke_http_fixture_early_exit"
-        );
-        rh::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
-    throw "script_smoke_http_fixture_ready_timeout";
+    if std::fs::exists(ready_path) {
+        return rh::json::parse_file(ready_path);
+    }
+    let output = child.wait_with_output(std::time::Duration::from_secs(2));
+    let detail = "" + output.stderr_text() + ":" + output.stdout;
+    if child.state == "exited" {
+        throw "script_smoke_http_fixture_early_exit:" + detail;
+    }
+    throw "script_smoke_http_fixture_ready_timeout:" + detail;
 }
 
 fn u32_header(length) {

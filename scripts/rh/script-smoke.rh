@@ -521,7 +521,12 @@ fn start_http_fixture(
     log_path,
     stop_path
 ) {
-    configured_program(
+    // `rh run` compiles a native pack before writing READY. A Candidate
+    // Windows debug compile of that pack is routinely >3s, and the parent
+    // Command timeout used to kill the child at 60s. Keep this child
+    // isolated from the parent task pack: inherited `AGENTERM_RH_PACK`
+    // makes `resolve_rh_pack` ignore the fixture source.
+    let command = configured_program(
         context,
         script,
         [
@@ -532,7 +537,7 @@ fn start_http_fixture(
             "--project-root",
             repo,
             "--timeout-ms",
-            "20000",
+            "180000",
             "--max-operations",
             "10000000",
             "--",
@@ -544,22 +549,32 @@ fn start_http_fixture(
         ],
         "",
         script_smoke_empty_env()
-    ).start()
+    );
+    command.env_remove("AGENTERM_RH_PACK");
+    command.timeout(std::time::Duration::from_secs(180));
+    command.start()
 }
 
 fn wait_http_ready(child, ready_path, timeout_ms) {
-    let attempts = timeout_ms / 5;
+    let attempts = timeout_ms / 50;
+    if attempts < 1 {
+        throw "script_smoke_http_fixture_ready_timeout";
+    }
     for attempt in 0..attempts {
         if std::fs::exists(ready_path) {
             return rh::json::parse_file(ready_path);
         }
-        require(
-            ("" + child.state) != "exited",
-            "script_smoke_http_fixture_early_exit"
-        );
-        rh::task::sleep(std::time::Duration::from_millis(5));
+        rh::task::sleep(std::time::Duration::from_millis(50));
     }
-    throw "script_smoke_http_fixture_ready_timeout";
+    if std::fs::exists(ready_path) {
+        return rh::json::parse_file(ready_path);
+    }
+    let output = child.wait_with_output(std::time::Duration::from_secs(2));
+    let detail = "" + output.stderr_text() + ":" + output.stdout;
+    if ("" + child.state) == "exited" {
+        throw "script_smoke_http_fixture_early_exit:" + detail;
+    }
+    throw "script_smoke_http_fixture_ready_timeout:" + detail;
 }
 
 fn script_framed_worker_smoke_eval_source(script) {
@@ -1298,7 +1313,7 @@ fn assert_tasks_and_http(
     );
     let http_error = "";
     try {
-        let ready = wait_http_ready(fixture, ready_path, 3000);
+        let ready = wait_http_ready(fixture, ready_path, 180000);
         test_harness::require(
             ready.schema_version == 1
                 && ready.pid > 0
@@ -2872,7 +2887,7 @@ fn run_fleet_journey(
         let ready = wait_http_ready(
             http_child,
             ready_path,
-            3000
+            180000
         );
         let latest = cli_json(
             context,
