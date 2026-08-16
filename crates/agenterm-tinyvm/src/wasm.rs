@@ -57,6 +57,16 @@ enum Op {
     I32Add,
     I32Sub,
     I32Eqz,
+    I32Eq,
+    I32Ne,
+    I32LtS,
+    I32LtU,
+    I32GtS,
+    I32GtU,
+    I32LeS,
+    I32LeU,
+    I32GeS,
+    I32GeU,
     /// `i32.load` — pop address, push 4 little-endian bytes at `addr + offset`.
     /// The memarg alignment hint is decoded and ignored (a valid MVP choice).
     I32Load { offset: u32 },
@@ -161,6 +171,16 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x6A => ops.push(Op::I32Add),
             0x6B => ops.push(Op::I32Sub),
             0x45 => ops.push(Op::I32Eqz),
+            0x46 => ops.push(Op::I32Eq),
+            0x47 => ops.push(Op::I32Ne),
+            0x48 => ops.push(Op::I32LtS),
+            0x49 => ops.push(Op::I32LtU),
+            0x4A => ops.push(Op::I32GtS),
+            0x4B => ops.push(Op::I32GtU),
+            0x4C => ops.push(Op::I32LeS),
+            0x4D => ops.push(Op::I32LeU),
+            0x4E => ops.push(Op::I32GeS),
+            0x4F => ops.push(Op::I32GeU),
             0x28 => {
                 // memarg = align (LEB u32, ignored) then offset (LEB u32)
                 let (_align, n1) = leb_u32(body, i)?;
@@ -512,6 +532,16 @@ impl Module {
                     let a = pop(&mut stack)?;
                     stack.push(i32::from(a == 0));
                 }
+                Op::I32Eq => bin_i32(&mut stack, |a, b| i32::from(a == b))?,
+                Op::I32Ne => bin_i32(&mut stack, |a, b| i32::from(a != b))?,
+                Op::I32LtS => bin_i32(&mut stack, |a, b| i32::from(a < b))?,
+                Op::I32LtU => bin_i32(&mut stack, |a, b| i32::from((a as u32) < (b as u32)))?,
+                Op::I32GtS => bin_i32(&mut stack, |a, b| i32::from(a > b))?,
+                Op::I32GtU => bin_i32(&mut stack, |a, b| i32::from((a as u32) > (b as u32)))?,
+                Op::I32LeS => bin_i32(&mut stack, |a, b| i32::from(a <= b))?,
+                Op::I32LeU => bin_i32(&mut stack, |a, b| i32::from((a as u32) <= (b as u32)))?,
+                Op::I32GeS => bin_i32(&mut stack, |a, b| i32::from(a >= b))?,
+                Op::I32GeU => bin_i32(&mut stack, |a, b| i32::from((a as u32) >= (b as u32)))?,
                 Op::I32Load { offset } => {
                     let addr = pop(&mut stack)?;
                     stack.push(mem_read_i32(mem, addr, offset)?);
@@ -617,6 +647,14 @@ fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
 fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(), WasmError> {
     let ea = effective_range(mem.len(), addr, offset)?;
     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+/// Pop `b` then `a` and push `f(a, b)` — the shape of every binary i32 op.
+fn bin_i32(stack: &mut Vec<i32>, f: impl FnOnce(i32, i32) -> i32) -> Result<(), WasmError> {
+    let b = pop(stack)?;
+    let a = pop(stack)?;
+    stack.push(f(a, b));
     Ok(())
 }
 
@@ -832,6 +870,44 @@ mod tests {
         let mut m = Module::new();
         let f = m.add_function(0, 0, 1, &body).unwrap();
         assert_eq!(m.invoke(f, &[]).unwrap(), vec![7]);
+    }
+
+    /// Encode a small integer in [-64, 63] as a single signed-LEB byte.
+    fn leb1(v: i32) -> u8 {
+        (v as u8) & 0x7f
+    }
+
+    /// Run `i32.const a ; i32.const b ; <op> ; end` and return the result.
+    fn binop(op: u8, a: i32, b: i32) -> Result<i32, WasmError> {
+        let body = [0x41, leb1(a), 0x41, leb1(b), op, 0x0B];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body)?;
+        Ok(m.invoke(f, &[])?[0])
+    }
+
+    /// Run `i32.const a ; <op> ; end` and return the result.
+    fn unop(op: u8, a: i32) -> i32 {
+        let body = [0x41, leb1(a), op, 0x0B];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        m.invoke(f, &[]).unwrap()[0]
+    }
+
+    // Family 1: i32 comparisons — signed vs unsigned must differ, true/false both.
+    #[test]
+    fn i32_comparisons() {
+        assert_eq!(binop(0x46, 5, 5).unwrap(), 1); // eq true
+        assert_eq!(binop(0x46, 5, 6).unwrap(), 0); // eq false
+        assert_eq!(binop(0x47, 5, 6).unwrap(), 1); // ne true
+        assert_eq!(binop(0x47, 5, 5).unwrap(), 0); // ne false
+        assert_eq!(binop(0x48, -1, 1).unwrap(), 1); // lt_s(-1,1) true
+        assert_eq!(binop(0x49, -1, 1).unwrap(), 0); // lt_u(0xffffffff,1) false
+        assert_eq!(binop(0x4A, 1, -1).unwrap(), 1); // gt_s(1,-1) true
+        assert_eq!(binop(0x4B, 1, -1).unwrap(), 0); // gt_u(1,huge) false
+        assert_eq!(binop(0x4C, 5, 5).unwrap(), 1); // le_s
+        assert_eq!(binop(0x4D, -1, -1).unwrap(), 1); // le_u equal
+        assert_eq!(binop(0x4E, 5, 5).unwrap(), 1); // ge_s
+        assert_eq!(binop(0x4F, -1, 1).unwrap(), 1); // ge_u(huge,1) true
     }
 
     // Acceptance (tinyvm.6): load a standard .wasm module and invoke.
