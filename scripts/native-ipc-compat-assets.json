@@ -7,6 +7,7 @@
       "version": "0.1.10",
       "tag": "v0.1.10",
       "commit": "79ef87829acda0f491ce447ec39a0d7f1d110c13",
+      "acquisition": "public_url",
       "native_server_platforms": ["windows"],
       "assets": [
         {
@@ -57,6 +58,7 @@
       "version": "0.1.11",
       "tag": "v0.1.11",
       "commit": "53f3036a1450e12429e5be12b8f4d3db237a943d",
+      "acquisition": "github_release_authenticated",
       "native_server_platforms": ["windows", "linux", "macos"],
       "assets": [
         {

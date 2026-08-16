@@ -1147,7 +1147,60 @@ fn theme_smoke_uses_native_bundled_pack() {
 
 #[test]
 fn native_ipc_compat_smoke_uses_bundled_pack() {
-    // Still host-eval (closure HE>1); pack build is the Phase B gate.
+    let source = std::fs::read_to_string(repo().join("scripts/rh/native-ipc-compat-smoke.rh"))
+        .expect("read native IPC compatibility smoke");
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(repo().join("scripts/native-ipc-compat-assets.json"))
+            .expect("read native IPC compatibility asset catalog"),
+    )
+    .expect("parse native IPC compatibility asset catalog");
+    let releases = catalog["releases"].as_array().expect("catalog releases");
+    let release_110 = releases
+        .iter()
+        .find(|release| release["version"] == "0.1.10")
+        .expect("v0.1.10 catalog entry");
+    let release_111 = releases
+        .iter()
+        .find(|release| release["version"] == "0.1.11")
+        .expect("v0.1.11 catalog entry");
+    assert_eq!(release_110["acquisition"], "public_url");
+    assert_eq!(release_111["acquisition"], "github_release_authenticated");
+    assert_eq!(release_111["assets"][0]["size"], 4_005_143);
+    assert_eq!(
+        release_111["assets"][0]["sha256"],
+        "31b6eea1cd2d3173edaa4ce5394c835f93d3b988fadd474d8c949c4e875ce7cf"
+    );
+
+    let gh_arguments = source
+        .split("let gh_arguments = [")
+        .nth(1)
+        .and_then(|tail| tail.split("];\n").next())
+        .expect("gh release download argv");
+    assert!(gh_arguments.contains("\"release\", \"download\""));
+    assert!(gh_arguments.contains("\"--repo\""));
+    assert!(gh_arguments.contains("\"--pattern\""));
+    assert!(gh_arguments.contains("\"--dir\""));
+    assert!(!gh_arguments.contains("GH_TOKEN"));
+    assert!(!gh_arguments.to_ascii_lowercase().contains("token"));
+    assert!(source.contains("std::env::has(\"GH_TOKEN\")"));
+    assert!(source.contains("acquisition == \"public_url\""));
+    assert!(source.contains("command_output(\n            context,\n            curl,"));
+    assert!(source.contains("native_ipc_compat_download_file_set:"));
+    assert!(source.contains("native_ipc_compat_archive_size:"));
+    assert!(source.contains("native_ipc_compat_archive_hash:"));
+
+    let candidate = std::fs::read_to_string(repo().join(".github/workflows/candidate.yml"))
+        .expect("read Candidate workflow");
+    let quality_step = candidate
+        .split("- name: Run release quality gate")
+        .nth(1)
+        .and_then(|tail| {
+            tail.split("- name: Upload failed quality-gate diagnostics")
+                .next()
+        })
+        .expect("Candidate quality step");
+    assert!(quality_step.contains("GH_TOKEN: ${{ github.token }}"));
+
     assert_bundled_pack_builds("scripts/rh/native-ipc-compat-smoke.rh");
 }
 #[test]

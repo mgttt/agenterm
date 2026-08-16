@@ -1,7 +1,9 @@
-// Prove published v0.1.10/v0.1.11 control clients and servers remain
+// Prove v0.1.10/v0.1.11 control clients and servers remain
 // compatible with the exact staged HEAD bytes across the TCP-to-native IPC
-// migration. Published archives are acquired by exact hash at invocation time;
-// no historical executable is stored in the repository.
+// migration. Release archives are acquired by exact hash at invocation time;
+// draft assets use the authenticated GitHub release API, while published
+// assets retain their public URL path. No historical executable is stored in
+// the repository.
 //
 // Args:
 //   --list-evidence
@@ -138,26 +140,59 @@ fn acquire_release(context, catalog, release, asset, facts) {
     std::fs::create_dir_all(downloads);
     std::fs::create_dir_all(extracted);
     let archive = std::path::join(downloads, asset.name).display;
-    let url = "https://github.com/" + catalog.repository +
-        "/releases/download/" + release.tag + "/" + asset.name;
-    let curl = "curl";
-    if facts.os == "windows" {
-        curl = "curl.exe";
+    let acquisition = "" + release.acquisition;
+    if acquisition == "github_release_authenticated" {
+        if !std::env::has("GH_TOKEN") {
+            throw "native_ipc_compat_gh_token_missing:" + release.version;
+        }
+        let release_tag = "" + release.tag;
+        let repository = "" + catalog.repository;
+        let asset_name = "" + asset.name;
+        // Authentication is inherited exclusively through GH_TOKEN. Keep the
+        // credential out of argv so the command record cannot retain it.
+        let gh_arguments = [
+            "release", "download", release_tag,
+            "--repo", repository,
+            "--pattern", asset_name,
+            "--dir", downloads
+        ];
+        command_output(context, "gh", gh_arguments, false, 130);
+    } else if acquisition == "public_url" {
+        let url = "https://github.com/" + catalog.repository +
+            "/releases/download/" + release.tag + "/" + asset.name;
+        let curl = "curl";
+        if facts.os == "windows" {
+            curl = "curl.exe";
+        }
+        let max_filesize = "" + asset.size;
+        let archive_output = "" + archive;
+        command_output(
+            context,
+            curl,
+            [
+                "--fail", "--location", "--silent", "--show-error",
+                "--max-time", "120",
+                "--max-filesize", max_filesize,
+                "--output", archive_output,
+                url
+            ],
+            false,
+            130
+        );
+    } else {
+        throw "native_ipc_compat_acquisition:" + acquisition;
     }
-    let max_filesize = "" + asset.size;
-    let archive_output = "" + archive;
-    command_output(
-        context,
-        curl,
-        [
-            "--fail", "--location", "--silent", "--show-error",
-            "--max-time", "120",
-            "--max-filesize", max_filesize,
-            "--output", archive_output,
-            url
-        ],
-        false,
-        130
+    let downloaded_names = [];
+    for entry in std::fs::read_dir(downloads) {
+        test_harness::require(
+            entry.is_file,
+            "native_ipc_compat_download_not_file:" + release.version
+        );
+        downloaded_names.push("" + entry.file_name);
+    }
+    test_harness::require(
+        downloaded_names.len == 1 && downloaded_names[0] == asset.name,
+        "native_ipc_compat_download_file_set:" + release.version
     );
     // Hoist INT locals: comparing metadata.len to a JSON field otherwise
     // selects the string-ops lane via prefers_string_ops and breaks emit.

@@ -171,6 +171,7 @@ jobs:
         if: matrix.platform_id == 'windows-x86_64'
         shell: cmd
         env:
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           @echo off
