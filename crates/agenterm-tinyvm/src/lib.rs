@@ -33,6 +33,9 @@
 
 use std::fmt;
 
+mod asm;
+pub use asm::{AsmError, assemble};
+
 /// One bytecode instruction.
 ///
 /// Branch and call targets are absolute instruction indices into the program
@@ -140,6 +143,26 @@ impl fmt::Display for VmError {
 
 impl std::error::Error for VmError {}
 
+/// A fault from [`Vm::eval`]: either assembling the text or running it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvalError {
+    /// The text could not be assembled.
+    Assemble(AsmError),
+    /// The assembled program faulted at run time.
+    Run(VmError),
+}
+
+impl fmt::Display for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Assemble(e) => write!(f, "{e}"),
+            Self::Run(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for EvalError {}
+
 /// Default cap on executed instructions per [`Vm::run`] call.
 pub const DEFAULT_MAX_STEPS: u64 = 16_000_000;
 /// Default cap on value-stack depth.
@@ -191,11 +214,34 @@ impl Vm {
     /// Execute `program` from instruction 0 until [`Instr::Halt`].
     ///
     /// Returns the top of the value stack at halt (`None` if the stack is
-    /// empty), or a [`VmError`] on any fault. The VM's stack and call stack are
-    /// reset at entry; its linear memory persists across runs so a caller can
-    /// seed inputs and read outputs.
+    /// empty), or a [`VmError`] on any fault. The VM's value stack and call
+    /// stack are reset at entry; its linear memory persists across runs so a
+    /// caller can seed inputs and read outputs.
     pub fn run(&mut self, program: &[Instr]) -> Result<Option<i64>, VmError> {
         self.stack.clear();
+        self.exec(program)
+    }
+
+    /// Assemble one-line-per-instruction `src` and execute it **without
+    /// clearing the value stack**, so the stack (and linear memory) form a live
+    /// image that persists across calls — the basis of a REPL: one [`Vm`],
+    /// evaluated repeatedly.
+    ///
+    /// A trailing implicit halt is supplied, so a bare snippet like
+    /// `push 40\npush 2\nadd` ends by returning the current stack top rather
+    /// than running off the end. Branch/call operands index the assembled
+    /// snippet (0-based). Returns the stack top after execution.
+    pub fn eval(&mut self, src: &str) -> Result<Option<i64>, EvalError> {
+        let mut program = asm::assemble(src).map_err(EvalError::Assemble)?;
+        program.push(Instr::Halt);
+        self.exec(&program).map_err(EvalError::Run)
+    }
+
+    /// Run `program` from instruction 0, resetting only the call stack (the
+    /// value stack and memory are left as the caller set them). Shared engine
+    /// behind [`Vm::run`] (which clears the stack first) and [`Vm::eval`]
+    /// (which does not).
+    fn exec(&mut self, program: &[Instr]) -> Result<Option<i64>, VmError> {
         self.call.clear();
         let mut pc: usize = 0;
         let mut steps: u64 = 0;
@@ -490,5 +536,38 @@ mod tests {
         let mut vm = Vm::new(2);
         let e = vm.run(&[Instr::Push(1)]).unwrap_err();
         assert!(matches!(e, VmError::RanOffEnd { .. }));
+    }
+
+    #[test]
+    fn eval_assembles_and_runs_text() {
+        let mut vm = Vm::new(4);
+        let top = vm.eval("push 40\npush 2\nadd").unwrap();
+        assert_eq!(top, Some(42));
+    }
+
+    #[test]
+    fn eval_keeps_the_stack_image_across_calls() {
+        let mut vm = Vm::new(4);
+        assert_eq!(vm.eval("push 40\npush 2\nadd").unwrap(), Some(42));
+        // Same Vm, no clear: the 42 is still on the stack.
+        assert_eq!(vm.eval("push 1\nadd").unwrap(), Some(43));
+    }
+
+    #[test]
+    fn run_still_clears_the_stack_at_entry() {
+        let mut vm = Vm::new(4);
+        vm.eval("push 99").unwrap();
+        // run() clears the value stack, so the earlier 99 does not survive.
+        let r = vm
+            .run(&[Instr::Push(7), Instr::Halt])
+            .unwrap();
+        assert_eq!(r, Some(7));
+        assert_eq!(vm.stack(), &[7]);
+    }
+
+    #[test]
+    fn eval_reports_assembly_errors() {
+        let mut vm = Vm::new(4);
+        assert!(matches!(vm.eval("bogus 1"), Err(EvalError::Assemble(_))));
     }
 }
