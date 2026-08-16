@@ -127,15 +127,90 @@ fn platform_asset(release, facts) {
     matches[0]
 }
 
+fn expected_asset_name(version, os_name, arch) {
+    test_harness::require(
+        version == "0.1.10" || version == "0.1.11",
+        "native_ipc_compat_release_path_version:" + version
+    );
+    test_harness::require(
+        os_name == "windows" || os_name == "linux" || os_name == "macos",
+        "native_ipc_compat_release_path_os:" + os_name
+    );
+    test_harness::require(
+        arch == "x86_64" || arch == "aarch64",
+        "native_ipc_compat_release_path_arch:" + arch
+    );
+    let suffix = ".tar.gz";
+    if os_name == "windows" {
+        suffix = ".zip";
+    } else if os_name == "macos" {
+        suffix = "-unsigned-preview.zip";
+    }
+    "agenterm-" + version + "-" + os_name + "-" + arch + suffix
+}
+
+fn acquisition_paths(context, release, asset) {
+    let version = "" + release.version;
+    let tag = "" + release.tag;
+    let os_name = "" + asset.os;
+    let arch = "" + asset.arch;
+    let asset_name = "" + asset.name;
+    let expected_name = expected_asset_name(version, os_name, arch);
+    test_harness::require(
+        tag == "v" + version,
+        "native_ipc_compat_release_path_tag:" + version
+    );
+    test_harness::require(
+        asset_name == expected_name
+            && std::path::PathBuf::from(asset_name).file_name == asset_name
+            && !asset_name.contains("/")
+            && !asset_name.contains("\\"),
+        "native_ipc_compat_release_path_asset:" + version
+    );
+    let owner = std::path::join(
+        context.run_directory,
+        "published-" + version + "-" + asset_name
+    ).display;
+    #{
+        downloads: std::path::join(owner, "downloads").display,
+        extracted: std::path::join(owner, "extracted").display
+    }
+}
+
+fn verify_download_file_set(downloads, release, asset) {
+    let downloaded_names = [];
+    for entry in std::fs::read_dir(downloads) {
+        test_harness::require(
+            entry.is_file,
+            "native_ipc_compat_download_not_file:" + release.version
+        );
+        downloaded_names.push("" + entry.file_name);
+    }
+    test_harness::require(
+        downloaded_names.len == 1 && downloaded_names[0] == asset.name,
+        "native_ipc_compat_download_file_set:" + release.version
+    );
+}
+
+fn verify_archive(archive, release, asset) {
+    // Hoist INT locals: comparing metadata.len to a JSON field otherwise
+    // selects the string-ops lane via prefers_string_ops and breaks emit.
+    let archive_len = std::fs::metadata(archive).len;
+    let asset_size = 0 + asset.size;
+    test_harness::require(
+        archive_len == asset_size,
+        "native_ipc_compat_archive_size:" + release.version
+    );
+    test_harness::require(
+        rh::crypto::sha256_file(archive) == asset.sha256,
+        "native_ipc_compat_archive_hash:" + release.version
+    );
+}
+
 fn acquire_release(context, repo, catalog, release, asset, facts) {
-    let downloads = std::path::join(
-        context.run_directory,
-        "published-downloads"
-    ).display;
-    let extracted = std::path::join(
-        context.run_directory,
-        "published-" + release.version
-    ).display;
+    let paths = acquisition_paths(context, release, asset);
+    let downloads = "" + paths.downloads;
+    let extracted = "" + paths.extracted;
     std::fs::create_dir_all(downloads);
     std::fs::create_dir_all(extracted);
     let archive = std::path::join(downloads, asset.name).display;
@@ -177,30 +252,8 @@ fn acquire_release(context, repo, catalog, release, asset, facts) {
     } else {
         throw "native_ipc_compat_acquisition:" + acquisition;
     }
-    let downloaded_names = [];
-    for entry in std::fs::read_dir(downloads) {
-        test_harness::require(
-            entry.is_file,
-            "native_ipc_compat_download_not_file:" + release.version
-        );
-        downloaded_names.push("" + entry.file_name);
-    }
-    test_harness::require(
-        downloaded_names.len == 1 && downloaded_names[0] == asset.name,
-        "native_ipc_compat_download_file_set:" + release.version
-    );
-    // Hoist INT locals: comparing metadata.len to a JSON field otherwise
-    // selects the string-ops lane via prefers_string_ops and breaks emit.
-    let archive_len = std::fs::metadata(archive).len;
-    let asset_size = 0 + asset.size;
-    test_harness::require(
-        archive_len == asset_size,
-        "native_ipc_compat_archive_size:" + release.version
-    );
-    test_harness::require(
-        rh::crypto::sha256_file(archive) == asset.sha256,
-        "native_ipc_compat_archive_hash:" + release.version
-    );
+    verify_download_file_set(downloads, release, asset);
+    verify_archive(archive, release, asset);
     let tar = "tar";
     if facts.os == "windows" {
         tar = "tar.exe";
@@ -257,6 +310,69 @@ fn acquire_release(context, repo, catalog, release, asset, facts) {
         "native_ipc_compat_published_version:" + release_version
     );
     #{ server: server, cli: cli }
+}
+
+fn acquisition_isolation_selftest(root, mode) {
+    let context = #{ run_directory: std::path::absolute(root).display };
+    let release_110 = #{ version: "0.1.10", tag: "v0.1.10" };
+    let release_111 = #{ version: "0.1.11", tag: "v0.1.11" };
+    let asset_110 = #{
+        os: "windows",
+        arch: "x86_64",
+        name: "agenterm-0.1.10-windows-x86_64.zip",
+        size: 4,
+        sha256: "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c"
+    };
+    let asset_111 = #{
+        os: "windows",
+        arch: "x86_64",
+        name: "agenterm-0.1.11-windows-x86_64.zip",
+        size: 4,
+        sha256: "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c"
+    };
+    if mode == "traversal" {
+        asset_110.name = "../agenterm-0.1.10-windows-x86_64.zip";
+    }
+    let paths_110 = acquisition_paths(context, release_110, asset_110);
+    let paths_111 = acquisition_paths(context, release_111, asset_111);
+    test_harness::require(
+        paths_110.downloads != paths_111.downloads
+            && paths_110.extracted != paths_111.extracted,
+        "native_ipc_compat_acquisition_directory_isolation"
+    );
+    std::fs::create_dir_all(paths_110.downloads);
+    std::fs::create_dir_all(paths_111.downloads);
+    let archive_110 = std::path::join(
+        paths_110.downloads,
+        asset_110.name
+    ).display;
+    let archive_111 = std::path::join(
+        paths_111.downloads,
+        asset_111.name
+    ).display;
+    std::fs::write(archive_110, "good");
+    std::fs::write(archive_111, "good");
+    verify_download_file_set(paths_110.downloads, release_110, asset_110);
+    verify_download_file_set(paths_111.downloads, release_111, asset_111);
+    verify_archive(archive_110, release_110, asset_110);
+    verify_archive(archive_111, release_111, asset_111);
+
+    if mode == "pollution" {
+        let pollution_path = std::path::join(
+            paths_110.downloads,
+            "pollution.zip"
+        ).display;
+        std::fs::write(pollution_path, "bad");
+        verify_download_file_set(paths_110.downloads, release_110, asset_110);
+    } else if mode == "tamper" {
+        std::fs::write(archive_111, "evil");
+        verify_archive(archive_111, release_111, asset_111);
+    } else {
+        test_harness::require(
+            mode == "clean",
+            "native_ipc_compat_selftest_mode:" + mode
+        );
+    }
 }
 
 fn git_head(context, repo) {
@@ -574,7 +690,6 @@ fn entry() {
         print("control.native-ipc-published-compatibility");
         return;
     }
-
     test_harness::require(args.len >= 1, "expected: REPO [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
 let catalog_path = std::path::join(

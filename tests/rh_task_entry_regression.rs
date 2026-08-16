@@ -5,10 +5,37 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use agenterm::script_backend::{RhInvocationOptions, try_execute_rh_invocation};
+use agenterm::script_protocol::ScriptOperation;
 use sha2::Digest as _;
 
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn rh_function_source<'a>(source: &'a str, name: &str) -> &'a str {
+    let marker = format!("fn {name}(");
+    let start = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing Rh function {name}"));
+    let open = source[start..]
+        .find('{')
+        .map(|offset| start + offset)
+        .unwrap_or_else(|| panic!("missing Rh function body {name}"));
+    let mut depth = 0usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[start..=open + offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated Rh function {name}");
 }
 
 // Unreferenced since the wave that trimmed this suite's transpile-shape
@@ -1203,6 +1230,67 @@ fn native_ipc_compat_smoke_uses_bundled_pack() {
     assert!(source.contains("native_ipc_compat_download_file_set:"));
     assert!(source.contains("native_ipc_compat_archive_size:"));
     assert!(source.contains("native_ipc_compat_archive_hash:"));
+
+    let isolation_root = tempfile::tempdir().expect("native IPC acquisition isolation root");
+    let selftest_source = format!(
+        "fn require(condition, message) {{ if condition == 0 {{ throw message; }} else {{ 0; }} }}\n{}\n{}\n{}\n{}\n{}\n{}\nfn entry() {{ acquisition_isolation_selftest(args[0], args[1]); }}",
+        rh_function_source(&source, "catch_text"),
+        rh_function_source(&source, "expected_asset_name"),
+        rh_function_source(&source, "acquisition_paths"),
+        rh_function_source(&source, "verify_download_file_set"),
+        rh_function_source(&source, "verify_archive"),
+        rh_function_source(&source, "acquisition_isolation_selftest"),
+    )
+    .replace("test_harness::require", "require");
+    let run_selftest = |root: &std::path::Path, mode: &str| {
+        try_execute_rh_invocation(
+            ScriptOperation::Run,
+            &selftest_source,
+            RhInvocationOptions {
+                project_root: Some(repo()),
+                arguments: Some(serde_json::json!([root.to_string_lossy(), mode])),
+                ..RhInvocationOptions::default()
+            },
+            None,
+        )
+    };
+    let result = run_selftest(isolation_root.path(), "clean")
+        .expect("run clean native IPC acquisition isolation selftest")
+        .expect("Rh backend handles native IPC acquisition isolation selftest");
+    assert_eq!(result.value, Some(serde_json::json!(0)));
+    let polluted_root = tempfile::tempdir().expect("native IPC polluted acquisition root");
+    let polluted = match run_selftest(polluted_root.path(), "pollution") {
+        Err(error) => error,
+        Ok(_) => panic!("polluted acquisition directory must fail closed"),
+    };
+    assert!(
+        polluted
+            .to_string()
+            .contains("native_ipc_compat_download_file_set:0.1.10"),
+        "{polluted}"
+    );
+    let tampered_root = tempfile::tempdir().expect("native IPC tampered acquisition root");
+    let tampered = match run_selftest(tampered_root.path(), "tamper") {
+        Err(error) => error,
+        Ok(_) => panic!("tampered acquisition archive must fail closed"),
+    };
+    assert!(
+        tampered
+            .to_string()
+            .contains("native_ipc_compat_archive_hash:0.1.11"),
+        "{tampered}"
+    );
+    let traversal_root = tempfile::tempdir().expect("native IPC traversal acquisition root");
+    let traversal = match run_selftest(traversal_root.path(), "traversal") {
+        Err(error) => error,
+        Ok(_) => panic!("traversing acquisition asset must fail closed"),
+    };
+    assert!(
+        traversal
+            .to_string()
+            .contains("native_ipc_compat_release_path_asset:0.1.10"),
+        "{traversal}"
+    );
 
     let candidate = std::fs::read_to_string(repo().join(".github/workflows/candidate.yml"))
         .expect("read Candidate workflow");
