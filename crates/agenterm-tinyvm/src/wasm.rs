@@ -63,7 +63,10 @@ impl std::error::Error for WasmError {}
 
 /// A decoded instruction. Branch/call operands keep their WASM indices; block
 /// and loop carry the index of their matching `End` so branches resolve in O(1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// No `Eq` derive: `F32Const` holds an `f32`, which is not `Eq` (float consts
+/// are stored raw so decoding a `.wasm` module never needs value comparison).
+#[derive(Debug, Clone, PartialEq)]
 enum Op {
     I32Const(i32),
     I32Add,
@@ -180,6 +183,30 @@ enum Op {
     F64Copysign,
     F64Load { offset: u32 },
     F64Store { offset: u32 },
+    // --- f32 family ---
+    F32Const(f32),
+    F32Eq,
+    F32Ne,
+    F32Lt,
+    F32Gt,
+    F32Le,
+    F32Ge,
+    F32Abs,
+    F32Neg,
+    F32Ceil,
+    F32Floor,
+    F32Trunc,
+    F32Nearest,
+    F32Sqrt,
+    F32Add,
+    F32Sub,
+    F32Mul,
+    F32Div,
+    F32Min,
+    F32Max,
+    F32Copysign,
+    F32Load { offset: u32 },
+    F32Store { offset: u32 },
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -620,6 +647,45 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 let (offset, ni) = memarg(body, i)?;
                 i = ni;
                 ops.push(Op::F64Store { offset });
+            }
+            0x43 => {
+                let end = i
+                    .checked_add(4)
+                    .filter(|&e| e <= body.len())
+                    .ok_or_else(|| WasmError::Decode("truncated f32.const literal".into()))?;
+                let v = f32::from_le_bytes([body[i], body[i + 1], body[i + 2], body[i + 3]]);
+                i = end;
+                ops.push(Op::F32Const(v));
+            }
+            0x5B => ops.push(Op::F32Eq),
+            0x5C => ops.push(Op::F32Ne),
+            0x5D => ops.push(Op::F32Lt),
+            0x5E => ops.push(Op::F32Gt),
+            0x5F => ops.push(Op::F32Le),
+            0x60 => ops.push(Op::F32Ge),
+            0x8B => ops.push(Op::F32Abs),
+            0x8C => ops.push(Op::F32Neg),
+            0x8D => ops.push(Op::F32Ceil),
+            0x8E => ops.push(Op::F32Floor),
+            0x8F => ops.push(Op::F32Trunc),
+            0x90 => ops.push(Op::F32Nearest),
+            0x91 => ops.push(Op::F32Sqrt),
+            0x92 => ops.push(Op::F32Add),
+            0x93 => ops.push(Op::F32Sub),
+            0x94 => ops.push(Op::F32Mul),
+            0x95 => ops.push(Op::F32Div),
+            0x96 => ops.push(Op::F32Min),
+            0x97 => ops.push(Op::F32Max),
+            0x98 => ops.push(Op::F32Copysign),
+            0x2A => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::F32Load { offset });
+            }
+            0x38 => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::F32Store { offset });
             }
             other => {
                 return Err(WasmError::Decode(format!(
@@ -1159,6 +1225,37 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
                     mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
+                Op::F32Const(v) => stack.push(Val::F32(v)),
+                Op::F32Eq => bin_f32_cmp(&mut stack, |a, b| a == b)?,
+                Op::F32Ne => bin_f32_cmp(&mut stack, |a, b| a != b)?,
+                Op::F32Lt => bin_f32_cmp(&mut stack, |a, b| a < b)?,
+                Op::F32Gt => bin_f32_cmp(&mut stack, |a, b| a > b)?,
+                Op::F32Le => bin_f32_cmp(&mut stack, |a, b| a <= b)?,
+                Op::F32Ge => bin_f32_cmp(&mut stack, |a, b| a >= b)?,
+                Op::F32Abs => un_f32(&mut stack, f32::abs)?,
+                Op::F32Neg => un_f32(&mut stack, |a| -a)?,
+                Op::F32Ceil => un_f32(&mut stack, f32::ceil)?,
+                Op::F32Floor => un_f32(&mut stack, f32::floor)?,
+                Op::F32Trunc => un_f32(&mut stack, f32::trunc)?,
+                Op::F32Nearest => un_f32(&mut stack, f32::round_ties_even)?,
+                Op::F32Sqrt => un_f32(&mut stack, f32::sqrt)?,
+                Op::F32Add => bin_f32(&mut stack, |a, b| a + b)?,
+                Op::F32Sub => bin_f32(&mut stack, |a, b| a - b)?,
+                Op::F32Mul => bin_f32(&mut stack, |a, b| a * b)?,
+                Op::F32Div => bin_f32(&mut stack, |a, b| a / b)?,
+                Op::F32Min => bin_f32(&mut stack, wasm_min_f32)?,
+                Op::F32Max => bin_f32(&mut stack, wasm_max_f32)?,
+                Op::F32Copysign => bin_f32(&mut stack, f32::copysign)?,
+                Op::F32Load { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
+                    let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
+                    stack.push(Val::F32(f32::from_le_bytes(bytes)));
+                }
+                Op::F32Store { offset } => {
+                    let value = pop_f32(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
+                    mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
+                }
                 Op::F64Const(bits) => stack.push(Val::F64(f64::from_bits(bits))),
                 Op::F64Eq => {
                     let b = pop_f64(&mut stack)?;
@@ -1549,6 +1646,55 @@ fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(
     let ea = mem_ea(mem.len(), addr, offset, 4)?;
     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+/// Pop `b` then `a` and push `f(a, b)` — the shape of every binary f32 op.
+fn bin_f32(stack: &mut Vec<Val>, f: impl FnOnce(f32, f32) -> f32) -> Result<(), WasmError> {
+    let b = pop_f32(stack)?;
+    let a = pop_f32(stack)?;
+    stack.push(Val::F32(f(a, b)));
+    Ok(())
+}
+
+/// Pop `b` then `a`, push `1`/`0` — the shape of every f32 comparison.
+fn bin_f32_cmp(stack: &mut Vec<Val>, f: impl FnOnce(f32, f32) -> bool) -> Result<(), WasmError> {
+    let b = pop_f32(stack)?;
+    let a = pop_f32(stack)?;
+    stack.push(Val::I32(i32::from(f(a, b))));
+    Ok(())
+}
+
+/// Pop `a` and push `f(a)` — the shape of every unary f32 op.
+fn un_f32(stack: &mut Vec<Val>, f: impl FnOnce(f32) -> f32) -> Result<(), WasmError> {
+    let a = pop_f32(stack)?;
+    stack.push(Val::F32(f(a)));
+    Ok(())
+}
+
+/// WASM `f32.min`: NaN propagates; `min(-0.0, +0.0)` is `-0.0`.
+fn wasm_min_f32(a: f32, b: f32) -> f32 {
+    if a.is_nan() || b.is_nan() {
+        f32::NAN
+    } else if a == b {
+        if a.is_sign_negative() { a } else { b }
+    } else if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// WASM `f32.max`: NaN propagates; `max(-0.0, +0.0)` is `+0.0`.
+fn wasm_max_f32(a: f32, b: f32) -> f32 {
+    if a.is_nan() || b.is_nan() {
+        f32::NAN
+    } else if a == b {
+        if a.is_sign_negative() { b } else { a }
+    } else if a > b {
+        a
+    } else {
+        b
+    }
 }
 
 /// WASM `f64.min`: either NaN yields NaN; `min(-0.0, +0.0)` is `-0.0`.
@@ -2277,6 +2423,66 @@ mod tests {
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
         ));
+    }
+
+    // Family: f32.
+    fn f32_run(body: &[u8]) -> Vec<Val> {
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, body).unwrap();
+        m.invoke_val(f, &[]).unwrap()
+    }
+    fn f32_bin(a: f32, b: f32, op: u8) -> Vec<Val> {
+        let mut body = vec![0x43];
+        body.extend_from_slice(&a.to_le_bytes());
+        body.push(0x43);
+        body.extend_from_slice(&b.to_le_bytes());
+        body.push(op);
+        body.push(0x0B);
+        f32_run(&body)
+    }
+    fn f32_un(a: f32, op: u8) -> Vec<Val> {
+        let mut body = vec![0x43];
+        body.extend_from_slice(&a.to_le_bytes());
+        body.push(op);
+        body.push(0x0B);
+        f32_run(&body)
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn f32_const_add_and_ops() {
+        assert_eq!(f32_bin(1.5, 2.5, 0x92), vec![Val::F32(4.0)]); // add
+        assert_eq!(f32_bin(4.0, 2.5, 0x93), vec![Val::F32(1.5)]); // sub
+        assert_eq!(f32_bin(3.0, 4.0, 0x94), vec![Val::F32(12.0)]); // mul
+        assert_eq!(f32_bin(9.0, 4.0, 0x95), vec![Val::F32(2.25)]); // div
+        assert_eq!(f32_un(4.0, 0x91), vec![Val::F32(2.0)]); // sqrt
+        assert_eq!(f32_un(-3.0, 0x8B), vec![Val::F32(3.0)]); // abs
+        assert_eq!(f32_bin(3.0, -1.0, 0x98), vec![Val::F32(-3.0)]); // copysign
+    }
+
+    #[test]
+    fn f32_comparisons_and_nan() {
+        assert_eq!(f32_bin(1.5, 2.5, 0x5D), vec![Val::I32(1)]); // lt true
+        assert_eq!(f32_bin(2.5, 1.5, 0x5D), vec![Val::I32(0)]); // lt false
+        assert_eq!(f32_bin(2.5, 2.5, 0x5B), vec![Val::I32(1)]); // eq true
+        assert_eq!(f32_bin(f32::NAN, 1.0, 0x5B), vec![Val::I32(0)]); // eq false on NaN
+        assert_eq!(f32_bin(f32::NAN, 1.0, 0x5C), vec![Val::I32(1)]); // ne true on NaN
+    }
+
+    #[test]
+    fn f32_min_max_nan_signed_zero() {
+        assert!(matches!(f32_bin(f32::NAN, 1.0, 0x96)[0], Val::F32(x) if x.is_nan()));
+        assert!(matches!(f32_bin(-0.0, 0.0, 0x96)[0], Val::F32(x) if x == 0.0 && x.is_sign_negative()));
+        assert!(matches!(f32_bin(-0.0, 0.0, 0x97)[0], Val::F32(x) if x == 0.0 && x.is_sign_positive()));
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn f32_store_load_roundtrip() {
+        let mut body = vec![0x41, 0x00, 0x43];
+        body.extend_from_slice(&3.25f32.to_le_bytes());
+        body.extend_from_slice(&[0x38, 0x00, 0x00, 0x41, 0x00, 0x2A, 0x00, 0x00, 0x0B]);
+        assert_eq!(f32_run(&body), vec![Val::F32(3.25)]);
     }
 
     // Family: f64.
