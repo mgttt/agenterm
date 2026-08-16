@@ -25,9 +25,11 @@ use std::fmt;
 pub const WASM_MAX_DEPTH: usize = 1_024;
 /// Max executed instructions per top-level [`Module::invoke`].
 pub const WASM_MAX_STEPS: u64 = 16_000_000;
-/// WebAssembly linear-memory page size (64 KiB). This cut allocates exactly one
-/// page per invocation; growth and a module memory section come later.
+/// WebAssembly linear-memory page size (64 KiB). Memory starts at one page per
+/// invocation and can grow via `memory.grow`.
 pub const WASM_PAGE_SIZE: usize = 65_536;
+/// Maximum pages `memory.grow` will allocate (the spec's 32-bit maximum).
+pub const WASM_MAX_PAGES: usize = 65_536;
 
 /// A decode-time or run-time WebAssembly fault.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +91,17 @@ enum Op {
     /// `i32.store` — pop value then address; write 4 little-endian bytes at
     /// `addr + offset`. Alignment hint decoded and ignored.
     I32Store { offset: u32 },
+    /// Narrow loads (sign/zero extended to i32) and stores (low bytes).
+    I32Load8S { offset: u32 },
+    I32Load8U { offset: u32 },
+    I32Load16S { offset: u32 },
+    I32Load16U { offset: u32 },
+    I32Store8 { offset: u32 },
+    I32Store16 { offset: u32 },
+    /// `memory.size` — push the current size in pages.
+    MemorySize,
+    /// `memory.grow` — pop delta pages, grow, push old size (or -1 on failure).
+    MemoryGrow,
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -248,6 +261,57 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 i = n2;
                 ops.push(Op::I32Store { offset });
             }
+            0x2C => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I32Load8S { offset });
+            }
+            0x2D => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I32Load8U { offset });
+            }
+            0x2E => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I32Load16S { offset });
+            }
+            0x2F => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I32Load16U { offset });
+            }
+            0x3A => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I32Store8 { offset });
+            }
+            0x3B => {
+                let (offset, ni) = memarg(body, i)?;
+                i = ni;
+                ops.push(Op::I32Store16 { offset });
+            }
+            0x3F => {
+                // memory.size — a single reserved memory-index byte (must be 0)
+                let b = *body
+                    .get(i)
+                    .ok_or_else(|| WasmError::Decode("truncated memory.size".into()))?;
+                if b != 0x00 {
+                    return Err(WasmError::Decode("memory.size reserved byte must be 0".into()));
+                }
+                i += 1;
+                ops.push(Op::MemorySize);
+            }
+            0x40 => {
+                let b = *body
+                    .get(i)
+                    .ok_or_else(|| WasmError::Decode("truncated memory.grow".into()))?;
+                if b != 0x00 {
+                    return Err(WasmError::Decode("memory.grow reserved byte must be 0".into()));
+                }
+                i += 1;
+                ops.push(Op::MemoryGrow);
+            }
             0x20 => {
                 let (x, ni) = leb_u32(body, i)?;
                 i = ni;
@@ -344,10 +408,10 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                         }
                         _ => unreachable!("open index always points at a block, loop, or if"),
                     };
-                    if let Some(e) = else_pc {
-                        if let Op::Else { end } = &mut ops[e] {
-                            *end = end_idx;
-                        }
+                    if let Some(e) = else_pc
+                        && let Op::Else { end } = &mut ops[e]
+                    {
+                        *end = end_idx;
                     }
                 }
             }
@@ -583,7 +647,7 @@ impl Module {
         args: &[i32],
         depth: usize,
         steps: &mut u64,
-        mem: &mut [u8],
+        mem: &mut Vec<u8>,
     ) -> Result<Vec<i32>, WasmError> {
         if depth > WASM_MAX_DEPTH {
             return Err(WasmError::Trap(format!(
@@ -704,6 +768,44 @@ impl Module {
                     let value = pop(&mut stack)?;
                     let addr = pop(&mut stack)?;
                     mem_write_i32(mem, addr, offset, value)?;
+                }
+                Op::I32Load8S { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
+                    stack.push(mem[ea] as i8 as i32);
+                }
+                Op::I32Load8U { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
+                    stack.push(mem[ea] as i32);
+                }
+                Op::I32Load16S { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                    stack.push(i16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32);
+                }
+                Op::I32Load16U { offset } => {
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                    stack.push(u16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32);
+                }
+                Op::I32Store8 { offset } => {
+                    let value = pop(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
+                    mem[ea] = value as u8;
+                }
+                Op::I32Store16 { offset } => {
+                    let value = pop(&mut stack)?;
+                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                    mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
+                }
+                Op::MemorySize => stack.push((mem.len() / WASM_PAGE_SIZE) as i32),
+                Op::MemoryGrow => {
+                    let delta = pop(&mut stack)? as u32 as usize;
+                    let old_pages = mem.len() / WASM_PAGE_SIZE;
+                    let new_pages = old_pages.saturating_add(delta);
+                    if new_pages > WASM_MAX_PAGES {
+                        stack.push(-1);
+                    } else {
+                        mem.resize(new_pages * WASM_PAGE_SIZE, 0);
+                        stack.push(old_pages as i32);
+                    }
                 }
                 Op::LocalGet(l) => {
                     let v = *locals
@@ -829,25 +931,32 @@ impl Module {
     }
 }
 
-/// Effective address `addr as u32 + offset`, bounds-checked for a 4-byte i32
+/// Decode a memarg (align LEB, ignored; then offset LEB) and return the offset.
+fn memarg(body: &[u8], i: usize) -> Result<(u32, usize), WasmError> {
+    let (_align, n1) = leb_u32(body, i)?;
+    let (offset, n2) = leb_u32(body, n1)?;
+    Ok((offset, n2))
+}
+
+/// Effective address `addr as u32 + offset`, bounds-checked for a `width`-byte
 /// access. Alignment is not checked (MVP). Out of range is a loud trap.
-fn effective_range(mem_len: usize, addr: i32, offset: u32) -> Result<usize, WasmError> {
+fn mem_ea(mem_len: usize, addr: i32, offset: u32, width: usize) -> Result<usize, WasmError> {
     let ea = (addr as u32 as usize)
         .checked_add(offset as usize)
-        .ok_or_else(|| WasmError::Trap("i32 memory address overflow".into()))?;
+        .ok_or_else(|| WasmError::Trap("memory address overflow".into()))?;
     let end = ea
-        .checked_add(4)
-        .ok_or_else(|| WasmError::Trap("i32 memory access overflow".into()))?;
+        .checked_add(width)
+        .ok_or_else(|| WasmError::Trap("memory access overflow".into()))?;
     if end > mem_len {
         return Err(WasmError::Trap(format!(
-            "i32 memory access [{ea}, {end}) out of bounds for {mem_len}-byte memory"
+            "memory access [{ea}, {end}) out of bounds for {mem_len}-byte memory"
         )));
     }
     Ok(ea)
 }
 
 fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
-    let ea = effective_range(mem.len(), addr, offset)?;
+    let ea = mem_ea(mem.len(), addr, offset, 4)?;
     let bytes: [u8; 4] = mem[ea..ea + 4]
         .try_into()
         .expect("range is exactly 4 bytes");
@@ -855,7 +964,7 @@ fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
 }
 
 fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(), WasmError> {
-    let ea = effective_range(mem.len(), addr, offset)?;
+    let ea = mem_ea(mem.len(), addr, offset, 4)?;
     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
     Ok(())
 }
@@ -1280,6 +1389,67 @@ mod tests {
         assert_eq!(m.invoke(f, &[0]).unwrap(), vec![10]);
         assert_eq!(m.invoke(f, &[1]).unwrap(), vec![20]);
         assert_eq!(m.invoke(f, &[7]).unwrap(), vec![30]);
+    }
+
+    // Family 4: narrow memory access + memory.size/grow.
+    fn run_body(n_locals: usize, arity: usize, body: &[u8]) -> Result<Vec<i32>, WasmError> {
+        let mut m = Module::new();
+        let f = m.add_function(0, n_locals, arity, body)?;
+        m.invoke(f, &[])
+    }
+
+    #[test]
+    fn narrow_byte_store_load() {
+        // store8 171 @0 ; load8_u -> 171 ; load8_s -> -85
+        let u = [
+            0x41, 0x00, 0x41, 0xAB, 0x01, 0x3A, 0x00, 0x00, 0x41, 0x00, 0x2D, 0x00, 0x00, 0x0B,
+        ];
+        let s = [
+            0x41, 0x00, 0x41, 0xAB, 0x01, 0x3A, 0x00, 0x00, 0x41, 0x00, 0x2C, 0x00, 0x00, 0x0B,
+        ];
+        assert_eq!(run_body(0, 1, &u).unwrap(), vec![171]);
+        assert_eq!(run_body(0, 1, &s).unwrap(), vec![-85]);
+    }
+
+    #[test]
+    fn narrow_halfword_store_load() {
+        // store16 4660 @0 ; load16_u -> 4660
+        let u = [
+            0x41, 0x00, 0x41, 0xB4, 0x24, 0x3B, 0x00, 0x00, 0x41, 0x00, 0x2F, 0x00, 0x00, 0x0B,
+        ];
+        assert_eq!(run_body(0, 1, &u).unwrap(), vec![4660]);
+        // store16 -1 ; load16_s -> -1 ; load16_u -> 65535
+        let s = [
+            0x41, 0x00, 0x41, 0x7F, 0x3B, 0x00, 0x00, 0x41, 0x00, 0x2E, 0x00, 0x00, 0x0B,
+        ];
+        let uu = [
+            0x41, 0x00, 0x41, 0x7F, 0x3B, 0x00, 0x00, 0x41, 0x00, 0x2F, 0x00, 0x00, 0x0B,
+        ];
+        assert_eq!(run_body(0, 1, &s).unwrap(), vec![-1]);
+        assert_eq!(run_body(0, 1, &uu).unwrap(), vec![65535]);
+    }
+
+    #[test]
+    fn memory_size_and_grow() {
+        // fresh memory is one page
+        assert_eq!(run_body(0, 1, &[0x3F, 0x00, 0x0B]).unwrap(), vec![1]);
+        // grow by 2 returns the old page count (1)
+        assert_eq!(
+            run_body(0, 1, &[0x41, 0x02, 0x40, 0x00, 0x0B]).unwrap(),
+            vec![1]
+        );
+        // grow by 1, drop the old count, then memory.size -> 2
+        assert_eq!(
+            run_body(0, 1, &[0x41, 0x01, 0x40, 0x00, 0x1A, 0x3F, 0x00, 0x0B]).unwrap(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn narrow_load_out_of_bounds_traps() {
+        // i32.const 65536 ; i32.load8_u -> [65536, 65537) > one page
+        let body = [0x41, 0x80, 0x80, 0x04, 0x2D, 0x00, 0x00, 0x0B];
+        assert!(matches!(run_body(0, 1, &body), Err(WasmError::Trap(_))));
     }
 
     // Acceptance (tinyvm.6): load a standard .wasm module and invoke.
