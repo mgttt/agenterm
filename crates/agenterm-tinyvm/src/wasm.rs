@@ -67,6 +67,22 @@ enum Op {
     I32LeU,
     I32GeS,
     I32GeU,
+    I32Clz,
+    I32Ctz,
+    I32Popcnt,
+    I32Mul,
+    I32DivS,
+    I32DivU,
+    I32RemS,
+    I32RemU,
+    I32And,
+    I32Or,
+    I32Xor,
+    I32Shl,
+    I32ShrS,
+    I32ShrU,
+    I32Rotl,
+    I32Rotr,
     /// `i32.load` — pop address, push 4 little-endian bytes at `addr + offset`.
     /// The memarg alignment hint is decoded and ignored (a valid MVP choice).
     I32Load { offset: u32 },
@@ -168,8 +184,24 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 i = ni;
                 ops.push(Op::I32Const(v));
             }
+            0x67 => ops.push(Op::I32Clz),
+            0x68 => ops.push(Op::I32Ctz),
+            0x69 => ops.push(Op::I32Popcnt),
             0x6A => ops.push(Op::I32Add),
             0x6B => ops.push(Op::I32Sub),
+            0x6C => ops.push(Op::I32Mul),
+            0x6D => ops.push(Op::I32DivS),
+            0x6E => ops.push(Op::I32DivU),
+            0x6F => ops.push(Op::I32RemS),
+            0x70 => ops.push(Op::I32RemU),
+            0x71 => ops.push(Op::I32And),
+            0x72 => ops.push(Op::I32Or),
+            0x73 => ops.push(Op::I32Xor),
+            0x74 => ops.push(Op::I32Shl),
+            0x75 => ops.push(Op::I32ShrS),
+            0x76 => ops.push(Op::I32ShrU),
+            0x77 => ops.push(Op::I32Rotl),
+            0x78 => ops.push(Op::I32Rotr),
             0x45 => ops.push(Op::I32Eqz),
             0x46 => ops.push(Op::I32Eq),
             0x47 => ops.push(Op::I32Ne),
@@ -542,6 +574,51 @@ impl Module {
                 Op::I32LeU => bin_i32(&mut stack, |a, b| i32::from((a as u32) <= (b as u32)))?,
                 Op::I32GeS => bin_i32(&mut stack, |a, b| i32::from(a >= b))?,
                 Op::I32GeU => bin_i32(&mut stack, |a, b| i32::from((a as u32) >= (b as u32)))?,
+                Op::I32Clz => un_i32(&mut stack, |a| (a as u32).leading_zeros() as i32)?,
+                Op::I32Ctz => un_i32(&mut stack, |a| (a as u32).trailing_zeros() as i32)?,
+                Op::I32Popcnt => un_i32(&mut stack, |a| (a as u32).count_ones() as i32)?,
+                Op::I32Mul => bin_i32(&mut stack, |a, b| a.wrapping_mul(b))?,
+                Op::I32DivS => bin_i32_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i32.div_s by zero".into()))
+                    } else {
+                        a.checked_div(b)
+                            .ok_or_else(|| WasmError::Trap("i32.div_s overflow".into()))
+                    }
+                })?,
+                Op::I32DivU => bin_i32_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i32.div_u by zero".into()))
+                    } else {
+                        Ok(((a as u32) / (b as u32)) as i32)
+                    }
+                })?,
+                Op::I32RemS => bin_i32_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i32.rem_s by zero".into()))
+                    } else {
+                        Ok(a.wrapping_rem(b))
+                    }
+                })?,
+                Op::I32RemU => bin_i32_try(&mut stack, |a, b| {
+                    if b == 0 {
+                        Err(WasmError::Trap("i32.rem_u by zero".into()))
+                    } else {
+                        Ok(((a as u32) % (b as u32)) as i32)
+                    }
+                })?,
+                Op::I32And => bin_i32(&mut stack, |a, b| a & b)?,
+                Op::I32Or => bin_i32(&mut stack, |a, b| a | b)?,
+                Op::I32Xor => bin_i32(&mut stack, |a, b| a ^ b)?,
+                Op::I32Shl => bin_i32(&mut stack, |a, b| ((a as u32) << ((b as u32) & 31)) as i32)?,
+                Op::I32ShrS => bin_i32(&mut stack, |a, b| a >> ((b as u32) & 31))?,
+                Op::I32ShrU => bin_i32(&mut stack, |a, b| ((a as u32) >> ((b as u32) & 31)) as i32)?,
+                Op::I32Rotl => {
+                    bin_i32(&mut stack, |a, b| (a as u32).rotate_left((b as u32) & 31) as i32)?
+                }
+                Op::I32Rotr => {
+                    bin_i32(&mut stack, |a, b| (a as u32).rotate_right((b as u32) & 31) as i32)?
+                }
                 Op::I32Load { offset } => {
                     let addr = pop(&mut stack)?;
                     stack.push(mem_read_i32(mem, addr, offset)?);
@@ -655,6 +732,25 @@ fn bin_i32(stack: &mut Vec<i32>, f: impl FnOnce(i32, i32) -> i32) -> Result<(), 
     let b = pop(stack)?;
     let a = pop(stack)?;
     stack.push(f(a, b));
+    Ok(())
+}
+
+/// Like [`bin_i32`] but the operation may trap (e.g. divide by zero).
+fn bin_i32_try(
+    stack: &mut Vec<i32>,
+    f: impl FnOnce(i32, i32) -> Result<i32, WasmError>,
+) -> Result<(), WasmError> {
+    let b = pop(stack)?;
+    let a = pop(stack)?;
+    let r = f(a, b)?;
+    stack.push(r);
+    Ok(())
+}
+
+/// Pop `a` and push `f(a)` — the shape of every unary i32 op.
+fn un_i32(stack: &mut Vec<i32>, f: impl FnOnce(i32) -> i32) -> Result<(), WasmError> {
+    let a = pop(stack)?;
+    stack.push(f(a));
     Ok(())
 }
 
@@ -910,6 +1006,50 @@ mod tests {
         assert_eq!(binop(0x4F, -1, 1).unwrap(), 1); // ge_u(huge,1) true
     }
 
+    // Family 2: i32 arithmetic and bitwise.
+    #[test]
+    fn i32_arithmetic_and_bitwise() {
+        assert_eq!(binop(0x6C, 6, 7).unwrap(), 42); // mul
+        assert_eq!(binop(0x6D, 20, 4).unwrap(), 5); // div_s
+        assert_eq!(binop(0x6D, -20, 4).unwrap(), -5); // div_s neg
+        assert_eq!(binop(0x6E, 20, 4).unwrap(), 5); // div_u
+        assert_eq!(binop(0x6F, 20, 6).unwrap(), 2); // rem_s
+        assert_eq!(binop(0x70, 20, 6).unwrap(), 2); // rem_u
+        assert_eq!(binop(0x71, 6, 3).unwrap(), 2); // and
+        assert_eq!(binop(0x72, 4, 1).unwrap(), 5); // or
+        assert_eq!(binop(0x73, 6, 3).unwrap(), 5); // xor
+        assert_eq!(binop(0x74, 1, 4).unwrap(), 16); // shl
+        assert_eq!(binop(0x75, -8, 1).unwrap(), -4); // shr_s
+        assert_eq!(binop(0x76, -8, 1).unwrap(), 0x7FFF_FFFC); // shr_u
+        assert_eq!(binop(0x77, 1, 4).unwrap(), 16); // rotl
+        assert_eq!(binop(0x78, 16, 4).unwrap(), 1); // rotr
+        assert_eq!(unop(0x67, 1), 31); // clz
+        assert_eq!(unop(0x68, 8), 3); // ctz
+        assert_eq!(unop(0x69, 7), 3); // popcnt
+    }
+
+    #[test]
+    fn i32_div_rem_by_zero_traps() {
+        assert!(matches!(binop(0x6D, 5, 0), Err(WasmError::Trap(_)))); // div_s
+        assert!(matches!(binop(0x6E, 5, 0), Err(WasmError::Trap(_)))); // div_u
+        assert!(matches!(binop(0x6F, 5, 0), Err(WasmError::Trap(_)))); // rem_s
+        assert!(matches!(binop(0x70, 5, 0), Err(WasmError::Trap(_)))); // rem_u
+    }
+
+    #[test]
+    fn i32_div_s_min_over_neg_one_traps() {
+        // i32.const i32::MIN (LEB 80 80 80 80 78) ; i32.const -1 ; i32.div_s
+        let body = [
+            0x41, 0x80, 0x80, 0x80, 0x80, 0x78, // i32.const -2147483648
+            0x41, 0x7F, // i32.const -1
+            0x6D, // i32.div_s
+            0x0B,
+        ];
+        let mut m = Module::new();
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert!(matches!(m.invoke(f, &[]), Err(WasmError::Trap(_))));
+    }
+
     // Acceptance (tinyvm.6): load a standard .wasm module and invoke.
     //
     // Equivalent to:  (module (func (result i32) i32.const 42))
@@ -1021,9 +1161,9 @@ mod tests {
     #[test]
     fn unsupported_opcode_fails_to_decode() {
         let mut m = Module::new();
-        // 0x6C is i32.mul, deliberately outside this subset.
+        // 0x7C is i64.add, deliberately outside this cut's subset.
         assert!(matches!(
-            m.add_function(0, 0, 1, &[0x6C, 0x0B]),
+            m.add_function(0, 0, 1, &[0x7C, 0x0B]),
             Err(WasmError::Decode(_))
         ));
     }
