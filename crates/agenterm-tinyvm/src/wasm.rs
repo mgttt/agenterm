@@ -252,6 +252,10 @@ enum Op {
     },
     Br(u32),
     BrIf(u32),
+    /// `call_indirect` — pop a table index, look up the funcref, type-check it
+    /// against `type_index`, and call it. (The table immediate is always 0 in
+    /// MVP and is decoded then ignored.)
+    CallIndirect { type_index: u32 },
     /// `br_table` — pop an index; branch to `targets[index]` or `default`.
     BrTable { targets: Vec<u32>, default: u32 },
     /// `if` — pop a condition; run the then-body when nonzero, else the
@@ -460,6 +464,12 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 let (x, ni) = leb_u32(body, i)?;
                 i = ni;
                 ops.push(Op::Call(x));
+            }
+            0x11 => {
+                let (type_index, n1) = leb_u32(body, i)?;
+                let (_table, n2) = leb_u32(body, n1)?;
+                i = n2;
+                ops.push(Op::CallIndirect { type_index });
             }
             0x02 => {
                 let (arity, ni) = block_arity(body, i)?;
@@ -794,6 +804,80 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
     Ok((s, end))
 }
 
+/// Parse the table section, returning the initial size of the (single) table.
+fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    if count != 1 {
+        return Err(WasmError::Decode(format!(
+            "unsupported table count {count} (this cut allows exactly one)"
+        )));
+    }
+    let reftype = *p
+        .get(i)
+        .ok_or_else(|| WasmError::Decode("truncated table type".into()))?;
+    if reftype != 0x70 {
+        return Err(WasmError::Decode(format!(
+            "unsupported reftype 0x{reftype:02x} (only funcref 0x70)"
+        )));
+    }
+    i += 1;
+    let flag = *p
+        .get(i)
+        .ok_or_else(|| WasmError::Decode("truncated table limits".into()))?;
+    i += 1;
+    let (min, ni) = leb_u32(p, i)?;
+    i = ni;
+    match flag {
+        0x00 => {}
+        0x01 => {
+            let (_max, _ni) = leb_u32(p, i)?;
+        }
+        other => {
+            return Err(WasmError::Decode(format!(
+                "unsupported table limits flag 0x{other:02x}"
+            )));
+        }
+    }
+    Ok(min as usize)
+}
+
+/// Parse the element section into `(offset, func_indices)` per active segment.
+fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let flag = *p
+            .get(i)
+            .ok_or_else(|| WasmError::Decode("truncated elem segment".into()))?;
+        i += 1;
+        if flag != 0x00 {
+            return Err(WasmError::Decode(format!(
+                "unsupported elem segment flag 0x{flag:02x} (only active table 0)"
+            )));
+        }
+        let (offset_val, ni) = parse_const_expr(p, i)?;
+        i = ni;
+        let offset = match offset_val {
+            Val::I32(v) => v as u32 as usize,
+            other => {
+                return Err(WasmError::Decode(format!(
+                    "elem offset must be i32, got {other:?}"
+                )));
+            }
+        };
+        let (n_funcs, ni) = leb_u32(p, i)?;
+        i = ni;
+        let mut idxs = Vec::with_capacity(n_funcs as usize);
+        for _ in 0..n_funcs {
+            let (fidx, nj) = leb_u32(p, i)?;
+            i = nj;
+            idxs.push(fidx as usize);
+        }
+        out.push((offset, idxs));
+    }
+    Ok(out)
+}
+
 /// Evaluate a constant init expression (`<t.const imm> end`) to a value.
 fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
     let op = *p
@@ -1037,6 +1121,12 @@ pub struct Module {
     globals: Vec<GlobalDesc>,
     /// Optional start function (run by [`Module::run_start`]).
     start: Option<usize>,
+    /// The funcref table: each slot holds a combined function index or `None`.
+    /// Indexed by `call_indirect`.
+    table: Vec<Option<usize>>,
+    /// The module's function types as `(n_params, n_results)`, so
+    /// `call_indirect` can type-check the callee against a declared type.
+    types: Vec<(usize, usize)>,
 }
 
 impl Module {
@@ -1113,6 +1203,8 @@ impl Module {
         let mut exports: Vec<(String, usize)> = Vec::new();
         let mut globals: Vec<(Val, bool)> = Vec::new();
         let mut start_fn: Option<usize> = None;
+        let mut table_size: usize = 0;
+        let mut elems: Vec<(usize, Vec<usize>)> = Vec::new();
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1130,9 +1222,11 @@ impl Module {
                 1 => types = parse_type_section(payload)?,
                 2 => imports = parse_import_section(payload, &types)?,
                 3 => func_types = parse_func_section(payload)?,
+                4 => table_size = parse_table_section(payload)?,
                 6 => globals = parse_global_section(payload)?,
                 7 => exports = parse_export_section(payload)?,
                 8 => start_fn = Some(leb_u32(payload, 0)?.0 as usize),
+                9 => elems = parse_elem_section(payload)?,
                 10 => codes = parse_code_section(payload)?,
                 _ => {} // custom / memory / … : skipped
             }
@@ -1175,6 +1269,19 @@ impl Module {
             module.exports.insert(name, index);
         }
         module.start = start_fn;
+        // Record the declared function types so `call_indirect` can type-check.
+        module.types = types;
+        // Allocate the table, then apply active element segments into it.
+        module.table = vec![None; table_size];
+        for (offset, idxs) in &elems {
+            for (k, &fidx) in idxs.iter().enumerate() {
+                let slot = offset
+                    .checked_add(k)
+                    .filter(|&s| s < module.table.len())
+                    .ok_or_else(|| WasmError::Decode("elem segment runs past table bounds".into()))?;
+                module.table[slot] = Some(fidx);
+            }
+        }
         Ok(module)
     }
 
@@ -1183,6 +1290,27 @@ impl Module {
     pub fn add_global(&mut self, init: Val, mutable: bool) -> usize {
         let idx = self.globals.len();
         self.globals.push(GlobalDesc { init, mutable });
+        idx
+    }
+
+    /// Allocate a funcref table of `size` uninitialised slots (for tests /
+    /// programmatic module construction).
+    pub fn add_table(&mut self, size: usize) {
+        self.table = vec![None; size];
+    }
+
+    /// Set table `slot` to point at combined function index `func_index`.
+    pub fn set_table_entry(&mut self, slot: usize, func_index: usize) {
+        if let Some(cell) = self.table.get_mut(slot) {
+            *cell = Some(func_index);
+        }
+    }
+
+    /// Register a function type `(n_params, n_results)` for `call_indirect`
+    /// type-checking, returning its type index.
+    pub fn add_type(&mut self, n_params: usize, n_results: usize) -> usize {
+        let idx = self.types.len();
+        self.types.push((n_params, n_results));
         idx
     }
 
@@ -1866,6 +1994,47 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap(format!(
                             "call {f}: stack has {} values, needs {n}",
+                            stack.len()
+                        )));
+                    }
+                    let cargs = stack.split_off(stack.len() - n);
+                    let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
+                    stack.extend(res);
+                }
+                Op::CallIndirect { type_index } => {
+                    let ti = pop(&mut stack)? as u32 as usize;
+                    if ti >= self.table.len() {
+                        return Err(WasmError::Trap(format!(
+                            "call_indirect: table index {ti} out of bounds (len {})",
+                            self.table.len()
+                        )));
+                    }
+                    let combined = self.table.get(ti).copied().flatten().ok_or_else(|| {
+                        WasmError::Trap("call_indirect: uninitialised table element".into())
+                    })?;
+                    // Type check (arity-level, an MVP approximation): compares
+                    // only the parameter/result counts, not the value types.
+                    let (ep, er) = *self
+                        .types
+                        .get(type_index as usize)
+                        .ok_or_else(|| WasmError::Trap("call_indirect: bad type index".into()))?;
+                    let (actual_params, actual_results) = if combined < self.hosts.len() {
+                        let h = &self.hosts[combined];
+                        (h.n_params, h.n_results)
+                    } else {
+                        let f = self
+                            .funcs
+                            .get(combined - self.hosts.len())
+                            .ok_or_else(|| WasmError::Trap("call_indirect: bad table entry".into()))?;
+                        (f.n_params, f.arity)
+                    };
+                    if (ep, er) != (actual_params, actual_results) {
+                        return Err(WasmError::Trap("call_indirect: signature mismatch".into()));
+                    }
+                    let n = self.param_count(combined)?;
+                    if stack.len() < n {
+                        return Err(WasmError::Trap(format!(
+                            "call_indirect: stack has {} values, needs {n}",
                             stack.len()
                         )));
                     }
@@ -2876,6 +3045,61 @@ mod tests {
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
         ));
+    }
+
+    // Opcode: call_indirect + table/elem.
+    #[test]
+    fn call_indirect_dispatches_through_table() {
+        let mut m = Module::new();
+        let callee = m
+            .add_function(1, 0, 1, &[0x20, 0x00, 0x41, 0x01, 0x6A, 0x0B])
+            .unwrap();
+        let t = m.add_type(1, 1);
+        m.add_table(4);
+        m.set_table_entry(0, callee);
+        let body = [0x20, 0x00, 0x41, 0x00, 0x11, t as u8, 0x00, 0x0B];
+        let caller = m.add_function(1, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke_val(caller, &[Val::I32(41)]).unwrap(), vec![Val::I32(42)]);
+    }
+
+    #[test]
+    fn call_indirect_traps_on_bounds_empty_and_mismatch() {
+        let build = |ttype: (usize, usize), fill: bool, tab_index: u8| {
+            let mut m = Module::new();
+            let callee = m
+                .add_function(1, 0, 1, &[0x20, 0x00, 0x41, 0x01, 0x6A, 0x0B])
+                .unwrap();
+            let t = m.add_type(ttype.0, ttype.1);
+            m.add_table(4);
+            if fill {
+                m.set_table_entry(0, callee);
+            }
+            let body = [0x20, 0x00, 0x41, tab_index, 0x11, t as u8, 0x00, 0x0B];
+            let caller = m.add_function(1, 0, 1, &body).unwrap();
+            m.invoke_val(caller, &[Val::I32(1)])
+        };
+        assert!(matches!(build((1, 1), true, 9), Err(WasmError::Trap(_)))); // out of bounds
+        assert!(matches!(build((1, 1), false, 0), Err(WasmError::Trap(_)))); // empty slot
+        assert!(matches!(build((0, 1), true, 0), Err(WasmError::Trap(_)))); // signature mismatch
+    }
+
+    #[test]
+    fn from_bytes_table_elem_call_indirect() {
+        // (module (type (func (result i32))) (func (result i32) i32.const 7)
+        //   (table 1 funcref) (elem (i32.const 0) 0)
+        //   (func (result i32) i32.const 0 call_indirect 0))
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // type () -> i32
+            0x03, 0x03, 0x02, 0x00, 0x00, // funcs: type 0, type 0
+            0x04, 0x04, 0x01, 0x70, 0x00, 0x01, // table 1 funcref
+            0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00, // elem (i32.const 0) [func 0]
+            0x0A, 0x0E, 0x02, // code: 2 bodies
+            0x04, 0x00, 0x41, 0x07, 0x0B, // func 0: i32.const 7
+            0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B, // func 1: i32.const 0 ; call_indirect 0 0
+        ];
+        let m = Module::from_bytes(wasm).unwrap();
+        assert_eq!(m.invoke(1, &[]).unwrap(), vec![7]);
     }
 
     // Section: start function.
