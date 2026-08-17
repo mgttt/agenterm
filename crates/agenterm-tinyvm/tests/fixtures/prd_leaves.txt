@@ -1,0 +1,6 @@
+# PRD [x] leaf edges that are not opcode-family goldens.
+# id|family|opcodes|expect|wasm_hex|bind
+# eval(bytes) drives the shipped face (i32.const 17 — not the in-crate 40+2=42).
+eval(bytes)|eval(bytes)|41,0B|i32:17|0061736d010000000105016000017f03020100070801046d61696e00000a0601040041110b|
+<100KiB>|<100KiB>||edge||
+#78|#78||edge||

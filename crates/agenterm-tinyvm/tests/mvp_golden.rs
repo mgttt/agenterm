@@ -34,11 +34,22 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+/// `#78|...` is a data row. `# comment` and `# id|family|...` are not.
+fn is_fixture_comment(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('#') else {
+        return false;
+    };
+    rest.starts_with(' ') || rest.starts_with("id|") || !rest.contains('|')
+}
+
 fn parse_expect(s: &str) -> Expect {
     if s == "trap" {
         return Expect::Trap;
     }
     if s == "empty" {
+        return Expect::Empty;
+    }
+    if s == "edge" {
         return Expect::Empty;
     }
     if let Some(rest) = s.strip_prefix("i32:") {
@@ -71,7 +82,7 @@ fn load_cases(name: &str) -> Vec<Case> {
     let mut out = Vec::new();
     for (lineno, line) in text.lines().enumerate() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() || is_fixture_comment(line) {
             continue;
         }
         let parts: Vec<&str> = line.split('|').collect();
@@ -146,6 +157,9 @@ fn bind_host(module: &mut WasmModule, m: &str, field: &str) {
 }
 
 fn run_case(case: &Case) -> Result<Vec<Val>, WasmError> {
+    if case.wasm.is_empty() {
+        return Ok(Vec::new());
+    }
     match &case.bind {
         None => eval(&case.wasm),
         Some((m, f)) => {
@@ -336,4 +350,186 @@ fn host_import_table_bind_and_unbound_are_independent() {
         [Val::I32(221)] => {}
         other => panic!("bound mul expected 221, got {}", describe_vals(other)),
     }
+}
+
+fn prd35_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../prd/PRD_02_35_agenterm_tinyvm.md")
+}
+
+/// `[x]` node tokens inside the first fenced tree of PRD 35.
+fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
+    let mut in_fence = false;
+    let mut leaves = Vec::new();
+    for line in prd.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence || !line.contains("[x]") {
+            continue;
+        }
+        let token: String = line
+            .replace("[x]", "")
+            .chars()
+            .map(|c| match c {
+                '│' | '├' | '└' | '─' | '|' => ' ',
+                _ => c,
+            })
+            .collect();
+        let token = token.trim();
+        if !token.is_empty() {
+            leaves.push(token.to_string());
+        }
+    }
+    leaves
+}
+
+fn fixture_files() -> [&'static str; 3] {
+    ["mvp_goldens.txt", "family_extra.txt", "prd_leaves.txt"]
+}
+
+fn suite_edge_tokens() -> BTreeSet<String> {
+    let mut edges = BTreeSet::new();
+    for name in fixture_files() {
+        for case in load_cases(name) {
+            edges.insert(case.id);
+            edges.insert(case.family);
+        }
+    }
+    let src = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mvp_golden.rs"),
+    )
+    .unwrap();
+    for line in src.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("fn ")
+            && let Some(name) = rest.split('(').next()
+        {
+            let name = name.strip_prefix("r#").unwrap_or(name);
+            edges.insert(name.to_string());
+        }
+    }
+    edges
+}
+
+fn cargo_deps_section() -> String {
+    let t = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let after = t.split("[dependencies]").nth(1).unwrap_or("");
+    after.split("\n[").next().unwrap_or(after).to_string()
+}
+
+#[test]
+fn prd_x_leaves_have_suite_edges() {
+    let prd = fs::read_to_string(prd35_path()).expect("PRD_02_35");
+    let leaves = parse_prd_x_leaves(&prd);
+    assert!(
+        !leaves.is_empty(),
+        "PRD 35 fence must list [x] leaves"
+    );
+    let edges = suite_edge_tokens();
+    let mut missing = Vec::new();
+    for leaf in &leaves {
+        if !edges.contains(leaf) {
+            missing.push(leaf.clone());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "PRD [x] leaves with no suite edge (family/id/test name): {missing:?}"
+    );
+}
+
+#[test]
+fn eval_bytes() {
+    let case = load_cases("prd_leaves.txt")
+        .into_iter()
+        .find(|c| c.id == "eval(bytes)")
+        .expect("eval(bytes) fixture");
+    assert_eq!(case.id, "eval(bytes)");
+    assert_expect(&case, run_case(&case));
+}
+
+#[test]
+fn size_budget_script_gates_100kib() {
+    let sh = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("measure-core.sh"),
+    )
+    .unwrap();
+    assert!(sh.contains("102400"), "measure-core.sh must keep the 100 KiB cap");
+    assert!(sh.contains("OK: < 100 KiB and selftest==42"));
+    assert!(
+        load_cases("prd_leaves.txt")
+            .iter()
+            .any(|c| c.id == "<100KiB>" && c.family == "<100KiB>"),
+        "<100KiB> leaf must exist as fixture id/family"
+    );
+}
+
+#[test]
+fn cu() {
+    assert!(
+        !cargo_deps_section().contains("agenterm-cu"),
+        "cu is a non-goal: not a crate dependency"
+    );
+}
+
+#[test]
+fn r#dyn() {
+    assert!(
+        !cargo_deps_section().contains("agenterm-dyn"),
+        "dyn is a non-goal: not a crate dependency"
+    );
+}
+
+#[test]
+fn chassis() {
+    assert!(
+        !cargo_deps_section().contains("agenterm-chassis"),
+        "chassis is a non-goal: not a crate dependency"
+    );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn WASI() {
+    assert!(
+        !cargo_deps_section().to_ascii_lowercase().contains("wasi"),
+        "WASI is a non-goal: not a crate dependency"
+    );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn APE() {
+    let deps = cargo_deps_section();
+    assert!(
+        !deps.lines().any(|l| l.trim_start().starts_with("ape")),
+        "APE is a non-goal: not kernel work"
+    );
+}
+
+#[test]
+fn issue78_runtimes_stay_out_of_the_crate() {
+    let deps = cargo_deps_section().to_ascii_lowercase();
+    for banned in ["sljit", "wasmtime", "wasmi", "wasmbin"] {
+        assert!(
+            !deps.contains(banned),
+            "{banned} must not be a crate dep (#78)"
+        );
+    }
+    assert!(
+        load_cases("prd_leaves.txt").iter().any(|c| c.id == "#78"),
+        "#78 leaf must exist as fixture id"
+    );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn WAT() {
+    let deps = cargo_deps_section();
+    assert!(
+        !deps.to_ascii_lowercase().contains("wat") && !deps.contains("wabt"),
+        "WAT is not a kernel input"
+    );
 }
