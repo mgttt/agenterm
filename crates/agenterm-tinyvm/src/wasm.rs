@@ -16,6 +16,8 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+mod validate;
+
 /// Max call recursion depth (via `call`/`call_indirect`).
 ///
 /// The interpreter recurses on the native stack, so the cap is set to what the
@@ -311,14 +313,17 @@ enum Op {
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
-    /// `arity` is the block's result count (0 or 1); `end` indexes its `End`.
+    /// `vt` is the block type byte (`0x40` = empty), `arity` its result count
+    /// (0 or 1); `end` indexes its `End`.
     Block {
+        vt: u8,
         arity: u32,
         end: usize,
     },
     /// `arity` is the loop's result count; the back-edge arity is always 0
     /// (MVP loops take no inputs). `end` indexes its `End`.
     Loop {
+        vt: u8,
         arity: u32,
         end: usize,
     },
@@ -339,6 +344,7 @@ enum Op {
     /// else-body. `else_pc` indexes the [`Op::Else`] (if any); `end` indexes the
     /// matching `End`.
     If {
+        vt: u8,
         arity: u32,
         else_pc: Option<usize>,
         end: usize,
@@ -408,15 +414,16 @@ fn leb_s32(bytes: &[u8], mut i: usize) -> Result<(i32, usize), WasmError> {
         .map_err(|_| WasmError::Decode("signed LEB128 exceeds i32"))
 }
 
-/// Decode a block type byte: empty (`0x40`) -> arity 0; a single value type
-/// (i32/i64/f32/f64) -> arity 1. Anything else is unsupported in this cut.
-fn block_arity(bytes: &[u8], i: usize) -> Result<(u32, usize), WasmError> {
+/// Decode a block type byte into `(valtype, arity)`: empty (`0x40`) -> arity 0;
+/// a single value type (i32/i64/f32/f64) -> arity 1. The value type itself is
+/// kept so load-time validation can type-check the block, not just count it.
+fn block_arity(bytes: &[u8], i: usize) -> Result<(u8, u32, usize), WasmError> {
     let byte = *bytes
         .get(i)
         .ok_or(WasmError::Decode("truncated block type"))?;
     match byte {
-        0x40 => Ok((0, i + 1)),
-        0x7C..=0x7F => Ok((1, i + 1)),
+        0x40 => Ok((0x40, 0, i + 1)),
+        0x7C..=0x7F => Ok((byte, 1, i + 1)),
         _other => Err(WasmError::Decode("unsupported block type 0x")),
     }
 }
@@ -549,16 +556,16 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 ops.push(Op::CallIndirect { type_index });
             }
             0x02 => {
-                let (arity, ni) = block_arity(body, i)?;
+                let (vt, arity, ni) = block_arity(body, i)?;
                 i = ni;
                 open.push(ops.len());
-                ops.push(Op::Block { arity, end: 0 });
+                ops.push(Op::Block { vt, arity, end: 0 });
             }
             0x03 => {
-                let (arity, ni) = block_arity(body, i)?;
+                let (vt, arity, ni) = block_arity(body, i)?;
                 i = ni;
                 open.push(ops.len());
-                ops.push(Op::Loop { arity, end: 0 });
+                ops.push(Op::Loop { vt, arity, end: 0 });
             }
             0x0C => {
                 let (x, ni) = leb_u32(body, i)?;
@@ -584,10 +591,11 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 ops.push(Op::BrTable { targets, default });
             }
             0x04 => {
-                let (arity, ni) = block_arity(body, i)?;
+                let (vt, arity, ni) = block_arity(body, i)?;
                 i = ni;
                 open.push(ops.len());
                 ops.push(Op::If {
+                    vt,
                     arity,
                     else_pc: None,
                     end: 0,
@@ -1171,6 +1179,16 @@ type CodeEntry = (Vec<Val>, Vec<u8>);
 /// A native host implementation behind an import.
 type HostImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
 
+/// The value type byte of a runtime value.
+fn valtype_of(v: &Val) -> u8 {
+    match v {
+        Val::I32(_) => 0x7F,
+        Val::I64(_) => 0x7E,
+        Val::F32(_) => 0x7D,
+        Val::F64(_) => 0x7C,
+    }
+}
+
 /// The zero value of a value type byte (spec 4.5.3: locals start at zero of
 /// their declared type).
 fn zero_of_valtype(vt: u8) -> Result<Val, WasmError> {
@@ -1480,6 +1498,36 @@ impl Module {
                 .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
         }
         module.data = data;
+        // --- load gate: prove every body before this Module is handed out ---
+        // A module that fails validation is a Decode error here; it never
+        // becomes something the caller can invoke, and no invalid program is
+        // left for an execution-time Trap to catch.
+        {
+            let mut func_sigs: Vec<usize> = Vec::new();
+            for h in &module.hosts {
+                func_sigs.push(h.sig.unwrap_or(0));
+            }
+            for f in &module.funcs {
+                func_sigs.push(f.sig.unwrap_or(0));
+            }
+            let global_types: Vec<u8> =
+                module.globals.iter().map(|g| valtype_of(&g.init)).collect();
+            let ctx = validate::ModuleCtx {
+                types: &module.types,
+                func_sigs: &func_sigs,
+                globals: &global_types,
+            };
+            for f in &module.funcs {
+                let ft = f
+                    .sig
+                    .and_then(|s| module.types.get(s))
+                    .ok_or(WasmError::Decode("function has no declared type"))?;
+                let mut locals: Vec<u8> = ft.params.clone();
+                locals.extend(f.locals.iter().map(valtype_of));
+                validate::validate_body(&ctx, &locals, &ft.results, &f.code)?;
+            }
+        }
+
         // Allocate the table, then apply active element segments into it.
         module.table = vec![None; table_size];
         for (offset, idxs) in &elems {
@@ -2333,7 +2381,7 @@ impl Module {
                     let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
                     stack.extend(res);
                 }
-                Op::Block { arity, end } => control.push(Frame {
+                Op::Block { arity, end, .. } => control.push(Frame {
                     base: stack.len(),
                     branch_arity: arity as usize,
                     cont: end + 1,
@@ -2372,6 +2420,7 @@ impl Module {
                     arity,
                     else_pc,
                     end,
+                    ..
                 } => {
                     let cond = pop(&mut stack)?;
                     control.push(Frame {
@@ -4056,5 +4105,49 @@ mod tests {
             0x10, 0x01, 0x0B, 0x09, 0x00, 0x20, 0x00, 0x41, 0x01, 0x6A, 0x10, 0x01, 0x0B,
         ];
         assert!(matches!(eval(wasm), Err(WasmError::Trap("call depth"))));
+    }
+    // --- the load gate ---
+
+    #[test]
+    fn an_invalid_body_is_rejected_at_load_not_at_run() {
+        // (func (result i32) i32.add) — i32.add on an empty stack.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7F, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, b'm', b'a', b'i', b'n', 0x00,
+            0x00, 0x0A, 0x05, 0x01, 0x03, 0x00, 0x6A, 0x0B,
+        ];
+        // No Module comes out, so nothing reaches the interpreter.
+        assert!(matches!(
+            Module::from_bytes(wasm),
+            Err(WasmError::Decode(_))
+        ));
+        assert!(matches!(eval(wasm), Err(WasmError::Decode(_))));
+    }
+
+    #[test]
+    fn an_out_of_range_index_is_a_load_error() {
+        // (func (result i32) local.get 99) with no locals.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7F, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, b'm', b'a', b'i', b'n', 0x00,
+            0x00, 0x0A, 0x06, 0x01, 0x04, 0x00, 0x20, 0x63, 0x0B,
+        ];
+        assert!(matches!(
+            Module::from_bytes(wasm),
+            Err(WasmError::Decode(_))
+        ));
+    }
+
+    #[test]
+    fn validation_keeps_run_time_traps_at_run_time() {
+        // A valid module that divides by zero: this one must load fine and
+        // trap while running — the gate must not swallow execution semantics.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7F, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, b'm', b'a', b'i', b'n', 0x00,
+            0x00, 0x0A, 0x09, 0x01, 0x07, 0x00, 0x41, 0x01, 0x41, 0x00, 0x6D, 0x0B,
+        ];
+        assert!(Module::from_bytes(wasm).is_ok());
+        assert!(matches!(eval(wasm), Err(WasmError::Trap(_))));
     }
 }

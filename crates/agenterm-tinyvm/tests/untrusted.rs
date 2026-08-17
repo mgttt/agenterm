@@ -22,11 +22,17 @@ const MEMORY_MIN_65536: [u8; 44] = [
 
 /// Build a module whose `main` is `n` consecutive `i32.const 1` (then `end`).
 /// A structured `loop`+`br` would unwind and never grow the operand stack.
+/// A stack bomb that is a *valid* module: it pushes `n` constants and folds
+/// them back with `n - 1` adds, so the body is balanced (result i32) while its
+/// peak operand-stack height is still `n`. Load-time validation rejects the
+/// unbalanced variant, so the host cap has to be proved with a legal program.
 fn push_n_module(n: usize) -> Vec<u8> {
-    let mut expr = Vec::with_capacity(n * 2 + 1);
+    let mut expr = Vec::with_capacity(n * 3 + 1);
     for _ in 0..n {
         expr.extend_from_slice(&[0x41, 0x01]);
     }
+    // n - 1 × i32.add, folding the pushed constants back to one value.
+    expr.resize(expr.len() + n.saturating_sub(1), 0x6a);
     expr.push(0x0b);
     let mut body = vec![0x00];
     body.extend_from_slice(&expr);
@@ -34,8 +40,8 @@ fn push_n_module(n: usize) -> Vec<u8> {
     leb_u32(&mut payload, body.len() as u32);
     payload.extend_from_slice(&body);
     let mut wasm = vec![
-        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03,
-        0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00, 0x00, 0x0a,
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x6d, 0x61, 0x69, 0x6e, 0x00, 0x00, 0x0a,
     ];
     leb_u32(&mut wasm, payload.len() as u32);
     wasm.extend_from_slice(&payload);

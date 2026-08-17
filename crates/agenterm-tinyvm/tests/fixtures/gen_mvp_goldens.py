@@ -696,7 +696,9 @@ def build_cases() -> list[Case]:
             ),
         )
     )
-    # br_if taken: leave 23 on the stack (outer value, empty block)
+    # br_if taken: leave 23 on the stack (outer value, empty block). The
+    # skipped tail pushes then drops, so the block stays balanced at its entry
+    # height — a spec validator rejects a drop that reaches below it.
     cases.append(
         Case(
             "br_if",
@@ -708,8 +710,8 @@ def build_cases() -> list[Case]:
                 + bytes([0x02, 0x40])
                 + i32c(1)
                 + bytes([0x0D, 0x00])
-                + bytes([0x1A])
                 + i32c(99)
+                + bytes([0x1A])
                 + bytes([0x0B, 0x0B])
             ),
         )
@@ -1524,7 +1526,7 @@ def extra_cases() -> list[Case]:
                 i32c(71)
                 + bytes([0x22, 0x00])
                 + i32c(2)
-                + bytes([0x21, 0x01, 0x20, 0x00, 0x20, 0x01, 0x6A, 0x0B]),
+                + bytes([0x21, 0x01, 0x20, 0x01, 0x6A, 0x0B]),
                 nloc=2,
             ),
         )
