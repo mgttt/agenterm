@@ -100,34 +100,72 @@ enum Op {
     I32Rotr,
     /// `i32.load` — pop address, push 4 little-endian bytes at `addr + offset`.
     /// The memarg alignment hint is decoded and ignored (a valid MVP choice).
-    I32Load { offset: u32 },
+    I32Load {
+        offset: u32,
+    },
     /// `i32.store` — pop value then address; write 4 little-endian bytes at
     /// `addr + offset`. Alignment hint decoded and ignored.
-    I32Store { offset: u32 },
+    I32Store {
+        offset: u32,
+    },
     /// Narrow loads (sign/zero extended to i32) and stores (low bytes).
-    I32Load8S { offset: u32 },
-    I32Load8U { offset: u32 },
-    I32Load16S { offset: u32 },
-    I32Load16U { offset: u32 },
-    I32Store8 { offset: u32 },
-    I32Store16 { offset: u32 },
+    I32Load8S {
+        offset: u32,
+    },
+    I32Load8U {
+        offset: u32,
+    },
+    I32Load16S {
+        offset: u32,
+    },
+    I32Load16U {
+        offset: u32,
+    },
+    I32Store8 {
+        offset: u32,
+    },
+    I32Store16 {
+        offset: u32,
+    },
     /// `memory.size` — push the current size in pages.
     MemorySize,
     /// `memory.grow` — pop delta pages, grow, push old size (or -1 on failure).
     MemoryGrow,
     /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
-    I64Load { offset: u32 },
-    I64Store { offset: u32 },
+    I64Load {
+        offset: u32,
+    },
+    I64Store {
+        offset: u32,
+    },
     /// Narrow i64 loads (sign/zero extended to i64) and stores (low bytes).
-    I64Load8S { offset: u32 },
-    I64Load8U { offset: u32 },
-    I64Load16S { offset: u32 },
-    I64Load16U { offset: u32 },
-    I64Load32S { offset: u32 },
-    I64Load32U { offset: u32 },
-    I64Store8 { offset: u32 },
-    I64Store16 { offset: u32 },
-    I64Store32 { offset: u32 },
+    I64Load8S {
+        offset: u32,
+    },
+    I64Load8U {
+        offset: u32,
+    },
+    I64Load16S {
+        offset: u32,
+    },
+    I64Load16U {
+        offset: u32,
+    },
+    I64Load32S {
+        offset: u32,
+    },
+    I64Load32U {
+        offset: u32,
+    },
+    I64Store8 {
+        offset: u32,
+    },
+    I64Store16 {
+        offset: u32,
+    },
+    I64Store32 {
+        offset: u32,
+    },
     // --- i64 integer family ---
     I64Const(i64),
     I64Eqz,
@@ -181,8 +219,12 @@ enum Op {
     F64Min,
     F64Max,
     F64Copysign,
-    F64Load { offset: u32 },
-    F64Store { offset: u32 },
+    F64Load {
+        offset: u32,
+    },
+    F64Store {
+        offset: u32,
+    },
     // --- f32 family ---
     F32Const(f32),
     F32Eq,
@@ -205,8 +247,12 @@ enum Op {
     F32Min,
     F32Max,
     F32Copysign,
-    F32Load { offset: u32 },
-    F32Store { offset: u32 },
+    F32Load {
+        offset: u32,
+    },
+    F32Store {
+        offset: u32,
+    },
     /// `global.get` / `global.set` — read/write a module global by index.
     GlobalGet(u32),
     GlobalSet(u32),
@@ -255,9 +301,14 @@ enum Op {
     /// `call_indirect` — pop a table index, look up the funcref, type-check it
     /// against `type_index`, and call it. (The table immediate is always 0 in
     /// MVP and is decoded then ignored.)
-    CallIndirect { type_index: u32 },
+    CallIndirect {
+        type_index: u32,
+    },
     /// `br_table` — pop an index; branch to `targets[index]` or `default`.
-    BrTable { targets: Vec<u32>, default: u32 },
+    BrTable {
+        targets: Vec<u32>,
+        default: u32,
+    },
     /// `if` — pop a condition; run the then-body when nonzero, else the
     /// else-body. `else_pc` indexes the [`Op::Else`] (if any); `end` indexes the
     /// matching `End`.
@@ -267,7 +318,9 @@ enum Op {
         end: usize,
     },
     /// `else` — end of the then-body; `end` indexes the `if`'s matching `End`.
-    Else { end: usize },
+    Else {
+        end: usize,
+    },
     /// `unreachable` — always traps.
     Unreachable,
     /// `nop` — does nothing.
@@ -435,7 +488,9 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                     .get(i)
                     .ok_or_else(|| WasmError::Decode("truncated memory.size".into()))?;
                 if b != 0x00 {
-                    return Err(WasmError::Decode("memory.size reserved byte must be 0".into()));
+                    return Err(WasmError::Decode(
+                        "memory.size reserved byte must be 0".into(),
+                    ));
                 }
                 i += 1;
                 ops.push(Op::MemorySize);
@@ -445,7 +500,9 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                     .get(i)
                     .ok_or_else(|| WasmError::Decode("truncated memory.grow".into()))?;
                 if b != 0x00 {
-                    return Err(WasmError::Decode("memory.grow reserved byte must be 0".into()));
+                    return Err(WasmError::Decode(
+                        "memory.grow reserved byte must be 0".into(),
+                    ));
                 }
                 i += 1;
                 ops.push(Op::MemoryGrow);
@@ -1250,9 +1307,9 @@ impl Module {
             });
         }
         for (fi, &tidx) in func_types.iter().enumerate() {
-            let (n_params, n_results) = *types
-                .get(tidx)
-                .ok_or_else(|| WasmError::Decode(format!("function {fi} references missing type")))?;
+            let (n_params, n_results) = *types.get(tidx).ok_or_else(|| {
+                WasmError::Decode(format!("function {fi} references missing type"))
+            })?;
             let (n_locals, expr) = &codes[fi];
             let code = decode(expr)?;
             module.funcs.push(Func {
@@ -1278,7 +1335,9 @@ impl Module {
                 let slot = offset
                     .checked_add(k)
                     .filter(|&s| s < module.table.len())
-                    .ok_or_else(|| WasmError::Decode("elem segment runs past table bounds".into()))?;
+                    .ok_or_else(|| {
+                        WasmError::Decode("elem segment runs past table bounds".into())
+                    })?;
                 module.table[slot] = Some(fidx);
             }
         }
@@ -1552,13 +1611,15 @@ impl Module {
                 Op::I32Xor => bin_i32(&mut stack, |a, b| a ^ b)?,
                 Op::I32Shl => bin_i32(&mut stack, |a, b| ((a as u32) << ((b as u32) & 31)) as i32)?,
                 Op::I32ShrS => bin_i32(&mut stack, |a, b| a >> ((b as u32) & 31))?,
-                Op::I32ShrU => bin_i32(&mut stack, |a, b| ((a as u32) >> ((b as u32) & 31)) as i32)?,
-                Op::I32Rotl => {
-                    bin_i32(&mut stack, |a, b| (a as u32).rotate_left((b as u32) & 31) as i32)?
+                Op::I32ShrU => {
+                    bin_i32(&mut stack, |a, b| ((a as u32) >> ((b as u32) & 31)) as i32)?
                 }
-                Op::I32Rotr => {
-                    bin_i32(&mut stack, |a, b| (a as u32).rotate_right((b as u32) & 31) as i32)?
-                }
+                Op::I32Rotl => bin_i32(&mut stack, |a, b| {
+                    (a as u32).rotate_left((b as u32) & 31) as i32
+                })?,
+                Op::I32Rotr => bin_i32(&mut stack, |a, b| {
+                    (a as u32).rotate_right((b as u32) & 31) as i32
+                })?,
                 Op::I32Load { offset } => {
                     let addr = pop(&mut stack)?;
                     stack.push(Val::I32(mem_read_i32(mem, addr, offset)?));
@@ -1603,7 +1664,9 @@ impl Module {
                 Op::GlobalSet(g) => {
                     let gi = g as usize;
                     if self.globals.get(gi).is_some_and(|d| !d.mutable) {
-                        return Err(WasmError::Trap(format!("global.set {g} on immutable global")));
+                        return Err(WasmError::Trap(format!(
+                            "global.set {g} on immutable global"
+                        )));
                     }
                     let v = pop_val(&mut stack)?;
                     let cell = globals
@@ -1882,7 +1945,9 @@ impl Module {
                 }
                 Op::I64Load16U { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    stack.push(Val::I64(u16::from_le_bytes([mem[ea], mem[ea + 1]]) as u64 as i64));
+                    stack.push(Val::I64(
+                        u16::from_le_bytes([mem[ea], mem[ea + 1]]) as u64 as i64
+                    ));
                 }
                 Op::I64Load32S { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
@@ -1964,17 +2029,15 @@ impl Module {
                 Op::I64Xor => bin_i64(&mut stack, |a, b| a ^ b)?,
                 Op::I64Shl => bin_i64(&mut stack, |a, b| ((a as u64) << ((b as u64) & 63)) as i64)?,
                 Op::I64ShrS => bin_i64(&mut stack, |a, b| a >> ((b as u64) & 63))?,
-                Op::I64ShrU => bin_i64(&mut stack, |a, b| ((a as u64) >> ((b as u64) & 63)) as i64)?,
-                Op::I64Rotl => {
-                    bin_i64(&mut stack, |a, b| {
-                        (a as u64).rotate_left((b as u64 & 63) as u32) as i64
-                    })?
+                Op::I64ShrU => {
+                    bin_i64(&mut stack, |a, b| ((a as u64) >> ((b as u64) & 63)) as i64)?
                 }
-                Op::I64Rotr => {
-                    bin_i64(&mut stack, |a, b| {
-                        (a as u64).rotate_right((b as u64 & 63) as u32) as i64
-                    })?
-                }
+                Op::I64Rotl => bin_i64(&mut stack, |a, b| {
+                    (a as u64).rotate_left((b as u64 & 63) as u32) as i64
+                })?,
+                Op::I64Rotr => bin_i64(&mut stack, |a, b| {
+                    (a as u64).rotate_right((b as u64 & 63) as u32) as i64
+                })?,
                 Op::LocalGet(l) => {
                     let v = *locals
                         .get(l as usize)
@@ -2022,10 +2085,9 @@ impl Module {
                         let h = &self.hosts[combined];
                         (h.n_params, h.n_results)
                     } else {
-                        let f = self
-                            .funcs
-                            .get(combined - self.hosts.len())
-                            .ok_or_else(|| WasmError::Trap("call_indirect: bad table entry".into()))?;
+                        let f = self.funcs.get(combined - self.hosts.len()).ok_or_else(|| {
+                            WasmError::Trap("call_indirect: bad table entry".into())
+                        })?;
                         (f.n_params, f.arity)
                     };
                     if (ep, er) != (actual_params, actual_results) {
@@ -2442,7 +2504,9 @@ fn pop_val(stack: &mut Vec<Val>) -> Result<Val, WasmError> {
 fn pop(stack: &mut Vec<Val>) -> Result<i32, WasmError> {
     match pop_val(stack)? {
         Val::I32(v) => Ok(v),
-        other => Err(WasmError::Trap(format!("expected i32 on stack, got {other:?}"))),
+        other => Err(WasmError::Trap(format!(
+            "expected i32 on stack, got {other:?}"
+        ))),
     }
 }
 
@@ -2451,7 +2515,9 @@ fn pop(stack: &mut Vec<Val>) -> Result<i32, WasmError> {
 fn pop_i64(stack: &mut Vec<Val>) -> Result<i64, WasmError> {
     match pop_val(stack)? {
         Val::I64(v) => Ok(v),
-        other => Err(WasmError::Trap(format!("expected i64 on stack, got {other:?}"))),
+        other => Err(WasmError::Trap(format!(
+            "expected i64 on stack, got {other:?}"
+        ))),
     }
 }
 
@@ -2460,7 +2526,9 @@ fn pop_i64(stack: &mut Vec<Val>) -> Result<i64, WasmError> {
 fn pop_f32(stack: &mut Vec<Val>) -> Result<f32, WasmError> {
     match pop_val(stack)? {
         Val::F32(v) => Ok(v),
-        other => Err(WasmError::Trap(format!("expected f32 on stack, got {other:?}"))),
+        other => Err(WasmError::Trap(format!(
+            "expected f32 on stack, got {other:?}"
+        ))),
     }
 }
 
@@ -2469,7 +2537,9 @@ fn pop_f32(stack: &mut Vec<Val>) -> Result<f32, WasmError> {
 fn pop_f64(stack: &mut Vec<Val>) -> Result<f64, WasmError> {
     match pop_val(stack)? {
         Val::F64(v) => Ok(v),
-        other => Err(WasmError::Trap(format!("expected f64 on stack, got {other:?}"))),
+        other => Err(WasmError::Trap(format!(
+            "expected f64 on stack, got {other:?}"
+        ))),
     }
 }
 
@@ -2710,7 +2780,10 @@ mod tests {
         let f = m
             .add_function(1, 0, 1, &[0x20, 0x00, 0x41, 0x01, 0x6A, 0x0B])
             .unwrap();
-        assert_eq!(m.invoke_val(f, &[Val::I32(41)]).unwrap(), vec![Val::I32(42)]);
+        assert_eq!(
+            m.invoke_val(f, &[Val::I32(41)]).unwrap(),
+            vec![Val::I32(42)]
+        );
         // The i32 convenience wrapper still works.
         assert_eq!(m.invoke(f, &[41]).unwrap(), vec![42]);
     }
@@ -2979,12 +3052,10 @@ mod tests {
         let wasm = [
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
             // type: func () -> (i32)
-            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
-            // import: "env"."h" func type 0
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // import: "env"."h" func type 0
             0x02, 0x09, 0x01, 0x03, 0x65, 0x6E, 0x76, 0x01, 0x68, 0x00, 0x00,
             // func: type 0 (the defined function, index 1)
-            0x03, 0x02, 0x01, 0x00,
-            // code: call 0 (the import) ; end
+            0x03, 0x02, 0x01, 0x00, // code: call 0 (the import) ; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
         ];
         let m = Module::from_bytes(&wasm).unwrap();
@@ -3000,10 +3071,8 @@ mod tests {
         let wasm = [
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // \0asm, version 1
             // type section: 1 type, func () -> (i32)
-            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
-            // function section: 1 func, type 0
-            0x03, 0x02, 0x01, 0x00,
-            // code section: 1 body: 0 locals, i32.const 42, end
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // function section: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00, // code section: 1 body: 0 locals, i32.const 42, end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B,
         ];
         let m = Module::from_bytes(&wasm).unwrap();
@@ -3019,10 +3088,8 @@ mod tests {
         let wasm = [
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
             // type: func (i32) -> (i32)
-            0x01, 0x06, 0x01, 0x60, 0x01, 0x7F, 0x01, 0x7F,
-            // func: type 0
-            0x03, 0x02, 0x01, 0x00,
-            // export "inc" func 0  -> skipped
+            0x01, 0x06, 0x01, 0x60, 0x01, 0x7F, 0x01, 0x7F, // func: type 0
+            0x03, 0x02, 0x01, 0x00, // export "inc" func 0  -> skipped
             0x07, 0x07, 0x01, 0x03, 0x69, 0x6E, 0x63, 0x00, 0x00,
             // code: 0 locals, local.get 0, i32.const 1, i32.add, end
             0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x41, 0x01, 0x6A, 0x0B,
@@ -3059,7 +3126,10 @@ mod tests {
         m.set_table_entry(0, callee);
         let body = [0x20, 0x00, 0x41, 0x00, 0x11, t as u8, 0x00, 0x0B];
         let caller = m.add_function(1, 0, 1, &body).unwrap();
-        assert_eq!(m.invoke_val(caller, &[Val::I32(41)]).unwrap(), vec![Val::I32(42)]);
+        assert_eq!(
+            m.invoke_val(caller, &[Val::I32(41)]).unwrap(),
+            vec![Val::I32(42)]
+        );
     }
 
     #[test]
@@ -3093,10 +3163,12 @@ mod tests {
             0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // type () -> i32
             0x03, 0x03, 0x02, 0x00, 0x00, // funcs: type 0, type 0
             0x04, 0x04, 0x01, 0x70, 0x00, 0x01, // table 1 funcref
-            0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00, // elem (i32.const 0) [func 0]
+            0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01,
+            0x00, // elem (i32.const 0) [func 0]
             0x0A, 0x0E, 0x02, // code: 2 bodies
             0x04, 0x00, 0x41, 0x07, 0x0B, // func 0: i32.const 7
-            0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B, // func 1: i32.const 0 ; call_indirect 0 0
+            0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00,
+            0x0B, // func 1: i32.const 0 ; call_indirect 0 0
         ];
         let m = Module::from_bytes(wasm).unwrap();
         assert_eq!(m.invoke(1, &[]).unwrap(), vec![7]);
@@ -3177,8 +3249,8 @@ mod tests {
             0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // type () -> i32
             0x03, 0x02, 0x01, 0x00, // func: type 0
             // global section: 1 global, i32 mutable=0, init i32.const 99, end
-            0x06, 0x07, 0x01, 0x7F, 0x00, 0x41, 0xE3, 0x00, 0x0B,
-            0x0A, 0x06, 0x01, 0x04, 0x00, 0x23, 0x00, 0x0B, // code: global.get 0
+            0x06, 0x07, 0x01, 0x7F, 0x00, 0x41, 0xE3, 0x00, 0x0B, 0x0A, 0x06, 0x01, 0x04, 0x00,
+            0x23, 0x00, 0x0B, // code: global.get 0
         ];
         let m = Module::from_bytes(&wasm).unwrap();
         assert_eq!(m.invoke(0, &[]).unwrap(), vec![99]);
@@ -3193,8 +3265,8 @@ mod tests {
             0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // type () -> i32
             0x03, 0x02, 0x01, 0x00, // func: type 0
             // export "answer" func 0
-            0x07, 0x0A, 0x01, 0x06, 0x61, 0x6E, 0x73, 0x77, 0x65, 0x72, 0x00, 0x00,
-            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B, // code: i32.const 42
+            0x07, 0x0A, 0x01, 0x06, 0x61, 0x6E, 0x73, 0x77, 0x65, 0x72, 0x00, 0x00, 0x0A, 0x06,
+            0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B, // code: i32.const 42
         ];
         let m = Module::from_bytes(&wasm).unwrap();
         assert_eq!(m.export_index("answer"), Some(0));
@@ -3216,13 +3288,25 @@ mod tests {
     #[test]
     fn conv_wrap_extend_reinterpret() {
         // i32.wrap_i64: low 32 bits of 0x1_0000_002A = 42
-        assert_eq!(conv1(0xA7, Val::I64(0x1_0000_002A)).unwrap(), vec![Val::I32(42)]);
+        assert_eq!(
+            conv1(0xA7, Val::I64(0x1_0000_002A)).unwrap(),
+            vec![Val::I32(42)]
+        );
         // i64.extend_i32_s(-1) = -1 ; extend_i32_u(-1) = 0xFFFFFFFF
         assert_eq!(conv1(0xAC, Val::I32(-1)).unwrap(), vec![Val::I64(-1)]);
-        assert_eq!(conv1(0xAD, Val::I32(-1)).unwrap(), vec![Val::I64(4294967295)]);
+        assert_eq!(
+            conv1(0xAD, Val::I32(-1)).unwrap(),
+            vec![Val::I64(4294967295)]
+        );
         // i32.reinterpret_f32(1.0) = 0x3F800000 ; and back
-        assert_eq!(conv1(0xBC, Val::F32(1.0)).unwrap(), vec![Val::I32(0x3F80_0000)]);
-        assert_eq!(conv1(0xBE, Val::I32(0x3F80_0000)).unwrap(), vec![Val::F32(1.0)]);
+        assert_eq!(
+            conv1(0xBC, Val::F32(1.0)).unwrap(),
+            vec![Val::I32(0x3F80_0000)]
+        );
+        assert_eq!(
+            conv1(0xBE, Val::I32(0x3F80_0000)).unwrap(),
+            vec![Val::F32(1.0)]
+        );
         assert_eq!(
             conv1(0xBD, Val::F64(1.5)).unwrap(),
             vec![Val::I64(0x3FF8_0000_0000_0000u64 as i64)]
@@ -3233,7 +3317,10 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn conv_int_float_roundtrips() {
         assert_eq!(conv1(0xB2, Val::I32(42)).unwrap(), vec![Val::F32(42.0)]); // f32.convert_i32_s
-        assert_eq!(conv1(0xB3, Val::I32(-1)).unwrap(), vec![Val::F32(4294967295.0)]); // convert_i32_u
+        assert_eq!(
+            conv1(0xB3, Val::I32(-1)).unwrap(),
+            vec![Val::F32(4294967295.0)]
+        ); // convert_i32_u
         assert_eq!(conv1(0xB9, Val::I64(-5)).unwrap(), vec![Val::F64(-5.0)]); // f64.convert_i64_s
         assert_eq!(conv1(0xBB, Val::F32(1.5)).unwrap(), vec![Val::F64(1.5)]); // promote
         assert_eq!(conv1(0xB6, Val::F64(1.5)).unwrap(), vec![Val::F32(1.5)]); // demote
@@ -3243,12 +3330,27 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn conv_trunc_happy_and_traps() {
         assert_eq!(conv1(0xA8, Val::F32(42.9)).unwrap(), vec![Val::I32(42)]); // happy
-        assert!(matches!(conv1(0xA8, Val::F32(f32::NAN)), Err(WasmError::Trap(_))));
-        assert!(matches!(conv1(0xA8, Val::F32(3e9)), Err(WasmError::Trap(_)))); // > i32::MAX
-        assert!(matches!(conv1(0xA8, Val::F32(f32::INFINITY)), Err(WasmError::Trap(_))));
-        assert!(matches!(conv1(0xA9, Val::F32(-1.5)), Err(WasmError::Trap(_)))); // u: past -1
+        assert!(matches!(
+            conv1(0xA8, Val::F32(f32::NAN)),
+            Err(WasmError::Trap(_))
+        ));
+        assert!(matches!(
+            conv1(0xA8, Val::F32(3e9)),
+            Err(WasmError::Trap(_))
+        )); // > i32::MAX
+        assert!(matches!(
+            conv1(0xA8, Val::F32(f32::INFINITY)),
+            Err(WasmError::Trap(_))
+        ));
+        assert!(matches!(
+            conv1(0xA9, Val::F32(-1.5)),
+            Err(WasmError::Trap(_))
+        )); // u: past -1
         assert_eq!(conv1(0xA9, Val::F32(-0.5)).unwrap(), vec![Val::I32(0)]); // (-1,0] -> 0
-        assert!(matches!(conv1(0xAF, Val::F32(1.9e19)), Err(WasmError::Trap(_)))); // i64.trunc_f32_u > 2^64
+        assert!(matches!(
+            conv1(0xAF, Val::F32(1.9e19)),
+            Err(WasmError::Trap(_))
+        )); // i64.trunc_f32_u > 2^64
     }
 
     // Family: f32.
@@ -3298,8 +3400,12 @@ mod tests {
     #[test]
     fn f32_min_max_nan_signed_zero() {
         assert!(matches!(f32_bin(f32::NAN, 1.0, 0x96)[0], Val::F32(x) if x.is_nan()));
-        assert!(matches!(f32_bin(-0.0, 0.0, 0x96)[0], Val::F32(x) if x == 0.0 && x.is_sign_negative()));
-        assert!(matches!(f32_bin(-0.0, 0.0, 0x97)[0], Val::F32(x) if x == 0.0 && x.is_sign_positive()));
+        assert!(
+            matches!(f32_bin(-0.0, 0.0, 0x96)[0], Val::F32(x) if x == 0.0 && x.is_sign_negative())
+        );
+        assert!(
+            matches!(f32_bin(-0.0, 0.0, 0x97)[0], Val::F32(x) if x == 0.0 && x.is_sign_positive())
+        );
     }
 
     #[test]
@@ -3450,7 +3556,10 @@ mod tests {
         ];
         let mut m = Module::new();
         let f = m.add_function(1, 0, 1, &body).unwrap();
-        assert_eq!(m.invoke_val(f, &[Val::I64(42)]).unwrap(), vec![Val::I64(42)]);
+        assert_eq!(
+            m.invoke_val(f, &[Val::I64(42)]).unwrap(),
+            vec![Val::I64(42)]
+        );
     }
 
     #[test]
