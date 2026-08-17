@@ -718,3 +718,8 @@ track remains planned, but every declared dependency must still pass.
   Owned by [agenterm-dyn](PRD_02_34_agenterm_dyn.md). First cut is on `main`.
   Resume after Grok Bot Cursor quota resets: harden leftovers, pointer-buffer
   Linux probes, paired examples. No cu/platform/JIT unless 政委 orders it.
+- [~] `agenterm-tinyvm` — WASM 1.0 interpret slot A; one face `eval(bytes)`.
+  Owned by [agenterm-tinyvm](PRD_02_35_agenterm_tinyvm.md). Kernel is the
+  interpreter (stripped static core < 100 KiB); multi-arch/APE packaging is
+  not the engine. Slot B (dyn/AOT) is deferred. Does not merge cu or touch
+  dyn / chassis / #78.

@@ -37,14 +37,14 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 
 mod asm;
 pub use asm::{AsmError, assemble};
 
 pub mod wasm;
-pub use wasm::{Module as WasmModule, Val, WasmError};
+pub use wasm::{ImportDesc, Module as WasmModule, Val, WasmError, eval};
 
 /// One bytecode instruction.
 ///

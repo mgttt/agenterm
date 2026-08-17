@@ -147,8 +147,9 @@ AgenTerm — local agent & process fleet work OS
 │     └─ QR pairing             扫码绑定桌面客户端，先观察后协同
 │
 ├─ 内部原生底座
-│  └─ 34 agenterm-dyn          publish=false 的极小 native door；当前授权范围持续收口
-│                             ISA folding / wasm export / libagenterm merge 仍未授权
+│  ├─ 34 agenterm-dyn          publish=false 的极小 native door；当前授权范围持续收口
+│  │                          ISA folding / wasm export / libagenterm merge 仍未授权
+│  └─ 35 agenterm-tinyvm       一张脸 eval(bytes)→值或错；槽 A = WASM 1.0 解释（172 操作码）
 │
 └─ 未来面（里程碑 / 灵感）
    ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
@@ -195,6 +196,7 @@ AgenTerm — local agent & process fleet work OS
 | 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放与几何合同（Spectacle 收录）；macOS host 已落地，Windows desktop-host ABI 1.7 已通过本机 self-test，正式交付仍在 qualification |
 | 33 | [Mobile reach (`agenterm-mobile`)](prd/PRD_02_33_mobile_reach.md) | 手机接入端：PWA 先行（`https://agenterm.work/app`）、商店 App 占位、扫码绑定桌面；无版本承诺 |
 | 34 | [`agenterm-dyn` internal native door](prd/PRD_02_34_agenterm_dyn.md) | `publish = false` 的极小 S-expr / intern / bounded `dlcall` crate；当前授权范围持续收口，host-ISA folding、wasm export 与 libagenterm merge 仍未授权 |
+| 35 | [`agenterm-tinyvm` WASM 1.0 interpreter](prd/PRD_02_35_agenterm_tinyvm.md) | 一张脸 `eval(bytes)→` 值或错；槽 A = WASM 1.0 全部 172 条 MVP 操作码；宿主门是 import 表；核 <100KiB |
 
 ## Non-negotiable invariants
 

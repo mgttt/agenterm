@@ -1,30 +1,20 @@
-//! A minimal interpreter for **WebAssembly 1.0 function-body bytecode**.
+//! Slot A: a thin interpreter for **WebAssembly 1.0 MVP** (all 172 opcodes).
 //!
-//! This runs real `.wasm` opcode bytes — not a re-invented instruction set —
-//! for a first subset large enough to execute one real function:
-//!
-//! - `i32.const` (0x41), `i32.add` (0x6A)
-//! - `local.get` (0x20), `local.set` (0x21)
-//! - `call` (0x10)
-//! - `block` (0x02), `loop` (0x03), `br` (0x0C), `br_if` (0x0D),
-//!   `return` (0x0F), `end` (0x0B)
-//!
-//! It does **not** implement the whole spec: no linear memory, tables, globals,
-//! or whole-module (import/export/section) parsing — those come later. A caller
-//! registers function bodies (with their param/local/result counts) into a
-//! [`Module`] and invokes them. Block types are limited to empty (`0x40`) or a
-//! single value type. No JIT/AOT — pure interpretation.
+//! The public face is [`eval`]: standard `.wasm` bytes in, a [`Val`] sequence
+//! or a loud [`WasmError`] out. WAT is not an input. Host functions enter
+//! through the module import table ([`Module::bind_import`]), not a general
+//! FFI. No JIT/AOT — that is parked slot B.
 //!
 //! Every fault is loud: a malformed body fails to decode, and a run-time trap
-//! (stack underflow, out-of-range local/label/func, budget/depth overrun)
-//! returns a [`WasmError`] rather than misbehaving silently.
+//! (stack underflow, out-of-range local/label/func, unbound import, budget
+//! / depth overrun) returns a [`WasmError`] rather than misbehaving silently.
 
+use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use alloc::vec::Vec;
 use alloc::vec;
-use alloc::borrow::ToOwned;
+use alloc::vec::Vec;
 
 /// Max call recursion depth (via `call`).
 pub const WASM_MAX_DEPTH: usize = 1_024;
@@ -65,6 +55,16 @@ impl WasmError {
             Self::Decode(m) | Self::Trap(m) => m,
         }
     }
+}
+
+/// Slot A face: load a standard WebAssembly 1.0 module and evaluate it.
+///
+/// Runs the start function if present, then the first declared function
+/// export (or the first defined function if there is no export). Host
+/// imports stay unbound and trap if called; bind them via
+/// [`Module::from_bytes`] + [`Module::bind_import`] + [`Module::eval`].
+pub fn eval(bytes: &[u8]) -> Result<Vec<Val>, WasmError> {
+    Module::from_bytes(bytes)?.eval(&[])
 }
 
 /// A decoded instruction. Branch/call operands keep their WASM indices; block
@@ -493,9 +493,7 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                     .get(i)
                     .ok_or(WasmError::Decode("truncated memory.size"))?;
                 if b != 0x00 {
-                    return Err(WasmError::Decode(
-                        "memory.size reserved byte must be 0",
-                    ));
+                    return Err(WasmError::Decode("memory.size reserved byte must be 0"));
                 }
                 i += 1;
                 ops.push(Op::MemorySize);
@@ -505,9 +503,7 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                     .get(i)
                     .ok_or(WasmError::Decode("truncated memory.grow"))?;
                 if b != 0x00 {
-                    return Err(WasmError::Decode(
-                        "memory.grow reserved byte must be 0",
-                    ));
+                    return Err(WasmError::Decode("memory.grow reserved byte must be 0"));
                 }
                 i += 1;
                 ops.push(Op::MemoryGrow);
@@ -843,14 +839,6 @@ fn skip_valtypes(p: &[u8], i: usize, n: u32) -> Result<usize, WasmError> {
     Ok(end)
 }
 
-/// Skip a name (LEB length + that many bytes).
-fn skip_name(p: &[u8], i: usize) -> Result<usize, WasmError> {
-    let (len, ni) = leb_u32(p, i)?;
-    ni.checked_add(len as usize)
-        .filter(|&e| e <= p.len())
-        .ok_or(WasmError::Decode("name runs past section"))
-}
-
 /// Read a UTF-8 name (LEB length + bytes), returning it and the next offset.
 fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
     let (len, ni) = leb_u32(p, i)?;
@@ -870,9 +858,7 @@ fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
     if count != 1 {
         return Err(WasmError::Decode("unsupported table count"));
     }
-    let reftype = *p
-        .get(i)
-        .ok_or(WasmError::Decode("truncated table type"))?;
+    let reftype = *p.get(i).ok_or(WasmError::Decode("truncated table type"))?;
     if reftype != 0x70 {
         return Err(WasmError::Decode("unsupported reftype 0x"));
     }
@@ -930,9 +916,7 @@ fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
 
 /// Evaluate a constant init expression (`<t.const imm> end`) to a value.
 fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
-    let op = *p
-        .get(i)
-        .ok_or(WasmError::Decode("truncated const expr"))?;
+    let op = *p.get(i).ok_or(WasmError::Decode("truncated const expr"))?;
     let (val, mut j) = match op {
         0x41 => {
             let (v, ni) = leb_s32(p, i + 1)?;
@@ -978,9 +962,7 @@ fn parse_global_section(p: &[u8]) -> Result<Vec<(Val, bool)>, WasmError> {
     let mut out = Vec::new();
     for _ in 0..count {
         // globaltype = valtype byte + mutability byte
-        let _valtype = p
-            .get(i)
-            .ok_or(WasmError::Decode("truncated global type"))?;
+        let _valtype = p.get(i).ok_or(WasmError::Decode("truncated global type"))?;
         let mutable = *p
             .get(i + 1)
             .ok_or(WasmError::Decode("truncated global mutability"))?
@@ -1000,9 +982,7 @@ fn parse_export_section(p: &[u8]) -> Result<Vec<(String, usize)>, WasmError> {
     let mut out = Vec::new();
     for _ in 0..count {
         let (name, ni) = read_name(p, i)?;
-        let kind = *p
-            .get(ni)
-            .ok_or(WasmError::Decode("truncated export"))?;
+        let kind = *p.get(ni).ok_or(WasmError::Decode("truncated export"))?;
         let (index, nj) = leb_u32(p, ni + 1)?;
         i = nj;
         if kind == 0x00 {
@@ -1012,29 +992,43 @@ fn parse_export_section(p: &[u8]) -> Result<Vec<(String, usize)>, WasmError> {
     Ok(out)
 }
 
-/// Parse the import section, returning `(n_params, n_results)` for each
-/// imported **function** in order. Only function imports are supported here.
-fn parse_import_section(
-    p: &[u8],
-    types: &[(usize, usize)],
-) -> Result<Vec<(usize, usize)>, WasmError> {
+/// A function import: `(module, field)` name and its type arity.
+///
+/// This is the host door. Bind a callback with [`Module::bind_import`]; an
+/// unbound import traps if the guest calls it.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct ImportDesc {
+    pub module: String,
+    pub field: String,
+    pub n_params: usize,
+    pub n_results: usize,
+}
+
+/// Parse the import section, returning each imported **function** in order.
+/// Only function imports are supported here.
+fn parse_import_section(p: &[u8], types: &[(usize, usize)]) -> Result<Vec<ImportDesc>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     for _ in 0..count {
-        i = skip_name(p, i)?; // module name
-        i = skip_name(p, i)?; // field name
-        let kind = *p
-            .get(i)
-            .ok_or(WasmError::Decode("truncated import"))?;
+        let (module, ni) = read_name(p, i)?;
+        let (field, ni) = read_name(p, ni)?;
+        i = ni;
+        let kind = *p.get(i).ok_or(WasmError::Decode("truncated import"))?;
         i += 1;
         match kind {
             0x00 => {
                 let (tidx, ni) = leb_u32(p, i)?;
                 i = ni;
-                let t = types.get(tidx as usize).ok_or({
-                    WasmError::Decode("imported function references missing type")
-                })?;
-                out.push(*t);
+                let t = types
+                    .get(tidx as usize)
+                    .ok_or(WasmError::Decode("imported function references missing type"))?;
+                out.push(ImportDesc {
+                    module,
+                    field,
+                    n_params: t.0,
+                    n_results: t.1,
+                });
             }
             _other => {
                 return Err(WasmError::Decode("unsupported import kind 0x"));
@@ -1049,9 +1043,7 @@ fn parse_type_section(p: &[u8]) -> Result<Vec<(usize, usize)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     for _ in 0..count {
-        let form = *p
-            .get(i)
-            .ok_or(WasmError::Decode("truncated func type"))?;
+        let form = *p.get(i).ok_or(WasmError::Decode("truncated func type"))?;
         i += 1;
         if form != 0x60 {
             return Err(WasmError::Decode("unsupported type form 0x"));
@@ -1161,6 +1153,11 @@ pub struct Module {
     /// Exported function names -> combined function index (from a module's
     /// export section, or registered via [`Module::export`]).
     exports: BTreeMap<String, usize>,
+    /// Function exports in declaration order (first one is [`Module::eval`]'s
+    /// preferred entry).
+    export_list: Vec<(String, usize)>,
+    /// Imported functions in index order (the host door).
+    import_descs: Vec<ImportDesc>,
     /// Module globals; a fresh working copy is initialised per invocation.
     globals: Vec<GlobalDesc>,
     /// Optional start function (run by [`Module::run_start`]).
@@ -1235,13 +1232,11 @@ impl Module {
             return Err(WasmError::Decode("not a wasm module (bad magic)"));
         }
         if wasm[4..8] != [0x01, 0x00, 0x00, 0x00] {
-            return Err(WasmError::Decode(
-                "unsupported wasm version (expected 1)",
-            ));
+            return Err(WasmError::Decode("unsupported wasm version (expected 1)"));
         }
 
         let mut types: Vec<(usize, usize)> = Vec::new();
-        let mut imports: Vec<(usize, usize)> = Vec::new();
+        let mut imports: Vec<ImportDesc> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
         let mut exports: Vec<(String, usize)> = Vec::new();
@@ -1284,15 +1279,15 @@ impl Module {
         let mut module = Module::new();
         // Imported functions occupy the low indices; without a bound host
         // implementation they trap loudly if actually called.
-        for (np, nr) in &imports {
-            module.add_host_function(*np, *nr, |_args, _mem| {
+        for desc in &imports {
+            module.add_host_function(desc.n_params, desc.n_results, |_args, _mem| {
                 Err(WasmError::Trap("call to unbound imported function"))
             });
         }
+        module.import_descs = imports;
         for (fi, &tidx) in func_types.iter().enumerate() {
-            let (n_params, n_results) = *types.get(tidx).ok_or({
-                WasmError::Decode("function")
-            })?;
+            let (n_params, n_results) =
+                *types.get(tidx).ok_or(WasmError::Decode("function"))?;
             let (n_locals, expr) = &codes[fi];
             let code = decode(expr)?;
             module.funcs.push(Func {
@@ -1306,7 +1301,8 @@ impl Module {
             module.globals.push(GlobalDesc { init, mutable });
         }
         for (name, index) in exports {
-            module.exports.insert(name, index);
+            module.exports.insert(name.clone(), index);
+            module.export_list.push((name, index));
         }
         module.start = start_fn;
         // Record the declared function types so `call_indirect` can type-check.
@@ -1318,9 +1314,7 @@ impl Module {
                 let slot = offset
                     .checked_add(k)
                     .filter(|&s| s < module.table.len())
-                    .ok_or({
-                        WasmError::Decode("elem segment runs past table bounds")
-                    })?;
+                    .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
                 module.table[slot] = Some(fidx);
             }
         }
@@ -1379,6 +1373,47 @@ impl Module {
     /// Record `name` as an exported function index (for [`Module::invoke_by_name`]).
     pub fn export(&mut self, name: &str, func_index: usize) {
         self.exports.insert(name.to_owned(), func_index);
+        self.export_list.push((name.to_owned(), func_index));
+    }
+
+    /// Function imports in module-index order. Bind each with [`Module::bind_import`].
+    pub fn imports(&self) -> &[ImportDesc] {
+        &self.import_descs
+    }
+
+    /// Bind a host callback to imported `module.field`. Replaces the unbound
+    /// stub installed by [`Module::from_bytes`].
+    pub fn bind_import<F>(&mut self, module: &str, field: &str, f: F) -> Result<(), WasmError>
+    where
+        F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
+    {
+        let pos = self
+            .import_descs
+            .iter()
+            .position(|d| d.module == module && d.field == field)
+            .ok_or(WasmError::Trap("no imported function named"))?;
+        self.hosts[pos].f = Box::new(f);
+        Ok(())
+    }
+
+    /// Run start (if any), then the first declared function export, else the
+    /// first defined function. This is the crate's one-face evaluator once a
+    /// module is loaded.
+    pub fn eval(&self, args: &[Val]) -> Result<Vec<Val>, WasmError> {
+        if let Some((_, idx)) = self.export_list.first() {
+            if self.start.is_some() {
+                self.run_start()?;
+            }
+            return self.invoke_val(*idx, args);
+        }
+        if let Some(idx) = self.start {
+            self.invoke_val(idx, args)?;
+            return Ok(Vec::new());
+        }
+        if !self.funcs.is_empty() {
+            return self.invoke_val(self.hosts.len(), args);
+        }
+        Ok(Vec::new())
     }
 
     /// Resolve an exported function name to its index, if present.
@@ -1630,9 +1665,7 @@ impl Module {
                         return Err(WasmError::Trap("global.set"));
                     }
                     let v = pop_val(&mut stack)?;
-                    let cell = globals
-                        .get_mut(gi)
-                        .ok_or(WasmError::Trap("global.set"))?;
+                    let cell = globals.get_mut(gi).ok_or(WasmError::Trap("global.set"))?;
                     *cell = v;
                 }
                 Op::I32WrapI64 => {
@@ -2000,9 +2033,7 @@ impl Module {
                     (a as u64).rotate_right((b as u64 & 63) as u32) as i64
                 })?,
                 Op::LocalGet(l) => {
-                    let v = *locals
-                        .get(l as usize)
-                        .ok_or(WasmError::Trap("local.get"))?;
+                    let v = *locals.get(l as usize).ok_or(WasmError::Trap("local.get"))?;
                     stack.push(v);
                 }
                 Op::LocalSet(l) => {
@@ -2027,9 +2058,10 @@ impl Module {
                     if ti >= self.table.len() {
                         return Err(WasmError::Trap("call_indirect: table index"));
                     }
-                    let combined = self.table.get(ti).copied().flatten().ok_or({
-                        WasmError::Trap("call_indirect: uninitialised table element")
-                    })?;
+                    let combined =
+                        self.table.get(ti).copied().flatten().ok_or({
+                            WasmError::Trap("call_indirect: uninitialised table element")
+                        })?;
                     // Type check (arity-level, an MVP approximation): compares
                     // only the parameter/result counts, not the value types.
                     let (ep, er) = *self
@@ -2040,9 +2072,10 @@ impl Module {
                         let h = &self.hosts[combined];
                         (h.n_params, h.n_results)
                     } else {
-                        let f = self.funcs.get(combined - self.hosts.len()).ok_or({
-                            WasmError::Trap("call_indirect: bad table entry")
-                        })?;
+                        let f = self
+                            .funcs
+                            .get(combined - self.hosts.len())
+                            .ok_or(WasmError::Trap("call_indirect: bad table entry"))?;
                         (f.n_params, f.arity)
                     };
                     if (ep, er) != (actual_params, actual_results) {
