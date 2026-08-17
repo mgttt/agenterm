@@ -1648,6 +1648,9 @@ def edge_cases() -> list[Case]:
                   "i32:2147483647", simple(i32c(-1) + i32c(2) + bytes([0x6E, 0x0B]))))
     e.append(Case("edge.i32.shl_count_mod32", "i32", ops("i32.const", "i32.shl", "end"),
                   "i32:1", simple(i32c(1) + i32c(32) + bytes([0x74, 0x0B]))))
+    # count 0x80000001: & 31 == 1, so a 255-wide or 63-wide mask is visible
+    e.append(Case("edge.i32.shl_count_mod32_high", "i32", ops("i32.const", "i32.shl", "end"),
+                  "i32:2", simple(i32c(1) + i32c(-2147483647) + bytes([0x74, 0x0B]))))
     e.append(Case("edge.i32.shr_u_zero_fill", "i32", ops("i32.const", "i32.shr_u", "end"),
                   "i32:2147483647", simple(i32c(-1) + i32c(1) + bytes([0x76, 0x0B]))))
     e.append(Case("edge.i32.shr_s_sign_fill", "i32", ops("i32.const", "i32.shr_s", "end"),
