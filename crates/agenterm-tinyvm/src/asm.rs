@@ -14,24 +14,17 @@
 //! instructions. A malformed line fails loudly with its line number.
 
 use crate::Instr;
-use std::fmt;
+use alloc::vec::Vec;
 
 /// A textual-assembly parse fault, with the 1-based source line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AsmError {
     /// 1-based line number of the offending line.
     pub line: usize,
-    /// What went wrong.
-    pub msg: String,
+    /// What went wrong (a static message; the crate carries no formatting).
+    pub msg: &'static str,
 }
-
-impl fmt::Display for AsmError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "asm error on line {}: {}", self.line, self.msg)
-    }
-}
-
-impl std::error::Error for AsmError {}
 
 /// Assemble one-instruction-per-line `src` into a program.
 pub fn assemble(src: &str) -> Result<Vec<Instr>, AsmError> {
@@ -49,7 +42,7 @@ pub fn assemble(src: &str) -> Result<Vec<Instr>, AsmError> {
         if toks.next().is_some() {
             return Err(AsmError {
                 line,
-                msg: format!("unexpected extra token after `{mnem}`"),
+                msg: "unexpected extra token after mnemonic",
             });
         }
         program.push(parse_one(mnem, operand, line)?);
@@ -79,10 +72,10 @@ fn parse_one(mnem: &str, operand: Option<&str>, line: usize) -> Result<Instr, As
         "not" => nullary(Instr::Not, mnem, operand, line)?,
         "ret" => nullary(Instr::Ret, mnem, operand, line)?,
         "halt" => nullary(Instr::Halt, mnem, operand, line)?,
-        other => {
+        _other => {
             return Err(AsmError {
                 line,
-                msg: format!("unknown mnemonic `{other}`"),
+                msg: "unknown mnemonic",
             });
         }
     };
@@ -91,38 +84,38 @@ fn parse_one(mnem: &str, operand: Option<&str>, line: usize) -> Result<Instr, As
 
 fn nullary(
     instr: Instr,
-    mnem: &str,
+    _mnem: &str,
     operand: Option<&str>,
     line: usize,
 ) -> Result<Instr, AsmError> {
     match operand {
         None => Ok(instr),
-        Some(tok) => Err(AsmError {
+        Some(_tok) => Err(AsmError {
             line,
-            msg: format!("`{mnem}` takes no operand, found `{tok}`"),
+            msg: "instruction takes no operand",
         }),
     }
 }
 
-fn int_operand(mnem: &str, operand: Option<&str>, line: usize) -> Result<i64, AsmError> {
-    let tok = operand.ok_or_else(|| AsmError {
+fn int_operand(_mnem: &str, operand: Option<&str>, line: usize) -> Result<i64, AsmError> {
+    let tok = operand.ok_or(AsmError {
         line,
-        msg: format!("`{mnem}` requires an integer operand"),
+        msg: "instruction requires an integer operand",
     })?;
     tok.parse::<i64>().map_err(|_| AsmError {
         line,
-        msg: format!("`{mnem}` operand `{tok}` is not a valid i64"),
+        msg: "operand is not a valid i64",
     })
 }
 
-fn addr_operand(mnem: &str, operand: Option<&str>, line: usize) -> Result<usize, AsmError> {
-    let tok = operand.ok_or_else(|| AsmError {
+fn addr_operand(_mnem: &str, operand: Option<&str>, line: usize) -> Result<usize, AsmError> {
+    let tok = operand.ok_or(AsmError {
         line,
-        msg: format!("`{mnem}` requires a non-negative operand"),
+        msg: "instruction requires a non-negative operand",
     })?;
     tok.parse::<usize>().map_err(|_| AsmError {
         line,
-        msg: format!("`{mnem}` operand `{tok}` is not a valid address/index"),
+        msg: "operand is not a valid address/index",
     })
 }
 

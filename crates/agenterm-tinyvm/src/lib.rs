@@ -9,16 +9,17 @@
 //! backend on desktop is a possible later step, deliberately not done here.)
 //!
 //! Properties, on purpose:
-//! - **Zero dependencies, pure `std`, no `unsafe`, no `mmap`.** It runs on any
-//!   target Rust can build — including platforms that forbid runtime-generated
-//!   native code (iOS, `wasm32`), where L1's JIT cannot run at all.
+//! - **`no_std`, no `fmt`, no `unsafe`, no `mmap`.** The crate is `no_std`
+//!   (only `alloc`) and never pulls in the formatting machinery — errors are
+//!   `&'static str` codes — so a stripped static core stays tiny. It runs on
+//!   any target Rust can build, including platforms that forbid
+//!   runtime-generated native code (iOS, `wasm32`).
 //! - **Turing-complete** in the usual bounded-by-memory sense: a value stack, a
 //!   linear memory (load/store), integer arithmetic, and a data-dependent
-//!   conditional branch (`Jz`) — enough to express loops and recursion.
+//!   conditional branch — enough to express loops and recursion.
 //! - **Loud failure, never silent or hung.** Stack underflow, division by
 //!   zero, out-of-range memory/branch, and a runaway program (step budget) all
-//!   return a [`VmError`]; the VM never corrupts silently and never spins
-//!   forever.
+//!   return an error; the VM never corrupts silently and never spins forever.
 //!
 //! It does not link, import, or otherwise touch `agenterm-dyn`, `agenterm-cu`,
 //! or `agenterm-chassis`.
@@ -28,10 +29,16 @@
 //! use agenterm_tinyvm::{Instr, Vm};
 //! let mut vm = Vm::new(16);
 //! let result = vm.run(&[Instr::Push(40), Instr::Push(2), Instr::Add, Instr::Halt]);
-//! assert_eq!(result.unwrap(), Some(42));
+//! assert!(matches!(result, Ok(Some(42))));
 //! ```
+#![cfg_attr(not(test), no_std)]
 
-use std::fmt;
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+use alloc::vec::Vec;
+use alloc::vec;
 
 mod asm;
 pub use asm::{AsmError, assemble};
@@ -43,7 +50,8 @@ pub use wasm::{Module as WasmModule, Val, WasmError};
 ///
 /// Branch and call targets are absolute instruction indices into the program
 /// slice passed to [`Vm::run`]. Memory addresses index the VM's linear memory.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Instr {
     // -- stack shuffling --
     /// Push an immediate onto the value stack.
@@ -98,7 +106,8 @@ pub enum Instr {
 
 /// A run-time fault. Every one is loud: the VM stops and returns it rather than
 /// corrupting state or hanging.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
 pub enum VmError {
     /// An op needed more stack values than were present.
     StackUnderflow { pc: usize, op: &'static str },
@@ -120,34 +129,26 @@ pub enum VmError {
     StepBudgetExceeded { limit: u64 },
 }
 
-impl fmt::Display for VmError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl VmError {
+    /// A static description of this fault (no formatting).
+    pub fn message(&self) -> &'static str {
         match self {
-            Self::StackUnderflow { pc, op } => {
-                write!(f, "stack underflow at pc {pc} in `{op}`")
-            }
-            Self::StackOverflow { pc } => write!(f, "value-stack overflow at pc {pc}"),
-            Self::CallOverflow { pc } => write!(f, "call-stack overflow at pc {pc}"),
-            Self::DivideByZero { pc } => write!(f, "divide by zero at pc {pc}"),
-            Self::MemoryOutOfRange { pc, addr } => {
-                write!(f, "memory address {addr} out of range at pc {pc}")
-            }
-            Self::BranchOutOfRange { pc, target } => {
-                write!(f, "branch target {target} out of range at pc {pc}")
-            }
-            Self::ReturnWithoutCall { pc } => write!(f, "ret without matching call at pc {pc}"),
-            Self::RanOffEnd { pc } => write!(f, "ran off the end of the program at pc {pc}"),
-            Self::StepBudgetExceeded { limit } => {
-                write!(f, "step budget {limit} exceeded (runaway program)")
-            }
+            Self::StackUnderflow { .. } => "stack underflow",
+            Self::StackOverflow { .. } => "value-stack overflow",
+            Self::CallOverflow { .. } => "call-stack overflow",
+            Self::DivideByZero { .. } => "divide by zero",
+            Self::MemoryOutOfRange { .. } => "memory address out of range",
+            Self::BranchOutOfRange { .. } => "branch target out of range",
+            Self::ReturnWithoutCall { .. } => "ret without matching call",
+            Self::RanOffEnd { .. } => "ran off the end of the program",
+            Self::StepBudgetExceeded { .. } => "step budget exceeded",
         }
     }
 }
 
-impl std::error::Error for VmError {}
-
 /// A fault from [`Vm::eval`]: either assembling the text or running it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
 pub enum EvalError {
     /// The text could not be assembled.
     Assemble(AsmError),
@@ -155,16 +156,15 @@ pub enum EvalError {
     Run(VmError),
 }
 
-impl fmt::Display for EvalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl EvalError {
+    /// A static description of this fault (no formatting).
+    pub fn message(&self) -> &'static str {
         match self {
-            Self::Assemble(e) => write!(f, "{e}"),
-            Self::Run(e) => write!(f, "{e}"),
+            Self::Assemble(e) => e.msg,
+            Self::Run(e) => e.message(),
         }
     }
 }
-
-impl std::error::Error for EvalError {}
 
 /// Default cap on executed instructions per [`Vm::run`] call.
 pub const DEFAULT_MAX_STEPS: u64 = 16_000_000;
@@ -174,7 +174,7 @@ pub const DEFAULT_STACK_LIMIT: usize = 65_536;
 pub const DEFAULT_CALL_LIMIT: usize = 8_192;
 
 /// A tiny stack machine with a fixed-size zero-initialised linear memory.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Vm {
     stack: Vec<i64>,
     mem: Vec<i64>,
@@ -571,5 +571,84 @@ mod tests {
     fn eval_reports_assembly_errors() {
         let mut vm = Vm::new(4);
         assert!(matches!(vm.eval("bogus 1"), Err(EvalError::Assemble(_))));
+    }
+}
+
+/// Freestanding static-core support: a minimal global allocator, panic handler,
+/// and a C-ABI self-test entry, enabled only for the size-measurement build
+/// (`--features staticcore`). Not compiled for normal builds or tests, so it
+/// never clashes with `std`'s allocator/panic handler.
+#[cfg(feature = "staticcore")]
+mod staticcore {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::cell::UnsafeCell;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    // A large arena lives in .bss (zero-initialised) so it costs no file bytes.
+    const ARENA_BYTES: usize = 32 * 1024 * 1024;
+
+    struct Bump {
+        buf: UnsafeCell<[u8; ARENA_BYTES]>,
+        off: AtomicUsize,
+    }
+    // Single-threaded static core; access is serialised by the bump CAS loop.
+    unsafe impl Sync for Bump {}
+
+    #[global_allocator]
+    static ALLOC: Bump = Bump {
+        buf: UnsafeCell::new([0; ARENA_BYTES]),
+        off: AtomicUsize::new(0),
+    };
+
+    unsafe impl GlobalAlloc for Bump {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let align = layout.align();
+            let size = layout.size();
+            let base = self.buf.get() as usize;
+            loop {
+                let cur = self.off.load(Ordering::Relaxed);
+                let ptr = (base + cur + align - 1) & !(align - 1);
+                let new_off = ptr - base + size;
+                if new_off > ARENA_BYTES {
+                    return core::ptr::null_mut();
+                }
+                if self
+                    .off
+                    .compare_exchange(cur, new_off, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    return ptr as *mut u8;
+                }
+            }
+        }
+        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
+    }
+
+    #[panic_handler]
+    fn panic(_info: &core::panic::PanicInfo) -> ! {
+        loop {}
+    }
+
+    /// Run a hand-written `.wasm` module through the interpreter and return the
+    /// exported function's i32 result (or a negative code on error). Exercises
+    /// decode + section parsing + execution from the no_std core.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn tinyvm_selftest() -> i32 {
+        // (module (func (export "answer") (result i32) i32.const 42))
+        const WASM: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7F, 0x03, 0x02, 0x01, 0x00, 0x07, 0x0A, 0x01, 0x06, 0x61, 0x6E, 0x73, 0x77, 0x65,
+            0x72, 0x00, 0x00, 0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B,
+        ];
+        match crate::WasmModule::from_bytes(WASM) {
+            Ok(m) => match m.invoke_by_name("answer", &[]) {
+                Ok(r) => match r.first() {
+                    Some(crate::Val::I32(v)) => *v,
+                    _ => -2,
+                },
+                Err(_) => -3,
+            },
+            Err(_) => -4,
+        }
     }
 }

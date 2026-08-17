@@ -19,7 +19,12 @@
 //! (stack underflow, out-of-range local/label/func, budget/depth overrun)
 //! returns a [`WasmError`] rather than misbehaving silently.
 
-use std::fmt;
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use alloc::vec;
+use alloc::borrow::ToOwned;
 
 /// Max call recursion depth (via `call`).
 pub const WASM_MAX_DEPTH: usize = 1_024;
@@ -33,7 +38,8 @@ pub const WASM_MAX_PAGES: usize = 65_536;
 
 /// A tagged WebAssembly value. The operand stack, locals, arguments, and
 /// results are all sequences of these so the four numeric types can coexist.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Val {
     I32(i32),
     I64(i64),
@@ -41,32 +47,33 @@ pub enum Val {
     F64(f64),
 }
 
-/// A decode-time or run-time WebAssembly fault.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A decode-time or run-time WebAssembly fault. Messages are `&'static str`
+/// so the crate never pulls in the formatting machinery.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WasmError {
     /// The function body could not be decoded.
-    Decode(String),
+    Decode(&'static str),
     /// The program trapped at run time.
-    Trap(String),
+    Trap(&'static str),
 }
 
-impl fmt::Display for WasmError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl WasmError {
+    /// The static message for this fault (no formatting).
+    pub fn message(&self) -> &'static str {
         match self {
-            Self::Decode(m) => write!(f, "wasm decode error: {m}"),
-            Self::Trap(m) => write!(f, "wasm trap: {m}"),
+            Self::Decode(m) | Self::Trap(m) => m,
         }
     }
 }
-
-impl std::error::Error for WasmError {}
 
 /// A decoded instruction. Branch/call operands keep their WASM indices; block
 /// and loop carry the index of their matching `End` so branches resolve in O(1).
 ///
 /// No `Eq` derive: `F32Const` holds an `f32`, which is not `Eq` (float consts
 /// are stored raw so decoding a `.wasm` module never needs value comparison).
-#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq)]
 enum Op {
     I32Const(i32),
     I32Add,
@@ -341,7 +348,7 @@ fn leb_u32(bytes: &[u8], mut i: usize) -> Result<(u32, usize), WasmError> {
     loop {
         let byte = *bytes
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated unsigned LEB128".into()))?;
+            .ok_or(WasmError::Decode("truncated unsigned LEB128"))?;
         i += 1;
         result |= u64::from(byte & 0x7f) << shift;
         if byte & 0x80 == 0 {
@@ -349,12 +356,12 @@ fn leb_u32(bytes: &[u8], mut i: usize) -> Result<(u32, usize), WasmError> {
         }
         shift += 7;
         if shift >= 35 {
-            return Err(WasmError::Decode("unsigned LEB128 too long".into()));
+            return Err(WasmError::Decode("unsigned LEB128 too long"));
         }
     }
     u32::try_from(result)
         .map(|v| (v, i))
-        .map_err(|_| WasmError::Decode("unsigned LEB128 exceeds u32".into()))
+        .map_err(|_| WasmError::Decode("unsigned LEB128 exceeds u32"))
 }
 
 fn leb_s32(bytes: &[u8], mut i: usize) -> Result<(i32, usize), WasmError> {
@@ -363,7 +370,7 @@ fn leb_s32(bytes: &[u8], mut i: usize) -> Result<(i32, usize), WasmError> {
     loop {
         let byte = *bytes
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated signed LEB128".into()))?;
+            .ok_or(WasmError::Decode("truncated signed LEB128"))?;
         i += 1;
         result |= i64::from(byte & 0x7f) << shift;
         shift += 7;
@@ -374,12 +381,12 @@ fn leb_s32(bytes: &[u8], mut i: usize) -> Result<(i32, usize), WasmError> {
             break;
         }
         if shift >= 35 {
-            return Err(WasmError::Decode("signed LEB128 too long".into()));
+            return Err(WasmError::Decode("signed LEB128 too long"));
         }
     }
     i32::try_from(result)
         .map(|v| (v, i))
-        .map_err(|_| WasmError::Decode("signed LEB128 exceeds i32".into()))
+        .map_err(|_| WasmError::Decode("signed LEB128 exceeds i32"))
 }
 
 /// Decode a block type byte: empty (`0x40`) -> arity 0; a single value type
@@ -387,13 +394,11 @@ fn leb_s32(bytes: &[u8], mut i: usize) -> Result<(i32, usize), WasmError> {
 fn block_arity(bytes: &[u8], i: usize) -> Result<(u32, usize), WasmError> {
     let byte = *bytes
         .get(i)
-        .ok_or_else(|| WasmError::Decode("truncated block type".into()))?;
+        .ok_or(WasmError::Decode("truncated block type"))?;
     match byte {
         0x40 => Ok((0, i + 1)),
         0x7C..=0x7F => Ok((1, i + 1)),
-        other => Err(WasmError::Decode(format!(
-            "unsupported block type 0x{other:02x} (this cut allows empty or one value type)"
-        ))),
+        _other => Err(WasmError::Decode("unsupported block type 0x")),
     }
 }
 
@@ -486,10 +491,10 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 // memory.size — a single reserved memory-index byte (must be 0)
                 let b = *body
                     .get(i)
-                    .ok_or_else(|| WasmError::Decode("truncated memory.size".into()))?;
+                    .ok_or(WasmError::Decode("truncated memory.size"))?;
                 if b != 0x00 {
                     return Err(WasmError::Decode(
-                        "memory.size reserved byte must be 0".into(),
+                        "memory.size reserved byte must be 0",
                     ));
                 }
                 i += 1;
@@ -498,10 +503,10 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x40 => {
                 let b = *body
                     .get(i)
-                    .ok_or_else(|| WasmError::Decode("truncated memory.grow".into()))?;
+                    .ok_or(WasmError::Decode("truncated memory.grow"))?;
                 if b != 0x00 {
                     return Err(WasmError::Decode(
-                        "memory.grow reserved byte must be 0".into(),
+                        "memory.grow reserved byte must be 0",
                     ));
                 }
                 i += 1;
@@ -577,10 +582,10 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 let else_idx = ops.len();
                 let open_idx = *open
                     .last()
-                    .ok_or_else(|| WasmError::Decode("else without matching if".into()))?;
+                    .ok_or(WasmError::Decode("else without matching if"))?;
                 match &mut ops[open_idx] {
                     Op::If { else_pc, .. } => *else_pc = Some(else_idx),
-                    _ => return Err(WasmError::Decode("else not inside an if".into())),
+                    _ => return Err(WasmError::Decode("else not inside an if")),
                 }
                 ops.push(Op::Else { end: 0 });
             }
@@ -708,7 +713,7 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x44 => {
                 let bytes: [u8; 8] = body
                     .get(i..i + 8)
-                    .ok_or_else(|| WasmError::Decode("truncated f64.const immediate".into()))?
+                    .ok_or(WasmError::Decode("truncated f64.const immediate"))?
                     .try_into()
                     .expect("slice of length 8 converts to [u8; 8]");
                 i += 8;
@@ -748,7 +753,7 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 let end = i
                     .checked_add(4)
                     .filter(|&e| e <= body.len())
-                    .ok_or_else(|| WasmError::Decode("truncated f32.const literal".into()))?;
+                    .ok_or(WasmError::Decode("truncated f32.const literal"))?;
                 let v = f32::from_le_bytes([body[i], body[i + 1], body[i + 2], body[i + 3]]);
                 i = end;
                 ops.push(Op::F32Const(v));
@@ -818,15 +823,13 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0xBD => ops.push(Op::I64ReinterpretF64),
             0xBE => ops.push(Op::F32ReinterpretI32),
             0xBF => ops.push(Op::F64ReinterpretI64),
-            other => {
-                return Err(WasmError::Decode(format!(
-                    "unsupported opcode 0x{other:02x} in this subset"
-                )));
+            _other => {
+                return Err(WasmError::Decode("unsupported opcode 0x"));
             }
         }
     }
     if !open.is_empty() {
-        return Err(WasmError::Decode("unterminated block or loop".into()));
+        return Err(WasmError::Decode("unterminated block or loop"));
     }
     Ok(ops)
 }
@@ -836,7 +839,7 @@ fn skip_valtypes(p: &[u8], i: usize, n: u32) -> Result<usize, WasmError> {
     let end = i
         .checked_add(n as usize)
         .filter(|&e| e <= p.len())
-        .ok_or_else(|| WasmError::Decode("value-type list runs past section".into()))?;
+        .ok_or(WasmError::Decode("value-type list runs past section"))?;
     Ok(end)
 }
 
@@ -845,7 +848,7 @@ fn skip_name(p: &[u8], i: usize) -> Result<usize, WasmError> {
     let (len, ni) = leb_u32(p, i)?;
     ni.checked_add(len as usize)
         .filter(|&e| e <= p.len())
-        .ok_or_else(|| WasmError::Decode("name runs past section".into()))
+        .ok_or(WasmError::Decode("name runs past section"))
 }
 
 /// Read a UTF-8 name (LEB length + bytes), returning it and the next offset.
@@ -854,9 +857,9 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
     let end = ni
         .checked_add(len as usize)
         .filter(|&e| e <= p.len())
-        .ok_or_else(|| WasmError::Decode("name runs past section".into()))?;
-    let s = std::str::from_utf8(&p[ni..end])
-        .map_err(|_| WasmError::Decode("name is not valid UTF-8".into()))?
+        .ok_or(WasmError::Decode("name runs past section"))?;
+    let s = core::str::from_utf8(&p[ni..end])
+        .map_err(|_| WasmError::Decode("name is not valid UTF-8"))?
         .to_owned();
     Ok((s, end))
 }
@@ -865,22 +868,18 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
 fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     if count != 1 {
-        return Err(WasmError::Decode(format!(
-            "unsupported table count {count} (this cut allows exactly one)"
-        )));
+        return Err(WasmError::Decode("unsupported table count"));
     }
     let reftype = *p
         .get(i)
-        .ok_or_else(|| WasmError::Decode("truncated table type".into()))?;
+        .ok_or(WasmError::Decode("truncated table type"))?;
     if reftype != 0x70 {
-        return Err(WasmError::Decode(format!(
-            "unsupported reftype 0x{reftype:02x} (only funcref 0x70)"
-        )));
+        return Err(WasmError::Decode("unsupported reftype 0x"));
     }
     i += 1;
     let flag = *p
         .get(i)
-        .ok_or_else(|| WasmError::Decode("truncated table limits".into()))?;
+        .ok_or(WasmError::Decode("truncated table limits"))?;
     i += 1;
     let (min, ni) = leb_u32(p, i)?;
     i = ni;
@@ -889,10 +888,8 @@ fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
         0x01 => {
             let (_max, _ni) = leb_u32(p, i)?;
         }
-        other => {
-            return Err(WasmError::Decode(format!(
-                "unsupported table limits flag 0x{other:02x}"
-            )));
+        _other => {
+            return Err(WasmError::Decode("unsupported table limits flag 0x"));
         }
     }
     Ok(min as usize)
@@ -905,21 +902,17 @@ fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
     for _ in 0..count {
         let flag = *p
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated elem segment".into()))?;
+            .ok_or(WasmError::Decode("truncated elem segment"))?;
         i += 1;
         if flag != 0x00 {
-            return Err(WasmError::Decode(format!(
-                "unsupported elem segment flag 0x{flag:02x} (only active table 0)"
-            )));
+            return Err(WasmError::Decode("unsupported elem segment flag 0x"));
         }
         let (offset_val, ni) = parse_const_expr(p, i)?;
         i = ni;
         let offset = match offset_val {
             Val::I32(v) => v as u32 as usize,
-            other => {
-                return Err(WasmError::Decode(format!(
-                    "elem offset must be i32, got {other:?}"
-                )));
+            _other => {
+                return Err(WasmError::Decode("elem offset must be i32, got"));
             }
         };
         let (n_funcs, ni) = leb_u32(p, i)?;
@@ -939,7 +932,7 @@ fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
 fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
     let op = *p
         .get(i)
-        .ok_or_else(|| WasmError::Decode("truncated const expr".into()))?;
+        .ok_or(WasmError::Decode("truncated const expr"))?;
     let (val, mut j) = match op {
         0x41 => {
             let (v, ni) = leb_s32(p, i + 1)?;
@@ -953,7 +946,7 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
             let end = (i + 1)
                 .checked_add(4)
                 .filter(|&e| e <= p.len())
-                .ok_or_else(|| WasmError::Decode("truncated f32 const expr".into()))?;
+                .ok_or(WasmError::Decode("truncated f32 const expr"))?;
             let b: [u8; 4] = p[i + 1..end].try_into().expect("4 bytes");
             (Val::F32(f32::from_le_bytes(b)), end)
         }
@@ -961,14 +954,12 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
             let end = (i + 1)
                 .checked_add(8)
                 .filter(|&e| e <= p.len())
-                .ok_or_else(|| WasmError::Decode("truncated f64 const expr".into()))?;
+                .ok_or(WasmError::Decode("truncated f64 const expr"))?;
             let b: [u8; 8] = p[i + 1..end].try_into().expect("8 bytes");
             (Val::F64(f64::from_le_bytes(b)), end)
         }
-        other => {
-            return Err(WasmError::Decode(format!(
-                "unsupported const-expr opcode 0x{other:02x} (only t.const)"
-            )));
+        _other => {
+            return Err(WasmError::Decode("unsupported const-expr opcode 0x"));
         }
     };
     // Expect a closing `end` (0x0B).
@@ -977,7 +968,7 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
             j += 1;
             Ok((val, j))
         }
-        _ => Err(WasmError::Decode("const expr missing end".into())),
+        _ => Err(WasmError::Decode("const expr missing end")),
     }
 }
 
@@ -989,10 +980,10 @@ fn parse_global_section(p: &[u8]) -> Result<Vec<(Val, bool)>, WasmError> {
         // globaltype = valtype byte + mutability byte
         let _valtype = p
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated global type".into()))?;
+            .ok_or(WasmError::Decode("truncated global type"))?;
         let mutable = *p
             .get(i + 1)
-            .ok_or_else(|| WasmError::Decode("truncated global mutability".into()))?
+            .ok_or(WasmError::Decode("truncated global mutability"))?
             != 0;
         i += 2;
         let (val, ni) = parse_const_expr(p, i)?;
@@ -1011,7 +1002,7 @@ fn parse_export_section(p: &[u8]) -> Result<Vec<(String, usize)>, WasmError> {
         let (name, ni) = read_name(p, i)?;
         let kind = *p
             .get(ni)
-            .ok_or_else(|| WasmError::Decode("truncated export".into()))?;
+            .ok_or(WasmError::Decode("truncated export"))?;
         let (index, nj) = leb_u32(p, ni + 1)?;
         i = nj;
         if kind == 0x00 {
@@ -1034,21 +1025,19 @@ fn parse_import_section(
         i = skip_name(p, i)?; // field name
         let kind = *p
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated import".into()))?;
+            .ok_or(WasmError::Decode("truncated import"))?;
         i += 1;
         match kind {
             0x00 => {
                 let (tidx, ni) = leb_u32(p, i)?;
                 i = ni;
-                let t = types.get(tidx as usize).ok_or_else(|| {
-                    WasmError::Decode("imported function references missing type".into())
+                let t = types.get(tidx as usize).ok_or({
+                    WasmError::Decode("imported function references missing type")
                 })?;
                 out.push(*t);
             }
-            other => {
-                return Err(WasmError::Decode(format!(
-                    "unsupported import kind 0x{other:02x} (only functions)"
-                )));
+            _other => {
+                return Err(WasmError::Decode("unsupported import kind 0x"));
             }
         }
     }
@@ -1062,12 +1051,10 @@ fn parse_type_section(p: &[u8]) -> Result<Vec<(usize, usize)>, WasmError> {
     for _ in 0..count {
         let form = *p
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated func type".into()))?;
+            .ok_or(WasmError::Decode("truncated func type"))?;
         i += 1;
         if form != 0x60 {
-            return Err(WasmError::Decode(format!(
-                "unsupported type form 0x{form:02x} (only func 0x60)"
-            )));
+            return Err(WasmError::Decode("unsupported type form 0x"));
         }
         let (n_params, ni) = leb_u32(p, i)?;
         i = skip_valtypes(p, ni, n_params)?;
@@ -1100,7 +1087,7 @@ fn parse_code_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
         let bend = bstart
             .checked_add(body_size as usize)
             .filter(|&e| e <= p.len())
-            .ok_or_else(|| WasmError::Decode("code entry runs past section".into()))?;
+            .ok_or(WasmError::Decode("code entry runs past section"))?;
         let body = &p[bstart..bend];
 
         // locals: vec of (count, valtype)
@@ -1111,11 +1098,11 @@ fn parse_code_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
             j = nj;
             // one value-type byte follows
             body.get(j)
-                .ok_or_else(|| WasmError::Decode("truncated local declaration".into()))?;
+                .ok_or(WasmError::Decode("truncated local declaration"))?;
             j += 1;
             n_locals = n_locals
                 .checked_add(n as usize)
-                .ok_or_else(|| WasmError::Decode("local count overflow".into()))?;
+                .ok_or(WasmError::Decode("local count overflow"))?;
         }
         out.push((n_locals, body[j..].to_vec()));
         i = bend;
@@ -1124,7 +1111,7 @@ fn parse_code_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
 }
 
 /// A registered function: its param/local/result counts and decoded body.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Func {
     n_params: usize,
     n_locals: usize,
@@ -1133,7 +1120,7 @@ struct Func {
 }
 
 /// A structured-control frame on the control stack.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct Frame {
     /// Operand-stack height when the construct was entered.
     base: usize,
@@ -1161,7 +1148,7 @@ struct HostFunc {
 /// functions, a defined function's index equals its position — matching the
 /// pre-host behaviour.
 /// A module global: its initial value and whether `global.set` may write it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct GlobalDesc {
     init: Val,
     mutable: bool,
@@ -1173,7 +1160,7 @@ pub struct Module {
     funcs: Vec<Func>,
     /// Exported function names -> combined function index (from a module's
     /// export section, or registered via [`Module::export`]).
-    exports: std::collections::HashMap<String, usize>,
+    exports: BTreeMap<String, usize>,
     /// Module globals; a fresh working copy is initialised per invocation.
     globals: Vec<GlobalDesc>,
     /// Optional start function (run by [`Module::run_start`]).
@@ -1245,11 +1232,11 @@ impl Module {
     /// and local counts from each code entry.
     pub fn from_bytes(wasm: &[u8]) -> Result<Module, WasmError> {
         if wasm.len() < 8 || &wasm[0..4] != b"\0asm" {
-            return Err(WasmError::Decode("not a wasm module (bad magic)".into()));
+            return Err(WasmError::Decode("not a wasm module (bad magic)"));
         }
         if wasm[4..8] != [0x01, 0x00, 0x00, 0x00] {
             return Err(WasmError::Decode(
-                "unsupported wasm version (expected 1)".into(),
+                "unsupported wasm version (expected 1)",
             ));
         }
 
@@ -1273,7 +1260,7 @@ impl Module {
             let end = start
                 .checked_add(size as usize)
                 .filter(|&e| e <= wasm.len())
-                .ok_or_else(|| WasmError::Decode("section runs past end of module".into()))?;
+                .ok_or(WasmError::Decode("section runs past end of module"))?;
             let payload = &wasm[start..end];
             match id {
                 1 => types = parse_type_section(payload)?,
@@ -1291,11 +1278,7 @@ impl Module {
         }
 
         if func_types.len() != codes.len() {
-            return Err(WasmError::Decode(format!(
-                "function count {} does not match code count {}",
-                func_types.len(),
-                codes.len()
-            )));
+            return Err(WasmError::Decode("function count"));
         }
 
         let mut module = Module::new();
@@ -1303,12 +1286,12 @@ impl Module {
         // implementation they trap loudly if actually called.
         for (np, nr) in &imports {
             module.add_host_function(*np, *nr, |_args, _mem| {
-                Err(WasmError::Trap("call to unbound imported function".into()))
+                Err(WasmError::Trap("call to unbound imported function"))
             });
         }
         for (fi, &tidx) in func_types.iter().enumerate() {
-            let (n_params, n_results) = *types.get(tidx).ok_or_else(|| {
-                WasmError::Decode(format!("function {fi} references missing type"))
+            let (n_params, n_results) = *types.get(tidx).ok_or({
+                WasmError::Decode("function")
             })?;
             let (n_locals, expr) = &codes[fi];
             let code = decode(expr)?;
@@ -1335,8 +1318,8 @@ impl Module {
                 let slot = offset
                     .checked_add(k)
                     .filter(|&s| s < module.table.len())
-                    .ok_or_else(|| {
-                        WasmError::Decode("elem segment runs past table bounds".into())
+                    .ok_or({
+                        WasmError::Decode("elem segment runs past table bounds")
                     })?;
                 module.table[slot] = Some(fidx);
             }
@@ -1409,7 +1392,7 @@ impl Module {
             .exports
             .get(name)
             .copied()
-            .ok_or_else(|| WasmError::Trap(format!("no exported function named `{name}`")))?;
+            .ok_or(WasmError::Trap("no exported function named `"))?;
         self.invoke_val(idx, args)
     }
 
@@ -1425,9 +1408,7 @@ impl Module {
             .into_iter()
             .map(|v| match v {
                 Val::I32(n) => Ok(n),
-                other => Err(WasmError::Trap(format!(
-                    "invoke: expected i32 result, got {other:?}"
-                ))),
+                _other => Err(WasmError::Trap("invoke: expected i32 result, got")),
             })
             .collect()
     }
@@ -1450,7 +1431,7 @@ impl Module {
             self.funcs
                 .get(idx - self.hosts.len())
                 .map(|f| f.n_params)
-                .ok_or_else(|| WasmError::Trap(format!("call to unknown function {idx}")))
+                .ok_or(WasmError::Trap("call to unknown function"))
         }
     }
 
@@ -1467,29 +1448,19 @@ impl Module {
         if idx < self.hosts.len() {
             let host = &self.hosts[idx];
             if args.len() != host.n_params {
-                return Err(WasmError::Trap(format!(
-                    "host function {idx} expects {} args, got {}",
-                    host.n_params,
-                    args.len()
-                )));
+                return Err(WasmError::Trap("host function"));
             }
             // Host functions use an i32 ABI: every arg/result must be i32.
             let i32_args: Vec<i32> = args
                 .iter()
                 .map(|v| match v {
                     Val::I32(n) => Ok(*n),
-                    other => Err(WasmError::Trap(format!(
-                        "host function {idx} takes i32 args, got {other:?}"
-                    ))),
+                    _other => Err(WasmError::Trap("host function")),
                 })
                 .collect::<Result<_, _>>()?;
             let res = (host.f)(&i32_args, mem)?;
             if res.len() != host.n_results {
-                return Err(WasmError::Trap(format!(
-                    "host function {idx} returned {} results, expected {}",
-                    res.len(),
-                    host.n_results
-                )));
+                return Err(WasmError::Trap("host function"));
             }
             return Ok(res.into_iter().map(Val::I32).collect());
         }
@@ -1506,20 +1477,14 @@ impl Module {
         globals: &mut Vec<Val>,
     ) -> Result<Vec<Val>, WasmError> {
         if depth > WASM_MAX_DEPTH {
-            return Err(WasmError::Trap(format!(
-                "call depth {WASM_MAX_DEPTH} exceeded"
-            )));
+            return Err(WasmError::Trap("call depth"));
         }
         let func = self
             .funcs
             .get(def_idx)
-            .ok_or_else(|| WasmError::Trap(format!("call to unknown function {def_idx}")))?;
+            .ok_or(WasmError::Trap("call to unknown function"))?;
         if args.len() != func.n_params {
-            return Err(WasmError::Trap(format!(
-                "function {def_idx} expects {} args, got {}",
-                func.n_params,
-                args.len()
-            )));
+            return Err(WasmError::Trap("function"));
         }
 
         let mut locals: Vec<Val> = args.to_vec();
@@ -1538,9 +1503,7 @@ impl Module {
         loop {
             *steps += 1;
             if *steps > WASM_MAX_STEPS {
-                return Err(WasmError::Trap(format!(
-                    "step budget {WASM_MAX_STEPS} exceeded"
-                )));
+                return Err(WasmError::Trap("step budget"));
             }
             if pc >= func.code.len() {
                 return take_results(&mut stack, func.arity);
@@ -1579,29 +1542,29 @@ impl Module {
                 Op::I32Mul => bin_i32(&mut stack, |a, b| a.wrapping_mul(b))?,
                 Op::I32DivS => bin_i32_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i32.div_s by zero".into()))
+                        Err(WasmError::Trap("i32.div_s by zero"))
                     } else {
                         a.checked_div(b)
-                            .ok_or_else(|| WasmError::Trap("i32.div_s overflow".into()))
+                            .ok_or(WasmError::Trap("i32.div_s overflow"))
                     }
                 })?,
                 Op::I32DivU => bin_i32_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i32.div_u by zero".into()))
+                        Err(WasmError::Trap("i32.div_u by zero"))
                     } else {
                         Ok(((a as u32) / (b as u32)) as i32)
                     }
                 })?,
                 Op::I32RemS => bin_i32_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i32.rem_s by zero".into()))
+                        Err(WasmError::Trap("i32.rem_s by zero"))
                     } else {
                         Ok(a.wrapping_rem(b))
                     }
                 })?,
                 Op::I32RemU => bin_i32_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i32.rem_u by zero".into()))
+                        Err(WasmError::Trap("i32.rem_u by zero"))
                     } else {
                         Ok(((a as u32) % (b as u32)) as i32)
                     }
@@ -1658,20 +1621,18 @@ impl Module {
                 Op::GlobalGet(g) => {
                     let v = *globals
                         .get(g as usize)
-                        .ok_or_else(|| WasmError::Trap(format!("global.get {g} out of range")))?;
+                        .ok_or(WasmError::Trap("global.get"))?;
                     stack.push(v);
                 }
                 Op::GlobalSet(g) => {
                     let gi = g as usize;
                     if self.globals.get(gi).is_some_and(|d| !d.mutable) {
-                        return Err(WasmError::Trap(format!(
-                            "global.set {g} on immutable global"
-                        )));
+                        return Err(WasmError::Trap("global.set"));
                     }
                     let v = pop_val(&mut stack)?;
                     let cell = globals
                         .get_mut(gi)
-                        .ok_or_else(|| WasmError::Trap(format!("global.set {g} out of range")))?;
+                        .ok_or(WasmError::Trap("global.set"))?;
                     *cell = v;
                 }
                 Op::I32WrapI64 => {
@@ -1781,20 +1742,20 @@ impl Module {
                 Op::F32Gt => bin_f32_cmp(&mut stack, |a, b| a > b)?,
                 Op::F32Le => bin_f32_cmp(&mut stack, |a, b| a <= b)?,
                 Op::F32Ge => bin_f32_cmp(&mut stack, |a, b| a >= b)?,
-                Op::F32Abs => un_f32(&mut stack, f32::abs)?,
+                Op::F32Abs => un_f32(&mut stack, libm::fabsf)?,
                 Op::F32Neg => un_f32(&mut stack, |a| -a)?,
-                Op::F32Ceil => un_f32(&mut stack, f32::ceil)?,
-                Op::F32Floor => un_f32(&mut stack, f32::floor)?,
-                Op::F32Trunc => un_f32(&mut stack, f32::trunc)?,
-                Op::F32Nearest => un_f32(&mut stack, f32::round_ties_even)?,
-                Op::F32Sqrt => un_f32(&mut stack, f32::sqrt)?,
+                Op::F32Ceil => un_f32(&mut stack, libm::ceilf)?,
+                Op::F32Floor => un_f32(&mut stack, libm::floorf)?,
+                Op::F32Trunc => un_f32(&mut stack, libm::truncf)?,
+                Op::F32Nearest => un_f32(&mut stack, libm::rintf)?,
+                Op::F32Sqrt => un_f32(&mut stack, libm::sqrtf)?,
                 Op::F32Add => bin_f32(&mut stack, |a, b| a + b)?,
                 Op::F32Sub => bin_f32(&mut stack, |a, b| a - b)?,
                 Op::F32Mul => bin_f32(&mut stack, |a, b| a * b)?,
                 Op::F32Div => bin_f32(&mut stack, |a, b| a / b)?,
                 Op::F32Min => bin_f32(&mut stack, wasm_min_f32)?,
                 Op::F32Max => bin_f32(&mut stack, wasm_max_f32)?,
-                Op::F32Copysign => bin_f32(&mut stack, f32::copysign)?,
+                Op::F32Copysign => bin_f32(&mut stack, libm::copysignf)?,
                 Op::F32Load { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
                     let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
@@ -1838,7 +1799,7 @@ impl Module {
                 }
                 Op::F64Abs => {
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.abs()));
+                    stack.push(Val::F64(libm::fabs(a)));
                 }
                 Op::F64Neg => {
                     let a = pop_f64(&mut stack)?;
@@ -1846,23 +1807,23 @@ impl Module {
                 }
                 Op::F64Ceil => {
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.ceil()));
+                    stack.push(Val::F64(libm::ceil(a)));
                 }
                 Op::F64Floor => {
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.floor()));
+                    stack.push(Val::F64(libm::floor(a)));
                 }
                 Op::F64Trunc => {
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.trunc()));
+                    stack.push(Val::F64(libm::trunc(a)));
                 }
                 Op::F64Nearest => {
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.round_ties_even()));
+                    stack.push(Val::F64(libm::rint(a)));
                 }
                 Op::F64Sqrt => {
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.sqrt()));
+                    stack.push(Val::F64(libm::sqrt(a)));
                 }
                 Op::F64Add => {
                     let b = pop_f64(&mut stack)?;
@@ -1897,7 +1858,7 @@ impl Module {
                 Op::F64Copysign => {
                     let b = pop_f64(&mut stack)?;
                     let a = pop_f64(&mut stack)?;
-                    stack.push(Val::F64(a.copysign(b)));
+                    stack.push(Val::F64(libm::copysign(a, b)));
                 }
                 Op::F64Load { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
@@ -1997,29 +1958,29 @@ impl Module {
                 Op::I64Mul => bin_i64(&mut stack, |a, b| a.wrapping_mul(b))?,
                 Op::I64DivS => bin_i64_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i64.div_s by zero".into()))
+                        Err(WasmError::Trap("i64.div_s by zero"))
                     } else {
                         a.checked_div(b)
-                            .ok_or_else(|| WasmError::Trap("i64.div_s overflow".into()))
+                            .ok_or(WasmError::Trap("i64.div_s overflow"))
                     }
                 })?,
                 Op::I64DivU => bin_i64_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i64.div_u by zero".into()))
+                        Err(WasmError::Trap("i64.div_u by zero"))
                     } else {
                         Ok(((a as u64) / (b as u64)) as i64)
                     }
                 })?,
                 Op::I64RemS => bin_i64_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i64.rem_s by zero".into()))
+                        Err(WasmError::Trap("i64.rem_s by zero"))
                     } else {
                         Ok(a.wrapping_rem(b))
                     }
                 })?,
                 Op::I64RemU => bin_i64_try(&mut stack, |a, b| {
                     if b == 0 {
-                        Err(WasmError::Trap("i64.rem_u by zero".into()))
+                        Err(WasmError::Trap("i64.rem_u by zero"))
                     } else {
                         Ok(((a as u64) % (b as u64)) as i64)
                     }
@@ -2041,24 +2002,21 @@ impl Module {
                 Op::LocalGet(l) => {
                     let v = *locals
                         .get(l as usize)
-                        .ok_or_else(|| WasmError::Trap(format!("local.get {l} out of range")))?;
+                        .ok_or(WasmError::Trap("local.get"))?;
                     stack.push(v);
                 }
                 Op::LocalSet(l) => {
                     let v = pop_val(&mut stack)?;
                     let cell = locals
                         .get_mut(l as usize)
-                        .ok_or_else(|| WasmError::Trap(format!("local.set {l} out of range")))?;
+                        .ok_or(WasmError::Trap("local.set"))?;
                     *cell = v;
                 }
                 Op::Call(f) => {
                     let combined = f as usize;
                     let n = self.param_count(combined)?;
                     if stack.len() < n {
-                        return Err(WasmError::Trap(format!(
-                            "call {f}: stack has {} values, needs {n}",
-                            stack.len()
-                        )));
+                        return Err(WasmError::Trap("call"));
                     }
                     let cargs = stack.split_off(stack.len() - n);
                     let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
@@ -2067,38 +2025,32 @@ impl Module {
                 Op::CallIndirect { type_index } => {
                     let ti = pop(&mut stack)? as u32 as usize;
                     if ti >= self.table.len() {
-                        return Err(WasmError::Trap(format!(
-                            "call_indirect: table index {ti} out of bounds (len {})",
-                            self.table.len()
-                        )));
+                        return Err(WasmError::Trap("call_indirect: table index"));
                     }
-                    let combined = self.table.get(ti).copied().flatten().ok_or_else(|| {
-                        WasmError::Trap("call_indirect: uninitialised table element".into())
+                    let combined = self.table.get(ti).copied().flatten().ok_or({
+                        WasmError::Trap("call_indirect: uninitialised table element")
                     })?;
                     // Type check (arity-level, an MVP approximation): compares
                     // only the parameter/result counts, not the value types.
                     let (ep, er) = *self
                         .types
                         .get(type_index as usize)
-                        .ok_or_else(|| WasmError::Trap("call_indirect: bad type index".into()))?;
+                        .ok_or(WasmError::Trap("call_indirect: bad type index"))?;
                     let (actual_params, actual_results) = if combined < self.hosts.len() {
                         let h = &self.hosts[combined];
                         (h.n_params, h.n_results)
                     } else {
-                        let f = self.funcs.get(combined - self.hosts.len()).ok_or_else(|| {
-                            WasmError::Trap("call_indirect: bad table entry".into())
+                        let f = self.funcs.get(combined - self.hosts.len()).ok_or({
+                            WasmError::Trap("call_indirect: bad table entry")
                         })?;
                         (f.n_params, f.arity)
                     };
                     if (ep, er) != (actual_params, actual_results) {
-                        return Err(WasmError::Trap("call_indirect: signature mismatch".into()));
+                        return Err(WasmError::Trap("call_indirect: signature mismatch"));
                     }
                     let n = self.param_count(combined)?;
                     if stack.len() < n {
-                        return Err(WasmError::Trap(format!(
-                            "call_indirect: stack has {} values, needs {n}",
-                            stack.len()
-                        )));
+                        return Err(WasmError::Trap("call_indirect: stack has"));
                     }
                     let cargs = stack.split_off(stack.len() - n);
                     let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
@@ -2166,7 +2118,7 @@ impl Module {
                     pc = end;
                 }
                 Op::Unreachable => {
-                    return Err(WasmError::Trap("unreachable executed".into()));
+                    return Err(WasmError::Trap("unreachable executed"));
                 }
                 Op::Nop => {}
                 Op::Drop => {
@@ -2181,10 +2133,10 @@ impl Module {
                 Op::LocalTee(l) => {
                     let v = *stack
                         .last()
-                        .ok_or_else(|| WasmError::Trap("local.tee on empty stack".into()))?;
+                        .ok_or(WasmError::Trap("local.tee on empty stack"))?;
                     let cell = locals
                         .get_mut(l as usize)
-                        .ok_or_else(|| WasmError::Trap(format!("local.tee {l} out of range")))?;
+                        .ok_or(WasmError::Trap("local.tee"))?;
                     *cell = v;
                 }
                 Op::Return => return take_results(&mut stack, func.arity),
@@ -2211,14 +2163,12 @@ fn memarg(body: &[u8], i: usize) -> Result<(u32, usize), WasmError> {
 fn mem_ea(mem_len: usize, addr: i32, offset: u32, width: usize) -> Result<usize, WasmError> {
     let ea = (addr as u32 as usize)
         .checked_add(offset as usize)
-        .ok_or_else(|| WasmError::Trap("memory address overflow".into()))?;
+        .ok_or(WasmError::Trap("memory address overflow"))?;
     let end = ea
         .checked_add(width)
-        .ok_or_else(|| WasmError::Trap("memory access overflow".into()))?;
+        .ok_or(WasmError::Trap("memory access overflow"))?;
     if end > mem_len {
-        return Err(WasmError::Trap(format!(
-            "memory access [{ea}, {end}) out of bounds for {mem_len}-byte memory"
-        )));
+        return Err(WasmError::Trap("memory access ["));
     }
     Ok(ea)
 }
@@ -2240,15 +2190,15 @@ fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(
 /// Trap for a float that cannot be truncated into the target integer type
 /// (NaN, infinity, or out of range). WASM boundaries (±2^31, 2^32, ±2^63, 2^64)
 /// are exact powers of two, so the valid range is the half-open `[lo, hi)`.
-fn trunc_trap(op: &str) -> WasmError {
-    WasmError::Trap(format!("{op}: float is NaN, infinite, or out of range"))
+fn trunc_trap(_op: &str) -> WasmError {
+    WasmError::Trap("")
 }
 
 fn trunc_f32_to_i32_s(x: f32) -> Result<i32, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i32.trunc_f32_s"));
     }
-    let t = x.trunc();
+    let t = libm::truncf(x);
     if !(-2147483648.0f32..2147483648.0f32).contains(&t) {
         return Err(trunc_trap("i32.trunc_f32_s"));
     }
@@ -2259,7 +2209,7 @@ fn trunc_f32_to_i32_u(x: f32) -> Result<i32, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i32.trunc_f32_u"));
     }
-    let t = x.trunc();
+    let t = libm::truncf(x);
     if !(0.0f32..4294967296.0f32).contains(&t) {
         return Err(trunc_trap("i32.trunc_f32_u"));
     }
@@ -2270,7 +2220,7 @@ fn trunc_f64_to_i32_s(x: f64) -> Result<i32, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i32.trunc_f64_s"));
     }
-    let t = x.trunc();
+    let t = libm::trunc(x);
     if !(-2147483648.0f64..2147483648.0f64).contains(&t) {
         return Err(trunc_trap("i32.trunc_f64_s"));
     }
@@ -2281,7 +2231,7 @@ fn trunc_f64_to_i32_u(x: f64) -> Result<i32, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i32.trunc_f64_u"));
     }
-    let t = x.trunc();
+    let t = libm::trunc(x);
     if !(0.0f64..4294967296.0f64).contains(&t) {
         return Err(trunc_trap("i32.trunc_f64_u"));
     }
@@ -2292,7 +2242,7 @@ fn trunc_f32_to_i64_s(x: f32) -> Result<i64, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i64.trunc_f32_s"));
     }
-    let t = x.trunc();
+    let t = libm::truncf(x);
     if !(-9223372036854775808.0f32..9223372036854775808.0f32).contains(&t) {
         return Err(trunc_trap("i64.trunc_f32_s"));
     }
@@ -2303,7 +2253,7 @@ fn trunc_f32_to_i64_u(x: f32) -> Result<i64, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i64.trunc_f32_u"));
     }
-    let t = x.trunc();
+    let t = libm::truncf(x);
     if !(0.0f32..18446744073709551616.0f32).contains(&t) {
         return Err(trunc_trap("i64.trunc_f32_u"));
     }
@@ -2314,7 +2264,7 @@ fn trunc_f64_to_i64_s(x: f64) -> Result<i64, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i64.trunc_f64_s"));
     }
-    let t = x.trunc();
+    let t = libm::trunc(x);
     if !(-9223372036854775808.0f64..9223372036854775808.0f64).contains(&t) {
         return Err(trunc_trap("i64.trunc_f64_s"));
     }
@@ -2325,7 +2275,7 @@ fn trunc_f64_to_i64_u(x: f64) -> Result<i64, WasmError> {
     if x.is_nan() || x.is_infinite() {
         return Err(trunc_trap("i64.trunc_f64_u"));
     }
-    let t = x.trunc();
+    let t = libm::trunc(x);
     if !(0.0f64..18446744073709551616.0f64).contains(&t) {
         return Err(trunc_trap("i64.trunc_f64_u"));
     }
@@ -2414,7 +2364,7 @@ fn leb_s64(bytes: &[u8], mut i: usize) -> Result<(i64, usize), WasmError> {
     loop {
         let byte = *bytes
             .get(i)
-            .ok_or_else(|| WasmError::Decode("truncated signed LEB128".into()))?;
+            .ok_or(WasmError::Decode("truncated signed LEB128"))?;
         i += 1;
         result |= i64::from(byte & 0x7f) << shift;
         shift += 7;
@@ -2425,7 +2375,7 @@ fn leb_s64(bytes: &[u8], mut i: usize) -> Result<(i64, usize), WasmError> {
             break;
         }
         if shift >= 70 {
-            return Err(WasmError::Decode("signed LEB128 too long".into()));
+            return Err(WasmError::Decode("signed LEB128 too long"));
         }
     }
     Ok((result, i))
@@ -2497,16 +2447,14 @@ fn un_i32(stack: &mut Vec<Val>, f: impl FnOnce(i32) -> i32) -> Result<(), WasmEr
 fn pop_val(stack: &mut Vec<Val>) -> Result<Val, WasmError> {
     stack
         .pop()
-        .ok_or_else(|| WasmError::Trap("operand stack underflow".into()))
+        .ok_or(WasmError::Trap("operand stack underflow"))
 }
 
 /// Pop a value expected to be an `i32`.
 fn pop(stack: &mut Vec<Val>) -> Result<i32, WasmError> {
     match pop_val(stack)? {
         Val::I32(v) => Ok(v),
-        other => Err(WasmError::Trap(format!(
-            "expected i32 on stack, got {other:?}"
-        ))),
+        _other => Err(WasmError::Trap("expected i32 on stack, got")),
     }
 }
 
@@ -2515,9 +2463,7 @@ fn pop(stack: &mut Vec<Val>) -> Result<i32, WasmError> {
 fn pop_i64(stack: &mut Vec<Val>) -> Result<i64, WasmError> {
     match pop_val(stack)? {
         Val::I64(v) => Ok(v),
-        other => Err(WasmError::Trap(format!(
-            "expected i64 on stack, got {other:?}"
-        ))),
+        _other => Err(WasmError::Trap("expected i64 on stack, got")),
     }
 }
 
@@ -2526,9 +2472,7 @@ fn pop_i64(stack: &mut Vec<Val>) -> Result<i64, WasmError> {
 fn pop_f32(stack: &mut Vec<Val>) -> Result<f32, WasmError> {
     match pop_val(stack)? {
         Val::F32(v) => Ok(v),
-        other => Err(WasmError::Trap(format!(
-            "expected f32 on stack, got {other:?}"
-        ))),
+        _other => Err(WasmError::Trap("expected f32 on stack, got")),
     }
 }
 
@@ -2537,18 +2481,13 @@ fn pop_f32(stack: &mut Vec<Val>) -> Result<f32, WasmError> {
 fn pop_f64(stack: &mut Vec<Val>) -> Result<f64, WasmError> {
     match pop_val(stack)? {
         Val::F64(v) => Ok(v),
-        other => Err(WasmError::Trap(format!(
-            "expected f64 on stack, got {other:?}"
-        ))),
+        _other => Err(WasmError::Trap("expected f64 on stack, got")),
     }
 }
 
 fn take_results(stack: &mut Vec<Val>, arity: usize) -> Result<Vec<Val>, WasmError> {
     if stack.len() < arity {
-        return Err(WasmError::Trap(format!(
-            "result arity {arity} exceeds stack height {}",
-            stack.len()
-        )));
+        return Err(WasmError::Trap("result arity"));
     }
     Ok(stack.split_off(stack.len() - arity))
 }
@@ -2562,10 +2501,10 @@ fn do_branch(stack: &mut Vec<Val>, control: &mut Vec<Frame>, l: u32) -> Result<u
     let idx = control
         .len()
         .checked_sub(1 + l)
-        .ok_or_else(|| WasmError::Trap(format!("branch label {l} out of range")))?;
+        .ok_or(WasmError::Trap("branch label"))?;
     let frame = control[idx];
     if stack.len() < frame.base + frame.branch_arity {
-        return Err(WasmError::Trap("branch operand stack underflow".into()));
+        return Err(WasmError::Trap("branch operand stack underflow"));
     }
     let keep = stack.split_off(stack.len() - frame.branch_arity);
     stack.truncate(frame.base);

@@ -54,7 +54,7 @@ fn run_eval(src: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("tinyvm: {e}");
+            eprintln!("tinyvm: {}", e.message());
             ExitCode::FAILURE
         }
     }
