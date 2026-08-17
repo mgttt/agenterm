@@ -1035,6 +1035,8 @@ pub struct Module {
     exports: std::collections::HashMap<String, usize>,
     /// Module globals; a fresh working copy is initialised per invocation.
     globals: Vec<GlobalDesc>,
+    /// Optional start function (run by [`Module::run_start`]).
+    start: Option<usize>,
 }
 
 impl Module {
@@ -1110,6 +1112,7 @@ impl Module {
         let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
         let mut exports: Vec<(String, usize)> = Vec::new();
         let mut globals: Vec<(Val, bool)> = Vec::new();
+        let mut start_fn: Option<usize> = None;
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1129,6 +1132,7 @@ impl Module {
                 3 => func_types = parse_func_section(payload)?,
                 6 => globals = parse_global_section(payload)?,
                 7 => exports = parse_export_section(payload)?,
+                8 => start_fn = Some(leb_u32(payload, 0)?.0 as usize),
                 10 => codes = parse_code_section(payload)?,
                 _ => {} // custom / memory / … : skipped
             }
@@ -1170,6 +1174,7 @@ impl Module {
         for (name, index) in exports {
             module.exports.insert(name, index);
         }
+        module.start = start_fn;
         Ok(module)
     }
 
@@ -1179,6 +1184,26 @@ impl Module {
         let idx = self.globals.len();
         self.globals.push(GlobalDesc { init, mutable });
         idx
+    }
+
+    /// Set the module's start function (run by [`Module::run_start`]).
+    pub fn set_start(&mut self, func_index: usize) {
+        self.start = Some(func_index);
+    }
+
+    /// The start function's index, if the module has one.
+    pub fn start_index(&self) -> Option<usize> {
+        self.start
+    }
+
+    /// Run the start function (no args, no results), if present. This is how a
+    /// module instantiates: the start function runs once against a fresh
+    /// memory/globals instance.
+    pub fn run_start(&self) -> Result<(), WasmError> {
+        if let Some(idx) = self.start {
+            self.invoke_val(idx, &[])?;
+        }
+        Ok(())
     }
 
     /// Record `name` as an exported function index (for [`Module::invoke_by_name`]).
@@ -2851,6 +2876,43 @@ mod tests {
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
         ));
+    }
+
+    // Section: start function.
+    #[test]
+    fn run_start_executes_the_start_function() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let flag = Rc::new(Cell::new(false));
+        let f = flag.clone();
+        let mut m = Module::new();
+        // host 0 records that it ran
+        m.add_host_function(0, 0, move |_, _| {
+            f.set(true);
+            Ok(vec![])
+        });
+        // start function calls host 0
+        let start = m.add_function(0, 0, 0, &[0x10, 0x00, 0x0B]).unwrap();
+        m.set_start(start);
+        assert_eq!(m.start_index(), Some(start));
+        assert!(!flag.get());
+        m.run_start().unwrap();
+        assert!(flag.get());
+    }
+
+    #[test]
+    fn module_start_section_is_parsed() {
+        // (module (func) (start 0)) — func 0 is an empty no-result function.
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type () -> ()
+            0x03, 0x02, 0x01, 0x00, // func: type 0
+            0x08, 0x01, 0x00, // start section: func 0
+            0x0A, 0x04, 0x01, 0x02, 0x00, 0x0B, // code: (empty body) end
+        ];
+        let m = Module::from_bytes(&wasm).unwrap();
+        assert_eq!(m.start_index(), Some(0));
+        m.run_start().unwrap(); // runs the empty start function without error
     }
 
     // Gate: module globals + global.get/set.
