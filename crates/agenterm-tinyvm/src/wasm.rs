@@ -34,6 +34,14 @@ pub const WASM_MAX_STEPS: u64 = 16_000_000;
 pub const WASM_PAGE_SIZE: usize = 65_536;
 /// Maximum pages `memory.grow` will allocate (the spec's 32-bit maximum).
 pub const WASM_MAX_PAGES: usize = 65_536;
+/// Host robustness cap on *initial* linear memory (pages). A declared min
+/// above this is `Err` before any multi-gigabyte allocation is touched.
+/// The spec still allows declaring up to [`WASM_MAX_PAGES`]; this crate
+/// refuses to instantiate that on the host.
+pub const WASM_MAX_ALLOC_PAGES: usize = 256;
+/// Cap on the WASM operand stack. Independent of [`WASM_MAX_STEPS`]: a
+/// push-only loop traps here instead of growing to hundreds of megabytes.
+pub const WASM_STACK_LIMIT: usize = 65_536;
 /// Maximum declared locals per function (a decode-time sanity bound).
 pub const WASM_MAX_LOCALS: usize = 1 << 20;
 
@@ -1579,7 +1587,7 @@ impl Module {
         // One instance: the start function and the entry point share the same
         // linear memory and globals, so start-time host writes are visible.
         let mut steps: u64 = 0;
-        let mut mem = self.new_memory();
+        let mut mem = self.new_memory()?;
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
         if let Some(start) = self.start {
             self.call_any(start, &[], 0, &mut steps, &mut mem, &mut globals)?;
@@ -1632,7 +1640,7 @@ impl Module {
     /// convenience wrapper over it.
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
-        let mut mem = self.new_memory();
+        let mut mem = self.new_memory()?;
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
         self.call_any(idx, args, 0, &mut steps, &mut mem, &mut globals)
     }
@@ -1645,15 +1653,27 @@ impl Module {
 
     /// A fresh zeroed linear memory with the module's active data segments
     /// applied (spec 4.5.4 instantiation).
-    fn new_memory(&self) -> Vec<u8> {
-        let mut mem = vec![0u8; self.initial_mem_pages() * WASM_PAGE_SIZE];
+    ///
+    /// Oversized `min` or an allocator refusal is `Err`, never a process abort.
+    fn new_memory(&self) -> Result<Vec<u8>, WasmError> {
+        let pages = self.initial_mem_pages();
+        if pages > WASM_MAX_ALLOC_PAGES {
+            return Err(WasmError::Trap("memory size"));
+        }
+        let nbytes = pages
+            .checked_mul(WASM_PAGE_SIZE)
+            .ok_or(WasmError::Trap("memory size"))?;
+        let mut mem = Vec::new();
+        mem.try_reserve(nbytes)
+            .map_err(|_| WasmError::Trap("memory size"))?;
+        mem.resize(nbytes, 0);
         for (offset, bytes) in &self.data {
             let end = offset + bytes.len();
             if end <= mem.len() {
                 mem[*offset..end].copy_from_slice(bytes);
             }
         }
-        mem
+        Ok(mem)
     }
 
     /// Number of parameters a function index (host or defined) expects.
@@ -1745,6 +1765,9 @@ impl Module {
             *steps += 1;
             if *steps > WASM_MAX_STEPS {
                 return Err(WasmError::Trap("step budget"));
+            }
+            if stack.len() > WASM_STACK_LIMIT {
+                return Err(WasmError::Trap("operand stack"));
             }
             if pc >= func.code.len() {
                 return take_results(&mut stack, func.arity);
@@ -2441,8 +2464,8 @@ fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(
 /// Trap for a float that cannot be truncated into the target integer type
 /// (NaN, infinity, or out of range). WASM boundaries (±2^31, 2^32, ±2^63, 2^64)
 /// are exact powers of two, so the valid range is the half-open `[lo, hi)`.
-fn trunc_trap(_op: &str) -> WasmError {
-    WasmError::Trap("")
+fn trunc_trap(op: &'static str) -> WasmError {
+    WasmError::Trap(op)
 }
 
 fn trunc_f32_to_i32_s(x: f32) -> Result<i32, WasmError> {
