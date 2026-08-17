@@ -71,6 +71,16 @@ def f32c(x: float) -> bytes:
     return bytes([0x43]) + struct.pack("<f", float(x))
 
 
+def f32c_bits(bits: int) -> bytes:
+    """f32.const from a raw bit pattern (NaN payloads, signed zeros)."""
+    return bytes([0x43]) + struct.pack("<I", bits & 0xFFFFFFFF)
+
+
+def f64c_bits(bits: int) -> bytes:
+    """f64.const from a raw bit pattern."""
+    return bytes([0x44]) + struct.pack("<Q", bits & 0xFFFFFFFFFFFFFFFF)
+
+
 def f64c(x: float) -> bytes:
     return bytes([0x44]) + struct.pack("<d", float(x))
 
@@ -86,6 +96,10 @@ def encode_module(
     table_min: int | None = None,
     elems: list[tuple[int, list[int]]] | None = None,
     start: int | None = None,
+    memory_min: int | None = None,
+    memory_max: int | None = None,
+    data: list[tuple[int, bytes]] | None = None,
+    local_decls: list[list[tuple[int, int]]] | None = None,
 ) -> bytes:
     out = bytearray(b"\x00asm\x01\x00\x00\x00")
     tpay = bytearray(uleb(len(types)))
@@ -104,6 +118,13 @@ def encode_module(
     out += section(3, bytes(fp))
     if table_min is not None:
         out += section(4, bytes([0x01, 0x70, 0x00]) + uleb(table_min))
+    if memory_min is not None:
+        if memory_max is None:
+            out += section(5, bytes([0x01, 0x00]) + uleb(memory_min))
+        else:
+            out += section(
+                5, bytes([0x01, 0x01]) + uleb(memory_min) + uleb(memory_max)
+            )
     if globals_:
         gp = bytearray(uleb(len(globals_)))
         for vt, mut, init in globals_:
@@ -124,15 +145,26 @@ def encode_module(
                 el += uleb(i)
         out += section(9, bytes(el))
     cp = bytearray(uleb(len(codes)))
-    for nloc, expr in codes:
+    for fi, (nloc, expr) in enumerate(codes):
         body = bytearray()
-        if nloc:
+        decls = local_decls[fi] if local_decls else None
+        if decls:
+            body += uleb(len(decls))
+            for cnt, vt in decls:
+                body += uleb(cnt) + bytes([vt])
+        elif nloc:
             body += uleb(1) + uleb(nloc) + bytes([I32])
         else:
             body += uleb(0)
         body += expr
         cp += uleb(len(body)) + body
     out += section(10, bytes(cp))
+    if data:
+        dp = bytearray(uleb(len(data)))
+        for off, payload in data:
+            dp += bytes([0x00]) + i32c(off) + bytes([0x0B])
+            dp += uleb(len(payload)) + payload
+        out += section(11, bytes(dp))
     return bytes(out)
 
 
@@ -142,6 +174,10 @@ def simple(
     result: int | None = I32,
     nloc: int = 0,
     params: list[int] | None = None,
+    memory_min: int | None = None,
+    memory_max: int | None = None,
+    data: list[tuple[int, bytes]] | None = None,
+    local_decls: list[tuple[int, int]] | None = None,
 ) -> bytes:
     params = params or []
     results = [result] if result is not None else []
@@ -150,6 +186,10 @@ def simple(
         func_types=[0],
         codes=[(nloc, expr)],
         exports=[("main", 0)],
+        memory_min=memory_min,
+        memory_max=memory_max,
+        data=data,
+        local_decls=[local_decls] if local_decls else None,
     )
 
 
@@ -965,31 +1005,74 @@ def build_cases() -> list[Case]:
             simple(i32c(3) + bytes([0x40, 0x00, 0x0B])),
         )
     )
-    # explicit store-only credit cases (result is the stored value reloaded)
-    for store, load, extra in [
-        ("i32.store", "i32.load", []),
-        ("i32.store8", "i32.load8_u", []),
-        ("i32.store16", "i32.load16_u", []),
-        ("i64.store", "i64.load", ["i64.const"]),
-        ("i64.store8", "i64.load8_u", ["i64.const"]),
-        ("i64.store16", "i64.load16_u", ["i64.const"]),
-        ("i64.store32", "i64.load32_u", ["i64.const"]),
-        ("f32.store", "f32.load", ["f32.const"]),
-        ("f64.store", "f64.load", ["f64.const"]),
-    ]:
-        # already have load-named cases; add store-named duplicates only if missing
-        if not any(c.cid == store for c in cases):
-            # find the load case with this store and clone the wasm
-            src = next(c for c in cases if store in c.opcodes and c.family == "memory" and c.cid != store)
-            cases.append(
-                Case(
-                    store,
-                    "memory",
-                    ops(store, *([load] if load else []), "end", *extra),
-                    src.expect,
-                    src.wasm,
-                )
-            )
+    # Store-named rows: each builds its OWN module (store, then read back with
+    # the load named in its opcode column) instead of cloning a load row's
+    # bytes, so the column never claims an opcode the module lacks.
+    def store_roundtrip(cid, store, load, addr, push, expect, result=I32):
+        return Case(
+            cid,
+            "memory",
+            ops(store, load, "end"),
+            expect,
+            simple(
+                i32c(addr)
+                + push
+                + bytes([OPS[store], 0x00, 0x00])
+                + i32c(addr)
+                + bytes([OPS[load], 0x00, 0x00, 0x0B]),
+                result=result,
+            ),
+        )
+
+    cases.append(
+        store_roundtrip(
+            "i32.store", "i32.store", "i32.load", 32, i32c(0x12345678),
+            f"i32:{i32(0x12345678)}",
+        )
+    )
+    cases.append(
+        store_roundtrip("i32.store8", "i32.store8", "i32.load8_u", 36, i32c(0x1FF), "i32:255")
+    )
+    cases.append(
+        store_roundtrip(
+            "i32.store16", "i32.store16", "i32.load16_u", 38, i32c(0x1BEEF), "i32:48879"
+        )
+    )
+    cases.append(
+        store_roundtrip(
+            "i64.store", "i64.store", "i64.load", 40, i64c(0x0102030405060708),
+            f"i64:{0x0102030405060708}", result=I64,
+        )
+    )
+    cases.append(
+        store_roundtrip(
+            "i64.store8", "i64.store8", "i64.load8_u", 48, i64c(0x1FF), "i64:255", result=I64
+        )
+    )
+    cases.append(
+        store_roundtrip(
+            "i64.store16", "i64.store16", "i64.load16_u", 50, i64c(0x1BEEF), "i64:48879",
+            result=I64,
+        )
+    )
+    cases.append(
+        store_roundtrip(
+            "i64.store32", "i64.store32", "i64.load32_u", 52, i64c(0x180000001),
+            "i64:2147483649", result=I64,
+        )
+    )
+    cases.append(
+        store_roundtrip(
+            "f32.store", "f32.store", "f32.load", 56, f32c(12.5),
+            f"f32bits:{f32bits(12.5)}", result=F32,
+        )
+    )
+    cases.append(
+        store_roundtrip(
+            "f64.store", "f64.store", "f64.load", 64, f64c(12.5),
+            f"f64bits:{f64bits(12.5)}", result=F64,
+        )
+    )
 
     # --- i32 (operands 17/31, not 40/2 or 6/7) ---
     cases.append(
@@ -1476,9 +1559,12 @@ def extra_cases() -> list[Case]:
         Case(
             "extra.i64.sub",
             "i64",
-            ops("i64.sub", "i64.const", "end"),
-            "i64:77",
-            simple(i64c(100) + i64c(23) + bytes([0x7D, 0x0B]), result=I64),
+            ops("i64.sub", "i64.const", "i64.mul", "end"),
+            "i64:-154",
+            simple(
+                i64c(23) + i64c(100) + bytes([0x7D]) + i64c(2) + bytes([0x7E, 0x0B]),
+                result=I64,
+            ),
         )
     )
     extras.append(
@@ -1528,6 +1614,409 @@ def extra_cases() -> list[Case]:
     return extras
 
 
+
+def edge_cases() -> list[Case]:
+    """Spec-boundary goldens: the cases a wiring-only suite cannot fail.
+
+    Every expectation here is derived from the WASM 1.0 / IEEE-754 text, not
+    from running the Rust interpreter. Hardware-chosen NaN results (0/0,
+    inf-inf, sqrt(-1)) are asserted as `f32nan`/`f64nan` rather than raw bits,
+    because the sign of those NaNs is platform-dependent and the spec admits
+    either.
+    """
+    e: list[Case] = []
+
+    # --- i32: traps, signedness, and the shift-count mask -----------------
+    e.append(Case("edge.i32.div_s_overflow", "i32", ops("i32.const", "i32.div_s", "end"),
+                  "trap", simple(i32c(-2147483648) + i32c(-1) + bytes([0x6D, 0x0B]))))
+    e.append(Case("edge.i32.rem_s_min_mod_neg1", "i32", ops("i32.const", "i32.rem_s", "end"),
+                  "i32:0", simple(i32c(-2147483648) + i32c(-1) + bytes([0x6F, 0x0B]))))
+    e.append(Case("edge.i32.div_u_by_zero", "i32", ops("i32.const", "i32.div_u", "end"),
+                  "trap", simple(i32c(1) + i32c(0) + bytes([0x6E, 0x0B]))))
+    e.append(Case("edge.i32.rem_u_by_zero", "i32", ops("i32.const", "i32.rem_u", "end"),
+                  "trap", simple(i32c(1) + i32c(0) + bytes([0x70, 0x0B]))))
+    e.append(Case("edge.i32.div_s_by_zero", "i32", ops("i32.const", "i32.div_s", "end"),
+                  "trap", simple(i32c(1) + i32c(0) + bytes([0x6D, 0x0B]))))
+    # truncation is toward zero, not floor: -99/4 = -24 rem -3
+    e.append(Case("edge.i32.div_s_truncates_toward_zero", "i32",
+                  ops("i32.const", "i32.div_s", "end"), "i32:-24",
+                  simple(i32c(-99) + i32c(4) + bytes([0x6D, 0x0B]))))
+    e.append(Case("edge.i32.rem_s_sign_follows_dividend", "i32",
+                  ops("i32.const", "i32.rem_s", "end"), "i32:-3",
+                  simple(i32c(-99) + i32c(4) + bytes([0x6F, 0x0B]))))
+    e.append(Case("edge.i32.div_u_unsigned", "i32", ops("i32.const", "i32.div_u", "end"),
+                  "i32:2147483647", simple(i32c(-1) + i32c(2) + bytes([0x6E, 0x0B]))))
+    e.append(Case("edge.i32.shl_count_mod32", "i32", ops("i32.const", "i32.shl", "end"),
+                  "i32:1", simple(i32c(1) + i32c(32) + bytes([0x74, 0x0B]))))
+    e.append(Case("edge.i32.shr_u_zero_fill", "i32", ops("i32.const", "i32.shr_u", "end"),
+                  "i32:2147483647", simple(i32c(-1) + i32c(1) + bytes([0x76, 0x0B]))))
+    e.append(Case("edge.i32.shr_s_sign_fill", "i32", ops("i32.const", "i32.shr_s", "end"),
+                  "i32:-1", simple(i32c(-1) + i32c(1) + bytes([0x75, 0x0B]))))
+    e.append(Case("edge.i32.rotl_wrap_top_bit", "i32", ops("i32.const", "i32.rotl", "end"),
+                  "i32:1", simple(i32c(-2147483648) + i32c(1) + bytes([0x77, 0x0B]))))
+    e.append(Case("edge.i32.rotr_count_mod32", "i32", ops("i32.const", "i32.rotr", "end"),
+                  "i32:1", simple(i32c(1) + i32c(32) + bytes([0x78, 0x0B]))))
+    e.append(Case("edge.i32.clz_zero", "i32", ops("i32.const", "i32.clz", "end"),
+                  "i32:32", simple(i32c(0) + bytes([0x67, 0x0B]))))
+    e.append(Case("edge.i32.ctz_zero", "i32", ops("i32.const", "i32.ctz", "end"),
+                  "i32:32", simple(i32c(0) + bytes([0x68, 0x0B]))))
+    e.append(Case("edge.i32.le_u_is_unsigned", "i32", ops("i32.const", "i32.le_u", "end"),
+                  "i32:0", simple(i32c(-1) + i32c(1) + bytes([0x4D, 0x0B]))))
+    e.append(Case("edge.i32.add_wraps_at_max", "i32", ops("i32.const", "i32.add", "end"),
+                  "i32:-2147483648", simple(i32c(2147483647) + i32c(1) + bytes([0x6A, 0x0B]))))
+
+    # --- i64: same edges at 64-bit width ----------------------------------
+    e.append(Case("edge.i64.div_s_min_neg1", "i64", ops("i64.const", "i64.div_s", "end"),
+                  "trap", simple(i64c(-(2 ** 63)) + i64c(-1) + bytes([0x7F, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.rem_s_min_neg1", "i64", ops("i64.const", "i64.rem_s", "end"),
+                  "i64:0", simple(i64c(-(2 ** 63)) + i64c(-1) + bytes([0x81, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.div_u_by_zero", "i64", ops("i64.const", "i64.div_u", "end"),
+                  "trap", simple(i64c(1) + i64c(0) + bytes([0x80, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.rem_u_by_zero", "i64", ops("i64.const", "i64.rem_u", "end"),
+                  "trap", simple(i64c(1) + i64c(0) + bytes([0x82, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.shl_by63", "i64", ops("i64.const", "i64.shl", "end"),
+                  f"i64:{i64(1 << 63)}", simple(i64c(1) + i64c(63) + bytes([0x86, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.shl_count_mod64", "i64", ops("i64.const", "i64.shl", "end"),
+                  "i64:1", simple(i64c(1) + i64c(64) + bytes([0x86, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.shr_u_neg1_by32", "i64", ops("i64.const", "i64.shr_u", "end"),
+                  "i64:4294967295", simple(i64c(-1) + i64c(32) + bytes([0x88, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.rotr_by32", "i64", ops("i64.const", "i64.rotr", "end"),
+                  "i64:4294967296", simple(i64c(1) + i64c(32) + bytes([0x8A, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.ctz_zero", "i64", ops("i64.const", "i64.ctz", "end"),
+                  "i64:64", simple(i64c(0) + bytes([0x7A, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.clz_zero", "i64", ops("i64.const", "i64.clz", "end"),
+                  "i64:64", simple(i64c(0) + bytes([0x79, 0x0B]), result=I64)))
+    e.append(Case("edge.i64.lt_u_high32", "i64", ops("i64.const", "i64.lt_u", "end"),
+                  "i32:0", simple(i64c(2 ** 32) + i64c(2 ** 32 - 1) + bytes([0x54, 0x0B]))))
+    e.append(Case("edge.i64.eqz_high_bits_only", "i64", ops("i64.const", "i64.eqz", "end"),
+                  "i32:0", simple(i64c(2 ** 32) + bytes([0x50, 0x0B]))))
+
+    # --- f32: NaN, signed zero, ties-to-even ------------------------------
+    e.append(Case("edge.f32.min_propagates_nan", "f32", ops("f32.const", "f32.min", "end"),
+                  "f32nan", simple(f32c_bits(0x7FC00001) + f32c(1.0) + bytes([0x96, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.max_propagates_nan", "f32", ops("f32.const", "f32.max", "end"),
+                  "f32nan", simple(f32c(1.0) + f32c_bits(0x7FC00001) + bytes([0x97, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.min_zero_signs", "f32", ops("f32.const", "f32.min", "end"),
+                  "f32bits:0x80000000",
+                  simple(f32c_bits(0x00000000) + f32c_bits(0x80000000) + bytes([0x96, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.max_zero_signs", "f32", ops("f32.const", "f32.max", "end"),
+                  "f32bits:0x0",
+                  simple(f32c_bits(0x00000000) + f32c_bits(0x80000000) + bytes([0x97, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.nearest_tie_even", "f32", ops("f32.const", "f32.nearest", "end"),
+                  f"f32bits:{f32bits(2.0)}", simple(f32c(2.5) + bytes([0x90, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.nearest_neg_half", "f32", ops("f32.const", "f32.nearest", "end"),
+                  "f32bits:0x80000000", simple(f32c(-0.5) + bytes([0x90, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.ceil_neg_half", "f32", ops("f32.const", "f32.ceil", "end"),
+                  "f32bits:0x80000000", simple(f32c(-0.5) + bytes([0x8D, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.copysign_nan", "f32", ops("f32.const", "f32.copysign", "end"),
+                  "f32bits:0xffc00001",
+                  simple(f32c_bits(0x7FC00001) + f32c(-1.0) + bytes([0x98, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.div_by_neg_zero", "f32", ops("f32.const", "f32.div", "end"),
+                  "f32bits:0xff800000",
+                  simple(f32c(1.0) + f32c_bits(0x80000000) + bytes([0x95, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.div_zero_by_zero_is_nan", "f32", ops("f32.const", "f32.div", "end"),
+                  "f32nan", simple(f32c(0.0) + f32c(0.0) + bytes([0x95, 0x0B]), result=F32)))
+    e.append(Case("edge.f32.ne_nan_is_true", "f32", ops("f32.const", "f32.ne", "end"),
+                  "i32:1", simple(f32c_bits(0x7FC00001) + f32c_bits(0x7FC00001) + bytes([0x5C, 0x0B]))))
+    e.append(Case("edge.f32.lt_nan_is_false", "f32", ops("f32.const", "f32.lt", "end"),
+                  "i32:0", simple(f32c_bits(0x7FC00001) + f32c(1.0) + bytes([0x5D, 0x0B]))))
+    e.append(Case("edge.f32.sqrt_neg_is_nan", "f32", ops("f32.const", "f32.sqrt", "end"),
+                  "f32nan", simple(f32c(-1.0) + bytes([0x91, 0x0B]), result=F32)))
+
+    # --- f64: same shape, plus a value f32 cannot hold --------------------
+    e.append(Case("edge.f64.nearest_tie_even", "f64", ops("f64.const", "f64.nearest", "end"),
+                  f"f64bits:{f64bits(2.0)}", simple(f64c(2.5) + bytes([0x9E, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.nearest_neg_half", "f64", ops("f64.const", "f64.nearest", "end"),
+                  "f64bits:0x8000000000000000", simple(f64c(-0.5) + bytes([0x9E, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.ceil_neg_half", "f64", ops("f64.const", "f64.ceil", "end"),
+                  "f64bits:0x8000000000000000", simple(f64c(-0.5) + bytes([0x9B, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.min_zero_signs", "f64", ops("f64.const", "f64.min", "end"),
+                  "f64bits:0x8000000000000000",
+                  simple(f64c(0.0) + f64c_bits(0x8000000000000000) + bytes([0xA4, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.max_zero_signs", "f64", ops("f64.const", "f64.max", "end"),
+                  "f64bits:0x0",
+                  simple(f64c_bits(0x8000000000000000) + f64c(0.0) + bytes([0xA5, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.min_propagates_nan", "f64", ops("f64.const", "f64.min", "end"),
+                  "f64nan",
+                  simple(f64c_bits(0x7FF8000000000001) + f64c(1.0) + bytes([0xA4, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.div_zero_inf", "f64", ops("f64.const", "f64.div", "end"),
+                  "f64bits:0x7ff0000000000000",
+                  simple(f64c(1.0) + f64c(0.0) + bytes([0xA3, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.mul_1e300_needs_f64", "f64", ops("f64.const", "f64.mul", "end"),
+                  f"f64bits:{f64bits(1e301)}",
+                  simple(f64c(1e300) + f64c(10.0) + bytes([0xA2, 0x0B]), result=F64)))
+    e.append(Case("edge.f64.lt_nan_is_false", "f64", ops("f64.const", "f64.lt", "end"),
+                  "i32:0",
+                  simple(f64c_bits(0x7FF8000000000000) + f64c(1.0) + bytes([0x63, 0x0B]))))
+    e.append(Case("edge.f64.sqrt_neg_zero", "f64", ops("f64.const", "f64.sqrt", "end"),
+                  "f64bits:0x8000000000000000",
+                  simple(f64c_bits(0x8000000000000000) + bytes([0x9F, 0x0B]), result=F64)))
+
+    # --- conv: the trunc traps a saturating cast would swallow -------------
+    e.append(Case("edge.conv.trunc_f32_s_2p31_traps", "conv",
+                  ops("f32.const", "i32.trunc_f32_s", "end"), "trap",
+                  simple(f32c(2147483648.0) + bytes([0xA8, 0x0B]))))
+    e.append(Case("edge.conv.trunc_f32_s_max_ok", "conv",
+                  ops("f32.const", "i32.trunc_f32_s", "end"), "i32:2147483520",
+                  simple(f32c(2147483520.0) + bytes([0xA8, 0x0B]))))
+    e.append(Case("edge.conv.trunc_f32_s_nan_traps", "conv",
+                  ops("f32.const", "i32.trunc_f32_s", "end"), "trap",
+                  simple(f32c_bits(0x7FC00000) + bytes([0xA8, 0x0B]))))
+    e.append(Case("edge.conv.trunc_f32_u_neg_half_is_zero", "conv",
+                  ops("f32.const", "i32.trunc_f32_u", "end"), "i32:0",
+                  simple(f32c(-0.5) + bytes([0xA9, 0x0B]))))
+    e.append(Case("edge.conv.trunc_f32_u_neg_one_traps", "conv",
+                  ops("f32.const", "i32.trunc_f32_u", "end"), "trap",
+                  simple(f32c(-1.0) + bytes([0xA9, 0x0B]))))
+    e.append(Case("edge.conv.trunc_f64_s_nan_traps", "conv",
+                  ops("f64.const", "i32.trunc_f64_s", "end"), "trap",
+                  simple(f64c_bits(0x7FF8000000000000) + bytes([0xAA, 0x0B]))))
+    e.append(Case("edge.conv.trunc_f64_s_2p63_traps", "conv",
+                  ops("f64.const", "i64.trunc_f64_s", "end"), "trap",
+                  simple(f64c(9223372036854775808.0) + bytes([0xB0, 0x0B]), result=I64)))
+    e.append(Case("edge.conv.trunc_f64_s_inf_traps", "conv",
+                  ops("f64.const", "i32.trunc_f64_s", "end"), "trap",
+                  simple(f64c_bits(0x7FF0000000000000) + bytes([0xAA, 0x0B]))))
+    e.append(Case("edge.conv.convert_i32_u_reads_unsigned", "conv",
+                  ops("i32.const", "f32.convert_i32_u", "end"), "f32bits:1333788672",
+                  simple(i32c(-1) + bytes([0xB3, 0x0B]), result=F32)))
+    e.append(Case("edge.conv.demote_overflows_to_inf", "conv",
+                  ops("f64.const", "f32.demote_f64", "end"), "f32bits:0x7f800000",
+                  simple(f64c(1e300) + bytes([0xB6, 0x0B]), result=F32)))
+    e.append(Case("edge.conv.reinterpret_keeps_nan_payload", "conv",
+                  ops("f32.const", "i32.reinterpret_f32", "end"), "i32:2141192193",
+                  simple(f32c_bits(0x7FA00001) + bytes([0xBC, 0x0B]))))
+    e.append(Case("edge.conv.extend_i32_u_is_unsigned", "conv",
+                  ops("i32.const", "i64.extend_i32_u", "end"), "i64:4294967295",
+                  simple(i32c(-1) + bytes([0xAD, 0x0B]), result=I64)))
+
+    # --- control: the label semantics a pass-through block cannot show ----
+    e.append(Case("edge.control.loop_backedge", "control",
+                  ops("loop", "br_if", "local.get", "local.set", "i32.add", "i32.sub", "end"),
+                  "i32:35",
+                  simple(i32c(5) + bytes([0x21, 0x00]) + i32c(0) + bytes([0x21, 0x01])
+                         + bytes([0x03, 0x40])
+                         + bytes([0x20, 0x01]) + i32c(7) + bytes([0x6A, 0x21, 0x01])
+                         + bytes([0x20, 0x00]) + i32c(1) + bytes([0x6B, 0x21, 0x00])
+                         + bytes([0x20, 0x00]) + bytes([0x0D, 0x00])
+                         + bytes([0x0B])
+                         + bytes([0x20, 0x01]) + bytes([0x0B]), nloc=2)))
+    e.append(Case("edge.control.br_table_negative_index_takes_default", "control",
+                  ops("block", "br_table", "return", "i32.const", "end"), "i32:30",
+                  simple(bytes([0x02, 0x40, 0x02, 0x40, 0x02, 0x40]) + i32c(-1)
+                         + bytes([0x0E, 0x02, 0x00, 0x01, 0x02])
+                         + bytes([0x0B]) + i32c(10) + bytes([0x0F])
+                         + bytes([0x0B]) + i32c(20) + bytes([0x0F])
+                         + bytes([0x0B]) + i32c(30) + bytes([0x0F]) + bytes([0x0B]))))
+    e.append(Case("edge.control.if_without_else_false", "control",
+                  ops("if", "drop", "i32.const", "end"), "i32:11",
+                  simple(i32c(0) + bytes([0x04, 0x40]) + i32c(9) + bytes([0x1A])
+                         + bytes([0x0B]) + i32c(11) + bytes([0x0B]))))
+    e.append(Case("edge.control.return_from_nested_blocks", "control",
+                  ops("block", "return", "i32.const", "end"), "i32:77",
+                  simple(bytes([0x02, 0x40, 0x02, 0x40, 0x02, 0x40]) + i32c(77) + bytes([0x0F])
+                         + bytes([0x0B, 0x0B, 0x0B]) + i32c(0) + bytes([0x0B]))))
+    e.append(Case("edge.control.br0_at_top_level_returns", "control",
+                  ops("br", "i32.const", "end"), "i32:88",
+                  simple(i32c(88) + bytes([0x0C, 0x00]) + i32c(1) + bytes([0x0B]))))
+    e.append(Case("edge.control.call_indirect_null_elem_traps", "control",
+                  ops("call_indirect", "i32.const", "end"), "trap",
+                  encode_module(types=[([], [I32])], func_types=[0, 0],
+                                codes=[(0, i32c(3) + bytes([0x11, 0x00, 0x00]) + bytes([0x0B])),
+                                       (0, i32c(88) + bytes([0x0B]))],
+                                exports=[("main", 0)], table_min=4, elems=[(0, [1])])))
+    e.append(Case("edge.control.call_indirect_type_mismatch_traps", "control",
+                  ops("call_indirect", "i32.const", "end"), "trap",
+                  encode_module(types=[([], [I32]), ([I32], [I32]), ([I64], [I32])],
+                                func_types=[0, 2],
+                                codes=[(0, i32c(1) + i32c(0) + bytes([0x11, 0x01, 0x00]) + bytes([0x0B])),
+                                       (0, i32c(7) + bytes([0x0B]))],
+                                exports=[("main", 0)], table_min=1, elems=[(0, [1])])))
+    e.append(Case("edge.control.call_recursion_sum6", "control",
+                  ops("call", "if", "else", "local.get", "i32.sub", "i32.add", "end"), "i32:21",
+                  encode_module(types=[([], [I32]), ([I32], [I32])], func_types=[0, 1],
+                                codes=[(0, i32c(6) + bytes([0x10, 0x01]) + bytes([0x0B])),
+                                       (0, bytes([0x20, 0x00]) + bytes([0x04, I32])
+                                        + bytes([0x20, 0x00]) + bytes([0x20, 0x00]) + i32c(1)
+                                        + bytes([0x6B]) + bytes([0x10, 0x01]) + bytes([0x6A])
+                                        + bytes([0x05]) + i32c(0)
+                                        + bytes([0x0B]) + bytes([0x0B]))],
+                                exports=[("main", 0)])))
+
+    # control: unbounded recursion must be a loud trap, never a stack overflow
+    e.append(Case("edge.control.unbounded_recursion_traps", "control",
+                  ops("call", "i32.add", "local.get", "end"), "trap",
+                  encode_module(types=[([], [I32]), ([I32], [I32])], func_types=[0, 1],
+                                codes=[(0, i32c(1) + bytes([0x10, 0x01, 0x0B])),
+                                       (0, bytes([0x20, 0x00]) + i32c(1)
+                                        + bytes([0x6A, 0x10, 0x01, 0x0B]))],
+                                exports=[("main", 0)])))
+
+    # --- parametric / locals: types, not just i32 --------------------------
+    e.append(Case("edge.parametric.select_i64_cond_zero", "parametric",
+                  ops("i64.const", "i32.const", "select", "end"), "i64:9",
+                  simple(i64c(7) + i64c(9) + i32c(0) + bytes([0x1B, 0x0B]), result=I64)))
+    e.append(Case("edge.parametric.select_i64_cond_negative", "parametric",
+                  ops("i64.const", "i32.const", "select", "end"), "i64:7",
+                  simple(i64c(7) + i64c(9) + i32c(-1) + bytes([0x1B, 0x0B]), result=I64)))
+    e.append(Case("edge.parametric.select_keeps_f64_nan_payload", "parametric",
+                  ops("f64.const", "i32.const", "select", "end"),
+                  "f64bits:0x7ff8000000000001",
+                  simple(f64c_bits(0x7FF8000000000001) + f64c(1.5) + i32c(1)
+                         + bytes([0x1B, 0x0B]), result=F64)))
+    e.append(Case("edge.parametric.drop_is_type_agnostic", "parametric",
+                  ops("f32.const", "f64.const", "drop", "end"), f"f32bits:{f32bits(2.5)}",
+                  simple(f32c(2.5) + f64c(1.25) + bytes([0x1A, 0x0B]), result=F32)))
+    e.append(Case("edge.locals.default_zero_i64", "locals", ops("local.get", "end"), "i64:0",
+                  simple(bytes([0x20, 0x00, 0x0B]), result=I64, local_decls=[(1, I64)])))
+    e.append(Case("edge.locals.default_zero_f32_is_usable", "locals",
+                  ops("local.get", "f32.const", "f32.add", "end"), f"f32bits:{f32bits(1.5)}",
+                  simple(bytes([0x20, 0x00]) + f32c(1.5) + bytes([0x92, 0x0B]),
+                         result=F32, local_decls=[(1, F32)])))
+    e.append(Case("edge.locals.two_decl_groups", "locals",
+                  ops("i64.const", "local.set", "local.get", "end"), "i64:8",
+                  simple(i64c(8) + bytes([0x21, 0x02, 0x20, 0x02, 0x0B]),
+                         result=I64, local_decls=[(2, I32), (1, I64)])))
+    e.append(Case("edge.locals.params_then_locals_index_space", "locals",
+                  ops("i32.const", "call", "local.get", "i32.sub", "local.set", "end"), "i32:-11",
+                  encode_module(types=[([], [I32]), ([I32, I32], [I32])], func_types=[0, 1],
+                                codes=[(0, i32c(11) + i32c(22) + bytes([0x10, 0x01, 0x0B])),
+                                       (1, bytes([0x20, 0x00, 0x20, 0x01, 0x6B, 0x21, 0x02,
+                                                  0x20, 0x02, 0x0B]))],
+                                exports=[("main", 0)])))
+    e.append(Case("edge.locals.global_set_immutable_traps", "locals",
+                  ops("i32.const", "global.set", "global.get", "end"), "trap",
+                  encode_module(types=[([], [I32])], func_types=[0],
+                                codes=[(0, i32c(9) + bytes([0x24, 0x00, 0x23, 0x00, 0x0B]))],
+                                exports=[("main", 0)],
+                                globals_=[(I32, False, i32c(7) + bytes([0x0B]))])))
+    e.append(Case("edge.locals.global_i64_set_get", "locals",
+                  ops("i64.const", "global.set", "global.get", "end"), "i64:-3",
+                  encode_module(types=[([], [I64])], func_types=[0],
+                                codes=[(0, i64c(-3) + bytes([0x24, 0x00, 0x23, 0x00, 0x0B]))],
+                                exports=[("main", 0)],
+                                globals_=[(I64, True, i64c(1) + bytes([0x0B]))])))
+
+    e.append(Case("edge.parametric.select_f32_cond_nonzero", "parametric",
+                  ops("f32.const", "i32.const", "select", "end"), f"f32bits:{f32bits(2.5)}",
+                  simple(f32c(2.5) + f32c(7.5) + i32c(2) + bytes([0x1B, 0x0B]), result=F32)))
+    e.append(Case("edge.parametric.drop_leaves_the_value_below", "parametric",
+                  ops("i64.const", "drop", "end"), "i64:-7",
+                  simple(i64c(-7) + i64c(1) + bytes([0x1A, 0x0B]), result=I64)))
+    e.append(Case("edge.parametric.select_keeps_i64_high_bits", "parametric",
+                  ops("i64.const", "i32.const", "select", "end"), "i64:4294967296",
+                  simple(i64c(2 ** 32) + i64c(1) + i32c(1) + bytes([0x1B, 0x0B]), result=I64)))
+
+    # --- memory: limits, data segments, bounds -----------------------------
+    e.append(Case("edge.memory.store8_truncates_then_load8_s", "memory",
+                  ops("i32.const", "i32.store8", "i32.load8_s", "end"), "i32:-1",
+                  simple(i32c(0) + i32c(0x1FF) + bytes([0x3A, 0x00, 0x00])
+                         + i32c(0) + bytes([0x2C, 0x00, 0x00, 0x0B]), memory_min=1)))
+    e.append(Case("edge.memory.little_endian_bytes", "memory",
+                  ops("i32.const", "i32.store", "i32.load8_u", "i32.mul", "i32.add", "end"),
+                  "i32:8",
+                  simple(i32c(8) + i32c(0x04030201) + bytes([0x36, 0x00, 0x00])
+                         + i32c(8) + bytes([0x2D, 0x00, 0x00]) + i32c(4) + bytes([0x6C])
+                         + i32c(11) + bytes([0x2D, 0x00, 0x00]) + bytes([0x6A, 0x0B]),
+                         memory_min=1)))
+    e.append(Case("edge.memory.memarg_offset_applies", "memory",
+                  ops("i32.const", "i32.store", "i32.load", "end"), "i32:99",
+                  simple(i32c(16) + i32c(99) + bytes([0x36, 0x00, 0x04])
+                         + i32c(20) + bytes([0x28, 0x00, 0x00, 0x0B]), memory_min=1)))
+    e.append(Case("edge.memory.partial_tail_out_of_bounds_traps", "memory",
+                  ops("i32.const", "i32.load", "end"), "trap",
+                  simple(i32c(65533) + bytes([0x28, 0x00, 0x00, 0x0B]), memory_min=1)))
+    e.append(Case("edge.memory.address_plus_offset_overflow_traps", "memory",
+                  ops("i32.const", "i32.load", "end"), "trap",
+                  simple(i32c(-1) + bytes([0x28, 0x00, 0x01, 0x0B]), memory_min=1)))
+    e.append(Case("edge.memory.store_out_of_bounds_traps", "memory",
+                  ops("i32.const", "i32.store", "end"), "trap",
+                  simple(i32c(65534) + i32c(7) + bytes([0x36, 0x00, 0x00, 0x0B]),
+                         result=None, memory_min=1)))
+    e.append(Case("edge.memory.grown_page_reads_zero", "memory",
+                  ops("i32.const", "memory.grow", "drop", "i32.load", "end"), "i32:0",
+                  simple(i32c(1) + bytes([0x40, 0x00, 0x1A])
+                         + i32c(65536) + bytes([0x28, 0x00, 0x00, 0x0B]), memory_min=1)))
+    e.append(Case("edge.memory.data_segment_initialises", "memory",
+                  ops("i32.const", "i32.load", "end"), "i32:-559038737",
+                  simple(i32c(0) + bytes([0x28, 0x00, 0x00, 0x0B]),
+                         memory_min=1, data=[(0, bytes([0xEF, 0xBE, 0xAD, 0xDE]))])))
+    e.append(Case("edge.memory.data_segment_at_offset", "memory",
+                  ops("i32.const", "i32.load8_u", "end"), "i32:42",
+                  simple(i32c(7) + bytes([0x2D, 0x00, 0x00, 0x0B]),
+                         memory_min=1, data=[(7, bytes([42]))])))
+    e.append(Case("edge.memory.size_reports_declared_min", "memory",
+                  ops("memory.size", "end"), "i32:3",
+                  simple(bytes([0x3F, 0x00, 0x0B]), memory_min=3)))
+    e.append(Case("edge.memory.grow_past_declared_max_returns_minus_one", "memory",
+                  ops("i32.const", "memory.grow", "end"), "i32:-1",
+                  simple(i32c(5) + bytes([0x40, 0x00, 0x0B]), memory_min=1, memory_max=2)))
+    e.append(Case("edge.memory.grow_returns_previous_size", "memory",
+                  ops("i32.const", "memory.grow", "end"), "i32:2",
+                  simple(i32c(1) + bytes([0x40, 0x00, 0x0B]), memory_min=2, memory_max=4)))
+
+    # --- host: the import table as the only door ---------------------------
+    e.append(Case("edge.host.index_shift_defined_func", "host",
+                  ops("call", "i32.const", "end"), "i32:7",
+                  encode_module(types=[([I32], [I32]), ([], [I32])], func_types=[1, 1],
+                                codes=[(0, i32c(7) + bytes([0x0B])), (0, bytes([0x10, 0x02, 0x0B]))],
+                                exports=[("main", 3)],
+                                imports=[("host", "double", 0), ("host", "plus100", 0)])))
+    e.append(Case("edge.host.call_reaches_second_import", "host",
+                  ops("call", "i32.const", "end"), "i32:105",
+                  encode_module(types=[([I32], [I32]), ([], [I32])], func_types=[1, 1],
+                                codes=[(0, i32c(7) + bytes([0x0B])),
+                                       (0, i32c(5) + bytes([0x10, 0x01, 0x0B]))],
+                                exports=[("main", 3)],
+                                imports=[("host", "double", 0), ("host", "plus100", 0)]),
+                  bind="host.plus100"))
+    e.append(Case("edge.host.two_imports_in_order", "host",
+                  ops("i32.const", "call", "end"), "i32:110",
+                  encode_module(types=[([I32], [I32]), ([], [I32])], func_types=[1],
+                                codes=[(0, i32c(5) + bytes([0x10, 0x00, 0x10, 0x01, 0x0B]))],
+                                exports=[("main", 2)],
+                                imports=[("host", "double", 0), ("host", "plus100", 0)]),
+                  bind="host.double+host.plus100"))
+    e.append(Case("edge.host.sibling_bound_other_still_traps", "host",
+                  ops("i32.const", "call", "end"), "trap",
+                  encode_module(types=[([I32], [I32]), ([], [I32])], func_types=[1],
+                                codes=[(0, i32c(5) + bytes([0x10, 0x01, 0x0B]))],
+                                exports=[("main", 2)],
+                                imports=[("host", "double", 0), ("env", "missing", 0)]),
+                  bind="host.double"))
+    e.append(Case("edge.host.closure_writes_linear_memory", "host",
+                  ops("call", "i32.const", "i32.load", "end"), "i32:35",
+                  encode_module(types=[([], []), ([], [I32])], func_types=[1],
+                                codes=[(0, bytes([0x10, 0x00]) + i32c(0)
+                                        + bytes([0x28, 0x02, 0x08, 0x0B]))],
+                                exports=[("main", 1)],
+                                imports=[("host", "poke", 0)], memory_min=1),
+                  bind="host.poke"))
+    e.append(Case("edge.host.import_reached_through_table", "host",
+                  ops("i32.const", "call_indirect", "end"), "i32:10",
+                  encode_module(types=[([I32], [I32]), ([], [I32])], func_types=[1],
+                                codes=[(0, i32c(5) + i32c(0) + bytes([0x11, 0x00, 0x00, 0x0B]))],
+                                exports=[("main", 1)],
+                                imports=[("host", "double", 0)], table_min=1, elems=[(0, [0])]),
+                  bind="host.double"))
+    e.append(Case("edge.host.unused_import_does_not_block", "host",
+                  ops("i32.const", "end"), "i32:99",
+                  encode_module(types=[([I32], [I32]), ([], [I32])], func_types=[1],
+                                codes=[(0, i32c(99) + bytes([0x0B]))],
+                                exports=[("main", 1)],
+                                imports=[("host", "never", 0)])))
+    e.append(Case("edge.host.start_writes_are_visible_to_entry", "host",
+                  ops("call", "i32.const", "i32.load", "end"), "i32:35",
+                  encode_module(types=[([], []), ([], [I32])], func_types=[0, 1],
+                                codes=[(0, bytes([0x10, 0x00, 0x0B])),
+                                       (0, i32c(0) + bytes([0x28, 0x02, 0x08, 0x0B]))],
+                                exports=[("main", 2)],
+                                imports=[("host", "poke", 0)], start=1, memory_min=1),
+                  bind="host.poke"))
+
+    return e
+
+
 def write_file(path: Path, cases: list[Case], header: str) -> None:
     lines = [header, "# id|family|opcodes|expect|wasm_hex|bind"]
     for c in cases:
@@ -1565,7 +2054,16 @@ def main() -> None:
         extras,
         "# Extra per-family goldens. Operands/layout/control differ from crates/agenterm-tinyvm/src/wasm.rs in-crate tests.",
     )
-    print(f"wrote {len(cases)} goldens, {len(extras)} extras, {len(OPS)} opcodes")
+    edges = edge_cases()
+    write_file(
+        here / "family_edge.txt",
+        edges,
+        "# Spec-boundary goldens: traps, signed/unsigned splits, shift-count masks, NaN and signed zero, ties-to-even, memory limits and data segments, and the import table. Expected values are read off the WASM 1.0 / IEEE-754 text, never off this interpreter.",
+    )
+    print(
+        f"wrote {len(cases)} goldens, {len(extras)} extras, {len(edges)} edges, "
+        f"{len(OPS)} opcodes"
+    )
 
 
 if __name__ == "__main__":

@@ -5,10 +5,22 @@
 //! running this interpreter. The runner only calls the shipped face:
 //! [`agenterm_tinyvm::eval`] or `Module::from_bytes` + `bind_import` +
 //! `Module::eval`.
+//!
+//! Three fixture files, three jobs:
+//! - `mvp_goldens.txt` — one path per MVP opcode (the wiring gate).
+//! - `family_extra.txt` — one extra per family, different operands/layout.
+//! - `family_edge.txt` — spec boundaries: traps, signed/unsigned splits,
+//!   shift-count masks, NaN and signed zero, ties-to-even, memory limits and
+//!   data segments, the import table (the semantics gate).
+//!
+//! Every row must *execute*: there is no empty-module escape hatch, and each
+//! row's declared opcode column is checked against the module's own bytes, so
+//! coverage cannot be manufactured by editing a text column.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use agenterm_tinyvm::{Val, WasmError, WasmModule, eval};
 
@@ -18,7 +30,7 @@ struct Case {
     opcodes: Vec<u8>,
     expect: Expect,
     wasm: Vec<u8>,
-    bind: Option<(String, String)>,
+    binds: Vec<(String, String)>,
 }
 
 enum Expect {
@@ -26,12 +38,24 @@ enum Expect {
     I64(i64),
     F32Bits(u32),
     F64Bits(u64),
+    /// Any NaN: the sign/payload of a hardware-produced NaN is platform
+    /// dependent and the spec admits either, so bits are not pinned.
+    F32Nan,
+    F64Nan,
     Trap,
-    Empty,
 }
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+fn fixture_files() -> [&'static str; 4] {
+    [
+        "mvp_goldens.txt",
+        "family_extra.txt",
+        "family_edge.txt",
+        "prd_leaves.txt",
+    ]
 }
 
 /// `#78|...` is a data row. `# comment` and `# id|family|...` are not.
@@ -46,11 +70,11 @@ fn parse_expect(s: &str) -> Expect {
     if s == "trap" {
         return Expect::Trap;
     }
-    if s == "empty" {
-        return Expect::Empty;
+    if s == "f32nan" {
+        return Expect::F32Nan;
     }
-    if s == "edge" {
-        return Expect::Empty;
+    if s == "f64nan" {
+        return Expect::F64Nan;
     }
     if let Some(rest) = s.strip_prefix("i32:") {
         return Expect::I32(rest.parse().expect("i32 expect"));
@@ -96,29 +120,39 @@ fn load_cases(name: &str) -> Vec<Case> {
             .filter(|s| !s.is_empty())
             .map(|s| u8::from_str_radix(s, 16).expect("opcode hex"))
             .collect();
-        let bind = parts.get(5).and_then(|s| {
-            let s = s.trim();
-            if s.is_empty() {
-                None
-            } else {
-                let (m, f) = s.split_once('.').expect("bind module.field");
-                Some((m.to_string(), f.to_string()))
-            }
-        });
+        let binds = parts
+            .get(5)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                s.split('+')
+                    .map(|one| {
+                        let (m, f) = one.split_once('.').expect("bind module.field");
+                        (m.to_string(), f.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let wasm = decode_hex(parts[4]);
+        assert!(
+            !wasm.is_empty(),
+            "{name}:{}: every golden must carry a real module — no empty rows",
+            lineno + 1
+        );
         out.push(Case {
             id: parts[0].to_string(),
             family: parts[1].to_string(),
             opcodes,
             expect: parse_expect(parts[3]),
-            wasm: decode_hex(parts[4]),
-            bind,
+            wasm,
+            binds,
         });
     }
     out
 }
 
 fn decode_hex(s: &str) -> Vec<u8> {
-    assert!(s.len() % 2 == 0, "odd hex length");
+    assert!(s.len().is_multiple_of(2), "odd hex length");
     (0..s.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex"))
@@ -132,42 +166,45 @@ fn must_ok<T>(r: Result<T, WasmError>, what: &str) -> T {
     }
 }
 
+/// The host side of the import table. Each arm is a plain native closure; the
+/// guest reaches it only through a bound import.
 fn bind_host(module: &mut WasmModule, m: &str, field: &str) {
-    match (m, field) {
-        ("host", "mul") => {
-            must_ok(
-                module.bind_import(m, field, |args, _mem| {
-                    assert_eq!(args.len(), 2);
-                    Ok(vec![args[0].wrapping_mul(args[1])])
-                }),
-                "bind mul",
-            );
-        }
-        ("host", "add19") => {
-            must_ok(
-                module.bind_import(m, field, |args, _mem| {
-                    assert_eq!(args.len(), 1);
-                    Ok(vec![args[0].wrapping_add(19)])
-                }),
-                "bind add19",
-            );
-        }
+    let r = match (m, field) {
+        ("host", "mul") => module.bind_import(m, field, |args, _mem| {
+            assert_eq!(args.len(), 2);
+            Ok(vec![args[0].wrapping_mul(args[1])])
+        }),
+        ("host", "add19") => module.bind_import(m, field, |args, _mem| {
+            assert_eq!(args.len(), 1);
+            Ok(vec![args[0].wrapping_add(19)])
+        }),
+        ("host", "double") => module.bind_import(m, field, |args, _mem| {
+            assert_eq!(args.len(), 1);
+            Ok(vec![args[0].wrapping_mul(2)])
+        }),
+        ("host", "plus100") => module.bind_import(m, field, |args, _mem| {
+            assert_eq!(args.len(), 1);
+            Ok(vec![args[0].wrapping_add(100)])
+        }),
+        // Writes through the &mut [u8] memory handle the host gate hands out.
+        ("host", "poke") => module.bind_import(m, field, |_args, mem| {
+            mem[8..12].copy_from_slice(&35i32.to_le_bytes());
+            Ok(vec![])
+        }),
         other => panic!("unknown host bind {other:?}"),
-    }
+    };
+    must_ok(r, "bind_import");
 }
 
 fn run_case(case: &Case) -> Result<Vec<Val>, WasmError> {
-    if case.wasm.is_empty() {
-        return Ok(Vec::new());
+    if case.binds.is_empty() {
+        return eval(&case.wasm);
     }
-    match &case.bind {
-        None => eval(&case.wasm),
-        Some((m, f)) => {
-            let mut module = WasmModule::from_bytes(&case.wasm)?;
-            bind_host(&mut module, m, f);
-            module.eval(&[])
-        }
+    let mut module = WasmModule::from_bytes(&case.wasm)?;
+    for (m, f) in &case.binds {
+        bind_host(&mut module, m, f);
     }
+    module.eval(&[])
 }
 
 fn describe_vals(vals: &[Val]) -> String {
@@ -185,7 +222,6 @@ fn describe_vals(vals: &[Val]) -> String {
 fn assert_expect(case: &Case, got: Result<Vec<Val>, WasmError>) {
     match (&case.expect, got) {
         (Expect::Trap, Err(WasmError::Trap(_))) => {}
-        (Expect::Empty, Ok(v)) if v.is_empty() => {}
         (Expect::I32(e), Ok(v)) => match v.as_slice() {
             [Val::I32(g)] if g == e => {}
             other => panic!(
@@ -218,15 +254,121 @@ fn assert_expect(case: &Case, got: Result<Vec<Val>, WasmError>) {
                 describe_vals(other)
             ),
         },
+        (Expect::F32Nan, Ok(v)) => match v.as_slice() {
+            [Val::F32(g)] if g.is_nan() => {}
+            other => panic!(
+                "{}: expected an f32 NaN, got {}",
+                case.id,
+                describe_vals(other)
+            ),
+        },
+        (Expect::F64Nan, Ok(v)) => match v.as_slice() {
+            [Val::F64(g)] if g.is_nan() => {}
+            other => panic!(
+                "{}: expected an f64 NaN, got {}",
+                case.id,
+                describe_vals(other)
+            ),
+        },
         (Expect::Trap, Ok(v)) => panic!("{}: expected trap, got {}", case.id, describe_vals(&v)),
         (Expect::Trap, Err(WasmError::Decode(m))) => {
             panic!("{}: expected trap, got decode {m}", case.id)
         }
         (_, Err(e)) => panic!("{}: unexpected {}", case.id, e.message()),
-        (Expect::Empty, Ok(v)) => {
-            panic!("{}: expected empty, got {}", case.id, describe_vals(&v))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The opcode column is metadata; the module bytes are the truth. This walks a
+// module's code section so coverage is derived from what a row really contains.
+// ---------------------------------------------------------------------------
+
+fn leb(bytes: &[u8], i: &mut usize) -> u64 {
+    let mut shift = 0;
+    let mut out = 0u64;
+    loop {
+        let b = bytes[*i];
+        *i += 1;
+        out |= u64::from(b & 0x7F) << shift;
+        shift += 7;
+        if b & 0x80 == 0 {
+            return out;
         }
     }
+}
+
+fn skip_leb(bytes: &[u8], i: &mut usize) {
+    while bytes[*i] & 0x80 != 0 {
+        *i += 1;
+    }
+    *i += 1;
+}
+
+/// Opcode bytes present in a function body, immediates skipped correctly.
+fn body_opcodes(body: &[u8], out: &mut BTreeSet<u8>) {
+    let mut i = 0usize;
+    while i < body.len() {
+        let op = body[i];
+        i += 1;
+        out.insert(op);
+        match op {
+            0x02..=0x04 => i += 1, // blocktype
+            0x0C | 0x0D | 0x10 | 0x20..=0x24 => skip_leb(body, &mut i),
+            0x0E => {
+                let n = leb(body, &mut i);
+                for _ in 0..=n {
+                    skip_leb(body, &mut i);
+                }
+            }
+            0x11 => {
+                skip_leb(body, &mut i);
+                skip_leb(body, &mut i);
+            }
+            0x28..=0x3E => {
+                skip_leb(body, &mut i);
+                skip_leb(body, &mut i);
+            }
+            0x3F | 0x40 => i += 1,
+            0x41 | 0x42 => skip_leb(body, &mut i),
+            0x43 => i += 4,
+            0x44 => i += 8,
+            _ => {}
+        }
+    }
+}
+
+/// Every opcode byte in every function body of a module.
+fn module_opcodes(wasm: &[u8]) -> BTreeSet<u8> {
+    let mut out = BTreeSet::new();
+    let mut i = 8usize; // magic + version
+    while i < wasm.len() {
+        let id = wasm[i];
+        i += 1;
+        let size = leb(wasm, &mut i) as usize;
+        let start = i;
+        let end = start + size;
+        if id == 10 {
+            let payload = &wasm[start..end];
+            let mut j = 0usize;
+            let count = leb(payload, &mut j);
+            for _ in 0..count {
+                let body_size = leb(payload, &mut j) as usize;
+                let bend = j + body_size;
+                let body = &payload[j..bend];
+                // locals: vec of (count, valtype)
+                let mut k = 0usize;
+                let decls = leb(body, &mut k);
+                for _ in 0..decls {
+                    skip_leb(body, &mut k);
+                    k += 1;
+                }
+                body_opcodes(&body[k..], &mut out);
+                j = bend;
+            }
+        }
+        i = end;
+    }
+    out
 }
 
 fn load_opcode_catalog() -> Vec<(String, u8)> {
@@ -248,15 +390,17 @@ fn load_opcode_catalog() -> Vec<(String, u8)> {
 #[test]
 fn fixtures_live_outside_the_interpreter_source() {
     let src = fixtures_dir();
-    assert!(src.join("mvp_goldens.txt").is_file());
-    assert!(src.join("family_extra.txt").is_file());
-    assert!(src.join("mvp_opcodes.txt").is_file());
+    for f in fixture_files() {
+        assert!(src.join(f).is_file(), "missing fixture {f}");
+    }
     let wasm_rs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/wasm.rs");
     let wasm_src = fs::read_to_string(wasm_rs).unwrap();
-    assert!(
-        !wasm_src.contains("mvp_goldens.txt"),
-        "independent goldens must not be embedded in src/wasm.rs"
-    );
+    for f in fixture_files() {
+        assert!(
+            !wasm_src.contains(f),
+            "independent goldens must not be embedded in src/wasm.rs"
+        );
+    }
 }
 
 #[test]
@@ -272,18 +416,70 @@ fn catalog_lists_all_172_mvp_opcodes() {
     }
 }
 
+/// A row may not claim an opcode its own module does not contain: coverage is
+/// read from the bytes, and the column has to agree with them.
+#[test]
+fn opcode_columns_match_the_module_bytes() {
+    let mut bad = Vec::new();
+    for name in fixture_files() {
+        for case in load_cases(name) {
+            let present = module_opcodes(&case.wasm);
+            for op in &case.opcodes {
+                if !present.contains(op) {
+                    bad.push(format!("{} claims {op:02X}, bytes do not have it", case.id));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "opcode column lies: {bad:#?}");
+}
+
+/// A row that is byte-identical to another adds no signal; the suite grew that
+/// way once (store rows cloned from load rows) and must not again.
+#[test]
+fn no_two_goldens_are_byte_identical() {
+    let mut seen: BTreeMap<(String, Vec<u8>), String> = BTreeMap::new();
+    let mut dups = Vec::new();
+    for name in ["mvp_goldens.txt", "family_extra.txt", "family_edge.txt"] {
+        for case in load_cases(name) {
+            let key = (format!("{:?}", ExpectKey(&case.expect)), case.wasm.clone());
+            if let Some(first) = seen.insert(key, case.id.clone()) {
+                dups.push(format!("{first} == {}", case.id));
+            }
+        }
+    }
+    assert!(dups.is_empty(), "duplicate goldens: {dups:?}");
+}
+
+struct ExpectKey<'a>(&'a Expect);
+
+impl core::fmt::Debug for ExpectKey<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            Expect::I32(v) => write!(f, "i32:{v}"),
+            Expect::I64(v) => write!(f, "i64:{v}"),
+            Expect::F32Bits(v) => write!(f, "f32:{v:#x}"),
+            Expect::F64Bits(v) => write!(f, "f64:{v:#x}"),
+            Expect::F32Nan => write!(f, "f32nan"),
+            Expect::F64Nan => write!(f, "f64nan"),
+            Expect::Trap => write!(f, "trap"),
+        }
+    }
+}
+
 #[test]
 fn independent_goldens_cover_every_mvp_opcode_via_eval() {
     let catalog = load_opcode_catalog();
     let cases = load_cases("mvp_goldens.txt");
     assert!(cases.len() >= 172, "need a golden path for every opcode");
 
+    // Coverage comes from the decoded module, not from the opcode column.
     let mut covered: BTreeMap<u8, String> = BTreeMap::new();
     for case in &cases {
         let got = run_case(case);
         assert_expect(case, got);
-        for op in &case.opcodes {
-            covered.entry(*op).or_insert_with(|| case.id.clone());
+        for op in module_opcodes(&case.wasm) {
+            covered.entry(op).or_insert_with(|| case.id.clone());
         }
     }
 
@@ -303,19 +499,7 @@ fn independent_goldens_cover_every_mvp_opcode_via_eval() {
 #[test]
 fn each_family_has_an_extra_independent_golden() {
     let extras = load_cases("family_extra.txt");
-    let required = [
-        "control",
-        "parametric",
-        "locals",
-        "memory",
-        "i32",
-        "i64",
-        "f32",
-        "f64",
-        "conv",
-        "host",
-    ];
-    for fam in required {
+    for fam in FAMILIES {
         assert!(
             extras.iter().any(|c| c.family == fam),
             "missing extra golden for family {fam}"
@@ -326,6 +510,40 @@ fn each_family_has_an_extra_independent_golden() {
     }
 }
 
+const FAMILIES: [&str; 10] = [
+    "control",
+    "parametric",
+    "locals",
+    "memory",
+    "i32",
+    "i64",
+    "f32",
+    "f64",
+    "conv",
+    "host",
+];
+
+/// The semantics gate: spec boundaries every family must hold, including the
+/// trap conditions and sign/width/rounding rules a wiring-only suite misses.
+#[test]
+fn spec_edge_goldens_hold() {
+    let cases = load_cases("family_edge.txt");
+    let mut per_family: BTreeMap<&str, usize> = BTreeMap::new();
+    for case in &cases {
+        assert_expect(case, run_case(case));
+        *per_family.entry(case.family.as_str()).or_default() += 1;
+    }
+    for fam in FAMILIES {
+        let n = per_family.get(fam).copied().unwrap_or(0);
+        assert!(n >= 6, "family {fam} has only {n} spec-boundary goldens");
+    }
+    let traps = cases
+        .iter()
+        .filter(|c| matches!(c.expect, Expect::Trap))
+        .count();
+    assert!(traps >= 20, "only {traps} trap goldens; traps are the gate");
+}
+
 #[test]
 fn host_import_table_bind_and_unbound_are_independent() {
     let cases = load_cases("mvp_goldens.txt");
@@ -334,8 +552,8 @@ fn host_import_table_bind_and_unbound_are_independent() {
         .iter()
         .find(|c| c.id == "host.unbound")
         .expect("host.unbound");
-    assert!(bound.bind.is_some());
-    assert!(unbound.bind.is_none());
+    assert!(!bound.binds.is_empty());
+    assert!(unbound.binds.is_empty());
     assert_expect(bound, run_case(bound));
     assert_expect(unbound, run_case(unbound));
 
@@ -345,11 +563,35 @@ fn host_import_table_bind_and_unbound_are_independent() {
     assert_eq!(m.imports()[0].field, "mul");
     // Unbound until bind_import: the guest call must trap.
     assert!(matches!(m.eval(&[]), Err(WasmError::Trap(_))));
+    // Binding a name that is not in the import table must fail loudly, and
+    // must leave the gate shut.
+    assert!(m.bind_import("host", "nope", |_, _| Ok(vec![])).is_err());
+    assert!(m.bind_import("nope", "mul", |_, _| Ok(vec![])).is_err());
+    assert!(matches!(m.eval(&[]), Err(WasmError::Trap(_))));
     bind_host(&mut m, "host", "mul");
     match must_ok(m.eval(&[]), "eval bound mul").as_slice() {
         [Val::I32(221)] => {}
         other => panic!("bound mul expected 221, got {}", describe_vals(other)),
     }
+    // A host that fails must propagate its error, not be swallowed.
+    let mut fails = must_ok(WasmModule::from_bytes(&bound.wasm), "from_bytes");
+    must_ok(
+        fails.bind_import("host", "mul", |_, _| Err(WasmError::Trap("host said no"))),
+        "bind failing host",
+    );
+    assert!(matches!(fails.eval(&[]), Err(WasmError::Trap(_))));
+
+    // Two imports: the function index space puts them first, so a defined
+    // function's combined index is shifted by the import count.
+    let edges = load_cases("family_edge.txt");
+    let shift = edges
+        .iter()
+        .find(|c| c.id == "edge.host.index_shift_defined_func")
+        .expect("index shift golden");
+    let m2 = must_ok(WasmModule::from_bytes(&shift.wasm), "from_bytes shift");
+    assert_eq!(m2.imports().len(), 2);
+    assert_eq!(m2.export_index("main"), Some(3));
+    assert_expect(shift, run_case(shift));
 }
 
 fn prd35_path() -> PathBuf {
@@ -385,58 +627,77 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
     leaves
 }
 
-fn fixture_files() -> [&'static str; 3] {
-    ["mvp_goldens.txt", "family_extra.txt", "prd_leaves.txt"]
-}
+/// Leaves whose backing is a test rather than a fixture family. The mapped
+/// test must exist in this file *and* assert something concrete — the point of
+/// naming it here is that a leaf can no longer be satisfied by a text row.
+const LEAF_TESTS: [(&str, &str); 9] = [
+    ("eval(bytes)", "eval_bytes"),
+    ("<100KiB>", "size_budget_script_gates_100kib"),
+    ("#78", "issue78_runtimes_stay_out_of_the_crate"),
+    ("cu", "cu"),
+    ("dyn", "dyn"),
+    ("chassis", "chassis"),
+    ("WASI", "WASI"),
+    ("APE", "APE"),
+    ("WAT", "WAT"),
+];
 
-fn suite_edge_tokens() -> BTreeSet<String> {
-    let mut edges = BTreeSet::new();
-    for name in fixture_files() {
-        for case in load_cases(name) {
-            edges.insert(case.id);
-            edges.insert(case.family);
-        }
-    }
-    let src = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mvp_golden.rs"),
-    )
-    .unwrap();
+fn suite_test_names() -> BTreeSet<String> {
+    let src =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mvp_golden.rs"))
+            .unwrap();
+    let mut names = BTreeSet::new();
     for line in src.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("fn ")
             && let Some(name) = rest.split('(').next()
         {
-            let name = name.strip_prefix("r#").unwrap_or(name);
-            edges.insert(name.to_string());
+            names.insert(name.strip_prefix("r#").unwrap_or(name).to_string());
         }
     }
-    edges
+    names
 }
 
 fn cargo_deps_section() -> String {
-    let t = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let t =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
     let after = t.split("[dependencies]").nth(1).unwrap_or("");
     after.split("\n[").next().unwrap_or(after).to_string()
 }
 
+/// Every `[x]` leaf is either an opcode family with executed goldens in all
+/// three fixture files, or a leaf mapped to a test that asserts it.
 #[test]
 fn prd_x_leaves_have_suite_edges() {
     let prd = fs::read_to_string(prd35_path()).expect("PRD_02_35");
     let leaves = parse_prd_x_leaves(&prd);
-    assert!(
-        !leaves.is_empty(),
-        "PRD 35 fence must list [x] leaves"
-    );
-    let edges = suite_edge_tokens();
+    assert!(!leaves.is_empty(), "PRD 35 fence must list [x] leaves");
+    let tests = suite_test_names();
+    let mut families: BTreeMap<String, usize> = BTreeMap::new();
+    for name in ["mvp_goldens.txt", "family_extra.txt", "family_edge.txt"] {
+        for case in load_cases(name) {
+            *families.entry(case.family).or_default() += 1;
+        }
+    }
+    let mapped: BTreeMap<&str, &str> = LEAF_TESTS.into_iter().collect();
     let mut missing = Vec::new();
     for leaf in &leaves {
-        if !edges.contains(leaf) {
-            missing.push(leaf.clone());
+        if let Some(test) = mapped.get(leaf.as_str()) {
+            assert!(
+                tests.contains(*test),
+                "leaf {leaf} maps to missing test {test}"
+            );
+            continue;
+        }
+        match families.get(leaf) {
+            // A family leaf needs a base path, an extra, and a spec edge.
+            Some(n) if *n >= 3 => {}
+            _ => missing.push(leaf.clone()),
         }
     }
     assert!(
         missing.is_empty(),
-        "PRD [x] leaves with no suite edge (family/id/test name): {missing:?}"
+        "PRD [x] leaves with no executed backing: {missing:?}"
     );
 }
 
@@ -446,23 +707,54 @@ fn eval_bytes() {
         .into_iter()
         .find(|c| c.id == "eval(bytes)")
         .expect("eval(bytes) fixture");
-    assert_eq!(case.id, "eval(bytes)");
     assert_expect(&case, run_case(&case));
 }
 
+/// The `<100KiB>` leaf is a measurement, not a grep: this builds the no_std
+/// static core, links it, strips it, and checks the size and the selftest.
 #[test]
 fn size_budget_script_gates_100kib() {
-    let sh = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("measure-core.sh"),
-    )
-    .unwrap();
-    assert!(sh.contains("102400"), "measure-core.sh must keep the 100 KiB cap");
-    assert!(sh.contains("OK: < 100 KiB and selftest==42"));
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = crate_dir.join("measure-core.sh");
+    let sh = fs::read_to_string(&script).unwrap();
     assert!(
-        load_cases("prd_leaves.txt")
-            .iter()
-            .any(|c| c.id == "<100KiB>" && c.family == "<100KiB>"),
-        "<100KiB> leaf must exist as fixture id/family"
+        sh.contains("102400"),
+        "measure-core.sh must keep the 100 KiB cap"
+    );
+    assert!(sh.contains("OK: < 100 KiB and selftest==42"));
+
+    if Command::new("sh")
+        .args(["-c", "command -v cc"])
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("no C compiler: size gate not measured in this environment");
+        return;
+    }
+    // A separate target dir so the outer cargo's lock is untouched.
+    let target = crate_dir.join("../../target/measure-core-gate");
+    let out = Command::new("sh")
+        .arg(&script)
+        .env("CARGO_TARGET_DIR", target)
+        .output()
+        .expect("run measure-core.sh");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("OK: < 100 KiB and selftest==42"),
+        "measure-core.sh failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let size: usize = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("static core: "))
+        .and_then(|l| l.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .expect("size line");
+    assert!(size < 102_400, "static core is {size} bytes");
+    assert!(
+        stdout.contains("selftest rc=42"),
+        "selftest must return 42:\n{stdout}"
     );
 }
 
@@ -518,10 +810,6 @@ fn issue78_runtimes_stay_out_of_the_crate() {
             "{banned} must not be a crate dep (#78)"
         );
     }
-    assert!(
-        load_cases("prd_leaves.txt").iter().any(|c| c.id == "#78"),
-        "#78 leaf must exist as fixture id"
-    );
 }
 
 #[test]

@@ -10,14 +10,23 @@
 //! / depth overrun) returns a [`WasmError`] rather than misbehaving silently.
 
 use alloc::borrow::ToOwned;
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-/// Max call recursion depth (via `call`).
-pub const WASM_MAX_DEPTH: usize = 1_024;
+/// Max call recursion depth (via `call`/`call_indirect`).
+///
+/// The interpreter recurses on the native stack, so the cap is set to what the
+/// smallest stack this crate is expected to run on survives — an unoptimised
+/// build has a far larger frame, so its cap is lower. Either way, exceeding it
+/// is a loud `Trap("call depth")`, never a stack overflow.
+#[cfg(debug_assertions)]
+pub const WASM_MAX_DEPTH: usize = 48;
+/// See the `debug_assertions` variant above.
+#[cfg(not(debug_assertions))]
+pub const WASM_MAX_DEPTH: usize = 512;
 /// Max executed instructions per top-level [`Module::invoke`].
 pub const WASM_MAX_STEPS: u64 = 16_000_000;
 /// WebAssembly linear-memory page size (64 KiB). Memory starts at one page per
@@ -25,6 +34,8 @@ pub const WASM_MAX_STEPS: u64 = 16_000_000;
 pub const WASM_PAGE_SIZE: usize = 65_536;
 /// Maximum pages `memory.grow` will allocate (the spec's 32-bit maximum).
 pub const WASM_MAX_PAGES: usize = 65_536;
+/// Maximum declared locals per function (a decode-time sanity bound).
+pub const WASM_MAX_LOCALS: usize = 1 << 20;
 
 /// A tagged WebAssembly value. The operand stack, locals, arguments, and
 /// results are all sequences of these so the four numeric types can coexist.
@@ -707,11 +718,9 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x89 => ops.push(Op::I64Rotl),
             0x8A => ops.push(Op::I64Rotr),
             0x44 => {
-                let bytes: [u8; 8] = body
+                let bytes = le8(body
                     .get(i..i + 8)
-                    .ok_or(WasmError::Decode("truncated f64.const immediate"))?
-                    .try_into()
-                    .expect("slice of length 8 converts to [u8; 8]");
+                    .ok_or(WasmError::Decode("truncated f64.const immediate"))?);
                 i += 8;
                 ops.push(Op::F64Const(u64::from_le_bytes(bytes)));
             }
@@ -830,13 +839,26 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
     Ok(ops)
 }
 
-/// Skip `n` value-type bytes, bounds-checked.
-fn skip_valtypes(p: &[u8], i: usize, n: u32) -> Result<usize, WasmError> {
+/// Take the first 4 bytes of a slice known to hold at least 4. Written as
+/// plain indexing rather than `try_into().expect(..)`: the latter needs
+/// `Debug`, which links `core::fmt` into the otherwise fmt-free static core.
+fn le4(s: &[u8]) -> [u8; 4] {
+    [s[0], s[1], s[2], s[3]]
+}
+
+/// The 8-byte counterpart of [`le4`].
+fn le8(s: &[u8]) -> [u8; 8] {
+    [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]
+}
+
+/// Read `n` value-type bytes, bounds-checked, returning them and the next
+/// offset. `call_indirect` compares these, so the bytes are kept, not skipped.
+fn read_valtypes(p: &[u8], i: usize, n: u32) -> Result<(Vec<u8>, usize), WasmError> {
     let end = i
         .checked_add(n as usize)
         .filter(|&e| e <= p.len())
         .ok_or(WasmError::Decode("value-type list runs past section"))?;
-    Ok(end)
+    Ok((p[i..end].to_vec(), end))
 }
 
 /// Read a UTF-8 name (LEB length + bytes), returning it and the next offset.
@@ -882,6 +904,64 @@ fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
 }
 
 /// Parse the element section into `(offset, func_indices)` per active segment.
+/// Parse the memory section (id 5) into `(min_pages, max_pages)`. WASM 1.0
+/// allows at most one memory per module.
+fn parse_memory_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    if count != 1 {
+        return Err(WasmError::Decode("unsupported memory count"));
+    }
+    let flag = *p
+        .get(i)
+        .ok_or(WasmError::Decode("truncated memory limits"))?;
+    i += 1;
+    let (min, ni) = leb_u32(p, i)?;
+    i = ni;
+    let max = match flag {
+        0x00 => None,
+        0x01 => {
+            let (m, _ni) = leb_u32(p, i)?;
+            Some(m as usize)
+        }
+        _other => return Err(WasmError::Decode("unsupported memory limits flag 0x")),
+    };
+    let min = min as usize;
+    if min > WASM_MAX_PAGES || max.is_some_and(|m| m > WASM_MAX_PAGES || m < min) {
+        return Err(WasmError::Decode("memory limits out of range"));
+    }
+    Ok((min, max))
+}
+
+/// Parse the data section (id 11) into `(offset, bytes)` segments.
+fn parse_data_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let flag = *p
+            .get(i)
+            .ok_or(WasmError::Decode("truncated data segment"))?;
+        i += 1;
+        if flag != 0x00 {
+            return Err(WasmError::Decode("unsupported data segment flag 0x"));
+        }
+        let (offset_val, ni) = parse_const_expr(p, i)?;
+        i = ni;
+        let offset = match offset_val {
+            Val::I32(v) => v as u32 as usize,
+            _other => return Err(WasmError::Decode("data offset must be i32, got")),
+        };
+        let (len, ni) = leb_u32(p, i)?;
+        i = ni;
+        let end = i
+            .checked_add(len as usize)
+            .filter(|&e| e <= p.len())
+            .ok_or(WasmError::Decode("data segment runs past section"))?;
+        out.push((offset, p[i..end].to_vec()));
+        i = end;
+    }
+    Ok(out)
+}
+
 fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
@@ -931,7 +1011,7 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
                 .checked_add(4)
                 .filter(|&e| e <= p.len())
                 .ok_or(WasmError::Decode("truncated f32 const expr"))?;
-            let b: [u8; 4] = p[i + 1..end].try_into().expect("4 bytes");
+            let b = le4(&p[i + 1..end]);
             (Val::F32(f32::from_le_bytes(b)), end)
         }
         0x44 => {
@@ -939,7 +1019,7 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
                 .checked_add(8)
                 .filter(|&e| e <= p.len())
                 .ok_or(WasmError::Decode("truncated f64 const expr"))?;
-            let b: [u8; 8] = p[i + 1..end].try_into().expect("8 bytes");
+            let b = le8(&p[i + 1..end]);
             (Val::F64(f64::from_le_bytes(b)), end)
         }
         _other => {
@@ -1007,7 +1087,10 @@ pub struct ImportDesc {
 
 /// Parse the import section, returning each imported **function** in order.
 /// Only function imports are supported here.
-fn parse_import_section(p: &[u8], types: &[(usize, usize)]) -> Result<Vec<ImportDesc>, WasmError> {
+fn parse_import_section(
+    p: &[u8],
+    types: &[FuncType],
+) -> Result<Vec<(ImportDesc, usize)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     for _ in 0..count {
@@ -1020,15 +1103,18 @@ fn parse_import_section(p: &[u8], types: &[(usize, usize)]) -> Result<Vec<Import
             0x00 => {
                 let (tidx, ni) = leb_u32(p, i)?;
                 i = ni;
-                let t = types
-                    .get(tidx as usize)
-                    .ok_or(WasmError::Decode("imported function references missing type"))?;
-                out.push(ImportDesc {
-                    module,
-                    field,
-                    n_params: t.0,
-                    n_results: t.1,
-                });
+                let t = types.get(tidx as usize).ok_or(WasmError::Decode(
+                    "imported function references missing type",
+                ))?;
+                out.push((
+                    ImportDesc {
+                        module,
+                        field,
+                        n_params: t.params.len(),
+                        n_results: t.results.len(),
+                    },
+                    tidx as usize,
+                ));
             }
             _other => {
                 return Err(WasmError::Decode("unsupported import kind 0x"));
@@ -1039,7 +1125,7 @@ fn parse_import_section(p: &[u8], types: &[(usize, usize)]) -> Result<Vec<Import
 }
 
 /// Parse the type section into `(n_params, n_results)` per function type.
-fn parse_type_section(p: &[u8]) -> Result<Vec<(usize, usize)>, WasmError> {
+fn parse_type_section(p: &[u8]) -> Result<Vec<FuncType>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     for _ in 0..count {
@@ -1049,10 +1135,11 @@ fn parse_type_section(p: &[u8]) -> Result<Vec<(usize, usize)>, WasmError> {
             return Err(WasmError::Decode("unsupported type form 0x"));
         }
         let (n_params, ni) = leb_u32(p, i)?;
-        i = skip_valtypes(p, ni, n_params)?;
-        let (n_results, ni) = leb_u32(p, i)?;
-        i = skip_valtypes(p, ni, n_results)?;
-        out.push((n_params as usize, n_results as usize));
+        let (params, ni) = read_valtypes(p, ni, n_params)?;
+        let (n_results, ni) = leb_u32(p, ni)?;
+        let (results, ni) = read_valtypes(p, ni, n_results)?;
+        i = ni;
+        out.push(FuncType { params, results });
     }
     Ok(out)
 }
@@ -1069,8 +1156,27 @@ fn parse_func_section(p: &[u8]) -> Result<Vec<usize>, WasmError> {
     Ok(out)
 }
 
-/// Parse the code section into `(n_locals, expr_bytes)` per function.
-fn parse_code_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
+/// One code-section entry: the zero values of its declared locals, and the
+/// instruction bytes of its body.
+type CodeEntry = (Vec<Val>, Vec<u8>);
+
+/// A native host implementation behind an import.
+type HostImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
+
+/// The zero value of a value type byte (spec 4.5.3: locals start at zero of
+/// their declared type).
+fn zero_of_valtype(vt: u8) -> Result<Val, WasmError> {
+    match vt {
+        0x7F => Ok(Val::I32(0)),
+        0x7E => Ok(Val::I64(0)),
+        0x7D => Ok(Val::F32(0.0)),
+        0x7C => Ok(Val::F64(0.0)),
+        _other => Err(WasmError::Decode("unsupported local value type 0x")),
+    }
+}
+
+/// Parse the code section into `(local_zero_values, expr_bytes)` per function.
+fn parse_code_section(p: &[u8]) -> Result<Vec<CodeEntry>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     for _ in 0..count {
@@ -1084,31 +1190,51 @@ fn parse_code_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
 
         // locals: vec of (count, valtype)
         let (n_decls, mut j) = leb_u32(body, 0)?;
-        let mut n_locals: usize = 0;
+        let mut locals: Vec<Val> = Vec::new();
         for _ in 0..n_decls {
             let (n, nj) = leb_u32(body, j)?;
             j = nj;
             // one value-type byte follows
-            body.get(j)
+            let vt = *body
+                .get(j)
                 .ok_or(WasmError::Decode("truncated local declaration"))?;
             j += 1;
-            n_locals = n_locals
+            let zero = zero_of_valtype(vt)?;
+            let total = locals
+                .len()
                 .checked_add(n as usize)
+                .filter(|&t| t <= WASM_MAX_LOCALS)
                 .ok_or(WasmError::Decode("local count overflow"))?;
+            locals.resize(total, zero);
         }
-        out.push((n_locals, body[j..].to_vec()));
+        out.push((locals, body[j..].to_vec()));
         i = bend;
     }
     Ok(out)
 }
 
-/// A registered function: its param/local/result counts and decoded body.
+/// A declared function type: the value-type bytes of its parameters and
+/// results. `call_indirect` requires an exact match (spec 4.4.8), so the value
+/// types are kept, not just their counts.
+#[derive(Clone, PartialEq, Eq)]
+struct FuncType {
+    params: Vec<u8>,
+    results: Vec<u8>,
+}
+
+/// A registered function: its param count, declared locals (as their typed
+/// zero values), result arity, and decoded body.
 #[derive(Clone)]
 struct Func {
     n_params: usize,
-    n_locals: usize,
+    /// One entry per declared local, holding the zero value of its type.
+    locals: Vec<Val>,
     arity: usize,
     code: Vec<Op>,
+    /// Index into [`Module::types`] for functions that came from a module's
+    /// type section; `None` for functions registered through
+    /// [`Module::add_function`], which carry counts only.
+    sig: Option<usize>,
 }
 
 /// A structured-control frame on the control stack.
@@ -1128,8 +1254,10 @@ struct Frame {
 struct HostFunc {
     n_params: usize,
     n_results: usize,
-    #[allow(clippy::type_complexity)]
-    f: Box<dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>>,
+    /// Index into [`Module::types`] when the host function stands in for an
+    /// imported function declared in the module's type section.
+    sig: Option<usize>,
+    f: Rc<HostImpl>,
 }
 
 /// A collection of function bodies that can call one another (and registered
@@ -1167,7 +1295,15 @@ pub struct Module {
     table: Vec<Option<usize>>,
     /// The module's function types as `(n_params, n_results)`, so
     /// `call_indirect` can type-check the callee against a declared type.
-    types: Vec<(usize, usize)>,
+    types: Vec<FuncType>,
+    /// Declared memory limits in 64 KiB pages, from the memory section. A
+    /// module without one still gets one page (this crate's lenient default),
+    /// and `None` max means "up to [`WASM_MAX_PAGES`]".
+    mem_min_pages: Option<usize>,
+    mem_max_pages: Option<usize>,
+    /// Data segments `(offset, bytes)`, written into a fresh linear memory at
+    /// the start of every top-level invocation.
+    data: Vec<(usize, Vec<u8>)>,
 }
 
 impl Module {
@@ -1192,9 +1328,10 @@ impl Module {
         let combined = self.hosts.len() + self.funcs.len();
         self.funcs.push(Func {
             n_params,
-            n_locals,
+            locals: vec![Val::I32(0); n_locals],
             arity: result_arity,
             code,
+            sig: None,
         });
         Ok(combined)
     }
@@ -1214,19 +1351,27 @@ impl Module {
         self.hosts.push(HostFunc {
             n_params,
             n_results,
-            f: Box::new(f),
+            sig: None,
+            f: Rc::new(f),
         });
         idx
     }
 
-    /// Load a standard `.wasm` **module** (magic `\0asm` + version 1) with a
-    /// minimal set of sections: type (1), function (3), and code (10). Other
-    /// sections (custom, import, export, memory, …) are skipped. Suitable for a
-    /// `wat2wasm` product of a single function with no imports.
+    /// Load a standard `.wasm` **module** (magic `\0asm` + version 1).
+    ///
+    /// Sections read: type (1), import (2, function imports), function (3),
+    /// table (4), memory (5), global (6), export (7), start (8), element (9),
+    /// code (10), and data (11). Custom sections are skipped.
+    ///
+    /// A module that declares no memory still gets one zeroed page, so a body
+    /// that loads and stores without a memory section keeps working; a module
+    /// that declares one gets exactly its declared minimum, with data segments
+    /// applied at each invocation and `memory.grow` bounded by its declared
+    /// maximum.
     ///
     /// Function bodies are decoded with the same instruction subset as
     /// [`Module::add_function`]; result/param counts come from the type section
-    /// and local counts from each code entry.
+    /// and locals (with their declared value types) from each code entry.
     pub fn from_bytes(wasm: &[u8]) -> Result<Module, WasmError> {
         if wasm.len() < 8 || &wasm[0..4] != b"\0asm" {
             return Err(WasmError::Decode("not a wasm module (bad magic)"));
@@ -1235,15 +1380,17 @@ impl Module {
             return Err(WasmError::Decode("unsupported wasm version (expected 1)"));
         }
 
-        let mut types: Vec<(usize, usize)> = Vec::new();
-        let mut imports: Vec<ImportDesc> = Vec::new();
+        let mut types: Vec<FuncType> = Vec::new();
+        let mut imports: Vec<(ImportDesc, usize)> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
-        let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
+        let mut codes: Vec<CodeEntry> = Vec::new();
         let mut exports: Vec<(String, usize)> = Vec::new();
         let mut globals: Vec<(Val, bool)> = Vec::new();
         let mut start_fn: Option<usize> = None;
         let mut table_size: usize = 0;
         let mut elems: Vec<(usize, Vec<usize>)> = Vec::new();
+        let mut mem_limits: Option<(usize, Option<usize>)> = None;
+        let mut data: Vec<(usize, Vec<u8>)> = Vec::new();
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1262,12 +1409,14 @@ impl Module {
                 2 => imports = parse_import_section(payload, &types)?,
                 3 => func_types = parse_func_section(payload)?,
                 4 => table_size = parse_table_section(payload)?,
+                5 => mem_limits = Some(parse_memory_section(payload)?),
                 6 => globals = parse_global_section(payload)?,
                 7 => exports = parse_export_section(payload)?,
                 8 => start_fn = Some(leb_u32(payload, 0)?.0 as usize),
                 9 => elems = parse_elem_section(payload)?,
                 10 => codes = parse_code_section(payload)?,
-                _ => {} // custom / memory / … : skipped
+                11 => data = parse_data_section(payload)?,
+                _ => {} // custom / name / … : skipped
             }
             i = end;
         }
@@ -1279,22 +1428,24 @@ impl Module {
         let mut module = Module::new();
         // Imported functions occupy the low indices; without a bound host
         // implementation they trap loudly if actually called.
-        for desc in &imports {
-            module.add_host_function(desc.n_params, desc.n_results, |_args, _mem| {
+        for (desc, tidx) in &imports {
+            let h = module.add_host_function(desc.n_params, desc.n_results, |_args, _mem| {
                 Err(WasmError::Trap("call to unbound imported function"))
             });
+            module.hosts[h].sig = Some(*tidx);
         }
-        module.import_descs = imports;
+        module.import_descs = imports.into_iter().map(|(d, _)| d).collect();
         for (fi, &tidx) in func_types.iter().enumerate() {
-            let (n_params, n_results) =
-                *types.get(tidx).ok_or(WasmError::Decode("function"))?;
-            let (n_locals, expr) = &codes[fi];
+            let ft = types.get(tidx).ok_or(WasmError::Decode("function"))?;
+            let (n_params, n_results) = (ft.params.len(), ft.results.len());
+            let (locals, expr) = &codes[fi];
             let code = decode(expr)?;
             module.funcs.push(Func {
                 n_params,
-                n_locals: *n_locals,
+                locals: locals.clone(),
                 arity: n_results,
                 code,
+                sig: Some(tidx),
             });
         }
         for (init, mutable) in globals {
@@ -1307,6 +1458,20 @@ impl Module {
         module.start = start_fn;
         // Record the declared function types so `call_indirect` can type-check.
         module.types = types;
+        // Memory limits and data segments (both were previously skipped, which
+        // left every module on a hardcoded single zeroed page).
+        if let Some((min, max)) = mem_limits {
+            module.mem_min_pages = Some(min);
+            module.mem_max_pages = max;
+        }
+        let mem_bytes = module.initial_mem_pages() * WASM_PAGE_SIZE;
+        for (offset, bytes) in &data {
+            offset
+                .checked_add(bytes.len())
+                .filter(|&e| e <= mem_bytes)
+                .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
+        }
+        module.data = data;
         // Allocate the table, then apply active element segments into it.
         module.table = vec![None; table_size];
         for (offset, idxs) in &elems {
@@ -1346,7 +1511,10 @@ impl Module {
     /// type-checking, returning its type index.
     pub fn add_type(&mut self, n_params: usize, n_results: usize) -> usize {
         let idx = self.types.len();
-        self.types.push((n_params, n_results));
+        self.types.push(FuncType {
+            params: vec![0x7F; n_params],
+            results: vec![0x7F; n_results],
+        });
         idx
     }
 
@@ -1387,12 +1555,20 @@ impl Module {
     where
         F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
     {
-        let pos = self
-            .import_descs
-            .iter()
-            .position(|d| d.module == module && d.field == field)
-            .ok_or(WasmError::Trap("no imported function named"))?;
-        self.hosts[pos].f = Box::new(f);
+        // A module may import the same (module, field) pair more than once;
+        // every matching slot binds to the same implementation, so a bind that
+        // reports success never leaves a sibling slot silently unbound.
+        let shared: Rc<HostImpl> = Rc::new(f);
+        let mut bound = 0usize;
+        for (pos, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.hosts[pos].f = shared.clone();
+                bound += 1;
+            }
+        }
+        if bound == 0 {
+            return Err(WasmError::Trap("no imported function named"));
+        }
         Ok(())
     }
 
@@ -1400,20 +1576,23 @@ impl Module {
     /// first defined function. This is the crate's one-face evaluator once a
     /// module is loaded.
     pub fn eval(&self, args: &[Val]) -> Result<Vec<Val>, WasmError> {
-        if let Some((_, idx)) = self.export_list.first() {
-            if self.start.is_some() {
-                self.run_start()?;
-            }
-            return self.invoke_val(*idx, args);
+        // One instance: the start function and the entry point share the same
+        // linear memory and globals, so start-time host writes are visible.
+        let mut steps: u64 = 0;
+        let mut mem = self.new_memory();
+        let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
+        if let Some(start) = self.start {
+            self.call_any(start, &[], 0, &mut steps, &mut mem, &mut globals)?;
         }
-        if let Some(idx) = self.start {
-            self.invoke_val(idx, args)?;
-            return Ok(Vec::new());
-        }
-        if !self.funcs.is_empty() {
-            return self.invoke_val(self.hosts.len(), args);
-        }
-        Ok(Vec::new())
+        let entry = match self.export_list.first() {
+            Some((_, idx)) => *idx,
+            // No export: a start-only module is already done; otherwise the
+            // first defined function is the entry.
+            None if self.start.is_some() => return Ok(Vec::new()),
+            None if !self.funcs.is_empty() => self.hosts.len(),
+            None => return Ok(Vec::new()),
+        };
+        self.call_any(entry, args, 0, &mut steps, &mut mem, &mut globals)
     }
 
     /// Resolve an exported function name to its index, if present.
@@ -1453,9 +1632,28 @@ impl Module {
     /// convenience wrapper over it.
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
-        let mut mem = vec![0u8; WASM_PAGE_SIZE];
+        let mut mem = self.new_memory();
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
         self.call_any(idx, args, 0, &mut steps, &mut mem, &mut globals)
+    }
+
+    /// Pages the module's linear memory starts at: its declared minimum, or
+    /// one page for a module that declares no memory section.
+    fn initial_mem_pages(&self) -> usize {
+        self.mem_min_pages.unwrap_or(1)
+    }
+
+    /// A fresh zeroed linear memory with the module's active data segments
+    /// applied (spec 4.5.4 instantiation).
+    fn new_memory(&self) -> Vec<u8> {
+        let mut mem = vec![0u8; self.initial_mem_pages() * WASM_PAGE_SIZE];
+        for (offset, bytes) in &self.data {
+            let end = offset + bytes.len();
+            if end <= mem.len() {
+                mem[*offset..end].copy_from_slice(bytes);
+            }
+        }
+        mem
     }
 
     /// Number of parameters a function index (host or defined) expects.
@@ -1493,6 +1691,14 @@ impl Module {
                     _other => Err(WasmError::Trap("host function")),
                 })
                 .collect::<Result<_, _>>()?;
+            // The host ABI is i32-only. If the module declares any other value
+            // type for this import, say so instead of handing the guest an i32
+            // where it declared an i64/f32/f64.
+            if let Some(ft) = host.sig.and_then(|s| self.types.get(s))
+                && (ft.params.iter().any(|&t| t != 0x7F) || ft.results.iter().any(|&t| t != 0x7F))
+            {
+                return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+            }
             let res = (host.f)(&i32_args, mem)?;
             if res.len() != host.n_results {
                 return Err(WasmError::Trap("host function"));
@@ -1523,9 +1729,9 @@ impl Module {
         }
 
         let mut locals: Vec<Val> = args.to_vec();
-        // Declared locals default to i32 zero (local value types are not tracked
-        // in this cut; pass non-i32 locals as parameters via invoke_val).
-        locals.resize(func.n_params + func.n_locals, Val::I32(0));
+        // Declared locals default to the zero value of their declared type
+        // (spec 4.5.3): i32 0, i64 0, +0.0f, +0.0d.
+        locals.extend_from_slice(&func.locals);
         let mut stack: Vec<Val> = Vec::new();
         let mut control: Vec<Frame> = vec![Frame {
             base: 0,
@@ -1791,7 +1997,7 @@ impl Module {
                 Op::F32Copysign => bin_f32(&mut stack, libm::copysignf)?,
                 Op::F32Load { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
+                    let bytes = le4(&mem[ea..ea + 4]);
                     stack.push(Val::F32(f32::from_le_bytes(bytes)));
                 }
                 Op::F32Store { offset } => {
@@ -1895,7 +2101,7 @@ impl Module {
                 }
                 Op::F64Load { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
-                    let bytes: [u8; 8] = mem[ea..ea + 8].try_into().expect("8 bytes");
+                    let bytes = le8(&mem[ea..ea + 8]);
                     stack.push(Val::F64(f64::from_le_bytes(bytes)));
                 }
                 Op::F64Store { offset } => {
@@ -1908,7 +2114,12 @@ impl Module {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let old_pages = mem.len() / WASM_PAGE_SIZE;
                     let new_pages = old_pages.saturating_add(delta);
-                    if new_pages > WASM_MAX_PAGES {
+                    // The declared maximum is the module's own ceiling; the
+                    // spec-wide cap applies when it declares none. Growth that
+                    // the allocator refuses reports -1 rather than aborting.
+                    let cap = self.mem_max_pages.unwrap_or(WASM_MAX_PAGES);
+                    let extra = (new_pages - old_pages) * WASM_PAGE_SIZE;
+                    if new_pages > cap.min(WASM_MAX_PAGES) || mem.try_reserve(extra).is_err() {
                         stack.push(Val::I32(-1));
                     } else {
                         mem.resize(new_pages * WASM_PAGE_SIZE, 0);
@@ -1917,7 +2128,7 @@ impl Module {
                 }
                 Op::I64Load { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
-                    let bytes: [u8; 8] = mem[ea..ea + 8].try_into().expect("8 bytes");
+                    let bytes = le8(&mem[ea..ea + 8]);
                     stack.push(Val::I64(i64::from_le_bytes(bytes)));
                 }
                 Op::I64Store { offset } => {
@@ -1945,12 +2156,12 @@ impl Module {
                 }
                 Op::I64Load32S { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
+                    let bytes = le4(&mem[ea..ea + 4]);
                     stack.push(Val::I64(i32::from_le_bytes(bytes) as i64));
                 }
                 Op::I64Load32U { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    let bytes: [u8; 4] = mem[ea..ea + 4].try_into().expect("4 bytes");
+                    let bytes = le4(&mem[ea..ea + 4]);
                     stack.push(Val::I64(u32::from_le_bytes(bytes) as u64 as i64));
                 }
                 Op::I64Store8 { offset } => {
@@ -2062,23 +2273,33 @@ impl Module {
                         self.table.get(ti).copied().flatten().ok_or({
                             WasmError::Trap("call_indirect: uninitialised table element")
                         })?;
-                    // Type check (arity-level, an MVP approximation): compares
-                    // only the parameter/result counts, not the value types.
-                    let (ep, er) = *self
+                    // Type check (spec 4.4.8): the callee's declared type must
+                    // be *identical* to the declared one — value types, not
+                    // just arities. Functions registered without a type
+                    // section (add_function) fall back to the arity check.
+                    let expected = self
                         .types
                         .get(type_index as usize)
                         .ok_or(WasmError::Trap("call_indirect: bad type index"))?;
-                    let (actual_params, actual_results) = if combined < self.hosts.len() {
+                    let (actual_params, actual_results, actual_sig) = if combined < self.hosts.len()
+                    {
                         let h = &self.hosts[combined];
-                        (h.n_params, h.n_results)
+                        (h.n_params, h.n_results, h.sig)
                     } else {
                         let f = self
                             .funcs
                             .get(combined - self.hosts.len())
                             .ok_or(WasmError::Trap("call_indirect: bad table entry"))?;
-                        (f.n_params, f.arity)
+                        (f.n_params, f.arity, f.sig)
                     };
-                    if (ep, er) != (actual_params, actual_results) {
+                    let matches = match actual_sig.and_then(|s| self.types.get(s)) {
+                        Some(actual) => actual == expected,
+                        None => {
+                            expected.params.len() == actual_params
+                                && expected.results.len() == actual_results
+                        }
+                    };
+                    if !matches {
                         return Err(WasmError::Trap("call_indirect: signature mismatch"));
                     }
                     let n = self.param_count(combined)?;
@@ -2208,10 +2429,7 @@ fn mem_ea(mem_len: usize, addr: i32, offset: u32, width: usize) -> Result<usize,
 
 fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
     let ea = mem_ea(mem.len(), addr, offset, 4)?;
-    let bytes: [u8; 4] = mem[ea..ea + 4]
-        .try_into()
-        .expect("range is exactly 4 bytes");
-    Ok(i32::from_le_bytes(bytes))
+    Ok(i32::from_le_bytes(le4(&mem[ea..ea + 4])))
 }
 
 fn mem_write_i32(mem: &mut [u8], addr: i32, offset: u32, value: i32) -> Result<(), WasmError> {
@@ -3651,5 +3869,169 @@ mod tests {
         let mut m = Module::new();
         let f = m.add_function(0, 0, 1, &[0x41, 0x7F, 0x0B]).unwrap();
         assert_eq!(m.invoke(f, &[]).unwrap(), vec![-1]);
+    }
+    // --- sections that used to be skipped, and the gates they carry ---
+
+    /// Build a one-function module: `(memory min [max])`, optional data
+    /// segments, and `body` as the exported entry returning i32.
+    fn mem_module(min: u32, max: Option<u32>, data: &[(u32, &[u8])], body: &[u8]) -> Vec<u8> {
+        let mut m: Vec<u8> = alloc::vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+        m.extend_from_slice(&[0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F]);
+        m.extend_from_slice(&[0x03, 0x02, 0x01, 0x00]);
+        let mut mem_sec: Vec<u8> = alloc::vec![0x01];
+        match max {
+            None => {
+                mem_sec.push(0x00);
+                mem_sec.push(min as u8);
+            }
+            Some(mx) => {
+                mem_sec.push(0x01);
+                mem_sec.push(min as u8);
+                mem_sec.push(mx as u8);
+            }
+        }
+        m.push(0x05);
+        m.push(mem_sec.len() as u8);
+        m.extend_from_slice(&mem_sec);
+        m.extend_from_slice(&[0x07, 0x08, 0x01, 0x04, b'm', b'a', b'i', b'n', 0x00, 0x00]);
+        let mut code: Vec<u8> = alloc::vec![0x01, (body.len() + 1) as u8, 0x00];
+        code.extend_from_slice(body);
+        m.push(0x0A);
+        m.push(code.len() as u8);
+        m.extend_from_slice(&code);
+        if !data.is_empty() {
+            let mut ds: Vec<u8> = alloc::vec![data.len() as u8];
+            for (off, bytes) in data {
+                ds.extend_from_slice(&[0x00, 0x41, *off as u8, 0x0B, bytes.len() as u8]);
+                ds.extend_from_slice(bytes);
+            }
+            m.push(0x0B);
+            m.push(ds.len() as u8);
+            m.extend_from_slice(&ds);
+        }
+        m
+    }
+
+    #[test]
+    fn declared_locals_default_to_their_own_type() {
+        // (func (result i64) (local i64) local.get 0) -> i64 0, not i32 0.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7E, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x6D, 0x61, 0x69, 0x6E, 0x00,
+            0x00, 0x0A, 0x08, 0x01, 0x06, 0x01, 0x01, 0x7E, 0x20, 0x00, 0x0B,
+        ];
+        assert_eq!(eval(wasm).unwrap(), alloc::vec![Val::I64(0)]);
+    }
+
+    #[test]
+    fn data_section_initialises_linear_memory() {
+        let body = &[0x41, 0x00, 0x28, 0x00, 0x00, 0x0B];
+        let wasm = mem_module(1, None, &[(0, &[0xEF, 0xBE, 0xAD, 0xDE])], body);
+        assert_eq!(eval(&wasm).unwrap(), alloc::vec![Val::I32(-559038737i32)]);
+    }
+
+    #[test]
+    fn memory_size_reports_the_declared_minimum() {
+        let wasm = mem_module(3, None, &[], &[0x3F, 0x00, 0x0B]);
+        assert_eq!(eval(&wasm).unwrap(), alloc::vec![Val::I32(3)]);
+    }
+
+    #[test]
+    fn memory_grow_respects_the_declared_maximum() {
+        // grow by 5 with max 2 -> -1, and the memory keeps its old size.
+        let wasm = mem_module(1, Some(2), &[], &[0x41, 0x05, 0x40, 0x00, 0x0B]);
+        assert_eq!(eval(&wasm).unwrap(), alloc::vec![Val::I32(-1)]);
+        let wasm = mem_module(
+            1,
+            Some(2),
+            &[],
+            &[0x41, 0x05, 0x40, 0x00, 0x1A, 0x3F, 0x00, 0x0B],
+        );
+        assert_eq!(eval(&wasm).unwrap(), alloc::vec![Val::I32(1)]);
+    }
+
+    #[test]
+    fn a_data_segment_past_declared_memory_is_rejected() {
+        // Same module twice: the second segment overruns the declared page.
+        let inbounds: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7F, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x08, 0x01, 0x04,
+            0x6D, 0x61, 0x69, 0x6E, 0x00, 0x00, 0x0A, 0x0B, 0x01, 0x09, 0x00, 0x41, 0xFC, 0xFF,
+            0x03, 0x28, 0x00, 0x00, 0x0B, 0x0B, 0x0C, 0x01, 0x00, 0x41, 0xFC, 0xFF, 0x03, 0x0B,
+            0x04, 0x01, 0x02, 0x03, 0x04,
+        ];
+        assert!(Module::from_bytes(inbounds).is_ok());
+        let overruns: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7F, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x08, 0x01, 0x04,
+            0x6D, 0x61, 0x69, 0x6E, 0x00, 0x00, 0x0A, 0x09, 0x01, 0x07, 0x00, 0x41, 0x00, 0x28,
+            0x00, 0x00, 0x0B, 0x0B, 0x0C, 0x01, 0x00, 0x41, 0xFE, 0xFF, 0x03, 0x0B, 0x04, 0x01,
+            0x02, 0x03, 0x04,
+        ];
+        assert!(matches!(
+            Module::from_bytes(overruns),
+            Err(WasmError::Decode(_))
+        ));
+    }
+
+    #[test]
+    fn call_indirect_requires_an_exact_type_match() {
+        // table[0] is (i64) -> i32, called through a declared (i32) -> i32:
+        // the arities agree, the value types do not, so it must trap.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0F, 0x03, 0x60, 0x00, 0x01,
+            0x7F, 0x60, 0x01, 0x7F, 0x01, 0x7F, 0x60, 0x01, 0x7E, 0x01, 0x7F, 0x03, 0x03, 0x02,
+            0x00, 0x02, 0x04, 0x04, 0x01, 0x70, 0x00, 0x01, 0x07, 0x08, 0x01, 0x04, 0x6D, 0x61,
+            0x69, 0x6E, 0x00, 0x00, 0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x01, 0x0A,
+            0x10, 0x02, 0x09, 0x00, 0x41, 0x01, 0x41, 0x00, 0x11, 0x01, 0x00, 0x0B, 0x04, 0x00,
+            0x41, 0x07, 0x0B,
+        ];
+        assert!(matches!(eval(wasm), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn binding_an_import_binds_every_slot_with_that_name() {
+        // Two imports of the same (module, field); calling the second works.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x02, 0x60, 0x01, 0x7F,
+            0x01, 0x7F, 0x60, 0x00, 0x01, 0x7F, 0x02, 0x17, 0x02, 0x04, 0x68, 0x6F, 0x73, 0x74,
+            0x03, 0x64, 0x75, 0x70, 0x00, 0x00, 0x04, 0x68, 0x6F, 0x73, 0x74, 0x03, 0x64, 0x75,
+            0x70, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x08, 0x01, 0x04, 0x6D, 0x61, 0x69,
+            0x6E, 0x00, 0x02, 0x0A, 0x08, 0x01, 0x06, 0x00, 0x41, 0x05, 0x10, 0x01, 0x0B,
+        ];
+        let mut m = Module::from_bytes(wasm).unwrap();
+        assert_eq!(m.imports().len(), 2);
+        assert!(matches!(m.eval(&[]), Err(WasmError::Trap(_))));
+        m.bind_import("host", "dup", |args, _mem| Ok(alloc::vec![args[0] * 3]))
+            .unwrap();
+        assert_eq!(m.eval(&[]).unwrap(), alloc::vec![Val::I32(15)]);
+    }
+
+    #[test]
+    fn a_host_result_the_i32_abi_cannot_express_is_loud() {
+        // The import declares (result i64); the host ABI is i32-only, so the
+        // call traps rather than handing the guest a mistyped value.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x02, 0x60, 0x00, 0x01,
+            0x7E, 0x60, 0x00, 0x01, 0x7E, 0x02, 0x0C, 0x01, 0x04, 0x68, 0x6F, 0x73, 0x74, 0x03,
+            0x67, 0x65, 0x74, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x08, 0x01, 0x04, 0x6D,
+            0x61, 0x69, 0x6E, 0x00, 0x01, 0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        ];
+        let mut m = Module::from_bytes(wasm).unwrap();
+        m.bind_import("host", "get", |_args, _mem| Ok(alloc::vec![7]))
+            .unwrap();
+        assert!(matches!(m.eval(&[]), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn deep_recursion_traps_instead_of_overflowing_the_native_stack() {
+        // f(x) = f(x + 1): unbounded recursion is a loud trap, not a crash.
+        let wasm: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x02, 0x60, 0x00, 0x01,
+            0x7F, 0x60, 0x01, 0x7F, 0x01, 0x7F, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07, 0x08, 0x01,
+            0x04, 0x6D, 0x61, 0x69, 0x6E, 0x00, 0x00, 0x0A, 0x12, 0x02, 0x06, 0x00, 0x41, 0x01,
+            0x10, 0x01, 0x0B, 0x09, 0x00, 0x20, 0x00, 0x41, 0x01, 0x6A, 0x10, 0x01, 0x0B,
+        ];
+        assert!(matches!(eval(wasm), Err(WasmError::Trap("call depth"))));
     }
 }
