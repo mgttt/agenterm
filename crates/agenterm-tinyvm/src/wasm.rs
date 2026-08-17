@@ -207,6 +207,9 @@ enum Op {
     F32Copysign,
     F32Load { offset: u32 },
     F32Store { offset: u32 },
+    /// `global.get` / `global.set` — read/write a module global by index.
+    GlobalGet(u32),
+    GlobalSet(u32),
     // --- numeric conversion family (0xA7..=0xBF) ---
     I32WrapI64,
     I64ExtendI32S,
@@ -713,6 +716,16 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
                 i = ni;
                 ops.push(Op::F32Store { offset });
             }
+            0x23 => {
+                let (x, ni) = leb_u32(body, i)?;
+                i = ni;
+                ops.push(Op::GlobalGet(x));
+            }
+            0x24 => {
+                let (x, ni) = leb_u32(body, i)?;
+                i = ni;
+                ops.push(Op::GlobalSet(x));
+            }
             0xA7 => ops.push(Op::I32WrapI64),
             0xA8 => ops.push(Op::I32TruncF32S),
             0xA9 => ops.push(Op::I32TruncF32U),
@@ -779,6 +792,73 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
         .map_err(|_| WasmError::Decode("name is not valid UTF-8".into()))?
         .to_owned();
     Ok((s, end))
+}
+
+/// Evaluate a constant init expression (`<t.const imm> end`) to a value.
+fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
+    let op = *p
+        .get(i)
+        .ok_or_else(|| WasmError::Decode("truncated const expr".into()))?;
+    let (val, mut j) = match op {
+        0x41 => {
+            let (v, ni) = leb_s32(p, i + 1)?;
+            (Val::I32(v), ni)
+        }
+        0x42 => {
+            let (v, ni) = leb_s64(p, i + 1)?;
+            (Val::I64(v), ni)
+        }
+        0x43 => {
+            let end = (i + 1)
+                .checked_add(4)
+                .filter(|&e| e <= p.len())
+                .ok_or_else(|| WasmError::Decode("truncated f32 const expr".into()))?;
+            let b: [u8; 4] = p[i + 1..end].try_into().expect("4 bytes");
+            (Val::F32(f32::from_le_bytes(b)), end)
+        }
+        0x44 => {
+            let end = (i + 1)
+                .checked_add(8)
+                .filter(|&e| e <= p.len())
+                .ok_or_else(|| WasmError::Decode("truncated f64 const expr".into()))?;
+            let b: [u8; 8] = p[i + 1..end].try_into().expect("8 bytes");
+            (Val::F64(f64::from_le_bytes(b)), end)
+        }
+        other => {
+            return Err(WasmError::Decode(format!(
+                "unsupported const-expr opcode 0x{other:02x} (only t.const)"
+            )));
+        }
+    };
+    // Expect a closing `end` (0x0B).
+    match p.get(j) {
+        Some(0x0B) => {
+            j += 1;
+            Ok((val, j))
+        }
+        _ => Err(WasmError::Decode("const expr missing end".into())),
+    }
+}
+
+/// Parse the global section into `(init_value, mutable)` per global.
+fn parse_global_section(p: &[u8]) -> Result<Vec<(Val, bool)>, WasmError> {
+    let (count, mut i) = leb_u32(p, 0)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        // globaltype = valtype byte + mutability byte
+        let _valtype = p
+            .get(i)
+            .ok_or_else(|| WasmError::Decode("truncated global type".into()))?;
+        let mutable = *p
+            .get(i + 1)
+            .ok_or_else(|| WasmError::Decode("truncated global mutability".into()))?
+            != 0;
+        i += 2;
+        let (val, ni) = parse_const_expr(p, i)?;
+        i = ni;
+        out.push((val, mutable));
+    }
+    Ok(out)
 }
 
 /// Parse the export section into `(name, kind, index)` triples, keeping only
@@ -939,6 +1019,13 @@ struct HostFunc {
 /// `0..hosts.len()`), then WASM-defined functions. So when there are no host
 /// functions, a defined function's index equals its position — matching the
 /// pre-host behaviour.
+/// A module global: its initial value and whether `global.set` may write it.
+#[derive(Debug, Clone, Copy)]
+struct GlobalDesc {
+    init: Val,
+    mutable: bool,
+}
+
 #[derive(Default)]
 pub struct Module {
     hosts: Vec<HostFunc>,
@@ -946,6 +1033,8 @@ pub struct Module {
     /// Exported function names -> combined function index (from a module's
     /// export section, or registered via [`Module::export`]).
     exports: std::collections::HashMap<String, usize>,
+    /// Module globals; a fresh working copy is initialised per invocation.
+    globals: Vec<GlobalDesc>,
 }
 
 impl Module {
@@ -1020,6 +1109,7 @@ impl Module {
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<(usize, Vec<u8>)> = Vec::new();
         let mut exports: Vec<(String, usize)> = Vec::new();
+        let mut globals: Vec<(Val, bool)> = Vec::new();
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1037,9 +1127,10 @@ impl Module {
                 1 => types = parse_type_section(payload)?,
                 2 => imports = parse_import_section(payload, &types)?,
                 3 => func_types = parse_func_section(payload)?,
+                6 => globals = parse_global_section(payload)?,
                 7 => exports = parse_export_section(payload)?,
                 10 => codes = parse_code_section(payload)?,
-                _ => {} // custom / memory / global / … : skipped
+                _ => {} // custom / memory / … : skipped
             }
             i = end;
         }
@@ -1073,10 +1164,21 @@ impl Module {
                 code,
             });
         }
+        for (init, mutable) in globals {
+            module.globals.push(GlobalDesc { init, mutable });
+        }
         for (name, index) in exports {
             module.exports.insert(name, index);
         }
         Ok(module)
+    }
+
+    /// Register a module global with an initial value and mutability, returning
+    /// its index. A fresh working copy is created for each invocation.
+    pub fn add_global(&mut self, init: Val, mutable: bool) -> usize {
+        let idx = self.globals.len();
+        self.globals.push(GlobalDesc { init, mutable });
+        idx
     }
 
     /// Record `name` as an exported function index (for [`Module::invoke_by_name`]).
@@ -1124,7 +1226,8 @@ impl Module {
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
         let mut mem = vec![0u8; WASM_PAGE_SIZE];
-        self.call_any(idx, args, 0, &mut steps, &mut mem)
+        let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
+        self.call_any(idx, args, 0, &mut steps, &mut mem, &mut globals)
     }
 
     /// Number of parameters a function index (host or defined) expects.
@@ -1147,6 +1250,7 @@ impl Module {
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
+        globals: &mut Vec<Val>,
     ) -> Result<Vec<Val>, WasmError> {
         if idx < self.hosts.len() {
             let host = &self.hosts[idx];
@@ -1177,7 +1281,7 @@ impl Module {
             }
             return Ok(res.into_iter().map(Val::I32).collect());
         }
-        self.run_defined(idx - self.hosts.len(), args, depth, steps, mem)
+        self.run_defined(idx - self.hosts.len(), args, depth, steps, mem, globals)
     }
 
     fn run_defined(
@@ -1187,6 +1291,7 @@ impl Module {
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
+        globals: &mut Vec<Val>,
     ) -> Result<Vec<Val>, WasmError> {
         if depth > WASM_MAX_DEPTH {
             return Err(WasmError::Trap(format!(
@@ -1335,6 +1440,23 @@ impl Module {
                     let value = pop(&mut stack)?;
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
                     mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
+                }
+                Op::GlobalGet(g) => {
+                    let v = *globals
+                        .get(g as usize)
+                        .ok_or_else(|| WasmError::Trap(format!("global.get {g} out of range")))?;
+                    stack.push(v);
+                }
+                Op::GlobalSet(g) => {
+                    let gi = g as usize;
+                    if self.globals.get(gi).is_some_and(|d| !d.mutable) {
+                        return Err(WasmError::Trap(format!("global.set {g} on immutable global")));
+                    }
+                    let v = pop_val(&mut stack)?;
+                    let cell = globals
+                        .get_mut(gi)
+                        .ok_or_else(|| WasmError::Trap(format!("global.set {g} out of range")))?;
+                    *cell = v;
                 }
                 Op::I32WrapI64 => {
                     let a = pop_i64(&mut stack)?;
@@ -1723,7 +1845,7 @@ impl Module {
                         )));
                     }
                     let cargs = stack.split_off(stack.len() - n);
-                    let res = self.call_any(combined, &cargs, depth + 1, steps, mem)?;
+                    let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
                     stack.extend(res);
                 }
                 Op::Block { arity, end } => control.push(Frame {
@@ -2729,6 +2851,51 @@ mod tests {
             Module::from_bytes(&[0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00]),
             Err(WasmError::Decode(_))
         ));
+    }
+
+    // Gate: module globals + global.get/set.
+    #[test]
+    fn global_get_set_roundtrip() {
+        let mut m = Module::new();
+        let g = m.add_global(Val::I32(10), true);
+        assert_eq!(g, 0);
+        // global.set 0 (const 7) ; global.get 0
+        let body = [0x41, 0x07, 0x24, 0x00, 0x23, 0x00, 0x0B];
+        let f = m.add_function(0, 0, 1, &body).unwrap();
+        assert_eq!(m.invoke_val(f, &[]).unwrap(), vec![Val::I32(7)]);
+    }
+
+    #[test]
+    fn global_get_initial_value() {
+        let mut m = Module::new();
+        m.add_global(Val::I64(1234), false);
+        let f = m.add_function(0, 0, 1, &[0x23, 0x00, 0x0B]).unwrap();
+        assert_eq!(m.invoke_val(f, &[]).unwrap(), vec![Val::I64(1234)]);
+    }
+
+    #[test]
+    fn global_set_immutable_traps() {
+        let mut m = Module::new();
+        m.add_global(Val::I32(1), false);
+        let f = m
+            .add_function(0, 0, 0, &[0x41, 0x02, 0x24, 0x00, 0x0B])
+            .unwrap();
+        assert!(matches!(m.invoke_val(f, &[]), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn module_with_global_section() {
+        // (module (global i32 (i32.const 99)) (func (result i32) global.get 0))
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F, // type () -> i32
+            0x03, 0x02, 0x01, 0x00, // func: type 0
+            // global section: 1 global, i32 mutable=0, init i32.const 99, end
+            0x06, 0x07, 0x01, 0x7F, 0x00, 0x41, 0xE3, 0x00, 0x0B,
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x23, 0x00, 0x0B, // code: global.get 0
+        ];
+        let m = Module::from_bytes(&wasm).unwrap();
+        assert_eq!(m.invoke(0, &[]).unwrap(), vec![99]);
     }
 
     // Gate (tinyvm.18): resolve and invoke an exported function by name.
