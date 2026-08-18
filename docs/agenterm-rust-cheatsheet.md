@@ -2116,3 +2116,13 @@ the header unavailable (iOS-oriented). A symbol that `nm` can see is still
 not a live Darwin probe if the public SDK refuses the declaration. Prefer
 `dladdr`, `gethostuuid`, and `_dyld_get_image_header` for leak-free
 loader/host facts.
+
+## Guest `min` is not a host allocation size
+
+`vec![None; table_min]` and `vec![0u8; pages * 64KiB]` take the module's
+declared minimum as a trusted length. Untrusted `.wasm` can set
+`table min=0x0FFFFFFF` and abort the process (SIGABRT / rc 134) before
+any `Err` returns. Compare the host budget first; only then
+`try_reserve`. Instantiation failure is `Err`, never "allocate and hope".
+The reject point must move when the caller passes two different budgets
+— a crate `const` alone is not a host contract.

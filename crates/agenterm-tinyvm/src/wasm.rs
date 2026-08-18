@@ -78,14 +78,37 @@ impl WasmError {
     }
 }
 
+/// Host-owned resource budget for one load/eval. This knife only enforces
+/// [`Limits::max_table_elems`]; other knobs stay crate constants.
+#[derive(Clone, Copy)]
+pub struct Limits {
+    /// Maximum funcref-table length the host will instantiate. Compared
+    /// against the module's declared table `min` *before* any allocation.
+    pub max_table_elems: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_table_elems: 65_536,
+        }
+    }
+}
+
 /// Slot A face: load a standard WebAssembly 1.0 module and evaluate it.
 ///
 /// Runs the start function if present, then the first declared function
 /// export (or the first defined function if there is no export). Host
 /// imports stay unbound and trap if called; bind them via
 /// [`Module::from_bytes`] + [`Module::bind_import`] + [`Module::eval`].
+/// Uses [`Limits::default`] as the host budget.
 pub fn eval(bytes: &[u8]) -> Result<Vec<Val>, WasmError> {
-    Module::from_bytes(bytes)?.eval(&[])
+    eval_with(bytes, Limits::default())
+}
+
+/// Like [`eval`], but the caller supplies the host budget.
+pub fn eval_with(bytes: &[u8], limits: Limits) -> Result<Vec<Val>, WasmError> {
+    Module::from_bytes_with(bytes, limits)?.eval(&[])
 }
 
 /// A decoded instruction. Branch/call operands keep their WASM indices; block
@@ -1399,6 +1422,12 @@ impl Module {
     /// [`Module::add_function`]; result/param counts come from the type section
     /// and locals (with their declared value types) from each code entry.
     pub fn from_bytes(wasm: &[u8]) -> Result<Module, WasmError> {
+        Self::from_bytes_with(wasm, Limits::default())
+    }
+
+    /// Load a module under an explicit host budget. Table `min` is checked
+    /// against [`Limits::max_table_elems`] before any table allocation.
+    pub fn from_bytes_with(wasm: &[u8], limits: Limits) -> Result<Module, WasmError> {
         if wasm.len() < 8 || &wasm[0..4] != b"\0asm" {
             return Err(WasmError::Decode("not a wasm module (bad magic)"));
         }
@@ -1529,7 +1558,19 @@ impl Module {
         }
 
         // Allocate the table, then apply active element segments into it.
-        module.table = vec![None; table_size];
+        // Host budget first: never `vec![None; guest_min]` a multi-gigabyte
+        // table and hope the allocator fails loudly instead of aborting.
+        if table_size > limits.max_table_elems {
+            return Err(WasmError::Trap("table size"));
+        }
+        let mut table = Vec::new();
+        if table_size > 0 {
+            table
+                .try_reserve(table_size)
+                .map_err(|_| WasmError::Trap("table size"))?;
+            table.resize(table_size, None);
+        }
+        module.table = table;
         for (offset, idxs) in &elems {
             for (k, &fidx) in idxs.iter().enumerate() {
                 let slot = offset
