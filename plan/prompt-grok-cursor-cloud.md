@@ -30,8 +30,8 @@
 - 本步只对齐本地基线，不审查 diff、不 chat
 
 观测云席：
-- bun skills/cursor/cloud.ts list --active --env mgttt/agenterm
-- 目标：正在推进当前计划的 ACTIVE 席（如 rh / 用户指定）；含糊则取该 env 下最近更新的 ACTIVE 席。记下 name + bcId
+- bun skills/cursor/cloud.ts list --active
+- 目标：正在推进当前计划的 ACTIVE 席（如 rh / 用户指定）；确认其仓库为 `partnernetsoftware/agenterm`，不要依赖迁移前的 Cursor env 名称。含糊则取最近更新的匹配席。记下 name + bcId
 - get / runs：latestRun 仍为 CREATING|RUNNING|WAITING_FOR_BACKGROUND_WORK 等非终态 → 报一行 busy 后结束（已 pull 的保留）
 - 终态示例：FINISHED|ERROR|FAILED|CANCELLED|COMPLETED 或无进行中 run → 视为 free/停下
 

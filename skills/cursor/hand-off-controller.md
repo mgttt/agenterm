@@ -19,7 +19,7 @@
 ## 提示词模板（精简）
 
 ```text
-你是【主控N】。换防自 <旧主控 bcId>。从现在起由你统筹 mgttt/agenterm。
+你是【主控N】。换防自 <旧主控 bcId>。从现在起由你统筹 partnernetsoftware/agenterm。
 
 立即：
 1. git fetch && git checkout main && git pull --ff-only origin main

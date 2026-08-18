@@ -84,7 +84,7 @@ client, and a deliberately bounded tmux/RMUX frontend.
 One line — no `sudo`, checksum-verified, commands linked into `~/.local/bin`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/partnernetsoftware/agenterm/main/install.sh | bash
 ```
 
 The installer resolves the latest GitHub Release, verifies SHA-256 before
@@ -95,7 +95,7 @@ starts the GUI when a graphical session is available. On macOS it also creates
 Pin a version or install without launching:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/partnernetsoftware/agenterm/main/install.sh \
   | AGENTERM_VERSION=v0.1.14 AGENTERM_NO_LAUNCH=1 bash
 ```
 
@@ -106,14 +106,14 @@ installer never selects it silently. Read the
 [unsigned-preview security notes](docs/macos-unsigned-preview.md), then opt in:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/partnernetsoftware/agenterm/main/install.sh \
   | AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 bash
 ```
 
 ### Windows
 
 Download the portable zip for your CPU architecture from
-[GitHub Releases](https://github.com/mgttt/agenterm/releases/latest), extract
+[GitHub Releases](https://github.com/partnernetsoftware/agenterm/releases/latest), extract
 it anywhere, and run `agenterm.exe`. All four client binaries plus build
 metadata ship in the same folder — no installer and no admin rights required.
 
@@ -127,7 +127,7 @@ release has no package for the current platform. List all installer overrides
 with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/partnernetsoftware/agenterm/main/install.sh \
   | bash -s -- --help
 ```
 

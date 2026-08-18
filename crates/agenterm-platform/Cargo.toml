@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.97"
 description = "Typed operating-system contracts and adapters used by AgenTerm"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mgttt/agenterm"
+repository = "https://github.com/partnernetsoftware/agenterm"
 readme = "README.md"
 
 [features]

@@ -55,7 +55,7 @@ CI 的 debug target cache 独占 8.7GB，同一家族存 2–3 份陈旧世代
   Cargo.lock / Cargo.toml / scripts/artifacts.json 哈希完全相同
 另核：cargo-home-candidate-v2 只有 key、**无 restore-keys**
   （对照 cargo-target-v2 有），hashFiles 一变即彻底 miss、无近似回退
-复现：gh api repos/mgttt/agenterm/actions/caches
+复现：gh api repos/partnernetsoftware/agenterm/actions/caches
 ```
 
 v0.1.14 已落地的止血（不再重复投入）：失败也保存构建缓存（`always()`）；

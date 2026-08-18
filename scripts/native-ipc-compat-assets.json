@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "repository": "mgttt/agenterm",
+  "repository": "partnernetsoftware/agenterm",
   "purpose": "Exact archives used by the native IPC compatibility smoke; the unpublished Windows x86_64 baseline is a repository fixture and published baselines are downloaded into the invocation-owned run.",
   "releases": [
     {

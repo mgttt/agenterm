@@ -27,6 +27,11 @@ Agent chat：`scripts/cursor_agent_chat.sh`（默认 `--wait` + `<fleet-pulse>`�
 |------|--------------|------------|---------------------|------|
 | `主控 造梦` | `f2326638-90f1-11f1-ba66-0e7d0216e441` | `21 * * * *` | `7ef6e5b0-8a35-11f1-b532-320a589b8025` | enabled；repo=`mgttt/agenterm` `main`；首轮 `bc-0958a47a` → `968056a`；spawn 显示名=`舰队值班会话` |
 
+The repository is now canonically `partnernetsoftware/agenterm`. Entries above retain the exact
+provider-side environment/repository values last observed before transfer; do not infer that Cursor
+rewrote them through GitHub redirects. New sessions use the canonical repository URL, and the saved
+environment/automation must be rebound and verified separately.
+
 链接：
 
 - Automations：https://cursor.com/automations/f2326638-90f1-11f1-ba66-0e7d0216e441

@@ -10,7 +10,7 @@ set -euo pipefail
 
 USERNAME="${1:-mgttt}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ORIGIN_URL="https://github.com/mgttt/agenterm.git"
+ORIGIN_URL="https://github.com/partnernetsoftware/agenterm.git"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required." >&2

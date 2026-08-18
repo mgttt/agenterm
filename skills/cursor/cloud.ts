@@ -400,8 +400,11 @@ async function cmdCreate(args: string[]): Promise<void> {
   } else if (repo) {
     body.repos = [{ url: repo, startingRef: ref }];
   } else {
-    // default agenterm cloud env used by fleet skills
-    body.env = { type: "cloud", name: "mgttt/agenterm" };
+    // Follow the canonical GitHub repository without depending on a
+    // provider-side saved environment name surviving an ownership transfer.
+    body.repos = [
+      { url: "https://github.com/partnernetsoftware/agenterm", startingRef: ref },
+    ];
   }
 
   const { json } = await api("POST", "/agents", body);

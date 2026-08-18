@@ -24,7 +24,7 @@ it from another repository.
 ```toml
 [dependencies]
 agenterm-platform = {
-  git = "https://github.com/mgttt/agenterm.git",
+  git = "https://github.com/partnernetsoftware/agenterm.git",
   rev = "7245b60c4e6f1ee201eb9f5c5a8c156985845bd3",
   default-features = false,
   features = ["process", "filesystem"]

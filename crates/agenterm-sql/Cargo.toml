@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.97"
 description = "AgenTerm sql pack language scaffold: SQL-92/PostgreSQL-benchmarked script engine, capability-aligned with agenterm-rh/agenterm-lua/agenterm-qjs"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mgttt/agenterm"
+repository = "https://github.com/partnernetsoftware/agenterm"
 publish = false
 # No [[bin]] here — mirrors agenterm-qjs's/agenterm-rh's shape: the real
 # `agenterm-sql` binary is declared in the ROOT Cargo.toml's [[bin]] list

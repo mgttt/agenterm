@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.97"
 description = "AgenTerm qjs pack language: QuickJS-backed script engine, capability-aligned with agenterm-rh"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mgttt/agenterm"
+repository = "https://github.com/partnernetsoftware/agenterm"
 publish = false
 # No [[bin]] here — mirrors agenterm-rh's shape (see crates/agenterm-rh/Cargo.toml):
 # the real `agenterm-qjs` binary is declared in the ROOT Cargo.toml's [[bin]]

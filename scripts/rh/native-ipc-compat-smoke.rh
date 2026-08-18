@@ -759,7 +759,7 @@ let catalog = rh::json::parse_file(
     std::path::absolute(catalog_path).display
 );
 test_harness::require(
-    catalog.schema_version == 1 && catalog.repository == "mgttt/agenterm",
+    catalog.schema_version == 1 && catalog.repository == "partnernetsoftware/agenterm",
     "native_ipc_compat_catalog_identity"
 );
 let release_110 = release_by_version(catalog, "0.1.10");

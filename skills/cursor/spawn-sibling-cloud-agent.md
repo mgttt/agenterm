@@ -22,7 +22,7 @@ to Linux/planning in another session.
 ```text
 # Preferred cross-host CLI (env or ~/env.jsonl):
 bun skills/cursor/cloud.ts me
-bun skills/cursor/cloud.ts list --active --env mgttt/agenterm
+bun skills/cursor/cloud.ts list --active --env partnernetsoftware/agenterm
 bun skills/cursor/cloud.ts get 主控1
 
 # On a cloud VM with cursor-cloud MCP:
@@ -116,7 +116,7 @@ is not a silo. For 主控换防 use [hand-off-controller.md](hand-off-controller
 
 ```text
 你是舰队一员【分身N】。遵守 skills/cursor/fleet-awareness.md + inter-agent-comms.md。
-Repo: mgttt/agenterm. Base: origin/main.
+Repo: partnernetsoftware/agenterm. Base: origin/main.
 
 每轮：git pull → 读 session-registry + mailbox 全文（感知同伴）→ 更新本席位 → 再干活。
 显示名：分身N。文件所有权：…（独占）。禁止：…。

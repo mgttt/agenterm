@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.97"
 description = "A real wasmtime + wasmtime-wasi (p1) host: loads and runs wasm32-wasip1 guest modules, and exposes the same fleet_call(operation_id, params_json) -> result_json bridge shape as agenterm-rh/-lua/-qjs's ScriptFleetBridgeFn, marshalled across the WASM i32/linear-memory boundary. See README.md for the exact ABI."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mgttt/agenterm"
+repository = "https://github.com/partnernetsoftware/agenterm"
 publish = false
 autobins = false
 

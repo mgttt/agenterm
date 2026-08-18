@@ -23,16 +23,21 @@ bash-only cloud VM with `CURSOR_API` injected.
 ```bash
 # Auth: CURSOR_API env first, else ~/env.jsonl line with CURSOR_API / api_key
 bun skills/cursor/cloud.ts me
-bun skills/cursor/cloud.ts list --active --env mgttt/agenterm
+bun skills/cursor/cloud.ts list --active
 bun skills/cursor/cloud.ts get 主控1
 bun skills/cursor/cloud.ts chat --from 主控 --to 分身3 --prompt 'status?'
-bun skills/cursor/cloud.ts create --name 分身N --prompt '…' --env mgttt/agenterm
+bun skills/cursor/cloud.ts create --name 分身N --prompt '…' --repo https://github.com/partnernetsoftware/agenterm --ref main
 bun skills/cursor/cloud.ts --help
 ```
 
 Never prints the key. On local seats, put secrets only in `~/env.jsonl` (or
 inject env); never commit them. Bash helpers below still work when `CURSOR_API`
 is already in the environment.
+
+The historical saved Cursor environment is still named `mgttt/agenterm`. GitHub repository
+redirects do not prove that a provider-side saved environment has been rebound. New agents default
+to the canonical repository URL; rebind or replace that saved environment in Cursor before relying
+on it again.
 
 **Agent chat CLI:** `scripts/cursor_agent_chat.sh --from <谁> --to <谁> '正文'`
 silently wraps `<from::…><to::…>`, injects `<fleet-pulse>` by default, and

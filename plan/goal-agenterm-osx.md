@@ -301,7 +301,7 @@ command -v curl >/dev/null 2>&1 || fail 'precondition: curl is missing'
 command -v python3 >/dev/null 2>&1 || fail 'precondition: python3 is missing'
 
 LATEST_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-  https://github.com/mgttt/agenterm/releases/latest 2>"$OUT/02-latest.stderr.log")" \
+  https://github.com/partnernetsoftware/agenterm/releases/latest 2>"$OUT/02-latest.stderr.log")" \
   || fail 'preflight: cannot resolve latest release; preserve 02-latest.stderr.log verbatim'
 TAG="${LATEST_URL##*/}"
 VERSION="${TAG#v}"
@@ -315,7 +315,7 @@ if not match or tuple(map(int, match.groups())) < (0, 1, 15):
 print(f"version_gate=PASS tag=v{sys.argv[1]}")
 PY
 
-BASE="https://github.com/mgttt/agenterm/releases/download/$TAG"
+BASE="https://github.com/partnernetsoftware/agenterm/releases/download/$TAG"
 SIGNED="agenterm-$VERSION-macos-aarch64.zip"
 PREVIEW="agenterm-$VERSION-macos-aarch64-unsigned-preview.zip"
 http_status() {
@@ -557,11 +557,11 @@ printf '%s\n' \
   >"$OUT/00-command.txt"
 
 LATEST_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-  https://github.com/mgttt/agenterm/releases/latest 2>"$OUT/02-latest.stderr.log")" \
+  https://github.com/partnernetsoftware/agenterm/releases/latest 2>"$OUT/02-latest.stderr.log")" \
   || fail 'preflight: cannot resolve latest release'
 TAG="${LATEST_URL##*/}"
 VERSION="${TAG#v}"
-BASE="https://github.com/mgttt/agenterm/releases/download/$TAG"
+BASE="https://github.com/partnernetsoftware/agenterm/releases/download/$TAG"
 SIGNED="agenterm-$VERSION-macos-aarch64.zip"
 
 [[ "$(uname -s)" == Darwin ]] || fail "precondition: host is not macOS"

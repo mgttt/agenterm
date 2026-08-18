@@ -18,7 +18,7 @@
 | `origin/main` | tip `aef96053`（duty handoff） |
 | 待审合 | 无（`origin/cursor/*` ahead=0；`1-0e37`/`rh-emit-set-index-assign-1645` ahead=0） |
 | CI | docs 推送不触发 CI（paths-ignore）；Windows `ui-input` 仍开放决策 |
-| 云环境 | Personal `mgttt/agenterm`；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
+| 云环境 | 历史 saved env 名为 Personal `mgttt/agenterm`；GitHub canonical repo 已迁至 `partnernetsoftware/agenterm`，provider-side rebind 尚未验证；`environmentPublicId=7ef6e5b0-8a35-11f1-b532-320a589b8025` |
 | SkinHub / 外置皮肤包 | **不做**（M14）；本任务仅内置四预设 |
 | palette SSOT | `assets/skins/**/palettes/*.json`；`DARK`/`LIGHT` const 已删 |
 | WebView | 仅 `research/agenterm-webview/`；三 Tab 占位；**体积优先 direct-WRY**（Win ~521KiB vs Tauri ~8.4MiB）；**勿**链入发布 `agenterm-cc`（4 MiB） |

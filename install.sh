@@ -3,7 +3,7 @@
 # Install AgenTerm from a GitHub Release or a local macOS build.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/partnernetsoftware/agenterm/main/install.sh | bash
 #   ./install.sh --local-build target/debug
 #
 # Optional environment:
@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-REPOSITORY="mgttt/agenterm"
+REPOSITORY="partnernetsoftware/agenterm"
 GITHUB_URL="https://github.com"
 INSTALL_ROOT="${AGENTERM_INSTALL_DIR:-${HOME:?HOME is not set}/.local/share/agenterm}"
 BIN_DIR="${AGENTERM_BIN_DIR:-${HOME}/.local/bin}"

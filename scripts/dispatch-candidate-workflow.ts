@@ -9,7 +9,7 @@
 // across releases rather than being tied to one version by a hardcoded default.
 //
 // Usage:
-//   bun scripts/dispatch-candidate-workflow.ts --version 0.1.12 --sha <40-char-sha> [--ref release/v0.1.12] [--repo mgttt/agenterm]
+//   bun scripts/dispatch-candidate-workflow.ts --version 0.1.12 --sha <40-char-sha> [--ref release/v0.1.12] [--repo partnernetsoftware/agenterm]
 //
 // The token is read from `gh auth token` (or the GH_TOKEN / GITHUB_TOKEN env
 // vars as a fallback) at run time and is never printed, logged, or written
@@ -26,7 +26,7 @@ function usageAndExit(message?: string): never {
     console.error(`error: ${message}`);
   }
   console.error(
-    "usage: bun scripts/dispatch-candidate-workflow.ts --version <X.Y.Z> --sha <40-char-sha> [--ref release/vX.Y.Z] [--repo mgttt/agenterm]",
+    "usage: bun scripts/dispatch-candidate-workflow.ts --version <X.Y.Z> --sha <40-char-sha> [--ref release/vX.Y.Z] [--repo partnernetsoftware/agenterm]",
   );
   process.exit(1);
 }
@@ -35,7 +35,7 @@ function parseArgs(argv: string[]): Args {
   let version: string | undefined;
   let sha: string | undefined;
   let refOverride: string | undefined;
-  let repo = "mgttt/agenterm";
+  let repo = "partnernetsoftware/agenterm";
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
