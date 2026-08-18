@@ -137,6 +137,37 @@ impl CodeBuffer {
         Ok(offset)
     }
 
+    /// Overwrite `bytes.len()` already-appended bytes at `offset` in place.
+    ///
+    /// This is the backpatch primitive for resolving a forward reference: the
+    /// call site is emitted with a placeholder rel32 and rewritten here once its
+    /// target address is known. Requires the buffer to be
+    /// [`BufferState::Writable`] (W^X: patching landed code re-enters the
+    /// writable state, never a simultaneously writable+executable one), and the
+    /// range must lie within the already-filled region.
+    pub fn patch(&mut self, offset: usize, bytes: &[u8]) -> Result<(), DynError> {
+        if self.state != BufferState::Writable {
+            return Err(DynError::Exec(
+                "patch requires a writable buffer (W^X); call make_writable first".into(),
+            ));
+        }
+        let end = offset
+            .checked_add(bytes.len())
+            .ok_or_else(|| DynError::Exec("patch length overflow".into()))?;
+        if end > self.filled {
+            return Err(DynError::Exec(format!(
+                "patch of {} bytes at {offset} exceeds filled range 0..{}",
+                bytes.len(),
+                self.filled
+            )));
+        }
+        // SAFETY: `offset..end` is within the mapped, filled, writable region.
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr.add(offset), bytes.len());
+        }
+        Ok(())
+    }
+
     /// Flip to [`BufferState::Executable`] (read+exec, not writable).
     pub fn make_executable(&mut self) -> Result<(), DynError> {
         self.protect(libc::PROT_READ | libc::PROT_EXEC)?;
