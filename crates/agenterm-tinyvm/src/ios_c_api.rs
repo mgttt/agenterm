@@ -8,7 +8,10 @@ use std::boxed::Box;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::thread::{self, ThreadId};
 
-use crate::{GameFrame, GameInput, GameLimits, GameRuntime, Limits, WasmError};
+use crate::{
+    CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits, GameRuntime, Limits,
+    WasmError,
+};
 
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_INVALID_ARGUMENT: i32 = 1;
@@ -18,6 +21,7 @@ pub const STATUS_BUFFER_TOO_SMALL: i32 = 4;
 pub const STATUS_WRONG_THREAD: i32 = 5;
 pub const STATUS_FAILED_INSTANCE: i32 = 6;
 pub const STATUS_PANIC: i32 = 7;
+pub const STATUS_TRUST: i32 = 8;
 
 thread_local! {
     static LAST_ERROR: Cell<&'static str> = const { Cell::new("") };
@@ -33,6 +37,29 @@ pub struct TinyArcadeConfigV1 {
     pub max_audio_bytes: u32,
     pub max_state_bytes: u32,
     pub rng_seed: u32,
+}
+
+#[repr(C)]
+pub struct TinyArcadeCatalogEntryV1 {
+    pub struct_size: u32,
+    pub game_id: *const u8,
+    pub game_id_len: usize,
+    pub game_version: *const u8,
+    pub game_version_len: usize,
+    pub abi_version: u32,
+    pub state_version: u32,
+    pub wasm_length: u64,
+    pub wasm_sha256: *const u8,
+    pub wasm_sha256_len: usize,
+    pub signing_key_id: *const u8,
+    pub signing_key_id_len: usize,
+    pub signature: *const u8,
+    pub signature_len: usize,
+}
+
+pub struct TinyArcadeTrustStoreV1 {
+    owner: ThreadId,
+    store: CartridgeTrustStore,
 }
 
 pub struct TinyArcadeRuntimeV1 {
@@ -99,6 +126,111 @@ unsafe fn runtime_mut<'a>(
     Ok(runtime)
 }
 
+unsafe fn trust_mut<'a>(
+    trust: *mut TinyArcadeTrustStoreV1,
+) -> Result<&'a mut TinyArcadeTrustStoreV1, FfiError> {
+    let trust = unsafe { trust.as_mut() }.ok_or(FfiError::new(
+        STATUS_INVALID_ARGUMENT,
+        "null trust store handle",
+    ))?;
+    if trust.owner != thread::current().id() {
+        return Err(FfiError::new(
+            STATUS_WRONG_THREAD,
+            "trust store used from a different thread",
+        ));
+    }
+    Ok(trust)
+}
+
+unsafe fn input_bytes<'a>(
+    pointer: *const u8,
+    length: usize,
+    message: &'static str,
+) -> Result<&'a [u8], FfiError> {
+    if pointer.is_null() || length == 0 {
+        return Err(FfiError::new(STATUS_INVALID_ARGUMENT, message));
+    }
+    Ok(unsafe { slice::from_raw_parts(pointer, length) })
+}
+
+unsafe fn input_string(
+    pointer: *const u8,
+    length: usize,
+    max_length: usize,
+    message: &'static str,
+) -> Result<String, FfiError> {
+    if length > max_length {
+        return Err(FfiError::new(STATUS_INVALID_ARGUMENT, message));
+    }
+    let bytes = unsafe { input_bytes(pointer, length, message)? };
+    let value =
+        core::str::from_utf8(bytes).map_err(|_| FfiError::new(STATUS_INVALID_ARGUMENT, message))?;
+    Ok(value.to_owned())
+}
+
+unsafe fn catalog_entry(entry: *const TinyArcadeCatalogEntryV1) -> Result<CatalogEntry, FfiError> {
+    let entry = unsafe { entry.as_ref() }
+        .ok_or(FfiError::new(STATUS_INVALID_ARGUMENT, "null catalog entry"))?;
+    if entry.struct_size < size_of::<TinyArcadeCatalogEntryV1>() as u32
+        || entry.wasm_sha256_len != 32
+        || entry.signature_len != 64
+    {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid catalog entry layout",
+        ));
+    }
+    let hash = unsafe {
+        input_bytes(
+            entry.wasm_sha256,
+            entry.wasm_sha256_len,
+            "invalid catalog hash",
+        )?
+    };
+    let signature = unsafe {
+        input_bytes(
+            entry.signature,
+            entry.signature_len,
+            "invalid catalog signature",
+        )?
+    };
+    let mut fixed_hash = [0; 32];
+    fixed_hash.copy_from_slice(hash);
+    let mut fixed_signature = [0; 64];
+    fixed_signature.copy_from_slice(signature);
+    Ok(CatalogEntry {
+        game_id: unsafe {
+            input_string(
+                entry.game_id,
+                entry.game_id_len,
+                128,
+                "invalid catalog game id",
+            )?
+        },
+        game_version: unsafe {
+            input_string(
+                entry.game_version,
+                entry.game_version_len,
+                64,
+                "invalid catalog game version",
+            )?
+        },
+        abi_version: entry.abi_version,
+        state_version: entry.state_version,
+        wasm_length: entry.wasm_length,
+        wasm_sha256: fixed_hash,
+        signing_key_id: unsafe {
+            input_string(
+                entry.signing_key_id,
+                entry.signing_key_id_len,
+                64,
+                "invalid catalog signing key id",
+            )?
+        },
+        signature: fixed_signature,
+    })
+}
+
 unsafe fn copy_bytes(
     bytes: &[u8],
     output: *mut u8,
@@ -123,7 +255,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    1 << 16
+    (1 << 16) | 1
 }
 
 #[unsafe(no_mangle)]
@@ -150,9 +282,188 @@ pub unsafe extern "C" fn tinyarcade_v1_default_config(config: *mut TinyArcadeCon
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_trust_store_create(
+    output: *mut *mut TinyArcadeTrustStoreV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null trust store output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let trust = Box::new(TinyArcadeTrustStoreV1 {
+            owner: thread::current().id(),
+            store: CartridgeTrustStore::new(),
+        });
+        unsafe { output.write(Box::into_raw(trust)) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_trust_store_close(
+    trust: *mut TinyArcadeTrustStoreV1,
+) -> i32 {
+    boundary(|| {
+        unsafe { trust_mut(trust)? };
+        drop(unsafe { Box::from_raw(trust) });
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_trust_store_add_key(
+    trust: *mut TinyArcadeTrustStoreV1,
+    key_id: *const u8,
+    key_id_len: usize,
+    public_key: *const u8,
+    public_key_len: usize,
+) -> i32 {
+    boundary(|| {
+        let trust = unsafe { trust_mut(trust)? };
+        let key_id = unsafe { input_string(key_id, key_id_len, 64, "invalid trust key id")? };
+        if public_key_len != 32 {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid trust public key",
+            ));
+        }
+        let public_key =
+            unsafe { input_bytes(public_key, public_key_len, "invalid trust public key")? };
+        trust
+            .store
+            .add_key(&key_id, public_key)
+            .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_trust_store_revoke_key(
+    trust: *mut TinyArcadeTrustStoreV1,
+    key_id: *const u8,
+    key_id_len: usize,
+) -> i32 {
+    boundary(|| {
+        let trust = unsafe { trust_mut(trust)? };
+        let key_id = unsafe { input_string(key_id, key_id_len, 64, "invalid trust key id")? };
+        trust
+            .store
+            .revoke_key(&key_id)
+            .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_trust_store_revoke_content(
+    trust: *mut TinyArcadeTrustStoreV1,
+    sha256: *const u8,
+    sha256_len: usize,
+) -> i32 {
+    boundary(|| {
+        let trust = unsafe { trust_mut(trust)? };
+        if sha256_len != 32 {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid revoked content hash",
+            ));
+        }
+        let bytes = unsafe { input_bytes(sha256, sha256_len, "invalid revoked content hash")? };
+        let mut fixed = [0; 32];
+        fixed.copy_from_slice(bytes);
+        trust.store.revoke_content(fixed);
+        Ok(())
+    })
+}
+
+unsafe fn open_runtime(
+    wasm: *const u8,
+    wasm_len: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+    create: impl FnOnce(&[u8], Limits, GameLimits, u32) -> Result<GameRuntime, FfiError>,
+) -> Result<(), FfiError> {
+    if output.is_null() {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "null runtime output",
+        ));
+    }
+    unsafe { output.write(ptr::null_mut()) };
+    let config =
+        unsafe { config.as_ref() }.ok_or(FfiError::new(STATUS_INVALID_ARGUMENT, "null config"))?;
+    if config.struct_size < size_of::<TinyArcadeConfigV1>() as u32
+        || wasm.is_null()
+        || wasm_len == 0
+        || config.max_table_elems == 0
+        || config.max_memory_pages == 0
+        || config.max_steps == 0
+    {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid runtime configuration",
+        ));
+    }
+    let bytes = unsafe { slice::from_raw_parts(wasm, wasm_len) };
+    let runtime = create(
+        bytes,
+        Limits {
+            max_table_elems: config.max_table_elems as usize,
+            max_memory_pages: config.max_memory_pages as usize,
+            max_steps: config.max_steps,
+        },
+        GameLimits {
+            max_render_bytes: config.max_render_bytes as usize,
+            max_audio_bytes: config.max_audio_bytes as usize,
+            max_state_bytes: config.max_state_bytes as usize,
+        },
+        config.rng_seed,
+    )?;
+    let handle = Box::new(TinyArcadeRuntimeV1 {
+        owner: thread::current().id(),
+        runtime,
+        frame: None,
+        snapshot: Vec::new(),
+    });
+    unsafe { output.write(Box::into_raw(handle)) };
+    Ok(())
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn tinyarcade_v1_open(
     wasm: *const u8,
     wasm_len: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+) -> i32 {
+    boundary(|| unsafe {
+        open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
+            GameRuntime::from_bytes(bytes, vm, game, seed).map_err(wasm_error)
+        })
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_open_private(
+    wasm: *const u8,
+    wasm_len: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+) -> i32 {
+    boundary(|| unsafe {
+        open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
+            GameRuntime::from_private_bytes(bytes, vm, game, seed).map_err(wasm_error)
+        })
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_open_reviewed(
+    wasm: *const u8,
+    wasm_len: usize,
+    entry: *const TinyArcadeCatalogEntryV1,
+    trust: *mut TinyArcadeTrustStoreV1,
     config: *const TinyArcadeConfigV1,
     output: *mut *mut TinyArcadeRuntimeV1,
 ) -> i32 {
@@ -164,44 +475,14 @@ pub unsafe extern "C" fn tinyarcade_v1_open(
             ));
         }
         unsafe { output.write(ptr::null_mut()) };
-        let config = unsafe { config.as_ref() }
-            .ok_or(FfiError::new(STATUS_INVALID_ARGUMENT, "null config"))?;
-        if config.struct_size < size_of::<TinyArcadeConfigV1>() as u32
-            || wasm.is_null()
-            || wasm_len == 0
-            || config.max_table_elems == 0
-            || config.max_memory_pages == 0
-            || config.max_steps == 0
-        {
-            return Err(FfiError::new(
-                STATUS_INVALID_ARGUMENT,
-                "invalid runtime configuration",
-            ));
+        let entry = unsafe { catalog_entry(entry)? };
+        let trust = unsafe { trust_mut(trust)? };
+        unsafe {
+            open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
+                GameRuntime::from_reviewed_bytes(bytes, &entry, &trust.store, vm, game, seed)
+                    .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+            })
         }
-        let bytes = unsafe { slice::from_raw_parts(wasm, wasm_len) };
-        let runtime = GameRuntime::from_bytes(
-            bytes,
-            Limits {
-                max_table_elems: config.max_table_elems as usize,
-                max_memory_pages: config.max_memory_pages as usize,
-                max_steps: config.max_steps,
-            },
-            GameLimits {
-                max_render_bytes: config.max_render_bytes as usize,
-                max_audio_bytes: config.max_audio_bytes as usize,
-                max_state_bytes: config.max_state_bytes as usize,
-            },
-            config.rng_seed,
-        )
-        .map_err(wasm_error)?;
-        let handle = Box::new(TinyArcadeRuntimeV1 {
-            owner: thread::current().id(),
-            runtime,
-            frame: None,
-            snapshot: Vec::new(),
-        });
-        unsafe { output.write(Box::into_raw(handle)) };
-        Ok(())
     })
 }
 
@@ -376,6 +657,24 @@ pub unsafe extern "C" fn tinyarcade_v1_is_failed(
     })
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_origin(
+    runtime: *mut TinyArcadeRuntimeV1,
+    output: *mut u32,
+) -> i32 {
+    boundary(|| {
+        let runtime = unsafe { runtime_mut(runtime)? };
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null cartridge origin output",
+            ));
+        }
+        unsafe { output.write(runtime.runtime.origin() as u32) };
+        Ok(())
+    })
+}
+
 /// Copy the last error for the calling thread. This call intentionally does
 /// not clear the error before reading it.
 #[unsafe(no_mangle)]
@@ -397,6 +696,8 @@ pub unsafe extern "C" fn tinyarcade_v1_last_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CartridgeOrigin, cartridge_sha256};
+    use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::mem::MaybeUninit;
 
     fn leb(output: &mut Vec<u8>, mut value: usize) {
@@ -514,7 +815,13 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), 1 << 16);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 1);
+        let mut origin = u32::MAX;
+        assert_eq!(
+            unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
+            STATUS_OK
+        );
+        assert_eq!(origin, CartridgeOrigin::Bundled as u32);
         assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 16) }, STATUS_OK);
 
         let mut required = 0usize;
@@ -582,6 +889,122 @@ mod tests {
         );
         assert_eq!(unsafe { tinyarcade_v1_close(restored) }, STATUS_OK);
         assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+
+        let config = unsafe { config() };
+        let mut private = ptr::null_mut();
+        assert_eq!(
+            unsafe { tinyarcade_v1_open_private(wasm.as_ptr(), wasm.len(), &config, &mut private) },
+            STATUS_OK
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_origin(private, &mut origin) },
+            STATUS_OK
+        );
+        assert_eq!(origin, CartridgeOrigin::PrivateUser as u32);
+        assert_eq!(unsafe { tinyarcade_v1_close(private) }, STATUS_OK);
+    }
+
+    #[test]
+    fn c_reviewed_open_binds_signature_revocation_and_origin() {
+        let wasm = cartridge();
+        let key_id = b"ios-test-key";
+        let key_pair = Ed25519KeyPair::from_seed_unchecked(&[0x6c; 32]).expect("signing key");
+        let mut entry = CatalogEntry {
+            game_id: "c.test".into(),
+            game_version: "1.0.0".into(),
+            abi_version: 1,
+            state_version: 1,
+            wasm_length: wasm.len() as u64,
+            wasm_sha256: cartridge_sha256(&wasm),
+            signing_key_id: "ios-test-key".into(),
+            signature: [0; 64],
+        };
+        let signing = entry.signing_bytes().expect("catalog signing bytes");
+        entry
+            .signature
+            .copy_from_slice(key_pair.sign(&signing).as_ref());
+        let c_entry = TinyArcadeCatalogEntryV1 {
+            struct_size: size_of::<TinyArcadeCatalogEntryV1>() as u32,
+            game_id: entry.game_id.as_ptr(),
+            game_id_len: entry.game_id.len(),
+            game_version: entry.game_version.as_ptr(),
+            game_version_len: entry.game_version.len(),
+            abi_version: entry.abi_version,
+            state_version: entry.state_version,
+            wasm_length: entry.wasm_length,
+            wasm_sha256: entry.wasm_sha256.as_ptr(),
+            wasm_sha256_len: entry.wasm_sha256.len(),
+            signing_key_id: entry.signing_key_id.as_ptr(),
+            signing_key_id_len: entry.signing_key_id.len(),
+            signature: entry.signature.as_ptr(),
+            signature_len: entry.signature.len(),
+        };
+        let mut trust = ptr::null_mut();
+        assert_eq!(
+            unsafe { tinyarcade_v1_trust_store_create(&mut trust) },
+            STATUS_OK
+        );
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_trust_store_add_key(
+                    trust,
+                    key_id.as_ptr(),
+                    key_id.len(),
+                    key_pair.public_key().as_ref().as_ptr(),
+                    key_pair.public_key().as_ref().len(),
+                )
+            },
+            STATUS_OK
+        );
+        let config = unsafe { config() };
+        let mut runtime = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_reviewed(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &c_entry,
+                    trust,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_OK
+        );
+        let mut origin = u32::MAX;
+        assert_eq!(
+            unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
+            STATUS_OK
+        );
+        assert_eq!(origin, CartridgeOrigin::OfficialReviewed as u32);
+        assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_trust_store_revoke_content(
+                    trust,
+                    entry.wasm_sha256.as_ptr(),
+                    entry.wasm_sha256.len(),
+                )
+            },
+            STATUS_OK
+        );
+        runtime = ptr::dangling_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_reviewed(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &c_entry,
+                    trust,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_TRUST
+        );
+        assert!(runtime.is_null());
+        assert_eq!(unsafe { tinyarcade_v1_trust_store_close(trust) }, STATUS_OK);
     }
 
     #[test]
@@ -600,6 +1023,38 @@ mod tests {
             STATUS_BUFFER_TOO_SMALL
         );
         assert!(len > 0);
+
+        let invalid_entry = TinyArcadeCatalogEntryV1 {
+            struct_size: 0,
+            game_id: ptr::null(),
+            game_id_len: 0,
+            game_version: ptr::null(),
+            game_version_len: 0,
+            abi_version: 0,
+            state_version: 0,
+            wasm_length: 0,
+            wasm_sha256: ptr::null(),
+            wasm_sha256_len: 0,
+            signing_key_id: ptr::null(),
+            signing_key_id_len: 0,
+            signature: ptr::null(),
+            signature_len: 0,
+        };
+        runtime = ptr::dangling_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_reviewed(
+                    bad.as_ptr(),
+                    bad.len(),
+                    &invalid_entry,
+                    ptr::null_mut(),
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert!(runtime.is_null());
     }
 
     #[test]
@@ -610,7 +1065,14 @@ mod tests {
         for symbol in [
             "tinyarcade_v1_abi_version",
             "tinyarcade_v1_default_config",
+            "tinyarcade_v1_trust_store_create",
+            "tinyarcade_v1_trust_store_close",
+            "tinyarcade_v1_trust_store_add_key",
+            "tinyarcade_v1_trust_store_revoke_key",
+            "tinyarcade_v1_trust_store_revoke_content",
             "tinyarcade_v1_open",
+            "tinyarcade_v1_open_private",
+            "tinyarcade_v1_open_reviewed",
             "tinyarcade_v1_close",
             "tinyarcade_v1_tick",
             "tinyarcade_v1_copy_render",
@@ -621,6 +1083,7 @@ mod tests {
             "tinyarcade_v1_copy_game_id",
             "tinyarcade_v1_copy_game_version",
             "tinyarcade_v1_is_failed",
+            "tinyarcade_v1_origin",
             "tinyarcade_v1_last_error",
         ] {
             assert!(

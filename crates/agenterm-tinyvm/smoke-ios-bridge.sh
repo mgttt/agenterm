@@ -24,6 +24,7 @@ xcrun --sdk iphonesimulator swiftc \
   -I "$SLICE/Headers" \
   -L "$SLICE" \
   -lagenterm_tinyvm \
+  -Xlinker -fatal_warnings \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
   "$CRATE/tests/ios/TinyArcadeSmoke.swift" \
   -o "$TEMP/TinyArcadeSmoke"
@@ -35,5 +36,11 @@ test -f "$XCFRAMEWORK/ios-arm64/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64-simulator/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64/Headers/tinyarcade.h"
 test -f "$XCFRAMEWORK/ios-arm64-simulator/Headers/module.modulemap"
+
+if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
+  CARTRIDGE="$TEMP/depth-well-0.1.0.wasm"
+  "$CRATE/build-depth-well-cartridge.sh" "$CARTRIDGE" >/dev/null
+  xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke" "$CARTRIDGE"
+fi
 
 echo "OK: iOS device + simulator XCFramework; Swift simulator link ${LINKED_BYTES} bytes"

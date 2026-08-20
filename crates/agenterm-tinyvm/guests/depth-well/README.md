@@ -10,6 +10,13 @@ Build from the repository root:
 crates/agenterm-tinyvm/build-depth-well-cartridge.sh
 ```
 
+Validate the finished artifact exactly as a fan converter would:
+
+```sh
+cargo run -p agenterm-tinyvm --bin tinyvm -- \
+  cartridge check target/tinyvm-depth-well/depth-well-0.1.0.wasm
+```
+
 The pinned Rust compiler emits the guest, then Binaryen lowers compiler-added
 `memory.copy`/`memory.fill` operations to strict WebAssembly MVP. Install
 Binaryen so `wasm-opt` is available, or set `WASM_OPT` to its executable.

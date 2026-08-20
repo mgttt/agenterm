@@ -17,5 +17,5 @@ tempfile = "3.25"
 [features]
 staticcore = []
 std = []
-ios-c-api = ["std"]
+ios-c-api = ["cartridge-trust"]
 cartridge-trust = ["std", "dep:ring"]

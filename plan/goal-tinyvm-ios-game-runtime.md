@@ -23,37 +23,37 @@ tinyvm iOS game runtime
 │   ├── version negotiation           [x]
 │   ├── lifecycle init/tick/suspend   [x]
 │   ├── input snapshot                [x]
-│   ├── bounded render commands       [~]
-│   ├── bounded audio commands        [~]
+│   ├── bounded render commands       [x]
+│   ├── bounded audio commands        [x]
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [~]
 │   └── storage without guest network [~]
-├── artifact trust                    [~]
+├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
 │   ├── content hash/signature        [x]
 │   ├── atomic cache/rollback         [x]
-│   └── reviewed catalog only         [ ]
-├── cartridge ownership              [ ]
-│   ├── official reviewed catalog     [ ]
-│   ├── private user import           [ ]
-│   ├── converter conformance kit     [~]
-│   └── no public arbitrary execution [ ]
+│   └── reviewed catalog only         [x]
+├── cartridge ownership              [~]
+│   ├── official reviewed catalog     [~]
+│   ├── private user import           [x]
+│   ├── converter conformance kit     [x]
+│   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
 │   ├── stable C lifecycle ABI        [x]
 │   ├── static library/XCFramework   [x]
 │   ├── Swift ownership/threading     [x]
 │   ├── device + simulator build      [x]
 │   └── on-device lifecycle test      [ ]
-├── real-game proof                   [ ]
+├── real-game proof                   [~]
 │   ├── constrained compiler profile  [x]
 │   ├── Depth Well WASM vertical cut  [x]
 │   ├── frame-time/resource evidence  [~]
 │   └── suspend/resume/save evidence  [x]
 └── distribution gate                 [ ]
-    ├── fixed app purpose/offline game [ ]
+    ├── fixed app purpose/offline game [~]
     ├── catalog metadata/deep links   [ ]
-    ├── review clarification/probe    [ ]
-    └── fail closed on revoked content [ ]
+    ├── review clarification/probe    [~]
+    └── fail closed on revoked content [x]
 ```
 
 ## Dependency path
@@ -254,3 +254,44 @@ Evidence on 2026-08-21:
   generation prevents reactivation.
 - Trust/cache code builds for arm64 iOS device and simulator; the no-feature
   static interpreter core remains independent of the crypto dependency.
+
+## Seventh executable increment — explicit origin and iOS execution
+
+Bundled, official-reviewed and private-user cartridges now have distinct Rust,
+C ABI v1.1 and Swift opens. Origin is immutable and queryable. Reviewed opening
+requires the live signature/revocation store; private opening always uses an
+empty native capability registry and cannot be relabelled as official.
+
+Swift now strictly decodes the versioned 3D frame and tone records before
+native consumers see cells/events. The public converter CLI inspects canonical
+metadata and checks a cartridge through the same private policy, lifecycle
+budgets, media validation and byte-deterministic suspend/resume replay.
+
+Evidence on 2026-08-21:
+
+- C black-box tests prove all three origins, signed reviewed open, live content
+  revocation and source query.
+- `tinyvm cartridge check` accepts the real 6,076-byte Depth Well artifact and
+  reports its bounded frame and 335-byte snapshot.
+- A linked 760,656-byte iOS Simulator executable loads Depth Well through the
+  Swift private-import API, decodes its frame, suspends/resumes and hard-drops.
+- On the booted iPhone 17 Pro simulator, 600 complete tick/copy/decode frames
+  measured 0.102 ms average, 0.113 ms p95 and 0.202 ms maximum.
+- iOS 14 deployment is pinned for Rust and Ring objects, and linker warnings
+  are fatal.
+
+## Eighth executable increment — honest App Review boundary
+
+Current Apple policy was rechecked against the official guidelines dated
+2026-06-08. Guideline 2.5.2 generally rejects downloaded/executed code that
+changes app functionality. Guideline 4.7 names HTML5/JavaScript mini games,
+streaming games, chatbots, plug-ins and retro-emulator game downloads, but does
+not expressly name a custom WASM platform; Apple's Mini Apps Partner material
+requires approval for another language.
+
+Therefore the initial App Store product gate is a self-contained, fixed-purpose
+Depth Well build with its cartridge inside the signed app bundle. Remote
+catalog execution and Files/private import remain technical SDK capabilities,
+not enabled shipping features, until Apple explicitly clarifies or permits the
+use case. This is recorded in
+[`docs/tinyarcade-app-review-boundary.md`](../docs/tinyarcade-app-review-boundary.md).

@@ -10,9 +10,22 @@ use crate::{CartridgeManifest, Limits, Val, WasmError, WasmInstance, WasmModule}
 
 /// Guest/host contract implemented by this module.
 pub const GAME_ABI_VERSION: i32 = 1;
+pub const MAX_CARTRIDGE_BYTES: usize = 2 * 1024 * 1024;
 const ABI_MODULE: &str = "tinyarcade:core/v1";
 const SNAPSHOT_MAGIC: &[u8; 4] = b"TGS1";
 type NativeImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
+
+/// Immutable policy surface that admitted a cartridge instance.
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CartridgeOrigin {
+    /// Shipped inside the signed app bundle.
+    Bundled = 0,
+    /// Exact bytes accepted by the reviewed signed-catalog trust gate.
+    OfficialReviewed = 1,
+    /// User-selected local import, never catalog publication authority.
+    PrivateUser = 2,
+}
 
 /// Stable v1 bits returned by the `input_bits` core import.
 pub mod button {
@@ -185,22 +198,63 @@ pub struct GameRuntime {
     instance: WasmInstance,
     host: Rc<RefCell<HostState>>,
     manifest: CartridgeManifest,
+    origin: CartridgeOrigin,
     failed: bool,
 }
 
 impl GameRuntime {
-    /// Validate, bind, instantiate and initialise a reviewed WASM game.
+    /// Validate, bind, instantiate and initialise a bundled WASM game.
     pub fn from_bytes(
         wasm: &[u8],
         vm_limits: Limits,
         game_limits: GameLimits,
         rng_seed: u32,
     ) -> Result<Self, WasmError> {
-        Self::from_bytes_with_registry(
+        Self::from_bytes_with_origin_and_registry(
             wasm,
             vm_limits,
             game_limits,
             rng_seed,
+            CartridgeOrigin::Bundled,
+            &NativeModuleRegistry::new(),
+        )
+    }
+
+    /// Load a user-selected local cartridge with only the standard core ABI.
+    /// This path cannot grant native-module imports or official catalog status.
+    pub fn from_private_bytes(
+        wasm: &[u8],
+        vm_limits: Limits,
+        game_limits: GameLimits,
+        rng_seed: u32,
+    ) -> Result<Self, WasmError> {
+        Self::from_bytes_with_origin_and_registry(
+            wasm,
+            vm_limits,
+            game_limits,
+            rng_seed,
+            CartridgeOrigin::PrivateUser,
+            &NativeModuleRegistry::new(),
+        )
+    }
+
+    /// Load exact bytes admitted by a signed reviewed catalog record.
+    #[cfg(feature = "cartridge-trust")]
+    pub fn from_reviewed_bytes(
+        wasm: &[u8],
+        entry: &crate::CatalogEntry,
+        trust: &crate::CartridgeTrustStore,
+        vm_limits: Limits,
+        game_limits: GameLimits,
+        rng_seed: u32,
+    ) -> Result<Self, WasmError> {
+        trust.verify(entry, wasm)?;
+        Self::from_bytes_with_origin_and_registry(
+            wasm,
+            vm_limits,
+            game_limits,
+            rng_seed,
+            CartridgeOrigin::OfficialReviewed,
             &NativeModuleRegistry::new(),
         )
     }
@@ -213,6 +267,27 @@ impl GameRuntime {
         rng_seed: u32,
         registry: &NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
+        Self::from_bytes_with_origin_and_registry(
+            wasm,
+            vm_limits,
+            game_limits,
+            rng_seed,
+            CartridgeOrigin::Bundled,
+            registry,
+        )
+    }
+
+    fn from_bytes_with_origin_and_registry(
+        wasm: &[u8],
+        vm_limits: Limits,
+        game_limits: GameLimits,
+        rng_seed: u32,
+        origin: CartridgeOrigin,
+        registry: &NativeModuleRegistry,
+    ) -> Result<Self, WasmError> {
+        if wasm.is_empty() || wasm.len() > MAX_CARTRIDGE_BYTES {
+            return Err(WasmError::Decode("game cartridge size limit"));
+        }
         let manifest = CartridgeManifest::from_wasm(wasm)?;
         if manifest.abi_version != GAME_ABI_VERSION as u32 {
             return Err(WasmError::Trap("unsupported game ABI version"));
@@ -250,6 +325,7 @@ impl GameRuntime {
             instance,
             host,
             manifest,
+            origin,
             failed: false,
         };
 
@@ -335,6 +411,10 @@ impl GameRuntime {
 
     pub fn manifest(&self) -> &CartridgeManifest {
         &self.manifest
+    }
+
+    pub fn origin(&self) -> CartridgeOrigin {
+        self.origin
     }
 
     pub fn is_failed(&self) -> bool {

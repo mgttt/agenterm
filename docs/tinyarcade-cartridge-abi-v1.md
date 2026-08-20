@@ -4,6 +4,9 @@ This document is the converter-facing contract for a TinyArcade cartridge.
 A cartridge is an ordinary WebAssembly 1.0 binary module. It has the standard
 `.wasm` magic/version, standard sections and standard function imports/exports.
 There are no tinyvm-only opcodes and no executable wrapper format.
+The v1 runtime rejects an empty cartridge or any whole module above 2 MiB
+before manifest/WASM parsing; transports should enforce the same ceiling while
+downloading rather than use the runtime as a network buffer.
 
 ## Required manifest custom section
 

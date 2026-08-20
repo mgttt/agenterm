@@ -48,7 +48,8 @@ pub use cartridge::CartridgeManifest;
 
 pub mod game;
 pub use game::{
-    GAME_ABI_VERSION, GameFrame, GameInput, GameLimits, GameRuntime, NativeModuleRegistry,
+    CartridgeOrigin, GAME_ABI_VERSION, GameFrame, GameInput, GameLimits, GameRuntime,
+    MAX_CARTRIDGE_BYTES, NativeModuleRegistry,
 };
 
 pub mod media;

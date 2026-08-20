@@ -29,7 +29,14 @@ the workspace's abort profile would silently remove that guarantee.
 
 ## Ownership
 
-`tinyarcade_v1_open` creates one opaque handle. The WASM bytes and config are
+ABI v1.1 exposes three non-interchangeable opens: bundled
+`tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
+`tinyarcade_v1_open_private`. Every instance retains its immutable origin for
+UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
+private opening has no native capability registry and cannot acquire official
+provenance.
+
+An open call creates one opaque handle. The WASM bytes and config are
 copied/consumed during the call; caller pointers are not retained. The handle
 must be ticked, suspended, resumed, queried and closed on its creating thread.
 Wrong-thread calls return `TINYARCADE_WRONG_THREAD` without touching instance
@@ -49,7 +56,9 @@ NUL-terminated or retained in caller memory.
 Every failing call records a static diagnostic in thread-local state. Read it
 immediately with `tinyarcade_v1_last_error`; the next ordinary bridge call
 clears it. Decode failure, guest trap, failed-instance latch, wrong-thread use,
-buffer sizing and caught panic have distinct stable status values.
+buffer sizing, trust failure and caught panic have distinct stable status
+values. The Swift frame owner validates `grid3d/v1` and `tones/v1` completely
+before exposing decoded cells or tone events to native rendering/audio code.
 
 ## Current evidence boundary
 
@@ -61,8 +70,15 @@ The optimized linked smoke executable must remain at or below 1 MiB; this
 measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size.
 
-Rust black-box tests drive the C handle through open, tick, frame copy,
+The builder pins iOS 14.0 as the deployment target for Rust and Ring C/assembly
+objects; the Swift link treats linker warnings as errors. With
+`TINYARCADE_RUN_BOOTED_SIMULATOR=1`, the smoke additionally compiles Depth Well,
+runs the linked executable in an already-booted iOS Simulator, opens it through
+the private origin, decodes its first frame, suspends/resumes and hard-drops.
+
+Rust black-box tests drive the C handle through bundled/private/reviewed open,
+signature and revocation, origin query, tick, frame copy,
 suspend, snapshot copy, fresh-instance resume, error retrieval, cross-thread
 rejection and close. This is build/link/lifecycle evidence, not yet a physical
-iPhone launch or frame-time measurement; those remain part of the Depth Well
-vertical cut.
+iPhone launch or frame-time measurement; those remain open physical-device
+evidence.

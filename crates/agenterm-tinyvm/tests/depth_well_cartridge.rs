@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use agenterm_tinyvm::{
-    GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, WasmError,
+    CartridgeOrigin, GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, WasmError,
 };
 
 #[cfg(feature = "cartridge-trust")]
@@ -62,6 +62,7 @@ fn standard_depth_well_plays_and_restores_deterministically() {
     let wasm = build_cartridge();
     assert!(wasm.len() < 16 * 1024, "cartridge grew unexpectedly");
     let mut first = runtime(&wasm);
+    assert!(matches!(first.origin(), CartridgeOrigin::Bundled));
     assert_eq!(first.manifest().game_id, "com.partnernet.depth-well");
     assert_eq!(first.manifest().game_version, "0.1.0");
     assert!(first.manifest().capabilities.is_empty());
@@ -187,6 +188,27 @@ fn standard_depth_well_plays_and_restores_deterministically() {
     assert_eq!(clear_tone.kind, 2);
 }
 
+#[test]
+fn converter_cli_accepts_the_real_depth_well_cartridge() {
+    let wasm = build_cartridge();
+    let directory = tempfile::tempdir().expect("temporary converter fixture");
+    let path = directory.path().join("depth-well.wasm");
+    std::fs::write(&path, wasm).expect("write converter fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(path)
+        .output()
+        .expect("run converter conformance command");
+    assert!(
+        output.status.success(),
+        "converter failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("converter UTF-8 output");
+    assert!(stdout.contains("game_id=com.partnernet.depth-well"));
+    assert!(stdout.contains("OK: private-import converter conformance v1"));
+}
+
 #[cfg(feature = "cartridge-trust")]
 #[test]
 fn reviewed_depth_well_requires_exact_signed_bytes_and_honours_revocation() {
@@ -214,6 +236,25 @@ fn reviewed_depth_well_requires_exact_signed_bytes_and_honours_revocation() {
     );
     let manifest = must_ok(trust.verify(&entry, &wasm), "verify reviewed cartridge");
     assert_eq!(manifest.game_id, entry.game_id);
+    let reviewed = must_ok(
+        GameRuntime::from_reviewed_bytes(
+            &wasm,
+            &entry,
+            &trust,
+            Limits {
+                max_table_elems: 64,
+                max_memory_pages: 17,
+                max_steps: 100_000,
+            },
+            GameLimits::default(),
+            7,
+        ),
+        "open reviewed runtime",
+    );
+    assert!(matches!(
+        reviewed.origin(),
+        CartridgeOrigin::OfficialReviewed
+    ));
 
     let mut changed = wasm.clone();
     let last = changed.len() - 1;

@@ -4,10 +4,20 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    GameInput, GameLimits, GameRuntime, Limits, NativeModuleRegistry, WasmError,
+    GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES, NativeModuleRegistry,
+    WasmError,
 };
 
 const CORE: &str = "tinyarcade:core/v1";
+
+#[test]
+fn whole_cartridge_size_is_bounded_before_wasm_parsing() {
+    let oversized = vec![0; MAX_CARTRIDGE_BYTES + 1];
+    assert!(matches!(
+        GameRuntime::from_private_bytes(&oversized, Limits::default(), GameLimits::default(), 1,),
+        Err(WasmError::Decode("game cartridge size limit"))
+    ));
+}
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
