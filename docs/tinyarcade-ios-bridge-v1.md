@@ -49,6 +49,16 @@ non-200/MIME mismatches, checks declared and received lengths, propagates Task
 cancellation, and bounds both active and queued requests. It still exposes no
 network import to WASM and never opens or activates content implicitly.
 
+`TinyArcadeReviewedLibraryV1` composes those primitives into one main-actor
+installation transaction. It fetches the selected bytes, opens a reviewed
+runtime under the live signature/revocation store and native registry as a
+preflight, and only then activates the verified cache generation. Thus a
+signature-valid cartridge that this app cannot instantiate cannot replace the
+last playable active object. Only one install may cross the network `await` at
+a time; a second receives `operationInProgress`. Cancellation before activation
+leaves selection unchanged, while `openActive` re-verifies current trust before
+opening the exact cached bytes.
+
 ## Ownership
 
 ABI v1.4 exposes three non-interchangeable origins: bundled

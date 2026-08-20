@@ -42,6 +42,12 @@ smaller bounded limits. Task cancellation stops in-flight work or removes a
 queued waiter. The returned cartridge `Data` must still be passed explicitly to
 `TinyArcadeCartridgeCacheV1.activate`; transport success grants no provenance.
 
+Use `TinyArcadeReviewedLibraryV1` for the complete official selection path. It
+preflights downloaded bytes as a reviewed runtime before cache activation,
+serializes installs across `await`, and reopens an active generation only after
+live trust/revocation verification. This preserves the last playable cache
+state when a signed cartridge needs native capabilities absent from the app.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

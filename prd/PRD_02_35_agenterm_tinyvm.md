@@ -127,6 +127,14 @@ key 绑定精确长度和 SHA-256。输出先写同级 staging directory，逐�
 粉丝转换器无需依赖 tinyvm 私有 opcode；官方上架则仍要求 app 预先审核并注册对应
 native module。该工具不负责上传，真实站点与审核许可仍为 partial。
 
+App 侧不再需要自行猜测 reviewed 安装顺序。`TinyArcadeReviewedLibraryV1` 把
+catalog selection、受限 HTTPS、当前 trust/revocation、runtime/native capability
+预检和 verified cache 组成一个 main-actor transaction：只有卡带已经成功以
+`officialReviewed` 打开后才激活缓存。网络取消、并发选择、缺失 native module、
+不兼容资源上限、篡改或撤销都不能把不可玩的对象变成 active；缓存重开仍按当前
+trust 再验证。模拟器已用真实签名 Paddle Guard 证明完整路径，物理设备与真实站点
+仍未完成。
+
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
 function，用 160×120 indexed frame、通用 input bits、impact/success/failure

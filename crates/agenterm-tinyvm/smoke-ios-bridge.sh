@@ -41,6 +41,19 @@ xcrun --sdk iphonesimulator swiftc \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
   "$CRATE/tests/ios/TinyArcadeSmoke.swift" \
   -o "$TEMP/TinyArcadeSmoke-x86_64"
+xcrun --sdk iphonesimulator swiftc \
+  -parse-as-library \
+  -warnings-as-errors \
+  -O \
+  -target arm64-apple-ios14.0-simulator \
+  -I "$SLICE/Headers" \
+  -L "$SLICE" \
+  -lagenterm_tinyvm \
+  -framework CryptoKit \
+  -Xlinker -fatal_warnings \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
+  "$CRATE/tests/ios/TinyArcadeReviewedFlowSmoke.swift" \
+  -o "$TEMP/TinyArcadeReviewedFlowSmoke-arm64"
 
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-arm64" | grep -q 'platform IOSSIMULATOR'
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-x86_64" | grep -q 'platform IOSSIMULATOR'
@@ -77,6 +90,8 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
   "$CRATE/build-paddle-guard-cartridge.sh" "$PADDLE_CARTRIDGE" >/dev/null
   xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
     "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
+  xcrun simctl spawn booted "$TEMP/TinyArcadeReviewedFlowSmoke-arm64" \
+    "$PADDLE_CARTRIDGE"
 fi
 
 echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} bytes"

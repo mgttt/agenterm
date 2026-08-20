@@ -1504,6 +1504,94 @@ public final class TinyArcadeCartridgeCacheV1 {
     }
 }
 
+public enum TinyArcadeReviewedLibraryError: Error, Equatable {
+    case operationInProgress
+}
+
+/// Main-actor transaction that turns one reviewed catalog selection into a
+/// ready runtime and only then makes it the cache's active generation.
+///
+/// The runtime preflight deliberately precedes cache activation. A cartridge
+/// with a valid signature but unavailable native imports therefore cannot
+/// replace the last playable active generation. Actor reentrancy across the
+/// network await is closed with one explicit in-flight transaction.
+@MainActor
+public final class TinyArcadeReviewedLibraryV1 {
+    private let transport: TinyArcadeHTTPSClientV1
+    private let cache: TinyArcadeCartridgeCacheV1
+    private let trustStore: TinyArcadeTrustStoreV1
+    private var installing = false
+
+    public init(
+        transport: TinyArcadeHTTPSClientV1,
+        cache: TinyArcadeCartridgeCacheV1,
+        trustStore: TinyArcadeTrustStoreV1
+    ) {
+        self.transport = transport
+        self.cache = cache
+        self.trustStore = trustStore
+    }
+
+    public func fetchCatalog(
+        at catalogURL: URL,
+        cartridgeBaseURL: URL,
+        maximumCartridgeBytes: UInt64 = 8 * 1_024 * 1_024
+    ) async throws -> TinyArcadeCatalogV1 {
+        try await transport.fetchCatalog(
+            at: catalogURL,
+            cartridgeBaseURL: cartridgeBaseURL,
+            maximumCartridgeBytes: maximumCartridgeBytes
+        )
+    }
+
+    public func installAndOpen(
+        _ game: TinyArcadeCatalogGameV1,
+        nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        configure: (inout tinyarcade_config_v1) -> Void = { _ in }
+    ) async throws -> TinyArcadeRuntimeV1 {
+        guard !installing else { throw TinyArcadeReviewedLibraryError.operationInProgress }
+        installing = true
+        defer { installing = false }
+
+        let cartridge = try await transport.fetchCartridge(game)
+        try Task.checkCancellation()
+        let runtime = try TinyArcadeRuntimeV1(
+            reviewedCartridge: cartridge,
+            entry: game.entry,
+            trustStore: trustStore,
+            nativeFunctions: nativeFunctions,
+            configure: configure
+        )
+        do {
+            try Task.checkCancellation()
+            try cache.activate(
+                entry: game.entry,
+                cartridge: cartridge,
+                trustStore: trustStore
+            )
+            return runtime
+        } catch {
+            try? runtime.close()
+            throw error
+        }
+    }
+
+    public func openActive(
+        _ game: TinyArcadeCatalogGameV1,
+        nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        configure: (inout tinyarcade_config_v1) -> Void = { _ in }
+    ) throws -> TinyArcadeRuntimeV1 {
+        let cartridge = try cache.loadActive(entry: game.entry, trustStore: trustStore)
+        return try TinyArcadeRuntimeV1(
+            reviewedCartridge: cartridge,
+            entry: game.entry,
+            trustStore: trustStore,
+            nativeFunctions: nativeFunctions,
+            configure: configure
+        )
+    }
+}
+
 /// Main-actor owner for the single-threaded C runtime handle.
 @MainActor
 public final class TinyArcadeRuntimeV1 {

@@ -2237,3 +2237,21 @@ a new private sibling directory, reject an existing destination, and promote by
 one rename only after every file succeeds. A failed build must have no visible
 release directory; deterministic ordering and serialization should make two
 independent builds byte-identical.
+
+## Preflight compatibility before activating a verified artifact
+
+Cryptographic validity does not imply that the current app can instantiate an
+artifact. A signed cartridge may require a native capability absent from this
+app version or exceed its selected runtime limits. If cache activation happens
+before runtime construction, a legitimate but unplayable update displaces the
+last playable generation.
+
+For a reviewed install transaction, fetch bounded bytes, verify/open the runtime
+with the current trust store and native registry, then atomically activate the
+same bytes. Close the preflight handle when activation fails. In an actor-based
+client, a method remains reentrant while awaiting network I/O; guard one
+in-flight installation explicitly or two user selections can commit out of
+order. Check cancellation both after download and immediately before the
+irreversible selection change. Test this boundary with a correctly signed
+artifact that fails runtime limits—not only with a bad signature—because only
+the former proves the ordering invariant.

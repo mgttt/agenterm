@@ -46,6 +46,7 @@ tinyvm iOS game runtime
 │   ├── indexed 2D presentation       [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
+│   ├── reviewed install transaction  [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [~]
 │   ├── constrained compiler profile  [x]
@@ -754,3 +755,31 @@ Evidence on 2026-08-21:
   [`docs/tinyarcade-catalog-publisher-v1.md`](../docs/tinyarcade-catalog-publisher-v1.md).
   Live hosting, Apple permission and physical-device evidence remain open, so
   official catalog ownership and the overall runtime goal remain partial.
+
+## Twenty-third executable increment — reviewed install transaction
+
+`TinyArcadeReviewedLibraryV1` closes the app-integration gap between discovery,
+transport, trust, runtime compatibility and cache activation. One main-actor
+transaction downloads the exact selected object, checks cancellation, opens it
+as an `officialReviewed` runtime with the current native registry, checks
+cancellation again, and only then activates the verified cache. If runtime
+preflight or activation fails, no new generation becomes active and any
+preflight handle is closed. A single in-flight flag closes Swift actor
+reentrancy while URLSession is awaited; parallel installation fails typed rather
+than racing two selections.
+
+Evidence on 2026-08-21:
+
+- A booted iPhone 17 Pro simulator fetches a dynamically Ed25519-signed real
+  Paddle Guard over the bounded URLProtocol transport, opens it with reviewed
+  origin, atomically activates it, renders a 160×120 frame and reopens the
+  cached generation under live trust.
+- Cancelling an in-flight cartridge request leaves no active cache record; a
+  concurrent install receives `operationInProgress`. A valid signed cartridge
+  opened with an impossible memory ceiling fails preflight and also leaves no
+  active record. Changed downloaded bytes fail trust without replacing the good
+  generation, and a later live content revocation rejects cached reopen.
+- Swift 6 warnings-as-errors builds remain clean for generic iOS device and the
+  universal simulator. The linked consumer is 1,229,256 bytes arm64 and
+  1,289,744 bytes x86_64, still below 1.25 MiB. Physical-iPhone lifecycle,
+  live-server hosting and Apple permission remain open, so the goal is partial.

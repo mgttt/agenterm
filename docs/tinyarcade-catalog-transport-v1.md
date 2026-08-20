@@ -103,7 +103,21 @@ network slot opens. Thus both bytes and request ownership are bounded.
 
 The client returns discovery or cartridge bytes only. It does not activate the
 cache, open a runtime, add authentication headers or expose network to a guest.
-The app explicitly passes a complete cartridge response into the verified cache.
+The reference composition is `TinyArcadeReviewedLibraryV1`:
+
+```text
+selected catalog row
+    → bounded same-origin HTTPS bytes
+    → reviewed runtime open/preflight under live trust + native registry
+    → verified cache activation
+    → ready officialReviewed runtime
+```
+
+This ordering prevents a correctly signed but currently uninstantiable
+cartridge from displacing a playable generation. The library serializes
+installs across Swift actor reentrancy, checks cancellation before preflight and
+activation, closes a preflight runtime if activation fails, and never treats
+HTTP success as reviewed provenance.
 
 ## Deep links
 
