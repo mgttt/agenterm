@@ -37,6 +37,7 @@ tinyvm iOS game runtime
 │   ├── official reviewed catalog     [~]
 │   ├── private user import           [x]
 │   ├── converter conformance kit     [x]
+│   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
 │   ├── stable C lifecycle ABI        [x]
@@ -722,3 +723,34 @@ Evidence on 2026-08-21:
 - Live-server TLS/status/MIME evidence, hosted signed metadata, public universal
   links, Apple permission and physical-iPhone behavior remain open. The runtime
   goal is not complete.
+
+## Twenty-second executable increment — deterministic offline publication
+
+The feature-gated `tinyvm catalog build` operator command accepts strict source
+metadata, standard `.wasm` cartridges and one raw offline Ed25519 seed. Identity,
+version and ABI/state compatibility are derived only from the embedded manifest.
+Every cartridge passes module/import validation plus init/tick/media and
+byte-deterministic suspend/resume replay before the publisher signs its exact
+length and SHA-256. The newly signed record is verified with the derived public
+key before any output can be promoted.
+
+Games are sorted by `game_id`; filenames, lowercase hashes, canonical base64 and
+JSON formatting are reproducible. The destination must not exist. Work occurs in
+a private sibling staging directory and becomes visible with one rename; failure
+removes staging. The seed must be an exact 32-byte regular file and, on Unix,
+must have no group/other permission bits. It is never emitted or logged. This
+catalog key is independent of Apple APNs credentials.
+
+Evidence on 2026-08-21:
+
+- A real compiler-produced Paddle Guard cartridge publishes twice to
+  byte-identical catalogs and objects. The generated row derives
+  `com.partnernet.paddle-guard`, version `0.1.0`, exact length/hash and a
+  decodable 64-byte signature from the cartridge rather than source metadata.
+- The black box confirms no raw seed bytes occur in the catalog and an invalid
+  source leaves no visible destination. The publisher's own trust store
+  re-verifies each signature, object hash/length and embedded manifest.
+- The source/output contract is
+  [`docs/tinyarcade-catalog-publisher-v1.md`](../docs/tinyarcade-catalog-publisher-v1.md).
+  Live hosting, Apple permission and physical-device evidence remain open, so
+  official catalog ownership and the overall runtime goal remain partial.

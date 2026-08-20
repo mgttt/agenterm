@@ -2219,3 +2219,21 @@ A state transition can leave an old prompt or overlay in the resident frame;
 a fresh resumed instance rebuilds from logical state and exposes the mismatch.
 Clear transition-owned pixels when the phase changes, then require the original
 and rebuilt instances to emit byte-identical render and audio on the next tick.
+
+## Secret-bearing artifact publishers need a one-way staging boundary
+
+Do not let a release manifest repeat executable identity or compatibility fields
+that already live inside the signed artifact. Parse them from the artifact,
+validate the same lifecycle/converter path consumers rely on, sign exact bytes,
+then immediately verify the new signature with the derived public key. This
+prevents an operator typo from relabelling a valid binary and catches signing
+format drift before publication.
+
+Keep crypto/JSON dependencies behind an operator-only feature so a `no_std`
+runtime and its static/iOS core do not inherit publishing machinery. Require an
+exact regular secret file with restrictive permissions; never accept it through
+source metadata, copy it into output, or print it. Write all public artifacts to
+a new private sibling directory, reject an existing destination, and promote by
+one rename only after every file succeeds. A failed build must have no visible
+release directory; deterministic ordering and serialization should make two
+independent builds byte-identical.

@@ -117,6 +117,16 @@ signed-entry 字段与只选中不执行的 `tinyarcade://game/<game-id>`。JSON
 真实 hosted catalog、审核澄清与物理设备仍未交付，因此 distribution 继续为
 partial。
 
+离线发布端已形成独立且可复现的
+[`tinyvm catalog build`](../docs/tinyarcade-catalog-publisher-v1.md) 契约：标准
+`.wasm` 必须先通过 manifest/import、生命周期、媒体与 suspend/resume 确定性检查，
+身份和 ABI/state 版本只从卡带内嵌 manifest 派生，再由独立的离线 Ed25519 catalog
+key 绑定精确长度和 SHA-256。输出先写同级 staging directory，逐条用派生公钥重新
+验签后才通过一次 rename 可见；已有目标不会覆盖，失败不会留下半发布目录，私钥
+不会进入产物或日志。Native 扩展继续是标准 WASM 的版本化 function import，未来
+粉丝转换器无需依赖 tinyvm 私有 opcode；官方上架则仍要求 app 预先审核并注册对应
+native module。该工具不负责上传，真实站点与审核许可仍为 partial。
+
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
 function，用 160×120 indexed frame、通用 input bits、impact/success/failure

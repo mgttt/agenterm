@@ -203,8 +203,11 @@ dependencies = [
 name = "agenterm-tinyvm"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "libm",
  "ring",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
