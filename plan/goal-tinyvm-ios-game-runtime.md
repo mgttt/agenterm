@@ -47,6 +47,7 @@ tinyvm iOS game runtime
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   ├── reviewed install transaction  [x]
+│   ├── atomic scene persistence      [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [~]
 │   ├── constrained compiler profile  [x]
@@ -783,3 +784,33 @@ Evidence on 2026-08-21:
   universal simulator. The linked consumer is 1,229,256 bytes arm64 and
   1,289,744 bytes x86_64, still below 1.25 MiB. Physical-iPhone lifecycle,
   live-server hosting and Apple permission remain open, so the goal is partial.
+
+## Twenty-fourth executable increment — recoverable scene persistence
+
+`TinyArcadeSnapshotStoreV1` converts the runtime snapshot primitive into an iOS
+session owner suitable for backgrounding and process termination. One bounded
+binary envelope per canonical game id stores the host-owned game clock and
+snapshot under a versioned header and CRC-32. The embedded snapshot remains the
+authority for game identity, ABI and state-schema compatibility. The store uses
+atomic file replacement, excludes its directory from backup, applies
+complete-until-first-authentication file protection and rejects symlinks,
+non-regular objects and files outside the configured byte ceiling.
+
+`openSession` never resumes into the runtime ultimately used for a fallback. If
+decode or guest resume fails, it closes that candidate, removes the invalid
+save and creates a second fresh runtime, returning `discardedInvalid` with clock
+zero. This prevents a resume-side failure latch or partially restored guest from
+poisoning the playable fallback.
+
+Evidence on 2026-08-21:
+
+- A booted iPhone 17 Pro simulator writes two Paddle Guard generations,
+  restores the latest clock and guest state, then proves a changed byte and an
+  oversized regular file are discarded into a playable fresh runtime.
+- A symlink at the expected per-game path is refused without following it. The
+  Swift 6 wrapper and separate snapshot black box build for the generic device
+  and arm64 simulator.
+- The complete linked consumer grows to 1,289,976 bytes arm64 and 1,337,544
+  bytes x86_64. Its honest ceiling is now 1.375 MiB; the interpreter static core
+  remains independently gated at 100 KiB and measures 70,904 bytes. Physical
+  device background/termination behavior remains open, so the goal is partial.

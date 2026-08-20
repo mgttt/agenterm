@@ -135,6 +135,15 @@ catalog selection、受限 HTTPS、当前 trust/revocation、runtime/native capa
 trust 再验证。模拟器已用真实签名 Paddle Guard 证明完整路径，物理设备与真实站点
 仍未完成。
 
+`TinyArcadeSnapshotStoreV1` 已把裸 `suspend/resume` 补成可用于 iOS scene
+lifecycle 的存档事务：每个 canonical game id 使用独立、限长、带 CRC 的版本化
+binary envelope，同时保存 host-owned game clock；内部 snapshot 继续负责 ABI 与
+state schema 兼容性。写入采用 atomic replace，目录不进 backup，文件使用
+complete-until-first-authentication protection，并拒绝 symlink、非 regular 或超限
+对象。损坏/不兼容存档不会在同一个已失败 runtime 上继续开新局，而是关闭候选、
+删除坏文件并创建第二个 fresh runtime。模拟器已证明覆盖、恢复、损坏/超限回退与
+symlink fail-closed；物理设备后台终止恢复仍未验证。
+
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
 function，用 160×120 indexed frame、通用 input bits、impact/success/failure

@@ -1910,3 +1910,248 @@ public final class TinyArcadeRuntimeV1 {
         return String(decoding: bytes, as: UTF8.self)
     }
 }
+
+public enum TinyArcadeSnapshotStoreError: Error, Equatable {
+    case invalidDirectory
+    case invalidLimit
+    case invalidGameID
+    case unsafeStoredFile
+    case storageFailure
+}
+
+public enum TinyArcadeSnapshotRestoreDispositionV1: Sendable, Equatable {
+    case fresh
+    case restored
+    case discardedInvalid
+}
+
+public struct TinyArcadeSnapshotSessionV1 {
+    public let runtime: TinyArcadeRuntimeV1
+    public let gameClockMilliseconds: UInt32
+    public let disposition: TinyArcadeSnapshotRestoreDispositionV1
+}
+
+/// Main-actor, per-game persistence for cartridge snapshots and the host-owned
+/// game clock. The file envelope is bounded and checksummed; the embedded
+/// runtime snapshot remains the authority for game id, ABI and state schema.
+@MainActor
+public final class TinyArcadeSnapshotStoreV1 {
+    public let directoryURL: URL
+    public let maximumSnapshotBytes: Int
+
+    public init(
+        directoryURL: URL,
+        maximumSnapshotBytes: Int = 512 * 1_024
+    ) throws {
+        guard directoryURL.isFileURL else { throw TinyArcadeSnapshotStoreError.invalidDirectory }
+        guard (1...(8 * 1_024 * 1_024)).contains(maximumSnapshotBytes) else {
+            throw TinyArcadeSnapshotStoreError.invalidLimit
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+            let values = try directoryURL.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            )
+            guard values.isDirectory == true, values.isSymbolicLink != true else {
+                throw TinyArcadeSnapshotStoreError.invalidDirectory
+            }
+            var backup = URLResourceValues()
+            backup.isExcludedFromBackup = true
+            var mutableDirectory = directoryURL
+            try? mutableDirectory.setResourceValues(backup)
+        } catch let error as TinyArcadeSnapshotStoreError {
+            throw error
+        } catch {
+            throw TinyArcadeSnapshotStoreError.storageFailure
+        }
+        self.directoryURL = directoryURL
+        self.maximumSnapshotBytes = maximumSnapshotBytes
+    }
+
+    public func openSession(
+        makeRuntime: () throws -> TinyArcadeRuntimeV1
+    ) throws -> TinyArcadeSnapshotSessionV1 {
+        let candidate = try makeRuntime()
+        let gameID = try candidate.gameID()
+        let loaded: LoadedSnapshot
+        do {
+            loaded = try load(gameID: gameID)
+        } catch {
+            try? candidate.close()
+            throw error
+        }
+        switch loaded {
+        case .absent:
+            return session(candidate, clock: 0, disposition: .fresh)
+        case .invalid:
+            try discard(gameID: gameID)
+            return session(candidate, clock: 0, disposition: .discardedInvalid)
+        case let .valid(clock, snapshot):
+            do {
+                try candidate.resume(snapshot: snapshot)
+                return session(candidate, clock: clock, disposition: .restored)
+            } catch {
+                try? candidate.close()
+                try discard(gameID: gameID)
+                return session(try makeRuntime(), clock: 0, disposition: .discardedInvalid)
+            }
+        }
+    }
+
+    public func save(
+        runtime: TinyArcadeRuntimeV1,
+        gameClockMilliseconds: UInt32
+    ) throws {
+        let gameID = try runtime.gameID()
+        guard Self.validGameID(gameID) else { throw TinyArcadeSnapshotStoreError.invalidGameID }
+        let snapshot = try runtime.suspend()
+        guard !snapshot.isEmpty, snapshot.count <= maximumSnapshotBytes else {
+            throw TinyArcadeSnapshotStoreError.invalidLimit
+        }
+        let url = try fileURL(gameID: gameID)
+        try rejectUnsafeExistingFile(url)
+        var data = Data("TAS1".utf8)
+        Self.append(UInt16(1), to: &data)
+        Self.append(UInt16(32), to: &data)
+        Self.append(gameClockMilliseconds, to: &data)
+        Self.append(UInt16(gameID.utf8.count), to: &data)
+        Self.append(UInt16(0), to: &data)
+        Self.append(UInt32(snapshot.count), to: &data)
+        Self.append(UInt32(0), to: &data)
+        Self.append(UInt64(0), to: &data)
+        data.append(contentsOf: gameID.utf8)
+        data.append(snapshot)
+        let checksum = Self.checksum(data)
+        for offset in 0..<4 { data[20 + offset] = UInt8(truncatingIfNeeded: checksum >> (offset * 8)) }
+        do {
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: url.path
+            )
+        } catch {
+            throw TinyArcadeSnapshotStoreError.storageFailure
+        }
+    }
+
+    public func discard(gameID: String) throws {
+        let url = try fileURL(gameID: gameID)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try rejectUnsafeExistingFile(url)
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            throw TinyArcadeSnapshotStoreError.storageFailure
+        }
+    }
+
+    private enum LoadedSnapshot {
+        case absent
+        case invalid
+        case valid(clock: UInt32, snapshot: Data)
+    }
+
+    private func load(gameID: String) throws -> LoadedSnapshot {
+        let url = try fileURL(gameID: gameID)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
+        try rejectUnsafeExistingFile(url)
+        do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            guard let size = values.fileSize,
+                  (32...(32 + 128 + maximumSnapshotBytes)).contains(size) else {
+                return .invalid
+            }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard data.count == size,
+                  data.prefix(4) == Data("TAS1".utf8),
+                  Self.u16(data, 4) == 1,
+                  Self.u16(data, 6) == 32,
+                  Self.u16(data, 14) == 0,
+                  Self.u64(data, 24) == 0 else { return .invalid }
+            let clock = Self.u32(data, 8)
+            let idLength = Int(Self.u16(data, 12))
+            let snapshotLength = Int(Self.u32(data, 16))
+            guard (1...128).contains(idLength),
+                  (1...maximumSnapshotBytes).contains(snapshotLength),
+                  data.count == 32 + idLength + snapshotLength,
+                  Self.u32(data, 20) == Self.checksum(data),
+                  let storedID = String(data: data.subdata(in: 32..<(32 + idLength)), encoding: .utf8),
+                  storedID == gameID else { return .invalid }
+            return .valid(
+                clock: clock,
+                snapshot: data.subdata(in: (32 + idLength)..<data.count)
+            )
+        } catch let error as TinyArcadeSnapshotStoreError {
+            throw error
+        } catch {
+            throw TinyArcadeSnapshotStoreError.storageFailure
+        }
+    }
+
+    private func fileURL(gameID: String) throws -> URL {
+        guard Self.validGameID(gameID) else { throw TinyArcadeSnapshotStoreError.invalidGameID }
+        return directoryURL.appendingPathComponent("\(gameID).snapshot-v1", isDirectory: false)
+    }
+
+    private func rejectUnsafeExistingFile(_ url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                throw TinyArcadeSnapshotStoreError.unsafeStoredFile
+            }
+        } catch let error as TinyArcadeSnapshotStoreError {
+            throw error
+        } catch {
+            throw TinyArcadeSnapshotStoreError.storageFailure
+        }
+    }
+
+    private func session(
+        _ runtime: TinyArcadeRuntimeV1,
+        clock: UInt32,
+        disposition: TinyArcadeSnapshotRestoreDispositionV1
+    ) -> TinyArcadeSnapshotSessionV1 {
+        TinyArcadeSnapshotSessionV1(
+            runtime: runtime,
+            gameClockMilliseconds: clock,
+            disposition: disposition
+        )
+    }
+
+    private static func validGameID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128 && value.utf8.allSatisfy {
+            (97...122).contains($0) || (48...57).contains($0) || [46, 95, 45].contains($0)
+        }
+    }
+
+    private static func checksum(_ data: Data) -> UInt32 {
+        var crc = UInt32.max
+        for (offset, stored) in data.enumerated() {
+            let byte: UInt8 = (20..<24).contains(offset) ? 0 : stored
+            crc ^= UInt32(byte)
+            for _ in 0..<8 { crc = (crc >> 1) ^ (0xedb8_8320 & (0 &- (crc & 1))) }
+        }
+        return ~crc
+    }
+
+    private static func append<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    private static func u16(_ data: Data, _ offset: Int) -> UInt16 {
+        UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
+    }
+
+    private static func u32(_ data: Data, _ offset: Int) -> UInt32 {
+        UInt32(data[offset]) | UInt32(data[offset + 1]) << 8
+            | UInt32(data[offset + 2]) << 16 | UInt32(data[offset + 3]) << 24
+    }
+
+    private static func u64(_ data: Data, _ offset: Int) -> UInt64 {
+        UInt64(u32(data, offset)) | UInt64(u32(data, offset + 4)) << 32
+    }
+}

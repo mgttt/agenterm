@@ -59,6 +59,16 @@ a time; a second receives `operationInProgress`. Cancellation before activation
 leaves selection unchanged, while `openActive` re-verifies current trust before
 opening the exact cached bytes.
 
+`TinyArcadeSnapshotStoreV1` owns scene/background persistence independently of
+cartridge distribution. It stores one bounded binary envelope per canonical
+game id with the host-owned game clock, CRC-32 and the runtime's already
+ABI/state-schema-bound snapshot. Writes use atomic replacement, the directory
+is excluded from backup and files receive complete-until-first-authentication
+protection. Reads reject symlinks and oversized/non-regular files. A corrupt or
+incompatible snapshot is removed; the failed candidate runtime is closed and a
+second clean runtime is returned with `discardedInvalid`, so save damage cannot
+turn into a cartridge launch failure.
+
 ## Ownership
 
 ABI v1.4 exposes three non-interchangeable origins: bundled

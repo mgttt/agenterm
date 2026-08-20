@@ -2255,3 +2255,19 @@ order. Check cancellation both after download and immediately before the
 irreversible selection change. Test this boundary with a correctly signed
 artifact that fails runtime limits—not only with a bad signature—because only
 the former proves the ordering invariant.
+
+## A corrupt save must not poison the fallback runtime
+
+Runtime-level snapshot validation is necessary but not a complete app lifecycle.
+Persist the host clock beside the guest snapshot in a bounded, versioned,
+checksummed envelope and atomically replace one canonical per-game file. Reject
+symlinks and non-regular or oversized objects before reading. The runtime's own
+snapshot decoder—not duplicated app metadata—remains the ABI/state-schema
+compatibility authority.
+
+Most importantly, do not catch `resume` and continue using that same instance.
+A guest resume can mutate memory or latch failure before returning an error.
+Close the candidate, discard the bad save, and invoke the runtime factory a
+second time for the fresh fallback. Test a corrupted persisted byte and assert
+both the `discardedInvalid` outcome and successful gameplay on the replacement
+instance; merely asserting that decode threw does not prove recovery.

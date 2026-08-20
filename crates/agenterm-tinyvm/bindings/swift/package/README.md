@@ -48,6 +48,13 @@ serializes installs across `await`, and reopens an active generation only after
 live trust/revocation verification. This preserves the last playable cache
 state when a signed cartridge needs native capabilities absent from the app.
 
+Use `TinyArcadeSnapshotStoreV1` for scene/background persistence. It atomically
+replaces one bounded file per canonical game id, stores the host-owned game
+clock beside the runtime snapshot, applies iOS file protection and excludes the
+directory from backup. `openSession` returns a fresh runtime when no save exists,
+restores a compatible save, or discards a corrupt/incompatible save and creates
+a second clean runtime so failed resume state cannot poison gameplay.
+
 Generate a self-contained directory from the repository root:
 
 ```sh
