@@ -31,10 +31,10 @@
 //! let result = vm.run(&[Instr::Push(40), Instr::Push(2), Instr::Add, Instr::Halt]);
 //! assert!(matches!(result, Ok(Some(42))));
 //! ```
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, feature = "std")), no_std)]
 
 extern crate alloc;
-#[cfg(test)]
+#[cfg(any(test, feature = "std"))]
 extern crate std;
 
 use alloc::vec;
@@ -50,6 +50,9 @@ pub mod game;
 pub use game::{
     GAME_ABI_VERSION, GameFrame, GameInput, GameLimits, GameRuntime, NativeModuleRegistry,
 };
+
+#[cfg(feature = "ios-c-api")]
+mod ios_c_api;
 
 pub mod wasm;
 pub use wasm::{
@@ -589,7 +592,7 @@ mod tests {
 /// and a C-ABI self-test entry, enabled only for the size-measurement build
 /// (`--features staticcore`). Not compiled for normal builds or tests, so it
 /// never clashes with `std`'s allocator/panic handler.
-#[cfg(feature = "staticcore")]
+#[cfg(all(feature = "staticcore", not(feature = "std")))]
 mod staticcore {
     use core::alloc::{GlobalAlloc, Layout};
     use core::cell::UnsafeCell;

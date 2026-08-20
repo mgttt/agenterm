@@ -137,6 +137,12 @@ panic = "unwind"
 inherits = "release"
 panic = "unwind"
 
+# Static C bridge embedded in an iOS app. The exported boundary catches Rust
+# panics and maps them to a stable status, so this profile must preserve unwind.
+[profile.tinyvm-ios-release]
+inherits = "release"
+panic = "unwind"
+
 # Vendored with one change: macOS frames are tagged with the display's color
 # space so Core Animation presents without a per-frame vImage conversion.
 [patch.crates-io]

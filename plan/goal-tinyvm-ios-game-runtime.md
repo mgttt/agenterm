@@ -38,11 +38,12 @@ tinyvm iOS game runtime
 │   ├── private user import           [ ]
 │   ├── converter conformance kit     [~]
 │   └── no public arbitrary execution [ ]
-├── iOS native bridge                 [ ]
-│   ├── stable C lifecycle ABI        [ ]
-│   ├── static library/XCFramework   [ ]
-│   ├── Swift ownership/threading     [ ]
-│   └── device build + lifecycle test [ ]
+├── iOS native bridge                 [~]
+│   ├── stable C lifecycle ABI        [x]
+│   ├── static library/XCFramework   [x]
+│   ├── Swift ownership/threading     [x]
+│   ├── device + simulator build      [x]
+│   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [ ]
 │   ├── constrained compiler profile  [ ]
 │   ├── Depth Well WASM vertical cut  [ ]
@@ -175,3 +176,33 @@ Evidence on 2026-08-21:
 - PRD `[x]` evidence map, Clippy with warnings denied, iOS device build and
   Apple-silicon simulator build: clean.
 - Stripped static core remains 70,904 bytes with self-test 42.
+
+## Fourth executable increment — iOS C/Swift ownership
+
+The versioned C ABI owns open/tick/frame-copy/suspend/snapshot/resume/close,
+manifest metadata, failed-state inspection and per-thread error diagnostics.
+Opaque handles record their creating thread and reject every cross-thread
+operation, including close. Every export has a panic fence and the dedicated
+`tinyvm-ios-release` profile preserves unwinding so the fence is real.
+
+The XCFramework builder produces arm64 iOS-device and arm64 iOS-simulator
+static slices with the public header and Swift module map. The `@MainActor`
+Swift wrapper owns the handle and exposes Data-valued frame/snapshot methods.
+The bridge smoke gate compiles the C header, builds both slices, assembles the
+XCFramework, imports it from Swift, links the wrapper, and verifies an
+`IOSSIMULATOR` Mach-O. Physical-device launch remains tied to the Depth Well
+vertical cut.
+
+The embedding contract is
+[`docs/tinyarcade-ios-bridge-v1.md`](../docs/tinyarcade-ios-bridge-v1.md).
+
+Evidence on 2026-08-21:
+
+- Feature-enabled suite: 151 passed, including C handle lifecycle and the
+  macOS-owned XCFramework/Swift-link integration gate.
+- Real XCFramework slices: `ios-arm64` and `ios-arm64-simulator`, each with C
+  header and Swift module map.
+- Optimized linked Swift simulator smoke: 588,016 bytes, below the 1 MiB
+  consumer footprint gate.
+- Feature-enabled Clippy with warnings denied and documentation redaction:
+  clean.

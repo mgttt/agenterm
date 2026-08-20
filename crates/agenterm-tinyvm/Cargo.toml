@@ -13,4 +13,5 @@ libm = "0.2"
 
 [features]
 staticcore = []
-
+std = []
+ios-c-api = ["std"]

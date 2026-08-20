@@ -1,0 +1,68 @@
+# TinyArcade iOS bridge v1
+
+The iOS app links a static TinyArcade library; a cartridge remains data. No
+downloaded code is turned into native executable memory. The Rust interpreter,
+host ABI and lifecycle owner are compiled into the app binary.
+
+## Delivered surfaces
+
+- `crates/agenterm-tinyvm/include/tinyarcade.h`: versioned C ABI.
+- `crates/agenterm-tinyvm/include/module.modulemap`: Swift module `TinyArcade`.
+- `crates/agenterm-tinyvm/bindings/swift/TinyArcadeRuntime.swift`:
+  `@MainActor` Swift owner.
+- `crates/agenterm-tinyvm/build-xcframework.sh`: device/simulator archive and
+  XCFramework builder.
+- `crates/agenterm-tinyvm/smoke-ios-bridge.sh`: C header, XCFramework and Swift
+  simulator-link acceptance gate.
+
+Build and verify from the repository root:
+
+```sh
+CARGO="$HOME/.cargo/bin/cargo" \
+  crates/agenterm-tinyvm/smoke-ios-bridge.sh
+```
+
+The builder uses the dedicated `tinyvm-ios-release` Cargo profile. Its panic
+strategy is `unwind`, because every exported operation is fenced with
+`catch_unwind` and maps a panic to `TINYARCADE_PANIC`. Building the bridge under
+the workspace's abort profile would silently remove that guarantee.
+
+## Ownership
+
+`tinyarcade_v1_open` creates one opaque handle. The WASM bytes and config are
+copied/consumed during the call; caller pointers are not retained. The handle
+must be ticked, suspended, resumed, queried and closed on its creating thread.
+Wrong-thread calls return `TINYARCADE_WRONG_THREAD` without touching instance
+state. The Swift wrapper is `@MainActor`, so ordinary app use enforces this
+contract at compile time.
+
+Close is explicit and idempotent at the Swift layer. Its `deinit` is a final
+safety release. A raw C consumer must close exactly once on the owner thread.
+
+## Data transfer and errors
+
+Frame, snapshot and metadata outputs use a two-stage copy protocol. A NULL/zero
+query writes the required length and returns `TINYARCADE_BUFFER_TOO_SMALL` for
+non-empty data. A later copy does not execute the guest again. Bytes are never
+NUL-terminated or retained in caller memory.
+
+Every failing call records a static diagnostic in thread-local state. Read it
+immediately with `tinyarcade_v1_last_error`; the next ordinary bridge call
+clears it. Decode failure, guest trap, failed-instance latch, wrong-thread use,
+buffer sizing and caught panic have distinct stable status values.
+
+## Current evidence boundary
+
+The smoke gate builds real arm64 iOS-device and arm64 iOS-simulator static
+archives, assembles both into one XCFramework, compiles the public C header,
+imports the module from Swift, links the Swift ownership wrapper against the
+simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
+The optimized linked smoke executable must remain at or below 1 MiB; this
+measures the dead-stripped consumer result rather than the multi-object static
+archive's misleading on-disk size.
+
+Rust black-box tests drive the C handle through open, tick, frame copy,
+suspend, snapshot copy, fresh-instance resume, error retrieval, cross-thread
+rejection and close. This is build/link/lifecycle evidence, not yet a physical
+iPhone launch or frame-time measurement; those remain part of the Depth Well
+vertical cut.
