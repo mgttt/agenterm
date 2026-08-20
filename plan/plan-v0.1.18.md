@@ -14,7 +14,7 @@ v0.1.17 已于 2026-08-12 归档，其全部未完成叶按 `plan/README.md` §�
 |----|------|----------|-----------|
 | **A. App Substrate** | 稳定 App Host ABI + 一份 QJS `.agp` 跨六格消费 | §0–§10 | G0–G5（§4） |
 | **B. v0.1.17 承接树** | 多窗、跨主机证据、发布链、安装尾、脚本引擎债、低成本卫生 | §11 | 无，逐叶带证据合同 |
-| **C. agenterm-con** | 第二产品：预算、独立对齐门、巨石切分、余量叶 | §12 | GC1–GC3 |
+| **C. agenterm-con** | 第二产品：预算、独立对齐门、巨石切分、可观测稳定性、余量叶 | §12 | GC1–GC4 |
 | **D. agenterm-cu** | 新立项：computer-use 底座设计与 `current` 档原型 | §13 | GD1–GD3 |
 | **E. libagenterm** | 机制层动态库：ABI 设计与 Phase 0 形态判决 | §14 | Phase 0 四判据（§14.6） |
 
@@ -474,7 +474,7 @@ X0  跨六格消费 + App-only 无 Cargo 决定性证据
 `.agp` builder 可并行；公共 schema、根 manifest、workflow 和 Script dispatch 属于集成热区，
 由主线串行修改。最终 lint、Quick、Base matrix 与 App-only lane 在同一集成状态上串行验收。
 
-**上表只管轨 A。** 轨 C 的 GC1–GC3 见 §12，轨 D 的 GD1–GD3 见 §13，
+**上表只管轨 A。** 轨 C 的 GC1–GC4 见 §12，轨 D 的 GD1–GD3 见 §13，
 轨 E 的 Phase 0 四判据见 §14.6；轨 B 无独立
 Gate，其叶各自带证据合同。五条轨的 Gate 互不替代：`G5` 通过不代表 con 预算达标，
 `GC1` 全绿也不代表 App lane 成立，Phase 0 通过更不代表任何产品已迁入动态库。
@@ -825,6 +825,27 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
 - [ ] **CON-C10d 可选三叶**（承接，不阻塞 must-ship）— 回看搜索、OSC 8 链接、脏行
   重绘各自独立验收。非目标：server attach 或完整 conhost 替代。
 
+- [~] **CON-stability 可观测稳定性**（2026-08-21 开）— 用户报告粘贴后假死并易闪退。
+  两条机制已修：
+  - 唤醒合并（native + portable 两个宿主）。wake 是 level-triggered，重复投递不带
+    新信息；原先每块 PTY 输出一条消息，宿主抽不动时累积到 256 槽 deferred queue 溢出，
+    `record_failure` 闩住 `exit_requested` → **在活跃 shell 里粘贴必退**。
+  - 粘贴审阅框从嵌套 `GetMessageW` 改为无模式状态机（`open_review` + `try_poll`）。
+    嵌套泵从 `ConApp::event` 里跑，持着 host `RefCell`，审阅期间不重绘、控制口不应答——
+    与 PRD 23 "fail without blocking the GUI indefinitely" 直接冲突。顺带修了
+    `SetForegroundWindow` 失败未检查（owner 已禁用 + 审阅框藏在其后 = 纯假死体感）。
+  证据：三条 adapter 单测钉住"不得跑第二个消息泵"（旧实现根本无法被测——调用不返回），
+  125 con 单测 / 117 平台单测 / 23 GUI 黑盒 / 对齐门 / 三平台 `cargo check` 全绿。
+  **仍未关**：
+  - 人机路径端到端零覆盖，且是设计使然——`send-ui-keys` 按 PRD 23 传 `review=false`，
+    审阅框只有真实按键/右键能触发。这就是该缺陷在 23 条黑盒全绿下发布的原因。
+    补它需要真实输入注入的 journey，不得用走 CLI 的断言冒充。
+  - GUI 层失败仍全部静默：无 panic hook、无 minidump、无落盘；`con-release` 继承
+    `strip = true`，即使拿到 dump 也无符号。PDB 是独立文件，不计入 PE 预算。
+  - `agenterm_con_control` 的并发截图断言带本改动 8 轮挂 1 次、基线 4 轮全过；
+    它断言的是调度依赖的所有权窗口，归属未定，不当作既有抖动放过。
+  非目标：借稳定性改动回退 unwind 或削预算纪律。
+
 ### 轨 C Gate
 
 | Gate | 必须证明 | 不通过时 |
@@ -832,6 +853,7 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
 | **GC1** | con 自有对齐门 + 完整 con 套件在精确 unwind profile 下全绿 | 不动巨石 |
 | **GC2** | CON-C1 每一步切分后公开合同字节不变 | 回滚该步，不累积半切状态 |
 | **GC3** | CON-budget 有可复现的 linked-symbol/disassembly 证据 | 如实记录超预算，不宣称达标 |
+| **GC4** | GUI 层失败留下带 code 的落盘证据；且有一条断言"还活着"（而不只是"没退出"）的 journey | 不得把"套件全绿"当作产品在真人手上稳定的证据 |
 
 ---
 
