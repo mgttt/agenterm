@@ -142,8 +142,9 @@ Native extensions are not private WASM opcodes. The app explicitly registers
 an exact i32 function signature under a versioned namespace such as
 `studio:physics/v1`; only then can a cartridge import it. An unknown namespace,
 duplicate function import or signature mismatch fails before instantiation.
-The registry is partial until native-call time/resource budgets, manifest
-capability declarations and the C/iOS registration surface are proven.
+Manifest capability declarations and the C/iOS registration surface are now
+proven. The registry remains partial until native-call wall-time/resource
+budgets are defined and enforced for every shipped capability implementation.
 
 Evidence on 2026-08-21:
 
@@ -360,3 +361,27 @@ Evidence on 2026-08-21:
   before the successful archive/upload.
 - A physical-iPhone lifecycle/performance session and TestFlight feel check
   remain open; this goal is not complete until that device evidence exists.
+
+## Eleventh executable increment — versioned native import bridge
+
+C ABI v1.2 and the Swift package now let bundled and reviewed cartridges bind
+an exact, versioned native function table while private-user cartridges remain
+core-only. Each registration fixes namespace, field and i32 arity; unknown or
+mismatched imports fail before instantiation. Swift owns stable UTF-8 name
+storage and callback contexts until runtime close. Callbacks run synchronously
+on the runtime owner thread, borrow guest memory only for the call, and a throw,
+wrong result count or raw nonzero return traps and latches that cartridge.
+
+Evidence on 2026-08-21:
+
+- Rust C-ABI tests prove exact binding, i32 parameters/results, guest-memory
+  mutation, callback-failure latch, missing registration and arity rejection.
+- The C header smoke compiles both new open forms and the callback layout for an
+  iOS simulator target with warnings denied.
+- The Swift 6 package builds for generic iOS device and universal simulator.
+- On the booted iPhone 17 Pro simulator, a standard cartridge calls
+  `fan:physics/v1.step_world` through the public Swift API before the same linked
+  executable runs Depth Well for 600 frames (0.098 ms average, 0.106 ms p95,
+  0.122 ms maximum).
+- Native callback wall-time/resource budgets remain open; the physical-iPhone
+  lifecycle/performance and TestFlight feel checks also remain open.

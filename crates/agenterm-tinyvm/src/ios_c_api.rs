@@ -1,6 +1,7 @@
 //! Versioned C ownership boundary for Swift/Objective-C hosts.
 
 use core::cell::Cell;
+use core::ffi::c_void;
 use core::mem::size_of;
 use core::ptr;
 use core::slice;
@@ -10,7 +11,7 @@ use std::thread::{self, ThreadId};
 
 use crate::{
     CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits, GameRuntime, Limits,
-    WasmError,
+    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -55,6 +56,29 @@ pub struct TinyArcadeCatalogEntryV1 {
     pub signing_key_id_len: usize,
     pub signature: *const u8,
     pub signature_len: usize,
+}
+
+pub type TinyArcadeNativeCallbackV1 = unsafe extern "C" fn(
+    context: *mut c_void,
+    params: *const i32,
+    n_params: usize,
+    results: *mut i32,
+    n_results: usize,
+    memory: *mut u8,
+    memory_len: usize,
+) -> i32;
+
+#[repr(C)]
+pub struct TinyArcadeNativeFunctionV1 {
+    pub struct_size: u32,
+    pub module: *const u8,
+    pub module_len: usize,
+    pub field: *const u8,
+    pub field_len: usize,
+    pub n_params: u32,
+    pub n_results: u32,
+    pub callback: Option<TinyArcadeNativeCallbackV1>,
+    pub context: *mut c_void,
 }
 
 pub struct TinyArcadeTrustStoreV1 {
@@ -231,6 +255,100 @@ unsafe fn catalog_entry(entry: *const TinyArcadeCatalogEntryV1) -> Result<Catalo
     })
 }
 
+unsafe fn native_registry(
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+) -> Result<NativeModuleRegistry, FfiError> {
+    if function_count > MAX_NATIVE_FUNCTIONS || (function_count != 0 && functions.is_null()) {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid native function table",
+        ));
+    }
+    let functions = if function_count == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(functions, function_count) }
+    };
+    let mut registry = NativeModuleRegistry::new();
+    for function in functions {
+        if function.struct_size < size_of::<TinyArcadeNativeFunctionV1>() as u32 {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid native function layout",
+            ));
+        }
+        let module = unsafe {
+            input_string(
+                function.module,
+                function.module_len,
+                128,
+                "invalid native module",
+            )?
+        };
+        let field = unsafe {
+            input_string(
+                function.field,
+                function.field_len,
+                128,
+                "invalid native field",
+            )?
+        };
+        let callback = function.callback.ok_or(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "null native callback",
+        ))?;
+        let n_params = function.n_params as usize;
+        let n_results = function.n_results as usize;
+        let context = function.context;
+        registry
+            .register(
+                &module,
+                &field,
+                n_params,
+                n_results,
+                move |params, memory| {
+                    let mut results = Vec::new();
+                    results
+                        .try_reserve_exact(n_results)
+                        .map_err(|_| WasmError::Trap("native callback result allocation"))?;
+                    results.resize(n_results, 0);
+                    let status = unsafe {
+                        callback(
+                            context,
+                            if params.is_empty() {
+                                ptr::null()
+                            } else {
+                                params.as_ptr()
+                            },
+                            params.len(),
+                            if results.is_empty() {
+                                ptr::null_mut()
+                            } else {
+                                results.as_mut_ptr()
+                            },
+                            results.len(),
+                            memory.as_mut_ptr(),
+                            memory.len(),
+                        )
+                    };
+                    if status == STATUS_OK {
+                        Ok(results)
+                    } else {
+                        Err(WasmError::Trap("native capability callback failed"))
+                    }
+                },
+            )
+            .map_err(|_| {
+                FfiError::new(
+                    STATUS_INVALID_ARGUMENT,
+                    "invalid native function registration",
+                )
+            })?;
+    }
+    Ok(registry)
+}
+
 unsafe fn copy_bytes(
     bytes: &[u8],
     output: *mut u8,
@@ -255,7 +373,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 1
+    (1 << 16) | 2
 }
 
 #[unsafe(no_mangle)]
@@ -445,6 +563,33 @@ pub unsafe extern "C" fn tinyarcade_v1_open(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_open_with_native_modules(
+    wasm: *const u8,
+    wasm_len: usize,
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null runtime output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let registry = unsafe { native_registry(functions, function_count)? };
+        unsafe {
+            open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
+                GameRuntime::from_bytes_with_registry(bytes, vm, game, seed, &registry)
+                    .map_err(wasm_error)
+            })
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn tinyarcade_v1_open_private(
     wasm: *const u8,
     wasm_len: usize,
@@ -481,6 +626,45 @@ pub unsafe extern "C" fn tinyarcade_v1_open_reviewed(
             open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
                 GameRuntime::from_reviewed_bytes(bytes, &entry, &trust.store, vm, game, seed)
                     .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+            })
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_open_reviewed_with_native_modules(
+    wasm: *const u8,
+    wasm_len: usize,
+    entry: *const TinyArcadeCatalogEntryV1,
+    trust: *mut TinyArcadeTrustStoreV1,
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null runtime output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let entry = unsafe { catalog_entry(entry)? };
+        let trust = unsafe { trust_mut(trust)? };
+        let registry = unsafe { native_registry(functions, function_count)? };
+        unsafe {
+            open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
+                GameRuntime::from_reviewed_bytes_with_registry(
+                    bytes,
+                    &entry,
+                    &trust.store,
+                    vm,
+                    game,
+                    seed,
+                    &registry,
+                )
+                .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
             })
         }
     })
@@ -791,6 +975,102 @@ mod tests {
         module
     }
 
+    fn native_cartridge() -> Vec<u8> {
+        let mut module = b"\0asm\x01\0\0\0".to_vec();
+        let capability = "fan:physics/v1";
+        let mut manifest = Vec::new();
+        name(&mut manifest, "tinyarcade.manifest.v1");
+        manifest.extend_from_slice(b"TAM1");
+        manifest.extend_from_slice(&1u32.to_le_bytes());
+        manifest.extend_from_slice(&1u32.to_le_bytes());
+        for value in ["c.native", "1.0.0"] {
+            manifest.extend_from_slice(&(value.len() as u16).to_le_bytes());
+            manifest.extend_from_slice(value.as_bytes());
+        }
+        manifest.extend_from_slice(&1u16.to_le_bytes());
+        manifest.extend_from_slice(&(capability.len() as u16).to_le_bytes());
+        manifest.extend_from_slice(capability.as_bytes());
+        section(&mut module, 0, &manifest);
+        section(
+            &mut module,
+            1,
+            &[
+                0x02, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
+            ],
+        );
+        let mut imports = vec![0x02];
+        for (namespace, field) in [
+            (capability, "step_world"),
+            ("tinyarcade:core/v1", "submit_render"),
+        ] {
+            name(&mut imports, namespace);
+            name(&mut imports, field);
+            imports.extend_from_slice(&[0x00, 0x01]);
+        }
+        section(&mut module, 2, &imports);
+        section(&mut module, 3, &[0x05, 0, 0, 0, 0, 0]);
+        section(&mut module, 5, &[0x01, 0x00, 0x01]);
+        let mut exports = vec![0x05];
+        for (field, index) in [
+            ("game_abi_version", 2usize),
+            ("game_init", 3),
+            ("game_tick", 4),
+            ("game_suspend", 5),
+            ("game_resume", 6),
+        ] {
+            name(&mut exports, field);
+            exports.push(0);
+            leb(&mut exports, index);
+        }
+        section(&mut module, 7, &exports);
+        let functions = [
+            body(&[0x41, 0x01, 0x0b]),
+            body(&[0x41, 0x00, 0x0b]),
+            body(&[
+                0x41, 0x00, 0x41, 0x28, 0x41, 0x02, 0x10, 0x00, 0x36, 0x02, 0x00, 0x41, 0x00, 0x41,
+                0x08, 0x10, 0x01, 0x1a, 0x41, 0x00, 0x0b,
+            ]),
+            body(&[0x41, 0x00, 0x0b]),
+            body(&[0x41, 0x00, 0x0b]),
+        ];
+        let mut code = vec![0x05];
+        for function in &functions {
+            leb(&mut code, function.len());
+            code.extend_from_slice(function);
+        }
+        section(&mut module, 10, &code);
+        module
+    }
+
+    struct NativeProbe {
+        calls: Cell<u32>,
+        fail: Cell<bool>,
+    }
+
+    unsafe extern "C" fn native_step(
+        context: *mut c_void,
+        params: *const i32,
+        n_params: usize,
+        results: *mut i32,
+        n_results: usize,
+        memory: *mut u8,
+        memory_len: usize,
+    ) -> i32 {
+        let probe = unsafe { &mut *context.cast::<NativeProbe>() };
+        probe.calls.set(probe.calls.get() + 1);
+        if probe.fail.get() {
+            return 41;
+        }
+        assert_eq!(unsafe { slice::from_raw_parts(params, n_params) }, [40, 2]);
+        assert_eq!(n_results, 1);
+        assert!(memory_len >= 8);
+        unsafe {
+            results.write(42);
+            memory.add(4).write(9);
+        }
+        STATUS_OK
+    }
+
     unsafe fn config() -> TinyArcadeConfigV1 {
         let mut config = MaybeUninit::uninit();
         assert_eq!(
@@ -815,7 +1095,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 1);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 2);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -902,6 +1182,103 @@ mod tests {
         );
         assert_eq!(origin, CartridgeOrigin::PrivateUser as u32);
         assert_eq!(unsafe { tinyarcade_v1_close(private) }, STATUS_OK);
+    }
+
+    #[test]
+    fn c_native_table_binds_exact_callback_and_latches_failure() {
+        let wasm = native_cartridge();
+        let config = unsafe { config() };
+        let module = b"fan:physics/v1";
+        let field = b"step_world";
+        let mut probe = NativeProbe {
+            calls: Cell::new(0),
+            fail: Cell::new(false),
+        };
+        let function = TinyArcadeNativeFunctionV1 {
+            struct_size: size_of::<TinyArcadeNativeFunctionV1>() as u32,
+            module: module.as_ptr(),
+            module_len: module.len(),
+            field: field.as_ptr(),
+            field_len: field.len(),
+            n_params: 2,
+            n_results: 1,
+            callback: Some(native_step),
+            context: (&mut probe as *mut NativeProbe).cast(),
+        };
+
+        let mut runtime = ptr::dangling_mut();
+        assert_eq!(
+            unsafe { tinyarcade_v1_open(wasm.as_ptr(), wasm.len(), &config, &mut runtime) },
+            STATUS_TRAP
+        );
+        assert!(runtime.is_null());
+        assert_eq!(probe.calls.get(), 0);
+
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_with_native_modules(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &function,
+                    1,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 0) }, STATUS_OK);
+        assert_eq!(probe.calls.get(), 1);
+        let mut render = [0; 8];
+        let mut render_len = 0;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_render(
+                    runtime,
+                    render.as_mut_ptr(),
+                    render.len(),
+                    &mut render_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(render_len, 8);
+        assert_eq!(&render[..4], &42i32.to_le_bytes());
+        assert_eq!(render[4], 9);
+
+        probe.fail.set(true);
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 1) }, STATUS_TRAP);
+        let mut failed = 0;
+        assert_eq!(
+            unsafe { tinyarcade_v1_is_failed(runtime, &mut failed) },
+            STATUS_OK
+        );
+        assert_eq!(failed, 1);
+        assert_eq!(
+            unsafe { tinyarcade_v1_tick(runtime, 0, 2) },
+            STATUS_FAILED_INSTANCE
+        );
+        assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+
+        let invalid = TinyArcadeNativeFunctionV1 {
+            n_results: 17,
+            ..function
+        };
+        runtime = ptr::dangling_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_with_native_modules(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &invalid,
+                    1,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert!(runtime.is_null());
     }
 
     #[test]
@@ -1071,8 +1448,10 @@ mod tests {
             "tinyarcade_v1_trust_store_revoke_key",
             "tinyarcade_v1_trust_store_revoke_content",
             "tinyarcade_v1_open",
+            "tinyarcade_v1_open_with_native_modules",
             "tinyarcade_v1_open_private",
             "tinyarcade_v1_open_reviewed",
+            "tinyarcade_v1_open_reviewed_with_native_modules",
             "tinyarcade_v1_close",
             "tinyarcade_v1_tick",
             "tinyarcade_v1_copy_render",

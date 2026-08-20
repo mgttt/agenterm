@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 1u
-#define TINYARCADE_ABI_VERSION 0x00010001u
+#define TINYARCADE_ABI_MINOR 2u
+#define TINYARCADE_ABI_VERSION 0x00010002u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -64,6 +64,31 @@ typedef struct tinyarcade_catalog_entry_v1 {
     size_t signature_len;
 } tinyarcade_catalog_entry_v1;
 
+/* Native callbacks execute synchronously on the runtime owner thread. Params,
+ * results and guest memory are borrowed only for the callback duration. Return
+ * zero on success; any other int32 value traps and latches the guest instance.
+ * The callback must not retain pointers or unwind across this C boundary. */
+typedef int32_t (*tinyarcade_native_callback_v1)(
+    void* context,
+    const int32_t* params,
+    size_t n_params,
+    int32_t* results,
+    size_t n_results,
+    uint8_t* memory,
+    size_t memory_len);
+
+typedef struct tinyarcade_native_function_v1 {
+    uint32_t struct_size;
+    const uint8_t* module;
+    size_t module_len;
+    const uint8_t* field;
+    size_t field_len;
+    uint32_t n_params;
+    uint32_t n_results;
+    tinyarcade_native_callback_v1 callback;
+    void* context;
+} tinyarcade_native_function_v1;
+
 uint32_t tinyarcade_v1_abi_version(void);
 tinyarcade_status_v1 tinyarcade_v1_default_config(tinyarcade_config_v1* config);
 
@@ -97,6 +122,16 @@ tinyarcade_status_v1 tinyarcade_v1_open(
     size_t wasm_len,
     const tinyarcade_config_v1* config,
     tinyarcade_runtime_v1** output);
+/* The table is consumed during open. Callback/context pairs are copied into
+ * the runtime and must remain valid until that runtime is closed. At most 64
+ * exact functions and 16 i32 parameters/results per function are accepted. */
+tinyarcade_status_v1 tinyarcade_v1_open_with_native_modules(
+    const uint8_t* wasm,
+    size_t wasm_len,
+    const tinyarcade_native_function_v1* functions,
+    size_t function_count,
+    const tinyarcade_config_v1* config,
+    tinyarcade_runtime_v1** output);
 /* Private imports get only tinyarcade:core/v1. This entry point never grants
  * official catalog provenance or a native capability registry. */
 tinyarcade_status_v1 tinyarcade_v1_open_private(
@@ -111,6 +146,17 @@ tinyarcade_status_v1 tinyarcade_v1_open_reviewed(
     size_t wasm_len,
     const tinyarcade_catalog_entry_v1* entry,
     tinyarcade_trust_store_v1* trust,
+    const tinyarcade_config_v1* config,
+    tinyarcade_runtime_v1** output);
+/* Reviewed native opening performs exact signature/revocation verification
+ * before guest init or any registered callback can execute. */
+tinyarcade_status_v1 tinyarcade_v1_open_reviewed_with_native_modules(
+    const uint8_t* wasm,
+    size_t wasm_len,
+    const tinyarcade_catalog_entry_v1* entry,
+    tinyarcade_trust_store_v1* trust,
+    const tinyarcade_native_function_v1* functions,
+    size_t function_count,
     const tinyarcade_config_v1* config,
     tinyarcade_runtime_v1** output);
 tinyarcade_status_v1 tinyarcade_v1_close(tinyarcade_runtime_v1* runtime);

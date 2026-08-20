@@ -104,6 +104,14 @@ Native capability callbacks are app code, not downloaded machine code. A
 cartridge never carries dylibs, JIT output, device-side AOT output, JavaScript,
 WASI or direct network access.
 
+The public iOS ABI registers at most 64 exact functions per runtime and limits
+each to 16 i32 parameters and 16 i32 results. A callback runs synchronously on
+the runtime owner thread, may read/write guest linear memory only during that
+call, and latches the cartridge on callback failure. This is a compatibility
+door, not an ambient native API: a host should expose the smallest versioned
+module needed by the reviewed game and may decline a manifest capability even
+when the app binary implements it.
+
 The exact function import table is the machine-readable interface descriptor:
 module namespace, field, parameter count and result count all come from normal
 WASM sections. `tinyvm cartridge inspect` prints that table without executing

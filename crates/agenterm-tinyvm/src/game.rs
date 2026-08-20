@@ -12,6 +12,8 @@ use crate::{CartridgeManifest, Limits, Val, WasmError, WasmInstance, WasmModule}
 /// Guest/host contract implemented by this module.
 pub const GAME_ABI_VERSION: i32 = 1;
 pub const MAX_CARTRIDGE_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_NATIVE_FUNCTIONS: usize = 64;
+pub const MAX_NATIVE_ARITY: usize = 16;
 const ABI_MODULE: &str = "tinyarcade:core/v1";
 const SNAPSHOT_MAGIC: &[u8; 4] = b"TGS1";
 type NativeImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
@@ -112,6 +114,9 @@ impl NativeModuleRegistry {
         if module == ABI_MODULE
             || !valid_native_namespace(module)
             || !valid_native_field(field)
+            || n_params > MAX_NATIVE_ARITY
+            || n_results > MAX_NATIVE_ARITY
+            || self.functions.len() >= MAX_NATIVE_FUNCTIONS
             || self.find(module, field).is_some()
         {
             return Err(WasmError::Trap("invalid native module registration"));
@@ -251,6 +256,30 @@ impl GameRuntime {
             rng_seed,
             CartridgeOrigin::OfficialReviewed,
             &NativeModuleRegistry::new(),
+        )
+    }
+
+    /// Load exact reviewed bytes with app-provided, manifest-declared native
+    /// capabilities. Trust verification happens before any guest or native
+    /// callback can execute.
+    #[cfg(feature = "cartridge-trust")]
+    pub fn from_reviewed_bytes_with_registry(
+        wasm: &[u8],
+        entry: &crate::CatalogEntry,
+        trust: &crate::CartridgeTrustStore,
+        vm_limits: Limits,
+        game_limits: GameLimits,
+        rng_seed: u32,
+        registry: &NativeModuleRegistry,
+    ) -> Result<Self, WasmError> {
+        trust.verify(entry, wasm)?;
+        Self::from_bytes_with_origin_and_registry(
+            wasm,
+            vm_limits,
+            game_limits,
+            rng_seed,
+            CartridgeOrigin::OfficialReviewed,
+            registry,
         )
     }
 

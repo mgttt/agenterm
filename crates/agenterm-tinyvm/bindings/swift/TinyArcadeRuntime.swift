@@ -176,6 +176,121 @@ public struct TinyArcadeReviewedCatalogEntry: Sendable {
     }
 }
 
+/// One exact, versioned native capability exposed to a bundled or reviewed cartridge.
+/// The handler runs synchronously on the runtime owner thread. It must not retain `memory`.
+public struct TinyArcadeNativeFunctionV1 {
+    public let module: String
+    public let field: String
+    public let parameterCount: UInt32
+    public let resultCount: UInt32
+    public let handler: ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
+
+    public init(
+        module: String,
+        field: String,
+        parameterCount: UInt32,
+        resultCount: UInt32,
+        handler: @escaping ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
+    ) {
+        self.module = module
+        self.field = field
+        self.parameterCount = parameterCount
+        self.resultCount = resultCount
+        self.handler = handler
+    }
+}
+
+private final class TinyArcadeNativeCallbackBox {
+    let modulePointer: UnsafeMutablePointer<UInt8>
+    let moduleCount: Int
+    let fieldPointer: UnsafeMutablePointer<UInt8>
+    let fieldCount: Int
+    let parameterCount: UInt32
+    let resultCount: UInt32
+    let handler: ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
+
+    init(_ function: TinyArcadeNativeFunctionV1) throws {
+        let module = Array(function.module.utf8)
+        let field = Array(function.field.utf8)
+        guard !module.isEmpty, !field.isEmpty,
+              function.parameterCount <= 16, function.resultCount <= 16 else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
+                message: "native imports require non-empty UTF-8 names and at most 16 parameters/results"
+            )
+        }
+        let ownedModule = UnsafeMutablePointer<UInt8>.allocate(capacity: module.count)
+        module.withUnsafeBufferPointer { bytes in
+            ownedModule.initialize(from: bytes.baseAddress!, count: bytes.count)
+        }
+        let ownedField = UnsafeMutablePointer<UInt8>.allocate(capacity: field.count)
+        field.withUnsafeBufferPointer { bytes in
+            ownedField.initialize(from: bytes.baseAddress!, count: bytes.count)
+        }
+        modulePointer = ownedModule
+        fieldPointer = ownedField
+        moduleCount = module.count
+        fieldCount = field.count
+        parameterCount = function.parameterCount
+        resultCount = function.resultCount
+        handler = function.handler
+    }
+
+    deinit {
+        modulePointer.deinitialize(count: moduleCount)
+        modulePointer.deallocate()
+        fieldPointer.deinitialize(count: fieldCount)
+        fieldPointer.deallocate()
+    }
+
+    func descriptor() -> tinyarcade_native_function_v1 {
+        tinyarcade_native_function_v1(
+            struct_size: UInt32(MemoryLayout<tinyarcade_native_function_v1>.size),
+            module: UnsafePointer(modulePointer),
+            module_len: moduleCount,
+            field: UnsafePointer(fieldPointer),
+            field_len: fieldCount,
+            n_params: parameterCount,
+            n_results: resultCount,
+            callback: tinyArcadeNativeCallback,
+            context: Unmanaged.passUnretained(self).toOpaque()
+        )
+    }
+}
+
+private func tinyArcadeNativeCallback(
+    context: UnsafeMutableRawPointer?,
+    params: UnsafePointer<Int32>?,
+    parameterCount: Int,
+    results: UnsafeMutablePointer<Int32>?,
+    resultCount: Int,
+    memory: UnsafeMutablePointer<UInt8>?,
+    memoryCount: Int
+) -> Int32 {
+    guard let context,
+          parameterCount == 0 || params != nil,
+          resultCount == 0 || results != nil,
+          memoryCount == 0 || memory != nil else { return -1 }
+    let box = Unmanaged<TinyArcadeNativeCallbackBox>.fromOpaque(context).takeUnretainedValue()
+    guard parameterCount == Int(box.parameterCount), resultCount == Int(box.resultCount) else {
+        return -1
+    }
+    do {
+        let parameters = params.map { Array(UnsafeBufferPointer(start: $0, count: parameterCount)) } ?? []
+        let guestMemory = UnsafeMutableRawBufferPointer(start: memory, count: memoryCount)
+        let returned = try box.handler(parameters, guestMemory)
+        guard returned.count == resultCount else { return -1 }
+        if let results {
+            for (index, value) in returned.enumerated() {
+                results[index] = value
+            }
+        }
+        return 0
+    } catch {
+        return -1
+    }
+}
+
 /// Main-actor owner for official catalog keys and live revocations.
 @MainActor
 public final class TinyArcadeTrustStoreV1 {
@@ -262,16 +377,28 @@ public final class TinyArcadeTrustStoreV1 {
 @MainActor
 public final class TinyArcadeRuntimeV1 {
     private var handle: OpaquePointer?
+    private var nativeCallbackBoxes: [TinyArcadeNativeCallbackBox] = []
 
     public init(
         cartridge: Data,
+        nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws {
-        handle = try Self.open(
-            cartridge: cartridge,
-            configure: configure,
-            function: tinyarcade_v1_open
-        )
+        if nativeFunctions.isEmpty {
+            handle = try Self.open(
+                cartridge: cartridge,
+                configure: configure,
+                function: tinyarcade_v1_open
+            )
+        } else {
+            let opened = try Self.openWithNativeFunctions(
+                cartridge: cartridge,
+                nativeFunctions: nativeFunctions,
+                configure: configure
+            )
+            handle = opened.handle
+            nativeCallbackBoxes = opened.boxes
+        }
     }
 
     public init(
@@ -289,6 +416,7 @@ public final class TinyArcadeRuntimeV1 {
         reviewedCartridge cartridge: Data,
         entry: TinyArcadeReviewedCatalogEntry,
         trustStore: TinyArcadeTrustStoreV1,
+        nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws {
         guard entry.wasmSHA256.count == 32, entry.signature.count == 64 else {
@@ -305,11 +433,11 @@ public final class TinyArcadeRuntimeV1 {
         let gameVersion = Data(entry.gameVersion.utf8)
         let keyID = Data(entry.signingKeyID.utf8)
         let trust = try trustStore.liveHandle()
-        let status = gameID.withUnsafeBytes { gameIDBytes in
-            gameVersion.withUnsafeBytes { versionBytes in
-                entry.wasmSHA256.withUnsafeBytes { hashBytes in
-                    keyID.withUnsafeBytes { keyIDBytes in
-                        entry.signature.withUnsafeBytes { signatureBytes in
+        let status = try gameID.withUnsafeBytes { gameIDBytes in
+            try gameVersion.withUnsafeBytes { versionBytes in
+                try entry.wasmSHA256.withUnsafeBytes { hashBytes in
+                    try keyID.withUnsafeBytes { keyIDBytes in
+                        try entry.signature.withUnsafeBytes { signatureBytes in
                             var cEntry = tinyarcade_catalog_entry_v1(
                                 struct_size: UInt32(MemoryLayout<tinyarcade_catalog_entry_v1>.size),
                                 game_id: gameIDBytes.bindMemory(to: UInt8.self).baseAddress,
@@ -326,15 +454,33 @@ public final class TinyArcadeRuntimeV1 {
                                 signature: signatureBytes.bindMemory(to: UInt8.self).baseAddress,
                                 signature_len: signatureBytes.count
                             )
-                            return cartridge.withUnsafeBytes { cartridgeBytes in
-                                tinyarcade_v1_open_reviewed(
-                                    cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
-                                    cartridgeBytes.count,
-                                    &cEntry,
-                                    trust,
-                                    &config,
-                                    &opened
-                                )
+                            return try cartridge.withUnsafeBytes { cartridgeBytes in
+                                if nativeFunctions.isEmpty {
+                                    return tinyarcade_v1_open_reviewed(
+                                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
+                                        cartridgeBytes.count,
+                                        &cEntry,
+                                        trust,
+                                        &config,
+                                        &opened
+                                    )
+                                }
+                                return try Self.withNativeFunctionTable(nativeFunctions) { table, count, boxes in
+                                    let result = tinyarcade_v1_open_reviewed_with_native_modules(
+                                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
+                                        cartridgeBytes.count,
+                                        &cEntry,
+                                        trust,
+                                        table,
+                                        count,
+                                        &config,
+                                        &opened
+                                    )
+                                    if result == TINYARCADE_OK {
+                                        nativeCallbackBoxes = boxes
+                                    }
+                                    return result
+                                }
                             }
                         }
                     }
@@ -355,6 +501,7 @@ public final class TinyArcadeRuntimeV1 {
         guard let handle else { return }
         try Self.check(tinyarcade_v1_close(handle))
         self.handle = nil
+        nativeCallbackBoxes.removeAll()
     }
 
     public func tick(buttons: UInt32, clockMilliseconds: UInt32) throws -> TinyArcadeFrame {
@@ -477,6 +624,54 @@ public final class TinyArcadeRuntimeV1 {
         }
         try check(status)
         return try requireHandle(opened)
+    }
+
+    private static func openWithNativeFunctions(
+        cartridge: Data,
+        nativeFunctions: [TinyArcadeNativeFunctionV1],
+        configure: (inout tinyarcade_config_v1) -> Void
+    ) throws -> (handle: OpaquePointer, boxes: [TinyArcadeNativeCallbackBox]) {
+        var config = tinyarcade_config_v1()
+        try check(tinyarcade_v1_default_config(&config))
+        configure(&config)
+        var opened: OpaquePointer?
+        var retainedBoxes: [TinyArcadeNativeCallbackBox] = []
+        let status = try cartridge.withUnsafeBytes { bytes in
+            try withNativeFunctionTable(nativeFunctions) { table, count, boxes in
+                retainedBoxes = boxes
+                return tinyarcade_v1_open_with_native_modules(
+                    bytes.bindMemory(to: UInt8.self).baseAddress,
+                    bytes.count,
+                    table,
+                    count,
+                    &config,
+                    &opened
+                )
+            }
+        }
+        try check(status)
+        return (try requireHandle(opened), retainedBoxes)
+    }
+
+    private static func withNativeFunctionTable<T>(
+        _ functions: [TinyArcadeNativeFunctionV1],
+        _ body: (
+            UnsafePointer<tinyarcade_native_function_v1>?,
+            Int,
+            [TinyArcadeNativeCallbackBox]
+        ) throws -> T
+    ) throws -> T {
+        guard functions.count <= 64 else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
+                message: "a runtime accepts at most 64 native functions"
+            )
+        }
+        let boxes = try functions.map(TinyArcadeNativeCallbackBox.init)
+        let descriptors = boxes.map { $0.descriptor() }
+        return try descriptors.withUnsafeBufferPointer { table in
+            try body(table.baseAddress, table.count, boxes)
+        }
     }
 
     private static func requireHandle(_ handle: OpaquePointer?) throws -> OpaquePointer {

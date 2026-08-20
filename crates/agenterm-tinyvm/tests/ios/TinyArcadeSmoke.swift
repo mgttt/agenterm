@@ -3,6 +3,89 @@ import TinyArcade
 
 @main
 struct TinyArcadeSmoke {
+    static func appendLEB(_ value: Int, to output: inout [UInt8]) {
+        var remaining = value
+        repeat {
+            var byte = UInt8(remaining & 0x7f)
+            remaining >>= 7
+            if remaining != 0 { byte |= 0x80 }
+            output.append(byte)
+        } while remaining != 0
+    }
+
+    static func appendName(_ value: String, to output: inout [UInt8]) {
+        let bytes = Array(value.utf8)
+        appendLEB(bytes.count, to: &output)
+        output.append(contentsOf: bytes)
+    }
+
+    static func appendSection(_ id: UInt8, _ payload: [UInt8], to module: inout [UInt8]) {
+        module.append(id)
+        appendLEB(payload.count, to: &module)
+        module.append(contentsOf: payload)
+    }
+
+    static func functionBody(_ code: [UInt8]) -> [UInt8] {
+        [0] + code
+    }
+
+    static func nativeCartridge() -> Data {
+        var module: [UInt8] = [0, 97, 115, 109, 1, 0, 0, 0]
+        let capability = "fan:physics/v1"
+        var manifest: [UInt8] = []
+        appendName("tinyarcade.manifest.v1", to: &manifest)
+        manifest += Array("TAM1".utf8) + [1, 0, 0, 0, 1, 0, 0, 0]
+        for value in ["c.native", "1.0.0"] {
+            let bytes = Array(value.utf8)
+            manifest += [UInt8(bytes.count), 0] + bytes
+        }
+        manifest += [1, 0, UInt8(capability.utf8.count), 0] + Array(capability.utf8)
+        appendSection(0, manifest, to: &module)
+        appendSection(1, [2, 0x60, 0, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 1, 0x7f], to: &module)
+        var imports: [UInt8] = [2]
+        for (namespace, field) in [
+            (capability, "step_world"),
+            ("tinyarcade:core/v1", "submit_render"),
+        ] {
+            appendName(namespace, to: &imports)
+            appendName(field, to: &imports)
+            imports += [0, 1]
+        }
+        appendSection(2, imports, to: &module)
+        appendSection(3, [5, 0, 0, 0, 0, 0], to: &module)
+        appendSection(5, [1, 0, 1], to: &module)
+        var exports: [UInt8] = [5]
+        for (field, index) in [
+            ("game_abi_version", 2),
+            ("game_init", 3),
+            ("game_tick", 4),
+            ("game_suspend", 5),
+            ("game_resume", 6),
+        ] {
+            appendName(field, to: &exports)
+            exports.append(0)
+            appendLEB(index, to: &exports)
+        }
+        appendSection(7, exports, to: &module)
+        let functions = [
+            functionBody([0x41, 1, 0x0b]),
+            functionBody([0x41, 0, 0x0b]),
+            functionBody([
+                0x41, 0, 0x41, 0x28, 0x41, 2, 0x10, 0, 0x36, 2, 0,
+                0x41, 0, 0x41, 8, 0x10, 1, 0x1a, 0x41, 0, 0x0b,
+            ]),
+            functionBody([0x41, 0, 0x0b]),
+            functionBody([0x41, 0, 0x0b]),
+        ]
+        var code: [UInt8] = [5]
+        for function in functions {
+            appendLEB(function.count, to: &code)
+            code += function
+        }
+        appendSection(10, code, to: &module)
+        return Data(module)
+    }
+
     @MainActor
     static func main() throws {
         precondition(tinyarcade_v1_abi_version() == TINYARCADE_ABI_VERSION)
@@ -10,6 +93,32 @@ struct TinyArcadeSmoke {
         precondition(tinyarcade_v1_default_config(&config) == TINYARCADE_OK)
         precondition(config.struct_size == MemoryLayout<tinyarcade_config_v1>.size)
         _ = TinyArcadeRuntimeV1.self
+
+        var nativeCalls = 0
+        let nativeRuntime = try TinyArcadeRuntimeV1(
+            cartridge: nativeCartridge(),
+            nativeFunctions: [
+                TinyArcadeNativeFunctionV1(
+                    module: "fan:physics/v1",
+                    field: "step_world",
+                    parameterCount: 2,
+                    resultCount: 1
+                ) { parameters, memory in
+                    precondition(parameters == [40, 2])
+                    precondition(memory.count >= 8)
+                    memory[4] = 9
+                    nativeCalls += 1
+                    return [42]
+                },
+            ]
+        )
+        do {
+            _ = try nativeRuntime.tick(buttons: 0, clockMilliseconds: 0)
+            preconditionFailure("native smoke frame should not decode as grid3d")
+        } catch {
+            precondition(nativeCalls == 1)
+        }
+        try nativeRuntime.close()
 
         guard CommandLine.arguments.count == 2 else { return }
         let cartridge = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))

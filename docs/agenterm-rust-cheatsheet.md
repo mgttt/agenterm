@@ -106,6 +106,17 @@ Native calls belong behind typed platform contracts. A sound adapter states:
 - what cleanup runs on every partial-failure path;
 - whether success means visibility, atomic replacement, or durable storage.
 
+For a host callback table borrowed during construction but invoked later,
+separate the two lifetimes explicitly. Copy or own descriptor names before the
+constructor returns, retain callback contexts until the native handle is closed,
+and destroy the handle before releasing those contexts. Null the output handle
+before validating the table so every failure path has the same postcondition.
+Treat parameter, result and guest-memory pointers as call-scoped borrows; bound
+arity before allocation, require the exact result count, and translate callback
+failure into typed fail-closed state without unwinding across C. A Swift wrapper
+should own stable pointer storage rather than rely on `Data.withUnsafeBytes`
+beyond its closure.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

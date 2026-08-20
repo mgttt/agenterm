@@ -37,12 +37,29 @@ versioned binary release artifact without changing the app-facing product.
 
 ## Ownership
 
-ABI v1.1 exposes three non-interchangeable opens: bundled
+ABI v1.2 exposes three non-interchangeable origins: bundled
 `tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
 `tinyarcade_v1_open_private`. Every instance retains its immutable origin for
 UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
 private opening has no native capability registry and cannot acquire official
 provenance.
+
+Bundled and reviewed origins may instead use their corresponding
+`*_with_native_modules` open. The host supplies at most 64 exact
+namespace/field/i32-signature registrations, with at most 16 parameters and 16
+results each. The table and its name pointers are borrowed only during open;
+callback/context pairs remain valid until close. Swift's
+`TinyArcadeNativeFunctionV1` owns stable UTF-8 names and strongly retains each
+callback box for exactly that runtime lifetime.
+
+A callback executes synchronously on the runtime owner thread and receives
+borrowed parameter/result buffers plus the complete bounds-checked guest linear
+memory. It must return exactly its declared results, must not retain any pointer
+or memory view, and must not unwind through C. Throwing, returning a wrong result
+count, or returning nonzero from raw C traps and latches only that cartridge.
+These callbacks are trusted code already compiled into the app; cartridges
+cannot supply native implementations. Private-user opening intentionally has no
+variant that grants native modules.
 
 An open call creates one opaque handle. The WASM bytes and config are
 copied/consumed during the call; caller pointers are not retained. The handle
@@ -83,11 +100,14 @@ The builder pins iOS 14.0 as the deployment target for Rust and Ring C/assembly
 objects; the Swift link treats linker warnings as errors. The gate also builds
 the generated package as a generic iOS device library and as a universal
 arm64/x86_64 simulator library under Swift 6 language mode. With
-`TINYARCADE_RUN_BOOTED_SIMULATOR=1`, the smoke additionally compiles Depth Well,
+`TINYARCADE_RUN_BOOTED_SIMULATOR=1`, the smoke additionally runs a standard WASM
+cartridge through a Swift-owned `fan:physics/v1` callback and proves i32
+parameters/results plus guest-memory mutation. It then compiles Depth Well,
 runs the linked executable in an already-booted iOS Simulator, opens it through
 the private origin, decodes its first frame, suspends/resumes and hard-drops.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
+exact native registration, callback success/failure and failed-instance latch,
 signature and revocation, origin query, tick, frame copy,
 suspend, snapshot copy, fresh-instance resume, error retrieval, cross-thread
 rejection and close. This is build/link/lifecycle evidence, not yet a physical
