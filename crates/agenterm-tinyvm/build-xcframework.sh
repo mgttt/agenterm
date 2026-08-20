@@ -17,13 +17,16 @@ fi
 mkdir -p "$(dirname -- "$OUTPUT")"
 
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
-  --profile "$PROFILE" --target aarch64-apple-ios --features ios-c-api \
+  --manifest-path "$ROOT/Cargo.toml" --profile "$PROFILE" \
+  --target aarch64-apple-ios --features ios-c-api \
   --lib --crate-type staticlib
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
-  --profile "$PROFILE" --target aarch64-apple-ios-sim --features ios-c-api \
+  --manifest-path "$ROOT/Cargo.toml" --profile "$PROFILE" \
+  --target aarch64-apple-ios-sim --features ios-c-api \
   --lib --crate-type staticlib
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
-  --profile "$PROFILE" --target x86_64-apple-ios --features ios-c-api \
+  --manifest-path "$ROOT/Cargo.toml" --profile "$PROFILE" \
+  --target x86_64-apple-ios --features ios-c-api \
   --lib --crate-type staticlib
 
 DEVICE="$TARGET_DIR/aarch64-apple-ios/$PROFILE/libagenterm_tinyvm.a"
