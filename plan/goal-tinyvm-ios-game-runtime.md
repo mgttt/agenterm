@@ -51,7 +51,7 @@ tinyvm iOS game runtime
 │   ├── frame-time/resource evidence  [~]
 │   └── suspend/resume/save evidence  [x]
 └── distribution gate                 [ ]
-    ├── fixed app purpose/offline game [~]
+    ├── fixed app purpose/offline game [x]
     ├── catalog metadata/deep links   [ ]
     ├── review clarification/probe    [~]
     └── fail closed on revoked content [x]
@@ -326,6 +326,33 @@ ships the exact 6,076-byte Depth Well cartridge in its signed resources. Its
 app-owned adapter exposes only the bundled origin. A hosted iPhone 17 Pro
 simulator test proves identity, first frame, suspend, fresh-instance resume and
 hard drop; a generic iOS device build proves the package, Rust archive and WASM
-resource participate in the final app link. The app UI still uses its current
-native game model, so visual/input parity and a physical-iPhone session remain
-open before TestFlight can switch Depth Well to this runtime.
+resource participate in the final app link.
+
+## Tenth executable increment — WASM-owned playable app route
+
+The live Depth Well route in `nostalgia-arcade` now uses the bundled WASM
+cartridge rather than the native game model. Swift owns a fixed orthographic
+SceneKit whole-well view, labeled touch controls, tones/haptics, lifecycle and a
+versioned local save envelope. All board cells, active/ghost pieces, gravity,
+movement, three-axis rotation, hard drop, score, cleared decks, level and
+game-over state originate in the guest's standard frame/state protocols.
+
+The host advances a monotonic game clock only while active and unpaused, caps a
+single catch-up interval, persists that clock beside the cartridge snapshot and
+releases every edge-triggered input at the same clock instant. Background wall
+time therefore cannot cause an unexpected drop on resume, and repeated taps do
+not become held guest buttons.
+
+Evidence on 2026-08-21:
+
+- App unit tests open the real bundled cartridge and prove hard drop/tone output,
+  fresh-runtime restore, paused clock exclusion and score-preserving re-entry.
+- The iPhone 17 Pro simulator UI path passes selection, visible 3D frame,
+  X/Y/Z rotation, hard drop, pause, settings, exit and restored re-entry.
+- The inspected final screen keeps the full 5 × 5 × 10 well, entry piece,
+  landing ghost and floor visible under one fixed orthographic camera.
+- A generic `iphoneos` build with signing disabled links successfully after the
+  UI switch, and the cartridge preparation/conformance script runs in a shell
+  where Cargo is installed but absent from `PATH`.
+- A physical-iPhone lifecycle/performance session and TestFlight feel check
+  remain open; this goal is not complete until that device evidence exists.
