@@ -55,6 +55,14 @@ directory from backup. `openSession` returns a fresh runtime when no save exists
 restores a compatible save, or discards a corrupt/incompatible save and creates
 a second clean runtime so failed resume state cannot poison gameplay.
 
+For reproducible bug reports or converter goldens, call
+`beginReplayRecording()`, drive the game with ordinary `tick`/`tickMedia`, then
+save or upload the bounded `Data` returned by `finishReplayRecording()`. Verify
+received bytes on a disposable fresh runtime with `verifyReplay(_:)`; this
+checks the runtime's exact loaded-cartridge hash and consumes its gameplay
+state. Replay data contains no executable code and grants no native capability
+or catalog trust.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

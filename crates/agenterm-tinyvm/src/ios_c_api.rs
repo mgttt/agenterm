@@ -11,8 +11,8 @@ use std::thread::{self, ThreadId};
 
 use crate::{
     CartridgeCache, CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits,
-    GameRuntime, Limits, NativeModuleRegistry, WasmError, MAX_NATIVE_CALLS_PER_LIFECYCLE,
-    MAX_NATIVE_FUNCTIONS,
+    GameRuntime, Limits, NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1, WasmError,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -100,6 +100,8 @@ pub struct TinyArcadeRuntimeV1 {
     runtime: GameRuntime,
     frame: Option<GameFrame>,
     snapshot: Vec<u8>,
+    replay_recorder: Option<ReplayRecorderV1>,
+    replay: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -152,6 +154,8 @@ fn runtime_boundary(
                 runtime.runtime.latch_host_panic();
                 runtime.frame = None;
                 runtime.snapshot.clear();
+                runtime.replay_recorder = None;
+                runtime.replay.clear();
             }
             set_error("panic inside tinyarcade runtime");
             STATUS_PANIC
@@ -484,7 +488,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 4
+    (1 << 16) | 5
 }
 
 #[unsafe(no_mangle)]
@@ -777,6 +781,8 @@ unsafe fn open_runtime(
         runtime,
         frame: None,
         snapshot: Vec::new(),
+        replay_recorder: None,
+        replay: Vec::new(),
     });
     unsafe { output.write(Box::into_raw(handle)) };
     Ok(())
@@ -921,12 +927,120 @@ pub unsafe extern "C" fn tinyarcade_v1_tick(
 ) -> i32 {
     runtime_boundary(runtime, |runtime| {
         runtime.frame = None;
-        runtime.frame = Some(
-            runtime
-                .runtime
-                .tick(GameInput { buttons, clock_ms })
-                .map_err(wasm_error)?,
-        );
+        let input = GameInput { buttons, clock_ms };
+        let frame = if let Some(recorder) = runtime.replay_recorder.as_mut() {
+            recorder
+                .record_tick(&mut runtime.runtime, input)
+                .map_err(wasm_error)?
+        } else {
+            runtime.runtime.tick(input).map_err(wasm_error)?
+        };
+        runtime.frame = Some(frame);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_replay_begin(runtime: *mut TinyArcadeRuntimeV1) -> i32 {
+    runtime_boundary(runtime, |runtime| {
+        if runtime.replay_recorder.is_some() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "replay recording already active",
+            ));
+        }
+        runtime.replay.clear();
+        runtime.snapshot.clear();
+        runtime.replay_recorder =
+            Some(ReplayRecorderV1::start_runtime(&mut runtime.runtime).map_err(wasm_error)?);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_replay_cancel(runtime: *mut TinyArcadeRuntimeV1) -> i32 {
+    runtime_boundary(runtime, |runtime| {
+        runtime.replay_recorder = None;
+        runtime.replay.clear();
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_replay_finish(runtime: *mut TinyArcadeRuntimeV1) -> i32 {
+    runtime_boundary(runtime, |runtime| {
+        let recorder = runtime.replay_recorder.as_ref().ok_or(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "no active replay recording",
+        ))?;
+        let replay = recorder.finish().map_err(wasm_error)?;
+        runtime.replay = replay;
+        runtime.replay_recorder = None;
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_copy_replay(
+    runtime: *mut TinyArcadeRuntimeV1,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let runtime = unsafe { runtime_mut(runtime)? };
+        if runtime.replay.is_empty() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "no completed replay",
+            ));
+        }
+        unsafe { copy_bytes(&runtime.replay, output, capacity, output_len) }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_replay_check(
+    runtime: *mut TinyArcadeRuntimeV1,
+    replay: *const u8,
+    replay_len: usize,
+    verified_steps: *mut u32,
+) -> i32 {
+    runtime_boundary(runtime, |runtime| {
+        if verified_steps.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null replay step output",
+            ));
+        }
+        unsafe { verified_steps.write(0) };
+        if runtime.replay_recorder.is_some() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "cannot verify while replay recording is active",
+            ));
+        }
+        let replay = unsafe { input_bytes(replay, replay_len, "invalid replay input")? };
+        let trace = ReplayTraceV1::decode(replay).map_err(wasm_error)?;
+        let steps = u32::try_from(trace.steps.len())
+            .map_err(|_| FfiError::new(STATUS_DECODE, "replay step limit"))?;
+        runtime.frame = None;
+        runtime.snapshot.clear();
+        let final_index = trace.steps.len().checked_sub(1);
+        let mut last_frame = None;
+        trace
+            .replay_loaded(&mut runtime.runtime, |index, frame| {
+                if Some(index) == final_index {
+                    last_frame = Some(GameFrame {
+                        render: frame.render.clone(),
+                        audio: frame.audio.clone(),
+                    });
+                }
+                Ok(())
+            })
+            .map_err(wasm_error)?;
+        runtime.frame = last_frame;
+        unsafe { verified_steps.write(steps) };
         Ok(())
     })
 }
@@ -972,6 +1086,12 @@ pub unsafe extern "C" fn tinyarcade_v1_copy_audio(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tinyarcade_v1_suspend(runtime: *mut TinyArcadeRuntimeV1) -> i32 {
     runtime_boundary(runtime, |runtime| {
+        if runtime.replay_recorder.is_some() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "cannot suspend while replay recording is active",
+            ));
+        }
         runtime.snapshot.clear();
         runtime.snapshot = runtime.runtime.suspend().map_err(wasm_error)?;
         Ok(())
@@ -1004,6 +1124,12 @@ pub unsafe extern "C" fn tinyarcade_v1_resume(
     snapshot_len: usize,
 ) -> i32 {
     runtime_boundary(runtime, |runtime| {
+        if runtime.replay_recorder.is_some() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "cannot resume while replay recording is active",
+            ));
+        }
         if snapshot.is_null() || snapshot_len == 0 {
             return Err(FfiError::new(
                 STATUS_INVALID_ARGUMENT,
@@ -1116,6 +1242,9 @@ mod tests {
     use crate::{cartridge_sha256, CartridgeOrigin};
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::mem::MaybeUninit;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::OnceLock;
 
     fn leb(output: &mut Vec<u8>, mut value: usize) {
         loop {
@@ -1324,11 +1453,145 @@ mod tests {
         runtime
     }
 
+    fn replay_cartridge() -> Vec<u8> {
+        static CARTRIDGE: OnceLock<Vec<u8>> = OnceLock::new();
+        CARTRIDGE
+            .get_or_init(|| {
+                let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                let output =
+                    crate_dir.join("../../target/tinyvm-ios-c-replay-test/depth-well-0.1.0.wasm");
+                let status = Command::new(crate_dir.join("build-depth-well-cartridge.sh"))
+                    .arg(&output)
+                    .status()
+                    .expect("run replay cartridge builder");
+                assert!(status.success(), "replay cartridge build failed");
+                std::fs::read(output).expect("read replay cartridge")
+            })
+            .clone()
+    }
+
+    unsafe fn open_replay_runtime(wasm: &[u8]) -> *mut TinyArcadeRuntimeV1 {
+        let mut config = unsafe { config() };
+        config.max_memory_pages = 17;
+        config.max_steps = 100_000;
+        config.max_render_bytes = 4 * 1024;
+        config.max_audio_bytes = 64;
+        config.max_state_bytes = 512;
+        config.rng_seed = 0x5eed_1234;
+        let mut runtime = ptr::null_mut();
+        assert_eq!(
+            unsafe { tinyarcade_v1_open_private(wasm.as_ptr(), wasm.len(), &config, &mut runtime) },
+            STATUS_OK
+        );
+        assert!(!runtime.is_null());
+        runtime
+    }
+
+    #[test]
+    fn c_replay_owner_records_copies_verifies_and_binds_loaded_bytes() {
+        let wasm = replay_cartridge();
+        let recorder = unsafe { open_replay_runtime(&wasm) };
+        assert_eq!(unsafe { tinyarcade_v1_replay_begin(recorder) }, STATUS_OK);
+        let address = recorder as usize;
+        assert_eq!(
+            std::thread::spawn(move || unsafe {
+                tinyarcade_v1_replay_cancel(address as *mut TinyArcadeRuntimeV1)
+            })
+            .join()
+            .expect("wrong-thread replay probe"),
+            STATUS_WRONG_THREAD
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_replay_begin(recorder) },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_suspend(recorder) },
+            STATUS_INVALID_ARGUMENT
+        );
+        for (buttons, clock) in [(0, 0), (1, 16), (1 << 4, 32), (1 << 7, 48)] {
+            assert_eq!(
+                unsafe { tinyarcade_v1_tick(recorder, buttons, clock) },
+                STATUS_OK
+            );
+        }
+        assert_eq!(unsafe { tinyarcade_v1_replay_finish(recorder) }, STATUS_OK);
+        let mut replay_len = 0;
+        assert_eq!(
+            unsafe { tinyarcade_v1_copy_replay(recorder, ptr::null_mut(), 0, &mut replay_len) },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(replay_len, 749);
+        let mut replay = vec![0; replay_len];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_replay(
+                    recorder,
+                    replay.as_mut_ptr(),
+                    replay.len(),
+                    &mut replay_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(unsafe { tinyarcade_v1_close(recorder) }, STATUS_OK);
+
+        let verifier = unsafe { open_replay_runtime(&wasm) };
+        let mut steps = u32::MAX;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_replay_check(verifier, replay.as_ptr(), replay.len(), &mut steps)
+            },
+            STATUS_OK
+        );
+        assert_eq!(steps, 4);
+        assert_eq!(unsafe { tinyarcade_v1_close(verifier) }, STATUS_OK);
+
+        let oversized_runtime = unsafe { open_replay_runtime(&wasm) };
+        let oversized = vec![0; crate::MAX_REPLAY_BYTES + 1];
+        steps = u32::MAX;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_replay_check(
+                    oversized_runtime,
+                    oversized.as_ptr(),
+                    oversized.len(),
+                    &mut steps,
+                )
+            },
+            STATUS_DECODE
+        );
+        assert_eq!(steps, 0);
+        assert_eq!(unsafe { tinyarcade_v1_close(oversized_runtime) }, STATUS_OK);
+
+        let mut changed = wasm.clone();
+        changed.extend_from_slice(&[0, 1, 0]);
+        let changed_runtime = unsafe { open_replay_runtime(&changed) };
+        steps = u32::MAX;
+        assert_ne!(
+            unsafe {
+                tinyarcade_v1_replay_check(
+                    changed_runtime,
+                    replay.as_ptr(),
+                    replay.len(),
+                    &mut steps,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(steps, 0);
+        assert_eq!(
+            unsafe { tinyarcade_v1_replay_cancel(changed_runtime) },
+            STATUS_OK
+        );
+        assert_eq!(unsafe { tinyarcade_v1_close(changed_runtime) }, STATUS_OK);
+    }
+
     #[test]
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 4);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 5);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1846,6 +2109,11 @@ mod tests {
             "tinyarcade_v1_open_reviewed_with_native_modules",
             "tinyarcade_v1_close",
             "tinyarcade_v1_tick",
+            "tinyarcade_v1_replay_begin",
+            "tinyarcade_v1_replay_cancel",
+            "tinyarcade_v1_replay_finish",
+            "tinyarcade_v1_copy_replay",
+            "tinyarcade_v1_replay_check",
             "tinyarcade_v1_copy_render",
             "tinyarcade_v1_copy_audio",
             "tinyarcade_v1_suspend",

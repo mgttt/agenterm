@@ -73,7 +73,7 @@ JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是
 
 完整的 iOS 游戏运行底层验收树与依赖路径见 [`plan/goal-tinyvm-ios-game-runtime.md`](../plan/goal-tinyvm-ios-game-runtime.md)。
 
-游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.4 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，并在调用 app callback 前执行每生命周期配额；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
+游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.5 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，并在调用 app callback 前执行每生命周期配额；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
 
 官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。
 
@@ -101,7 +101,7 @@ iOS SDK 提供有界 PCM/WAV 合成与 `AVAudioPlayer` owner，默认使用服�
 Paddle Guard 的真实 launch tone 证明合成、播放、中断和释放；物理设备音频仍是
 未完成证据，因此 native I/O surface 保持 partial。
 
-C ABI v1.4 已消除 Rust trust/cache 与 iOS App 之间的断层。独立的单线程 cache
+C ABI v1.5 已消除 Rust trust/cache 与 iOS App 之间的断层。独立的单线程 cache
 handle 和 Swift main-actor owner 接受 app 已完整接收的 bytes，在原子激活前复核
 key/content 撤销、Ed25519、长度、SHA-256 与 embedded manifest；load/rollback
 仍需对应 signed entry 并按当前 trust 再验证。cache 不拥有 URLSession 或 guest
@@ -154,6 +154,12 @@ grid3d、indexed2d 和真实 tone 形成固定长度/SHA-256 golden；CLI 可从
 确定性生成、验证且拒绝覆盖 `.tareplay`。未来 native import 仍走标准 versioned
 namespace 与 registry；回放不会携带代码、授予 capability 或伪造 native side
 effect，只会在同签名、确定性宿主行为下验证结果。
+已加载 runtime 现在保留构造它的精确卡带 SHA-256，Swift 不必为了录制长期重复
+持有 `.wasm`。main-actor owner 可从当前状态开始录制，让普通 tick 自动追加证据，
+finish 返回标准 `.tareplay` Data；fresh runtime 可验证所有步骤。模拟器已证明真实
+Paddle Guard 的录制、原子文件交换、逐字节复现、篡改拒绝和“相同 manifest、不同
+WASM 字节”拒绝。验证会消费候选 runtime 状态，故产品 API 明确要求需要保留现场时
+使用 disposable fresh runtime。
 
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`

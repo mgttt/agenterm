@@ -1708,6 +1708,45 @@ public final class TinyArcadeRuntimeV1 {
         return try TinyArcadeMediaFrame(render: output.render, audio: output.audio)
     }
 
+    /// Begins a deterministic replay at the runtime's current state. Subsequent
+    /// ordinary `tick`/`tickMedia` calls are recorded until finish or cancel.
+    public func beginReplayRecording() throws {
+        try Self.check(tinyarcade_v1_replay_begin(try liveHandle()))
+    }
+
+    /// Discards an active recording or the last completed replay. It does not
+    /// rewind gameplay state.
+    public func cancelReplayRecording() throws {
+        try Self.check(tinyarcade_v1_replay_cancel(try liveHandle()))
+    }
+
+    /// Completes the active recording and returns one canonical bounded
+    /// `.tareplay` artifact suitable for `Data.write` or app-owned upload.
+    public func finishReplayRecording() throws -> Data {
+        let handle = try liveHandle()
+        try Self.check(tinyarcade_v1_replay_finish(handle))
+        return try copy(handle, tinyarcade_v1_copy_replay)
+    }
+
+    /// Restores and executes a replay against this runtime's exact loaded
+    /// cartridge. Verification consumes this runtime's gameplay state; use a
+    /// disposable fresh runtime when the current session must be preserved.
+    @discardableResult
+    public func verifyReplay(_ replay: Data) throws -> UInt32 {
+        let handle = try liveHandle()
+        var steps: UInt32 = 0
+        let status = replay.withUnsafeBytes { bytes in
+            tinyarcade_v1_replay_check(
+                handle,
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                bytes.count,
+                &steps
+            )
+        }
+        try Self.check(status)
+        return steps
+    }
+
     private func tickOutput(
         buttons: UInt32,
         clockMilliseconds: UInt32

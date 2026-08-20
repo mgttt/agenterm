@@ -7,10 +7,11 @@ official catalog. A `.tareplay` records an initial portable snapshot, canonical
 input/clock steps and the length plus SHA-256 of every render/audio result.
 
 The trace binds the complete cartridge SHA-256 as well as the embedded game id,
-game version, ABI version and state version. Replay execution always receives
-the original `.wasm` bytes and verifies that binding itself before restoring or
-ticking the runtime; callers cannot accidentally rely on manifest identity
-alone.
+game version, ABI version and state version. A loaded runtime retains the hash
+of the exact bytes from which it was constructed. Replay execution compares
+that retained identity before restoring or ticking; CLI/Rust entry points that
+also receive `.wasm` bytes verify those bytes too. Callers cannot accidentally
+rely on manifest identity alone.
 
 ## Canonical binary envelope
 
@@ -89,6 +90,23 @@ signatures. Such modules must provide deterministic behavior for a replay to
 match. A trace does not serialize native side effects or grant a missing native
 capability; unknown or changed imports still fail during ordinary runtime
 construction.
+
+## iOS runtime workflow
+
+C ABI v1.5 and the main-actor Swift owner record directly on an already loaded
+runtime, so the app does not retain a second cartridge copy merely to identify
+it. `beginReplayRecording()` captures the current state;
+`tick`/`tickMedia` append evidence; `finishReplayRecording()` returns canonical
+`.tareplay` `Data`; and `cancelReplayRecording()` discards recording data
+without rewinding gameplay. Suspend/resume and verification are refused while
+a recording is active.
+
+`verifyReplay(_:)` compares the trace to the runtime's retained exact-cartridge
+hash, restores the initial snapshot and verifies all steps. It intentionally
+consumes that runtime's gameplay state, so an app uses a disposable fresh
+runtime when preserving the active scene matters. All calls inherit strict
+runtime owner-thread enforcement. File storage and upload remain app-owned;
+neither operation grants catalog approval or a native capability.
 
 Passing replay verification establishes deterministic compatibility for those
 inputs. It does not establish rights, product quality, signature trust, catalog

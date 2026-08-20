@@ -290,6 +290,13 @@ fn depth_well_replay_is_portable_bounded_and_tamper_evident() {
             .replay(&wasm, &mut runtime(&wasm), |_, _| Ok(()))
             .is_err()
     );
+    let mut same_manifest = wasm.clone();
+    same_manifest.extend_from_slice(&[0, 1, 0]);
+    let mut different_runtime = runtime(&same_manifest);
+    assert!(
+        ReplayRecorderV1::start(&wasm, &mut different_runtime).is_err(),
+        "recording must not bind supplied bytes to a different loaded cartridge"
+    );
 }
 
 #[cfg(feature = "replay")]

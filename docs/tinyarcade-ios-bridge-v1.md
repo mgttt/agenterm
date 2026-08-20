@@ -10,7 +10,7 @@ host ABI and lifecycle owner are compiled into the app binary.
 - `crates/agenterm-tinyvm/include/module.modulemap`: Swift module `TinyArcade`.
 - `crates/agenterm-tinyvm/bindings/swift/TinyArcadeRuntime.swift`:
   `@MainActor` Swift owners, bounded catalog decoding and indexed-2D/audio
-  native presentation.
+  native presentation, plus deterministic replay recording/verification.
 - `crates/agenterm-tinyvm/build-xcframework.sh`: device/simulator archive and
   XCFramework builder.
 - `crates/agenterm-tinyvm/build-swift-package.sh`: self-contained local Swift
@@ -71,7 +71,7 @@ turn into a cartridge launch failure.
 
 ## Ownership
 
-ABI v1.4 exposes three non-interchangeable origins: bundled
+ABI v1.5 exposes three non-interchangeable origins: bundled
 `tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
 `tinyarcade_v1_open_private`. Every instance retains its immutable origin for
 UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
@@ -121,7 +121,7 @@ contract at compile time.
 Close is explicit and idempotent at the Swift layer. Its `deinit` is a final
 safety release. A raw C consumer must close exactly once on the owner thread.
 
-ABI v1.4 also exposes the existing verified object cache through a distinct
+ABI v1.5 also exposes the existing verified object cache through a distinct
 single-thread-owned C handle and `TinyArcadeCartridgeCacheV1` Swift owner. The
 app supplies a file URL and a positive per-object WASM byte ceiling. Network
 transfer is deliberately absent: only a complete `Data` value may enter
@@ -138,7 +138,7 @@ the main actor and provides explicit, idempotent close.
 
 ## Data transfer and errors
 
-Frame, snapshot and metadata outputs use a two-stage copy protocol. A NULL/zero
+Frame, snapshot, replay and metadata outputs use a two-stage copy protocol. A NULL/zero
 query writes the required length and returns `TINYARCADE_BUFFER_TOO_SMALL` for
 non-empty data. A later copy does not execute the guest again. Bytes are never
 NUL-terminated or retained in caller memory.
@@ -152,6 +152,16 @@ values. The Swift frame owner validates `grid3d/v1`, `indexed2d/v1` and
 events to native rendering/audio code. `tickMedia` returns a discriminated
 render frame for either supported visual protocol; the original `tick` remains
 a source-compatible `grid3d/v1` convenience for existing Depth Well consumers.
+
+Replay recording is state on the same owner-thread runtime handle. Begin
+captures a portable snapshot and clears the previous completed trace; ordinary
+tick calls then append monotonic input plus exact media digests. Finish retains
+one bounded `.tareplay` for two-stage copy. Suspend/resume and verification are
+refused during recording, while cancel discards recording data without changing
+the already-advanced game state. Verification compares the trace against the
+exact cartridge hash retained at open, restores its initial snapshot and checks
+every frame. It consumes runtime state, so Swift documents a disposable fresh
+runtime as the preservation-safe verification owner.
 
 `TinyArcadeIndexed2DFrame.rgba8888()` expands only already-validated indices
 into canonical row-major RGBA bytes, with a decoder-proven allocation ceiling
@@ -179,7 +189,7 @@ app presentation policy and are not inferred by the SDK.
 
 Tick, suspend and resume use a handle-aware panic boundary. If Rust panics after
 a handle has been resolved, the boundary first latches that runtime failed,
-returns its phase to idle and discards any cached frame/snapshot before returning
+returns its phase to idle and discards any cached frame/snapshot/replay before returning
 `TINYARCADE_PANIC`. The app may inspect/close the handle but cannot execute it
 again. A generic `catch_unwind` status without that state transition is not
 containment because partially mutated guest state could otherwise be reused.
@@ -191,10 +201,12 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked smoke executable must remain at or below 1.25 MiB; this
+The optimized linked smoke executable must remain at or below 1.375 MiB; this
 measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
 the exercised Swift consumer added the bounded official-catalog JSON decoder;
+the later 1.375 MiB gate accounts for the recoverable snapshot-store owner.
+Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 
 The builder pins iOS 14.0 as the deployment target for Rust and Ring C/assembly
@@ -212,7 +224,7 @@ decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 suspend into a fresh instance during the measured run. Its real launch event is
 also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
 explicitly deactivated on the booted simulator.
-The same simulator smoke creates a real cache directory through the Swift v1.4
+The same simulator smoke creates a real cache directory through the Swift v1.5
 owner and proves that a cartridge naming an absent trust key cannot activate.
 Rust's public C black box separately installs a valid signed cartridge, reloads
 its exact bytes, rejects cross-thread access, then proves live revocation clears
@@ -221,6 +233,10 @@ An in-process URLProtocol fixture additionally proves the Swift transport's
 catalog/cartridge success path, early declared-length rejection, MIME and
 redirect failure, in-flight cancellation, exact active concurrency and typed
 zero-queue saturation without relying on an external server.
+Another linked simulator executable records four real Paddle Guard inputs,
+atomically exchanges the resulting `.tareplay` through a file, verifies all
+steps on a fresh runtime, reproduces byte-identical trace bytes, and rejects a
+changed output digest plus different WASM bytes carrying the same manifest.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,

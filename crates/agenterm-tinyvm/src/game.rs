@@ -245,6 +245,8 @@ pub struct GameRuntime {
     instance: WasmInstance,
     host: Rc<RefCell<HostState>>,
     manifest: CartridgeManifest,
+    #[cfg(feature = "replay")]
+    cartridge_sha256: [u8; 32],
     origin: CartridgeOrigin,
     failed: bool,
 }
@@ -402,6 +404,8 @@ impl GameRuntime {
             instance,
             host,
             manifest,
+            #[cfg(feature = "replay")]
+            cartridge_sha256: crate::cartridge_sha256(wasm),
             origin,
             failed: false,
         };
@@ -417,6 +421,11 @@ impl GameRuntime {
         require_success(init?, "game_init failed")?;
         runtime.host.borrow_mut().reset_output();
         Ok(runtime)
+    }
+
+    #[cfg(feature = "replay")]
+    pub(crate) fn cartridge_sha256(&self) -> [u8; 32] {
+        self.cartridge_sha256
     }
 
     /// Drive one deterministic frame and take ownership of its command bytes.

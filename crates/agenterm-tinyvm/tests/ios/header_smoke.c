@@ -1,6 +1,6 @@
 #include "tinyarcade.h"
 
-_Static_assert(TINYARCADE_ABI_VERSION == 0x00010004u, "ABI version drift");
+_Static_assert(TINYARCADE_ABI_VERSION == 0x00010005u, "ABI version drift");
 _Static_assert(sizeof(tinyarcade_config_v1) == 40, "config layout drift");
 
 static int32_t native_callback(
@@ -57,6 +57,11 @@ static void typecheck(void) {
     (void)tinyarcade_v1_open_reviewed_with_native_modules(
         0, 0, &entry, trust, &native, 1, &config, &runtime);
     (void)tinyarcade_v1_tick(runtime, 0, 0);
+    (void)tinyarcade_v1_replay_begin(runtime);
+    (void)tinyarcade_v1_replay_finish(runtime);
+    (void)tinyarcade_v1_copy_replay(runtime, 0, 0, 0);
+    (void)tinyarcade_v1_replay_check(runtime, 0, 0, 0);
+    (void)tinyarcade_v1_replay_cancel(runtime);
     (void)tinyarcade_v1_suspend(runtime);
     (void)tinyarcade_v1_resume(runtime, 0, 0);
     (void)tinyarcade_v1_origin(runtime, 0);

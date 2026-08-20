@@ -43,17 +43,22 @@ pub struct ReplayRecorderV1 {
 
 impl ReplayRecorderV1 {
     pub fn start(wasm: &[u8], runtime: &mut GameRuntime) -> Result<Self, WasmError> {
-        let manifest = CartridgeManifest::from_wasm(wasm)?;
-        if runtime.manifest() != &manifest {
+        if runtime.cartridge_sha256() != cartridge_sha256(wasm) {
             return Err(WasmError::Trap("replay runtime/cartridge mismatch"));
         }
+        CartridgeManifest::from_wasm(wasm)?;
+        Self::start_runtime(runtime)
+    }
+
+    pub fn start_runtime(runtime: &mut GameRuntime) -> Result<Self, WasmError> {
+        let manifest = runtime.manifest().clone();
         let initial_snapshot = runtime.suspend()?;
         if initial_snapshot.is_empty() || initial_snapshot.len() > MAX_REPLAY_SNAPSHOT_BYTES {
             return Err(WasmError::Trap("replay snapshot size"));
         }
         Ok(Self {
             trace: ReplayTraceV1 {
-                cartridge_sha256: cartridge_sha256(wasm),
+                cartridge_sha256: runtime.cartridge_sha256(),
                 game_id: manifest.game_id,
                 game_version: manifest.game_version,
                 abi_version: manifest.abi_version,
@@ -95,7 +100,7 @@ impl ReplayRecorderV1 {
         Ok(frame)
     }
 
-    pub fn finish(self) -> Result<Vec<u8>, WasmError> {
+    pub fn finish(&self) -> Result<Vec<u8>, WasmError> {
         self.trace.encode()
     }
 }
@@ -250,12 +255,31 @@ impl ReplayTraceV1 {
         &self,
         wasm: &[u8],
         runtime: &mut GameRuntime,
-        mut consume: F,
+        consume: F,
     ) -> Result<(), WasmError>
     where
         F: FnMut(usize, &GameFrame) -> Result<(), WasmError>,
     {
         self.verify_cartridge(wasm)?;
+        if runtime.cartridge_sha256() != cartridge_sha256(wasm) {
+            return Err(WasmError::Trap("replay runtime/cartridge mismatch"));
+        }
+        self.replay_loaded(runtime, consume)
+    }
+
+    pub fn replay_loaded<F>(
+        &self,
+        runtime: &mut GameRuntime,
+        mut consume: F,
+    ) -> Result<(), WasmError>
+    where
+        F: FnMut(usize, &GameFrame) -> Result<(), WasmError>,
+    {
+        validate_identity(self)?;
+        validate_steps(&self.steps)?;
+        if runtime.cartridge_sha256() != self.cartridge_sha256 {
+            return Err(WasmError::Trap("replay runtime/cartridge mismatch"));
+        }
         let manifest = runtime.manifest();
         if manifest.game_id != self.game_id
             || manifest.game_version != self.game_version

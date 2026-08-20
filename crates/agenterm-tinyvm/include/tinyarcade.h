@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 4u
-#define TINYARCADE_ABI_VERSION 0x00010004u
+#define TINYARCADE_ABI_MINOR 5u
+#define TINYARCADE_ABI_VERSION 0x00010005u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -203,6 +203,29 @@ tinyarcade_status_v1 tinyarcade_v1_tick(
     tinyarcade_runtime_v1* runtime,
     uint32_t buttons,
     uint32_t clock_ms);
+
+/* Replay recording begins from the runtime's current state and exact cartridge
+ * hash. While active, ordinary tick calls append canonical input/output
+ * evidence. suspend/resume and replay verification are refused until finish
+ * or cancel. finish retains one bounded .tareplay for the two-stage copy call.
+ * check restores and consumes the supplied trace on this runtime, so callers
+ * should use a disposable fresh runtime when they need to preserve play state. */
+tinyarcade_status_v1 tinyarcade_v1_replay_begin(
+    tinyarcade_runtime_v1* runtime);
+tinyarcade_status_v1 tinyarcade_v1_replay_cancel(
+    tinyarcade_runtime_v1* runtime);
+tinyarcade_status_v1 tinyarcade_v1_replay_finish(
+    tinyarcade_runtime_v1* runtime);
+tinyarcade_status_v1 tinyarcade_v1_copy_replay(
+    tinyarcade_runtime_v1* runtime,
+    uint8_t* output,
+    size_t capacity,
+    size_t* output_len);
+tinyarcade_status_v1 tinyarcade_v1_replay_check(
+    tinyarcade_runtime_v1* runtime,
+    const uint8_t* replay,
+    size_t replay_len,
+    uint32_t* verified_steps);
 
 /* All copy calls use the same two-stage protocol. *output_len always receives
  * the required byte count. NULL/0 is a size query and returns

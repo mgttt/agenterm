@@ -48,6 +48,7 @@ tinyvm iOS game runtime
 │   ├── real app target/package link  [x]
 │   ├── reviewed install transaction  [x]
 │   ├── atomic scene persistence      [x]
+│   ├── replay record/verify owner     [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [~]
 │   ├── constrained compiler profile  [x]
@@ -851,3 +852,41 @@ Evidence on 2026-08-21:
   bytes arm64 and 1,337,544 bytes x86_64 under the 1.375 MiB ceiling.
 - Physical-iPhone execution, live hosted catalog and Apple permission remain
   open, so the overall runtime goal remains partial.
+
+## Twenty-sixth executable increment — iOS replay ownership
+
+C ABI v1.5 and `TinyArcadeRuntimeV1` now own replay recording on the same
+single-thread runtime that owns gameplay. The loaded runtime retains the
+SHA-256 of its exact construction bytes, closing both a Swift ownership gap and
+the earlier core hazard where a caller could pair supplied bytes with a
+different runtime carrying the same manifest. Begin captures current state;
+ordinary tick records; finish exposes one bounded trace through the existing
+two-stage copy pattern; cancel discards trace data without rewinding play.
+
+Verification restores and consumes a candidate runtime, so the Swift contract
+explicitly directs apps to a disposable fresh runtime when preserving the live
+scene matters. Recording excludes suspend/resume and verification until finish
+or cancel. All operations inherit runtime owner-thread enforcement, caught
+panic cleanup and the v1 replay allocation/media ceilings. The trace remains
+data, grants no native capability and works with any already constructed
+bundled, private or reviewed runtime including registered native imports.
+
+Evidence on 2026-08-21:
+
+- A booted iPhone 17 Pro simulator records four real Paddle Guard inputs through
+  ordinary `tickMedia`, atomically writes/reads 529 replay bytes, verifies four
+  steps on a fresh runtime and reproduces the trace byte-identically.
+- The same linked Swift black box rejects a changed digest, duplicate lifecycle
+  operations and different WASM bytes with the same manifest. Rust C tests also
+  reject cross-thread replay calls and a trace beyond the 8 MiB ceiling.
+- A separate Rust black box records and verifies a cartridge importing
+  `fan:physics/v1.step`; all eight record/replay callbacks execute through the
+  exact registry, while constructing the same cartridge without that registry
+  still fails closed before replay.
+- All 181 package tests, all-feature/all-target Clippy, replay feature isolation,
+  no-default library and exact 70,904-byte static core pass. Generic iOS device
+  and universal simulator packages link; ordinary consumers measure 1,311,560
+  bytes arm64 and 1,353,416 bytes x86_64, while the replay consumer is
+  1,159,864 bytes arm64, all below 1.375 MiB.
+- Physical-iPhone lifecycle, live hosting and Apple permission are still open,
+  so the overall runtime goal remains partial.

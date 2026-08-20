@@ -7,6 +7,8 @@ use agenterm_tinyvm::{
     GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES,
     MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame, WasmError,
 };
+#[cfg(feature = "replay")]
+use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
 
 const CORE: &str = "tinyarcade:core/v1";
 
@@ -157,6 +159,80 @@ fn game_module(imports: &[(&str, &str, usize)], version: i8, tick: &[u8], data: 
         segment.extend_from_slice(data);
         section(&mut module, 11, &segment);
     }
+    module
+}
+
+#[cfg(feature = "replay")]
+fn native_replay_module() -> Vec<u8> {
+    let capability = "fan:physics/v1";
+    let mut module = b"\0asm\x01\0\0\0".to_vec();
+    section(
+        &mut module,
+        0,
+        &manifest_section_for(1, 1, "test.native-replay", &[capability]),
+    );
+    section(
+        &mut module,
+        1,
+        &[
+            0x02, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
+        ],
+    );
+    let mut imports = vec![0x04];
+    for (namespace, field, type_index) in [
+        (capability, "step", 0u8),
+        (CORE, "submit_render", 1),
+        (CORE, "save_state", 1),
+        (CORE, "load_state", 1),
+    ] {
+        name(&mut imports, namespace);
+        name(&mut imports, field);
+        imports.extend_from_slice(&[0x00, type_index]);
+    }
+    section(&mut module, 2, &imports);
+    section(&mut module, 3, &[0x05, 0, 0, 0, 0, 0]);
+    section(&mut module, 5, &[0x01, 0x00, 0x01]);
+    let mut exports = vec![0x05];
+    for (field, index) in [
+        ("game_abi_version", 4usize),
+        ("game_init", 5),
+        ("game_tick", 6),
+        ("game_suspend", 7),
+        ("game_resume", 8),
+    ] {
+        name(&mut exports, field);
+        exports.push(0);
+        leb(&mut exports, index);
+    }
+    section(&mut module, 7, &exports);
+    let functions = [
+        body(&[0x41, 1, 0x0b]),
+        body(&[0x41, 0, 0x0b]),
+        body(&[
+            0x10, 0, 0x1a, 0x41, 0, 0x41, 32, 0x10, 1, 0x1a, 0x41, 0, 0x0b,
+        ]),
+        body(&[0x41, 32, 0x41, 1, 0x10, 2, 0x1a, 0x41, 0, 0x0b]),
+        body(&[0x41, 32, 0x41, 1, 0x10, 3, 0x1a, 0x41, 0, 0x0b]),
+    ];
+    let mut code = vec![0x05];
+    for function in &functions {
+        leb(&mut code, function.len());
+        code.extend_from_slice(function);
+    }
+    section(&mut module, 10, &code);
+    let mut frame = vec![0; 33];
+    frame[0..4].copy_from_slice(b"TAG3");
+    frame[4..6].copy_from_slice(&1u16.to_le_bytes());
+    frame[6..8].copy_from_slice(&32u16.to_le_bytes());
+    for offset in [8, 10, 12] {
+        frame[offset..offset + 2].copy_from_slice(&1u16.to_le_bytes());
+    }
+    frame[24..28].copy_from_slice(&1u32.to_le_bytes());
+    frame[32] = 7;
+    let mut data = vec![0x01, 0x00, 0x41, 0x00, 0x0b];
+    leb(&mut data, frame.len());
+    data.extend_from_slice(&frame);
+    section(&mut module, 11, &data);
     module
 }
 
@@ -416,6 +492,66 @@ fn registered_versioned_native_module_is_bound_by_exact_signature() {
     );
     must_ok(runtime.tick(GameInput::default()), "tick native module");
     assert_eq!(calls.get(), 1);
+}
+
+#[cfg(feature = "replay")]
+#[test]
+fn replay_preserves_versioned_native_import_registration_boundary() {
+    let wasm = native_replay_module();
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let mut registry = NativeModuleRegistry::new();
+    must_ok(
+        registry.register("fan:physics/v1", "step", 0, 1, move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(vec![0])
+        }),
+        "register replay native module",
+    );
+    let open = || {
+        must_ok(
+            GameRuntime::from_bytes_with_registry(
+                &wasm,
+                Limits::default(),
+                GameLimits::default(),
+                7,
+                &registry,
+            ),
+            "open native replay runtime",
+        )
+    };
+    let mut recorded = open();
+    let mut recorder = must_ok(
+        ReplayRecorderV1::start_runtime(&mut recorded),
+        "start native replay",
+    );
+    for clock_ms in [0, 16, 32, 48] {
+        must_ok(
+            recorder.record_tick(
+                &mut recorded,
+                GameInput {
+                    buttons: 0,
+                    clock_ms,
+                },
+            ),
+            "record native replay tick",
+        );
+    }
+    let encoded = must_ok(recorder.finish(), "finish native replay");
+    let trace = must_ok(ReplayTraceV1::decode(&encoded), "decode native replay");
+    let mut replayed = open();
+    must_ok(
+        trace.replay_loaded(&mut replayed, |_, _| Ok(())),
+        "verify native replay",
+    );
+    assert_eq!(calls.get(), 8);
+
+    let missing_registry =
+        GameRuntime::from_bytes(&wasm, Limits::default(), GameLimits::default(), 7);
+    assert!(matches!(
+        missing_registry,
+        Err(WasmError::Trap("game import is not allowed"))
+    ));
 }
 
 #[test]
