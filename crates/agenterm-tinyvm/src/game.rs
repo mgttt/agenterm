@@ -72,6 +72,27 @@ pub struct GameInput {
     pub clock_ms: u32,
 }
 
+/// Static compatibility description of one standard WASM cartridge.
+///
+/// Inspection parses and validates the manifest, function imports and
+/// lifecycle exports without instantiating the module, running its start
+/// function or calling guest code. Native imports are described but do not
+/// need to be available in a host registry until a runtime is opened.
+pub struct CartridgeDescriptor {
+    pub manifest: CartridgeManifest,
+    pub imports: Vec<crate::ImportDesc>,
+}
+
+impl CartridgeDescriptor {
+    pub fn inspect(wasm: &[u8], vm_limits: Limits) -> Result<Self, WasmError> {
+        let (manifest, module) = parse_cartridge(wasm, vm_limits)?;
+        Ok(Self {
+            manifest,
+            imports: module.imports().to_vec(),
+        })
+    }
+}
+
 /// Bounded command streams emitted by one successful game tick.
 pub struct GameFrame {
     pub render: Vec<u8>,
@@ -358,26 +379,8 @@ impl GameRuntime {
         origin: CartridgeOrigin,
         registry: &NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
-        if wasm.is_empty() || wasm.len() > MAX_CARTRIDGE_BYTES {
-            return Err(WasmError::Decode("game cartridge size limit"));
-        }
-        let manifest = CartridgeManifest::from_wasm(wasm)?;
-        if manifest.abi_version != GAME_ABI_VERSION as u32 {
-            return Err(WasmError::Trap("unsupported game ABI version"));
-        }
-        let mut module = WasmModule::from_bytes_with(wasm, vm_limits)?;
-        validate_imports(&module, &manifest, registry)?;
-        for export in [
-            "game_abi_version",
-            "game_init",
-            "game_tick",
-            "game_suspend",
-            "game_resume",
-        ] {
-            if module.export_i32_arity(export) != Some((0, 1)) {
-                return Err(WasmError::Trap("invalid game lifecycle export"));
-            }
-        }
+        let (manifest, mut module) = parse_cartridge(wasm, vm_limits)?;
+        validate_native_availability(&module, registry)?;
         let mut native_calls = Vec::new();
         native_calls
             .try_reserve_exact(registry.functions.len())
@@ -556,12 +559,39 @@ fn require_success(values: Vec<Val>, message: &'static str) -> Result<(), WasmEr
     }
 }
 
-fn validate_imports(
+fn parse_cartridge(
+    wasm: &[u8],
+    vm_limits: Limits,
+) -> Result<(CartridgeManifest, WasmModule), WasmError> {
+    if wasm.is_empty() || wasm.len() > MAX_CARTRIDGE_BYTES {
+        return Err(WasmError::Decode("game cartridge size limit"));
+    }
+    let manifest = CartridgeManifest::from_wasm(wasm)?;
+    if manifest.abi_version != GAME_ABI_VERSION as u32 {
+        return Err(WasmError::Trap("unsupported game ABI version"));
+    }
+    let module = WasmModule::from_bytes_with(wasm, vm_limits)?;
+    validate_import_contract(&module, &manifest)?;
+    for export in [
+        "game_abi_version",
+        "game_init",
+        "game_tick",
+        "game_suspend",
+        "game_resume",
+    ] {
+        if module.export_i32_arity(export) != Some((0, 1)) {
+            return Err(WasmError::Trap("invalid game lifecycle export"));
+        }
+    }
+    Ok((manifest, module))
+}
+
+fn validate_import_contract(
     module: &WasmModule,
     manifest: &CartridgeManifest,
-    registry: &NativeModuleRegistry,
 ) -> Result<(), WasmError> {
     let mut seen = [false; 8];
+    let mut native_function_count = 0usize;
     let mut actual_capabilities: Vec<&str> = Vec::new();
     actual_capabilities
         .try_reserve_exact(module.imports().len())
@@ -575,14 +605,19 @@ fn validate_imports(
             return Err(WasmError::Trap("game import is not allowed"));
         }
         if import.module != ABI_MODULE {
+            native_function_count = native_function_count
+                .checked_add(1)
+                .ok_or(WasmError::Trap("game capability allocation"))?;
+            if !valid_native_namespace(&import.module)
+                || !valid_native_field(&import.field)
+                || import.n_params > MAX_NATIVE_ARITY
+                || import.n_results > MAX_NATIVE_ARITY
+                || native_function_count > MAX_NATIVE_FUNCTIONS
+            {
+                return Err(WasmError::Trap("invalid game import signature"));
+            }
             if !actual_capabilities.contains(&import.module.as_str()) {
                 actual_capabilities.push(import.module.as_str());
-            }
-            let native = registry
-                .find(&import.module, &import.field)
-                .ok_or(WasmError::Trap("game import is not allowed"))?;
-            if import.n_params != native.n_params || import.n_results != native.n_results {
-                return Err(WasmError::Trap("invalid game import signature"));
             }
             continue;
         }
@@ -610,6 +645,25 @@ fn validate_imports(
             .any(|(actual, declared)| *actual != declared)
     {
         return Err(WasmError::Trap("manifest capability mismatch"));
+    }
+    Ok(())
+}
+
+fn validate_native_availability(
+    module: &WasmModule,
+    registry: &NativeModuleRegistry,
+) -> Result<(), WasmError> {
+    for import in module
+        .imports()
+        .iter()
+        .filter(|import| import.module != ABI_MODULE)
+    {
+        let native = registry
+            .find(&import.module, &import.field)
+            .ok_or(WasmError::Trap("game import is not allowed"))?;
+        if import.n_params != native.n_params || import.n_results != native.n_results {
+            return Err(WasmError::Trap("invalid game import signature"));
+        }
     }
     Ok(())
 }

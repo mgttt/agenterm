@@ -139,6 +139,17 @@ can observe a failed trust/storage refresh, then accidentally copy stale bytes
 from an earlier success. Prove the failure-then-copy sequence at the public FFI
 boundary, not only the internal operation result.
 
+When a binary format has both converter inspection and runtime loading, keep
+one structural validator and split capability *description* from capability
+*availability*. Static inspection may parse manifests, imports and export
+signatures, but it must not instantiate the module, run start/init or silently
+bind a host function. Runtime open reuses that structure result and applies the
+host registry/trust/resource gates afterward. If FFI publishes a descriptor,
+make it bounded, versioned and explicit that it is metadata—not a replacement
+wrapper for the original standard executable bytes. Prove that a native-import
+descriptor succeeds without a registry while an unauthorized runtime open still
+fails closed.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

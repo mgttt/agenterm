@@ -339,6 +339,39 @@ struct TinyArcadeSmoke {
         precondition(config.struct_size == MemoryLayout<tinyarcade_config_v1>.size)
         _ = TinyArcadeRuntimeV1.self
 
+        let nativeBytes = nativeCartridge()
+        let descriptor = try TinyArcadeCartridgeDescriptorV1.inspect(nativeBytes)
+        precondition(descriptor.gameID == "c.native")
+        precondition(descriptor.gameVersion == "1.0.0")
+        precondition(descriptor.abiVersion == 1 && descriptor.stateVersion == 1)
+        precondition(descriptor.wasmLength == UInt32(nativeBytes.count))
+        precondition(descriptor.nativeCapabilities == ["fan:physics/v1"])
+        precondition(!descriptor.isCoreOnly)
+        precondition(descriptor.functionImports.count == 3)
+        precondition(
+            descriptor.functionImports.first == TinyArcadeFunctionImportV1(
+                module: "fan:physics/v1",
+                field: "step_world",
+                parameterCount: 2,
+                resultCount: 1,
+                importClass: .native
+            )
+        )
+        let privateDescriptorDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tinyarcade-private-descriptor-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: privateDescriptorDirectory) }
+        let privateDescriptorLibrary = try TinyArcadePrivateLibraryV1(
+            directoryURL: privateDescriptorDirectory
+        )
+        do {
+            _ = try privateDescriptorLibrary.importCartridge(nativeBytes)
+            preconditionFailure("private import must report unavailable native capabilities")
+        } catch let error as TinyArcadePrivateLibraryError {
+            precondition(
+                error == .unsupportedNativeCapabilities(["fan:physics/v1"])
+            )
+        }
+
         let cacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinyarcade-ios-cache-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: cacheDirectory) }

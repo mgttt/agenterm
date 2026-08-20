@@ -5,6 +5,13 @@ device/simulator `TinyArcade.xcframework` and the main-actor Swift ownership,
 media-decoding and signed-catalog wrapper as one `TinyArcadeRuntime` library
 product.
 
+Call `TinyArcadeCartridgeDescriptorV1.inspect(_:)` before presenting an import.
+It statically validates the standard WASM manifest, lifecycle exports and exact
+function import table without instantiating or executing the cartridge, then
+reports identity and required versioned native capabilities. The private
+library uses this same descriptor to return
+`unsupportedNativeCapabilities` before core-only runtime preflight.
+
 Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
 `tick` convenience.

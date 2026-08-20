@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 5u
-#define TINYARCADE_ABI_VERSION 0x00010005u
+#define TINYARCADE_ABI_MINOR 6u
+#define TINYARCADE_ABI_VERSION 0x00010006u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -97,6 +97,17 @@ typedef struct tinyarcade_native_function_v1 {
 
 uint32_t tinyarcade_v1_abi_version(void);
 tinyarcade_status_v1 tinyarcade_v1_default_config(tinyarcade_config_v1* config);
+
+/* Statically validates a standard WASM cartridge and returns its canonical
+ * TAD1 compatibility descriptor without instantiating or executing guest code.
+ * The descriptor contains manifest identity, declared native capabilities and
+ * every exact standard function import. Uses the two-stage copy protocol. */
+tinyarcade_status_v1 tinyarcade_v1_copy_cartridge_descriptor(
+    const uint8_t* wasm,
+    size_t wasm_len,
+    uint8_t* output,
+    size_t capacity,
+    size_t* output_len);
 
 /* Trust stores are mutable, single-thread-owned policy objects. Public keys
  * are exact 32-byte Ed25519 keys; content hashes are exact 32-byte SHA-256. */

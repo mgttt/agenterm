@@ -93,7 +93,7 @@ construction.
 
 ## iOS runtime workflow
 
-C ABI v1.5 and the main-actor Swift owner record directly on an already loaded
+C ABI v1.6 and the main-actor Swift owner record directly on an already loaded
 runtime, so the app does not retain a second cartridge copy merely to identify
 it. `beginReplayRecording()` captures the current state;
 `tick`/`tickMedia` append evidence; `finishReplayRecording()` returns canonical

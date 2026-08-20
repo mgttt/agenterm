@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES,
+    CartridgeDescriptor, GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES,
     MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame, WasmError,
 };
 #[cfg(feature = "replay")]
@@ -375,6 +375,38 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
     );
     assert_eq!(frame.render, [1, 2, 3]);
     assert_eq!(frame.audio, [4, 5]);
+}
+
+#[test]
+fn descriptor_validates_without_executing_or_granting_native_imports() {
+    let wasm = game_module(
+        &[("fan:physics/v1", "step_world", 1), (CORE, "input_bits", 0)],
+        1,
+        &[0x41, 0x00, 0x0b],
+        &[],
+    );
+    let descriptor = must_ok(
+        CartridgeDescriptor::inspect(&wasm, Limits::default()),
+        "inspect native cartridge",
+    );
+    assert_eq!(descriptor.manifest.game_id, "test.game");
+    assert_eq!(descriptor.manifest.game_version, "1.0.0");
+    assert_eq!(descriptor.manifest.capabilities, ["fan:physics/v1"]);
+    assert_eq!(descriptor.imports.len(), 2);
+    assert_eq!(descriptor.imports[0].module, "fan:physics/v1");
+    assert_eq!(descriptor.imports[0].field, "step_world");
+    assert_eq!(
+        (
+            descriptor.imports[0].n_params,
+            descriptor.imports[0].n_results
+        ),
+        (2, 1)
+    );
+
+    assert!(matches!(
+        GameRuntime::from_private_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        Err(WasmError::Trap("game import is not allowed"))
+    ));
 }
 
 #[test]

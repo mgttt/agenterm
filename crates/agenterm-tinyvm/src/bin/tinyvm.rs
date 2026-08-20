@@ -25,8 +25,8 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
 
 use agenterm_tinyvm::{
-    CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits, RenderFrame, ToneBatch, Vm,
-    WasmError, WasmModule,
+    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits,
+    RenderFrame, ToneBatch, Vm, WasmError, WasmModule,
 };
 #[cfg(feature = "catalog-publisher")]
 use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
@@ -669,10 +669,18 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let manifest = match CartridgeManifest::from_wasm(&bytes) {
-        Ok(manifest) => manifest,
+    let descriptor = match CartridgeDescriptor::inspect(
+        &bytes,
+        Limits {
+            max_table_elems: 1_024,
+            max_memory_pages: 64,
+            max_steps: 1_000_000,
+        },
+    ) {
+        Ok(descriptor) => descriptor,
         Err(error) => return cartridge_error(error),
     };
+    let manifest = &descriptor.manifest;
     println!("game_id={}", manifest.game_id);
     println!("game_version={}", manifest.game_version);
     println!("abi_version={}", manifest.abi_version);
@@ -683,19 +691,8 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
     } else {
         println!("native_capabilities=(none)");
     }
-    let module = match WasmModule::from_bytes_with(
-        &bytes,
-        Limits {
-            max_table_elems: 1_024,
-            max_memory_pages: 64,
-            max_steps: 1_000_000,
-        },
-    ) {
-        Ok(module) => module,
-        Err(error) => return cartridge_error(error),
-    };
-    println!("function_imports={}", module.imports().len());
-    for import in module.imports() {
+    println!("function_imports={}", descriptor.imports.len());
+    for import in &descriptor.imports {
         let class = if import.module == "tinyarcade:core/v1" {
             "core"
         } else {

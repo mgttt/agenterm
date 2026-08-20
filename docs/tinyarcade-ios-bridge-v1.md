@@ -71,12 +71,20 @@ turn into a cartridge launch failure.
 
 ## Ownership
 
-ABI v1.5 exposes three non-interchangeable origins: bundled
+ABI v1.6 exposes three non-interchangeable origins: bundled
 `tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
 `tinyarcade_v1_open_private`. Every instance retains its immutable origin for
 UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
 private opening has no native capability registry and cannot acquire official
 provenance.
+
+Before any origin opens, `TinyArcadeCartridgeDescriptorV1.inspect` can call the
+stateless C descriptor gate. It validates the manifest, standard module,
+lifecycle export signatures, core import signatures, native naming/arity and
+manifest/import equality without instantiation or guest execution. Its bounded
+TAD1 result exposes identity, ABI/state version and every exact import to app UI
+or creator tooling. Descriptor success grants no origin, trust or native
+capability; actual open remains authoritative.
 
 `TinyArcadePrivateLibraryV1` turns that private opening into a complete local
 library transaction. It preflights exact bytes under core-only policy before
@@ -130,7 +138,7 @@ contract at compile time.
 Close is explicit and idempotent at the Swift layer. Its `deinit` is a final
 safety release. A raw C consumer must close exactly once on the owner thread.
 
-ABI v1.5 also exposes the existing verified object cache through a distinct
+ABI v1.6 also exposes the existing verified object cache through a distinct
 single-thread-owned C handle and `TinyArcadeCartridgeCacheV1` Swift owner. The
 app supplies a file URL and a positive per-object WASM byte ceiling. Network
 transfer is deliberately absent: only a complete `Data` value may enter
@@ -233,7 +241,7 @@ decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 suspend into a fresh instance during the measured run. Its real launch event is
 also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
 explicitly deactivated on the booted simulator.
-The same simulator smoke creates a real cache directory through the Swift v1.5
+The same simulator smoke creates a real cache directory through the Swift v1.6
 owner and proves that a cartridge naming an absent trust key cannot activate.
 Rust's public C black box separately installs a valid signed cartridge, reloads
 its exact bytes, rejects cross-thread access, then proves live revocation clears

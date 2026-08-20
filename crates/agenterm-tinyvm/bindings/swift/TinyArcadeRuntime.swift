@@ -9,6 +9,207 @@ public struct TinyArcadeRuntimeError: Error, Sendable {
     public let message: String
 }
 
+public enum TinyArcadeImportClassV1: UInt8, Sendable, Equatable {
+    case core = 0
+    case native = 1
+}
+
+public struct TinyArcadeFunctionImportV1: Sendable, Equatable {
+    public let module: String
+    public let field: String
+    public let parameterCount: UInt8
+    public let resultCount: UInt8
+    public let importClass: TinyArcadeImportClassV1
+}
+
+/// A statically validated compatibility description. Inspection never
+/// instantiates the module, runs its start function or calls guest code.
+public struct TinyArcadeCartridgeDescriptorV1: Sendable, Equatable {
+    public let gameID: String
+    public let gameVersion: String
+    public let abiVersion: UInt32
+    public let stateVersion: UInt32
+    public let wasmLength: UInt32
+    public let nativeCapabilities: [String]
+    public let functionImports: [TinyArcadeFunctionImportV1]
+
+    public var isCoreOnly: Bool { nativeCapabilities.isEmpty }
+
+    public static func inspect(_ cartridge: Data) throws -> Self {
+        var required = 0
+        let query = cartridge.withUnsafeBytes { bytes in
+            tinyarcade_v1_copy_cartridge_descriptor(
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                bytes.count,
+                nil,
+                0,
+                &required
+            )
+        }
+        guard query == TINYARCADE_BUFFER_TOO_SMALL,
+              (32...(64 * 1_024)).contains(required) else {
+            try check(query)
+            throw decodeError("invalid cartridge descriptor length")
+        }
+        var encoded = Data(count: required)
+        let status = cartridge.withUnsafeBytes { cartridgeBytes in
+            encoded.withUnsafeMutableBytes { outputBytes in
+                tinyarcade_v1_copy_cartridge_descriptor(
+                    cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
+                    cartridgeBytes.count,
+                    outputBytes.bindMemory(to: UInt8.self).baseAddress,
+                    outputBytes.count,
+                    &required
+                )
+            }
+        }
+        try check(status)
+        guard required == encoded.count else {
+            throw decodeError("cartridge descriptor length changed")
+        }
+        return try decode(encoded, cartridgeLength: cartridge.count)
+    }
+
+    private static func decode(_ data: Data, cartridgeLength: Int) throws -> Self {
+        guard data.count >= 32,
+              data.prefix(4) == Data("TAD1".utf8),
+              u16(data, 4) == 1,
+              u16(data, 6) == 32,
+              u32(data, 28) == 0 else {
+            throw decodeError("invalid cartridge descriptor header")
+        }
+        let gameIDLength = Int(u16(data, 16))
+        let gameVersionLength = Int(u16(data, 18))
+        let capabilityCount = Int(u16(data, 20))
+        let importCount = Int(u16(data, 22))
+        guard (3...128).contains(gameIDLength),
+              (1...64).contains(gameVersionLength),
+              capabilityCount <= 64,
+              importCount <= 72,
+              u32(data, 24) == UInt32(exactly: cartridgeLength) else {
+            throw decodeError("invalid cartridge descriptor bounds")
+        }
+        var cursor = 32
+        let gameID = try string(data, cursor: &cursor, length: gameIDLength)
+        let gameVersion = try string(data, cursor: &cursor, length: gameVersionLength)
+        var capabilities: [String] = []
+        capabilities.reserveCapacity(capabilityCount)
+        for _ in 0..<capabilityCount {
+            capabilities.append(try lengthPrefixedString(data, cursor: &cursor, maximum: 128))
+        }
+        var imports: [TinyArcadeFunctionImportV1] = []
+        imports.reserveCapacity(importCount)
+        for _ in 0..<importCount {
+            guard cursor + 8 <= data.count else {
+                throw decodeError("truncated cartridge import descriptor")
+            }
+            let moduleLength = Int(u16(data, cursor))
+            let fieldLength = Int(u16(data, cursor + 2))
+            let parameters = data[cursor + 4]
+            let results = data[cursor + 5]
+            let classValue = data[cursor + 6]
+            let reserved = data[cursor + 7]
+            cursor += 8
+            guard moduleLength > 0, moduleLength <= 128,
+                  fieldLength > 0, fieldLength <= 64,
+                  parameters <= 16, results <= 16,
+                  reserved == 0,
+                  let importClass = TinyArcadeImportClassV1(rawValue: classValue) else {
+                throw decodeError("invalid cartridge import descriptor")
+            }
+            let module = try string(data, cursor: &cursor, length: moduleLength)
+            let field = try string(data, cursor: &cursor, length: fieldLength)
+            guard (module == "tinyarcade:core/v1") == (importClass == .core) else {
+                throw decodeError("invalid cartridge import class")
+            }
+            imports.append(
+                TinyArcadeFunctionImportV1(
+                    module: module,
+                    field: field,
+                    parameterCount: parameters,
+                    resultCount: results,
+                    importClass: importClass
+                )
+            )
+        }
+        guard cursor == data.count else {
+            throw decodeError("trailing cartridge descriptor bytes")
+        }
+        return Self(
+            gameID: gameID,
+            gameVersion: gameVersion,
+            abiVersion: u32(data, 8),
+            stateVersion: u32(data, 12),
+            wasmLength: u32(data, 24),
+            nativeCapabilities: capabilities,
+            functionImports: imports
+        )
+    }
+
+    private static func lengthPrefixedString(
+        _ data: Data,
+        cursor: inout Int,
+        maximum: Int
+    ) throws -> String {
+        guard cursor + 2 <= data.count else {
+            throw decodeError("truncated cartridge descriptor string")
+        }
+        let length = Int(u16(data, cursor))
+        cursor += 2
+        guard length > 0, length <= maximum else {
+            throw decodeError("invalid cartridge descriptor string length")
+        }
+        return try string(data, cursor: &cursor, length: length)
+    }
+
+    private static func string(
+        _ data: Data,
+        cursor: inout Int,
+        length: Int
+    ) throws -> String {
+        guard length >= 0, cursor <= data.count, length <= data.count - cursor,
+              let value = String(
+                  data: data.subdata(in: cursor..<(cursor + length)),
+                  encoding: .utf8
+              ) else {
+            throw decodeError("invalid cartridge descriptor UTF-8")
+        }
+        cursor += length
+        return value
+    }
+
+    private static func u16(_ data: Data, _ offset: Int) -> UInt16 {
+        UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
+    }
+
+    private static func u32(_ data: Data, _ offset: Int) -> UInt32 {
+        UInt32(data[offset]) | UInt32(data[offset + 1]) << 8
+            | UInt32(data[offset + 2]) << 16 | UInt32(data[offset + 3]) << 24
+    }
+
+    private static func decodeError(_ message: String) -> TinyArcadeRuntimeError {
+        TinyArcadeRuntimeError(
+            status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+            message: message
+        )
+    }
+
+    private static func check(_ status: tinyarcade_status_v1) throws {
+        guard status == TINYARCADE_OK else {
+            var count = 0
+            let query = tinyarcade_v1_last_error(nil, 0, &count)
+            var message = "tinyarcade descriptor error"
+            if query == TINYARCADE_BUFFER_TOO_SMALL, count > 0 {
+                var bytes = [UInt8](repeating: 0, count: count)
+                if tinyarcade_v1_last_error(&bytes, bytes.count, &count) == TINYARCADE_OK {
+                    message = String(decoding: bytes, as: UTF8.self)
+                }
+            }
+            throw TinyArcadeRuntimeError(status: Int32(status.rawValue), message: message)
+        }
+    }
+}
+
 public struct TinyArcadeGridCell: Sendable, Equatable {
     public let x: UInt8
     public let y: UInt8
@@ -2202,6 +2403,7 @@ public enum TinyArcadePrivateLibraryError: Error, Equatable {
     case unsafeStoredFile
     case cartridgeNotFound
     case tooManyCartridges
+    case unsupportedNativeCapabilities([String])
     case storageFailure
 }
 
@@ -2272,21 +2474,30 @@ public final class TinyArcadePrivateLibraryV1 {
         guard !cartridge.isEmpty, cartridge.count <= maximumCartridgeBytes else {
             throw TinyArcadePrivateLibraryError.invalidLimit
         }
+        let descriptor = try TinyArcadeCartridgeDescriptorV1.inspect(cartridge)
+        guard descriptor.nativeCapabilities.isEmpty else {
+            throw TinyArcadePrivateLibraryError.unsupportedNativeCapabilities(
+                descriptor.nativeCapabilities
+            )
+        }
         let runtime = try TinyArcadeRuntimeV1(
             privateCartridge: cartridge,
             configure: configure
         )
-        let gameID: String
-        let gameVersion: String
         do {
-            gameID = try runtime.gameID()
-            gameVersion = try runtime.gameVersion()
+            guard try runtime.gameID() == descriptor.gameID,
+                  try runtime.gameVersion() == descriptor.gameVersion else {
+                throw TinyArcadePrivateLibraryError.invalidIdentity
+            }
             try runtime.close()
         } catch {
             try? runtime.close()
             throw error
         }
-        let item = try self.cartridge(gameID: gameID, gameVersion: gameVersion)
+        let item = try self.cartridge(
+            gameID: descriptor.gameID,
+            gameVersion: descriptor.gameVersion
+        )
         try rejectUnsafeExistingFile(item.fileURL)
         try ensureCapacity(for: item.fileURL)
         do {

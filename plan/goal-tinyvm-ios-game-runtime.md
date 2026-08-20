@@ -36,6 +36,7 @@ tinyvm iOS game runtime
 ├── cartridge ownership              [~]
 │   ├── official reviewed catalog     [~]
 │   ├── private user import           [x]
+│   ├── static compatibility descriptor [x]
 │   ├── converter conformance kit     [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
@@ -943,3 +944,48 @@ Evidence on 2026-08-21:
   attached. The proposed `/wasm/` catalog, catalog JSON and AASA URLs currently
   return 404 and no repository-owned deployment source for that host was found.
   Physical-device evidence and live hosted distribution therefore remain open.
+
+## Twenty-eighth executable increment — static cartridge compatibility descriptor
+
+Compatibility inspection now has one implementation boundary rather than four
+informal interpretations. Rust `CartridgeDescriptor::inspect` parses at most
+2 MiB, validates the canonical manifest, standard Wasm module, lifecycle export
+signatures, exact core imports, canonical native names/i32 arities, duplicate
+rules and manifest/import equality. It does not instantiate the module, run its
+start/init functions or require native modules to be registered. Runtime open
+reuses the same structural validator and performs registry availability as a
+later independent gate; `tinyvm cartridge inspect` also consumes this shared
+descriptor.
+
+C ABI v1.6 exposes the result through a stateless two-stage copy as bounded
+canonical TAD1 data. The format carries exact inspected byte length, identity,
+ABI/state versions, declared native capability namespaces and every function
+import's module, field, class and i32 arity. TAD1 is host-side metadata, never a
+replacement or wrapper for the standard `.wasm` cartridge. Swift decodes all
+lengths, counts, UTF-8, class tags, reserved fields and trailing bytes before
+exposing `TinyArcadeCartridgeDescriptorV1`.
+
+`TinyArcadePrivateLibraryV1` now inspects first. A structurally valid fan
+cartridge that declares native modules receives the precise typed
+`unsupportedNativeCapabilities` result before core-only preflight, while an
+official reviewed open may later match the same exact descriptor against
+app-compiled registrations. Inspection grants no provenance, catalog trust or
+native authority.
+
+Evidence on 2026-08-21:
+
+- Public Rust black boxes inspect a native-importing cartridge without a
+  registry, recover exact identity and `fan:physics/v1.step_world (i32,i32) ->
+  i32`, then prove private runtime opening still rejects the unavailable
+  capability.
+- The C black box proves both stages of TAD1 copying, exact inspected byte
+  length, native namespace/field presence and malformed-Wasm failure. The C
+  header compile gate includes the new ABI v1.6 symbol.
+- A booted iPhone 17 Pro simulator decodes the same native cartridge through
+  Swift, verifies every descriptor field and receives the typed private-import
+  rejection before the already-proven native-registered runtime executes it.
+- Generic device and universal simulator packages link. Ordinary consumers
+  measure 1,370,280 bytes arm64 and 1,435,720 bytes x86_64; replay and private
+  consumers measure 1,235,256 and 1,236,912 bytes arm64, all below the existing
+  1.375 MiB linked-consumer ceiling. Physical-device and live distribution
+  evidence remain open.

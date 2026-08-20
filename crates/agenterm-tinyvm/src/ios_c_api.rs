@@ -6,13 +6,13 @@ use core::mem::size_of;
 use core::ptr;
 use core::slice;
 use std::boxed::Box;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::thread::{self, ThreadId};
 
 use crate::{
-    CartridgeCache, CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits,
-    GameRuntime, Limits, NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1, WasmError,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS,
+    CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, GameFrame, GameInput,
+    GameLimits, GameRuntime, Limits, MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS,
+    NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -488,7 +488,101 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 5
+    (1 << 16) | 6
+}
+
+fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
+    let value = u16::try_from(value)
+        .map_err(|_| FfiError::new(STATUS_DECODE, "cartridge descriptor limit"))?;
+    output.extend_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn encode_descriptor(
+    descriptor: &CartridgeDescriptor,
+    wasm_len: usize,
+) -> Result<Vec<u8>, FfiError> {
+    let wasm_len = u32::try_from(wasm_len)
+        .map_err(|_| FfiError::new(STATUS_DECODE, "cartridge descriptor limit"))?;
+    let mut encoded_len = 32usize
+        .checked_add(descriptor.manifest.game_id.len())
+        .and_then(|value| value.checked_add(descriptor.manifest.game_version.len()))
+        .ok_or(FfiError::new(STATUS_DECODE, "cartridge descriptor limit"))?;
+    for capability in &descriptor.manifest.capabilities {
+        encoded_len = encoded_len
+            .checked_add(2)
+            .and_then(|value| value.checked_add(capability.len()))
+            .ok_or(FfiError::new(STATUS_DECODE, "cartridge descriptor limit"))?;
+    }
+    for import in &descriptor.imports {
+        encoded_len = encoded_len
+            .checked_add(8)
+            .and_then(|value| value.checked_add(import.module.len()))
+            .and_then(|value| value.checked_add(import.field.len()))
+            .ok_or(FfiError::new(STATUS_DECODE, "cartridge descriptor limit"))?;
+    }
+    if encoded_len > 64 * 1024 {
+        return Err(FfiError::new(STATUS_DECODE, "cartridge descriptor limit"));
+    }
+    let mut encoded = Vec::new();
+    encoded
+        .try_reserve_exact(encoded_len)
+        .map_err(|_| FfiError::new(STATUS_DECODE, "cartridge descriptor allocation"))?;
+    encoded.extend_from_slice(b"TAD1");
+    encoded.extend_from_slice(&1u16.to_le_bytes());
+    encoded.extend_from_slice(&32u16.to_le_bytes());
+    encoded.extend_from_slice(&descriptor.manifest.abi_version.to_le_bytes());
+    encoded.extend_from_slice(&descriptor.manifest.state_version.to_le_bytes());
+    append_u16(&mut encoded, descriptor.manifest.game_id.len())?;
+    append_u16(&mut encoded, descriptor.manifest.game_version.len())?;
+    append_u16(&mut encoded, descriptor.manifest.capabilities.len())?;
+    append_u16(&mut encoded, descriptor.imports.len())?;
+    encoded.extend_from_slice(&wasm_len.to_le_bytes());
+    encoded.extend_from_slice(&0u32.to_le_bytes());
+    encoded.extend_from_slice(descriptor.manifest.game_id.as_bytes());
+    encoded.extend_from_slice(descriptor.manifest.game_version.as_bytes());
+    for capability in &descriptor.manifest.capabilities {
+        append_u16(&mut encoded, capability.len())?;
+        encoded.extend_from_slice(capability.as_bytes());
+    }
+    for import in &descriptor.imports {
+        append_u16(&mut encoded, import.module.len())?;
+        append_u16(&mut encoded, import.field.len())?;
+        encoded.push(
+            u8::try_from(import.n_params)
+                .map_err(|_| FfiError::new(STATUS_DECODE, "cartridge descriptor import arity"))?,
+        );
+        encoded.push(
+            u8::try_from(import.n_results)
+                .map_err(|_| FfiError::new(STATUS_DECODE, "cartridge descriptor import arity"))?,
+        );
+        encoded.push(u8::from(import.module != "tinyarcade:core/v1"));
+        encoded.push(0);
+        encoded.extend_from_slice(import.module.as_bytes());
+        encoded.extend_from_slice(import.field.as_bytes());
+    }
+    debug_assert_eq!(encoded.len(), encoded_len);
+    Ok(encoded)
+}
+
+/// Statically validate and describe a cartridge without instantiating it or
+/// running its start/lifecycle functions. The canonical TAD1 result uses the
+/// ordinary two-stage copy protocol.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_copy_cartridge_descriptor(
+    wasm: *const u8,
+    wasm_len: usize,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let wasm = unsafe { input_bytes(wasm, wasm_len, "invalid cartridge input")? };
+        let descriptor =
+            CartridgeDescriptor::inspect(wasm, Limits::default()).map_err(wasm_error)?;
+        let encoded = encode_descriptor(&descriptor, wasm.len())?;
+        unsafe { copy_bytes(&encoded, output, capacity, output_len) }
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -1239,7 +1333,7 @@ pub unsafe extern "C" fn tinyarcade_v1_last_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cartridge_sha256, CartridgeOrigin};
+    use crate::{CartridgeOrigin, cartridge_sha256};
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::mem::MaybeUninit;
     use std::path::PathBuf;
@@ -1591,7 +1685,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 5);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 6);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1678,6 +1772,65 @@ mod tests {
         );
         assert_eq!(origin, CartridgeOrigin::PrivateUser as u32);
         assert_eq!(unsafe { tinyarcade_v1_close(private) }, STATUS_OK);
+    }
+
+    #[test]
+    fn c_descriptor_is_bounded_static_and_reports_native_requirements() {
+        let wasm = native_cartridge();
+        let mut required = 0usize;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_cartridge_descriptor(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        assert!((32..=4096).contains(&required));
+        let mut encoded = vec![0; required];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_cartridge_descriptor(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    encoded.as_mut_ptr(),
+                    encoded.len(),
+                    &mut required,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(&encoded[0..4], b"TAD1");
+        assert_eq!(u16::from_le_bytes([encoded[4], encoded[5]]), 1);
+        assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 32);
+        assert_eq!(u16::from_le_bytes([encoded[20], encoded[21]]), 1);
+        assert_eq!(u16::from_le_bytes([encoded[22], encoded[23]]), 2);
+        assert_eq!(
+            u32::from_le_bytes(encoded[24..28].try_into().expect("descriptor length")),
+            wasm.len() as u32
+        );
+        assert!(encoded.windows(14).any(|bytes| bytes == b"fan:physics/v1"));
+        assert!(encoded.windows(10).any(|bytes| bytes == b"step_world"));
+
+        let invalid = [0u8];
+        required = usize::MAX;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_cartridge_descriptor(
+                    invalid.as_ptr(),
+                    invalid.len(),
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            STATUS_DECODE
+        );
+        assert_eq!(required, usize::MAX);
     }
 
     #[test]
@@ -2091,6 +2244,7 @@ mod tests {
         for symbol in [
             "tinyarcade_v1_abi_version",
             "tinyarcade_v1_default_config",
+            "tinyarcade_v1_copy_cartridge_descriptor",
             "tinyarcade_v1_trust_store_create",
             "tinyarcade_v1_trust_store_close",
             "tinyarcade_v1_trust_store_add_key",

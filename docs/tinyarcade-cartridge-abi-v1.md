@@ -131,12 +131,50 @@ quota, while each shipped native module owns a deterministic finite-work rule.
 
 The exact function import table is the machine-readable interface descriptor:
 module namespace, field, parameter count and result count all come from normal
-WASM sections. `tinyvm cartridge inspect` prints that table without executing
-the guest. Converters should preserve standard WASM imports and use this table
-to report missing host modules; they must not rewrite imports into private
-opcodes. A capability declaration is a compatibility requirement, not an
-entitlement: cartridge origin and host policy still decide whether a module is
-registered.
+WASM sections. Rust `CartridgeDescriptor::inspect`, `tinyvm cartridge inspect`
+and iOS `TinyArcadeCartridgeDescriptorV1.inspect` all use the same structural
+validator without instantiating the module, running its start function or
+calling guest code. Converters should preserve standard WASM imports and use
+this table to report missing host modules; they must not rewrite imports into
+private opcodes. A capability declaration is a compatibility requirement, not
+an entitlement: cartridge origin and host policy still decide whether a module
+is registered.
+
+The C ABI v1.6 two-stage copy function emits the following canonical host-side
+descriptor. `TAD1` is inspection output, not a cartridge wrapper and never
+replaces the original standard `.wasm` bytes.
+
+```text
+"TAD1"                       4 bytes
+schema_version               u16 little-endian; 1
+header_length                u16 little-endian; 32
+abi_version                  u32 little-endian
+state_version                u32 little-endian
+game_id_length               u16 little-endian
+game_version_length          u16 little-endian
+native_capability_count      u16 little-endian; at most 64
+function_import_count        u16 little-endian; at most 72
+wasm_length                  u32 little-endian; exact inspected bytes
+reserved                     u32 zero
+game_id                      exact UTF-8 bytes
+game_version                 exact UTF-8 bytes
+repeated native capability:
+  namespace_length           u16 little-endian
+  namespace                  exact UTF-8 bytes
+repeated function import:
+  module_length              u16 little-endian
+  field_length               u16 little-endian
+  parameter_count            u8; at most 16
+  result_count               u8; at most 16
+  class                      u8; 0 core, 1 native
+  reserved                   u8 zero
+  module                     exact UTF-8 bytes
+  field                      exact UTF-8 bytes
+```
+
+Descriptor success proves structural ABI compatibility only. Runtime-specific
+memory/step/media limits, native registry availability, catalog trust and guest
+initialization remain later independent gates.
 
 ## Snapshot envelope
 
