@@ -47,6 +47,7 @@ tinyvm iOS game runtime
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   ├── reviewed install transaction  [x]
+│   ├── private atomic library         [x]
 │   ├── atomic scene persistence      [x]
 │   ├── replay record/verify owner     [x]
 │   └── on-device lifecycle test      [ ]
@@ -108,6 +109,15 @@ import table, which the converter reports without executing the guest.
 Unknown namespaces fail closed. Metadata may live in a standard WASM custom
 section or adjacent signed manifest, so converters can emit and validate the
 same cartridge contract without depending on the interpreter implementation.
+
+Compatibility is defined by the standard module plus that versioned contract,
+not by tinyvm internals. Core v1 semantics do not drift when a native module is
+added. Each native module advances under its own canonical `/vN` namespace;
+module name, field, value signature and finite-work policy are exact. This lets
+future fan-facing converters inspect the manifest and import table without
+executing a cartridge, emit a capability/compatibility report, and target other
+standards-compliant Wasm producers. A capability declaration never grants the
+right to load native code.
 
 Official catalog distribution and a user's private cartridge import are two
 different policy surfaces. Private import is intended for a user's own app
@@ -890,3 +900,46 @@ Evidence on 2026-08-21:
   1,159,864 bytes arm64, all below 1.375 MiB.
 - Physical-iPhone lifecycle, live hosting and Apple permission are still open,
   so the overall runtime goal remains partial.
+
+## Twenty-seventh executable increment — private iOS cartridge library
+
+`TinyArcadePrivateLibraryV1` makes explicit user import a bounded local
+lifecycle instead of leaving apps to persist arbitrary `Data`. Complete bytes
+must first instantiate under the core-only private runtime; only then does the
+main-actor owner atomically install the exact module at canonical
+`game-id@version.wasm`. The directory is excluded from backup, receives iOS
+data protection and holds at most 256 cartridges of at most 2 MiB each.
+
+Enumeration does not execute guest code, but it rechecks canonical identity,
+size and regular-file ownership. Open performs those checks again and then
+revalidates the loaded manifest identity. Invalid updates cannot replace known
+good bytes; corrupt and oversized replacements fail closed; live and dangling
+symlinks are never followed. Remove is scoped to an item produced by the same
+canonical library. This owner deliberately has no network, catalog, signing,
+native-module or public-upload authority.
+
+The compatibility rule is now explicit: the cartridge is standard Wasm and
+the platform contract is its versioned manifest, standard import table and
+bounded lifecycle records. `tinyarcade:core/v1` is stable; future native
+modules advance independently under canonical `authority:module/vN` names.
+This lets creator converters statically report capability requirements without
+depending on tinyvm internals or turning a declaration into native-code
+authority.
+
+Evidence on 2026-08-21:
+
+- A booted iPhone 17 Pro simulator imports real Paddle Guard and Depth Well,
+  preserves an installed cartridge across a rejected invalid update, performs
+  an atomic same-version update, enumerates deterministically, opens the exact
+  private origin, runs a real indexed frame and removes both objects.
+- The same black box rejects corrupt and oversized stored bytes plus live and
+  dangling symlinks, enforces the 256-cartridge ceiling on import, then proves
+  a valid re-import repairs the canonical slot.
+- Generic iOS device and universal simulator packages link. Ordinary consumers
+  measure 1,342,232 bytes arm64 and 1,395,952 bytes x86_64; replay and private
+  library consumers measure 1,191,368 and 1,192,896 bytes arm64 respectively,
+  all below the 1.375 MiB linked-consumer ceiling.
+- Signing has a valid Apple Development identity, but no physical iPhone is
+  attached. The proposed `/wasm/` catalog, catalog JSON and AASA URLs currently
+  return 404 and no repository-owned deployment source for that host was found.
+  Physical-device evidence and live hosted distribution therefore remain open.

@@ -78,16 +78,30 @@ xcrun --sdk iphonesimulator swiftc \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
   "$CRATE/tests/ios/TinyArcadeReplaySmoke.swift" \
   -o "$TEMP/TinyArcadeReplaySmoke-arm64"
+xcrun --sdk iphonesimulator swiftc \
+  -parse-as-library \
+  -warnings-as-errors \
+  -O \
+  -target arm64-apple-ios14.0-simulator \
+  -I "$SLICE/Headers" \
+  -L "$SLICE" \
+  -lagenterm_tinyvm \
+  -Xlinker -fatal_warnings \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
+  "$CRATE/tests/ios/TinyArcadePrivateLibrarySmoke.swift" \
+  -o "$TEMP/TinyArcadePrivateLibrarySmoke-arm64"
 
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-arm64" | grep -q 'platform IOSSIMULATOR'
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-x86_64" | grep -q 'platform IOSSIMULATOR'
 ARM64_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSmoke-arm64")
 X86_64_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSmoke-x86_64")
 REPLAY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeReplaySmoke-arm64")
+PRIVATE_LIBRARY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadePrivateLibrarySmoke-arm64")
 MAX_LINKED_BYTES=1441792
 test "$ARM64_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test "$X86_64_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test "$REPLAY_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
+test "$PRIVATE_LIBRARY_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test -f "$XCFRAMEWORK/ios-arm64/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64_x86_64-simulator/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64/Headers/tinyarcade.h"
@@ -122,6 +136,8 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
     "$PADDLE_CARTRIDGE"
   xcrun simctl spawn booted "$TEMP/TinyArcadeReplaySmoke-arm64" \
     "$PADDLE_CARTRIDGE"
+  xcrun simctl spawn booted "$TEMP/TinyArcadePrivateLibrarySmoke-arm64" \
+    "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
 fi
 
-echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} bytes"
+echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} bytes"

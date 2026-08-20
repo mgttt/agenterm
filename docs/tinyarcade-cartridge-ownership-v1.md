@@ -28,6 +28,13 @@ cartridge origin
 gate. `from_private_bytes` / `tinyarcade_v1_open_private` intentionally create
 private provenance and instantiate with an empty native capability registry.
 
+On iOS, `TinyArcadePrivateLibraryV1` is the concrete owner for the private
+path. It validates and core-only preflights complete bytes before atomically
+installing one canonical `game-id@version.wasm` file. Enumeration and open
+recheck identity, byte ceiling and regular-file ownership; symlinks, dangling
+symlinks, corrupt modules and oversized replacements fail closed. The bounded
+directory is excluded from backup and protected until first authentication.
+
 The bounded transport index and selection-only deep link are specified by
 `docs/tinyarcade-catalog-transport-v1.md`. Catalog JSON can display and locate a
 reviewed candidate but cannot grant reviewed origin. A deep link resolves only
@@ -38,6 +45,30 @@ catalog row, public URL, discoverable listing, recommendation, rating, sharing
 endpoint or upload for other users. A future creator website may build and
 download a cartridge to its creator, but publication into the official catalog
 is a separate reviewed and signed operation controlled by the app owner.
+
+## Cartridge compatibility rule
+
+A cartridge stays an ordinary standards-valid WebAssembly module. TinyArcade
+does not reserve private opcodes, change section encoding, or require a
+tinyvm-specific executable wrapper. The stable platform contract consists of:
+
+- a versioned manifest in a standard custom section;
+- standard function imports with canonical versioned module names;
+- exact WebAssembly value signatures and explicit finite-work budgets; and
+- standard exported lifecycle functions plus bounded platform records.
+
+`tinyarcade:core/v1` is the portable baseline. Future app-compiled native
+modules use independent names such as `authority:module/v1`; adding one never
+changes the meaning of core v1. A converter can therefore inspect a module's
+manifest and import table without executing it, report required capabilities,
+and reject an unavailable version before installation. Unknown namespace,
+function, version, or signature always fails closed.
+
+Private-user cartridges remain core-only in v1 even if they declare a native
+module. The declaration is still useful to creator tools and future migration,
+but it is not authority to load native code. Official catalog admission may
+only use native modules whose implementation is already compiled into and
+registered by the reviewed app build.
 
 This document separates runtime authority; it does not assert that external
 WASM execution is presently allowed in an App Store build. The shipping feature

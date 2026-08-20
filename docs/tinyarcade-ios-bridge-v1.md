@@ -78,6 +78,15 @@ UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
 private opening has no native capability registry and cannot acquire official
 provenance.
 
+`TinyArcadePrivateLibraryV1` turns that private opening into a complete local
+library transaction. It preflights exact bytes under core-only policy before
+an atomic canonical install, caps each object at the runtime's 2 MiB ceiling
+and the library at 256 cartridges, excludes storage from backup, applies iOS
+file protection, and rejects non-regular, symlinked, dangling-symlink,
+oversized, corrupt or identity-mismatched objects when they are used. It owns
+neither document picking nor public upload; the app must present the explicit
+user selection and private provenance.
+
 Bundled and reviewed origins may instead use their corresponding
 `*_with_native_modules` open. The host supplies at most 64 exact
 namespace/field/i32-signature registrations, with at most 16 parameters, 16

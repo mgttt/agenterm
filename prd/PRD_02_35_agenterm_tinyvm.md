@@ -77,6 +77,13 @@ JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是
 
 官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。
 
+卡带兼容性以“标准 Wasm 文件 + 版本化平台契约”为准，而不是以某一版 tinyvm
+内部实现为准。manifest 放在标准 custom section；core/native 能力都只表现为标准
+function import，namespace、函数名、值签名和版本必须精确匹配。未来转换器可以只读
+manifest/import table 就生成兼容性报告；未知 native module 默认拒绝，绝不把声明
+本身视为装载原生代码的授权。`tinyarcade:core/v1` 的语义冻结，新增 native 能力使用
+独立 `authority:module/vN`，不得暗改旧版本。
+
 媒体边界不再假设所有游戏都是 Depth Well。`submit_render` 可提交严格有界的
 `tinyarcade:grid3d/v1` 或 `tinyarcade:indexed2d/v1` 标准记录；后者提供完整
 256 色调色板像素平面，默认 64 KiB 预算覆盖 256×240 与 320×200 经典画幅。
@@ -144,6 +151,13 @@ complete-until-first-authentication protection，并拒绝 symlink、非 regular
 对象。损坏/不兼容存档不会在同一个已失败 runtime 上继续开新局，而是关闭候选、
 删除坏文件并创建第二个 fresh runtime。模拟器已证明覆盖、恢复、损坏/超限回退与
 symlink fail-closed；物理设备后台终止恢复仍未验证。
+
+`TinyArcadePrivateLibraryV1` 已把“从 Data 打开”补成用户私有卡带的本地安装生命周期：
+完整 bytes 先用 core-only private runtime 预检，再以 canonical
+`game-id@version.wasm` 原子安装；枚举和打开重新检查身份、2 MiB 总上限、regular file
+与 symlink 边界，目录最多 256 枚卡带且不进 backup。模拟器已证明真实 Paddle Guard
+和 Depth Well 的导入、更新、排序、打开、删除，以及损坏、超限、live/dangling symlink
+拒绝。它不包含文件选择 UI、网络上传或公开发布权限。
 
 标准化回放不另造游戏执行格式。`tinyarcade-replay-v1` 只保存精确卡带 SHA-256、
 manifest identity、初始 portable snapshot、单调的 input/clock，以及每帧 render/audio

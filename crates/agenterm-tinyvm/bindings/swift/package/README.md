@@ -63,6 +63,13 @@ checks the runtime's exact loaded-cartridge hash and consumes its gameplay
 state. Replay data contains no executable code and grants no native capability
 or catalog trust.
 
+Use `TinyArcadePrivateLibraryV1` when a user explicitly imports a cartridge
+for personal play. It preflights the exact bytes with the core-only private
+runtime before an atomic `game-id@version.wasm` install, excludes the bounded
+library from backup, and revalidates canonical identity, size and regular-file
+ownership whenever an item is enumerated or opened. It never downloads,
+publishes, signs, or grants a native module.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

@@ -2194,3 +2194,291 @@ public final class TinyArcadeSnapshotStoreV1 {
         UInt64(u32(data, offset)) | UInt64(u32(data, offset + 4)) << 32
     }
 }
+
+public enum TinyArcadePrivateLibraryError: Error, Equatable {
+    case invalidDirectory
+    case invalidLimit
+    case invalidIdentity
+    case unsafeStoredFile
+    case cartridgeNotFound
+    case tooManyCartridges
+    case storageFailure
+}
+
+public struct TinyArcadePrivateCartridgeV1: Sendable, Equatable {
+    public let gameID: String
+    public let gameVersion: String
+    public let fileURL: URL
+
+    fileprivate init(gameID: String, gameVersion: String, fileURL: URL) {
+        self.gameID = gameID
+        self.gameVersion = gameVersion
+        self.fileURL = fileURL
+    }
+}
+
+/// Main-actor storage for cartridges explicitly imported into the user's own
+/// library. Import always preflights the private core-only runtime before one
+/// atomic version replacement. This owner does not download, publish, sign or
+/// grant a native capability.
+@MainActor
+public final class TinyArcadePrivateLibraryV1 {
+    public nonisolated static let maximumCartridgeCount = 256
+    public nonisolated static let runtimeMaximumCartridgeBytes = 2 * 1_024 * 1_024
+
+    public let directoryURL: URL
+    public let maximumCartridgeBytes: Int
+
+    public init(
+        directoryURL: URL,
+        maximumCartridgeBytes: Int = runtimeMaximumCartridgeBytes
+    ) throws {
+        guard directoryURL.isFileURL else {
+            throw TinyArcadePrivateLibraryError.invalidDirectory
+        }
+        guard (1...Self.runtimeMaximumCartridgeBytes).contains(maximumCartridgeBytes) else {
+            throw TinyArcadePrivateLibraryError.invalidLimit
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+            let values = try directoryURL.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            )
+            guard values.isDirectory == true, values.isSymbolicLink != true else {
+                throw TinyArcadePrivateLibraryError.invalidDirectory
+            }
+            var backup = URLResourceValues()
+            backup.isExcludedFromBackup = true
+            var mutableDirectory = directoryURL
+            try? mutableDirectory.setResourceValues(backup)
+        } catch let error as TinyArcadePrivateLibraryError {
+            throw error
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+        self.directoryURL = directoryURL
+        self.maximumCartridgeBytes = maximumCartridgeBytes
+    }
+
+    /// Preflights exact bytes under the private core-only policy, then atomically
+    /// installs or replaces that exact game-id/version slot.
+    public func importCartridge(
+        _ cartridge: Data,
+        configure: (inout tinyarcade_config_v1) -> Void = { _ in }
+    ) throws -> TinyArcadePrivateCartridgeV1 {
+        guard !cartridge.isEmpty, cartridge.count <= maximumCartridgeBytes else {
+            throw TinyArcadePrivateLibraryError.invalidLimit
+        }
+        let runtime = try TinyArcadeRuntimeV1(
+            privateCartridge: cartridge,
+            configure: configure
+        )
+        let gameID: String
+        let gameVersion: String
+        do {
+            gameID = try runtime.gameID()
+            gameVersion = try runtime.gameVersion()
+            try runtime.close()
+        } catch {
+            try? runtime.close()
+            throw error
+        }
+        let item = try self.cartridge(gameID: gameID, gameVersion: gameVersion)
+        try rejectUnsafeExistingFile(item.fileURL)
+        try ensureCapacity(for: item.fileURL)
+        do {
+            try cartridge.write(to: item.fileURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: item.fileURL.path
+            )
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+        return item
+    }
+
+    /// Enumerates bounded canonical slots without executing their guest code.
+    /// Each item is fully revalidated when `open` constructs its runtime.
+    public func installedCartridges() throws -> [TinyArcadePrivateCartridgeV1] {
+        do {
+            let urls = try FileManager.default.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: [
+                    .isRegularFileKey,
+                    .isSymbolicLinkKey,
+                    .fileSizeKey,
+                ],
+                options: [.skipsHiddenFiles]
+            ).filter { $0.pathExtension == "wasm" }
+            guard urls.count <= Self.maximumCartridgeCount else {
+                throw TinyArcadePrivateLibraryError.tooManyCartridges
+            }
+            var items: [TinyArcadePrivateCartridgeV1] = []
+            items.reserveCapacity(urls.count)
+            for url in urls {
+                try rejectUnsafeExistingFile(url)
+                let values = try url.resourceValues(forKeys: [.fileSizeKey])
+                guard let size = values.fileSize,
+                      (1...maximumCartridgeBytes).contains(size),
+                      let identity = Self.identity(from: url.lastPathComponent) else {
+                    throw TinyArcadePrivateLibraryError.unsafeStoredFile
+                }
+                items.append(
+                    TinyArcadePrivateCartridgeV1(
+                        gameID: identity.gameID,
+                        gameVersion: identity.gameVersion,
+                        fileURL: url
+                    )
+                )
+            }
+            return items.sorted {
+                $0.gameID == $1.gameID
+                    ? $0.gameVersion < $1.gameVersion
+                    : $0.gameID < $1.gameID
+            }
+        } catch let error as TinyArcadePrivateLibraryError {
+            throw error
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+    }
+
+    public func open(
+        _ item: TinyArcadePrivateCartridgeV1,
+        configure: (inout tinyarcade_config_v1) -> Void = { _ in }
+    ) throws -> TinyArcadeRuntimeV1 {
+        let expected = try cartridge(gameID: item.gameID, gameVersion: item.gameVersion)
+        guard expected.fileURL.standardizedFileURL == item.fileURL.standardizedFileURL else {
+            throw TinyArcadePrivateLibraryError.invalidIdentity
+        }
+        let bytes = try load(expected)
+        let runtime = try TinyArcadeRuntimeV1(privateCartridge: bytes, configure: configure)
+        do {
+            guard try runtime.gameID() == item.gameID,
+                  try runtime.gameVersion() == item.gameVersion else {
+                throw TinyArcadePrivateLibraryError.invalidIdentity
+            }
+            return runtime
+        } catch {
+            try? runtime.close()
+            throw error
+        }
+    }
+
+    public func remove(_ item: TinyArcadePrivateCartridgeV1) throws {
+        let expected = try cartridge(gameID: item.gameID, gameVersion: item.gameVersion)
+        guard expected.fileURL.standardizedFileURL == item.fileURL.standardizedFileURL else {
+            throw TinyArcadePrivateLibraryError.invalidIdentity
+        }
+        guard FileManager.default.fileExists(atPath: expected.fileURL.path) else { return }
+        try rejectUnsafeExistingFile(expected.fileURL)
+        do {
+            try FileManager.default.removeItem(at: expected.fileURL)
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+    }
+
+    private func load(_ item: TinyArcadePrivateCartridgeV1) throws -> Data {
+        guard FileManager.default.fileExists(atPath: item.fileURL.path) else {
+            throw TinyArcadePrivateLibraryError.cartridgeNotFound
+        }
+        try rejectUnsafeExistingFile(item.fileURL)
+        do {
+            let values = try item.fileURL.resourceValues(forKeys: [.fileSizeKey])
+            guard let size = values.fileSize,
+                  (1...maximumCartridgeBytes).contains(size) else {
+                throw TinyArcadePrivateLibraryError.invalidLimit
+            }
+            let bytes = try Data(contentsOf: item.fileURL, options: .mappedIfSafe)
+            guard bytes.count == size else {
+                throw TinyArcadePrivateLibraryError.storageFailure
+            }
+            return bytes
+        } catch let error as TinyArcadePrivateLibraryError {
+            throw error
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+    }
+
+    private func cartridge(
+        gameID: String,
+        gameVersion: String
+    ) throws -> TinyArcadePrivateCartridgeV1 {
+        guard Self.validGameID(gameID), Self.validVersion(gameVersion) else {
+            throw TinyArcadePrivateLibraryError.invalidIdentity
+        }
+        let leaf = "\(gameID)@\(gameVersion).wasm"
+        return TinyArcadePrivateCartridgeV1(
+            gameID: gameID,
+            gameVersion: gameVersion,
+            fileURL: directoryURL.appendingPathComponent(leaf, isDirectory: false)
+        )
+    }
+
+    private func rejectUnsafeExistingFile(_ url: URL) throws {
+        if (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil {
+            throw TinyArcadePrivateLibraryError.unsafeStoredFile
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                throw TinyArcadePrivateLibraryError.unsafeStoredFile
+            }
+        } catch let error as TinyArcadePrivateLibraryError {
+            throw error
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+    }
+
+    private func ensureCapacity(for destination: URL) throws {
+        if FileManager.default.fileExists(atPath: destination.path) { return }
+        do {
+            let count = try FileManager.default.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ).lazy.filter { $0.pathExtension == "wasm" }.prefix(
+                Self.maximumCartridgeCount
+            ).count
+            guard count < Self.maximumCartridgeCount else {
+                throw TinyArcadePrivateLibraryError.tooManyCartridges
+            }
+        } catch let error as TinyArcadePrivateLibraryError {
+            throw error
+        } catch {
+            throw TinyArcadePrivateLibraryError.storageFailure
+        }
+    }
+
+    private static func identity(from leaf: String) -> (gameID: String, gameVersion: String)? {
+        guard leaf.hasSuffix(".wasm") else { return nil }
+        let stem = leaf.dropLast(5)
+        let fields = stem.split(separator: "@", omittingEmptySubsequences: false)
+        guard fields.count == 2 else { return nil }
+        let gameID = String(fields[0])
+        let gameVersion = String(fields[1])
+        guard validGameID(gameID), validVersion(gameVersion) else { return nil }
+        return (gameID, gameVersion)
+    }
+
+    private static func validGameID(_ value: String) -> Bool {
+        (3...128).contains(value.utf8.count) && value.utf8.allSatisfy {
+            (97...122).contains($0) || (48...57).contains($0) || [46, 95, 45].contains($0)
+        }
+    }
+
+    private static func validVersion(_ value: String) -> Bool {
+        (1...64).contains(value.utf8.count) && value.utf8.allSatisfy {
+            (65...90).contains($0) || (97...122).contains($0)
+                || (48...57).contains($0) || [46, 95, 43, 45].contains($0)
+        }
+    }
+}
