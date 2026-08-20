@@ -193,7 +193,7 @@ public final class TinyArcadeTrustStoreV1 {
         handle = opened
     }
 
-    deinit {
+    isolated deinit {
         if let handle {
             _ = tinyarcade_v1_trust_store_close(handle)
         }
@@ -345,7 +345,7 @@ public final class TinyArcadeRuntimeV1 {
         handle = try Self.requireHandle(opened)
     }
 
-    deinit {
+    isolated deinit {
         if let handle {
             _ = tinyarcade_v1_close(handle)
         }

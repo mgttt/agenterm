@@ -22,11 +22,21 @@ IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DI
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
   --profile "$PROFILE" --target aarch64-apple-ios-sim --features ios-c-api \
   --lib --crate-type staticlib
+IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
+  --profile "$PROFILE" --target x86_64-apple-ios --features ios-c-api \
+  --lib --crate-type staticlib
 
 DEVICE="$TARGET_DIR/aarch64-apple-ios/$PROFILE/libagenterm_tinyvm.a"
-SIMULATOR="$TARGET_DIR/aarch64-apple-ios-sim/$PROFILE/libagenterm_tinyvm.a"
+SIMULATOR_ARM64="$TARGET_DIR/aarch64-apple-ios-sim/$PROFILE/libagenterm_tinyvm.a"
+SIMULATOR_X86_64="$TARGET_DIR/x86_64-apple-ios/$PROFILE/libagenterm_tinyvm.a"
+SIMULATOR_DIR="$TARGET_DIR/universal-apple-ios-simulator/$PROFILE"
+SIMULATOR="$SIMULATOR_DIR/libagenterm_tinyvm.a"
 test -f "$DEVICE"
-test -f "$SIMULATOR"
+test -f "$SIMULATOR_ARM64"
+test -f "$SIMULATOR_X86_64"
+mkdir -p "$SIMULATOR_DIR"
+xcrun lipo -create "$SIMULATOR_ARM64" "$SIMULATOR_X86_64" -output "$SIMULATOR"
+xcrun lipo "$SIMULATOR" -verify_arch arm64 x86_64
 
 xcodebuild -create-xcframework \
   -library "$DEVICE" -headers "$CRATE/include" \

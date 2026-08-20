@@ -12,12 +12,15 @@ host ABI and lifecycle owner are compiled into the app binary.
   `@MainActor` Swift owner.
 - `crates/agenterm-tinyvm/build-xcframework.sh`: device/simulator archive and
   XCFramework builder.
+- `crates/agenterm-tinyvm/build-swift-package.sh`: self-contained local Swift
+  package builder with one `TinyArcadeRuntime` library product.
 - `crates/agenterm-tinyvm/smoke-ios-bridge.sh`: C header, XCFramework and Swift
   simulator-link acceptance gate.
 
 Build and verify from the repository root:
 
 ```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 CARGO="$HOME/.cargo/bin/cargo" \
   crates/agenterm-tinyvm/smoke-ios-bridge.sh
 ```
@@ -26,6 +29,11 @@ The builder uses the dedicated `tinyvm-ios-release` Cargo profile. Its panic
 strategy is `unwind`, because every exported operation is fenced with
 `catch_unwind` and maps a panic to `TINYARCADE_PANIC`. Building the bridge under
 the workspace's abort profile would silently remove that guarantee.
+
+The generated Swift package is the stable app dependency boundary. It contains
+both XCFramework slices and the public Swift source, so an app does not compile
+Rust or copy wrapper code. The same directory can later be zipped as a
+versioned binary release artifact without changing the app-facing product.
 
 ## Ownership
 
@@ -62,8 +70,9 @@ before exposing decoded cells or tone events to native rendering/audio code.
 
 ## Current evidence boundary
 
-The smoke gate builds real arm64 iOS-device and arm64 iOS-simulator static
-archives, assembles both into one XCFramework, compiles the public C header,
+The smoke gate builds a real arm64 iOS-device archive and a universal
+arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
+compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
 The optimized linked smoke executable must remain at or below 1 MiB; this
@@ -71,7 +80,9 @@ measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size.
 
 The builder pins iOS 14.0 as the deployment target for Rust and Ring C/assembly
-objects; the Swift link treats linker warnings as errors. With
+objects; the Swift link treats linker warnings as errors. The gate also builds
+the generated package as a generic iOS device library and as a universal
+arm64/x86_64 simulator library under Swift 6 language mode. With
 `TINYARCADE_RUN_BOOTED_SIMULATOR=1`, the smoke additionally compiles Depth Well,
 runs the linked executable in an already-booted iOS Simulator, opens it through
 the private origin, decodes its first frame, suspends/resumes and hard-drops.
