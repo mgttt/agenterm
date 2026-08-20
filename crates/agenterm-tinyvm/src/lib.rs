@@ -44,7 +44,10 @@ mod asm;
 pub use asm::{AsmError, assemble};
 
 pub mod wasm;
-pub use wasm::{ImportDesc, Limits, Module as WasmModule, Val, WasmError, eval, eval_with};
+pub use wasm::{
+    ImportDesc, Instance as WasmInstance, Limits, Module as WasmModule, Val, WasmError, eval,
+    eval_with,
+};
 
 /// One bytecode instruction.
 ///

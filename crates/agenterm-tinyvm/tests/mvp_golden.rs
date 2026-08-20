@@ -628,10 +628,35 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 }
 
 /// Leaves whose backing is a test rather than a fixture family. The mapped
-/// test must exist in this file *and* assert something concrete — the point of
-/// naming it here is that a leaf can no longer be satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 9] = [
+/// test must exist in this package's integration tests and assert something
+/// concrete — the point of naming it here is that a leaf can no longer be
+/// satisfied by a text row.
+const LEAF_TESTS: [(&str, &str); 21] = [
     ("eval(bytes)", "eval_bytes"),
+    ("iOS runtime boundary", "native_interpreter_boundary"),
+    ("interpret wasm", "eval_bytes"),
+    ("JIT native code", "native_interpreter_boundary"),
+    ("device-side AOT", "native_interpreter_boundary"),
+    ("dyn native loading", "native_interpreter_boundary"),
+    ("tinyvm engine", "eval_bytes"),
+    ("H5/JS/WKWebView", "native_interpreter_boundary"),
+    (
+        "persistent instance",
+        "instance_preserves_globals_but_module_calls_stay_fresh",
+    ),
+    ("start once", "instance_runs_start_exactly_once"),
+    (
+        "per-call fuel",
+        "instruction_budget_is_host_owned_and_resets_per_call",
+    ),
+    (
+        "memory budget",
+        "memory_budget_rejects_initial_min_and_caps_grow",
+    ),
+    (
+        "table budget",
+        "table_budget_follows_host_not_crate_constant",
+    ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
     ("#78", "issue78_runtimes_stay_out_of_the_crate"),
     ("cu", "cu"),
@@ -643,16 +668,21 @@ const LEAF_TESTS: [(&str, &str); 9] = [
 ];
 
 fn suite_test_names() -> BTreeSet<String> {
-    let src =
-        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mvp_golden.rs"))
-            .unwrap();
     let mut names = BTreeSet::new();
-    for line in src.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("fn ")
-            && let Some(name) = rest.split('(').next()
-        {
-            names.insert(name.strip_prefix("r#").unwrap_or(name).to_string());
+    let tests = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
+    for entry in fs::read_dir(tests).expect("read integration-test directory") {
+        let path = entry.expect("integration-test entry").path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            continue;
+        }
+        let src = fs::read_to_string(path).expect("read integration test");
+        for line in src.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("fn ")
+                && let Some(name) = rest.split('(').next()
+            {
+                names.insert(name.strip_prefix("r#").unwrap_or(name).to_string());
+            }
         }
     }
     names
@@ -708,6 +738,30 @@ fn eval_bytes() {
         .find(|c| c.id == "eval(bytes)")
         .expect("eval(bytes) fixture");
     assert_expect(&case, run_case(&case));
+}
+
+#[test]
+fn native_interpreter_boundary() {
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wasm = fs::read_to_string(crate_dir.join("src/wasm.rs")).expect("read wasm engine");
+    assert!(
+        !wasm.contains("unsafe"),
+        "the interpreter engine must not require an unsafe native-code door"
+    );
+    let deps = cargo_deps_section().to_ascii_lowercase();
+    for backend in [
+        "javascriptcore",
+        "webkit",
+        "wasmtime",
+        "wasmi",
+        "cranelift",
+        "dynasm",
+    ] {
+        assert!(
+            !deps.contains(backend),
+            "{backend} must not replace the tinyvm interpreter authority"
+        );
+    }
 }
 
 /// The `<100KiB>` leaf is a measurement, not a grep: this builds the no_std

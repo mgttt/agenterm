@@ -36,10 +36,10 @@ pub const WASM_MAX_STEPS: u64 = 16_000_000;
 pub const WASM_PAGE_SIZE: usize = 65_536;
 /// Maximum pages `memory.grow` will allocate (the spec's 32-bit maximum).
 pub const WASM_MAX_PAGES: usize = 65_536;
-/// Host robustness cap on *initial* linear memory (pages). A declared min
-/// above this is `Err` before any multi-gigabyte allocation is touched.
-/// The spec still allows declaring up to [`WASM_MAX_PAGES`]; this crate
-/// refuses to instantiate that on the host.
+/// Default host robustness cap on linear memory (pages), including growth.
+/// A declared min above this is `Err` before any multi-gigabyte allocation is
+/// touched. Callers may choose a different cap through [`Limits`], still
+/// bounded by [`WASM_MAX_PAGES`].
 pub const WASM_MAX_ALLOC_PAGES: usize = 256;
 /// Cap on the WASM operand stack. Independent of [`WASM_MAX_STEPS`]: a
 /// push-only loop traps here instead of growing to hundreds of megabytes.
@@ -78,19 +78,31 @@ impl WasmError {
     }
 }
 
-/// Host-owned resource budget for one load/eval. This knife only enforces
-/// [`Limits::max_table_elems`]; other knobs stay crate constants.
+/// Host-owned resource budget for loading and invoking one module.
+///
+/// Table and initial-memory limits are checked before allocation. The step
+/// budget resets for every top-level invocation, and the memory-page limit
+/// also caps `memory.grow` for the complete lifetime of an [`Instance`].
 #[derive(Clone, Copy)]
 pub struct Limits {
     /// Maximum funcref-table length the host will instantiate. Compared
     /// against the module's declared table `min` *before* any allocation.
     pub max_table_elems: usize,
+    /// Maximum linear-memory pages the host will allocate. Compared against
+    /// the declared memory `min` before an instance is created and enforced
+    /// again by every `memory.grow` (one page is 64 KiB).
+    pub max_memory_pages: usize,
+    /// Maximum instructions executed by one top-level call. Nested calls share
+    /// that call's counter; the next top-level call receives a fresh budget.
+    pub max_steps: u64,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
             max_table_elems: 65_536,
+            max_memory_pages: WASM_MAX_ALLOC_PAGES,
+            max_steps: WASM_MAX_STEPS,
         }
     }
 }
@@ -1335,7 +1347,8 @@ pub struct Module {
     export_list: Vec<(String, usize)>,
     /// Imported functions in index order (the host door).
     import_descs: Vec<ImportDesc>,
-    /// Module globals; a fresh working copy is initialised per invocation.
+    /// Global initializers and mutability. A working copy is created for each
+    /// fresh convenience call or persistent [`Instance`].
     globals: Vec<GlobalDesc>,
     /// Optional start function (run by [`Module::run_start`]).
     start: Option<usize>,
@@ -1350,15 +1363,36 @@ pub struct Module {
     /// and `None` max means "up to [`WASM_MAX_PAGES`]".
     mem_min_pages: Option<usize>,
     mem_max_pages: Option<usize>,
-    /// Data segments `(offset, bytes)`, written into a fresh linear memory at
-    /// the start of every top-level invocation.
+    /// Data segments `(offset, bytes)`, applied when fresh convenience memory
+    /// or a persistent [`Instance`] is created.
     data: Vec<(usize, Vec<u8>)>,
+    /// Host budget retained for instantiation and every top-level call.
+    limits: Limits,
+}
+
+/// One live WebAssembly instance.
+///
+/// Unlike the convenience methods on [`Module`], an `Instance` retains linear
+/// memory and mutable globals across exported calls. Its start function runs
+/// exactly once during [`Module::instantiate`].
+pub struct Instance {
+    module: Module,
+    memory: Vec<u8>,
+    globals: Vec<Val>,
 }
 
 impl Module {
     /// An empty module.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An empty programmatic module under an explicit host budget.
+    pub fn new_with_limits(limits: Limits) -> Self {
+        Self {
+            limits,
+            ..Self::default()
+        }
     }
 
     /// Register a function from its WASM body bytes, returning its index.
@@ -1480,7 +1514,7 @@ impl Module {
             return Err(WasmError::Decode("function count"));
         }
 
-        let mut module = Module::new();
+        let mut module = Module::new_with_limits(limits);
         // Imported functions occupy the low indices; without a bound host
         // implementation they trap loudly if actually called.
         for (desc, tidx) in &imports {
@@ -1518,6 +1552,9 @@ impl Module {
         if let Some((min, max)) = mem_limits {
             module.mem_min_pages = Some(min);
             module.mem_max_pages = max;
+        }
+        if module.initial_mem_pages() > limits.max_memory_pages.min(WASM_MAX_PAGES) {
+            return Err(WasmError::Trap("memory size"));
         }
         let mem_bytes = module.initial_mem_pages() * WASM_PAGE_SIZE;
         for (offset, bytes) in &data {
@@ -1584,7 +1621,8 @@ impl Module {
     }
 
     /// Register a module global with an initial value and mutability, returning
-    /// its index. A fresh working copy is created for each invocation.
+    /// its index. A working copy is created for each fresh convenience call or
+    /// persistent [`Instance`].
     pub fn add_global(&mut self, init: Val, mutable: bool) -> usize {
         let idx = self.globals.len();
         self.globals.push(GlobalDesc { init, mutable });
@@ -1633,6 +1671,15 @@ impl Module {
             self.invoke_val(idx, &[])?;
         }
         Ok(())
+    }
+
+    /// Consume this decoded module and create one persistent instance.
+    ///
+    /// Active data segments and initial globals are applied once, then the
+    /// module start function runs once. Later calls through the returned
+    /// [`Instance`] preserve its memory and mutable globals.
+    pub fn instantiate(self) -> Result<Instance, WasmError> {
+        Instance::new(self)
     }
 
     /// Record `name` as an exported function index (for [`Module::invoke_by_name`]).
@@ -1709,9 +1756,9 @@ impl Module {
 
     /// Invoke function `idx` with `args`, returning its result values.
     ///
-    /// A fresh single-page (64 KiB) zero-initialised linear memory is allocated
-    /// for the call and shared across every nested `call`; it is discarded when
-    /// the top-level invocation returns.
+    /// Fresh zero-initialised linear memory is allocated for the call and
+    /// shared across every nested `call`; it is discarded when the top-level
+    /// invocation returns. Use [`Module::instantiate`] to retain state.
     pub fn invoke(&self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
         let vals: Vec<Val> = args.iter().map(|&a| Val::I32(a)).collect();
         let results = self.invoke_val(idx, &vals)?;
@@ -1746,7 +1793,7 @@ impl Module {
     /// Oversized `min` or an allocator refusal is `Err`, never a process abort.
     fn new_memory(&self) -> Result<Vec<u8>, WasmError> {
         let pages = self.initial_mem_pages();
-        if pages > WASM_MAX_ALLOC_PAGES {
+        if pages > self.limits.max_memory_pages.min(WASM_MAX_PAGES) {
             return Err(WasmError::Trap("memory size"));
         }
         let nbytes = pages
@@ -1852,7 +1899,7 @@ impl Module {
 
         loop {
             *steps += 1;
-            if *steps > WASM_MAX_STEPS {
+            if *steps > self.limits.max_steps {
                 return Err(WasmError::Trap("step budget"));
             }
             if stack.len() > WASM_STACK_LIMIT {
@@ -2225,17 +2272,28 @@ impl Module {
                 Op::MemoryGrow => {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let old_pages = mem.len() / WASM_PAGE_SIZE;
-                    let new_pages = old_pages.saturating_add(delta);
+                    let new_pages = old_pages.checked_add(delta);
                     // The declared maximum is the module's own ceiling; the
                     // spec-wide cap applies when it declares none. Growth that
                     // the allocator refuses reports -1 rather than aborting.
-                    let cap = self.mem_max_pages.unwrap_or(WASM_MAX_PAGES);
-                    let extra = (new_pages - old_pages) * WASM_PAGE_SIZE;
-                    if new_pages > cap.min(WASM_MAX_PAGES) || mem.try_reserve(extra).is_err() {
-                        stack.push(Val::I32(-1));
-                    } else {
+                    let cap = self
+                        .mem_max_pages
+                        .unwrap_or(WASM_MAX_PAGES)
+                        .min(self.limits.max_memory_pages)
+                        .min(WASM_MAX_PAGES);
+                    let growth = new_pages.filter(|&pages| pages <= cap).and_then(|pages| {
+                        pages
+                            .checked_sub(old_pages)
+                            .and_then(|delta_pages| delta_pages.checked_mul(WASM_PAGE_SIZE))
+                            .map(|extra| (pages, extra))
+                    });
+                    if let Some((new_pages, extra)) = growth
+                        && mem.try_reserve(extra).is_ok()
+                    {
                         mem.resize(new_pages * WASM_PAGE_SIZE, 0);
                         stack.push(Val::I32(old_pages as i32));
+                    } else {
+                        stack.push(Val::I32(-1));
                     }
                 }
                 Op::I64Load { offset } => {
@@ -2515,6 +2573,79 @@ impl Module {
                 }
             }
         }
+    }
+}
+
+impl Instance {
+    fn new(module: Module) -> Result<Self, WasmError> {
+        let memory = module.new_memory()?;
+        let globals = module.globals.iter().map(|global| global.init).collect();
+        let mut instance = Self {
+            module,
+            memory,
+            globals,
+        };
+        if let Some(start) = instance.module.start {
+            let mut steps = 0;
+            instance.module.call_any(
+                start,
+                &[],
+                0,
+                &mut steps,
+                &mut instance.memory,
+                &mut instance.globals,
+            )?;
+        }
+        Ok(instance)
+    }
+
+    /// Resolve and invoke an exported function while retaining instance state.
+    pub fn invoke_by_name(&mut self, name: &str, args: &[Val]) -> Result<Vec<Val>, WasmError> {
+        let idx = self
+            .module
+            .exports
+            .get(name)
+            .copied()
+            .ok_or(WasmError::Trap("no exported function named `"))?;
+        self.invoke_val(idx, args)
+    }
+
+    /// Invoke a function through the i32 convenience ABI while retaining
+    /// instance state.
+    pub fn invoke(&mut self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
+        let vals: Vec<Val> = args.iter().map(|&arg| Val::I32(arg)).collect();
+        self.invoke_val(idx, &vals)?
+            .into_iter()
+            .map(|value| match value {
+                Val::I32(number) => Ok(number),
+                _other => Err(WasmError::Trap("invoke: expected i32 result, got")),
+            })
+            .collect()
+    }
+
+    /// Invoke a function with typed values. The instruction counter starts at
+    /// zero for this top-level call; memory and globals remain live.
+    pub fn invoke_val(&mut self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
+        let mut steps = 0;
+        self.module.call_any(
+            idx,
+            args,
+            0,
+            &mut steps,
+            &mut self.memory,
+            &mut self.globals,
+        )
+    }
+
+    /// Read-only access to the live linear memory, for bounded native host I/O.
+    pub fn memory(&self) -> &[u8] {
+        &self.memory
+    }
+
+    /// Mutable access to the live linear memory, for writing bounded input or
+    /// state payloads before an exported call.
+    pub fn memory_mut(&mut self) -> &mut [u8] {
+        &mut self.memory
     }
 }
 

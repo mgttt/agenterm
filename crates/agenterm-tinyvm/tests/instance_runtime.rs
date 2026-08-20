@@ -1,0 +1,177 @@
+//! Public black-box ownership for the persistent game-runtime instance.
+
+use agenterm_tinyvm::wasm::WASM_PAGE_SIZE;
+use agenterm_tinyvm::{Limits, Val, WasmError, WasmModule};
+
+// (global (mut i32) (i32.const 0))
+// (func (export "tick") (result i32)
+//   global.get 0; i32.const 1; i32.add; global.set 0; global.get 0)
+const COUNTER_MODULE: &[u8] = &[
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // wasm v1
+    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+    0x03, 0x02, 0x01, 0x00, // one function, type 0
+    0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x00, 0x0b, // mutable global
+    0x07, 0x08, 0x01, 0x04, b't', b'i', b'c', b'k', 0x00, 0x00, // export
+    0x0a, 0x0d, 0x01, 0x0b, 0x00, 0x23, 0x00, 0x41, 0x01, 0x6a, 0x24, 0x00, 0x23, 0x00, 0x0b,
+];
+
+// (memory 1 4)
+// (func (export "grow") (param i32) (result i32)
+//   local.get 0; memory.grow)
+const GROW_MODULE: &[u8] = &[
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // wasm v1
+    0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f, // (i32) -> i32
+    0x03, 0x02, 0x01, 0x00, // one function, type 0
+    0x05, 0x04, 0x01, 0x01, 0x01, 0x04, // memory min 1, max 4
+    0x07, 0x08, 0x01, 0x04, b'g', b'r', b'o', b'w', 0x00, 0x00, // export
+    0x0a, 0x08, 0x01, 0x06, 0x00, 0x20, 0x00, 0x40, 0x00, 0x0b,
+];
+
+// (memory 3), with no functions. The host limit test must reject this at load.
+const MEMORY_MIN_3: &[u8] = &[
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x05, 0x03, 0x01, 0x00, 0x03,
+];
+
+fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
+    match result {
+        Ok(value) => value,
+        Err(error) => panic!("{context}: {}", error.message()),
+    }
+}
+
+fn only_i32(values: &[Val]) -> i32 {
+    match values {
+        [Val::I32(value)] => *value,
+        _ => panic!("expected one i32 result"),
+    }
+}
+
+#[test]
+fn instance_preserves_globals_but_module_calls_stay_fresh() {
+    let module = must_ok(WasmModule::from_bytes(COUNTER_MODULE), "load counter");
+    assert_eq!(
+        only_i32(&must_ok(module.invoke_by_name("tick", &[]), "fresh tick 1")),
+        1
+    );
+    assert_eq!(
+        only_i32(&must_ok(module.invoke_by_name("tick", &[]), "fresh tick 2")),
+        1
+    );
+
+    let module = must_ok(WasmModule::from_bytes(COUNTER_MODULE), "reload counter");
+    let mut instance = must_ok(module.instantiate(), "instantiate counter");
+    assert_eq!(
+        only_i32(&must_ok(
+            instance.invoke_by_name("tick", &[]),
+            "live tick 1"
+        )),
+        1
+    );
+    assert_eq!(
+        only_i32(&must_ok(
+            instance.invoke_by_name("tick", &[]),
+            "live tick 2"
+        )),
+        2
+    );
+}
+
+#[test]
+fn instance_runs_start_exactly_once() {
+    let mut module = WasmModule::new();
+    module.add_global(Val::I32(0), true);
+    let start = must_ok(
+        module.add_function(0, 0, 0, &[0x23, 0x00, 0x41, 0x01, 0x6a, 0x24, 0x00, 0x0b]),
+        "add start",
+    );
+    let read = must_ok(
+        module.add_function(0, 0, 1, &[0x23, 0x00, 0x0b]),
+        "add read",
+    );
+    module.set_start(start);
+    module.export("read", read);
+
+    let mut instance = must_ok(module.instantiate(), "instantiate start module");
+    assert_eq!(
+        only_i32(&must_ok(instance.invoke_by_name("read", &[]), "read 1")),
+        1
+    );
+    assert_eq!(
+        only_i32(&must_ok(instance.invoke_by_name("read", &[]), "read 2")),
+        1
+    );
+}
+
+#[test]
+fn instruction_budget_is_host_owned_and_resets_per_call() {
+    let limits = Limits {
+        max_steps: 8,
+        ..Limits::default()
+    };
+    let mut finite = WasmModule::new_with_limits(limits);
+    let done = must_ok(finite.add_function(0, 0, 0, &[0x0b]), "add finite");
+    let mut finite = must_ok(finite.instantiate(), "instantiate finite");
+    must_ok(finite.invoke(done, &[]), "finite call 1");
+    must_ok(finite.invoke(done, &[]), "finite call 2");
+
+    let mut runaway = WasmModule::new_with_limits(limits);
+    let spin = must_ok(
+        runaway.add_function(0, 0, 0, &[0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b]),
+        "add spin",
+    );
+    let mut runaway = must_ok(runaway.instantiate(), "instantiate spin");
+    assert!(matches!(
+        runaway.invoke(spin, &[]),
+        Err(WasmError::Trap("step budget"))
+    ));
+}
+
+#[test]
+fn memory_budget_rejects_initial_min_and_caps_grow() {
+    let limits = Limits {
+        max_memory_pages: 2,
+        ..Limits::default()
+    };
+    assert!(matches!(
+        WasmModule::from_bytes_with(MEMORY_MIN_3, limits),
+        Err(WasmError::Trap("memory size"))
+    ));
+
+    let module = must_ok(
+        WasmModule::from_bytes_with(GROW_MODULE, limits),
+        "load grow module",
+    );
+    let mut instance = must_ok(module.instantiate(), "instantiate grow module");
+    assert_eq!(instance.memory().len(), WASM_PAGE_SIZE);
+    assert_eq!(
+        only_i32(&must_ok(
+            instance.invoke_by_name("grow", &[Val::I32(1)]),
+            "grow 1"
+        )),
+        1
+    );
+    assert_eq!(instance.memory().len(), 2 * WASM_PAGE_SIZE);
+    assert_eq!(
+        only_i32(&must_ok(
+            instance.invoke_by_name("grow", &[Val::I32(1)]),
+            "grow 2"
+        )),
+        -1
+    );
+    assert_eq!(instance.memory().len(), 2 * WASM_PAGE_SIZE);
+}
+
+#[test]
+fn host_can_exchange_bounded_data_through_live_memory() {
+    let mut module = WasmModule::new();
+    let read = must_ok(
+        module.add_function(0, 0, 1, &[0x41, 0x00, 0x28, 0x02, 0x00, 0x0b]),
+        "add memory read",
+    );
+    let mut instance = must_ok(module.instantiate(), "instantiate memory module");
+    instance.memory_mut()[0..4].copy_from_slice(&42i32.to_le_bytes());
+    assert_eq!(
+        only_i32(&must_ok(instance.invoke_val(read, &[]), "read memory")),
+        42
+    );
+}

@@ -2117,6 +2117,15 @@ not a live Darwin probe if the public SDK refuses the declaration. Prefer
 `dladdr`, `gethostuuid`, and `_dyld_get_image_header` for leak-free
 loader/host facts.
 
+## GNU and Darwin `strip -s` are different contracts
+
+In GNU `strip`, `-s` strips all symbols. Apple's Darwin `strip` interprets
+`-s file` as a symbol-list input, so `strip -s artifact` consumes `artifact`
+as that list and then fails because no binary target remains. Portable artifact
+measurement scripts must branch on the host: use `strip -x artifact` on Darwin
+and `strip -s artifact` on GNU hosts. Measure the resulting artifact and run its
+black-box self-test; a successful link is not size or behavior evidence.
+
 ## Guest `min` is not a host allocation size
 
 `vec![None; table_min]` and `vec![0u8; pages * 64KiB]` take the module's
