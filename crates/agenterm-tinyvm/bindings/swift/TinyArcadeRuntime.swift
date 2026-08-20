@@ -463,6 +463,41 @@ public struct TinyArcadeReviewedCatalogEntry: Sendable {
         self.signingKeyID = signingKeyID
         self.signature = signature
     }
+
+    fileprivate func withCEntry<T>(
+        _ body: (UnsafePointer<tinyarcade_catalog_entry_v1>) throws -> T
+    ) rethrows -> T {
+        let gameID = Data(self.gameID.utf8)
+        let gameVersion = Data(self.gameVersion.utf8)
+        let keyID = Data(self.signingKeyID.utf8)
+        return try gameID.withUnsafeBytes { gameIDBytes in
+            try gameVersion.withUnsafeBytes { versionBytes in
+                try wasmSHA256.withUnsafeBytes { hashBytes in
+                    try keyID.withUnsafeBytes { keyIDBytes in
+                        try signature.withUnsafeBytes { signatureBytes in
+                            var entry = tinyarcade_catalog_entry_v1(
+                                struct_size: UInt32(MemoryLayout<tinyarcade_catalog_entry_v1>.size),
+                                game_id: gameIDBytes.bindMemory(to: UInt8.self).baseAddress,
+                                game_id_len: gameIDBytes.count,
+                                game_version: versionBytes.bindMemory(to: UInt8.self).baseAddress,
+                                game_version_len: versionBytes.count,
+                                abi_version: abiVersion,
+                                state_version: stateVersion,
+                                wasm_length: wasmLength,
+                                wasm_sha256: hashBytes.bindMemory(to: UInt8.self).baseAddress,
+                                wasm_sha256_len: hashBytes.count,
+                                signing_key_id: keyIDBytes.bindMemory(to: UInt8.self).baseAddress,
+                                signing_key_id_len: keyIDBytes.count,
+                                signature: signatureBytes.bindMemory(to: UInt8.self).baseAddress,
+                                signature_len: signatureBytes.count
+                            )
+                            return try withUnsafePointer(to: &entry, body)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// One exact, versioned native capability exposed to a bundled or reviewed cartridge.
@@ -669,6 +704,131 @@ public final class TinyArcadeTrustStoreV1 {
     }
 }
 
+/// Main-actor owner for verified, content-addressed cartridge storage.
+/// Network transfer remains app-owned; only complete downloaded bytes enter
+/// `activate`, which verifies current trust before changing active state.
+@MainActor
+public final class TinyArcadeCartridgeCacheV1 {
+    private var handle: OpaquePointer?
+
+    public init(
+        directoryURL: URL,
+        maxWasmBytes: UInt64 = 8 * 1_024 * 1_024
+    ) throws {
+        guard directoryURL.isFileURL, maxWasmBytes > 0 else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
+                message: "cartridge cache requires a file URL and positive byte limit"
+            )
+        }
+        let path = Data(directoryURL.path.utf8)
+        var opened: OpaquePointer?
+        let status = path.withUnsafeBytes { bytes in
+            tinyarcade_v1_cache_create(
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                bytes.count,
+                maxWasmBytes,
+                &opened
+            )
+        }
+        try TinyArcadeRuntimeV1.check(status)
+        guard let opened else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
+                message: "runtime returned a null cartridge cache"
+            )
+        }
+        handle = opened
+    }
+
+    isolated deinit {
+        if let handle { _ = tinyarcade_v1_cache_close(handle) }
+    }
+
+    public func activate(
+        entry: TinyArcadeReviewedCatalogEntry,
+        cartridge: Data,
+        trustStore: TinyArcadeTrustStoreV1
+    ) throws {
+        let handle = try liveHandle()
+        let trust = try trustStore.liveHandle()
+        let status = entry.withCEntry { cEntry in
+            cartridge.withUnsafeBytes { bytes in
+                tinyarcade_v1_cache_activate(
+                    handle,
+                    cEntry,
+                    bytes.bindMemory(to: UInt8.self).baseAddress,
+                    bytes.count,
+                    trust
+                )
+            }
+        }
+        try TinyArcadeRuntimeV1.check(status)
+    }
+
+    public func loadActive(
+        entry: TinyArcadeReviewedCatalogEntry,
+        trustStore: TinyArcadeTrustStoreV1
+    ) throws -> Data {
+        let handle = try liveHandle()
+        let trust = try trustStore.liveHandle()
+        let status = entry.withCEntry {
+            tinyarcade_v1_cache_load_active(handle, $0, trust)
+        }
+        try TinyArcadeRuntimeV1.check(status)
+        return try copyWasm(handle)
+    }
+
+    public func rollback(
+        to previousEntry: TinyArcadeReviewedCatalogEntry,
+        trustStore: TinyArcadeTrustStoreV1
+    ) throws -> Data {
+        let handle = try liveHandle()
+        let trust = try trustStore.liveHandle()
+        let status = previousEntry.withCEntry {
+            tinyarcade_v1_cache_rollback(handle, $0, trust)
+        }
+        try TinyArcadeRuntimeV1.check(status)
+        return try copyWasm(handle)
+    }
+
+    public func close() throws {
+        guard let handle else { return }
+        try TinyArcadeRuntimeV1.check(tinyarcade_v1_cache_close(handle))
+        self.handle = nil
+    }
+
+    private func liveHandle() throws -> OpaquePointer {
+        guard let handle else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
+                message: "cartridge cache is closed"
+            )
+        }
+        return handle
+    }
+
+    private func copyWasm(_ handle: OpaquePointer) throws -> Data {
+        var count = 0
+        let query = tinyarcade_v1_cache_copy_wasm(handle, nil, 0, &count)
+        guard query == TINYARCADE_BUFFER_TOO_SMALL, count > 0 else {
+            try TinyArcadeRuntimeV1.check(query)
+            return Data()
+        }
+        var data = Data(count: count)
+        let status = data.withUnsafeMutableBytes { bytes in
+            tinyarcade_v1_cache_copy_wasm(
+                handle,
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                bytes.count,
+                &count
+            )
+        }
+        try TinyArcadeRuntimeV1.check(status)
+        return data
+    }
+}
+
 /// Main-actor owner for the single-threaded C runtime handle.
 @MainActor
 public final class TinyArcadeRuntimeV1 {
@@ -725,61 +885,34 @@ public final class TinyArcadeRuntimeV1 {
         try Self.check(tinyarcade_v1_default_config(&config))
         configure(&config)
         var opened: OpaquePointer?
-        let gameID = Data(entry.gameID.utf8)
-        let gameVersion = Data(entry.gameVersion.utf8)
-        let keyID = Data(entry.signingKeyID.utf8)
         let trust = try trustStore.liveHandle()
-        let status = try gameID.withUnsafeBytes { gameIDBytes in
-            try gameVersion.withUnsafeBytes { versionBytes in
-                try entry.wasmSHA256.withUnsafeBytes { hashBytes in
-                    try keyID.withUnsafeBytes { keyIDBytes in
-                        try entry.signature.withUnsafeBytes { signatureBytes in
-                            var cEntry = tinyarcade_catalog_entry_v1(
-                                struct_size: UInt32(MemoryLayout<tinyarcade_catalog_entry_v1>.size),
-                                game_id: gameIDBytes.bindMemory(to: UInt8.self).baseAddress,
-                                game_id_len: gameIDBytes.count,
-                                game_version: versionBytes.bindMemory(to: UInt8.self).baseAddress,
-                                game_version_len: versionBytes.count,
-                                abi_version: entry.abiVersion,
-                                state_version: entry.stateVersion,
-                                wasm_length: entry.wasmLength,
-                                wasm_sha256: hashBytes.bindMemory(to: UInt8.self).baseAddress,
-                                wasm_sha256_len: hashBytes.count,
-                                signing_key_id: keyIDBytes.bindMemory(to: UInt8.self).baseAddress,
-                                signing_key_id_len: keyIDBytes.count,
-                                signature: signatureBytes.bindMemory(to: UInt8.self).baseAddress,
-                                signature_len: signatureBytes.count
-                            )
-                            return try cartridge.withUnsafeBytes { cartridgeBytes in
-                                if nativeFunctions.isEmpty {
-                                    return tinyarcade_v1_open_reviewed(
-                                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
-                                        cartridgeBytes.count,
-                                        &cEntry,
-                                        trust,
-                                        &config,
-                                        &opened
-                                    )
-                                }
-                                return try Self.withNativeFunctionTable(nativeFunctions) { table, count, boxes in
-                                    let result = tinyarcade_v1_open_reviewed_with_native_modules(
-                                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
-                                        cartridgeBytes.count,
-                                        &cEntry,
-                                        trust,
-                                        table,
-                                        count,
-                                        &config,
-                                        &opened
-                                    )
-                                    if result == TINYARCADE_OK {
-                                        nativeCallbackBoxes = boxes
-                                    }
-                                    return result
-                                }
-                            }
-                        }
+        let status = try entry.withCEntry { cEntry in
+            try cartridge.withUnsafeBytes { cartridgeBytes in
+                if nativeFunctions.isEmpty {
+                    return tinyarcade_v1_open_reviewed(
+                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
+                        cartridgeBytes.count,
+                        cEntry,
+                        trust,
+                        &config,
+                        &opened
+                    )
+                }
+                return try Self.withNativeFunctionTable(nativeFunctions) { table, count, boxes in
+                    let result = tinyarcade_v1_open_reviewed_with_native_modules(
+                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
+                        cartridgeBytes.count,
+                        cEntry,
+                        trust,
+                        table,
+                        count,
+                        &config,
+                        &opened
+                    )
+                    if result == TINYARCADE_OK {
+                        nativeCallbackBoxes = boxes
                     }
+                    return result
                 }
             }
         }

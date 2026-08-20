@@ -142,6 +142,44 @@ struct TinyArcadeSmoke {
         precondition(config.struct_size == MemoryLayout<tinyarcade_config_v1>.size)
         _ = TinyArcadeRuntimeV1.self
 
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tinyarcade-ios-cache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let cache = try TinyArcadeCartridgeCacheV1(
+            directoryURL: cacheDirectory,
+            maxWasmBytes: 64 * 1_024
+        )
+        let emptyTrust = try TinyArcadeTrustStoreV1()
+        let untrustedEntry = TinyArcadeReviewedCatalogEntry(
+            gameID: "c.native",
+            gameVersion: "1.0.0",
+            abiVersion: 1,
+            stateVersion: 1,
+            wasmLength: UInt64(nativeCartridge().count),
+            wasmSHA256: Data(repeating: 0, count: 32),
+            signingKeyID: "missing-test-key",
+            signature: Data(repeating: 0, count: 64)
+        )
+        do {
+            try cache.activate(
+                entry: untrustedEntry,
+                cartridge: nativeCartridge(),
+                trustStore: emptyTrust
+            )
+            preconditionFailure("untrusted cartridge must not enter the iOS cache")
+        } catch let error as TinyArcadeRuntimeError {
+            precondition(error.status == Int32(TINYARCADE_TRUST_ERROR.rawValue))
+        }
+        precondition(FileManager.default.fileExists(atPath: cacheDirectory.path))
+        precondition(
+            !FileManager.default.fileExists(
+                atPath: cacheDirectory.appendingPathComponent("active/c.native.state").path
+            )
+        )
+        try cache.close()
+        try cache.close()
+        try emptyTrust.close()
+
         var nativeCalls = 0
         let nativeRuntime = try TinyArcadeRuntimeV1(
             cartridge: nativeCartridge(),

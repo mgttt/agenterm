@@ -1,6 +1,6 @@
 #include "tinyarcade.h"
 
-_Static_assert(TINYARCADE_ABI_VERSION == 0x00010003u, "ABI version drift");
+_Static_assert(TINYARCADE_ABI_VERSION == 0x00010004u, "ABI version drift");
 _Static_assert(sizeof(tinyarcade_config_v1) == 40, "config layout drift");
 
 static int32_t native_callback(
@@ -24,6 +24,7 @@ static int32_t native_callback(
 static void typecheck(void) {
     tinyarcade_runtime_v1* runtime = 0;
     tinyarcade_trust_store_v1* trust = 0;
+    tinyarcade_cartridge_cache_v1* cache = 0;
     tinyarcade_catalog_entry_v1 entry = {0};
     tinyarcade_native_function_v1 native = {
         .struct_size = sizeof(tinyarcade_native_function_v1),
@@ -46,6 +47,12 @@ static void typecheck(void) {
     (void)tinyarcade_v1_trust_store_add_key(trust, 0, 0, 0, 0);
     (void)tinyarcade_v1_trust_store_revoke_key(trust, 0, 0);
     (void)tinyarcade_v1_trust_store_revoke_content(trust, 0, 0);
+    (void)tinyarcade_v1_cache_create(0, 0, 0, &cache);
+    (void)tinyarcade_v1_cache_activate(cache, &entry, 0, 0, trust);
+    (void)tinyarcade_v1_cache_load_active(cache, &entry, trust);
+    (void)tinyarcade_v1_cache_rollback(cache, &entry, trust);
+    (void)tinyarcade_v1_cache_copy_wasm(cache, 0, 0, 0);
+    (void)tinyarcade_v1_cache_close(cache);
     (void)tinyarcade_v1_open_reviewed(0, 0, &entry, trust, &config, &runtime);
     (void)tinyarcade_v1_open_reviewed_with_native_modules(
         0, 0, &entry, trust, &native, 1, &config, &runtime);

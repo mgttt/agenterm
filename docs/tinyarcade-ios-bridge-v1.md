@@ -37,7 +37,7 @@ versioned binary release artifact without changing the app-facing product.
 
 ## Ownership
 
-ABI v1.3 exposes three non-interchangeable origins: bundled
+ABI v1.4 exposes three non-interchangeable origins: bundled
 `tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
 `tinyarcade_v1_open_private`. Every instance retains its immutable origin for
 UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
@@ -86,6 +86,21 @@ contract at compile time.
 
 Close is explicit and idempotent at the Swift layer. Its `deinit` is a final
 safety release. A raw C consumer must close exactly once on the owner thread.
+
+ABI v1.4 also exposes the existing verified object cache through a distinct
+single-thread-owned C handle and `TinyArcadeCartridgeCacheV1` Swift owner. The
+app supplies a file URL and a positive per-object WASM byte ceiling. Network
+transfer is deliberately absent: only a complete `Data` value may enter
+`activate`, which checks current key/content revocation, Ed25519 signature,
+length, SHA-256 and embedded manifest before atomically selecting it. Neither a
+partial download nor an untrusted object becomes active.
+
+`loadActive` and `rollback` require the matching signed catalog record and
+reverify current trust before returning bytes through the same two-stage copy
+contract as runtime frames. A failed load clears the handle's prior copied
+result, so callers cannot accidentally consume bytes retained from an earlier
+successful query. Cache handles reject cross-thread use; Swift confines them to
+the main actor and provides explicit, idempotent close.
 
 ## Data transfer and errors
 
@@ -161,6 +176,11 @@ decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 suspend into a fresh instance during the measured run. Its real launch event is
 also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
 explicitly deactivated on the booted simulator.
+The same simulator smoke creates a real cache directory through the Swift v1.4
+owner and proves that a cartridge naming an absent trust key cannot activate.
+Rust's public C black box separately installs a valid signed cartridge, reloads
+its exact bytes, rejects cross-thread access, then proves live revocation clears
+the pending copy result and blocks the cached object.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,

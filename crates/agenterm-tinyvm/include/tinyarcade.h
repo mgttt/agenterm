@@ -9,11 +9,12 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 3u
-#define TINYARCADE_ABI_VERSION 0x00010003u
+#define TINYARCADE_ABI_MINOR 4u
+#define TINYARCADE_ABI_VERSION 0x00010004u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
+typedef struct tinyarcade_cartridge_cache_v1 tinyarcade_cartridge_cache_v1;
 
 typedef enum tinyarcade_status_v1 {
     TINYARCADE_OK = 0,
@@ -24,7 +25,8 @@ typedef enum tinyarcade_status_v1 {
     TINYARCADE_WRONG_THREAD = 5,
     TINYARCADE_FAILED_INSTANCE = 6,
     TINYARCADE_PANIC = 7,
-    TINYARCADE_TRUST_ERROR = 8
+    TINYARCADE_TRUST_ERROR = 8,
+    TINYARCADE_STORAGE_ERROR = 9
 } tinyarcade_status_v1;
 
 typedef enum tinyarcade_cartridge_origin_v1 {
@@ -116,6 +118,37 @@ tinyarcade_status_v1 tinyarcade_v1_trust_store_revoke_content(
     tinyarcade_trust_store_v1* trust,
     const uint8_t* sha256,
     size_t sha256_len);
+
+/* Cache handles are single-thread-owned app storage, not downloaders. Only
+ * complete bytes enter activate, which verifies signature/hash/manifest before
+ * an atomic current-generation update. Load and rollback recheck current trust
+ * and retain one verified WASM result for the two-stage copy call. */
+tinyarcade_status_v1 tinyarcade_v1_cache_create(
+    const uint8_t* directory,
+    size_t directory_len,
+    uint64_t max_wasm_bytes,
+    tinyarcade_cartridge_cache_v1** output);
+tinyarcade_status_v1 tinyarcade_v1_cache_close(
+    tinyarcade_cartridge_cache_v1* cache);
+tinyarcade_status_v1 tinyarcade_v1_cache_activate(
+    tinyarcade_cartridge_cache_v1* cache,
+    const tinyarcade_catalog_entry_v1* entry,
+    const uint8_t* wasm,
+    size_t wasm_len,
+    tinyarcade_trust_store_v1* trust);
+tinyarcade_status_v1 tinyarcade_v1_cache_load_active(
+    tinyarcade_cartridge_cache_v1* cache,
+    const tinyarcade_catalog_entry_v1* entry,
+    tinyarcade_trust_store_v1* trust);
+tinyarcade_status_v1 tinyarcade_v1_cache_rollback(
+    tinyarcade_cartridge_cache_v1* cache,
+    const tinyarcade_catalog_entry_v1* previous_entry,
+    tinyarcade_trust_store_v1* trust);
+tinyarcade_status_v1 tinyarcade_v1_cache_copy_wasm(
+    tinyarcade_cartridge_cache_v1* cache,
+    uint8_t* output,
+    size_t capacity,
+    size_t* output_len);
 
 /* Runtime handles have strict single-thread ownership. Every operation,
  * including close, must run on the thread that successfully called open.

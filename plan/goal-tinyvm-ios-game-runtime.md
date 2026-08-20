@@ -27,7 +27,7 @@ tinyvm iOS game runtime
 │   ├── bounded audio commands        [x]
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
-│   └── storage without guest network [~]
+│   └── storage without guest network [x]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
 │   ├── content hash/signature        [x]
@@ -612,3 +612,39 @@ Evidence on 2026-08-21:
   x86_64.
 - Physical-iPhone speaker, silent-switch and interruption behavior remain open,
   so native I/O and the overall runtime goal remain partial.
+
+## Nineteenth executable increment — iOS verified cartridge storage
+
+ABI v1.4 closes the gap between Rust's signed object cache and an iOS catalog
+client. A distinct single-thread-owned cache handle accepts a directory and
+per-object byte ceiling, verifies complete cartridge bytes, atomically selects
+the current generation, revalidates active/rollback objects under live trust,
+and returns only the newly verified bytes through a two-stage copy. Every new
+load clears a previous retained result before work begins, so a failed refresh
+cannot expose stale executable bytes.
+
+The matching main-actor `TinyArcadeCartridgeCacheV1` gives apps explicit
+activate, load, rollback and idempotent close operations. It intentionally owns
+no URLSession, download or guest network surface: the app bounds transport and
+hands over only a complete response. Private imports remain a separate origin
+and never acquire reviewed provenance by entering this store.
+
+Evidence on 2026-08-21:
+
+- The C black box creates a real cache, atomically activates a valid signed
+  cartridge, reloads byte-identical WASM through the public copy protocol and
+  rejects cross-thread access. After live content revocation, loading returns a
+  trust error and the old copied result is no longer available.
+- The C header compiles every new symbol and the Swift 6 wrapper builds for
+  generic iOS device plus universal simulator. A booted iPhone 17 Pro simulator
+  creates the real directory through Swift and proves a cartridge with an
+  absent trust key cannot become active. The existing Paddle Guard run remains
+  below frame budget at 0.192 ms average, 0.241 ms p95 and 0.992 ms maximum.
+- The complete 174-test suite, all-feature/all-target Clippy with warnings
+  denied, no-default library compile and 70,904-byte static-core/self-test gate
+  are clean. Cache inclusion keeps linked smokes below 1 MiB at 953,032 bytes
+  arm64 and 1,012,688 bytes x86_64; the x86_64 margin is now only 35,888 bytes
+  and must remain an explicit constraint on later bridge growth.
+- Official catalog transport, metadata/deep links and physical-iPhone storage
+  remain open, so cartridge ownership, distribution and the overall goal are
+  still partial.

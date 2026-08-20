@@ -22,6 +22,12 @@ app already owns session policy. Forward interruption-began events, call
 leaving the game surface. The SDK deliberately does not resume interrupted
 gameplay tones or choose haptics for the app.
 
+Reviewed downloads should be handed to `TinyArcadeCartridgeCacheV1.activate`
+only after the app has received the complete response. The cache verifies the
+signed entry and atomically selects it; `loadActive` and `rollback` recheck live
+revocations before returning executable bytes. The cache performs no network
+request, and private-user imports remain a separate origin and storage policy.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

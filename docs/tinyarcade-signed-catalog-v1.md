@@ -56,3 +56,11 @@ the matching signed catalog entry and the cache rechecks the object with the
 current key/content revocations. Only one previous generation is retained as
 active rollback state; later garbage collection may remove unreferenced content
 objects under an independent disk budget.
+
+The iOS ABI v1.4 exposes this cache without turning it into a downloader.
+`tinyarcade_v1_cache_activate` accepts only already-complete bytes;
+`load_active` and `rollback` retain one newly reverified result for the bounded
+two-stage copy call. The Swift `TinyArcadeCartridgeCacheV1` wrapper owns the
+handle on the main actor. This gives a catalog client one reusable trust/storage
+transaction while URLSession policy, transport limits and catalog discovery
+remain outside the interpreter.

@@ -6,12 +6,13 @@ use core::mem::size_of;
 use core::ptr;
 use core::slice;
 use std::boxed::Box;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::thread::{self, ThreadId};
 
 use crate::{
-    CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits, GameRuntime, Limits,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, WasmError,
+    CartridgeCache, CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits,
+    GameRuntime, Limits, NativeModuleRegistry, WasmError, MAX_NATIVE_CALLS_PER_LIFECYCLE,
+    MAX_NATIVE_FUNCTIONS,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -23,6 +24,7 @@ pub const STATUS_WRONG_THREAD: i32 = 5;
 pub const STATUS_FAILED_INSTANCE: i32 = 6;
 pub const STATUS_PANIC: i32 = 7;
 pub const STATUS_TRUST: i32 = 8;
+pub const STATUS_STORAGE: i32 = 9;
 
 thread_local! {
     static LAST_ERROR: Cell<&'static str> = const { Cell::new("") };
@@ -85,6 +87,12 @@ pub struct TinyArcadeNativeFunctionV1 {
 pub struct TinyArcadeTrustStoreV1 {
     owner: ThreadId,
     store: CartridgeTrustStore,
+}
+
+pub struct TinyArcadeCartridgeCacheV1 {
+    owner: ThreadId,
+    cache: CartridgeCache,
+    wasm: Vec<u8>,
 }
 
 pub struct TinyArcadeRuntimeV1 {
@@ -161,6 +169,31 @@ fn wasm_error(error: WasmError) -> FfiError {
     }
 }
 
+fn cache_error(error: WasmError) -> FfiError {
+    let message = error.message();
+    let status = if matches!(
+        message,
+        "invalid signed catalog entry"
+            | "catalog signing allocation"
+            | "invalid catalog trust key"
+            | "unknown catalog trust key"
+            | "untrusted or revoked catalog key"
+            | "revoked cartridge content"
+            | "invalid catalog signature"
+            | "cartridge length mismatch"
+            | "cartridge hash mismatch"
+            | "catalog manifest mismatch"
+            | "catalog string length"
+            | "active catalog entry mismatch"
+            | "rollback catalog entry mismatch"
+    ) {
+        STATUS_TRUST
+    } else {
+        STATUS_STORAGE
+    };
+    FfiError::new(status, message)
+}
+
 unsafe fn runtime_mut<'a>(
     runtime: *mut TinyArcadeRuntimeV1,
 ) -> Result<&'a mut TinyArcadeRuntimeV1, FfiError> {
@@ -191,6 +224,47 @@ unsafe fn trust_mut<'a>(
         ));
     }
     Ok(trust)
+}
+
+unsafe fn cache_mut<'a>(
+    cache: *mut TinyArcadeCartridgeCacheV1,
+) -> Result<&'a mut TinyArcadeCartridgeCacheV1, FfiError> {
+    let cache = unsafe { cache.as_mut() }.ok_or(FfiError::new(
+        STATUS_INVALID_ARGUMENT,
+        "null cartridge cache handle",
+    ))?;
+    if cache.owner != thread::current().id() {
+        return Err(FfiError::new(
+            STATUS_WRONG_THREAD,
+            "cartridge cache used from a different thread",
+        ));
+    }
+    Ok(cache)
+}
+
+fn cache_boundary(
+    cache: *mut TinyArcadeCartridgeCacheV1,
+    f: impl FnOnce(&mut TinyArcadeCartridgeCacheV1) -> Result<(), FfiError>,
+) -> i32 {
+    set_error("");
+    match catch_unwind(AssertUnwindSafe(|| {
+        let cache = unsafe { cache_mut(cache)? };
+        cache.wasm.clear();
+        f(cache)
+    })) {
+        Ok(Ok(())) => STATUS_OK,
+        Ok(Err(error)) => {
+            set_error(error.message);
+            error.status
+        }
+        Err(_) => {
+            if let Ok(cache) = unsafe { cache_mut(cache) } {
+                cache.wasm.clear();
+            }
+            set_error("panic inside tinyarcade cartridge cache");
+            STATUS_PANIC
+        }
+    }
 }
 
 unsafe fn input_bytes<'a>(
@@ -410,7 +484,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 3
+    (1 << 16) | 4
 }
 
 #[unsafe(no_mangle)]
@@ -529,6 +603,129 @@ pub unsafe extern "C" fn tinyarcade_v1_trust_store_revoke_content(
         fixed.copy_from_slice(bytes);
         trust.store.revoke_content(fixed);
         Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_cache_create(
+    directory: *const u8,
+    directory_len: usize,
+    max_wasm_bytes: u64,
+    output: *mut *mut TinyArcadeCartridgeCacheV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null cartridge cache output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let directory = unsafe {
+            input_string(
+                directory,
+                directory_len,
+                4_096,
+                "invalid cartridge cache directory",
+            )?
+        };
+        if max_wasm_bytes == 0 {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid cartridge cache limit",
+            ));
+        }
+        let max_wasm_bytes = usize::try_from(max_wasm_bytes)
+            .map_err(|_| FfiError::new(STATUS_INVALID_ARGUMENT, "invalid cartridge cache limit"))?;
+        let cache = CartridgeCache::open(directory, max_wasm_bytes).map_err(cache_error)?;
+        let handle = Box::new(TinyArcadeCartridgeCacheV1 {
+            owner: thread::current().id(),
+            cache,
+            wasm: Vec::new(),
+        });
+        unsafe { output.write(Box::into_raw(handle)) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_cache_close(cache: *mut TinyArcadeCartridgeCacheV1) -> i32 {
+    boundary(|| {
+        unsafe { cache_mut(cache)? };
+        drop(unsafe { Box::from_raw(cache) });
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_cache_activate(
+    cache: *mut TinyArcadeCartridgeCacheV1,
+    entry: *const TinyArcadeCatalogEntryV1,
+    wasm: *const u8,
+    wasm_len: usize,
+    trust: *mut TinyArcadeTrustStoreV1,
+) -> i32 {
+    cache_boundary(cache, |cache| {
+        let entry = unsafe { catalog_entry(entry)? };
+        let wasm = unsafe { input_bytes(wasm, wasm_len, "invalid cartridge cache input")? };
+        let trust = unsafe { trust_mut(trust)? };
+        cache
+            .cache
+            .activate(&entry, wasm, &trust.store)
+            .map_err(cache_error)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_cache_load_active(
+    cache: *mut TinyArcadeCartridgeCacheV1,
+    entry: *const TinyArcadeCatalogEntryV1,
+    trust: *mut TinyArcadeTrustStoreV1,
+) -> i32 {
+    cache_boundary(cache, |cache| {
+        let entry = unsafe { catalog_entry(entry)? };
+        let trust = unsafe { trust_mut(trust)? };
+        cache.wasm = cache
+            .cache
+            .load_active(&entry.game_id, &entry, &trust.store)
+            .map_err(cache_error)?;
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_cache_rollback(
+    cache: *mut TinyArcadeCartridgeCacheV1,
+    previous_entry: *const TinyArcadeCatalogEntryV1,
+    trust: *mut TinyArcadeTrustStoreV1,
+) -> i32 {
+    cache_boundary(cache, |cache| {
+        let entry = unsafe { catalog_entry(previous_entry)? };
+        let trust = unsafe { trust_mut(trust)? };
+        cache.wasm = cache
+            .cache
+            .rollback(&entry.game_id, &entry, &trust.store)
+            .map_err(cache_error)?;
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_cache_copy_wasm(
+    cache: *mut TinyArcadeCartridgeCacheV1,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let cache = unsafe { cache_mut(cache)? };
+        if cache.wasm.is_empty() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "no completed cartridge cache load",
+            ));
+        }
+        unsafe { copy_bytes(&cache.wasm, output, capacity, output_len) }
     })
 }
 
@@ -916,7 +1113,7 @@ pub unsafe extern "C" fn tinyarcade_v1_last_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CartridgeOrigin, cartridge_sha256};
+    use crate::{cartridge_sha256, CartridgeOrigin};
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::mem::MaybeUninit;
 
@@ -1131,7 +1328,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 3);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 4);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1477,6 +1674,65 @@ mod tests {
         assert_eq!(origin, CartridgeOrigin::OfficialReviewed as u32);
         assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
 
+        let directory = tempfile::tempdir().expect("temporary C cache");
+        let directory = directory.path().to_string_lossy().into_owned();
+        let mut cache = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_cache_create(
+                    directory.as_ptr(),
+                    directory.len(),
+                    1_048_576,
+                    &mut cache,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_cache_activate(cache, &c_entry, wasm.as_ptr(), wasm.len(), trust)
+            },
+            STATUS_OK
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_cache_load_active(cache, &c_entry, trust) },
+            STATUS_OK
+        );
+        let mut cached_len = 0;
+        assert_eq!(
+            unsafe { tinyarcade_v1_cache_copy_wasm(cache, ptr::null_mut(), 0, &mut cached_len) },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        let mut cached = vec![0; cached_len];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_cache_copy_wasm(
+                    cache,
+                    cached.as_mut_ptr(),
+                    cached.len(),
+                    &mut cached_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(cached, wasm);
+
+        let cache_address = cache as usize;
+        assert_eq!(
+            std::thread::spawn(move || unsafe {
+                let mut required = 0;
+                tinyarcade_v1_cache_copy_wasm(
+                    cache_address as *mut TinyArcadeCartridgeCacheV1,
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            })
+            .join()
+            .expect("cache thread probe"),
+            STATUS_WRONG_THREAD
+        );
+
         assert_eq!(
             unsafe {
                 tinyarcade_v1_trust_store_revoke_content(
@@ -1502,6 +1758,15 @@ mod tests {
             STATUS_TRUST
         );
         assert!(runtime.is_null());
+        assert_eq!(
+            unsafe { tinyarcade_v1_cache_load_active(cache, &c_entry, trust) },
+            STATUS_TRUST
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_cache_copy_wasm(cache, ptr::null_mut(), 0, &mut cached_len) },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(unsafe { tinyarcade_v1_cache_close(cache) }, STATUS_OK);
         assert_eq!(unsafe { tinyarcade_v1_trust_store_close(trust) }, STATUS_OK);
     }
 
@@ -1568,6 +1833,12 @@ mod tests {
             "tinyarcade_v1_trust_store_add_key",
             "tinyarcade_v1_trust_store_revoke_key",
             "tinyarcade_v1_trust_store_revoke_content",
+            "tinyarcade_v1_cache_create",
+            "tinyarcade_v1_cache_close",
+            "tinyarcade_v1_cache_activate",
+            "tinyarcade_v1_cache_load_active",
+            "tinyarcade_v1_cache_rollback",
+            "tinyarcade_v1_cache_copy_wasm",
             "tinyarcade_v1_open",
             "tinyarcade_v1_open_with_native_modules",
             "tinyarcade_v1_open_private",

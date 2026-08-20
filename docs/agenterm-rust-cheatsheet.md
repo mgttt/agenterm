@@ -132,6 +132,13 @@ partially mutated state; only inspection and close remain valid. Prove that
 transition under the exact unwind-enabled delivery profile, because the ordinary
 test profile does not establish that a release artifact can catch at all.
 
+A handle that separates a mutating operation from a later two-stage copy must
+clear its previous retained output before starting every new operation. Clear
+on typed failure and panic as well as success replacement; otherwise a caller
+can observe a failed trust/storage refresh, then accidentally copy stale bytes
+from an earlier success. Prove the failure-then-copy sequence at the public FFI
+boundary, not only the internal operation result.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.
