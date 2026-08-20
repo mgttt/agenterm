@@ -742,6 +742,7 @@ struct ConApp {
     pending_resize_requests: Vec<control::IncomingRequest>,
     pending_resize_deadline: Option<Instant>,
     pending_clipboard_paste: Option<PendingClipboardPaste>,
+    pending_paste_review: Option<PendingPasteReview>,
     terminal_clipboard_error: Option<String>,
     ime_status: Option<agenterm_platform::ime::ImeStatus>,
     ime_status_label: String,
@@ -808,6 +809,23 @@ struct PendingClipboardPaste {
     target: workspace::TabId,
     read: agenterm_platform::clipboard::ClipboardTextRead,
     review: bool,
+}
+
+/// Why a paste could not enter review. `Unsupported` has a defined fallback —
+/// the platform never offered a review and the unreviewed path is what shipped
+/// there — while `Failed` is a real failure the human must be shown.
+enum PasteReviewRefusal {
+    Unsupported,
+    Failed(String),
+}
+
+/// The second half of a reviewed paste. It is a distinct state because the
+/// event loop keeps running for as long as it is held: dropping it dismisses
+/// the review and re-enables the owner, which is how tab and window teardown
+/// stay safe without a separate cancel path.
+struct PendingPasteReview {
+    target: workspace::TabId,
+    review: agenterm_platform::text_review::TextReview,
 }
 
 fn mouse_outcome_json(outcome: MouseOutcome) -> json::JsonValue {
@@ -898,6 +916,7 @@ impl ConApp {
             pending_resize_requests: Vec::new(),
             pending_resize_deadline: None,
             pending_clipboard_paste: None,
+            pending_paste_review: None,
             terminal_clipboard_error: None,
             ime_status: None,
             ime_status_label: "IME: ?".to_owned(),
@@ -1628,6 +1647,16 @@ impl ConApp {
             self.pending_clipboard_paste = None;
             self.terminal_clipboard_error = Some(reason.to_owned());
         }
+        // Dropping the review dismisses it and restores the owner window, so a
+        // tab that goes away cannot leave an editor addressing a dead terminal.
+        if self
+            .pending_paste_review
+            .as_ref()
+            .is_some_and(|pending| pending.target == id)
+        {
+            self.pending_paste_review = None;
+            self.terminal_clipboard_error = Some(reason.to_owned());
+        }
     }
 
     fn cancel_all_control_requests(&mut self, reason: &str) {
@@ -1639,6 +1668,9 @@ impl ConApp {
         if self.pending_clipboard_paste.take().is_some() {
             self.terminal_clipboard_error = Some(reason.to_owned());
         }
+        if self.pending_paste_review.take().is_some() {
+            self.terminal_clipboard_error = Some(reason.to_owned());
+        }
     }
 
     fn request_terminal_clipboard_paste(
@@ -1647,7 +1679,7 @@ impl ConApp {
         target: workspace::TabId,
         review: bool,
     ) -> Result<(), String> {
-        if self.pending_clipboard_paste.is_some() {
+        if self.pending_clipboard_paste.is_some() || self.pending_paste_review.is_some() {
             return Err("a terminal clipboard paste is already pending".to_owned());
         }
         if !terminal_clipboard_target_is_current(
@@ -1679,6 +1711,42 @@ impl ConApp {
         Ok(())
     }
 
+    /// The confirmation half of a clipboard paste, shared by the reviewed and
+    /// unreviewed paths. Every check runs after the human has finished, because
+    /// a review the host keeps pumping through means the active tab and focus
+    /// can have moved while it was open — which is exactly what the invariant
+    /// in PRD 23 requires be revalidated.
+    fn deliver_terminal_paste(
+        &mut self,
+        target: workspace::TabId,
+        text: &str,
+    ) -> Result<(), String> {
+        if text.is_empty() {
+            return Err("reviewed paste contains no pasteable characters".to_owned());
+        }
+        if text.len() > terminal_input::TERMINAL_PASTE_LIMIT_BYTES {
+            return Err(format!(
+                "reviewed paste exceeds the {}-byte limit",
+                terminal_input::TERMINAL_PASTE_LIMIT_BYTES
+            ));
+        }
+        if !terminal_clipboard_target_is_current(
+            target,
+            self.workspace.active(),
+            self.composer.focused,
+        ) {
+            return Err("clipboard paste was cancelled because the active input changed".to_owned());
+        }
+        let session = self
+            .sessions
+            .get_mut(&target)
+            .ok_or_else(|| format!("terminal @{} is unavailable", target.get()))?;
+        session.ensure_pty_input_open()?;
+        session
+            .paste_text(text)
+            .map_err(|error| format!("terminal input failed: {error}"))
+    }
+
     fn drain_terminal_clipboard_paste(&mut self, window: &PixelWindow) {
         let poll = match self.pending_clipboard_paste.as_ref() {
             Some(pending) => pending.read.try_poll(),
@@ -1698,49 +1766,86 @@ impl ConApp {
                 if text.is_empty() {
                     return Err("clipboard text contains no pasteable characters".to_owned());
                 }
-                #[cfg(windows)]
-                let text = if pending.review {
-                    match agenterm_platform::text_review::review_text(
-                        window.native_identity(),
-                        "Review terminal paste",
-                        "Review or edit the text before it is sent to the active terminal.",
-                        &text,
-                    )
-                    .map_err(|error| format!("paste review failed: {error}"))?
-                    {
-                        Some(edited) => terminal_input::normalize_terminal_paste(&edited),
-                        None => return Ok(()),
+                if pending.review {
+                    // Hands the text to the human and returns immediately. The
+                    // event loop keeps running while the review is open, so the
+                    // terminal keeps drawing and the control endpoint keeps
+                    // answering; completion arrives through `try_poll`.
+                    match self.open_terminal_paste_review(window, pending.target, &text) {
+                        // A host with no native review has always delivered
+                        // this paste directly. Refusing it here would turn a
+                        // Windows freeze fix into a Linux/macOS regression, so
+                        // the unreviewed path stays exactly as shipped; the
+                        // missing review is a platform gap owned by the
+                        // adapter, not a reason to drop the human's paste.
+                        Err(PasteReviewRefusal::Unsupported) => {}
+                        Err(PasteReviewRefusal::Failed(error)) => return Err(error),
+                        Ok(()) => return Ok(()),
                     }
-                } else {
-                    text
-                };
-                if text.is_empty() {
-                    return Err("reviewed paste contains no pasteable characters".to_owned());
                 }
-                if text.len() > terminal_input::TERMINAL_PASTE_LIMIT_BYTES {
-                    return Err(format!(
-                        "reviewed paste exceeds the {}-byte limit",
-                        terminal_input::TERMINAL_PASTE_LIMIT_BYTES
-                    ));
-                }
-                if !terminal_clipboard_target_is_current(
-                    pending.target,
-                    self.workspace.active(),
-                    self.composer.focused,
-                ) {
-                    return Err(
-                        "clipboard paste was cancelled because the active input changed".to_owned(),
-                    );
-                }
-                let session = self
-                    .sessions
-                    .get_mut(&pending.target)
-                    .ok_or_else(|| format!("terminal @{} is unavailable", pending.target.get()))?;
-                session.ensure_pty_input_open()?;
-                session
-                    .paste_text(&text)
-                    .map_err(|error| format!("terminal input failed: {error}"))
+                self.deliver_terminal_paste(pending.target, &text)
             });
+        self.terminal_clipboard_error = result.err();
+        self.mark_chrome_full();
+        window.request_redraw();
+    }
+
+    /// Opens the editable confirmation without blocking the event loop.
+    ///
+    /// `Unsupported` is kept distinct from `Failed` so the caller can tell "this
+    /// platform has no review" from "the review broke". They deserve different
+    /// answers: the first is a known gap with a defined fallback, the second is
+    /// a failure the human must see.
+    fn open_terminal_paste_review(
+        &mut self,
+        window: &PixelWindow,
+        target: workspace::TabId,
+        text: &str,
+    ) -> Result<(), PasteReviewRefusal> {
+        if self.pending_paste_review.is_some() {
+            return Err(PasteReviewRefusal::Failed(
+                "a terminal paste review is already open".to_owned(),
+            ));
+        }
+        let waker = window.waker();
+        let review = agenterm_platform::text_review::open_review(
+            window.native_identity(),
+            "Review terminal paste",
+            "Review or edit the text before it is sent to the active terminal.",
+            text,
+            move || {
+                let _ = waker.wake();
+            },
+        )
+        .map_err(|error| match error {
+            agenterm_platform::text_review::TextReviewError::Unsupported { .. } => {
+                PasteReviewRefusal::Unsupported
+            }
+            error => PasteReviewRefusal::Failed(format!("paste review failed: {error}")),
+        })?;
+        self.pending_paste_review = Some(PendingPasteReview { target, review });
+        window.request_redraw();
+        Ok(())
+    }
+
+    fn drain_terminal_paste_review(&mut self, window: &PixelWindow) {
+        let poll = match self.pending_paste_review.as_mut() {
+            Some(pending) => pending.review.try_poll(),
+            None => return,
+        };
+        let agenterm_platform::text_review::TextReviewPoll::Ready(edited) = poll else {
+            return;
+        };
+        let pending = self
+            .pending_paste_review
+            .take()
+            .expect("a ready review remains owned until completion");
+        // A cancelled review is the human declining, not a failure: it clears
+        // the pending state and leaves no error in chrome.
+        let result = edited.map_or(Ok(()), |edited| {
+            let text = terminal_input::normalize_terminal_paste(&edited);
+            self.deliver_terminal_paste(pending.target, &text)
+        });
         self.terminal_clipboard_error = result.err();
         self.mark_chrome_full();
         window.request_redraw();
@@ -1832,8 +1937,16 @@ impl ConApp {
                                 "terminal_clipboard_paste",
                                 json::object(vec![
                                     (
+                                        // An open review is the same public
+                                        // state as a clipboard read still in
+                                        // flight: a paste is owned and not yet
+                                        // delivered. Splitting it would add a
+                                        // value to a contract the alignment
+                                        // gate pins, for no observer benefit.
                                         "state",
-                                        if self.pending_clipboard_paste.is_some() {
+                                        if self.pending_clipboard_paste.is_some()
+                                            || self.pending_paste_review.is_some()
+                                        {
                                             "pending"
                                         } else {
                                             "idle"
@@ -1845,7 +1958,12 @@ impl ConApp {
                                         tab_id_json(
                                             self.pending_clipboard_paste
                                                 .as_ref()
-                                                .map(|pending| pending.target),
+                                                .map(|pending| pending.target)
+                                                .or_else(|| {
+                                                    self.pending_paste_review
+                                                        .as_ref()
+                                                        .map(|pending| pending.target)
+                                                }),
                                         ),
                                     ),
                                     (
@@ -4648,6 +4766,7 @@ impl PixelWindowApplication for ConApp {
         if matches!(event, PixelWindowEvent::Wake) {
             self.drain_a11y_actions(window)?;
             self.drain_terminal_clipboard_paste(window);
+            self.drain_terminal_paste_review(window);
             // PTY readers and the control server share the native wake path.
             // A flooded PTY continuously reposts Wake while bounded output
             // remains, so waiting until about_to_wait would starve control

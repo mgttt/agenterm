@@ -871,9 +871,11 @@ pub(crate) fn run_pixel_window(
         if result == 0 || message.message == WM_QUIT {
             break;
         }
-        unsafe {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+        if !crate::selected::text_review::filter_dialog_message(&message) {
+            unsafe {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
         }
         drain_native(&user_data, hwnd);
         while !host_should_exit(&user_data)
@@ -883,9 +885,11 @@ pub(crate) fn run_pixel_window(
                 control.exit_requested.set(true);
                 break;
             }
-            unsafe {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
+            if !crate::selected::text_review::filter_dialog_message(&message) {
+                unsafe {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
             }
             drain_native(&user_data, hwnd);
         }
