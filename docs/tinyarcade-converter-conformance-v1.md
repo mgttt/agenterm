@@ -38,6 +38,12 @@ converter check
 └── byte-identical render/audio replay from the same input, clock and RNG
 ```
 
+Two compiler-produced reference cartridges own both media branches:
+`depth-well-0.1.0.wasm` exercises `grid3d/v1`, while
+`paddle-guard-0.1.0.wasm` exercises `indexed2d/v1`. Both are ordinary strict
+WASM MVP modules built through the shared `build-rust-cartridge.sh` profile and
+accepted by this same converter path; neither receives a fixture-only loader.
+
 Passing this command establishes technical compatibility for a user's private
 library. It does not sign, publish or approve the game for the official catalog.
 Official review additionally owns product quality, rights/provenance, metadata,

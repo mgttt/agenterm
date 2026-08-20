@@ -197,7 +197,7 @@ impl<'a> Indexed2dFrame<'a> {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ToneEvent {
-    /// 1 lock, 2 deck clear, 3 game over.
+    /// 1 impact, 2 success, 3 failure.
     pub kind: u8,
     pub frequency_hz: u16,
     pub duration_ms: u16,

@@ -209,6 +209,7 @@ public final class TinyArcadeIndexed2DView: UIView {
 }
 
 public struct TinyArcadeToneEvent: Sendable, Equatable {
+    /// Stable host feedback intent: 1 impact, 2 success, 3 failure.
     public let kind: UInt8
     public let frequencyHz: UInt16
     public let durationMilliseconds: UInt16

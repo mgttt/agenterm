@@ -49,6 +49,7 @@ tinyvm iOS game runtime
 ├── real-game proof                   [~]
 │   ├── constrained compiler profile  [x]
 │   ├── Depth Well WASM vertical cut  [x]
+│   ├── Paddle Guard 2D vertical cut   [x]
 │   ├── frame-time/resource evidence  [~]
 │   └── suspend/resume/save evidence  [x]
 └── distribution gate                 [ ]
@@ -543,3 +544,40 @@ Evidence on 2026-08-21:
   872,960 bytes for x86_64.
 - A production 2D cartridge and physical-iPhone/TestFlight display evidence
   remain open, so the overall goal is not complete.
+
+## Seventeenth executable increment — second real cartridge
+
+Paddle Guard is an original one-screen paddle game and the first complete
+`indexed2d/v1` cartridge. It uses procedural geometry, palette, digit glyphs,
+fixed-point physics and tones; it copies no commercial name, image, level,
+sound or other asset. Left/right move the shield and primary launches or
+restarts. The guest owns a five-by-eight panel field, angle-changing rebounds,
+three lives, score, level speed, clear/reset and game-over state.
+
+The 5,280-byte artifact is a strict standard WASM MVP module with no native
+capabilities. Its eight imports are ordinary `tinyarcade:core/v1` functions,
+including indexed-media negotiation. It emits one 19,248-byte 160 × 120 frame,
+  generic impact/success/failure tone intent and a 64-byte guest snapshot. A
+  shared compiler profile now builds both Rust-authored cartridges and performs
+  the same bulk-memory lowering and path remapping before converter validation;
+  moving Depth Well onto it preserves the exact 6,076-byte bundled artifact.
+
+Evidence on 2026-08-21:
+
+- Six public black-box tests prove launch/restart, clock-driven movement, a tracked
+  shield rebound, unattended life loss, final-panel clear and level rebuild,
+  converter acceptance, and byte-identical frame/audio replay through a fresh
+  resumed instance. The rare full-field rebuild passes the same 500,000-step
+  production ceiling rather than only testing cheap steady-state ticks. Two
+  independent cartridge builds are byte-identical and contain no checkout path.
+- The complete all-target/all-feature TinyVM suite passes 174 tests. Clippy
+  with warnings denied, no-default library compilation and the 70,904-byte
+  static-core/self-test gate are clean.
+- The generic Swift 6 package builds for iOS device and universal simulator.
+  On a booted iPhone 17 Pro simulator, Paddle Guard runs 600 complete
+  WASM/copy/decode/CGImage/UIKit frames, crosses suspend into a fresh instance,
+  emits gameplay feedback and measures 0.184 ms average, 0.206 ms p95 and
+  0.398 ms maximum. Linked smokes remain below 1 MiB at 835,048 bytes arm64
+  and 881,256 bytes x86_64.
+- A physical iPhone is not connected to this Mac mini, so physical-device and
+  TestFlight play evidence remain open and the overall goal is not complete.

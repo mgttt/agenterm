@@ -139,9 +139,11 @@ arm64/x86_64 simulator library under Swift 6 language mode. With
 cartridge through a Swift-owned `fan:physics/v1` callback and proves i32
 parameters/results, guest-memory mutation, generic `indexed2d/v1` decoding,
 exact translucent RGBA expansion and native view presentation policy.
-It then compiles Depth Well,
-runs the linked executable in an already-booted iOS Simulator, opens it through
-the private origin, decodes its first frame, suspends/resumes and hard-drops.
+It then compiles both reference cartridges and runs the linked executable in an
+already-booted iOS Simulator. Depth Well opens through the private origin,
+decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
+600 WASM-owned indexed frames through CGImage/UIKit presentation and crosses a
+suspend into a fresh instance during the measured run.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,

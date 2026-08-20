@@ -2192,3 +2192,16 @@ build its deterministic bytes once behind a process-wide `OnceLock` and clone
 the result. Concurrently invoking one builder/output path can race rustc/linker
 temporary cleanup and create a false missing-object failure even when the final
 artifact path is stable.
+
+For a whole-frame indexed guest, do not equate the wire format with repainting
+every pixel in guest code on every tick. Keep the complete validated frame in
+linear memory, erase/redraw only dynamic sprites during ordinary ticks, and
+rebuild static pixels only at init, level reset and resume. Gate the rare
+rebuild path separately under the same production fuel ceiling: measuring only
+steady-state ticks can ship a deterministic step-budget trap on the first clear.
+
+Portable state replay must compare complete render bytes, not only guest fields.
+A state transition can leave an old prompt or overlay in the resident frame;
+a fresh resumed instance rebuilds from logical state and exposes the mismatch.
+Clear transition-owned pixels when the phase changes, then require the original
+and rebuilt instances to emit byte-identical render and audio on the next tick.

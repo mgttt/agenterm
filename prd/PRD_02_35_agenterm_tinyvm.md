@@ -31,6 +31,10 @@ agenterm-tinyvm (35)
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
 │       └── native module registry    [x]
+├── real-game proofs               [~]
+│   ├── Depth Well grid3d             [x]
+│   ├── Paddle Guard indexed2d        [x]
+│   └── physical-device play          [ ]
 ├── slot-A
 │   ├── control          [x]
 │   ├── parametric       [x]
@@ -86,4 +90,11 @@ iOS SDK 已把 2D 数据边界接到可直接复用的原生呈现面：严格�
 展开为有界的 sRGB RGBA8 `CGImage`，或交给保持宽高比并使用 nearest filter
 的 `TinyArcadeIndexed2DView`。自有 Metal renderer 仍可直接使用 palette/index
 数据；UIKit/Core Graphics 类型不进入 WASM ABI。native I/O surface 仍标记为
-partial，直到真实 2D 生产卡带和物理设备显示证据完成。
+partial，直到物理设备显示、输入与 audio-session 证据完成。
+
+第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
+它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
+function，用 160×120 indexed frame、通用 input bits、impact/success/failure
+tones 与 64-byte guest state 完成另一种街机循环。Rust 黑盒覆盖发射、移动、
+护盾反弹、漏球、清场升级和逐字节恢复；iOS smoke 覆盖完整原生呈现。物理设备
+仍未连接，因此 real-game proofs 和 native I/O surface 继续保持 partial。

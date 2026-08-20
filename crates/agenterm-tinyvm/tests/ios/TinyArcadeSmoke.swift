@@ -259,7 +259,7 @@ struct TinyArcadeSmoke {
         )
         try classicRuntime.close()
 
-        guard CommandLine.arguments.count == 2 else { return }
+        guard CommandLine.arguments.count >= 2 else { return }
         let cartridge = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         let runtime = try TinyArcadeRuntimeV1(privateCartridge: cartridge) { config in
             config.max_memory_pages = 17
@@ -312,5 +312,76 @@ struct TinyArcadeSmoke {
             "OK: Depth Well in iOS Simulator; "
                 + String(format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms", average, p95, maximum)
         )
+        try runtime.close()
+        try restored.close()
+        try measured.close()
+
+        guard CommandLine.arguments.count >= 3 else { return }
+        let paddleCartridge = try Data(
+            contentsOf: URL(fileURLWithPath: CommandLine.arguments[2])
+        )
+        let makePaddleRuntime: () throws -> TinyArcadeRuntimeV1 = {
+            try TinyArcadeRuntimeV1(privateCartridge: paddleCartridge) { config in
+                config.max_memory_pages = 17
+                config.max_steps = 500_000
+                config.max_render_bytes = 20 * 1_024
+                config.max_audio_bytes = 64
+                config.max_state_bytes = 128
+            }
+        }
+        var paddleRuntime = try makePaddleRuntime()
+        var paddleFrame = try paddleRuntime.tickMedia(
+            buttons: 1 << 4,
+            clockMilliseconds: 0
+        )
+        guard case let .indexed2D(initialPaddle) = paddleFrame.renderFrame else {
+            preconditionFailure("Paddle Guard must emit indexed2d")
+        }
+        precondition(initialPaddle.width == 160 && initialPaddle.height == 120)
+        precondition(initialPaddle.paletteRGBA.count == 8)
+        let paddleView = TinyArcadeIndexed2DView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        try paddleView.display(initialPaddle)
+        var paddleMilliseconds: [Double] = []
+        paddleMilliseconds.reserveCapacity(600)
+        var sawPaddleTone = !paddleFrame.tones.isEmpty
+        for index in 1...600 {
+            if index == 300 {
+                let saved = try paddleRuntime.suspend()
+                let resumed = try makePaddleRuntime()
+                try resumed.resume(snapshot: saved)
+                try paddleRuntime.close()
+                paddleRuntime = resumed
+            }
+            let buttons: UInt32 = (index / 90).isMultiple(of: 2) ? 1 << 0 : 1 << 1
+            let started = ProcessInfo.processInfo.systemUptime
+            paddleFrame = try paddleRuntime.tickMedia(
+                buttons: buttons,
+                clockMilliseconds: UInt32(index * 16)
+            )
+            guard case let .indexed2D(decoded) = paddleFrame.renderFrame else {
+                preconditionFailure("Paddle Guard changed render protocol")
+            }
+            try paddleView.display(decoded)
+            paddleMilliseconds.append((ProcessInfo.processInfo.systemUptime - started) * 1_000)
+            sawPaddleTone = sawPaddleTone || !paddleFrame.tones.isEmpty
+        }
+        paddleMilliseconds.sort()
+        let paddleAverage = paddleMilliseconds.reduce(0, +) / Double(paddleMilliseconds.count)
+        let paddleP95 = paddleMilliseconds[Int(Double(paddleMilliseconds.count - 1) * 0.95)]
+        let paddleMaximum = paddleMilliseconds.last ?? 0
+        precondition(sawPaddleTone, "Paddle Guard must emit gameplay feedback")
+        precondition(paddleP95 < 8, "Paddle Guard simulator p95 exceeded 8 ms")
+        print(
+            "OK: Paddle Guard in iOS Simulator; "
+                + String(
+                    format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms",
+                    paddleAverage,
+                    paddleP95,
+                    paddleMaximum
+                )
+        )
+        try paddleRuntime.close()
     }
 }

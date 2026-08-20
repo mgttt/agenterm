@@ -88,7 +88,7 @@ event_count        u16
 Exactly `event_count` eight-byte events follow:
 
 ```text
-kind               u8; 1 lock, 2 deck clear, 3 game over
+kind               u8; 1 impact, 2 success, 3 failure
 reserved           u8 = 0
 frequency_hz       u16; 40..20000
 duration_ms        u16; 1..2000
@@ -98,3 +98,8 @@ amplitude_milli    u16; 0..1000
 The host owns the synthesizer, mixing, mute policy, interruption behavior and
 audio session. A cartridge can request only these bounded semantic cues; it
 cannot supply native audio code or address system audio APIs.
+
+The three kinds describe host feedback intent, not one game's rules. Depth
+Well maps lock/clear/game-over to impact/success/failure; a paddle game may map
+rebound/field-clear/life-loss to the same stable meanings. Frequency, duration
+and amplitude remain explicit cartridge parameters within the bounds above.
