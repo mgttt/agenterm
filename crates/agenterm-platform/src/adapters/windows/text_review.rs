@@ -376,3 +376,108 @@ pub(crate) fn open_review(
         finished: false,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{Duration, Instant},
+    };
+
+    /// The invariant that broke: this adapter must not run a message loop.
+    ///
+    /// The previous implementation pumped `GetMessageW` here and only returned
+    /// once a human had answered, which is why no test could reach it — the
+    /// call never came back without an interactive desktop. A bounded
+    /// `open_review` plus a non-blocking `try_poll` is the whole difference,
+    /// and asserting it costs one window.
+    #[test]
+    fn open_review_returns_without_pumping_and_polls_pending() {
+        let woken = Arc::new(AtomicBool::new(false));
+        let signal = Arc::clone(&woken);
+        let started = Instant::now();
+        let mut review = open_review(
+            None,
+            "test review",
+            "test prompt",
+            "initial text",
+            Box::new(move || signal.store(true, Ordering::Release)),
+        )
+        .expect("a review opens on a Windows test desktop");
+        let elapsed = started.elapsed();
+
+        // A pump would not return at all; the bound only has to be far below
+        // human answer time to tell the two designs apart.
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "open_review blocked for {elapsed:?}, which means it pumped"
+        );
+        assert!(
+            matches!(review.try_poll(), TextReviewPoll::Pending),
+            "an unanswered review must report Pending, not block"
+        );
+        assert!(
+            !woken.load(Ordering::Acquire),
+            "the host is woken on completion, not on open"
+        );
+
+        // A second review would steal the thread's dialog navigation from the
+        // first while still disabling its owner.
+        let refused = open_review(None, "second", "second", "", Box::new(|| {}));
+        assert!(matches!(
+            refused,
+            Err(TextReviewError::Failed { ref code, .. }) if code == "text_review_already_open"
+        ));
+
+        drop(review);
+        assert!(
+            ACTIVE_DIALOG.with(std::cell::Cell::get).is_null(),
+            "dropping a review releases the thread's dialog slot"
+        );
+        // The slot really is reusable, not merely reported as clear.
+        let reopened = open_review(None, "third", "third", "", Box::new(|| {}))
+            .expect("the slot is reusable once the previous review is dropped");
+        drop(reopened);
+    }
+
+    /// A dismissed review reports its outcome instead of leaving the caller to
+    /// guess, and reports it once however many messages describe the dismissal.
+    #[test]
+    fn dismissal_is_terminal_idempotent_and_wakes_once() {
+        let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&wakes);
+        let mut state = DialogState {
+            done: false,
+            confirmed: false,
+            wake: Some(Box::new(move || {
+                counter.fetch_add(1, Ordering::AcqRel);
+            })),
+        };
+
+        state.finish(true);
+        assert!(state.done);
+        assert!(state.confirmed);
+
+        // WM_CLOSE followed by WM_DESTROY is an ordinary teardown sequence: the
+        // second must not turn a confirmation into a cancellation.
+        state.finish(false);
+        assert!(state.confirmed, "a later message must not rewrite the answer");
+        assert_eq!(
+            wakes.load(Ordering::Acquire),
+            1,
+            "the host is woken exactly once per review"
+        );
+    }
+
+    /// No review open means the host owns every message, unchanged.
+    #[test]
+    fn message_filter_is_inert_without_an_open_review() {
+        let message: MSG = unsafe { mem::zeroed() };
+        assert!(ACTIVE_DIALOG.with(std::cell::Cell::get).is_null());
+        assert!(!filter_dialog_message(&message));
+    }
+}
