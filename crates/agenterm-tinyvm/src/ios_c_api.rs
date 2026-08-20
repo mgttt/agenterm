@@ -125,6 +125,32 @@ fn boundary(f: impl FnOnce() -> Result<(), FfiError>) -> i32 {
     }
 }
 
+fn runtime_boundary(
+    runtime: *mut TinyArcadeRuntimeV1,
+    f: impl FnOnce(&mut TinyArcadeRuntimeV1) -> Result<(), FfiError>,
+) -> i32 {
+    set_error("");
+    match catch_unwind(AssertUnwindSafe(|| {
+        let runtime = unsafe { runtime_mut(runtime)? };
+        f(runtime)
+    })) {
+        Ok(Ok(())) => STATUS_OK,
+        Ok(Err(error)) => {
+            set_error(error.message);
+            error.status
+        }
+        Err(_) => {
+            if let Ok(runtime) = unsafe { runtime_mut(runtime) } {
+                runtime.runtime.latch_host_panic();
+                runtime.frame = None;
+                runtime.snapshot.clear();
+            }
+            set_error("panic inside tinyarcade runtime");
+            STATUS_PANIC
+        }
+    }
+}
+
 fn wasm_error(error: WasmError) -> FfiError {
     match error {
         WasmError::Decode(message) => FfiError::new(STATUS_DECODE, message),
@@ -696,8 +722,8 @@ pub unsafe extern "C" fn tinyarcade_v1_tick(
     buttons: u32,
     clock_ms: u32,
 ) -> i32 {
-    boundary(|| {
-        let runtime = unsafe { runtime_mut(runtime)? };
+    runtime_boundary(runtime, |runtime| {
+        runtime.frame = None;
         runtime.frame = Some(
             runtime
                 .runtime
@@ -748,8 +774,8 @@ pub unsafe extern "C" fn tinyarcade_v1_copy_audio(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tinyarcade_v1_suspend(runtime: *mut TinyArcadeRuntimeV1) -> i32 {
-    boundary(|| {
-        let runtime = unsafe { runtime_mut(runtime)? };
+    runtime_boundary(runtime, |runtime| {
+        runtime.snapshot.clear();
         runtime.snapshot = runtime.runtime.suspend().map_err(wasm_error)?;
         Ok(())
     })
@@ -780,8 +806,7 @@ pub unsafe extern "C" fn tinyarcade_v1_resume(
     snapshot: *const u8,
     snapshot_len: usize,
 ) -> i32 {
-    boundary(|| {
-        let runtime = unsafe { runtime_mut(runtime)? };
+    runtime_boundary(runtime, |runtime| {
         if snapshot.is_null() || snapshot_len == 0 {
             return Err(FfiError::new(
                 STATUS_INVALID_ARGUMENT,
@@ -789,8 +814,8 @@ pub unsafe extern "C" fn tinyarcade_v1_resume(
             ));
         }
         let snapshot = unsafe { slice::from_raw_parts(snapshot, snapshot_len) };
-        runtime.runtime.resume(snapshot).map_err(wasm_error)?;
         runtime.frame = None;
+        runtime.runtime.resume(snapshot).map_err(wasm_error)?;
         Ok(())
     })
 }
@@ -1196,6 +1221,42 @@ mod tests {
     }
 
     #[test]
+    fn c_runtime_panic_latches_instance_and_discards_partial_outputs() {
+        let wasm = cartridge();
+        let runtime = unsafe { open(&wasm) };
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 0) }, STATUS_OK);
+        assert_eq!(unsafe { tinyarcade_v1_suspend(runtime) }, STATUS_OK);
+
+        assert_eq!(
+            runtime_boundary(runtime, |_| -> Result<(), FfiError> {
+                panic!("injected lifecycle panic")
+            }),
+            STATUS_PANIC
+        );
+        let mut failed = 0;
+        assert_eq!(
+            unsafe { tinyarcade_v1_is_failed(runtime, &mut failed) },
+            STATUS_OK
+        );
+        assert_eq!(failed, 1);
+        assert_eq!(
+            unsafe { tinyarcade_v1_tick(runtime, 0, 1) },
+            STATUS_FAILED_INSTANCE
+        );
+
+        let mut output_len = 0;
+        assert_eq!(
+            unsafe { tinyarcade_v1_copy_render(runtime, ptr::null_mut(), 0, &mut output_len) },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_copy_snapshot(runtime, ptr::null_mut(), 0, &mut output_len) },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+    }
+
+    #[test]
     fn c_native_table_binds_exact_callback_and_latches_failure() {
         let wasm = native_cartridge();
         let config = unsafe { config() };
@@ -1266,6 +1327,11 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(failed, 1);
+        render_len = 0;
+        assert_eq!(
+            unsafe { tinyarcade_v1_copy_render(runtime, ptr::null_mut(), 0, &mut render_len) },
+            STATUS_INVALID_ARGUMENT
+        );
         assert_eq!(
             unsafe { tinyarcade_v1_tick(runtime, 0, 2) },
             STATUS_FAILED_INSTANCE

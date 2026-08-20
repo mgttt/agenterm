@@ -497,6 +497,14 @@ impl GameRuntime {
         self.failed
     }
 
+    /// Permanently reject further lifecycle execution after a host boundary
+    /// catches a panic with potentially partial guest/host mutation.
+    #[cfg(feature = "ios-c-api")]
+    pub(crate) fn latch_host_panic(&mut self) {
+        self.failed = true;
+        self.host.borrow_mut().phase = Phase::Idle;
+    }
+
     fn ensure_live(&self) -> Result<(), WasmError> {
         if self.failed {
             Err(WasmError::Trap("game instance failed"))

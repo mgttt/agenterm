@@ -125,6 +125,13 @@ a stopwatch around borrowed memory on the owner thread. For trusted app-compiled
 callbacks, require each implementation to be finite and nonblocking, then bound
 untrusted guest amplification with a per-lifecycle quota charged before dispatch.
 
+`catch_unwind` returning a status is not enough after a mutable runtime operation.
+The handle-aware panic branch must mark the instance permanently failed, restore
+any lifecycle/phase guard and invalidate cached outputs that could represent
+partially mutated state; only inspection and close remain valid. Prove that
+transition under the exact unwind-enabled delivery profile, because the ordinary
+test profile does not establish that a release artifact can catch at all.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

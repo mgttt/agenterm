@@ -17,7 +17,7 @@ tinyvm iOS game runtime
 │   ├── start exactly once            [x]
 │   ├── per-call instruction budget   [x]
 │   ├── host memory/table budgets     [x]
-│   └── trap isolation                [~]
+│   └── trap isolation                [x]
 ├── game host ABI                    [~]
 │   ├── standard WASM cartridge       [x]
 │   ├── version negotiation           [x]
@@ -414,4 +414,25 @@ Evidence on 2026-08-21:
 - Swift 6 device/simulator package builds pass. On the booted iPhone 17 Pro
   simulator, one standard cartridge completes two budgeted native calls before
   Depth Well runs 600 frames (0.101 ms average, 0.109 ms p95, 0.117 ms max).
+- Physical-iPhone lifecycle/performance and TestFlight feel checks remain open.
+
+## Thirteenth executable increment — panic-latched lifecycle boundary
+
+Tick, suspend and resume now cross one handle-aware unwind boundary. A caught
+panic latches the affected runtime failed, restores the host lifecycle phase to
+idle and clears cached frame/snapshot output before returning
+`TINYARCADE_PANIC`. Subsequent lifecycle execution returns
+`TINYARCADE_FAILED_INSTANCE`; callers may still inspect and close the handle.
+Ordinary guest traps retain their existing latch, while malformed external
+snapshot bytes rejected before guest execution remain non-poisoning.
+
+Evidence on 2026-08-21:
+
+- An injected panic after a live frame and snapshot returns the stable panic
+  status, sets `is_failed=1`, removes both outputs and rejects the next tick.
+- The same test passes under the exact optimized `tinyvm-ios-release` profile
+  whose `panic=unwind` policy is used to build every XCFramework slice.
+- Full untrusted byte, stack, recursion, instruction, memory, table, lifecycle,
+  callback-failure and native-dispatch-budget tests remain the public trap
+  isolation owner.
 - Physical-iPhone lifecycle/performance and TestFlight feel checks remain open.

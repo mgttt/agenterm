@@ -101,6 +101,13 @@ buffer sizing, trust failure and caught panic have distinct stable status
 values. The Swift frame owner validates `grid3d/v1` and `tones/v1` completely
 before exposing decoded cells or tone events to native rendering/audio code.
 
+Tick, suspend and resume use a handle-aware panic boundary. If Rust panics after
+a handle has been resolved, the boundary first latches that runtime failed,
+returns its phase to idle and discards any cached frame/snapshot before returning
+`TINYARCADE_PANIC`. The app may inspect/close the handle but cannot execute it
+again. A generic `catch_unwind` status without that state transition is not
+containment because partially mutated guest state could otherwise be reused.
+
 ## Current evidence boundary
 
 The smoke gate builds a real arm64 iOS-device archive and a universal
