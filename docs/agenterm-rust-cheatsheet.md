@@ -2167,3 +2167,28 @@ may still invoke the infallible allocator and abort under pressure. For bytes
 originating in a guest or persisted snapshot, first `try_reserve_exact` the
 bounded addition and map refusal to the runtime's ordinary error path; only
 then extend. A small configured limit is policy, not allocation evidence.
+
+## Versioned media needs one discriminated SDK boundary
+
+When one guest output channel accepts multiple versioned media schemas, do not
+make the public lifecycle method unconditionally decode the first shipped
+schema. Keep a single magic/version dispatcher with strict whole-record
+decoders, expose the result as a typed enum, and make converter validation use
+the same dispatcher. Preserve a schema-specific convenience only when existing
+consumers already depend on it. Otherwise the second valid schema can pass the
+WASM/runtime byte boundary and still fail every real app on its first frame.
+Give a newly optional schema an ordinary version-query import so runtimes that
+predate it reject the module at load; magic-only dispatch is not capability
+negotiation.
+
+For indexed pixels, bound dimensions, their checked product, palette length,
+the complete stream length and every palette index before native presentation.
+A host byte ceiling alone does not reject a malformed in-range index or a
+pathological skinny image, while a decoder-only ceiling does not stop the
+guest-to-host allocation. Both layers are required.
+
+If several parallel integration tests need the same compiler-produced guest,
+build its deterministic bytes once behind a process-wide `OnceLock` and clone
+the result. Concurrently invoking one builder/output path can race rustc/linker
+temporary cleanup and create a false missing-object failure even when the final
+artifact path is stable.

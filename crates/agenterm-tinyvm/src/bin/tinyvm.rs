@@ -11,7 +11,7 @@ use std::io::Read;
 use std::process::ExitCode;
 
 use agenterm_tinyvm::{
-    CartridgeManifest, GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, Vm,
+    CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits, RenderFrame, ToneBatch, Vm,
     WasmError, WasmModule,
 };
 
@@ -139,9 +139,10 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
         Ok(frame) => frame,
         Err(error) => return cartridge_error(error),
     };
-    if let Err(error) = validate_media(&initial.render, &initial.audio) {
-        return cartridge_error(error);
-    }
+    let initial_render_stream = match validate_media(&initial.render, &initial.audio) {
+        Ok(stream) => stream,
+        Err(error) => return cartridge_error(error),
+    };
     let snapshot = match first.suspend() {
         Ok(snapshot) => snapshot,
         Err(error) => return cartridge_error(error),
@@ -175,6 +176,7 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
         eprintln!("tinyvm: suspend/resume replay is not byte-deterministic");
         return ExitCode::FAILURE;
     }
+    println!("render_stream={initial_render_stream}");
     println!("initial_render_bytes={}", initial.render.len());
     println!("initial_audio_bytes={}", initial.audio.len());
     println!("snapshot_bytes={}", snapshot.len());
@@ -182,12 +184,15 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn validate_media(render: &[u8], audio: &[u8]) -> Result<(), WasmError> {
-    Grid3dFrame::decode(render)?;
+fn validate_media(render: &[u8], audio: &[u8]) -> Result<&'static str, WasmError> {
+    let stream = match RenderFrame::decode(render)? {
+        RenderFrame::Grid3d(_) => "tinyarcade:grid3d/v1",
+        RenderFrame::Indexed2d(_) => "tinyarcade:indexed2d/v1",
+    };
     if !audio.is_empty() {
         ToneBatch::decode(audio)?;
     }
-    Ok(())
+    Ok(stream)
 }
 
 fn cartridge_error(error: WasmError) -> ExitCode {

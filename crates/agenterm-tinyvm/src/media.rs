@@ -3,11 +3,36 @@
 use crate::WasmError;
 
 pub const GRID3D_MAGIC: &[u8; 4] = b"TAG3";
+pub const INDEXED2D_MAGIC: &[u8; 4] = b"TAI2";
 pub const TONES_MAGIC: &[u8; 4] = b"TAT1";
 const GRID3D_HEADER_BYTES: usize = 32;
 const GRID3D_CELL_BYTES: usize = 8;
+const INDEXED2D_HEADER_BYTES: usize = 16;
+const INDEXED2D_MAX_DIMENSION: usize = 512;
+const INDEXED2D_MAX_PIXELS: usize = u16::MAX as usize;
+const INDEXED2D_MAX_BYTES: usize = 64 * 1024;
 const TONE_HEADER_BYTES: usize = 8;
 const TONE_EVENT_BYTES: usize = 8;
+
+/// Strictly decoded render stream supported by the portable cartridge SDK.
+pub enum RenderFrame<'a> {
+    Grid3d(Grid3dFrame<'a>),
+    Indexed2d(Indexed2dFrame<'a>),
+}
+
+impl<'a> RenderFrame<'a> {
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, WasmError> {
+        match bytes.get(..4) {
+            Some(magic) if magic == GRID3D_MAGIC => {
+                Grid3dFrame::decode(bytes).map(RenderFrame::Grid3d)
+            }
+            Some(magic) if magic == INDEXED2D_MAGIC => {
+                Indexed2dFrame::decode(bytes).map(RenderFrame::Indexed2d)
+            }
+            _ => Err(WasmError::Trap("unknown render stream")),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Grid3dCell {
@@ -92,6 +117,81 @@ impl<'a> Grid3dFrame<'a> {
                 rgba: u32::from_le_bytes([record[4], record[5], record[6], record[7]]),
             })
         })
+    }
+}
+
+/// Strict view over one `tinyarcade:indexed2d/v1` frame.
+pub struct Indexed2dFrame<'a> {
+    pub width: u16,
+    pub height: u16,
+    palette: &'a [u8],
+    pixels: &'a [u8],
+}
+
+impl<'a> Indexed2dFrame<'a> {
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, WasmError> {
+        if bytes.len() < INDEXED2D_HEADER_BYTES
+            || bytes.len() > INDEXED2D_MAX_BYTES
+            || &bytes[..4] != INDEXED2D_MAGIC
+            || read_u16(bytes, 4)? != 1
+            || read_u16(bytes, 6)? as usize != INDEXED2D_HEADER_BYTES
+        {
+            return Err(WasmError::Trap("invalid indexed2d frame header"));
+        }
+        let width = read_u16(bytes, 8)?;
+        let height = read_u16(bytes, 10)?;
+        let palette_count = read_u16(bytes, 12)? as usize;
+        let flags = read_u16(bytes, 14)?;
+        let pixel_count = usize::from(width)
+            .checked_mul(usize::from(height))
+            .ok_or(WasmError::Trap("indexed2d frame size"))?;
+        let palette_bytes = palette_count
+            .checked_mul(4)
+            .ok_or(WasmError::Trap("indexed2d frame size"))?;
+        let expected = INDEXED2D_HEADER_BYTES
+            .checked_add(palette_bytes)
+            .and_then(|prefix| prefix.checked_add(pixel_count))
+            .ok_or(WasmError::Trap("indexed2d frame size"))?;
+        if width == 0
+            || height == 0
+            || usize::from(width) > INDEXED2D_MAX_DIMENSION
+            || usize::from(height) > INDEXED2D_MAX_DIMENSION
+            || pixel_count > INDEXED2D_MAX_PIXELS
+            || !(1..=256).contains(&palette_count)
+            || flags != 0
+            || expected != bytes.len()
+        {
+            return Err(WasmError::Trap("indexed2d frame size"));
+        }
+        let pixel_offset = INDEXED2D_HEADER_BYTES + palette_bytes;
+        let frame = Self {
+            width,
+            height,
+            palette: &bytes[INDEXED2D_HEADER_BYTES..pixel_offset],
+            pixels: &bytes[pixel_offset..],
+        };
+        if frame
+            .pixels
+            .iter()
+            .any(|&index| usize::from(index) >= palette_count)
+        {
+            return Err(WasmError::Trap("invalid indexed2d pixel"));
+        }
+        Ok(frame)
+    }
+
+    pub fn palette_count(&self) -> usize {
+        self.palette.len() / 4
+    }
+
+    pub fn palette_rgba(&self) -> impl Iterator<Item = u32> + '_ {
+        self.palette
+            .chunks_exact(4)
+            .map(|rgba| u32::from_le_bytes([rgba[0], rgba[1], rgba[2], rgba[3]]))
+    }
+
+    pub fn pixels(&self) -> &'a [u8] {
+        self.pixels
     }
 }
 

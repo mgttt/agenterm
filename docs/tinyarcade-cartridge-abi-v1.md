@@ -66,6 +66,7 @@ Core services are optional standard function imports from
 input_bits() -> i32
 clock_ms() -> i32
 random_u32() -> i32
+indexed2d_version() -> i32
 submit_render(pointer: i32, length: i32) -> i32
 submit_audio(pointer: i32, length: i32) -> i32
 save_state(pointer: i32, length: i32) -> i32
@@ -76,6 +77,13 @@ load_state(pointer: i32, capacity: i32) -> i32
 only during init/tick. `save_state` is available only during suspend;
 `load_state` only during resume. Guest pointers are ranges in the module's
 linear memory and are bounds-checked before native access.
+
+A cartridge that emits `tinyarcade:indexed2d/v1` must import
+`indexed2d_version`; the current host returns 1. The import is the load-time
+compatibility declaration: an older runtime rejects the unknown core import
+before instantiation, and the current runtime traps an indexed frame from a
+cartridge that omitted it. A cartridge should check the returned version
+during init before relying on that media schema.
 
 The v1 input bit assignments are:
 

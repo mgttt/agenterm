@@ -98,8 +98,11 @@ Every failing call records a static diagnostic in thread-local state. Read it
 immediately with `tinyarcade_v1_last_error`; the next ordinary bridge call
 clears it. Decode failure, guest trap, failed-instance latch, wrong-thread use,
 buffer sizing, trust failure and caught panic have distinct stable status
-values. The Swift frame owner validates `grid3d/v1` and `tones/v1` completely
-before exposing decoded cells or tone events to native rendering/audio code.
+values. The Swift frame owner validates `grid3d/v1`, `indexed2d/v1` and
+`tones/v1` completely before exposing decoded cells, palettes, pixels or tone
+events to native rendering/audio code. `tickMedia` returns a discriminated
+render frame for either supported visual protocol; the original `tick` remains
+a source-compatible `grid3d/v1` convenience for existing Depth Well consumers.
 
 Tick, suspend and resume use a handle-aware panic boundary. If Rust panics after
 a handle has been resolved, the boundary first latches that runtime failed,
@@ -125,7 +128,8 @@ the generated package as a generic iOS device library and as a universal
 arm64/x86_64 simulator library under Swift 6 language mode. With
 `TINYARCADE_RUN_BOOTED_SIMULATOR=1`, the smoke additionally runs a standard WASM
 cartridge through a Swift-owned `fan:physics/v1` callback and proves i32
-parameters/results plus guest-memory mutation. It then compiles Depth Well,
+parameters/results, guest-memory mutation and generic `indexed2d/v1` decoding.
+It then compiles Depth Well,
 runs the linked executable in an already-booted iOS Simulator, opens it through
 the private origin, decodes its first frame, suspends/resumes and hard-drops.
 

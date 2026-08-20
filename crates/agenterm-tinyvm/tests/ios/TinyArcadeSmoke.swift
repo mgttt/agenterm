@@ -42,25 +42,26 @@ struct TinyArcadeSmoke {
         manifest += [1, 0, UInt8(capability.utf8.count), 0] + Array(capability.utf8)
         appendSection(0, manifest, to: &module)
         appendSection(1, [2, 0x60, 0, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 1, 0x7f], to: &module)
-        var imports: [UInt8] = [2]
-        for (namespace, field) in [
-            (capability, "step_world"),
-            ("tinyarcade:core/v1", "submit_render"),
+        var imports: [UInt8] = [3]
+        for (namespace, field, typeIndex) in [
+            (capability, "step_world", UInt8(1)),
+            ("tinyarcade:core/v1", "indexed2d_version", UInt8(0)),
+            ("tinyarcade:core/v1", "submit_render", UInt8(1)),
         ] {
             appendName(namespace, to: &imports)
             appendName(field, to: &imports)
-            imports += [0, 1]
+            imports += [0, typeIndex]
         }
         appendSection(2, imports, to: &module)
         appendSection(3, [5, 0, 0, 0, 0, 0], to: &module)
         appendSection(5, [1, 0, 1], to: &module)
         var exports: [UInt8] = [5]
         for (field, index) in [
-            ("game_abi_version", 2),
-            ("game_init", 3),
-            ("game_tick", 4),
-            ("game_suspend", 5),
-            ("game_resume", 6),
+            ("game_abi_version", 3),
+            ("game_init", 4),
+            ("game_tick", 5),
+            ("game_suspend", 6),
+            ("game_resume", 7),
         ] {
             appendName(field, to: &exports)
             exports.append(0)
@@ -71,9 +72,10 @@ struct TinyArcadeSmoke {
             functionBody([0x41, 1, 0x0b]),
             functionBody([0x41, 0, 0x0b]),
             functionBody([
+                0x10, 1, 0x1a,
                 0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
-                0x41, 0, 0x41, 0x28, 0x41, 2, 0x10, 0, 0x36, 2, 0,
-                0x41, 0, 0x41, 8, 0x10, 1, 0x1a, 0x41, 0, 0x0b,
+                0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
+                0x41, 0, 0x41, 26, 0x10, 2, 0x1a, 0x41, 0, 0x0b,
             ]),
             functionBody([0x41, 0, 0x0b]),
             functionBody([0x41, 0, 0x0b]),
@@ -85,6 +87,15 @@ struct TinyArcadeSmoke {
         }
         appendSection(10, code, to: &module)
         return Data(module)
+    }
+
+    static func indexedFrame(lastPixel: UInt8) -> [UInt8] {
+        [
+            84, 65, 73, 50, 1, 0, 16, 0,
+            2, 0, 1, 0, 2, 0, 0, 0,
+            255, 0, 0, 255, 0, 255, 0, 255,
+            0, lastPixel,
+        ]
     }
 
     @MainActor
@@ -107,20 +118,47 @@ struct TinyArcadeSmoke {
                     maxCallsPerLifecycle: 2
                 ) { parameters, memory in
                     precondition(parameters == [40, 2])
-                    precondition(memory.count >= 8)
-                    memory[4] = 9
+                    let indexedFrame = Self.indexedFrame(lastPixel: 1)
+                    precondition(memory.count >= indexedFrame.count)
+                    for (index, value) in indexedFrame.enumerated() { memory[index] = value }
                     nativeCalls += 1
                     return [42]
                 },
             ]
         )
-        do {
-            _ = try nativeRuntime.tick(buttons: 0, clockMilliseconds: 0)
-            preconditionFailure("native smoke frame should not decode as grid3d")
-        } catch {
-            precondition(nativeCalls == 2)
+        let media = try nativeRuntime.tickMedia(buttons: 0, clockMilliseconds: 0)
+        precondition(nativeCalls == 2)
+        guard case let .indexed2D(indexedFrame) = media.renderFrame else {
+            preconditionFailure("native smoke should decode indexed2d")
         }
+        precondition(indexedFrame.width == 2 && indexedFrame.height == 1)
+        precondition(indexedFrame.paletteRGBA == [0xff00_00ff, 0xff00_ff00])
+        precondition(indexedFrame.pixels == Data([0, 1]))
         try nativeRuntime.close()
+
+        let malformedRuntime = try TinyArcadeRuntimeV1(
+            cartridge: nativeCartridge(),
+            nativeFunctions: [
+                TinyArcadeNativeFunctionV1(
+                    module: "fan:physics/v1",
+                    field: "step_world",
+                    parameterCount: 2,
+                    resultCount: 1,
+                    maxCallsPerLifecycle: 2
+                ) { _, memory in
+                    let malformed = Self.indexedFrame(lastPixel: 2)
+                    for (index, value) in malformed.enumerated() { memory[index] = value }
+                    return [42]
+                },
+            ]
+        )
+        do {
+            _ = try malformedRuntime.tickMedia(buttons: 0, clockMilliseconds: 0)
+            preconditionFailure("out-of-palette indexed pixel must fail")
+        } catch let error as TinyArcadeRuntimeError {
+            precondition(error.status == Int32(TINYARCADE_DECODE_ERROR.rawValue))
+        }
+        try malformedRuntime.close()
 
         guard CommandLine.arguments.count == 2 else { return }
         let cartridge = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))

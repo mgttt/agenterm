@@ -466,3 +466,46 @@ Evidence on 2026-08-21:
 - App Store Connect processing is not physical-device evidence. The
   physical-iPhone lifecycle/performance session and TestFlight feel check
   remain open, so this goal remains incomplete.
+
+## Fifteenth executable increment — generic indexed 2D frames
+
+The media boundary no longer assumes every cartridge is a 3D Depth Well. The
+new `tinyarcade:indexed2d/v1` stream is one ordinary bounded render record: a
+fixed header, 1...256 RGBA8 palette entries and an exact row-major byte-index
+plane. Dimensions are independently capped at 512, the checked pixel product
+at 65,535 and the whole stream at 64 KiB. Full-palette 256 × 240 and 320 × 200
+classic frame sizes fit the default host budget. Unknown flags, trailing bytes
+and any out-of-palette index fail before native presentation.
+
+An indexed cartridge must declare the feature with the ordinary zero-argument
+core import `indexed2d_version() -> i32` and check for version 1. A runtime that
+predates the feature rejects that unknown import before instantiation; the new
+runtime also traps/latches a `TAI2` submission that omitted the declaration.
+This prevents a cartridge from appearing compatible until its first native
+render without introducing a proprietary opcode or wrapper.
+
+Rust exposes one discriminated `RenderFrame` decoder used by the converter
+gate. Swift exposes the parallel `TinyArcadeRenderFrame` through `tickMedia`,
+while the original grid-specific `tick` remains source-compatible for the
+existing Depth Well app. The app host still owns scaling, aspect fit,
+color-space conversion and Metal/Core Graphics presentation; no GPU command,
+platform object or new native capability crosses the guest boundary.
+
+Evidence on 2026-08-21:
+
+- A standard core-only WASM cartridge submits an indexed frame through the
+  real `GameRuntime`; allocation-free Rust decoding proves its palette and
+  pixel plane. Missing feature declaration, malformed index, flag, length and
+  over-budget vectors fail closed.
+- The complete all-target/all-feature TinyVM suite passes 168 tests. The PRD
+  traceability gate maps `bounded frame output [x]` to the executed core-only
+  cartridge test. Clippy with warnings denied and the no-default library check
+  are clean.
+- The iOS bridge builds device and universal simulator packages, links the
+  decoder smoke at 805,992 bytes for arm64 and 844,856 bytes for x86_64, and a
+  booted iPhone 17 Pro simulator accepts a valid indexed frame and rejects an
+  out-of-palette pixel through Swift before running Depth Well for 600 frames
+  (0.110 ms average, 0.117 ms p95, 0.135 ms maximum).
+- The stripped static core remains 70,904 bytes with self-test 42. A real 2D
+  production cartridge/native renderer and the physical-iPhone/TestFlight
+  evidence remain open; this goal is not complete.

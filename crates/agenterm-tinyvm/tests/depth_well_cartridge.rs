@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use agenterm_tinyvm::{
     CartridgeOrigin, GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, WasmError,
@@ -20,21 +21,27 @@ fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
 }
 
 fn build_cartridge() -> Vec<u8> {
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let output = crate_dir.join("../../target/tinyvm-depth-well-test/depth-well-0.1.0.wasm");
-    let status = Command::new(crate_dir.join("build-depth-well-cartridge.sh"))
-        .arg(&output)
-        .status()
-        .expect("run Depth Well cartridge builder");
-    assert!(status.success(), "Depth Well cartridge build failed");
-    let wasm = std::fs::read(output).expect("read built Depth Well cartridge");
-    assert!(
-        !wasm
-            .windows(b"/Users/".len())
-            .any(|bytes| bytes == b"/Users/"),
-        "published cartridge contains an absolute developer path"
-    );
-    wasm
+    static CARTRIDGE: OnceLock<Vec<u8>> = OnceLock::new();
+    CARTRIDGE
+        .get_or_init(|| {
+            let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let output =
+                crate_dir.join("../../target/tinyvm-depth-well-test/depth-well-0.1.0.wasm");
+            let status = Command::new(crate_dir.join("build-depth-well-cartridge.sh"))
+                .arg(&output)
+                .status()
+                .expect("run Depth Well cartridge builder");
+            assert!(status.success(), "Depth Well cartridge build failed");
+            let wasm = std::fs::read(output).expect("read built Depth Well cartridge");
+            assert!(
+                !wasm
+                    .windows(b"/Users/".len())
+                    .any(|bytes| bytes == b"/Users/"),
+                "published cartridge contains an absolute developer path"
+            );
+            wasm
+        })
+        .clone()
 }
 
 fn runtime(wasm: &[u8]) -> GameRuntime {
@@ -206,6 +213,7 @@ fn converter_cli_accepts_the_real_depth_well_cartridge() {
     );
     let stdout = String::from_utf8(output.stdout).expect("converter UTF-8 output");
     assert!(stdout.contains("game_id=com.partnernet.depth-well"));
+    assert!(stdout.contains("render_stream=tinyarcade:grid3d/v1"));
     assert!(stdout.contains("OK: private-import converter conformance v1"));
 }
 

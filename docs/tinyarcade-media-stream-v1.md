@@ -36,6 +36,41 @@ kind is known, unknown flag bits are rejected and trailing bytes are forbidden.
 Consumers use `kind` to draw settled, ghost and active cells in stable visual
 priority independent of record order.
 
+## `tinyarcade:indexed2d/v1`
+
+The indexed frame is a complete, uncompressed 2D pixel plane. Its 16-byte
+header is:
+
+```text
+"TAI2"             4 bytes
+version            u16 = 1
+header_bytes       u16 = 16
+width              u16; 1..512
+height             u16; 1..512
+palette_count      u16; 1..256
+flags              u16 = 0
+```
+
+Exactly `palette_count` four-byte colors follow. Each color is encoded as the
+four bytes R, G, B, A and is exposed by the Rust/Swift SDKs as one
+little-endian RGBA8 `u32`/`UInt32`. The remainder is exactly `width × height`
+one-byte palette indices in row-major top-to-bottom order. Every index must be
+less than `palette_count`; trailing bytes, unknown flags and malformed sizes
+are rejected before native presentation.
+
+Each dimension is at most 512, the pixel plane is at most 65,535 bytes and the
+whole stream is at most 64 KiB. Therefore ordinary 256 × 240 and 320 × 200
+frames with full 256-color palettes fit the default render budget. This v1
+format is deliberately a whole frame rather than a delta, compressed payload
+or GPU command list. The native host owns nearest-neighbour scaling, aspect
+fit, color-space conversion, compositing and display refresh; the cartridge
+cannot address Metal, Core Graphics or platform objects.
+
+An indexed cartridge must import `tinyarcade:core/v1.indexed2d_version` with
+signature `() -> i32` and check for version 1 during init. This ordinary WASM
+import makes compatibility fail at load on runtimes that predate indexed 2D;
+emitting `TAI2` without declaring the import traps the current cartridge.
+
 ## `tinyarcade:tones/v1`
 
 ```text

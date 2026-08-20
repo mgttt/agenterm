@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use agenterm_tinyvm::{
     GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, WasmError,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame, WasmError,
 };
 
 const CORE: &str = "tinyarcade:core/v1";
@@ -268,6 +268,21 @@ fn tick_with_deterministic_snapshot() -> Vec<u8> {
     ]
 }
 
+fn indexed2d_frame() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"TAI2");
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&0xff00_00ffu32.to_le_bytes());
+    bytes.extend_from_slice(&0xff00_ff00u32.to_le_bytes());
+    bytes.extend_from_slice(&[0, 1]);
+    bytes
+}
+
 #[test]
 fn standard_wasm_cartridge_drives_one_bounded_frame() {
     let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
@@ -284,6 +299,53 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
     );
     assert_eq!(frame.render, [1, 2, 3]);
     assert_eq!(frame.audio, [4, 5]);
+}
+
+#[test]
+fn standard_core_only_cartridge_drives_an_indexed2d_frame() {
+    let pixels = indexed2d_frame();
+    let undeclared = game_module(
+        &[(CORE, "submit_render", 1)],
+        1,
+        &[0x41, 0x00, 0x41, 0x1a, 0x10, 0x00, 0x1a, 0x41, 0x00, 0x0b],
+        &pixels,
+    );
+    let mut undeclared_runtime = must_ok(
+        GameRuntime::from_private_bytes(&undeclared, Limits::default(), GameLimits::default(), 1),
+        "load undeclared indexed2d cartridge",
+    );
+    assert!(matches!(
+        undeclared_runtime.tick(GameInput::default()),
+        Err(WasmError::Trap("indexed2d capability not declared"))
+    ));
+    assert!(undeclared_runtime.is_failed());
+
+    let wasm = game_module(
+        &[(CORE, "indexed2d_version", 0), (CORE, "submit_render", 1)],
+        1,
+        &[
+            0x10, 0x00, 0x1a, 0x41, 0x00, 0x41, 0x1a, 0x10, 0x01, 0x1a, 0x41, 0x00, 0x0b,
+        ],
+        &pixels,
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_private_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        "load indexed2d cartridge",
+    );
+    let output = must_ok(
+        runtime.tick(GameInput::default()),
+        "tick indexed2d cartridge",
+    );
+    match must_ok(
+        RenderFrame::decode(&output.render),
+        "decode indexed2d output",
+    ) {
+        RenderFrame::Indexed2d(frame) => {
+            assert_eq!((frame.width, frame.height), (2, 1));
+            assert_eq!(frame.pixels(), &[0, 1]);
+        }
+        RenderFrame::Grid3d(_) => panic!("indexed2d cartridge decoded as grid3d"),
+    }
 }
 
 #[test]

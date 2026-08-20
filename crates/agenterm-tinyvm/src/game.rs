@@ -7,6 +7,7 @@ use core::cell::RefCell;
 use core::mem;
 
 use crate::cartridge::{valid_native_field, valid_native_namespace};
+use crate::media::INDEXED2D_MAGIC;
 use crate::{CartridgeManifest, Limits, Val, WasmError, WasmInstance, WasmModule};
 
 /// Guest/host contract implemented by this module.
@@ -551,7 +552,7 @@ fn validate_imports(
     manifest: &CartridgeManifest,
     registry: &NativeModuleRegistry,
 ) -> Result<(), WasmError> {
-    let mut seen = [false; 7];
+    let mut seen = [false; 8];
     let mut actual_capabilities: Vec<&str> = Vec::new();
     actual_capabilities
         .try_reserve_exact(module.imports().len())
@@ -584,6 +585,7 @@ fn validate_imports(
             "submit_audio" => (4, 2),
             "save_state" => (5, 2),
             "load_state" => (6, 2),
+            "indexed2d_version" => (7, 0),
             _ => return Err(WasmError::Trap("game import is not allowed")),
         };
         if seen[slot] || import.n_params != params || import.n_results != 1 {
@@ -608,6 +610,10 @@ fn bind_imports(
     host: &Rc<RefCell<HostState>>,
     registry: &NativeModuleRegistry,
 ) -> Result<(), WasmError> {
+    let indexed2d_enabled = module
+        .imports()
+        .iter()
+        .any(|import| import.module == ABI_MODULE && import.field == "indexed2d_version");
     let fields: Vec<_> = module
         .imports()
         .iter()
@@ -649,8 +655,11 @@ fn bind_imports(
                 state.rng = value;
                 Ok(alloc::vec![value as i32])
             })?,
-            "submit_render" => bind_submit(module, &field, shared, true)?,
-            "submit_audio" => bind_submit(module, &field, shared, false)?,
+            "submit_render" => bind_submit(module, &field, shared, true, indexed2d_enabled)?,
+            "submit_audio" => bind_submit(module, &field, shared, false, false)?,
+            "indexed2d_version" => {
+                module.bind_import(ABI_MODULE, &field, move |_, _| Ok(alloc::vec![1]))?
+            }
             "save_state" => module.bind_import(ABI_MODULE, &field, move |args, memory| {
                 let mut state = shared.borrow_mut();
                 if state.phase != Phase::Suspend {
@@ -695,12 +704,16 @@ fn bind_submit(
     field: &str,
     host: Rc<RefCell<HostState>>,
     render: bool,
+    indexed2d_enabled: bool,
 ) -> Result<(), WasmError> {
     module.bind_import(ABI_MODULE, field, move |args, memory| {
         let mut state = host.borrow_mut();
         state.frame_active()?;
         let bytes = memory_range(args, memory)?;
         if render {
+            if bytes.starts_with(INDEXED2D_MAGIC) && !indexed2d_enabled {
+                return Err(WasmError::Trap("indexed2d capability not declared"));
+            }
             if state.render_submitted || bytes.len() > state.limits.max_render_bytes {
                 return Err(WasmError::Trap("game output budget"));
             }

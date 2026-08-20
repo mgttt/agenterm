@@ -86,27 +86,55 @@ public struct TinyArcadeGrid3DFrame: Sendable {
     }
 }
 
+public struct TinyArcadeIndexed2DFrame: Sendable {
+    public let width: UInt16
+    public let height: UInt16
+    public let paletteRGBA: [UInt32]
+    public let pixels: Data
+
+    fileprivate init(data: Data) throws {
+        guard data.count >= 16,
+              data.count <= 64 * 1_024,
+              data.prefix(4) == Data("TAI2".utf8),
+              TinyArcadeGrid3DFrame.u16(data, 4) == 1,
+              TinyArcadeGrid3DFrame.u16(data, 6) == 16 else {
+            throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d frame header")
+        }
+        width = TinyArcadeGrid3DFrame.u16(data, 8)
+        height = TinyArcadeGrid3DFrame.u16(data, 10)
+        let paletteCount = Int(TinyArcadeGrid3DFrame.u16(data, 12))
+        let flags = TinyArcadeGrid3DFrame.u16(data, 14)
+        let pixelCount = Int(width) * Int(height)
+        let pixelOffset = 16 + paletteCount * 4
+        guard width > 0, height > 0,
+              width <= 512, height <= 512,
+              pixelCount <= Int(UInt16.max),
+              (1...256).contains(paletteCount),
+              flags == 0,
+              data.count == pixelOffset + pixelCount else {
+            throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d frame size")
+        }
+        var decodedPalette: [UInt32] = []
+        decodedPalette.reserveCapacity(paletteCount)
+        for index in 0..<paletteCount {
+            decodedPalette.append(TinyArcadeGrid3DFrame.u32(data, 16 + index * 4))
+        }
+        paletteRGBA = decodedPalette
+        pixels = data.subdata(in: pixelOffset..<data.count)
+        guard !pixels.contains(where: { Int($0) >= paletteCount }) else {
+            throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d pixel")
+        }
+    }
+}
+
 public struct TinyArcadeToneEvent: Sendable, Equatable {
     public let kind: UInt8
     public let frequencyHz: UInt16
     public let durationMilliseconds: UInt16
     public let amplitudeMilli: UInt16
-}
 
-public struct TinyArcadeFrame: Sendable {
-    public let render: Data
-    public let audio: Data
-    public let grid3D: TinyArcadeGrid3DFrame
-    public let tones: [TinyArcadeToneEvent]
-
-    fileprivate init(render: Data, audio: Data) throws {
-        self.render = render
-        self.audio = audio
-        grid3D = try TinyArcadeGrid3DFrame(data: render)
-        if audio.isEmpty {
-            tones = []
-            return
-        }
+    fileprivate static func decodeBatch(_ audio: Data) throws -> [TinyArcadeToneEvent] {
+        if audio.isEmpty { return [] }
         guard audio.count >= 8,
               audio.prefix(4) == Data("TAT1".utf8),
               TinyArcadeGrid3DFrame.u16(audio, 4) == 1 else {
@@ -135,7 +163,50 @@ public struct TinyArcadeFrame: Sendable {
             }
             decoded.append(event)
         }
-        tones = decoded
+        return decoded
+    }
+}
+
+public enum TinyArcadeRenderFrame: Sendable {
+    case grid3D(TinyArcadeGrid3DFrame)
+    case indexed2D(TinyArcadeIndexed2DFrame)
+
+    fileprivate init(data: Data) throws {
+        if data.prefix(4) == Data("TAG3".utf8) {
+            self = .grid3D(try TinyArcadeGrid3DFrame(data: data))
+        } else if data.prefix(4) == Data("TAI2".utf8) {
+            self = .indexed2D(try TinyArcadeIndexed2DFrame(data: data))
+        } else {
+            throw TinyArcadeGrid3DFrame.decodeError("unknown render stream")
+        }
+    }
+}
+
+public struct TinyArcadeMediaFrame: Sendable {
+    public let render: Data
+    public let audio: Data
+    public let renderFrame: TinyArcadeRenderFrame
+    public let tones: [TinyArcadeToneEvent]
+
+    fileprivate init(render: Data, audio: Data) throws {
+        self.render = render
+        self.audio = audio
+        renderFrame = try TinyArcadeRenderFrame(data: render)
+        tones = try TinyArcadeToneEvent.decodeBatch(audio)
+    }
+}
+
+public struct TinyArcadeFrame: Sendable {
+    public let render: Data
+    public let audio: Data
+    public let grid3D: TinyArcadeGrid3DFrame
+    public let tones: [TinyArcadeToneEvent]
+
+    fileprivate init(render: Data, audio: Data) throws {
+        self.render = render
+        self.audio = audio
+        grid3D = try TinyArcadeGrid3DFrame(data: render)
+        tones = try TinyArcadeToneEvent.decodeBatch(audio)
     }
 }
 
@@ -512,11 +583,26 @@ public final class TinyArcadeRuntimeV1 {
     }
 
     public func tick(buttons: UInt32, clockMilliseconds: UInt32) throws -> TinyArcadeFrame {
+        let output = try tickOutput(buttons: buttons, clockMilliseconds: clockMilliseconds)
+        return try TinyArcadeFrame(render: output.render, audio: output.audio)
+    }
+
+    /// Runs one lifecycle tick and decodes any standard TinyArcade render stream.
+    /// Existing 3D-only consumers may continue to use `tick`.
+    public func tickMedia(buttons: UInt32, clockMilliseconds: UInt32) throws -> TinyArcadeMediaFrame {
+        let output = try tickOutput(buttons: buttons, clockMilliseconds: clockMilliseconds)
+        return try TinyArcadeMediaFrame(render: output.render, audio: output.audio)
+    }
+
+    private func tickOutput(
+        buttons: UInt32,
+        clockMilliseconds: UInt32
+    ) throws -> (render: Data, audio: Data) {
         let handle = try liveHandle()
         try Self.check(tinyarcade_v1_tick(handle, buttons, clockMilliseconds))
         let render = try copy(handle, tinyarcade_v1_copy_render)
         let audio = try copy(handle, tinyarcade_v1_copy_audio)
-        return try TinyArcadeFrame(render: render, audio: audio)
+        return (render, audio)
     }
 
     public func suspend() throws -> Data {

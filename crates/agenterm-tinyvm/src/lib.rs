@@ -54,7 +54,7 @@ pub use game::{
 };
 
 pub mod media;
-pub use media::{Grid3dCell, Grid3dFrame, ToneBatch, ToneEvent};
+pub use media::{Grid3dCell, Grid3dFrame, Indexed2dFrame, RenderFrame, ToneBatch, ToneEvent};
 
 #[cfg(feature = "cartridge-trust")]
 pub mod trust;

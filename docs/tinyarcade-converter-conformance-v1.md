@@ -28,9 +28,10 @@ converter check
 ├── regular non-empty file within 2 MiB
 ├── standard WASM envelope and canonical TinyArcade manifest
 ├── exact lifecycle exports and core import signatures
+├── indexed2d/v1 output declares indexed2d_version()
 ├── no private-import native capability namespace
 ├── bounded init and first tick
-├── valid tinyarcade:grid3d/v1 frame
+├── valid grid3d/v1 or indexed2d/v1 render frame
 ├── empty audio or valid tinyarcade:tones/v1 batch
 ├── bounded portable suspend state
 ├── fresh instance resume

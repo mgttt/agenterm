@@ -15,7 +15,7 @@ agenterm-tinyvm (35)
 ├── native wasm platform [~]
 │   ├── tinyvm engine       [x]
 │   ├── owned host ABI      [~]
-│   ├── native I/O surface  [ ]
+│   ├── native I/O surface  [~]
 │   └── H5/JS/WKWebView     [x]
 ├── game runtime         [~]
 │   ├── persistent instance [x]
@@ -29,7 +29,7 @@ agenterm-tinyvm (35)
 │       ├── core v1 imports           [~]
 │       ├── init/tick/suspend/resume  [x]
 │       ├── portable state snapshot   [x]
-│       ├── bounded frame output      [~]
+│       ├── bounded frame output      [x]
 │       └── native module registry    [x]
 ├── slot-A
 │   ├── control          [x]
@@ -71,3 +71,13 @@ JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是
 游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.3 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，并在调用 app callback 前执行每生命周期配额；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
 
 官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。
+
+媒体边界不再假设所有游戏都是 Depth Well。`submit_render` 可提交严格有界的
+`tinyarcade:grid3d/v1` 或 `tinyarcade:indexed2d/v1` 标准记录；后者提供完整
+256 色调色板像素平面，默认 64 KiB 预算覆盖 256×240 与 320×200 经典画幅。
+Swift `tickMedia` 先完整验证判别协议再向原生渲染层暴露数据，旧的 3D-only
+`tick` 保持兼容。具体 Metal/Core Graphics 呈现仍属于 app host，因此 native
+I/O surface 仍为 partial，而 bounded frame output 已具备通用 2D/3D 黑盒契约。
+2D 卡带必须导入标准 core function `indexed2d_version() -> i32`；旧 runtime
+会在实例化前拒绝未知 import，新 runtime 也拒绝未声明该 import 的 `TAI2`
+输出，因此兼容性失败发生在装载/首个违规提交处而不是原生渲染崩溃。

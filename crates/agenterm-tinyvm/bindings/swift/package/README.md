@@ -5,6 +5,10 @@ device/simulator `TinyArcade.xcframework` and the main-actor Swift ownership,
 media-decoding and signed-catalog wrapper as one `TinyArcadeRuntime` library
 product.
 
+Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
+frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
+`tick` convenience.
+
 Generate a self-contained directory from the repository root:
 
 ```sh
