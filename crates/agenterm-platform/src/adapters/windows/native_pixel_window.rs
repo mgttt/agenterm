@@ -193,6 +193,11 @@ enum DeferredNative {
 struct NativeControl {
     phase: Cell<DispatchPhase>,
     deferred: BoundedQueue<DeferredNative, MAX_NATIVE_DEFERRED>,
+    /// True while an unapplied `Wake` already occupies a deferred slot. A wake
+    /// is level-triggered, so a second queued copy would schedule the same
+    /// drain twice; keeping at most one means a producer flood cannot consume
+    /// the bounded queue that non-coalescible input and commands share.
+    deferred_wake: Cell<bool>,
     paint_pending: Cell<bool>,
     closed: Cell<bool>,
     exit_requested: Cell<bool>,
@@ -206,6 +211,7 @@ impl NativeControl {
         Self {
             phase: Cell::new(DispatchPhase::Idle),
             deferred: BoundedQueue::new(),
+            deferred_wake: Cell::new(false),
             paint_pending: Cell::new(false),
             closed: Cell::new(false),
             exit_requested: Cell::new(false),
@@ -249,11 +255,25 @@ impl NativeControl {
         })
     }
 
+    const fn is_wake(item: &DeferredNative) -> bool {
+        matches!(item, DeferredNative::Event(PendingNativeEvent::Wake))
+    }
+
     fn enqueue(&self, item: DeferredNative) -> Result<(), PixelWindowError> {
         if self.closed.get() {
             return Err(closed_error());
         }
+        let wake = Self::is_wake(&item);
+        if wake {
+            if self.deferred_wake.get() {
+                return Ok(());
+            }
+            self.deferred_wake.set(true);
+        }
         self.deferred.push(item).map_err(|cause| {
+            if wake {
+                self.deferred_wake.set(false);
+            }
             let code = match cause {
                 QueueError::Borrowed => "pixel_window_native_queue_borrow_failed",
                 QueueError::Full => "pixel_window_native_queue_overflow",
@@ -274,7 +294,12 @@ impl NativeControl {
 
     fn pop(&self) -> Option<DeferredNative> {
         match self.deferred.pop() {
-            Ok(item) => item,
+            Ok(item) => {
+                if item.as_ref().is_some_and(Self::is_wake) {
+                    self.deferred_wake.set(false);
+                }
+                item
+            }
             Err(QueueError::Borrowed) => {
                 self.record_failure(native_queue_failure(
                     "pixel_window_native_queue_borrow_failed",
@@ -286,7 +311,16 @@ impl NativeControl {
     }
 
     fn push_front(&self, item: DeferredNative) -> Result<(), PixelWindowError> {
+        // A returned item re-enters the queue, so a wake going back must retake
+        // the coalescing slot it released on `pop`.
+        let wake = Self::is_wake(&item);
+        if wake {
+            self.deferred_wake.set(true);
+        }
         self.deferred.push_front(item).map_err(|cause| {
+            if wake {
+                self.deferred_wake.set(false);
+            }
             native_queue_failure(match cause {
                 QueueError::Borrowed => "pixel_window_native_queue_borrow_failed",
                 QueueError::Full => "pixel_window_native_queue_overflow",
@@ -296,6 +330,7 @@ impl NativeControl {
 
     fn clear_deferred(&self) {
         let _ = self.deferred.clear();
+        self.deferred_wake.set(false);
     }
 }
 
@@ -440,6 +475,12 @@ fn stretch_geometry_for_paint(
 struct Backend {
     hwnd: Cell<HWND>,
     wake_hwnd: Arc<AtomicIsize>,
+    /// Set while an unconsumed `WAKE_MESSAGE` is already in the thread queue.
+    /// A wake is level-triggered — the loop drains every ready producer when it
+    /// runs — so a second post while the first is still pending carries no new
+    /// information. Without this, one PTY posts one message per output chunk
+    /// and a host that is not currently pumping accumulates them without bound.
+    wake_pending: Arc<AtomicBool>,
     metrics: RefCell<PixelWindowMetrics>,
     present: RefCell<PixelPresentLedger>,
     alive: Arc<AtomicBool>,
@@ -711,6 +752,7 @@ pub(crate) fn run_pixel_window(
     let backend = Rc::new(Backend {
         hwnd: Cell::new(ptr::null_mut()),
         wake_hwnd: Arc::new(AtomicIsize::new(0)),
+        wake_pending: Arc::new(AtomicBool::new(false)),
         metrics: RefCell::new(initial_metrics),
         present: RefCell::new(PixelPresentLedger::new()),
         alive: Arc::clone(&alive),
@@ -720,12 +762,21 @@ pub(crate) fn run_pixel_window(
     });
     let wake_alive = Arc::clone(&alive);
     let wake_hwnd = Arc::clone(&backend.wake_hwnd);
+    let wake_pending = Arc::clone(&backend.wake_pending);
     let waker = WindowWaker::new(Arc::new(move || {
         let hwnd = wake_hwnd.load(Ordering::Acquire) as HWND;
         if !wake_alive.load(Ordering::Acquire) || hwnd.is_null() {
             return Err(closed_error());
         }
+        // The flag is cleared as the message is consumed, before the resulting
+        // event reaches the application, so a producer that wakes during
+        // dispatch always posts again. Coalescing therefore drops duplicate
+        // notifications, never the notification itself.
+        if wake_pending.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
         if unsafe { PostMessageW(hwnd, WAKE_MESSAGE, 0, 0) } == 0 {
+            wake_pending.store(false, Ordering::Release);
             return Err(last_error("pixel_window_wake_failed"));
         }
         Ok(())
@@ -1111,7 +1162,13 @@ unsafe fn snapshot_native_message(
             }
         }
         WM_IME_CHAR => PendingNativeEvent::ImeChar(wparam as u16),
-        WAKE_MESSAGE => PendingNativeEvent::Wake,
+        WAKE_MESSAGE => {
+            // Released before the event reaches the application, so a producer
+            // that wakes during dispatch posts a fresh message instead of
+            // silently folding into the one being consumed.
+            backend.wake_pending.store(false, Ordering::Release);
+            PendingNativeEvent::Wake
+        }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
             let event = key_event(wparam, lparam, message);
             let call_default = event.is_none();
@@ -1983,7 +2040,13 @@ fn apply_directive(state: &mut HostState, result: Result<PixelWindowDirective, P
             let hwnd = state.backend.hwnd.get();
             let now = Instant::now();
             if deadline <= now {
-                unsafe { PostMessageW(hwnd, WAKE_MESSAGE, 0, 0) };
+                // Share the waker's coalescing flag: an already-posted wake
+                // satisfies an elapsed deadline just as well as a second one.
+                if !state.backend.wake_pending.swap(true, Ordering::AcqRel)
+                    && unsafe { PostMessageW(hwnd, WAKE_MESSAGE, 0, 0) } == 0
+                {
+                    state.backend.wake_pending.store(false, Ordering::Release);
+                }
             } else {
                 let millis = deadline
                     .duration_since(now)
@@ -2362,14 +2425,18 @@ mod tests {
 
     #[test]
     fn native_control_overflow_is_a_typed_failure() {
+        // Filled with a non-coalescible event on purpose: `Wake` folds into a
+        // single slot and can no longer reach this boundary.
         let control = NativeControl::new();
         for _ in 0..MAX_NATIVE_DEFERRED {
             control
-                .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+                .enqueue(DeferredNative::Event(PendingNativeEvent::FocusChanged(
+                    true,
+                )))
                 .expect("queue capacity");
         }
         let error = control
-            .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+            .enqueue(DeferredNative::Event(PendingNativeEvent::FocusChanged(true)))
             .expect_err("overflow must fail");
         match error {
             PixelWindowError::Failed { code, .. } => {
@@ -2379,6 +2446,59 @@ mod tests {
         }
         assert!(control.exit_requested.get());
         assert!(control.take_failure().is_some());
+    }
+
+    /// A host that cannot pump — the reentrancy case a modal or any other
+    /// nested loop creates — used to accumulate one deferred slot per PTY
+    /// output chunk and force an exit once the bounded queue filled. A wake is
+    /// level-triggered, so many wakes must collapse into the single pending
+    /// drain they all describe.
+    #[test]
+    fn queued_wakes_coalesce_and_cannot_exhaust_the_deferred_queue() {
+        let control = NativeControl::new();
+        for _ in 0..(MAX_NATIVE_DEFERRED * 4) {
+            control
+                .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+                .expect("a coalesced wake never overflows");
+        }
+        assert!(!control.exit_requested.get());
+        assert!(control.take_failure().is_none());
+
+        assert!(matches!(
+            control.pop(),
+            Some(DeferredNative::Event(PendingNativeEvent::Wake))
+        ));
+        assert!(!control.has_deferred(), "one wake represented them all");
+
+        // The slot is released on `pop`, so the next producer wake queues again
+        // rather than being swallowed by the one already delivered.
+        control
+            .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+            .expect("a fresh wake queues after the previous one is taken");
+        assert!(control.has_deferred());
+    }
+
+    /// Returning an unapplied item must also return its coalescing slot,
+    /// otherwise a wake that could not be applied would be dropped and the
+    /// drain it asked for would never happen.
+    #[test]
+    fn returned_wake_retakes_its_coalescing_slot() {
+        let control = NativeControl::new();
+        control
+            .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+            .expect("first wake queues");
+        let item = control.pop().expect("queued wake");
+        control.push_front(item).expect("return the unapplied wake");
+        assert!(control.has_deferred());
+
+        control
+            .enqueue(DeferredNative::Event(PendingNativeEvent::Wake))
+            .expect("a duplicate is accepted and folded");
+        assert!(matches!(
+            control.pop(),
+            Some(DeferredNative::Event(PendingNativeEvent::Wake))
+        ));
+        assert!(!control.has_deferred(), "the returned wake was not doubled");
     }
 
     #[test]
