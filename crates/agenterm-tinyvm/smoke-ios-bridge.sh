@@ -19,6 +19,7 @@ xcrun --sdk iphonesimulator clang \
   "$CRATE/tests/ios/header_smoke.c"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
   -I "$SLICE/Headers" \
@@ -30,6 +31,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeSmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -warnings-as-errors \
   -O \
   -target x86_64-apple-ios14.0-simulator \
   -I "$SLICE/Headers" \
@@ -44,8 +46,9 @@ xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-arm64" | grep -q 'platform IOSSIM
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-x86_64" | grep -q 'platform IOSSIMULATOR'
 ARM64_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSmoke-arm64")
 X86_64_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSmoke-x86_64")
-test "$ARM64_LINKED_BYTES" -le 1048576
-test "$X86_64_LINKED_BYTES" -le 1048576
+MAX_LINKED_BYTES=1310720
+test "$ARM64_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
+test "$X86_64_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test -f "$XCFRAMEWORK/ios-arm64/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64_x86_64-simulator/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64/Headers/tinyarcade.h"

@@ -28,6 +28,11 @@ cartridge origin
 gate. `from_private_bytes` / `tinyarcade_v1_open_private` intentionally create
 private provenance and instantiate with an empty native capability registry.
 
+The bounded transport index and selection-only deep link are specified by
+`docs/tinyarcade-catalog-transport-v1.md`. Catalog JSON can display and locate a
+reviewed candidate but cannot grant reviewed origin. A deep link resolves only
+an already-decoded row; it never downloads or opens executable bytes.
+
 Private import is not a moderation loophole. Importing a file does not create a
 catalog row, public URL, discoverable listing, recommendation, rating, sharing
 endpoint or upload for other users. A future creator website may build and

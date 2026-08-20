@@ -54,3 +54,4 @@ The normative wire details remain in:
 - `docs/tinyarcade-cartridge-abi-v1.md`
 - `docs/tinyarcade-media-stream-v1.md`
 - `docs/tinyarcade-signed-catalog-v1.md`
+- `docs/tinyarcade-catalog-transport-v1.md`

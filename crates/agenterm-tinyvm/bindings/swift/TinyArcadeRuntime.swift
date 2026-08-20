@@ -500,6 +500,294 @@ public struct TinyArcadeReviewedCatalogEntry: Sendable {
     }
 }
 
+public struct TinyArcadeCatalogLocalizationV1: Sendable, Equatable {
+    public let title: String
+    public let summary: String
+}
+
+public struct TinyArcadeCatalogGameV1: Sendable {
+    public let entry: TinyArcadeReviewedCatalogEntry
+    public let title: String
+    public let summary: String
+    public let localizations: [String: TinyArcadeCatalogLocalizationV1]
+    public let cartridgeURL: URL
+
+    public func localized(for languageTag: String) -> TinyArcadeCatalogLocalizationV1 {
+        var candidate = languageTag
+        while !candidate.isEmpty {
+            if let match = localizations.first(where: {
+                $0.key.caseInsensitiveCompare(candidate) == .orderedSame
+            })?.value {
+                return match
+            }
+            guard let separator = candidate.lastIndex(of: "-") else { break }
+            candidate.removeSubrange(separator...)
+        }
+        return TinyArcadeCatalogLocalizationV1(title: title, summary: summary)
+    }
+
+    public func deepLinkURL(scheme: String = "tinyarcade") -> URL? {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "game"
+        components.path = "/\(entry.gameID)"
+        return components.url
+    }
+}
+
+public enum TinyArcadeCatalogDecodeError: Error, Equatable {
+    case invalidDocument
+    case unsupportedSchema
+    case invalidEntry(Int)
+}
+
+/// Bounded discovery metadata for an official catalog. These JSON bytes never
+/// authorize execution: each selected cartridge still enters the signed-entry
+/// trust store and verified cache before a reviewed runtime can open it.
+public struct TinyArcadeCatalogV1: Sendable {
+    public static let maximumDocumentBytes = 1 * 1_024 * 1_024
+    public static let maximumGameCount = 256
+
+    public let catalogID: String
+    public let games: [TinyArcadeCatalogGameV1]
+
+    public static func decode(
+        _ data: Data,
+        cartridgeBaseURL: URL,
+        maximumCartridgeBytes: UInt64 = 8 * 1_024 * 1_024
+    ) throws -> TinyArcadeCatalogV1 {
+        guard !data.isEmpty, data.count <= maximumDocumentBytes,
+              maximumCartridgeBytes > 0,
+              Self.validBaseURL(cartridgeBaseURL) else {
+            throw TinyArcadeCatalogDecodeError.invalidDocument
+        }
+        let wire: WireCatalog
+        do {
+            wire = try JSONDecoder().decode(WireCatalog.self, from: data)
+        } catch {
+            throw TinyArcadeCatalogDecodeError.invalidDocument
+        }
+        guard wire.schemaVersion == 1 else {
+            throw TinyArcadeCatalogDecodeError.unsupportedSchema
+        }
+        guard Self.canonicalIdentifier(wire.catalogID),
+              !wire.games.isEmpty,
+              wire.games.count <= maximumGameCount else {
+            throw TinyArcadeCatalogDecodeError.invalidDocument
+        }
+
+        var seenGameIDs = Set<String>()
+        var games: [TinyArcadeCatalogGameV1] = []
+        games.reserveCapacity(wire.games.count)
+        for (index, game) in wire.games.enumerated() {
+            guard Self.canonicalIdentifier(game.gameID),
+                  seenGameIDs.insert(game.gameID).inserted,
+                  Self.validVersion(game.gameVersion),
+                  game.abiVersion > 0,
+                  game.stateVersion > 0,
+                  (1...maximumCartridgeBytes).contains(game.wasmLength),
+                  Self.validText(game.title, maximumUTF8Bytes: 256),
+                  Self.validText(game.summary, maximumUTF8Bytes: 1_024),
+                  Self.canonicalIdentifier(game.signingKeyID, maximumUTF8Bytes: 64),
+                  let hash = Self.hexData(game.wasmSHA256), hash.count == 32,
+                  let signature = Data(base64Encoded: game.signature),
+                  signature.count == 64,
+                  signature.base64EncodedString() == game.signature,
+                  Self.validCartridgeFile(game.cartridge, version: game.gameVersion),
+                  let cartridgeURL = URL(string: game.cartridge, relativeTo: cartridgeBaseURL)?.absoluteURL,
+                  Self.sameOrigin(cartridgeURL, cartridgeBaseURL) else {
+                throw TinyArcadeCatalogDecodeError.invalidEntry(index)
+            }
+
+            let wireLocalizations = game.localizations ?? [:]
+            guard wireLocalizations.count <= 16 else {
+                throw TinyArcadeCatalogDecodeError.invalidEntry(index)
+            }
+            var localizations: [String: TinyArcadeCatalogLocalizationV1] = [:]
+            localizations.reserveCapacity(wireLocalizations.count)
+            var seenLanguageTags = Set<String>()
+            for (languageTag, value) in wireLocalizations {
+                guard Self.validLanguageTag(languageTag),
+                      seenLanguageTags.insert(languageTag.lowercased()).inserted,
+                      Self.validText(value.title, maximumUTF8Bytes: 256),
+                      Self.validText(value.summary, maximumUTF8Bytes: 1_024) else {
+                    throw TinyArcadeCatalogDecodeError.invalidEntry(index)
+                }
+                localizations[languageTag] = TinyArcadeCatalogLocalizationV1(
+                    title: value.title,
+                    summary: value.summary
+                )
+            }
+
+            games.append(
+                TinyArcadeCatalogGameV1(
+                    entry: TinyArcadeReviewedCatalogEntry(
+                        gameID: game.gameID,
+                        gameVersion: game.gameVersion,
+                        abiVersion: game.abiVersion,
+                        stateVersion: game.stateVersion,
+                        wasmLength: game.wasmLength,
+                        wasmSHA256: hash,
+                        signingKeyID: game.signingKeyID,
+                        signature: signature
+                    ),
+                    title: game.title,
+                    summary: game.summary,
+                    localizations: localizations,
+                    cartridgeURL: cartridgeURL
+                )
+            )
+        }
+        return TinyArcadeCatalogV1(catalogID: wire.catalogID, games: games)
+    }
+
+    /// Resolves an exact `tinyarcade://game/<game-id>` selection. It performs
+    /// no network, cache or runtime operation.
+    public func game(forDeepLink url: URL, scheme: String = "tinyarcade") -> TinyArcadeCatalogGameV1? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.caseInsensitiveCompare(scheme) == .orderedSame,
+              components.host?.caseInsensitiveCompare("game") == .orderedSame,
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil else { return nil }
+        let path = components.path.split(separator: "/", omittingEmptySubsequences: true)
+        guard path.count == 1 else { return nil }
+        let gameID = String(path[0])
+        return games.first { $0.entry.gameID == gameID }
+    }
+
+    private init(catalogID: String, games: [TinyArcadeCatalogGameV1]) {
+        self.catalogID = catalogID
+        self.games = games
+    }
+
+    private static func validBaseURL(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        return components.scheme == "https"
+            && components.host != nil
+            && components.user == nil
+            && components.password == nil
+            && components.query == nil
+            && components.fragment == nil
+            && url.hasDirectoryPath
+    }
+
+    private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.scheme == rhs.scheme && lhs.host == rhs.host && lhs.port == rhs.port
+    }
+
+    private static func canonicalIdentifier(
+        _ value: String,
+        maximumUTF8Bytes: Int = 128
+    ) -> Bool {
+        let bytes = Array(value.utf8)
+        return !bytes.isEmpty && bytes.count <= maximumUTF8Bytes && bytes.allSatisfy {
+            (97...122).contains($0) || (48...57).contains($0) || [46, 95, 45].contains($0)
+        }
+    }
+
+    private static func validVersion(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        return !bytes.isEmpty && bytes.count <= 64 && bytes.allSatisfy {
+            (65...90).contains($0) || (97...122).contains($0)
+                || (48...57).contains($0) || [46, 95, 43, 45].contains($0)
+        }
+    }
+
+    private static func validText(_ value: String, maximumUTF8Bytes: Int) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && value.utf8.count <= maximumUTF8Bytes
+    }
+
+    private static func validLanguageTag(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        return !bytes.isEmpty && bytes.count <= 35 && bytes.allSatisfy {
+            (65...90).contains($0) || (97...122).contains($0)
+                || (48...57).contains($0) || $0 == 45
+        }
+    }
+
+    private static func validCartridgeFile(_ value: String, version: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard !bytes.isEmpty, bytes.count <= 160,
+              value.hasSuffix("-\(version).wasm"),
+              !value.hasPrefix("."),
+              !value.contains("..") else { return false }
+        return bytes.allSatisfy {
+            (65...90).contains($0) || (97...122).contains($0)
+                || (48...57).contains($0) || [46, 95, 43, 45].contains($0)
+        }
+    }
+
+    private static func hexData(_ value: String) -> Data? {
+        let bytes = Array(value.utf8)
+        guard bytes.count == 64 else { return nil }
+        var output = Data(capacity: 32)
+        for index in stride(from: 0, to: bytes.count, by: 2) {
+            guard let high = hexNibble(bytes[index]),
+                  let low = hexNibble(bytes[index + 1]) else { return nil }
+            output.append(high << 4 | low)
+        }
+        return output
+    }
+
+    private static func hexNibble(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 48...57: return byte - 48
+        case 97...102: return byte - 87
+        default: return nil
+        }
+    }
+
+    private struct WireCatalog: Decodable {
+        let schemaVersion: UInt32
+        let catalogID: String
+        let games: [WireGame]
+
+        enum CodingKeys: String, CodingKey {
+            case schemaVersion = "schema_version"
+            case catalogID = "catalog_id"
+            case games
+        }
+    }
+
+    private struct WireGame: Decodable {
+        let gameID: String
+        let gameVersion: String
+        let title: String
+        let summary: String
+        let localizations: [String: WireLocalization]?
+        let cartridge: String
+        let abiVersion: UInt32
+        let stateVersion: UInt32
+        let wasmLength: UInt64
+        let wasmSHA256: String
+        let signingKeyID: String
+        let signature: String
+
+        enum CodingKeys: String, CodingKey {
+            case gameID = "game_id"
+            case gameVersion = "game_version"
+            case title, summary, localizations, cartridge
+            case abiVersion = "abi_version"
+            case stateVersion = "state_version"
+            case wasmLength = "wasm_length"
+            case wasmSHA256 = "wasm_sha256"
+            case signingKeyID = "signing_key_id"
+            case signature
+        }
+    }
+
+    private struct WireLocalization: Decodable {
+        let title: String
+        let summary: String
+    }
+}
+
 /// One exact, versioned native capability exposed to a bundled or reviewed cartridge.
 /// The handler runs synchronously on the runtime owner thread. It must not retain `memory`.
 public struct TinyArcadeNativeFunctionV1 {

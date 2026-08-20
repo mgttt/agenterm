@@ -180,6 +180,82 @@ struct TinyArcadeSmoke {
         try cache.close()
         try emptyTrust.close()
 
+        let catalogSignature = Data(repeating: 0, count: 64).base64EncodedString()
+        let catalogData = Data(
+            """
+            {
+              "schema_version": 1,
+              "catalog_id": "com.partnernet.tinyarcade",
+              "games": [{
+                "game_id": "com.partnernet.paddle-guard",
+                "game_version": "0.1.0",
+                "title": "Paddle Guard",
+                "summary": "Defend the field.",
+                "localizations": {
+                  "zh-Hans": {"title": "护盾弹球", "summary": "守住球场。"}
+                },
+                "cartridge": "paddle-guard-0.1.0.wasm",
+                "abi_version": 1,
+                "state_version": 1,
+                "wasm_length": 5280,
+                "wasm_sha256": "\(String(repeating: "0", count: 64))",
+                "signing_key_id": "catalog-test",
+                "signature": "\(catalogSignature)"
+              }]
+            }
+            """.utf8
+        )
+        let catalogBaseURL = URL(string: "https://partnernetsoftware.com/wasm/")!
+        let catalog = try TinyArcadeCatalogV1.decode(
+            catalogData,
+            cartridgeBaseURL: catalogBaseURL
+        )
+        precondition(catalog.games.count == 1)
+        let catalogGame = catalog.games[0]
+        precondition(catalogGame.cartridgeURL.absoluteString == "https://partnernetsoftware.com/wasm/paddle-guard-0.1.0.wasm")
+        precondition(catalogGame.localized(for: "zh-Hans").title == "护盾弹球")
+        precondition(catalogGame.localized(for: "zh-Hans-CN").title == "护盾弹球")
+        let deepLink = catalogGame.deepLinkURL()!
+        precondition(deepLink.absoluteString == "tinyarcade://game/com.partnernet.paddle-guard")
+        precondition(catalog.game(forDeepLink: deepLink)?.entry.gameID == catalogGame.entry.gameID)
+        precondition(
+            catalog.game(
+                forDeepLink: URL(string: deepLink.absoluteString + "?run=1")!
+            ) == nil
+        )
+        let traversalCatalog = Data(
+            String(decoding: catalogData, as: UTF8.self)
+                .replacingOccurrences(
+                    of: "paddle-guard-0.1.0.wasm",
+                    with: "../paddle-guard-0.1.0.wasm"
+                ).utf8
+        )
+        do {
+            _ = try TinyArcadeCatalogV1.decode(
+                traversalCatalog,
+                cartridgeBaseURL: catalogBaseURL
+            )
+            preconditionFailure("catalog traversal must fail")
+        } catch let error as TinyArcadeCatalogDecodeError {
+            precondition(error == .invalidEntry(0))
+        }
+        let nonASCIIHashCatalog = Data(
+            String(decoding: catalogData, as: UTF8.self)
+                .replacingOccurrences(
+                    of: String(repeating: "0", count: 64),
+                    with: String(repeating: "é", count: 32)
+                ).utf8
+        )
+        do {
+            _ = try TinyArcadeCatalogV1.decode(
+                nonASCIIHashCatalog,
+                cartridgeBaseURL: catalogBaseURL
+            )
+            preconditionFailure("non-ASCII digest must fail without trapping")
+        } catch let error as TinyArcadeCatalogDecodeError {
+            precondition(error == .invalidEntry(0))
+        }
+
         var nativeCalls = 0
         let nativeRuntime = try TinyArcadeRuntimeV1(
             cartridge: nativeCartridge(),

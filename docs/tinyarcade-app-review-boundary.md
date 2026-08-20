@@ -52,6 +52,12 @@ permissioned external mode
 └── accurate App Store metadata and detailed Review Notes
 ```
 
+The SDK's `tinyarcade://game/<game-id>` form is presently an internal
+selection-only contract, not the universal-link evidence required by 4.7. It
+rejects query/fragment launch flags and cannot download or execute. A shipping
+external mode would additionally need one public HTTPS universal link per game,
+with the moderation, age and commerce metadata above, after Apple permission.
+
 Private local import remains technically safer than public distribution, but it
 still executes code outside the submitted bundle and therefore is not treated
 as automatically allowed under 2.5.2. It stays disabled in the baseline until

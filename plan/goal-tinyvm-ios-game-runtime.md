@@ -52,9 +52,9 @@ tinyvm iOS game runtime
 │   ├── Paddle Guard 2D vertical cut   [x]
 │   ├── frame-time/resource evidence  [~]
 │   └── suspend/resume/save evidence  [x]
-└── distribution gate                 [ ]
+└── distribution gate                 [~]
     ├── fixed app purpose/offline game [x]
-    ├── catalog metadata/deep links   [ ]
+    ├── catalog metadata/deep links   [x]
     ├── review clarification/probe    [~]
     └── fail closed on revoked content [x]
 ```
@@ -648,3 +648,37 @@ Evidence on 2026-08-21:
 - Official catalog transport, metadata/deep links and physical-iPhone storage
   remain open, so cartridge ownership, distribution and the overall goal are
   still partial.
+
+## Twentieth executable increment — bounded lobby catalog metadata
+
+`TinyArcadeCatalogV1` defines the converter/site-to-app discovery boundary for
+an official lobby. A UTF-8 JSON document is capped at 1 MiB and 256 unique game
+IDs. Each row bounds default/localized display text, validates the detached
+signed-entry fields, resolves exactly one same-origin HTTPS
+`{name}-{version}.wasm` filename and carries no executable authority. The app
+may choose a smaller positive cartridge ceiling than the SDK's 8 MiB default.
+
+The selection link `tinyarcade://game/<game-id>` accepts exactly one path
+component and no user info, port, query or fragment. It resolves only an
+already-decoded row and performs no transport, cache or runtime operation.
+Private imports cannot become catalog rows or shareable reviewed links through
+this format. Display JSON remains untrusted discovery data: complete downloaded
+bytes still require the signed-entry and verified-cache path from increment 19.
+
+Evidence on 2026-08-21:
+
+- The Swift smoke decodes a localized Paddle Guard row using the intended
+  `https://partnernetsoftware.com/wasm/` layout, reconstructs its exact signed
+  entry, resolves locale fallback and round-trips a selection-only deep link.
+  It rejects a traversal filename, a non-ASCII digest without trapping and a
+  deep link carrying an auto-run query.
+- The bounded JSON/Foundation path increases the exercised linked consumer from
+  953,032 to 1,060,872 bytes on arm64 and from 1,012,688 to 1,119,728 bytes on
+  x86_64. The honest whole-consumer gate is therefore 1.25 MiB; the separately
+  measured interpreter static core remains under its 100 KiB contract.
+- The complete 174-test suite, Swift warnings-as-errors compilation,
+  all-feature/all-target Clippy with warnings denied, no-default library compile
+  and exact 70,904-byte static-core/self-test gate are clean.
+- A live hosted/signed catalog, bounded HTTPS client, public per-game universal
+  links, moderation/commerce/age metadata, Apple permission and physical-device
+  evidence remain open. Distribution and the overall goal are not complete.

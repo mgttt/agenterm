@@ -28,6 +28,13 @@ signed entry and atomically selects it; `loadActive` and `rollback` recheck live
 revocations before returning executable bytes. The cache performs no network
 request, and private-user imports remain a separate origin and storage policy.
 
+Decode official lobby metadata with `TinyArcadeCatalogV1.decode`. It bounds the
+document, game count, strings, localizations, signed-entry encodings and
+same-origin `{name}-{version}.wasm` filename. A generated
+`tinyarcade://game/<game-id>` URL only selects an existing row; it never
+downloads, activates or opens a cartridge. JSON discovery is not a substitute
+for cache/trust verification.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

@@ -9,7 +9,8 @@ host ABI and lifecycle owner are compiled into the app binary.
 - `crates/agenterm-tinyvm/include/tinyarcade.h`: versioned C ABI.
 - `crates/agenterm-tinyvm/include/module.modulemap`: Swift module `TinyArcade`.
 - `crates/agenterm-tinyvm/bindings/swift/TinyArcadeRuntime.swift`:
-  `@MainActor` Swift owner plus indexed-2D native presentation.
+  `@MainActor` Swift owners, bounded catalog decoding and indexed-2D/audio
+  native presentation.
 - `crates/agenterm-tinyvm/build-xcframework.sh`: device/simulator archive and
   XCFramework builder.
 - `crates/agenterm-tinyvm/build-swift-package.sh`: self-contained local Swift
@@ -34,6 +35,12 @@ The generated Swift package is the stable app dependency boundary. It contains
 both XCFramework slices and the public Swift source, so an app does not compile
 Rust or copy wrapper code. The same directory can later be zipped as a
 versioned binary release artifact without changing the app-facing product.
+
+The package's `TinyArcadeCatalogV1` decoder implements
+`docs/tinyarcade-catalog-transport-v1.md`. It bounds discovery JSON and resolves
+same-origin cartridge filenames plus selection-only deep links, but never
+performs a request or grants execution trust. This keeps transport policy in
+the app while giving sites/converters one interoperable lobby schema.
 
 ## Ownership
 
@@ -157,9 +164,11 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked smoke executable must remain at or below 1 MiB; this
+The optimized linked smoke executable must remain at or below 1.25 MiB; this
 measures the dead-stripped consumer result rather than the multi-object static
-archive's misleading on-disk size.
+archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
+the exercised Swift consumer added the bounded official-catalog JSON decoder;
+the interpreter's separate stripped static-core gate remains below 100 KiB.
 
 The builder pins iOS 14.0 as the deployment target for Rust and Ring C/assembly
 objects; the Swift link treats linker warnings as errors. The gate also builds
