@@ -9,6 +9,11 @@ Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
 `tick` convenience.
 
+For indexed cartridges, `TinyArcadeIndexed2DFrame.makeCGImage()` provides an
+exact sRGB RGBA image and `TinyArcadeIndexed2DView` is a ready-to-layout UIKit
+surface with aspect-fit, nearest-neighbour presentation. Apps that own a Metal
+renderer can instead consume the validated palette and pixel plane directly.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

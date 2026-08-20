@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import TinyArcade
 
 @main
@@ -11,6 +12,19 @@ struct TinyArcadeSmoke {
             if remaining != 0 { byte |= 0x80 }
             output.append(byte)
         } while remaining != 0
+    }
+
+    static func appendSignedLEB(_ value: Int, to output: inout [UInt8]) {
+        precondition(value >= 0)
+        var remaining = value
+        while true {
+            var byte = UInt8(remaining & 0x7f)
+            remaining >>= 7
+            let done = remaining == 0 && byte & 0x40 == 0
+            if !done { byte |= 0x80 }
+            output.append(byte)
+            if done { return }
+        }
     }
 
     static func appendName(_ value: String, to output: inout [UInt8]) {
@@ -29,7 +43,7 @@ struct TinyArcadeSmoke {
         [0] + code
     }
 
-    static func nativeCartridge() -> Data {
+    static func nativeCartridge(renderLength: Int = 26) -> Data {
         var module: [UInt8] = [0, 97, 115, 109, 1, 0, 0, 0]
         let capability = "fan:physics/v1"
         var manifest: [UInt8] = []
@@ -68,15 +82,19 @@ struct TinyArcadeSmoke {
             appendLEB(index, to: &exports)
         }
         appendSection(7, exports, to: &module)
+        var tick: [UInt8] = [
+            0x10, 1, 0x1a,
+            0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
+            0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
+            0x41, 0,
+            0x41,
+        ]
+        appendSignedLEB(renderLength, to: &tick)
+        tick += [0x10, 2, 0x1a, 0x41, 0, 0x0b]
         let functions = [
             functionBody([0x41, 1, 0x0b]),
             functionBody([0x41, 0, 0x0b]),
-            functionBody([
-                0x10, 1, 0x1a,
-                0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
-                0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
-                0x41, 0, 0x41, 26, 0x10, 2, 0x1a, 0x41, 0, 0x0b,
-            ]),
+            functionBody(tick),
             functionBody([0x41, 0, 0x0b]),
             functionBody([0x41, 0, 0x0b]),
         ]
@@ -93,9 +111,27 @@ struct TinyArcadeSmoke {
         [
             84, 65, 73, 50, 1, 0, 16, 0,
             2, 0, 1, 0, 2, 0, 0, 0,
-            255, 0, 0, 255, 0, 255, 0, 255,
+            255, 0, 0, 255, 0, 255, 0, 128,
             0, lastPixel,
         ]
+    }
+
+    static func classicIndexedFrame() -> [UInt8] {
+        let width = 320
+        let height = 200
+        var bytes: [UInt8] = [
+            84, 65, 73, 50, 1, 0, 16, 0,
+            UInt8(width & 0xff), UInt8(width >> 8), UInt8(height), 0,
+            0, 1, 0, 0,
+        ]
+        bytes.reserveCapacity(16 + 256 * 4 + width * height)
+        for color in 0..<256 {
+            bytes += [UInt8(color), UInt8(255 - color), UInt8(color ^ 0x55), 255]
+        }
+        for pixel in 0..<(width * height) {
+            bytes.append(UInt8(pixel & 0xff))
+        }
+        return bytes
     }
 
     @MainActor
@@ -132,8 +168,29 @@ struct TinyArcadeSmoke {
             preconditionFailure("native smoke should decode indexed2d")
         }
         precondition(indexedFrame.width == 2 && indexedFrame.height == 1)
-        precondition(indexedFrame.paletteRGBA == [0xff00_00ff, 0xff00_ff00])
+        precondition(indexedFrame.paletteRGBA == [0xff00_00ff, 0x8000_ff00])
         precondition(indexedFrame.pixels == Data([0, 1]))
+        let expectedRGBA = Data([255, 0, 0, 255, 0, 255, 0, 128])
+        precondition(indexedFrame.rgba8888() == expectedRGBA)
+        let image = try indexedFrame.makeCGImage()
+        precondition(image.width == 2 && image.height == 1)
+        precondition(image.bitsPerPixel == 32 && image.bytesPerRow == 8)
+        precondition(image.shouldInterpolate == false)
+        precondition(image.alphaInfo == .last)
+        precondition(image.bitmapInfo.contains(.byteOrder32Big))
+        precondition(image.colorSpace?.name == CGColorSpace.sRGB)
+        guard let providerData = image.dataProvider?.data else {
+            preconditionFailure("indexed image must retain its pixel provider")
+        }
+        precondition(providerData as Data == expectedRGBA)
+        let view = TinyArcadeIndexed2DView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
+        try view.display(indexedFrame)
+        precondition(view.layer.contents != nil)
+        precondition(view.layer.contentsGravity == .resizeAspect)
+        precondition(view.layer.magnificationFilter == .nearest)
+        precondition(view.layer.minificationFilter == .nearest)
+        view.clear()
+        precondition(view.layer.contents == nil)
         try nativeRuntime.close()
 
         let malformedRuntime = try TinyArcadeRuntimeV1(
@@ -159,6 +216,48 @@ struct TinyArcadeSmoke {
             precondition(error.status == Int32(TINYARCADE_DECODE_ERROR.rawValue))
         }
         try malformedRuntime.close()
+
+        let classicBytes = Self.classicIndexedFrame()
+        precondition(classicBytes.count == 65_040)
+        let classicRuntime = try TinyArcadeRuntimeV1(
+            cartridge: nativeCartridge(renderLength: classicBytes.count),
+            nativeFunctions: [
+                TinyArcadeNativeFunctionV1(
+                    module: "fan:physics/v1",
+                    field: "step_world",
+                    parameterCount: 2,
+                    resultCount: 1,
+                    maxCallsPerLifecycle: 2
+                ) { _, memory in
+                    for (index, value) in classicBytes.enumerated() { memory[index] = value }
+                    return [42]
+                },
+            ]
+        )
+        let classicMedia = try classicRuntime.tickMedia(buttons: 0, clockMilliseconds: 0)
+        guard case let .indexed2D(classicFrame) = classicMedia.renderFrame else {
+            preconditionFailure("classic smoke should decode indexed2d")
+        }
+        precondition(classicFrame.width == 320 && classicFrame.height == 200)
+        precondition(classicFrame.paletteRGBA.count == 256)
+        precondition(classicFrame.pixels.count == 64_000)
+        let classicView = TinyArcadeIndexed2DView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        let renderIterations = 120
+        let renderStart = ProcessInfo.processInfo.systemUptime
+        for _ in 0..<renderIterations { try classicView.display(classicFrame) }
+        let renderAverageMilliseconds = (
+            ProcessInfo.processInfo.systemUptime - renderStart
+        ) * 1_000 / Double(renderIterations)
+        precondition(renderAverageMilliseconds < 16.0)
+        print(
+            String(
+                format: "OK: indexed2d 320x200 native presentation avg=%.3fms",
+                renderAverageMilliseconds
+            )
+        )
+        try classicRuntime.close()
 
         guard CommandLine.arguments.count == 2 else { return }
         let cartridge = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))

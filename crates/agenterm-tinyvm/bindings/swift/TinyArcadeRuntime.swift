@@ -1,4 +1,6 @@
 import Foundation
+import CoreGraphics
+import UIKit
 import TinyArcade
 
 public struct TinyArcadeRuntimeError: Error, Sendable {
@@ -124,6 +126,85 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         guard !pixels.contains(where: { Int($0) >= paletteCount }) else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d pixel")
         }
+    }
+
+    /// Copies the indexed plane into canonical row-major RGBA8 bytes.
+    /// The decoded frame bounds this allocation to less than 256 KiB.
+    public func rgba8888() -> Data {
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(pixels.count * 4)
+        for index in pixels {
+            let color = paletteRGBA[Int(index)]
+            bytes.append(UInt8(truncatingIfNeeded: color))
+            bytes.append(UInt8(truncatingIfNeeded: color >> 8))
+            bytes.append(UInt8(truncatingIfNeeded: color >> 16))
+            bytes.append(UInt8(truncatingIfNeeded: color >> 24))
+        }
+        return Data(bytes)
+    }
+
+    /// Builds an sRGB, non-premultiplied RGBA image suitable for Core Graphics
+    /// or direct assignment to a Core Animation layer.
+    public func makeCGImage() throws -> CGImage {
+        let rgba = rgba8888()
+        guard let provider = CGDataProvider(data: rgba as CFData),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw TinyArcadePresentationError.imageAllocation
+        }
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.union(
+            CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)
+        )
+        guard let image = CGImage(
+            width: Int(width),
+            height: Int(height),
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: Int(width) * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            throw TinyArcadePresentationError.imageAllocation
+        }
+        return image
+    }
+}
+
+public enum TinyArcadePresentationError: Error, Equatable {
+    case imageAllocation
+}
+
+/// Minimal native presentation surface for indexed cartridges. The host owns
+/// its layout; this view preserves aspect ratio and nearest-neighbour pixels.
+@MainActor
+public final class TinyArcadeIndexed2DView: UIView {
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        configure()
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    public func display(_ frame: TinyArcadeIndexed2DFrame) throws {
+        layer.contents = try frame.makeCGImage()
+    }
+
+    public func clear() {
+        layer.contents = nil
+    }
+
+    private func configure() {
+        isOpaque = false
+        clipsToBounds = true
+        layer.contentsGravity = .resizeAspect
+        layer.magnificationFilter = .nearest
+        layer.minificationFilter = .nearest
     }
 }
 

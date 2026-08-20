@@ -66,6 +66,12 @@ or GPU command list. The native host owns nearest-neighbour scaling, aspect
 fit, color-space conversion, compositing and display refresh; the cartridge
 cannot address Metal, Core Graphics or platform objects.
 
+The iOS SDK includes a host-side convenience that expands the validated plane
+to canonical sRGB RGBA8 and a UIKit view configured for aspect-fit,
+nearest-neighbour presentation. This does not change the cartridge protocol:
+custom Metal renderers may consume the same palette and indices directly, and
+no Apple framework type crosses the WASM boundary.
+
 An indexed cartridge must import `tinyarcade:core/v1.indexed2d_version` with
 signature `() -> i32` and check for version 1 during init. This ordinary WASM
 import makes compatibility fail at load on runtimes that predate indexed 2D;

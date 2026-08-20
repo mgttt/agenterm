@@ -9,7 +9,7 @@ host ABI and lifecycle owner are compiled into the app binary.
 - `crates/agenterm-tinyvm/include/tinyarcade.h`: versioned C ABI.
 - `crates/agenterm-tinyvm/include/module.modulemap`: Swift module `TinyArcade`.
 - `crates/agenterm-tinyvm/bindings/swift/TinyArcadeRuntime.swift`:
-  `@MainActor` Swift owner.
+  `@MainActor` Swift owner plus indexed-2D native presentation.
 - `crates/agenterm-tinyvm/build-xcframework.sh`: device/simulator archive and
   XCFramework builder.
 - `crates/agenterm-tinyvm/build-swift-package.sh`: self-contained local Swift
@@ -104,6 +104,15 @@ events to native rendering/audio code. `tickMedia` returns a discriminated
 render frame for either supported visual protocol; the original `tick` remains
 a source-compatible `grid3d/v1` convenience for existing Depth Well consumers.
 
+`TinyArcadeIndexed2DFrame.rgba8888()` expands only already-validated indices
+into canonical row-major RGBA bytes, with a decoder-proven allocation ceiling
+below 256 KiB. `makeCGImage()` retains those bytes in an sRGB,
+non-premultiplied, non-interpolated image. `TinyArcadeIndexed2DView` is the
+minimal UIKit presentation owner: it preserves aspect ratio, applies nearest
+filters for magnification and minification, and lets the app choose layout and
+compositing. A Metal host remains free to use the palette and index plane
+directly; UIKit and Core Graphics never enter the guest ABI.
+
 Tick, suspend and resume use a handle-aware panic boundary. If Rust panics after
 a handle has been resolved, the boundary first latches that runtime failed,
 returns its phase to idle and discards any cached frame/snapshot before returning
@@ -128,7 +137,8 @@ the generated package as a generic iOS device library and as a universal
 arm64/x86_64 simulator library under Swift 6 language mode. With
 `TINYARCADE_RUN_BOOTED_SIMULATOR=1`, the smoke additionally runs a standard WASM
 cartridge through a Swift-owned `fan:physics/v1` callback and proves i32
-parameters/results, guest-memory mutation and generic `indexed2d/v1` decoding.
+parameters/results, guest-memory mutation, generic `indexed2d/v1` decoding,
+exact translucent RGBA expansion and native view presentation policy.
 It then compiles Depth Well,
 runs the linked executable in an already-booted iOS Simulator, opens it through
 the private origin, decodes its first frame, suspends/resumes and hard-drops.

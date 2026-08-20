@@ -81,3 +81,9 @@ I/O surface 仍为 partial，而 bounded frame output 已具备通用 2D/3D 黑�
 2D 卡带必须导入标准 core function `indexed2d_version() -> i32`；旧 runtime
 会在实例化前拒绝未知 import，新 runtime 也拒绝未声明该 import 的 `TAI2`
 输出，因此兼容性失败发生在装载/首个违规提交处而不是原生渲染崩溃。
+
+iOS SDK 已把 2D 数据边界接到可直接复用的原生呈现面：严格验证后的索引帧可
+展开为有界的 sRGB RGBA8 `CGImage`，或交给保持宽高比并使用 nearest filter
+的 `TinyArcadeIndexed2DView`。自有 Metal renderer 仍可直接使用 palette/index
+数据；UIKit/Core Graphics 类型不进入 WASM ABI。native I/O surface 仍标记为
+partial，直到真实 2D 生产卡带和物理设备显示证据完成。

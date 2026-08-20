@@ -42,6 +42,7 @@ tinyvm iOS game runtime
 │   ├── stable C lifecycle ABI        [x]
 │   ├── static library/XCFramework   [x]
 │   ├── Swift ownership/threading     [x]
+│   ├── indexed 2D presentation       [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   └── on-device lifecycle test      [ ]
@@ -507,5 +508,38 @@ Evidence on 2026-08-21:
   out-of-palette pixel through Swift before running Depth Well for 600 frames
   (0.110 ms average, 0.117 ms p95, 0.135 ms maximum).
 - The stripped static core remains 70,904 bytes with self-test 42. A real 2D
-  production cartridge/native renderer and the physical-iPhone/TestFlight
-  evidence remain open; this goal is not complete.
+  production cartridge and the physical-iPhone/TestFlight evidence remain
+  open; this goal is not complete.
+
+## Sixteenth executable increment — native indexed 2D presentation
+
+The generated iOS SDK now carries the first reusable native presentation path,
+not merely a decoded byte container. A validated indexed frame can expand into
+canonical row-major RGBA8 bytes and an sRGB `CGImage`; the decoder's pixel
+ceiling bounds that temporary allocation below 256 KiB. Alpha remains
+non-premultiplied, the image disables interpolation, and the conversion maps
+the protocol's explicit R/G/B/A byte order independently of CPU endianness.
+
+`TinyArcadeIndexed2DView` owns the minimal UIKit policy shared by classic
+pixel games: aspect-fit layout, clipping and nearest-neighbour magnification
+and minification. It does not choose an app layout, frame clock or compositing
+scheme. A custom Metal host can still consume the same validated palette and
+index plane without using the convenience, and no Apple framework object or
+GPU command enters the standard WASM cartridge ABI.
+
+Evidence on 2026-08-21:
+
+- The Swift smoke drives standard core/native-import cartridges through the
+  real runtime, verifies exact red and translucent-green RGBA bytes, creates a
+  2 × 1 non-interpolated sRGB image backed by those bytes, and presents then
+  clears it through the public UIKit view. The same path accepts a full
+  classic 320 × 200 / 256-color frame and averages 0.266 ms across 120 native
+  presentations, below its 16 ms smoke ceiling.
+- Generic iOS-device and universal simulator package builds compile the same
+  public source under Swift 6. A booted iPhone 17 Pro simulator executes the
+  renderer assertions before the existing 600-frame Depth Well lifecycle
+  (0.111 ms average, 0.121 ms p95, 0.129 ms maximum). The optimized linked
+  smokes remain below the 1 MiB consumer gate at 834,936 bytes for arm64 and
+  872,960 bytes for x86_64.
+- A production 2D cartridge and physical-iPhone/TestFlight display evidence
+  remain open, so the overall goal is not complete.
