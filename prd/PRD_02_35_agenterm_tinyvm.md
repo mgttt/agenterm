@@ -23,7 +23,12 @@ agenterm-tinyvm (35)
 │   ├── per-call fuel       [x]
 │   ├── memory budget       [x]
 │   ├── table budget        [x]
-│   └── game ABI            [ ]
+│   └── game ABI            [~]
+│       ├── standard .wasm cartridge [~]
+│       ├── core v1 imports           [~]
+│       ├── init/tick lifecycle       [~]
+│       ├── bounded frame output      [~]
+│       └── native module registry    [~]
 ├── slot-A
 │   ├── control          [x]
 │   ├── parametric       [x]
@@ -60,3 +65,7 @@ tinyvm 是自有 native WASM 平台的执行核，不是 H5 小游戏、JavaScri
 JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是 `JSContext` 中的 JavaScript 执行，不是独立的原生 WASM module/instance API。JSC 可以作为后续对照基准或实验后端，但 tinyvm 是权威、可移植、可预算的 baseline；任何游戏都不得依赖 JSC 才能运行。
 
 完整的 iOS 游戏运行底层验收树与依赖路径见 [`plan/goal-tinyvm-ios-game-runtime.md`](../plan/goal-tinyvm-ios-game-runtime.md)。
+
+游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。未来 native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
+
+官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。

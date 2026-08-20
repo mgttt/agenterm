@@ -1134,6 +1134,8 @@ pub struct ImportDesc {
     pub field: String,
     pub n_params: usize,
     pub n_results: usize,
+    /// Whether every parameter and result uses the game-safe i32 host ABI.
+    pub i32_only: bool,
 }
 
 /// Parse the import section, returning each imported **function** in order.
@@ -1163,6 +1165,7 @@ fn parse_import_section(
                         field,
                         n_params: t.params.len(),
                         n_results: t.results.len(),
+                        i32_only: t.params.iter().chain(&t.results).all(|&ty| ty == 0x7F),
                     },
                     tidx as usize,
                 ));

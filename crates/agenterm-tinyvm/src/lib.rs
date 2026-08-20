@@ -43,6 +43,11 @@ use alloc::vec::Vec;
 mod asm;
 pub use asm::{AsmError, assemble};
 
+pub mod game;
+pub use game::{
+    GAME_ABI_VERSION, GameFrame, GameInput, GameLimits, GameRuntime, NativeModuleRegistry,
+};
+
 pub mod wasm;
 pub use wasm::{
     ImportDesc, Instance as WasmInstance, Limits, Module as WasmModule, Val, WasmError, eval,
