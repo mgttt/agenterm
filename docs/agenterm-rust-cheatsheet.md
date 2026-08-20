@@ -2135,3 +2135,9 @@ any `Err` returns. Compare the host budget first; only then
 `try_reserve`. Instantiation failure is `Err`, never "allocate and hope".
 The reject point must move when the caller passes two different budgets
 — a crate `const` alone is not a host contract.
+
+The same rule applies after a byte ceiling check. `Vec::extend_from_slice`
+may still invoke the infallible allocator and abort under pressure. For bytes
+originating in a guest or persisted snapshot, first `try_reserve_exact` the
+bounded addition and map refusal to the runtime's ordinary error path; only
+then extend. A small configured limit is policy, not allocation evidence.

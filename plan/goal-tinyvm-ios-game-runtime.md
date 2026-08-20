@@ -19,24 +19,24 @@ tinyvm iOS game runtime
 │   ├── host memory/table budgets     [x]
 │   └── trap isolation                [~]
 ├── game host ABI                    [~]
-│   ├── standard WASM cartridge       [~]
-│   ├── version negotiation           [~]
-│   ├── lifecycle init/tick/suspend   [~]
-│   ├── input snapshot                [~]
+│   ├── standard WASM cartridge       [x]
+│   ├── version negotiation           [x]
+│   ├── lifecycle init/tick/suspend   [x]
+│   ├── input snapshot                [x]
 │   ├── bounded render commands       [~]
 │   ├── bounded audio commands        [~]
-│   ├── clock/RNG determinism         [~]
+│   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [~]
-│   └── storage without guest network [ ]
+│   └── storage without guest network [~]
 ├── artifact trust                    [ ]
-│   ├── manifest + compatibility      [ ]
+│   ├── manifest + compatibility      [x]
 │   ├── content hash/signature        [ ]
 │   ├── atomic cache/rollback         [ ]
 │   └── reviewed catalog only         [ ]
 ├── cartridge ownership              [ ]
 │   ├── official reviewed catalog     [ ]
 │   ├── private user import           [ ]
-│   ├── converter conformance kit     [ ]
+│   ├── converter conformance kit     [~]
 │   └── no public arbitrary execution [ ]
 ├── iOS native bridge                 [ ]
 │   ├── stable C lifecycle ABI        [ ]
@@ -148,3 +148,30 @@ Evidence on 2026-08-21:
 - Clippy with warnings denied: clean.
 - iOS device and Apple-silicon simulator library checks: clean.
 - Stripped static core: 70,904 bytes; self-test 42.
+
+## Third executable increment — manifest and portable state
+
+Every runnable cartridge now carries one canonical
+`tinyarcade.manifest.v1` standard WASM custom section. Game id, game version,
+ABI/state-schema versions and declared native capability namespaces are parsed
+under strict size/UTF-8/canonicality bounds. The declared capability set must
+exactly match non-core imports, and all five lifecycle exports must have the
+exact `() -> i32` signature before instantiation.
+
+Suspend captures one bounded guest state payload plus host RNG in a canonical
+snapshot envelope bound to game id, ABI and state-schema version. Resume into a
+fresh instance restores both guest mutable state and deterministic RNG. Wrong
+game/schema, truncated bytes and oversized state fail before guest execution.
+A guest trap or lifecycle/budget violation latches the instance failed so the
+app cannot continue from partially mutated state.
+
+The converter-facing wire contract is
+[`docs/tinyarcade-cartridge-abi-v1.md`](../docs/tinyarcade-cartridge-abi-v1.md).
+
+Evidence on 2026-08-21:
+
+- Full `agenterm-tinyvm` suite: 147 passed, including ten public cartridge,
+  lifecycle and snapshot black-box tests.
+- PRD `[x]` evidence map, Clippy with warnings denied, iOS device build and
+  Apple-silicon simulator build: clean.
+- Stripped static core remains 70,904 bytes with self-test 42.

@@ -1747,6 +1747,26 @@ impl Module {
         self.exports.get(name).copied()
     }
 
+    /// Return `(parameter_count, result_count)` when an exported function's
+    /// complete signature uses the portable i32 host ABI.
+    pub fn export_i32_arity(&self, name: &str) -> Option<(usize, usize)> {
+        let idx = self.export_index(name)?;
+        let (params, results, signature) = if idx < self.hosts.len() {
+            let host = &self.hosts[idx];
+            (host.n_params, host.n_results, host.sig)
+        } else {
+            let function = self.funcs.get(idx.checked_sub(self.hosts.len())?)?;
+            (function.n_params, function.arity, function.sig)
+        };
+        if let Some(function_type) = signature.and_then(|index| self.types.get(index))
+            && (function_type.params.iter().any(|&ty| ty != 0x7f)
+                || function_type.results.iter().any(|&ty| ty != 0x7f))
+        {
+            return None;
+        }
+        Some((params, results))
+    }
+
     /// Invoke an exported function by name with typed [`Val`] arguments.
     pub fn invoke_by_name(&self, name: &str, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let idx = self

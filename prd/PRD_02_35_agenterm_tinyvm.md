@@ -24,9 +24,11 @@ agenterm-tinyvm (35)
 │   ├── memory budget       [x]
 │   ├── table budget        [x]
 │   └── game ABI            [~]
-│       ├── standard .wasm cartridge [~]
+│       ├── standard .wasm cartridge [x]
+│       ├── manifest compatibility    [x]
 │       ├── core v1 imports           [~]
-│       ├── init/tick lifecycle       [~]
+│       ├── init/tick/suspend/resume  [x]
+│       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [~]
 │       └── native module registry    [~]
 ├── slot-A

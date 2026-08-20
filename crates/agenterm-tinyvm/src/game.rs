@@ -6,11 +6,12 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::mem;
 
-use crate::{Limits, Val, WasmError, WasmInstance, WasmModule};
+use crate::{CartridgeManifest, Limits, Val, WasmError, WasmInstance, WasmModule};
 
 /// Guest/host contract implemented by this module.
 pub const GAME_ABI_VERSION: i32 = 1;
 const ABI_MODULE: &str = "tinyarcade:core/v1";
+const SNAPSHOT_MAGIC: &[u8; 4] = b"TGS1";
 type NativeImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
 
 /// Stable v1 bits returned by the `input_bits` core import.
@@ -31,6 +32,7 @@ pub mod button {
 pub struct GameLimits {
     pub max_render_bytes: usize,
     pub max_audio_bytes: usize,
+    pub max_state_bytes: usize,
 }
 
 impl Default for GameLimits {
@@ -38,6 +40,7 @@ impl Default for GameLimits {
         Self {
             max_render_bytes: 64 * 1024,
             max_audio_bytes: 16 * 1024,
+            max_state_bytes: 256 * 1024,
         }
     }
 }
@@ -127,6 +130,8 @@ enum Phase {
     Idle,
     Init,
     Tick,
+    Suspend,
+    Resume,
 }
 
 struct HostState {
@@ -136,15 +141,26 @@ struct HostState {
     rng: u32,
     render: Vec<u8>,
     audio: Vec<u8>,
+    saved_state: Vec<u8>,
+    restore_state: Vec<u8>,
     render_submitted: bool,
     audio_submitted: bool,
+    state_submitted: bool,
+    state_loaded: bool,
 }
 
 impl HostState {
     fn active(&self) -> Result<(), WasmError> {
         match self.phase {
-            Phase::Init | Phase::Tick => Ok(()),
+            Phase::Init | Phase::Tick | Phase::Suspend | Phase::Resume => Ok(()),
             Phase::Idle => Err(WasmError::Trap("game host call outside lifecycle")),
+        }
+    }
+
+    fn frame_active(&self) -> Result<(), WasmError> {
+        match self.phase {
+            Phase::Init | Phase::Tick => Ok(()),
+            _ => Err(WasmError::Trap("game frame call outside init/tick")),
         }
     }
 
@@ -168,6 +184,8 @@ impl HostState {
 pub struct GameRuntime {
     instance: WasmInstance,
     host: Rc<RefCell<HostState>>,
+    manifest: CartridgeManifest,
+    failed: bool,
 }
 
 impl GameRuntime {
@@ -195,8 +213,23 @@ impl GameRuntime {
         rng_seed: u32,
         registry: &NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
+        let manifest = CartridgeManifest::from_wasm(wasm)?;
+        if manifest.abi_version != GAME_ABI_VERSION as u32 {
+            return Err(WasmError::Trap("unsupported game ABI version"));
+        }
         let mut module = WasmModule::from_bytes_with(wasm, vm_limits)?;
-        validate_imports(&module, registry)?;
+        validate_imports(&module, &manifest, registry)?;
+        for export in [
+            "game_abi_version",
+            "game_init",
+            "game_tick",
+            "game_suspend",
+            "game_resume",
+        ] {
+            if module.export_i32_arity(export) != Some((0, 1)) {
+                return Err(WasmError::Trap("invalid game lifecycle export"));
+            }
+        }
         let host = Rc::new(RefCell::new(HostState {
             limits: game_limits,
             phase: Phase::Idle,
@@ -204,12 +237,21 @@ impl GameRuntime {
             rng: rng_seed,
             render: Vec::new(),
             audio: Vec::new(),
+            saved_state: Vec::new(),
+            restore_state: Vec::new(),
             render_submitted: false,
             audio_submitted: false,
+            state_submitted: false,
+            state_loaded: false,
         }));
         bind_imports(&mut module, &host, registry)?;
         let instance = module.instantiate()?;
-        let mut runtime = Self { instance, host };
+        let mut runtime = Self {
+            instance,
+            host,
+            manifest,
+            failed: false,
+        };
 
         let version = runtime.instance.invoke_by_name("game_abi_version", &[])?;
         if !matches!(version.as_slice(), [Val::I32(GAME_ABI_VERSION)]) {
@@ -226,15 +268,97 @@ impl GameRuntime {
 
     /// Drive one deterministic frame and take ownership of its command bytes.
     pub fn tick(&mut self, input: GameInput) -> Result<GameFrame, WasmError> {
+        self.ensure_live()?;
         self.enter(Phase::Tick, input);
         let tick = self.instance.invoke_by_name("game_tick", &[]);
         self.leave();
-        require_success(tick?, "game_tick failed")?;
+        self.accept_lifecycle(tick, "game_tick failed")?;
         let mut host = self.host.borrow_mut();
         Ok(GameFrame {
             render: mem::take(&mut host.render),
             audio: mem::take(&mut host.audio),
         })
+    }
+
+    /// Suspend the guest and return a portable, cartridge-bound snapshot.
+    pub fn suspend(&mut self) -> Result<Vec<u8>, WasmError> {
+        self.ensure_live()?;
+        {
+            let mut host = self.host.borrow_mut();
+            host.saved_state.clear();
+            host.state_submitted = false;
+        }
+        self.enter(Phase::Suspend, GameInput::default());
+        let suspended = self.instance.invoke_by_name("game_suspend", &[]);
+        self.leave();
+        self.accept_lifecycle(suspended, "game_suspend failed")?;
+        let (guest, rng) = {
+            let mut host = self.host.borrow_mut();
+            if !host.state_submitted {
+                self.failed = true;
+                return Err(WasmError::Trap("game did not submit state"));
+            }
+            (mem::take(&mut host.saved_state), host.rng)
+        };
+        encode_snapshot(&self.manifest, rng, &guest)
+    }
+
+    /// Restore a snapshot made by the same game and state-schema version.
+    pub fn resume(&mut self, snapshot: &[u8]) -> Result<(), WasmError> {
+        self.ensure_live()?;
+        let (rng, guest) = decode_snapshot(
+            snapshot,
+            &self.manifest,
+            self.host.borrow().limits.max_state_bytes,
+        )?;
+        {
+            let mut host = self.host.borrow_mut();
+            host.restore_state.clear();
+            host.restore_state
+                .try_reserve_exact(guest.len())
+                .map_err(|_| WasmError::Trap("game state allocation"))?;
+            host.restore_state.extend_from_slice(guest);
+            host.state_loaded = false;
+            host.rng = rng;
+        }
+        self.enter(Phase::Resume, GameInput::default());
+        let resumed = self.instance.invoke_by_name("game_resume", &[]);
+        self.leave();
+        self.accept_lifecycle(resumed, "game_resume failed")?;
+        if !self.host.borrow().state_loaded {
+            self.failed = true;
+            return Err(WasmError::Trap("game did not load state"));
+        }
+        self.host.borrow_mut().restore_state.clear();
+        Ok(())
+    }
+
+    pub fn manifest(&self) -> &CartridgeManifest {
+        &self.manifest
+    }
+
+    pub fn is_failed(&self) -> bool {
+        self.failed
+    }
+
+    fn ensure_live(&self) -> Result<(), WasmError> {
+        if self.failed {
+            Err(WasmError::Trap("game instance failed"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn accept_lifecycle(
+        &mut self,
+        result: Result<Vec<Val>, WasmError>,
+        message: &'static str,
+    ) -> Result<(), WasmError> {
+        let accepted = result.and_then(|values| require_success(values, message));
+        if accepted.is_err() {
+            self.failed = true;
+        }
+        accepted
     }
 
     fn enter(&mut self, phase: Phase, input: GameInput) {
@@ -257,8 +381,16 @@ fn require_success(values: Vec<Val>, message: &'static str) -> Result<(), WasmEr
     }
 }
 
-fn validate_imports(module: &WasmModule, registry: &NativeModuleRegistry) -> Result<(), WasmError> {
-    let mut seen = [false; 5];
+fn validate_imports(
+    module: &WasmModule,
+    manifest: &CartridgeManifest,
+    registry: &NativeModuleRegistry,
+) -> Result<(), WasmError> {
+    let mut seen = [false; 7];
+    let mut actual_capabilities: Vec<&str> = Vec::new();
+    actual_capabilities
+        .try_reserve_exact(module.imports().len())
+        .map_err(|_| WasmError::Trap("game capability allocation"))?;
     for (index, import) in module.imports().iter().enumerate() {
         if !import.i32_only
             || module.imports()[..index]
@@ -268,6 +400,9 @@ fn validate_imports(module: &WasmModule, registry: &NativeModuleRegistry) -> Res
             return Err(WasmError::Trap("game import is not allowed"));
         }
         if import.module != ABI_MODULE {
+            if !actual_capabilities.contains(&import.module.as_str()) {
+                actual_capabilities.push(import.module.as_str());
+            }
             let native = registry
                 .find(&import.module, &import.field)
                 .ok_or(WasmError::Trap("game import is not allowed"))?;
@@ -282,12 +417,23 @@ fn validate_imports(module: &WasmModule, registry: &NativeModuleRegistry) -> Res
             "random_u32" => (2, 0),
             "submit_render" => (3, 2),
             "submit_audio" => (4, 2),
+            "save_state" => (5, 2),
+            "load_state" => (6, 2),
             _ => return Err(WasmError::Trap("game import is not allowed")),
         };
         if seen[slot] || import.n_params != params || import.n_results != 1 {
             return Err(WasmError::Trap("invalid game import signature"));
         }
         seen[slot] = true;
+    }
+    actual_capabilities.sort();
+    if actual_capabilities.len() != manifest.capabilities.len()
+        || actual_capabilities
+            .iter()
+            .zip(&manifest.capabilities)
+            .any(|(actual, declared)| *actual != declared)
+    {
+        return Err(WasmError::Trap("manifest capability mismatch"));
     }
     Ok(())
 }
@@ -320,17 +466,17 @@ fn bind_imports(
         match field.as_str() {
             "input_bits" => module.bind_import(ABI_MODULE, &field, move |_, _| {
                 let state = shared.borrow();
-                state.active()?;
+                state.frame_active()?;
                 Ok(alloc::vec![state.input.buttons as i32])
             })?,
             "clock_ms" => module.bind_import(ABI_MODULE, &field, move |_, _| {
                 let state = shared.borrow();
-                state.active()?;
+                state.frame_active()?;
                 Ok(alloc::vec![state.input.clock_ms as i32])
             })?,
             "random_u32" => module.bind_import(ABI_MODULE, &field, move |_, _| {
                 let mut state = shared.borrow_mut();
-                state.active()?;
+                state.frame_active()?;
                 let mut value = state.rng;
                 value ^= value << 13;
                 value ^= value >> 17;
@@ -340,6 +486,39 @@ fn bind_imports(
             })?,
             "submit_render" => bind_submit(module, &field, shared, true)?,
             "submit_audio" => bind_submit(module, &field, shared, false)?,
+            "save_state" => module.bind_import(ABI_MODULE, &field, move |args, memory| {
+                let mut state = shared.borrow_mut();
+                if state.phase != Phase::Suspend {
+                    return Err(WasmError::Trap("game save outside suspend"));
+                }
+                let bytes = memory_range(args, memory)?;
+                if state.state_submitted || bytes.len() > state.limits.max_state_bytes {
+                    return Err(WasmError::Trap("game state budget"));
+                }
+                state
+                    .saved_state
+                    .try_reserve_exact(bytes.len())
+                    .map_err(|_| WasmError::Trap("game state allocation"))?;
+                state.saved_state.extend_from_slice(bytes);
+                state.state_submitted = true;
+                Ok(alloc::vec![0])
+            })?,
+            "load_state" => module.bind_import(ABI_MODULE, &field, move |args, memory| {
+                let mut state = shared.borrow_mut();
+                if state.phase != Phase::Resume || state.state_loaded {
+                    return Err(WasmError::Trap("game load outside resume"));
+                }
+                let ptr = nonnegative(args[0])?;
+                let capacity = nonnegative(args[1])?;
+                let len = state.restore_state.len();
+                let end = ptr
+                    .checked_add(len)
+                    .filter(|&end| end <= memory.len() && len <= capacity)
+                    .ok_or(WasmError::Trap("game restore capacity"))?;
+                memory[ptr..end].copy_from_slice(&state.restore_state);
+                state.state_loaded = true;
+                Ok(alloc::vec![len as i32])
+            })?,
             _ => return Err(WasmError::Trap("game import is not allowed")),
         }
     }
@@ -354,27 +533,122 @@ fn bind_submit(
 ) -> Result<(), WasmError> {
     module.bind_import(ABI_MODULE, field, move |args, memory| {
         let mut state = host.borrow_mut();
-        state.active()?;
-        let ptr = usize::try_from(args[0]).map_err(|_| WasmError::Trap("game output bounds"))?;
-        let len = usize::try_from(args[1]).map_err(|_| WasmError::Trap("game output bounds"))?;
-        let end = ptr
-            .checked_add(len)
-            .filter(|&end| end <= memory.len())
-            .ok_or(WasmError::Trap("game output bounds"))?;
-        let (limit, submitted) = if render {
-            (state.limits.max_render_bytes, &mut state.render_submitted)
-        } else {
-            (state.limits.max_audio_bytes, &mut state.audio_submitted)
-        };
-        if *submitted || len > limit {
-            return Err(WasmError::Trap("game output budget"));
-        }
-        *submitted = true;
+        state.frame_active()?;
+        let bytes = memory_range(args, memory)?;
         if render {
-            state.render.extend_from_slice(&memory[ptr..end]);
+            if state.render_submitted || bytes.len() > state.limits.max_render_bytes {
+                return Err(WasmError::Trap("game output budget"));
+            }
+            state
+                .render
+                .try_reserve_exact(bytes.len())
+                .map_err(|_| WasmError::Trap("game output allocation"))?;
+            state.render.extend_from_slice(bytes);
+            state.render_submitted = true;
         } else {
-            state.audio.extend_from_slice(&memory[ptr..end]);
+            if state.audio_submitted || bytes.len() > state.limits.max_audio_bytes {
+                return Err(WasmError::Trap("game output budget"));
+            }
+            state
+                .audio
+                .try_reserve_exact(bytes.len())
+                .map_err(|_| WasmError::Trap("game output allocation"))?;
+            state.audio.extend_from_slice(bytes);
+            state.audio_submitted = true;
         }
         Ok(alloc::vec![0])
     })
+}
+
+fn nonnegative(value: i32) -> Result<usize, WasmError> {
+    usize::try_from(value).map_err(|_| WasmError::Trap("game output bounds"))
+}
+
+fn memory_range<'a>(args: &[i32], memory: &'a [u8]) -> Result<&'a [u8], WasmError> {
+    let ptr = nonnegative(args[0])?;
+    let len = nonnegative(args[1])?;
+    let end = ptr
+        .checked_add(len)
+        .filter(|&end| end <= memory.len())
+        .ok_or(WasmError::Trap("game output bounds"))?;
+    Ok(&memory[ptr..end])
+}
+
+fn encode_snapshot(
+    manifest: &CartridgeManifest,
+    rng: u32,
+    guest: &[u8],
+) -> Result<Vec<u8>, WasmError> {
+    let id_len =
+        u16::try_from(manifest.game_id.len()).map_err(|_| WasmError::Trap("snapshot identity"))?;
+    let guest_len = u32::try_from(guest.len()).map_err(|_| WasmError::Trap("snapshot size"))?;
+    let total = 4usize
+        .checked_add(4 + 4 + 2)
+        .and_then(|size| size.checked_add(manifest.game_id.len()))
+        .and_then(|size| size.checked_add(4 + 4))
+        .and_then(|size| size.checked_add(guest.len()))
+        .ok_or(WasmError::Trap("snapshot size"))?;
+    let mut snapshot = Vec::new();
+    snapshot
+        .try_reserve_exact(total)
+        .map_err(|_| WasmError::Trap("snapshot allocation"))?;
+    snapshot.extend_from_slice(SNAPSHOT_MAGIC);
+    snapshot.extend_from_slice(&manifest.abi_version.to_le_bytes());
+    snapshot.extend_from_slice(&manifest.state_version.to_le_bytes());
+    snapshot.extend_from_slice(&id_len.to_le_bytes());
+    snapshot.extend_from_slice(manifest.game_id.as_bytes());
+    snapshot.extend_from_slice(&rng.to_le_bytes());
+    snapshot.extend_from_slice(&guest_len.to_le_bytes());
+    snapshot.extend_from_slice(guest);
+    Ok(snapshot)
+}
+
+fn decode_snapshot<'a>(
+    snapshot: &'a [u8],
+    manifest: &CartridgeManifest,
+    max_state_bytes: usize,
+) -> Result<(u32, &'a [u8]), WasmError> {
+    let mut cursor = 0;
+    let magic = snapshot_take(snapshot, &mut cursor, 4)?;
+    let abi = snapshot_u32(snapshot, &mut cursor)?;
+    let state = snapshot_u32(snapshot, &mut cursor)?;
+    let id_len = snapshot_u16(snapshot, &mut cursor)? as usize;
+    let id = snapshot_take(snapshot, &mut cursor, id_len)?;
+    let rng = snapshot_u32(snapshot, &mut cursor)?;
+    let guest_len = snapshot_u32(snapshot, &mut cursor)? as usize;
+    let guest = snapshot_take(snapshot, &mut cursor, guest_len)?;
+    if magic != SNAPSHOT_MAGIC
+        || abi != manifest.abi_version
+        || state != manifest.state_version
+        || id != manifest.game_id.as_bytes()
+        || guest_len > max_state_bytes
+        || cursor != snapshot.len()
+    {
+        return Err(WasmError::Trap("incompatible game snapshot"));
+    }
+    Ok((rng, guest))
+}
+
+fn snapshot_take<'a>(
+    bytes: &'a [u8],
+    cursor: &mut usize,
+    len: usize,
+) -> Result<&'a [u8], WasmError> {
+    let end = cursor
+        .checked_add(len)
+        .filter(|&end| end <= bytes.len())
+        .ok_or(WasmError::Trap("truncated game snapshot"))?;
+    let value = &bytes[*cursor..end];
+    *cursor = end;
+    Ok(value)
+}
+
+fn snapshot_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, WasmError> {
+    let raw = snapshot_take(bytes, cursor, 2)?;
+    Ok(u16::from_le_bytes([raw[0], raw[1]]))
+}
+
+fn snapshot_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, WasmError> {
+    let raw = snapshot_take(bytes, cursor, 4)?;
+    Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }

@@ -43,6 +43,9 @@ use alloc::vec::Vec;
 mod asm;
 pub use asm::{AsmError, assemble};
 
+pub mod cartridge;
+pub use cartridge::CartridgeManifest;
+
 pub mod game;
 pub use game::{
     GAME_ABI_VERSION, GameFrame, GameInput, GameLimits, GameRuntime, NativeModuleRegistry,
