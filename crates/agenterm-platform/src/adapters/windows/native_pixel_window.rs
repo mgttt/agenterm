@@ -76,7 +76,7 @@ use crate::contract::{
         PixelFrameState, PixelPointerCursor, PixelRect, PixelWindow, PixelWindowApplication,
         PixelWindowBackend, PixelWindowDirective, PixelWindowError, PixelWindowEvent,
         PixelWindowMetrics, PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta,
-        WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
+        WindowSemanticFlags, WindowWaker, XrgbPixelFrame, record_host_failure,
     },
 };
 
@@ -226,6 +226,10 @@ impl NativeControl {
     }
 
     fn record_failure(&self, error: PixelWindowError) {
+        // Every native-host failure code passes through here, and until now
+        // every one of them died silently: this call latches an exit, and a
+        // GUI process that exits has no console to explain itself on.
+        record_host_failure("pixel_window", &error);
         self.failure_latched.set(true);
         self.exit_requested.set(true);
         if let Ok(mut failure) = self.failure.try_borrow_mut()

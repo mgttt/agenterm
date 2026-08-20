@@ -39,6 +39,7 @@ use crate::{
             PixelWindowApplication, PixelWindowBackend, PixelWindowDirective, PixelWindowError,
             PixelWindowEvent, PixelWindowMetrics, PixelWindowOptions, PointerButton,
             PointerButtonState, WheelDelta, WindowSemanticFlags, WindowWaker, XrgbPixelFrame,
+            record_host_failure,
         },
     },
     input::{NativeKeyEventExt as _, NativeModifierStateExt as _},
@@ -314,6 +315,9 @@ struct PixelWindowRunner {
 
 impl PixelWindowRunner {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: PixelWindowError) {
+        // Same reason as the native host: this exits the loop, and a GUI
+        // process that exits has nowhere to say why.
+        record_host_failure("pixel_window", &error);
         self.failure = Some(error);
         self.alive.store(false, Ordering::Release);
         event_loop.exit();
