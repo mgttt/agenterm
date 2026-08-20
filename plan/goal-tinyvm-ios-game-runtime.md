@@ -43,6 +43,7 @@ tinyvm iOS game runtime
 │   ├── static library/XCFramework   [x]
 │   ├── Swift ownership/threading     [x]
 │   ├── device + simulator build      [x]
+│   ├── real app target/package link  [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [~]
 │   ├── constrained compiler profile  [x]
@@ -304,3 +305,27 @@ catalog execution and Files/private import remain technical SDK capabilities,
 not enabled shipping features, until Apple explicitly clarifies or permits the
 use case. This is recorded in
 [`docs/tinyarcade-app-review-boundary.md`](../docs/tinyarcade-app-review-boundary.md).
+
+## Ninth executable increment — reusable SDK and real app target
+
+Native extensions remain standard WASM imports. Their canonical namespace is
+`authority:module/vN`; exact function fields and i32 arities remain in the
+ordinary import table, and `tinyvm cartridge inspect` now reports that table for
+converter compatibility checks. Unknown, malformed, undeclared or unregistered
+capabilities still fail before instantiation.
+
+The iOS builder now emits an arm64 device slice and one universal arm64/x86_64
+simulator slice, then wraps them and the Swift 6 ownership layer in a
+self-contained `TinyArcadeRuntime` package. Actor-isolated teardown preserves
+the C handle's owner-executor contract. The complete bridge gate builds that
+package for generic iOS device and simulator destinations and directly links
+both simulator architectures.
+
+The real `nostalgia-arcade` app target now depends on that generated package and
+ships the exact 6,076-byte Depth Well cartridge in its signed resources. Its
+app-owned adapter exposes only the bundled origin. A hosted iPhone 17 Pro
+simulator test proves identity, first frame, suspend, fresh-instance resume and
+hard drop; a generic iOS device build proves the package, Rust archive and WASM
+resource participate in the final app link. The app UI still uses its current
+native game model, so visual/input parity and a physical-iPhone session remain
+open before TestFlight can switch Depth Well to this runtime.
