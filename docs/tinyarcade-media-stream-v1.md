@@ -95,6 +95,13 @@ duration_ms        u16; 1..2000
 amplitude_milli    u16; 0..1000
 ```
 
+`event_count` is at most 16 and the sum of all `duration_ms` values is at most
+4,000 ms. Events are scheduled sequentially in record order. A host may insert
+a small fixed transition gap, but must not turn one bounded batch into
+unbounded or concurrent audio work. These aggregate bounds apply in addition
+to the encoded-byte budget: a small command stream must not schedule an
+arbitrarily long native operation.
+
 The host owns the synthesizer, mixing, mute policy, interruption behavior and
 audio session. A cartridge can request only these bounded semantic cues; it
 cannot supply native audio code or address system audio APIs.
@@ -103,3 +110,6 @@ The three kinds describe host feedback intent, not one game's rules. Depth
 Well maps lock/clear/game-over to impact/success/failure; a paddle game may map
 rebound/field-clear/life-loss to the same stable meanings. Frequency, duration
 and amplitude remain explicit cartridge parameters within the bounds above.
+Waveform and timbre are host presentation choices, so converters and fan-made
+cartridges depend only on the versioned semantic event contract rather than an
+Apple audio implementation.

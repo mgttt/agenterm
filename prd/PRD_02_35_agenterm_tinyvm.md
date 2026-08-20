@@ -92,6 +92,14 @@ iOS SDK 已把 2D 数据边界接到可直接复用的原生呈现面：严格�
 数据；UIKit/Core Graphics 类型不进入 WASM ABI。native I/O surface 仍标记为
 partial，直到物理设备显示、输入与 audio-session 证据完成。
 
+`tinyarcade:tones/v1` 同样是平台协议而不是某个游戏的音效代码：单批最多 16
+个顺序事件、累计最多 4 秒，Rust 与 Swift 在调度原生工作前执行相同聚合校验。
+iOS SDK 提供有界 PCM/WAV 合成与 `AVAudioPlayer` owner，默认使用服从静音键且
+允许混音的 `.ambient` session；已有统一音频 owner 的 app 可关闭 SDK 的 session
+管理。中断只停止、不重放过期反馈，退出游戏面时显式 deactivate。模拟器已用
+Paddle Guard 的真实 launch tone 证明合成、播放、中断和释放；物理设备音频仍是
+未完成证据，因此 native I/O surface 保持 partial。
+
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
 function，用 160×120 indexed frame、通用 input bits、impact/success/failure

@@ -113,6 +113,21 @@ filters for magnification and minification, and lets the app choose layout and
 compositing. A Metal host remains free to use the palette and index plane
 directly; UIKit and Core Graphics never enter the guest ABI.
 
+`TinyArcadeToneSynthesizer.waveData(for:)` converts a validated tone batch into
+a bounded 22,050 Hz mono PCM WAV using the event order, pitch, duration and
+relative amplitude. `TinyArcadeTonePlayer` is the matching short-feedback
+owner. A new batch replaces the old batch, `stop()` clears current feedback,
+and `interruptionBegan()` stops without replaying stale game events. The app
+forwards its `AVAudioSession.interruptionNotification` began transition and
+calls `deactivate()` when the game surface relinquishes audio.
+
+By default the player owns `AVAudioSession` activation with the `.ambient`
+category and `.mixWithOthers`, so it follows the silent switch and does not
+take exclusive ownership from music or other audio. An app with a centralized
+audio coordinator constructs it with `managesAudioSession: false`; in that
+mode the player never changes session category or activation. Haptics remain an
+app presentation policy and are not inferred by the SDK.
+
 Tick, suspend and resume use a handle-aware panic boundary. If Rust panics after
 a handle has been resolved, the boundary first latches that runtime failed,
 returns its phase to idle and discards any cached frame/snapshot before returning
@@ -143,7 +158,9 @@ It then compiles both reference cartridges and runs the linked executable in an
 already-booted iOS Simulator. Depth Well opens through the private origin,
 decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 600 WASM-owned indexed frames through CGImage/UIKit presentation and crosses a
-suspend into a fresh instance during the measured run.
+suspend into a fresh instance during the measured run. Its real launch event is
+also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
+explicitly deactivated on the booted simulator.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,

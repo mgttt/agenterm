@@ -358,6 +358,13 @@ evidence to retain a compact ISA fork; GUI frame timing alone was too noisy.
 Terminal and GUI code must remain bounded under slow consumers and abnormal
 children.
 
+A bounded command buffer does not necessarily bound the native work it
+schedules. For duration-bearing media or timer protocols, validate record
+count and aggregate scheduled duration before dispatch, in addition to byte
+length and each record's local range. TinyArcade tone batches, for example,
+bound both event count and total sequential duration so a tiny payload cannot
+retain the audio owner indefinitely.
+
 - A queue needs a byte/item capacity, explicit backpressure, and a per-GUI-turn
   drain budget.
 - Closing must wake blocked producers/consumers and define whether committed

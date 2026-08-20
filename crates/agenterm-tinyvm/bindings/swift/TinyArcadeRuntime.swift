@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import CoreGraphics
 import UIKit
 import TinyArcade
@@ -209,6 +210,9 @@ public final class TinyArcadeIndexed2DView: UIView {
 }
 
 public struct TinyArcadeToneEvent: Sendable, Equatable {
+    public static let maximumBatchEventCount = 16
+    public static let maximumBatchDurationMilliseconds: UInt32 = 4_000
+
     /// Stable host feedback intent: 1 impact, 2 success, 3 failure.
     public let kind: UInt8
     public let frequencyHz: UInt16
@@ -223,11 +227,12 @@ public struct TinyArcadeToneEvent: Sendable, Equatable {
             throw TinyArcadeGrid3DFrame.decodeError("invalid tone batch header")
         }
         let count = Int(TinyArcadeGrid3DFrame.u16(audio, 6))
-        guard audio.count == 8 + count * 8 else {
+        guard count <= maximumBatchEventCount, audio.count == 8 + count * 8 else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid tone batch size")
         }
         var decoded: [TinyArcadeToneEvent] = []
         decoded.reserveCapacity(count)
+        var totalDurationMilliseconds: UInt32 = 0
         for index in 0..<count {
             let offset = 8 + index * 8
             let event = TinyArcadeToneEvent(
@@ -243,9 +248,140 @@ public struct TinyArcadeToneEvent: Sendable, Equatable {
                   event.amplitudeMilli <= 1_000 else {
                 throw TinyArcadeGrid3DFrame.decodeError("invalid tone event")
             }
+            totalDurationMilliseconds += UInt32(event.durationMilliseconds)
             decoded.append(event)
         }
+        guard totalDurationMilliseconds <= maximumBatchDurationMilliseconds else {
+            throw TinyArcadeGrid3DFrame.decodeError("invalid tone batch duration")
+        }
         return decoded
+    }
+}
+
+/// Bounded native rendering for `tinyarcade:tones/v1` events.
+/// Events remain semantic hints: hosts may choose another timbre while retaining
+/// their order, pitch, duration and relative amplitude.
+public enum TinyArcadeToneSynthesizer {
+    public static let sampleRate: UInt32 = 22_050
+
+    public static func waveData(for events: [TinyArcadeToneEvent]) -> Data {
+        let gapSamples = Int(sampleRate) * 4 / 1_000
+        let eventSamples = events.reduce(into: 0) { total, event in
+            total += Int(sampleRate) * Int(event.durationMilliseconds) / 1_000
+        }
+        let sampleCount = eventSamples + max(0, events.count - 1) * gapSamples
+        var pcm = Data(capacity: sampleCount * MemoryLayout<Int16>.size)
+
+        for (eventIndex, event) in events.enumerated() {
+            let count = Int(sampleRate) * Int(event.durationMilliseconds) / 1_000
+            let attack = max(1, min(count / 2, Int(sampleRate) * 3 / 1_000))
+            let release = max(1, min(count / 2, Int(sampleRate) * 8 / 1_000))
+            let amplitude = Double(event.amplitudeMilli) / 1_000.0 * 0.28
+            let radiansPerSample = 2.0 * Double.pi * Double(event.frequencyHz)
+                / Double(sampleRate)
+
+            for sampleIndex in 0..<count {
+                let attackEnvelope = min(1.0, Double(sampleIndex + 1) / Double(attack))
+                let releaseEnvelope = min(1.0, Double(count - sampleIndex) / Double(release))
+                let envelope = min(attackEnvelope, releaseEnvelope)
+                let sine = sin(Double(sampleIndex) * radiansPerSample)
+                let square = sine >= 0 ? 1.0 : -1.0
+                let shape: Double
+                switch event.kind {
+                case 1: shape = sine * 0.55 + square * 0.45
+                case 2: shape = sine
+                default: shape = sine * 0.8 + square * 0.2
+                }
+                let value = Int16(clamping: Int(shape * envelope * amplitude * 32_767.0))
+                appendLittleEndian(value, to: &pcm)
+            }
+            if eventIndex + 1 < events.count {
+                pcm.append(Data(count: gapSamples * MemoryLayout<Int16>.size))
+            }
+        }
+
+        var wave = Data(capacity: 44 + pcm.count)
+        wave.append(contentsOf: "RIFF".utf8)
+        appendLittleEndian(UInt32(36 + pcm.count), to: &wave)
+        wave.append(contentsOf: "WAVEfmt ".utf8)
+        appendLittleEndian(UInt32(16), to: &wave)
+        appendLittleEndian(UInt16(1), to: &wave)
+        appendLittleEndian(UInt16(1), to: &wave)
+        appendLittleEndian(sampleRate, to: &wave)
+        appendLittleEndian(sampleRate * 2, to: &wave)
+        appendLittleEndian(UInt16(2), to: &wave)
+        appendLittleEndian(UInt16(16), to: &wave)
+        wave.append(contentsOf: "data".utf8)
+        appendLittleEndian(UInt32(pcm.count), to: &wave)
+        wave.append(pcm)
+        return wave
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    }
+}
+
+public enum TinyArcadeTonePlayerError: Error, Equatable {
+    case playbackUnavailable
+}
+
+/// Main-actor owner for short native tone batches. A new batch replaces the
+/// current one; interruption never resumes stale gameplay feedback.
+@MainActor
+public final class TinyArcadeTonePlayer {
+    private let managesAudioSession: Bool
+    private let audioSession = AVAudioSession.sharedInstance()
+    private var player: AVAudioPlayer?
+
+    public private(set) var isAudioSessionActive = false
+    public var isPlaying: Bool { player?.isPlaying ?? false }
+
+    public init(managesAudioSession: Bool = true) {
+        self.managesAudioSession = managesAudioSession
+    }
+
+    public func play(_ events: [TinyArcadeToneEvent]) throws {
+        guard !events.isEmpty else { return }
+        stop()
+        var activatedForAttempt = false
+        if managesAudioSession && !isAudioSessionActive {
+            try audioSession.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try audioSession.setActive(true)
+            isAudioSessionActive = true
+            activatedForAttempt = true
+        }
+        do {
+            let next = try AVAudioPlayer(data: TinyArcadeToneSynthesizer.waveData(for: events))
+            next.prepareToPlay()
+            guard next.play() else { throw TinyArcadeTonePlayerError.playbackUnavailable }
+            player = next
+        } catch {
+            if activatedForAttempt {
+                try? audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
+                isAudioSessionActive = false
+            }
+            throw error
+        }
+    }
+
+    public func stop() {
+        player?.stop()
+        player = nil
+    }
+
+    /// Forward `AVAudioSession.interruptionNotification` began events here.
+    public func interruptionBegan() {
+        stop()
+        if managesAudioSession { isAudioSessionActive = false }
+    }
+
+    public func deactivate() throws {
+        stop()
+        if managesAudioSession && isAudioSessionActive {
+            try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
+            isAudioSessionActive = false
+        }
     }
 }
 

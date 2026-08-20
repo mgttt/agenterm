@@ -14,6 +14,14 @@ exact sRGB RGBA image and `TinyArcadeIndexed2DView` is a ready-to-layout UIKit
 surface with aspect-fit, nearest-neighbour presentation. Apps that own a Metal
 renderer can instead consume the validated palette and pixel plane directly.
 
+For audio feedback, pass `TinyArcadeMediaFrame.tones` to
+`TinyArcadeTonePlayer.play(_:)`. The default player uses a mixing `.ambient`
+audio session; use `TinyArcadeTonePlayer(managesAudioSession: false)` when the
+app already owns session policy. Forward interruption-began events, call
+`stop()` when feedback should be cut immediately, and call `deactivate()` when
+leaving the game surface. The SDK deliberately does not resume interrupted
+gameplay tones or choose haptics for the app.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

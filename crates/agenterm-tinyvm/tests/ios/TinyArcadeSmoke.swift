@@ -339,6 +339,17 @@ struct TinyArcadeSmoke {
         }
         precondition(initialPaddle.width == 160 && initialPaddle.height == 120)
         precondition(initialPaddle.paletteRGBA.count == 8)
+        precondition(!paddleFrame.tones.isEmpty)
+        let paddleWave = TinyArcadeToneSynthesizer.waveData(for: paddleFrame.tones)
+        precondition(paddleWave.prefix(4) == Data("RIFF".utf8))
+        precondition(paddleWave.subdata(in: 8..<12) == Data("WAVE".utf8))
+        precondition(paddleWave.count > 44)
+        let tonePlayer = TinyArcadeTonePlayer()
+        try tonePlayer.play(paddleFrame.tones)
+        precondition(tonePlayer.isAudioSessionActive)
+        tonePlayer.interruptionBegan()
+        precondition(!tonePlayer.isPlaying)
+        try tonePlayer.deactivate()
         let paddleView = TinyArcadeIndexed2DView(
             frame: CGRect(x: 0, y: 0, width: 390, height: 844)
         )

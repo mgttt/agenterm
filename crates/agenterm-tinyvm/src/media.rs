@@ -13,6 +13,8 @@ const INDEXED2D_MAX_PIXELS: usize = u16::MAX as usize;
 const INDEXED2D_MAX_BYTES: usize = 64 * 1024;
 const TONE_HEADER_BYTES: usize = 8;
 const TONE_EVENT_BYTES: usize = 8;
+pub const MAX_TONE_EVENTS: usize = 16;
+pub const MAX_TONE_DURATION_MS: u32 = 4_000;
 
 /// Strictly decoded render stream supported by the portable cartridge SDK.
 pub enum RenderFrame<'a> {
@@ -220,12 +222,13 @@ impl<'a> ToneBatch<'a> {
             .checked_mul(TONE_EVENT_BYTES)
             .and_then(|events| events.checked_add(TONE_HEADER_BYTES))
             .ok_or(WasmError::Trap("tone batch size"))?;
-        if expected != bytes.len() {
+        if count > MAX_TONE_EVENTS || expected != bytes.len() {
             return Err(WasmError::Trap("tone batch size"));
         }
         let batch = Self {
             events: &bytes[TONE_HEADER_BYTES..],
         };
+        let mut total_duration_ms = 0u32;
         for event in batch.events() {
             let event = event?;
             if !(1..=3).contains(&event.kind)
@@ -235,6 +238,12 @@ impl<'a> ToneBatch<'a> {
             {
                 return Err(WasmError::Trap("invalid tone event"));
             }
+            total_duration_ms = total_duration_ms
+                .checked_add(u32::from(event.duration_ms))
+                .ok_or(WasmError::Trap("tone batch duration"))?;
+        }
+        if total_duration_ms > MAX_TONE_DURATION_MS {
+            return Err(WasmError::Trap("tone batch duration"));
         }
         Ok(batch)
     }

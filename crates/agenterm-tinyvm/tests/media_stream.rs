@@ -82,6 +82,40 @@ fn tone_batch_decodes_and_rejects_unsafe_values() {
         ToneBatch::decode(&bytes),
         Err(WasmError::Trap("invalid tone event"))
     ));
+
+    let mut bounded = Vec::new();
+    bounded.extend_from_slice(b"TAT1\x01\0\x10\0");
+    for _ in 0..16 {
+        bounded.extend_from_slice(&[1, 0]);
+        bounded.extend_from_slice(&440u16.to_le_bytes());
+        bounded.extend_from_slice(&250u16.to_le_bytes());
+        bounded.extend_from_slice(&500u16.to_le_bytes());
+    }
+    assert_eq!(
+        must_ok(ToneBatch::decode(&bounded), "decode maximum tone batch").event_count(),
+        16
+    );
+
+    bounded[6..8].copy_from_slice(&17u16.to_le_bytes());
+    let seventeenth: [u8; 8] = bounded[8..16].try_into().expect("tone record");
+    bounded.extend_from_slice(&seventeenth);
+    assert!(matches!(
+        ToneBatch::decode(&bounded),
+        Err(WasmError::Trap("tone batch size"))
+    ));
+
+    let mut too_long = Vec::new();
+    too_long.extend_from_slice(b"TAT1\x01\0\x03\0");
+    for duration in [2_000u16, 2_000, 1] {
+        too_long.extend_from_slice(&[2, 0]);
+        too_long.extend_from_slice(&880u16.to_le_bytes());
+        too_long.extend_from_slice(&duration.to_le_bytes());
+        too_long.extend_from_slice(&750u16.to_le_bytes());
+    }
+    assert!(matches!(
+        ToneBatch::decode(&too_long),
+        Err(WasmError::Trap("tone batch duration"))
+    ));
 }
 
 fn indexed2d_frame() -> Vec<u8> {

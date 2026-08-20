@@ -557,10 +557,10 @@ three lives, score, level speed, clear/reset and game-over state.
 The 5,280-byte artifact is a strict standard WASM MVP module with no native
 capabilities. Its eight imports are ordinary `tinyarcade:core/v1` functions,
 including indexed-media negotiation. It emits one 19,248-byte 160 × 120 frame,
-  generic impact/success/failure tone intent and a 64-byte guest snapshot. A
-  shared compiler profile now builds both Rust-authored cartridges and performs
-  the same bulk-memory lowering and path remapping before converter validation;
-  moving Depth Well onto it preserves the exact 6,076-byte bundled artifact.
+generic impact/success/failure tone intent and a 64-byte guest snapshot. A
+shared compiler profile now builds both Rust-authored cartridges and performs
+the same bulk-memory lowering and path remapping before converter validation;
+moving Depth Well onto it preserves the exact 6,076-byte bundled artifact.
 
 Evidence on 2026-08-21:
 
@@ -581,3 +581,34 @@ Evidence on 2026-08-21:
   and 881,256 bytes x86_64.
 - A physical iPhone is not connected to this Mac mini, so physical-device and
   TestFlight play evidence remain open and the overall goal is not complete.
+
+## Eighteenth executable increment — bounded native tone playback
+
+The generic tone stream now bounds scheduled work rather than only encoded
+bytes: one batch contains at most 16 sequential events and at most 4,000 ms of
+total requested duration. Rust and Swift reject the same count, per-event and
+aggregate-duration violations before any native presentation. Kinds remain
+stable impact/success/failure intent; waveform and timbre remain host choices,
+so cartridges and converters do not depend on an Apple implementation.
+
+The iOS SDK now supplies a bounded 22,050 Hz mono PCM/WAV synthesizer and a
+main-actor `AVAudioPlayer` lifecycle owner. Its default `.ambient` plus
+`.mixWithOthers` session respects the silent switch and other audio; apps with
+a central audio coordinator can opt out of SDK session mutation. New batches
+replace old feedback, interruption stops without stale replay, and leaving the
+game surface has an explicit stop/deactivate path. Haptics remain app policy.
+
+Evidence on 2026-08-21:
+
+- Rust media black boxes accept the exact 16-event/4,000 ms boundary and reject
+  a seventeenth event or 4,001 ms aggregate duration. The complete 174-test
+  suite, all-feature/all-target Clippy with warnings denied, no-default library
+  compile and 70,904-byte static-core/self-test gate are clean.
+- The generic Swift package builds for iOS device and universal simulator. On
+  a booted iPhone 17 Pro simulator, Paddle Guard's real launch event produces a
+  valid WAV, enters `AVAudioPlayer`, crosses interruption and deactivates before
+  its 600-frame gameplay run (0.201 ms average, 0.240 ms p95, 4.850 ms maximum).
+  Linked smokes remain below 1 MiB at 861,992 bytes arm64 and 899,464 bytes
+  x86_64.
+- Physical-iPhone speaker, silent-switch and interruption behavior remain open,
+  so native I/O and the overall runtime goal remain partial.
