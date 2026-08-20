@@ -1,0 +1,49 @@
+#!/bin/sh
+set -eu
+
+crate_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$crate_dir/../.." && pwd)
+output=${1:-"$repo_dir/target/tinyvm-depth-well/depth-well-0.1.0.wasm"}
+mkdir -p "$(dirname -- "$output")"
+rustup_bin=${RUSTUP_BIN:-$(command -v rustup || true)}
+if [ -z "$rustup_bin" ]; then
+  rustup_bin="/Users/$(id -un)/.cargo/bin/rustup"
+fi
+wasm_opt=${WASM_OPT:-$(command -v wasm-opt || true)}
+if [ -z "$wasm_opt" ] && [ -x /opt/homebrew/opt/binaryen/bin/wasm-opt ]; then
+  wasm_opt=/opt/homebrew/opt/binaryen/bin/wasm-opt
+fi
+if [ -z "$wasm_opt" ]; then
+  echo "wasm-opt is required (install Binaryen or set WASM_OPT)" >&2
+  exit 1
+fi
+raw=$(mktemp "${TMPDIR:-/tmp}/tinyarcade-depth-well.XXXXXX")
+trap 'rm -f "$raw"' EXIT HUP INT TERM
+
+"$rustup_bin" run 1.97.0 rustc \
+  --edition=2024 \
+  --target wasm32-unknown-unknown \
+  --crate-name depth_well \
+  --crate-type cdylib \
+  --remap-path-prefix "$repo_dir"=. \
+  -C opt-level=z \
+  -C lto=fat \
+  -C codegen-units=1 \
+  -C panic=abort \
+  -C target-feature=-bulk-memory,-reference-types,-multivalue,-sign-ext,-nontrapping-fptoint,-simd128 \
+  -C link-arg=--export-memory \
+  "$crate_dir/guests/depth-well/depth_well.rs" \
+  -o "$raw"
+
+# Rust's precompiled core may still introduce memory.copy/fill. Lower those
+# standard post-MVP instructions so the published cartridge is strict MVP.
+"$wasm_opt" "$raw" \
+  --llvm-memory-copy-fill-lowering \
+  --mvp-features \
+  --enable-mutable-globals \
+  --strip-debug \
+  --strip-producers \
+  -Oz \
+  -o "$output"
+
+printf '%s\n' "$output"

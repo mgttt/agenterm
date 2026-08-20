@@ -45,10 +45,10 @@ tinyvm iOS game runtime
 │   ├── device + simulator build      [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [ ]
-│   ├── constrained compiler profile  [ ]
-│   ├── Depth Well WASM vertical cut  [ ]
-│   ├── frame-time/resource evidence  [ ]
-│   └── suspend/resume/save evidence  [ ]
+│   ├── constrained compiler profile  [x]
+│   ├── Depth Well WASM vertical cut  [x]
+│   ├── frame-time/resource evidence  [~]
+│   └── suspend/resume/save evidence  [x]
 └── distribution gate                 [ ]
     ├── fixed app purpose/offline game [ ]
     ├── catalog metadata/deep links   [ ]
@@ -206,3 +206,28 @@ Evidence on 2026-08-21:
   consumer footprint gate.
 - Feature-enabled Clippy with warnings denied and documentation redaction:
   clean.
+
+## Fifth executable increment — real standard cartridge
+
+Depth Well is now authored as a standalone `no_std` Rust guest rather than a
+host-side fixture. The reproducible compiler profile emits a normal `.wasm`,
+then lowers compiler-added bulk-memory operations to strict WASM MVP while
+preserving the standard TinyArcade manifest custom section. Its original 5 × 5
+× 10 falling-polycube rules include a fair five-piece bag, three-axis rotation,
+wall kicks, landing ghost, hard drop, full-deck compaction, scoring, level speed
+and semantic sound cues.
+
+The first versioned media protocols are allocation-free, strictly decoded
+`tinyarcade:grid3d/v1` frames and `tinyarcade:tones/v1` events. The native host
+retains camera/material/audio-session authority; cartridges transmit bounded
+semantic records rather than platform objects or native commands.
+
+Evidence on 2026-08-21:
+
+- The optimized cartridge is below 16 KiB, contains no absolute developer path
+  and loads under a 17-page memory ceiling.
+- Init, movement, hard drop, valid 3D frame, valid tone event and portable
+  suspend/resume run through the public `GameRuntime` black box.
+- Repeating the same hard drop after restore produces byte-identical render and
+  audio under a 100,000-instruction per-call ceiling.
+- Physical iPhone rendering/input and measured frame-time evidence remain open.

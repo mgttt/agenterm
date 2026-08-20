@@ -51,6 +51,9 @@ pub use game::{
     GAME_ABI_VERSION, GameFrame, GameInput, GameLimits, GameRuntime, NativeModuleRegistry,
 };
 
+pub mod media;
+pub use media::{Grid3dCell, Grid3dFrame, ToneBatch, ToneEvent};
+
 #[cfg(feature = "ios-c-api")]
 mod ios_c_api;
 

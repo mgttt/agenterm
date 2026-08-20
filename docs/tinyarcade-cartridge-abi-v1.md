@@ -79,9 +79,10 @@ bit 6 tertiary   bit 7 start      bit 8 menu
 Time is host-provided monotonic game time, not wall-clock time. RNG is owned by
 the host and its state is included in snapshots. Each lifecycle call may submit
 render/audio/state at most once and only within host-selected byte ceilings.
-Render and audio command byte schemas are not frozen by this document yet;
-converters must not treat the current opaque test streams as the final media
-format.
+Versioned, self-identifying media schemas are defined separately in
+[`tinyarcade-media-stream-v1.md`](tinyarcade-media-stream-v1.md). Unknown magic,
+unknown versions and malformed records must fail before native rendering or
+audio scheduling.
 
 ## Native capability imports
 
