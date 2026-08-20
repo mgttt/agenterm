@@ -11,7 +11,7 @@ use std::thread::{self, ThreadId};
 
 use crate::{
     CartridgeTrustStore, CatalogEntry, GameFrame, GameInput, GameLimits, GameRuntime, Limits,
-    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, WasmError,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -77,6 +77,7 @@ pub struct TinyArcadeNativeFunctionV1 {
     pub field_len: usize,
     pub n_params: u32,
     pub n_results: u32,
+    pub max_calls_per_lifecycle: u32,
     pub callback: Option<TinyArcadeNativeCallbackV1>,
     pub context: *mut c_void,
 }
@@ -300,13 +301,23 @@ unsafe fn native_registry(
         ))?;
         let n_params = function.n_params as usize;
         let n_results = function.n_results as usize;
+        if function.max_calls_per_lifecycle == 0
+            || function.max_calls_per_lifecycle > MAX_NATIVE_CALLS_PER_LIFECYCLE
+        {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid native call budget",
+            ));
+        }
+        let max_calls_per_lifecycle = function.max_calls_per_lifecycle;
         let context = function.context;
         registry
-            .register(
+            .register_with_call_limit(
                 &module,
                 &field,
                 n_params,
                 n_results,
+                max_calls_per_lifecycle,
                 move |params, memory| {
                     let mut results = Vec::new();
                     results
@@ -373,7 +384,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 2
+    (1 << 16) | 3
 }
 
 #[unsafe(no_mangle)]
@@ -1027,8 +1038,8 @@ mod tests {
             body(&[0x41, 0x01, 0x0b]),
             body(&[0x41, 0x00, 0x0b]),
             body(&[
-                0x41, 0x00, 0x41, 0x28, 0x41, 0x02, 0x10, 0x00, 0x36, 0x02, 0x00, 0x41, 0x00, 0x41,
-                0x08, 0x10, 0x01, 0x1a, 0x41, 0x00, 0x0b,
+                0x41, 0x28, 0x41, 0x02, 0x10, 0x00, 0x1a, 0x41, 0x00, 0x41, 0x28, 0x41, 0x02, 0x10,
+                0x00, 0x36, 0x02, 0x00, 0x41, 0x00, 0x41, 0x08, 0x10, 0x01, 0x1a, 0x41, 0x00, 0x0b,
             ]),
             body(&[0x41, 0x00, 0x0b]),
             body(&[0x41, 0x00, 0x0b]),
@@ -1095,7 +1106,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 2);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 3);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1202,6 +1213,7 @@ mod tests {
             field_len: field.len(),
             n_params: 2,
             n_results: 1,
+            max_calls_per_lifecycle: 2,
             callback: Some(native_step),
             context: (&mut probe as *mut NativeProbe).cast(),
         };
@@ -1228,7 +1240,7 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 0) }, STATUS_OK);
-        assert_eq!(probe.calls.get(), 1);
+        assert_eq!(probe.calls.get(), 2);
         let mut render = [0; 8];
         let mut render_len = 0;
         assert_eq!(
@@ -1259,6 +1271,49 @@ mod tests {
             STATUS_FAILED_INSTANCE
         );
         assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+
+        probe.calls.set(0);
+        probe.fail.set(false);
+        let one_call = TinyArcadeNativeFunctionV1 {
+            max_calls_per_lifecycle: 1,
+            ..function
+        };
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_with_native_modules(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &one_call,
+                    1,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 0) }, STATUS_TRAP);
+        assert_eq!(probe.calls.get(), 1);
+        assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+
+        let no_budget = TinyArcadeNativeFunctionV1 {
+            max_calls_per_lifecycle: 0,
+            ..function
+        };
+        runtime = ptr::dangling_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_with_native_modules(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &no_budget,
+                    1,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert!(runtime.is_null());
 
         let invalid = TinyArcadeNativeFunctionV1 {
             n_results: 17,

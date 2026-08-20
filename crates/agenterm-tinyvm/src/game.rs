@@ -14,6 +14,7 @@ pub const GAME_ABI_VERSION: i32 = 1;
 pub const MAX_CARTRIDGE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_NATIVE_FUNCTIONS: usize = 64;
 pub const MAX_NATIVE_ARITY: usize = 16;
+pub const MAX_NATIVE_CALLS_PER_LIFECYCLE: u32 = 64;
 const ABI_MODULE: &str = "tinyarcade:core/v1";
 const SNAPSHOT_MAGIC: &[u8; 4] = b"TGS1";
 type NativeImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
@@ -81,6 +82,7 @@ struct NativeFunction {
     field: String,
     n_params: usize,
     n_results: usize,
+    max_calls_per_lifecycle: u32,
     callback: Rc<NativeImpl>,
 }
 
@@ -111,11 +113,33 @@ impl NativeModuleRegistry {
     where
         F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
     {
+        self.register_with_call_limit(module, field, n_params, n_results, 1, callback)
+    }
+
+    /// Register one function with an exact per-lifecycle dispatch ceiling.
+    ///
+    /// The quota resets before each init/tick/suspend/resume call and is
+    /// charged before app code runs. Capability implementations remain trusted
+    /// app code and must themselves be bounded and nonblocking.
+    pub fn register_with_call_limit<F>(
+        &mut self,
+        module: &str,
+        field: &str,
+        n_params: usize,
+        n_results: usize,
+        max_calls_per_lifecycle: u32,
+        callback: F,
+    ) -> Result<(), WasmError>
+    where
+        F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
+    {
         if module == ABI_MODULE
             || !valid_native_namespace(module)
             || !valid_native_field(field)
             || n_params > MAX_NATIVE_ARITY
             || n_results > MAX_NATIVE_ARITY
+            || max_calls_per_lifecycle == 0
+            || max_calls_per_lifecycle > MAX_NATIVE_CALLS_PER_LIFECYCLE
             || self.functions.len() >= MAX_NATIVE_FUNCTIONS
             || self.find(module, field).is_some()
         {
@@ -126,6 +150,7 @@ impl NativeModuleRegistry {
             field: field.to_string(),
             n_params,
             n_results,
+            max_calls_per_lifecycle,
             callback: Rc::new(callback),
         });
         Ok(())
@@ -135,6 +160,13 @@ impl NativeModuleRegistry {
         self.functions
             .iter()
             .find(|function| function.module == module && function.field == field)
+    }
+
+    fn find_with_index(&self, module: &str, field: &str) -> Option<(usize, &NativeFunction)> {
+        self.functions
+            .iter()
+            .enumerate()
+            .find(|(_, function)| function.module == module && function.field == field)
     }
 }
 
@@ -160,6 +192,7 @@ struct HostState {
     audio_submitted: bool,
     state_submitted: bool,
     state_loaded: bool,
+    native_calls: Vec<u32>,
 }
 
 impl HostState {
@@ -182,6 +215,19 @@ impl HostState {
         self.audio.clear();
         self.render_submitted = false;
         self.audio_submitted = false;
+    }
+
+    fn charge_native(&mut self, index: usize, limit: u32) -> Result<(), WasmError> {
+        self.active()?;
+        let calls = self
+            .native_calls
+            .get_mut(index)
+            .ok_or(WasmError::Trap("native capability registry mismatch"))?;
+        if *calls >= limit {
+            return Err(WasmError::Trap("native capability call budget"));
+        }
+        *calls += 1;
+        Ok(())
     }
 }
 
@@ -329,6 +375,11 @@ impl GameRuntime {
                 return Err(WasmError::Trap("invalid game lifecycle export"));
             }
         }
+        let mut native_calls = Vec::new();
+        native_calls
+            .try_reserve_exact(registry.functions.len())
+            .map_err(|_| WasmError::Trap("native capability allocation"))?;
+        native_calls.resize(registry.functions.len(), 0);
         let host = Rc::new(RefCell::new(HostState {
             limits: game_limits,
             phase: Phase::Idle,
@@ -342,6 +393,7 @@ impl GameRuntime {
             audio_submitted: false,
             state_submitted: false,
             state_loaded: false,
+            native_calls,
         }));
         bind_imports(&mut module, &host, registry)?;
         let instance = module.instantiate()?;
@@ -469,6 +521,7 @@ impl GameRuntime {
         let mut host = self.host.borrow_mut();
         host.phase = phase;
         host.input = input;
+        host.native_calls.fill(0);
         host.reset_output();
     }
 
@@ -554,14 +607,14 @@ fn bind_imports(
         .collect();
     for (namespace, field) in fields {
         if namespace != ABI_MODULE {
-            let callback = registry
-                .find(&namespace, &field)
-                .ok_or(WasmError::Trap("game import is not allowed"))?
-                .callback
-                .clone();
+            let (index, native) = registry
+                .find_with_index(&namespace, &field)
+                .ok_or(WasmError::Trap("game import is not allowed"))?;
+            let callback = native.callback.clone();
+            let max_calls = native.max_calls_per_lifecycle;
             let lifecycle = host.clone();
             module.bind_import(&namespace, &field, move |args, memory| {
-                lifecycle.borrow().active()?;
+                lifecycle.borrow_mut().charge_native(index, max_calls)?;
                 callback(args, memory)
             })?;
             continue;

@@ -71,6 +71,7 @@ struct TinyArcadeSmoke {
             functionBody([0x41, 1, 0x0b]),
             functionBody([0x41, 0, 0x0b]),
             functionBody([
+                0x41, 0x28, 0x41, 2, 0x10, 0, 0x1a,
                 0x41, 0, 0x41, 0x28, 0x41, 2, 0x10, 0, 0x36, 2, 0,
                 0x41, 0, 0x41, 8, 0x10, 1, 0x1a, 0x41, 0, 0x0b,
             ]),
@@ -102,7 +103,8 @@ struct TinyArcadeSmoke {
                     module: "fan:physics/v1",
                     field: "step_world",
                     parameterCount: 2,
-                    resultCount: 1
+                    resultCount: 1,
+                    maxCallsPerLifecycle: 2
                 ) { parameters, memory in
                     precondition(parameters == [40, 2])
                     precondition(memory.count >= 8)
@@ -116,7 +118,7 @@ struct TinyArcadeSmoke {
             _ = try nativeRuntime.tick(buttons: 0, clockMilliseconds: 0)
             preconditionFailure("native smoke frame should not decode as grid3d")
         } catch {
-            precondition(nativeCalls == 1)
+            precondition(nativeCalls == 2)
         }
         try nativeRuntime.close()
 

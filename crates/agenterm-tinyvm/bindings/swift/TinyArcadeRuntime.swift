@@ -183,6 +183,7 @@ public struct TinyArcadeNativeFunctionV1 {
     public let field: String
     public let parameterCount: UInt32
     public let resultCount: UInt32
+    public let maxCallsPerLifecycle: UInt32
     public let handler: ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
 
     public init(
@@ -190,12 +191,14 @@ public struct TinyArcadeNativeFunctionV1 {
         field: String,
         parameterCount: UInt32,
         resultCount: UInt32,
+        maxCallsPerLifecycle: UInt32 = 1,
         handler: @escaping ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
     ) {
         self.module = module
         self.field = field
         self.parameterCount = parameterCount
         self.resultCount = resultCount
+        self.maxCallsPerLifecycle = maxCallsPerLifecycle
         self.handler = handler
     }
 }
@@ -207,16 +210,18 @@ private final class TinyArcadeNativeCallbackBox {
     let fieldCount: Int
     let parameterCount: UInt32
     let resultCount: UInt32
+    let maxCallsPerLifecycle: UInt32
     let handler: ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
 
     init(_ function: TinyArcadeNativeFunctionV1) throws {
         let module = Array(function.module.utf8)
         let field = Array(function.field.utf8)
         guard !module.isEmpty, !field.isEmpty,
-              function.parameterCount <= 16, function.resultCount <= 16 else {
+              function.parameterCount <= 16, function.resultCount <= 16,
+              (1...64).contains(function.maxCallsPerLifecycle) else {
             throw TinyArcadeRuntimeError(
                 status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
-                message: "native imports require non-empty UTF-8 names and at most 16 parameters/results"
+                message: "native imports require non-empty UTF-8 names, at most 16 parameters/results and 1...64 calls per lifecycle"
             )
         }
         let ownedModule = UnsafeMutablePointer<UInt8>.allocate(capacity: module.count)
@@ -233,6 +238,7 @@ private final class TinyArcadeNativeCallbackBox {
         fieldCount = field.count
         parameterCount = function.parameterCount
         resultCount = function.resultCount
+        maxCallsPerLifecycle = function.maxCallsPerLifecycle
         handler = function.handler
     }
 
@@ -252,6 +258,7 @@ private final class TinyArcadeNativeCallbackBox {
             field_len: fieldCount,
             n_params: parameterCount,
             n_results: resultCount,
+            max_calls_per_lifecycle: maxCallsPerLifecycle,
             callback: tinyArcadeNativeCallback,
             context: Unmanaged.passUnretained(self).toOpaque()
         )

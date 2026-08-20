@@ -26,7 +26,7 @@ tinyvm iOS game runtime
 │   ├── bounded render commands       [x]
 │   ├── bounded audio commands        [x]
 │   ├── clock/RNG determinism         [x]
-│   ├── native capability registry    [~]
+│   ├── native capability registry    [x]
 │   └── storage without guest network [~]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
@@ -142,9 +142,10 @@ Native extensions are not private WASM opcodes. The app explicitly registers
 an exact i32 function signature under a versioned namespace such as
 `studio:physics/v1`; only then can a cartridge import it. An unknown namespace,
 duplicate function import or signature mismatch fails before instantiation.
-Manifest capability declarations and the C/iOS registration surface are now
-proven. The registry remains partial until native-call wall-time/resource
-budgets are defined and enforced for every shipped capability implementation.
+Manifest declarations, exact C/iOS registration and pre-dispatch lifecycle
+quotas are proven. Native callbacks are trusted app code: every future shipped
+module must additionally prove its own finite input/work bound and nonblocking
+implementation before registration. No native gameplay module ships yet.
 
 Evidence on 2026-08-21:
 
@@ -385,3 +386,32 @@ Evidence on 2026-08-21:
   0.122 ms maximum).
 - Native callback wall-time/resource budgets remain open; the physical-iPhone
   lifecycle/performance and TestFlight feel checks also remain open.
+
+## Twelfth executable increment — native dispatch containment
+
+C ABI v1.3 adds an explicit `max_calls_per_lifecycle` to each native function
+registration. The value is 1...64 (Swift defaults to one), resets independently
+for init/tick/suspend/resume and is charged before callback dispatch. Exceeding
+it never enters app code and traps/latches only that cartridge. Combined with
+the 64-function table limit, even the loosest host registration has a fixed
+4,096-dispatch lifecycle ceiling.
+
+The runtime deliberately does not claim a wall-clock timeout for synchronous
+owner-thread callbacks over borrowed guest memory: elapsed-time rejection after
+return cannot prevent a hang and would make deterministic game behavior depend
+on device speed. Native module implementations are trusted app code and must
+prove bounded, nonblocking work before shipping; WASM fuel plus dispatch quota
+prevents an untrusted cartridge from amplifying that unit. There are currently
+no shipped native gameplay modules.
+
+Evidence on 2026-08-21:
+
+- Public Rust black-box tests prove charge-before-dispatch, rejection without a
+  second app callback, failed-instance latch, invalid 0/>64 limits and quota
+  reset across successful ticks.
+- C ABI tests prove the same over actual callback pointers and guest memory;
+  malformed limits null the output handle and fail before runtime creation.
+- Swift 6 device/simulator package builds pass. On the booted iPhone 17 Pro
+  simulator, one standard cartridge completes two budgeted native calls before
+  Depth Well runs 600 frames (0.101 ms average, 0.109 ms p95, 0.117 ms max).
+- Physical-iPhone lifecycle/performance and TestFlight feel checks remain open.

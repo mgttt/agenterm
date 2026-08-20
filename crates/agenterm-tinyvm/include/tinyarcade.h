@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 2u
-#define TINYARCADE_ABI_VERSION 0x00010002u
+#define TINYARCADE_ABI_MINOR 3u
+#define TINYARCADE_ABI_VERSION 0x00010003u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -85,6 +85,10 @@ typedef struct tinyarcade_native_function_v1 {
     size_t field_len;
     uint32_t n_params;
     uint32_t n_results;
+    /* Charged before dispatch and reset for every init/tick/suspend/resume.
+     * Must be 1..64. The callback itself is trusted app code and must remain
+     * bounded and nonblocking. */
+    uint32_t max_calls_per_lifecycle;
     tinyarcade_native_callback_v1 callback;
     void* context;
 } tinyarcade_native_function_v1;
@@ -124,7 +128,8 @@ tinyarcade_status_v1 tinyarcade_v1_open(
     tinyarcade_runtime_v1** output);
 /* The table is consumed during open. Callback/context pairs are copied into
  * the runtime and must remain valid until that runtime is closed. At most 64
- * exact functions and 16 i32 parameters/results per function are accepted. */
+ * exact functions, 16 i32 parameters/results and 64 calls per lifecycle per
+ * function are accepted. */
 tinyarcade_status_v1 tinyarcade_v1_open_with_native_modules(
     const uint8_t* wasm,
     size_t wasm_len,

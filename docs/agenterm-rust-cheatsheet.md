@@ -117,6 +117,14 @@ failure into typed fail-closed state without unwinding across C. A Swift wrapper
 should own stable pointer storage rather than rely on `Data.withUnsafeBytes`
 beyond its closure.
 
+Do not describe elapsed-time checking after a synchronous native callback as a
+timeout: it cannot prevent a hang, and latching based on device speed makes a
+deterministic guest nondeterministic. Preemption requires a different ownership
+model (worker execution, copied/transactional memory and cancellable work), not
+a stopwatch around borrowed memory on the owner thread. For trusted app-compiled
+callbacks, require each implementation to be finite and nonblocking, then bound
+untrusted guest amplification with a per-lifecycle quota charged before dispatch.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

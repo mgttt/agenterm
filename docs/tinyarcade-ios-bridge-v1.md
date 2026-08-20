@@ -37,7 +37,7 @@ versioned binary release artifact without changing the app-facing product.
 
 ## Ownership
 
-ABI v1.2 exposes three non-interchangeable origins: bundled
+ABI v1.3 exposes three non-interchangeable origins: bundled
 `tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
 `tinyarcade_v1_open_private`. Every instance retains its immutable origin for
 UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
@@ -46,11 +46,19 @@ provenance.
 
 Bundled and reviewed origins may instead use their corresponding
 `*_with_native_modules` open. The host supplies at most 64 exact
-namespace/field/i32-signature registrations, with at most 16 parameters and 16
-results each. The table and its name pointers are borrowed only during open;
+namespace/field/i32-signature registrations, with at most 16 parameters, 16
+results and 64 calls per lifecycle each. The table and its name pointers are
+borrowed only during open;
 callback/context pairs remain valid until close. Swift's
 `TinyArcadeNativeFunctionV1` owns stable UTF-8 names and strongly retains each
 callback box for exactly that runtime lifetime.
+
+Every registration carries `max_calls_per_lifecycle` (`1...64`; Swift defaults
+to one). The runtime clears counters before each init, tick, suspend and resume,
+then charges the matching function before dispatch. An over-budget call never
+enters app code and traps/latches the cartridge. Because at most 64 functions
+can be registered, guest-driven native dispatch is globally bounded to at most
+4,096 calls in any lifecycle even under the loosest host table.
 
 A callback executes synchronously on the runtime owner thread and receives
 borrowed parameter/result buffers plus the complete bounds-checked guest linear
@@ -60,6 +68,14 @@ count, or returning nonzero from raw C traps and latches only that cartridge.
 These callbacks are trusted code already compiled into the app; cartridges
 cannot supply native implementations. Private-user opening intentionally has no
 variant that grants native modules.
+
+A synchronous callback cannot be safely preempted while it owns borrowed guest
+memory and an owner-thread context. Measuring elapsed time after it returns is
+not a timeout and would make behavior device-speed-dependent. Therefore each
+app-compiled capability implementation must also enforce finite input/work
+bounds and must never block on network, file I/O, locks or asynchronous work.
+The runtime quota prevents an untrusted guest from amplifying that bounded unit;
+it cannot repair an unbounded callback shipped by the app.
 
 An open call creates one opaque handle. The WASM bytes and config are
 copied/consumed during the call; caller pointers are not retained. The handle

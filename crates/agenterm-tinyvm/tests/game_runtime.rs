@@ -4,8 +4,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    GameInput, GameLimits, GameRuntime, Limits, NativeModuleRegistry, WasmError,
-    MAX_CARTRIDGE_BYTES,
+    GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, WasmError,
 };
 
 const CORE: &str = "tinyarcade:core/v1";
@@ -354,6 +354,84 @@ fn registered_versioned_native_module_is_bound_by_exact_signature() {
     );
     must_ok(runtime.tick(GameInput::default()), "tick native module");
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn native_dispatch_quota_is_charged_before_callback_and_resets_per_lifecycle() {
+    let wasm = game_module(
+        &[("fan:physics/v1", "step", 0)],
+        1,
+        &[0x10, 0, 0x1a, 0x10, 0, 0x1a, 0x41, 0, 0x0b],
+        &[],
+    );
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let mut registry = NativeModuleRegistry::new();
+    must_ok(
+        registry.register("fan:physics/v1", "step", 0, 1, move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(vec![0])
+        }),
+        "register one-call native module",
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            &registry,
+        ),
+        "load one-call native module",
+    );
+    assert!(matches!(
+        runtime.tick(GameInput::default()),
+        Err(WasmError::Trap("native capability call budget"))
+    ));
+    assert_eq!(
+        calls.get(),
+        1,
+        "over-budget dispatch must not call app code"
+    );
+    assert!(runtime.is_failed());
+
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let mut registry = NativeModuleRegistry::new();
+    must_ok(
+        registry.register_with_call_limit("fan:physics/v1", "step", 0, 1, 2, move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(vec![0])
+        }),
+        "register two-call native module",
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            &registry,
+        ),
+        "load two-call native module",
+    );
+    must_ok(runtime.tick(GameInput::default()), "first bounded tick");
+    must_ok(runtime.tick(GameInput::default()), "second bounded tick");
+    assert_eq!(calls.get(), 4, "quota must reset before each game tick");
+
+    for invalid in [0, MAX_NATIVE_CALLS_PER_LIFECYCLE + 1] {
+        assert!(matches!(
+            NativeModuleRegistry::new().register_with_call_limit(
+                "fan:physics/v1",
+                "step",
+                0,
+                1,
+                invalid,
+                |_, _| Ok(vec![0]),
+            ),
+            Err(WasmError::Trap("invalid native module registration"))
+        ));
+    }
 }
 
 #[test]
