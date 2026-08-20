@@ -66,11 +66,26 @@ pub(crate) fn run_pixel_window(
     let alive = Arc::new(AtomicBool::new(true));
     let proxy = event_loop.create_proxy();
     let wake_alive = Arc::clone(&alive);
+    // A wake is level-triggered: `dispatch_event` drains every ready producer
+    // when it runs, so a second notification queued while the first is
+    // unconsumed carries no new information. Without this gate a busy PTY
+    // queues one user event per output chunk. Cleared in `user_event` before
+    // the application sees the wake, so a producer that wakes during dispatch
+    // always queues again — duplicates are dropped, never the notification.
+    let wake_pending = Arc::new(AtomicBool::new(false));
+    let post_pending = Arc::clone(&wake_pending);
     let waker = WindowWaker::new(Arc::new(move || {
         if !wake_alive.load(Ordering::Acquire) {
             return Err(event_loop_closed());
         }
-        proxy.send_event(()).map_err(|_| event_loop_closed())
+        if post_pending.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        proxy.send_event(()).map_err(|error| {
+            post_pending.store(false, Ordering::Release);
+            let _ = error;
+            event_loop_closed()
+        })
     }));
     let mut runner = PixelWindowRunner {
         options,
@@ -80,6 +95,7 @@ pub(crate) fn run_pixel_window(
         surface: None,
         surface_size: None,
         waker,
+        wake_pending,
         alive: Arc::clone(&alive),
         modifiers: ModifierState::empty(),
         last_pointer: None,
@@ -283,6 +299,9 @@ struct PixelWindowRunner {
     surface: Option<PixelSurface>,
     surface_size: Option<(u32, u32)>,
     waker: WindowWaker,
+    /// Set while an unconsumed wake user-event is already queued. See the
+    /// waker in `run_pixel_window` for the level-triggered argument.
+    wake_pending: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     modifiers: ModifierState,
     last_pointer: Option<LogicalPoint>,
@@ -541,6 +560,10 @@ impl ApplicationHandler<()> for PixelWindowRunner {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: ()) {
+        // Released before the application sees the wake, so a producer that
+        // wakes during dispatch queues a fresh one instead of folding into the
+        // notification being consumed.
+        self.wake_pending.store(false, Ordering::Release);
         self.dispatch_event(event_loop, PixelWindowEvent::Wake);
     }
 
