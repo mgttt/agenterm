@@ -87,11 +87,11 @@ src/platform/adapters/       主机实现（物理目录）
 
 crates/agenterm-con/         第二产品 package：Cargo.toml + build.rs + 自有源码/测试
                              autobins=false；无跨回工作台树的 [[bin]]/[[test]] 路径
-  src/main.rs                宿主主体约 5.7k 行（见 §4 C1 债务）
+  src/main.rs                宿主主体 6,630 行（生产 5,502 + 测试 1,128；见 §4 C1 债务）
                              ConApp / ConTerminal / SessionStore /
                              Surface / impl PixelWindowApplication
   src/                       con 私有叶（不被主程序 mod 引用）
-  control.rs                 ATC1 固定控制语法（1,687 行，con 最大叶）
+  control.rs                 ATC1 固定控制语法（1,956 行，con 最大叶）
   control_pending.rs         wait/screenshot 容量、deadline、取消与 reply 所有权
   json.rs                    固定 schema 有界 JSON 编解码（825 行）
   agent_interface.rs         机器可读自省 / ui-snapshot 组装
@@ -175,7 +175,7 @@ Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发�
 | Win 主机 | `src/platform/adapters/windows/{frontend,remote_frontend}.rs` | remote 客户端；`remote_frontend` 巨石见 L2 |
 | Unix 主机 | `src/platform/adapters/unix/frontend/` | embedded 状态机；`mod`/`render` 巨石见 L2 |
 | 机制 crate | `crates/agenterm-platform/src/{selected,window,numeric,input,ipc,pty,process,shared_memory}.rs` | 无产品名；`numeric` 固化 native geometry 的 IEEE-754 取整叶 |
-| con 宿主 | `crates/agenterm-con/src/main.rs` | 约 5.7k 行巨石；VT 回调/终端状态机/应用状态与 paint policy 仍同居，见 §4 C1 |
+| con 宿主 | `crates/agenterm-con/src/main.rs` | 6,630 行巨石（con 源码 12,995 行的 51%）；VT 回调/终端状态机/应用状态与 paint policy 仍同居，见 §4 C1 |
 | con 自动化 | `crates/agenterm-con/src/{control,json,agent_interface}.rs` | ATC1 语法 + 有界 JSON + 自省；公开面契约归 `prd/PRD_02_26_con_control_cli.md` |
 | con 待决控制 | `crates/agenterm-con/src/control_pending.rs` | bounded wait/screenshot、deadline、tab/window 取消、reply exactly-once；session/frame 探针仍由宿主提供 |
 | con 性能观测 | `crates/agenterm-con/src/perf.rs` | 计数、platform-present 基线、稳定 JSON 投影与 owning 单测；不拥有渲染/PTY/control policy |

@@ -583,6 +583,31 @@ impl fmt::Display for PixelWindowError {
 
 impl std::error::Error for PixelWindowError {}
 
+/// Writes a host failure to the diagnostics record, so a GUI process that has
+/// no console — and may be about to exit — still says why.
+///
+/// Shared by both hosts rather than written per adapter: a failure that is
+/// only recorded on one platform teaches nothing about the other, and there
+/// is no per-OS behavior here to own.
+///
+/// Silently inert without the `runtime` feature, which is where the
+/// configuration root the record lives under comes from. Recording is a
+/// diagnostic aid; it must never become a reason a host cannot build.
+#[cfg(feature = "runtime")]
+pub(crate) fn record_host_failure(component: &str, error: &PixelWindowError) {
+    match error {
+        PixelWindowError::Unsupported { reason } => {
+            crate::diagnostics::record(component, "unsupported", reason);
+        }
+        PixelWindowError::Failed { code, message } => {
+            crate::diagnostics::record(component, code, message);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+pub(crate) fn record_host_failure(_component: &str, _error: &PixelWindowError) {}
+
 pub(crate) trait PixelWindowBackend {
     fn request_redraw(&self);
 

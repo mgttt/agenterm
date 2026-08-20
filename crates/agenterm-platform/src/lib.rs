@@ -398,6 +398,12 @@ pub mod process_window;
 #[cfg(feature = "runtime")]
 pub mod runtime;
 
+// Records failures that already carry a stable code. Host-neutral std only,
+// on top of the configuration root, so it needs no adapter split; it follows
+// `runtime` because that is where the configuration root comes from.
+#[cfg(feature = "runtime")]
+pub mod diagnostics;
+
 #[cfg(feature = "screenshot")]
 pub mod screenshot;
 
