@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 use agenterm_tinyvm::{
     CartridgeManifest, GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, Vm,
-    WasmError,
+    WasmError, WasmModule,
 };
 
 const MEM_CELLS: usize = 4_096;
@@ -89,8 +89,31 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
     } else {
         println!("native_capabilities=(none)");
     }
+    let module = match WasmModule::from_bytes_with(
+        &bytes,
+        Limits {
+            max_table_elems: 1_024,
+            max_memory_pages: 64,
+            max_steps: 1_000_000,
+        },
+    ) {
+        Ok(module) => module,
+        Err(error) => return cartridge_error(error),
+    };
+    println!("function_imports={}", module.imports().len());
+    for import in module.imports() {
+        let class = if import.module == "tinyarcade:core/v1" {
+            "core"
+        } else {
+            "native"
+        };
+        println!(
+            "import={}.{} class={class} params={} results={} i32_only={}",
+            import.module, import.field, import.n_params, import.n_results, import.i32_only
+        );
+    }
     if !execute {
-        println!("OK: canonical TinyArcade manifest");
+        println!("OK: canonical TinyArcade manifest and parseable WASM module");
         return ExitCode::SUCCESS;
     }
 

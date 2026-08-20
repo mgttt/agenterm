@@ -91,7 +91,7 @@ fn parse_payload(payload: &[u8]) -> Result<CartridgeManifest, WasmError> {
         return Err(WasmError::Decode("invalid game manifest"));
     }
     for (index, capability) in capabilities.iter().enumerate() {
-        if !valid_capability(capability)
+        if !valid_native_namespace(capability)
             || (index > 0 && capabilities[index - 1].as_str() >= capability.as_str())
         {
             return Err(WasmError::Decode("invalid game capability"));
@@ -121,13 +121,47 @@ fn valid_version(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
 }
 
-fn valid_capability(value: &str) -> bool {
-    value.contains(':')
+pub(crate) fn valid_native_namespace(value: &str) -> bool {
+    let Some((qualified_name, version)) = value.rsplit_once('/') else {
+        return false;
+    };
+    let Some((authority, module)) = qualified_name.split_once(':') else {
+        return false;
+    };
+    !authority.contains(':')
         && value.len() <= 128
-        && value.rsplit('/').next().is_some_and(|part| {
-            part.strip_prefix('v').is_some_and(|version| {
-                !version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit())
-            })
+        && valid_name_part(authority, true)
+        && valid_name_part(module, false)
+        && version.strip_prefix('v').is_some_and(|digits| {
+            !digits.is_empty()
+                && digits.len() <= 10
+                && digits.bytes().all(|byte| byte.is_ascii_digit())
+                && !digits.starts_with('0')
+        })
+}
+
+pub(crate) fn valid_native_field(value: &str) -> bool {
+    (1..=64).contains(&value.len())
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn valid_name_part(value: &str, allow_dot: bool) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'_' | b'-')
+                || (allow_dot && byte == b'.')
         })
 }
 

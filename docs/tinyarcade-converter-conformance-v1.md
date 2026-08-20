@@ -14,9 +14,12 @@ cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check path/to/game.wasm
 ```
 
-`inspect` parses canonical identity/schema metadata without executing guest
-code. `check` uses the private-import policy and therefore rejects every native
-module import. It then enforces a 2 MiB file ceiling, 64 memory pages, 1,024
+`inspect` parses canonical identity/schema metadata and the normal WASM import
+table without executing guest code. It reports every import's namespace,
+function field, i32 signature and core/native classification so a converter can
+give an exact compatibility report. `check` uses the private-import policy and
+therefore rejects every native module import. It then enforces a 2 MiB file
+ceiling, 64 memory pages, 1,024
 table elements, one million interpreted instructions per lifecycle call and
 the ordinary frame/audio/state byte budgets.
 

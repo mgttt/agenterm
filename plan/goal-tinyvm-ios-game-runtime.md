@@ -94,7 +94,9 @@ The cartridge remains an ordinary standards-valid WebAssembly module. The
 runtime does not add private opcodes or wrap executable bytes in a proprietary
 format. Platform services are standard function imports under versioned module
 names: v1 core uses `tinyarcade:core/v1`; future native modules receive their
-own versioned namespaces and must be present in a host capability registry.
+own canonical `authority:module/vN` namespaces and must be present in a host
+capability registry. Function names and i32 signatures remain in the standard
+import table, which the converter reports without executing the guest.
 Unknown namespaces fail closed. Metadata may live in a standard WASM custom
 section or adjacent signed manifest, so converters can emit and validate the
 same cartridge contract without depending on the interpreter implementation.

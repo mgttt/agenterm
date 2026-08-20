@@ -4,8 +4,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES, NativeModuleRegistry,
-    WasmError,
+    GameInput, GameLimits, GameRuntime, Limits, NativeModuleRegistry, WasmError,
+    MAX_CARTRIDGE_BYTES,
 };
 
 const CORE: &str = "tinyarcade:core/v1";
@@ -354,6 +354,30 @@ fn registered_versioned_native_module_is_bound_by_exact_signature() {
     );
     must_ok(runtime.tick(GameInput::default()), "tick native module");
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn native_module_names_are_canonical_and_major_versioned() {
+    let mut registry = NativeModuleRegistry::new();
+    must_ok(
+        registry.register("com.example:physics/v1", "step_world", 2, 1, |_, _| {
+            Ok(vec![0])
+        }),
+        "register reverse-DNS native module",
+    );
+    for (module, field) in [
+        ("Example:physics/v1", "step_world"),
+        ("com.example:physics/v01", "step_world"),
+        ("com.example:physics/v0", "step_world"),
+        ("com.example:physics/v1/extra", "step_world"),
+        ("com.example:physics/v1", "StepWorld"),
+        ("com.example:physics/v1", "step-world"),
+    ] {
+        assert!(matches!(
+            registry.register(module, field, 0, 0, |_, _| Ok(Vec::new())),
+            Err(WasmError::Trap("invalid native module registration"))
+        ));
+    }
 }
 
 #[test]

@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::mem;
 
+use crate::cartridge::{valid_native_field, valid_native_namespace};
 use crate::{CartridgeManifest, Limits, Val, WasmError, WasmInstance, WasmModule};
 
 /// Guest/host contract implemented by this module.
@@ -108,15 +109,9 @@ impl NativeModuleRegistry {
     where
         F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
     {
-        let versioned = module.rsplit('/').next().is_some_and(|part| {
-            part.strip_prefix('v').is_some_and(|version| {
-                !version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit())
-            })
-        });
         if module == ABI_MODULE
-            || !module.contains(':')
-            || !versioned
-            || field.is_empty()
+            || !valid_native_namespace(module)
+            || !valid_native_field(field)
             || self.find(module, field).is_some()
         {
             return Err(WasmError::Trap("invalid native module registration"));

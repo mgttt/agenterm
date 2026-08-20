@@ -27,8 +27,14 @@ repeated capability:
   namespace                  UTF-8 versioned import module name
 ```
 
-A native namespace uses a version suffix such as `studio:physics/v1`. The
-manifest capability set must equal the set of non-core import module names in
+A native namespace uses the canonical form `authority:module/vN`, such as
+`com.example:physics/v1`. Authority is a lower-case ASCII name and may use
+dots for reverse-DNS ownership; module uses lower-case ASCII letters, digits,
+`_` or `-`; `N` is a positive decimal major version without a leading zero.
+Imported native function fields use lower-case ASCII `snake_case`, begin with a
+letter and are at most 64 bytes. A breaking signature or semantic change must
+use a new namespace major version; old namespaces are never silently rebound.
+The manifest capability set must equal the set of non-core import module names in
 the WASM module and is encoded in ascending byte order. Duplicate or unordered
 declarations/imports, undeclared imports and unused declarations are rejected
 before instantiation.
@@ -97,6 +103,15 @@ signatures and attempts to replace `tinyarcade:core/v1` fail closed.
 Native capability callbacks are app code, not downloaded machine code. A
 cartridge never carries dylibs, JIT output, device-side AOT output, JavaScript,
 WASI or direct network access.
+
+The exact function import table is the machine-readable interface descriptor:
+module namespace, field, parameter count and result count all come from normal
+WASM sections. `tinyvm cartridge inspect` prints that table without executing
+the guest. Converters should preserve standard WASM imports and use this table
+to report missing host modules; they must not rewrite imports into private
+opcodes. A capability declaration is a compatibility requirement, not an
+entitlement: cartridge origin and host policy still decide whether a module is
+registered.
 
 ## Snapshot envelope
 
