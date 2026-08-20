@@ -2220,6 +2220,16 @@ a fresh resumed instance rebuilds from logical state and exposes the mismatch.
 Clear transition-owned pixels when the phase changes, then require the original
 and rebuilt instances to emit byte-identical render and audio on the next tick.
 
+For a portable deterministic replay, bind the exact executable hash in addition
+to manifest identity, capture the initial portable snapshot, and record only
+monotonic inputs plus exact output lengths/digests. Make the execution method
+verify the executable bytes itself; a separate `verify` method is too easy for
+an app or converter caller to omit. Validate every step and the checked complete
+wire length before resuming the runtime, otherwise a malformed late record can
+partially mutate the candidate before failure. Reserve the next trace slot
+before ticking as well: allocation failure after a successful guest tick makes
+the recorder and runtime disagree about which input has been committed.
+
 ## Secret-bearing artifact publishers need a one-way staging boundary
 
 Do not let a release manifest repeat executable identity or compatibility fields

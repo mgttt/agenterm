@@ -61,6 +61,14 @@ pub mod trust;
 #[cfg(feature = "cartridge-trust")]
 pub use trust::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
 
+#[cfg(feature = "replay")]
+pub mod replay;
+#[cfg(feature = "replay")]
+pub use replay::{
+    MAX_REPLAY_BYTES, MAX_REPLAY_SNAPSHOT_BYTES, MAX_REPLAY_STEPS, ReplayRecorderV1, ReplayStepV1,
+    ReplayTraceV1,
+};
+
 #[cfg(feature = "cartridge-trust")]
 pub mod cartridge_cache;
 #[cfg(feature = "cartridge-trust")]

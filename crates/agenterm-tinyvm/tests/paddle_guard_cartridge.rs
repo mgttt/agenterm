@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 use agenterm_tinyvm::{
     GameFrame, GameInput, GameLimits, GameRuntime, Indexed2dFrame, Limits, ToneBatch, WasmError,
 };
+#[cfg(feature = "replay")]
+use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1, cartridge_sha256};
 
 const LEFT: u32 = 1 << 0;
 const RIGHT: u32 = 1 << 1;
@@ -170,6 +172,53 @@ fn paddle_guard_suspend_resume_replays_exact_frame_and_audio() {
     let replay = tick(&mut restored, RIGHT, clock_ms);
     assert_eq!(expected.render, replay.render);
     assert_eq!(expected.audio, replay.audio);
+}
+
+#[cfg(feature = "replay")]
+#[test]
+fn paddle_guard_replay_covers_indexed_frames_and_tones() {
+    let wasm = build_cartridge();
+    let mut recorded = runtime(&wasm);
+    let mut recorder = must_ok(
+        ReplayRecorderV1::start(&wasm, &mut recorded),
+        "start Paddle Guard replay",
+    );
+    let mut saw_audio = false;
+    for (buttons, clock_ms) in [(PRIMARY, 0), (0, 0), (LEFT, 16), (RIGHT, 32)] {
+        let frame = must_ok(
+            recorder.record_tick(&mut recorded, GameInput { buttons, clock_ms }),
+            "record Paddle Guard tick",
+        );
+        saw_audio |= !frame.audio.is_empty();
+    }
+    assert!(saw_audio, "the replay must cover a real tone output");
+    let bytes = must_ok(recorder.finish(), "encode Paddle Guard replay");
+    assert_eq!(bytes.len(), 529);
+    assert_eq!(
+        cartridge_sha256(&bytes),
+        [
+            0xb9, 0xda, 0x8d, 0xd1, 0xc2, 0xff, 0x10, 0xa8, 0x72, 0x7a, 0x0b, 0xa8, 0x38, 0xb5,
+            0xe5, 0x98, 0x6e, 0x65, 0x27, 0x6a, 0x0b, 0x6b, 0xd4, 0x78, 0xbd, 0xcb, 0x4d, 0x3b,
+            0x04, 0xdd, 0x65, 0x24,
+        ],
+        "the checked-in input plan is the indexed-frame replay golden"
+    );
+    let trace = must_ok(ReplayTraceV1::decode(&bytes), "decode Paddle Guard replay");
+    assert_eq!(trace.steps.len(), 4);
+    assert!(trace.steps.iter().any(|step| step.audio_length > 0));
+    must_ok(
+        trace.verify_cartridge(&wasm),
+        "bind Paddle Guard replay cartridge",
+    );
+    let mut replayed = runtime(&wasm);
+    must_ok(
+        trace.replay(&wasm, &mut replayed, |_, frame| {
+            let decoded = Indexed2dFrame::decode(&frame.render)?;
+            assert_eq!((decoded.width, decoded.height), (160, 120));
+            Ok(())
+        }),
+        "replay Paddle Guard",
+    );
 }
 
 #[test]

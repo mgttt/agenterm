@@ -34,6 +34,7 @@ agenterm-tinyvm (35)
 ├── real-game proofs               [~]
 │   ├── Depth Well grid3d             [x]
 │   ├── Paddle Guard indexed2d        [x]
+│   ├── deterministic replay vectors  [x]
 │   └── physical-device play          [ ]
 ├── slot-A
 │   ├── control          [x]
@@ -143,6 +144,16 @@ complete-until-first-authentication protection，并拒绝 symlink、非 regular
 对象。损坏/不兼容存档不会在同一个已失败 runtime 上继续开新局，而是关闭候选、
 删除坏文件并创建第二个 fresh runtime。模拟器已证明覆盖、恢复、损坏/超限回退与
 symlink fail-closed；物理设备后台终止恢复仍未验证。
+
+标准化回放不另造游戏执行格式。`tinyarcade-replay-v1` 只保存精确卡带 SHA-256、
+manifest identity、初始 portable snapshot、单调的 input/clock，以及每帧 render/audio
+的长度和 SHA-256；执行时仍由原 `.wasm` 在 tinyvm 中生成完整输出并逐字节摘要核对。
+8 MiB 总上限、1 MiB snapshot、65,536 steps 与媒体上限在分配前验证，回放 API 自己
+绑定原始 `.wasm`，不依赖调用方记得先验 hash。Depth Well 与 Paddle Guard 已分别以
+grid3d、indexed2d 和真实 tone 形成固定长度/SHA-256 golden；CLI 可从文本输入计划
+确定性生成、验证且拒绝覆盖 `.tareplay`。未来 native import 仍走标准 versioned
+namespace 与 registry；回放不会携带代码、授予 capability 或伪造 native side
+effect，只会在同签名、确定性宿主行为下验证结果。
 
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`

@@ -44,6 +44,14 @@ Two compiler-produced reference cartridges own both media branches:
 WASM MVP modules built through the shared `build-rust-cartridge.sh` profile and
 accepted by this same converter path; neither receives a fixture-only loader.
 
+Converters should also retain deterministic replay vectors for representative
+gameplay and every bug they fix. `tinyvm replay record` turns a bounded
+`clock_ms buttons` input plan into a canonical `.tareplay`; `tinyvm replay
+check` binds it to the exact cartridge SHA-256 and regenerates every render and
+audio digest. The wire format, ceilings, commands and checked-in Depth
+Well/Paddle Guard goldens are specified in
+[`docs/tinyarcade-replay-v1.md`](tinyarcade-replay-v1.md).
+
 Passing this command establishes technical compatibility for a user's private
 library. It does not sign, publish or approve the game for the official catalog.
 Official review additionally owns product quality, rights/provenance, metadata,
@@ -55,3 +63,4 @@ The normative wire details remain in:
 - `docs/tinyarcade-media-stream-v1.md`
 - `docs/tinyarcade-signed-catalog-v1.md`
 - `docs/tinyarcade-catalog-transport-v1.md`
+- `docs/tinyarcade-replay-v1.md`

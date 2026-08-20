@@ -10,6 +10,8 @@ use agenterm_tinyvm::{
 
 #[cfg(feature = "cartridge-trust")]
 use agenterm_tinyvm::{CartridgeCache, CartridgeTrustStore, CatalogEntry, cartridge_sha256};
+#[cfg(feature = "replay")]
+use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
 #[cfg(feature = "cartridge-trust")]
 use ring::signature::{Ed25519KeyPair, KeyPair};
 
@@ -193,6 +195,161 @@ fn standard_depth_well_plays_and_restores_deterministically() {
         "decode clear event",
     );
     assert_eq!(clear_tone.kind, 2);
+}
+
+#[cfg(feature = "replay")]
+#[test]
+fn depth_well_replay_is_portable_bounded_and_tamper_evident() {
+    let wasm = build_cartridge();
+    let mut recorded = runtime(&wasm);
+    let mut recorder = must_ok(
+        ReplayRecorderV1::start(&wasm, &mut recorded),
+        "start Depth Well replay",
+    );
+    for input in [
+        GameInput {
+            buttons: 0,
+            clock_ms: 0,
+        },
+        GameInput {
+            buttons: 1,
+            clock_ms: 16,
+        },
+        GameInput {
+            buttons: 1 << 4,
+            clock_ms: 32,
+        },
+        GameInput {
+            buttons: 1 << 7,
+            clock_ms: 48,
+        },
+    ] {
+        must_ok(
+            recorder.record_tick(&mut recorded, input),
+            "record Depth Well tick",
+        );
+    }
+    assert!(
+        recorder
+            .record_tick(
+                &mut recorded,
+                GameInput {
+                    buttons: 0,
+                    clock_ms: 47,
+                },
+            )
+            .is_err()
+    );
+    let bytes = must_ok(recorder.finish(), "encode Depth Well replay");
+    assert_eq!(bytes.len(), 749);
+    assert_eq!(
+        cartridge_sha256(&bytes),
+        [
+            0x36, 0x71, 0x4a, 0x06, 0x42, 0x70, 0x0a, 0x91, 0x93, 0xde, 0xdb, 0x56, 0x49, 0xc6,
+            0x8d, 0x79, 0xe8, 0x89, 0x90, 0x6a, 0x55, 0x63, 0x29, 0x74, 0x2f, 0xa3, 0x60, 0xc6,
+            0xe0, 0x5c, 0xc0, 0xcf,
+        ],
+        "the checked-in input plan is the replay wire-format golden"
+    );
+    let trace = must_ok(ReplayTraceV1::decode(&bytes), "decode Depth Well replay");
+    must_ok(
+        trace.verify_cartridge(&wasm),
+        "bind Depth Well replay cartridge",
+    );
+    assert_eq!(must_ok(trace.encode(), "re-encode replay"), bytes);
+    let mut replayed = runtime(&wasm);
+    let mut frames = 0;
+    must_ok(
+        trace.replay(&wasm, &mut replayed, |index, frame| {
+            assert_eq!(index, frames);
+            assert!(!frame.render.is_empty());
+            frames += 1;
+            Ok(())
+        }),
+        "replay Depth Well",
+    );
+    assert_eq!(frames, 4);
+
+    let mut changed_wasm = wasm.clone();
+    changed_wasm[0] ^= 0xff;
+    assert!(trace.verify_cartridge(&changed_wasm).is_err());
+    assert!(
+        trace
+            .replay(&changed_wasm, &mut runtime(&wasm), |_, _| Ok(()))
+            .is_err(),
+        "replay execution must enforce its own exact-cartridge binding"
+    );
+    let mut changed_trace = bytes;
+    *changed_trace.last_mut().expect("replay byte") ^= 0xff;
+    let changed = must_ok(
+        ReplayTraceV1::decode(&changed_trace),
+        "decode changed digest",
+    );
+    assert!(
+        changed
+            .replay(&wasm, &mut runtime(&wasm), |_, _| Ok(()))
+            .is_err()
+    );
+}
+
+#[cfg(feature = "replay")]
+#[test]
+fn replay_cli_records_checks_reproduces_and_never_overwrites() {
+    let directory = tempfile::tempdir().expect("temporary replay fixture");
+    let wasm_path = directory.path().join("depth-well.wasm");
+    let first = directory.path().join("first.tareplay");
+    let second = directory.path().join("second.tareplay");
+    std::fs::write(&wasm_path, build_cartridge()).expect("write replay cartridge");
+    let inputs = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/depth-well-replay-v1.inputs");
+
+    for output in [&first, &second] {
+        let result = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+            .args(["replay", "record"])
+            .arg(&wasm_path)
+            .arg(&inputs)
+            .arg(output)
+            .output()
+            .expect("record replay through CLI");
+        assert!(
+            result.status.success(),
+            "record failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let first_bytes = std::fs::read(&first).expect("read first replay");
+    assert_eq!(
+        first_bytes,
+        std::fs::read(&second).expect("read reproduced replay")
+    );
+    assert_eq!(
+        cartridge_sha256(&first_bytes),
+        [
+            0x07, 0x01, 0xda, 0x3d, 0x81, 0x51, 0x72, 0x29, 0xfb, 0x56, 0x95, 0x06, 0xfe, 0xdd,
+            0x70, 0x06, 0x8b, 0xb8, 0x80, 0x9a, 0x99, 0x40, 0x62, 0x68, 0x20, 0x58, 0x0d, 0x87,
+            0x1f, 0xd6, 0xd1, 0x19,
+        ],
+        "the CLI and checked-in input plan define a stable converter golden"
+    );
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&first)
+        .output()
+        .expect("check replay through CLI");
+    assert!(checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("verified_frames=4"));
+
+    let overwrite = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "record"])
+        .arg(&wasm_path)
+        .arg(&inputs)
+        .arg(&first)
+        .output()
+        .expect("reject replay overwrite");
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("already exists"));
 }
 
 #[test]

@@ -20,6 +20,7 @@ tempfile = "3.25"
 [features]
 staticcore = []
 std = []
-ios-c-api = ["cartridge-trust"]
+ios-c-api = ["cartridge-trust", "replay"]
 cartridge-trust = ["std", "dep:ring"]
 catalog-publisher = ["cartridge-trust", "dep:base64", "dep:serde", "dep:serde_json"]
+replay = ["cartridge-trust"]

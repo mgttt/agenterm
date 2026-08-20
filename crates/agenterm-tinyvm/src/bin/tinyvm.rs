@@ -12,7 +12,9 @@ use std::process::ExitCode;
 
 #[cfg(feature = "catalog-publisher")]
 use std::collections::{BTreeMap, HashSet};
-#[cfg(feature = "catalog-publisher")]
+#[cfg(feature = "replay")]
+use std::io::Write;
+#[cfg(any(feature = "catalog-publisher", feature = "replay"))]
 use std::path::Path;
 
 #[cfg(feature = "catalog-publisher")]
@@ -28,6 +30,8 @@ use agenterm_tinyvm::{
 };
 #[cfg(feature = "catalog-publisher")]
 use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
+#[cfg(feature = "replay")]
+use agenterm_tinyvm::{MAX_REPLAY_BYTES, ReplayRecorderV1, ReplayTraceV1};
 
 const MEM_CELLS: usize = 4_096;
 const MAX_CARTRIDGE_BYTES: u64 = 2 * 1024 * 1024;
@@ -54,6 +58,23 @@ fn main() -> ExitCode {
             (Some("check"), Some(path), None) => run_cartridge(&path, true),
             _ => usage(),
         },
+        #[cfg(feature = "replay")]
+        Some("replay") => {
+            let operation = args.next();
+            let first = args.next();
+            let second = args.next();
+            let third = args.next();
+            let extra = args.next();
+            match (operation.as_deref(), first, second, third, extra) {
+                (Some("record"), Some(wasm), Some(inputs), Some(output), None) => {
+                    run_replay_record(&wasm, &inputs, &output)
+                }
+                (Some("check"), Some(wasm), Some(trace), None, None) => {
+                    run_replay_check(&wasm, &trace)
+                }
+                _ => usage(),
+            }
+        }
         #[cfg(feature = "catalog-publisher")]
         Some("catalog") => match (
             args.next().as_deref(),
@@ -81,7 +102,185 @@ fn usage() -> ExitCode {
     eprintln!("  tinyvm cartridge check FILE.wasm");
     #[cfg(feature = "catalog-publisher")]
     eprintln!("  tinyvm catalog build SOURCE.json ED25519-SEED OUTPUT-DIRECTORY");
+    #[cfg(feature = "replay")]
+    {
+        eprintln!("  tinyvm replay record FILE.wasm INPUTS.txt OUTPUT.tareplay");
+        eprintln!("  tinyvm replay check FILE.wasm TRACE.tareplay");
+    }
     ExitCode::FAILURE
+}
+
+#[cfg(feature = "replay")]
+fn run_replay_record(wasm_path: &str, inputs_path: &str, output_path: &str) -> ExitCode {
+    let result: Result<(String, String, usize, usize), String> = (|| {
+        let wasm = read_bounded_regular(Path::new(wasm_path), MAX_CARTRIDGE_BYTES, "cartridge")?;
+        let input_bytes =
+            read_bounded_regular(Path::new(inputs_path), 1024 * 1024, "replay input plan")?;
+        let inputs = parse_replay_inputs(&input_bytes)?;
+        let mut runtime = replay_runtime(&wasm)?;
+        let mut recorder = ReplayRecorderV1::start(&wasm, &mut runtime)
+            .map_err(|error| error.message().to_string())?;
+        for input in inputs {
+            recorder
+                .record_tick(&mut runtime, input)
+                .map_err(|error| error.message().to_string())?;
+        }
+        let trace = recorder
+            .finish()
+            .map_err(|error| error.message().to_string())?;
+        publish_new_file(Path::new(output_path), &trace)?;
+        let decoded = ReplayTraceV1::decode(&trace).map_err(|error| error.message().to_string())?;
+        Ok((
+            decoded.game_id,
+            decoded.game_version,
+            decoded.steps.len(),
+            trace.len(),
+        ))
+    })();
+    match result {
+        Ok((game_id, version, steps, bytes)) => {
+            println!("game_id={game_id}");
+            println!("game_version={version}");
+            println!("steps={steps}");
+            println!("replay_bytes={bytes}");
+            println!("OK: deterministic TinyArcade replay v1");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(feature = "replay")]
+fn run_replay_check(wasm_path: &str, trace_path: &str) -> ExitCode {
+    let result: Result<(String, String, usize), String> = (|| {
+        let wasm = read_bounded_regular(Path::new(wasm_path), MAX_CARTRIDGE_BYTES, "cartridge")?;
+        let bytes = read_bounded_regular(
+            Path::new(trace_path),
+            MAX_REPLAY_BYTES as u64,
+            "replay trace",
+        )?;
+        let trace = ReplayTraceV1::decode(&bytes).map_err(|error| error.message().to_string())?;
+        trace
+            .verify_cartridge(&wasm)
+            .map_err(|error| error.message().to_string())?;
+        let mut runtime = replay_runtime(&wasm)?;
+        let mut frames = 0usize;
+        trace
+            .replay(&wasm, &mut runtime, |_, _| {
+                frames += 1;
+                Ok(())
+            })
+            .map_err(|error| error.message().to_string())?;
+        Ok((trace.game_id, trace.game_version, frames))
+    })();
+    match result {
+        Ok((game_id, version, frames)) => {
+            println!("game_id={game_id}");
+            println!("game_version={version}");
+            println!("verified_frames={frames}");
+            println!("OK: replay matches exact cartridge outputs");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(feature = "replay")]
+fn replay_runtime(wasm: &[u8]) -> Result<GameRuntime, String> {
+    GameRuntime::from_private_bytes(
+        wasm,
+        Limits {
+            max_table_elems: 1_024,
+            max_memory_pages: 64,
+            max_steps: 1_000_000,
+        },
+        GameLimits::default(),
+        0x5441_5231,
+    )
+    .map_err(|error| error.message().to_string())
+}
+
+#[cfg(feature = "replay")]
+fn parse_replay_inputs(bytes: &[u8]) -> Result<Vec<GameInput>, String> {
+    let source = core::str::from_utf8(bytes).map_err(|_| "replay input plan is not UTF-8")?;
+    let mut inputs = Vec::new();
+    for (index, raw) in source.lines().enumerate() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.split_ascii_whitespace();
+        let clock = fields
+            .next()
+            .ok_or_else(|| format!("input line {} is empty", index + 1))?;
+        let buttons = fields
+            .next()
+            .ok_or_else(|| format!("input line {} needs clock and buttons", index + 1))?;
+        if fields.next().is_some() {
+            return Err(format!("input line {} has extra fields", index + 1));
+        }
+        if inputs.len() >= agenterm_tinyvm::replay::MAX_REPLAY_STEPS {
+            return Err("replay input plan exceeds step limit".into());
+        }
+        inputs
+            .try_reserve(1)
+            .map_err(|_| "replay input allocation".to_string())?;
+        inputs.push(GameInput {
+            clock_ms: parse_u32(clock)
+                .ok_or_else(|| format!("invalid clock on line {}", index + 1))?,
+            buttons: parse_u32(buttons)
+                .ok_or_else(|| format!("invalid buttons on line {}", index + 1))?,
+        });
+    }
+    if inputs.is_empty() {
+        return Err("replay input plan has no steps".into());
+    }
+    Ok(inputs)
+}
+
+#[cfg(feature = "replay")]
+fn parse_u32(value: &str) -> Option<u32> {
+    value.strip_prefix("0x").map_or_else(
+        || value.parse().ok(),
+        |hex| u32::from_str_radix(hex, 16).ok(),
+    )
+}
+
+#[cfg(feature = "replay")]
+fn publish_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if path.exists() {
+        return Err("replay output already exists".into());
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let leaf = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "replay output needs a UTF-8 leaf name".to_string())?;
+    let stage = parent.join(format!(".{leaf}.stage-{}", std::process::id()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&stage)
+            .map_err(|_| "cannot create replay staging file")?;
+        file.write_all(bytes)
+            .map_err(|_| "cannot write replay staging file")?;
+        file.sync_all()
+            .map_err(|_| "cannot flush replay staging file")?;
+        std::fs::hard_link(&stage, path).map_err(|_| "cannot promote replay output")?;
+        let _ = std::fs::remove_file(&stage);
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&stage);
+    }
+    result
 }
 
 #[cfg(feature = "catalog-publisher")]
@@ -276,13 +475,34 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
     result
 }
 
-#[cfg(feature = "catalog-publisher")]
+#[cfg(any(feature = "catalog-publisher", feature = "replay"))]
 fn read_bounded_regular(path: &Path, maximum: u64, label: &str) -> Result<Vec<u8>, String> {
     let metadata = std::fs::symlink_metadata(path).map_err(|_| format!("cannot stat {label}"))?;
     if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > maximum {
         return Err(format!("{label} is not a bounded non-empty regular file"));
     }
-    std::fs::read(path).map_err(|_| format!("cannot read {label}"))
+    let file = std::fs::File::open(path).map_err(|_| format!("cannot open {label}"))?;
+    let opened = file
+        .metadata()
+        .map_err(|_| format!("cannot inspect opened {label}"))?;
+    if !opened.file_type().is_file() || opened.len() == 0 || opened.len() > maximum {
+        return Err(format!("{label} changed outside its accepted bounds"));
+    }
+    let capacity = usize::try_from(maximum)
+        .ok()
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| format!("{label} limit is unsupported on this host"))?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(capacity)
+        .map_err(|_| format!("cannot allocate bounded {label}"))?;
+    file.take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| format!("cannot read {label}"))?;
+    if bytes.is_empty() || bytes.len() > maximum as usize {
+        return Err(format!("{label} changed outside its accepted bounds"));
+    }
+    Ok(bytes)
 }
 
 #[cfg(feature = "catalog-publisher")]

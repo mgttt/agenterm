@@ -53,6 +53,7 @@ tinyvm iOS game runtime
 │   ├── constrained compiler profile  [x]
 │   ├── Depth Well WASM vertical cut  [x]
 │   ├── Paddle Guard 2D vertical cut   [x]
+│   ├── portable replay goldens        [x]
 │   ├── frame-time/resource evidence  [~]
 │   └── suspend/resume/save evidence  [x]
 └── distribution gate                 [~]
@@ -814,3 +815,39 @@ Evidence on 2026-08-21:
   bytes x86_64. Its honest ceiling is now 1.375 MiB; the interpreter static core
   remains independently gated at 100 KiB and measures 70,904 bytes. Physical
   device background/termination behavior remains open, so the goal is partial.
+
+## Twenty-fifth executable increment — deterministic replay exchange
+
+The feature-gated replay owner turns a real cartridge session into a canonical,
+bounded `.tareplay` artifact. It stores no executable code or rendered payload:
+the exact cartridge SHA-256, manifest identity, initial portable snapshot,
+monotonic button/clock inputs and each render/audio length plus SHA-256 are
+enough for the runtime to regenerate and compare complete outputs. Replay
+execution verifies the supplied `.wasm` binding internally before it mutates a
+runtime, so a caller cannot substitute different bytes with the same manifest.
+
+The v1 decoder proves checked total length before allocation and caps the trace
+at 8 MiB, its snapshot at 1 MiB, its steps at 65,536 and each media result at
+the ordinary platform ceilings. The CLI records through private core-only
+policy and publishes a new trace without overwrite. The Rust API remains
+compatible with reviewed runtimes containing future versioned native imports;
+the caller must provide the same registered signatures and deterministic native
+behavior rather than receiving capability from the trace.
+
+Evidence on 2026-08-21:
+
+- Depth Well and Paddle Guard each record, encode, decode, re-encode and replay
+  four real inputs. Together they cover grid3d, indexed2d, movement, rotation,
+  hard drop and non-empty tone output.
+- Checked-in input plans have stable expected encoded length and SHA-256. A CLI
+  black box records the Depth Well vector twice byte-identically, checks all
+  four regenerated frames and refuses to overwrite an existing trace.
+- Backward clocks, unknown inputs, declared allocation abuse, changed cartridge
+  bytes and a changed output digest fail closed. The normative format is
+  [`docs/tinyarcade-replay-v1.md`](../docs/tinyarcade-replay-v1.md).
+- All 179 package tests, all-feature/all-target Clippy, replay feature isolation,
+  no-default library check, exact 70,904-byte static-core gate and iOS
+  device/universal-simulator Swift link pass. Linked consumers remain 1,290,216
+  bytes arm64 and 1,337,544 bytes x86_64 under the 1.375 MiB ceiling.
+- Physical-iPhone execution, live hosted catalog and Apple permission remain
+  open, so the overall runtime goal remains partial.

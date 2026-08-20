@@ -64,7 +64,7 @@ impl Default for GameLimits {
 }
 
 /// Complete deterministic input visible during one call to `game_tick`.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct GameInput {
     /// ABI v1 buttons packed using the stable [`button`] bit assignments.
     pub buttons: u32,
