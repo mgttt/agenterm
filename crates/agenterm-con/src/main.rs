@@ -543,7 +543,7 @@ Mouse coordinates are zero-based terminal cells. Positive wheel notches scroll u
 {config_location}
 Keys: font_size, cols, rows (all optional).
 CLI flags override config; config overrides defaults.
-Ctrl+wheel adjusts font size at runtime.",
+The tab column's z / Z buttons adjust font size at runtime.",
         control_examples = USAGE_CONTROL_EXAMPLES,
         shell_examples = USAGE_SHELL_EXAMPLES,
         config_location = USAGE_CONFIG_LOCATION,
@@ -640,7 +640,7 @@ struct ConTerminal {
     child_exit_code_encoded: Arc<AtomicU64>,
     child_exit_code: Option<i32>,
 
-    /// Logical font size in DIPs. Adjusted by Ctrl+wheel.
+    /// Logical font size in DIPs. Adjusted by the tab column's z / Z buttons.
     font_size_logical: f64,
 
     /// Physical cell metrics, recomputed whenever the font size or scale changes.
@@ -4341,16 +4341,23 @@ impl ConTerminal {
                 ..
             } => {
                 self.dirty.mark_full();
-                // Ctrl+wheel adjusts font size (wave 4); plain wheel scrolls.
-                if modifiers.control {
-                    let dir = match delta {
-                        WheelDelta::Lines { y, .. } => y,
-                        _ => 0.0,
-                    };
-                    if dir.abs() > 0.0 {
-                        self.zoom_font(window, dir > 0.0);
-                    }
-                } else {
+                // Interactive Ctrl+wheel font zoom is retired: the tab column's
+                // z/Z buttons own font size now, and a modifier-sensitive wheel
+                // made every scroll a chance to resize the grid by accident.
+                // Every wheel notch scrolls, Ctrl held or not. `zoom_font` stays
+                // reachable through the z/Z hit targets and through
+                // `send-wheel --ctrl`, which the zoom soak tests drive.
+                //
+                // if modifiers.control {
+                //     let dir = match delta {
+                //         WheelDelta::Lines { y, .. } => y,
+                //         _ => 0.0,
+                //     };
+                //     if dir.abs() > 0.0 {
+                //         self.zoom_font(window, dir > 0.0);
+                //     }
+                // } else { ... }
+                {
                     let lines = match delta {
                         WheelDelta::Lines { y, .. } => y,
                         WheelDelta::LogicalPixels { y, .. } => {
@@ -4714,7 +4721,7 @@ impl PixelWindowApplication for ConApp {
         if let PixelWindowEvent::MouseWheel {
             delta,
             position: Some(position),
-            modifiers,
+            ..
         } = &event
         {
             let metrics = window.metrics()?;
@@ -4724,12 +4731,12 @@ impl PixelWindowApplication for ConApp {
                 metrics.physical_height,
                 metrics.scale_factor,
             );
-            if !modifiers.control
-                && layout.sidebar.contains(
-                    (position.x * scale).max(0.0) as u32,
-                    (position.y * scale).max(0.0) as u32,
-                )
-            {
+            // No Ctrl exemption: Ctrl+wheel no longer zooms, so a modifier must
+            // not steal the sidebar's own scroll.
+            if layout.sidebar.contains(
+                (position.x * scale).max(0.0) as u32,
+                (position.y * scale).max(0.0) as u32,
+            ) {
                 let rows = match delta {
                     WheelDelta::Lines { y, .. } => {
                         agenterm_platform::numeric::round_f32(*y) as isize
