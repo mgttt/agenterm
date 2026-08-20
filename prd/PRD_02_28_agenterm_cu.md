@@ -110,6 +110,14 @@ boundary; it does not open raw OS APIs or fork a fifth screenshot stack.
   able to control everything a human can and receive the same feedback. The
   terminal surface is largely covered; the machine outside the terminal is not.
   `agenterm-cu` closes that half.
+- [ ] Living skill source is sibling-repo `moltbaby/skills/mcu` (`bin/mcu`).
+  This product's job is to align that desktop-bridge surface (discover,
+  a11y tree, local input, CDP page, verify, window geometry) onto the
+  command / grant / `libagenterm` ABI — not to stay a Spectacle window-placer.
+  Window placement ([32](PRD_02_32_cu_window_placement.md)) is one landed
+  slice. When this product and AgenTerm are mature enough to replace the
+  skill, `skills/mcu` archives and agents depend on this product line.
+  Provenance: [14](PRD_02_14_research_provenance.md) (lessons, not a TS copy).
 - [ ] the differentiator is direction, not parity. General computer-use tools
   drive a screen through screenshot + OCR + coordinate guessing. AgenTerm
   already publishes exact structured bounds through `ui-snapshot`, so AgenTerm

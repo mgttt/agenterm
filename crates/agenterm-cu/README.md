@@ -4,6 +4,19 @@
 surface for orchestrator agents to observe and actuate a desktop through
 structured data instead of screenshot/OCR coordinate guessing.
 
+## Living skill source (`moltbaby/skills/mcu`)
+
+The living desktop-bridge lab is sibling-repo `moltbaby/skills/mcu` (`bin/mcu`).
+This crate is the **product destination**: align that skill's surface
+(discover windows, a11y tree, local input, CDP page, verify, window geometry)
+onto AgenTerm's command / grant / `libagenterm` ABI. Do not transplant the
+TypeScript. Clean-room / provenance: [PRD 14](../../prd/PRD_02_14_research_provenance.md).
+
+Named window placement (`window-place`, Spectacle catalog, [PRD 32](../../prd/PRD_02_32_cu_window_placement.md))
+is one already-landed slice, not the whole goal. When this product and AgenTerm
+are mature enough to replace the skill, `skills/mcu` archives and agents depend
+on `agenterm-cu`. Until then, do not treat window-place as computer-use done.
+
 ## Intended agent loop
 
 Orchestrator agents (not humans staring at pixels) should run:
