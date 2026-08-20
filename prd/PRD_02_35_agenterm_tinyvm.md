@@ -109,8 +109,13 @@ metadata 与 deep link 协议见
 [`docs/tinyarcade-catalog-transport-v1.md`](../docs/tinyarcade-catalog-transport-v1.md)：
 Swift 严格限制 1 MiB/256 games、同源 HTTPS filename、display text/localizations、
 signed-entry 字段与只选中不执行的 `tinyarcade://game/<game-id>`。JSON 不取得执行
-授权；完整下载仍必须经过 signed entry 与 verified cache。真实 hosted catalog、
-transport client、审核澄清与物理设备仍未交付，因此 distribution 继续为 partial。
+授权；完整下载仍必须经过 signed entry 与 verified cache。Swift
+`TinyArcadeHTTPSClientV1` 已交付 app-owned transport：只允许 HTTPS/200/指定 MIME，
+拒绝 redirect，按声明长度和每个 delegate chunk 双重限流，cartridge 最终长度必须
+与 signed entry 一致；timeout、active requests 和 queued waiters 全部有界，Task
+取消会释放 in-flight 或 queued ownership。transport 成功不会自动 activate/open。
+真实 hosted catalog、审核澄清与物理设备仍未交付，因此 distribution 继续为
+partial。
 
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`

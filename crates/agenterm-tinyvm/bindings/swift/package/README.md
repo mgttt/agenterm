@@ -35,6 +35,13 @@ same-origin `{name}-{version}.wasm` filename. A generated
 downloads, activates or opens a cartridge. JSON discovery is not a substitute
 for cache/trust verification.
 
+`TinyArcadeHTTPSClientV1` streams official catalog and cartridge responses
+through strict status, MIME, redirect, timeout, declared-length and received-byte
+checks. It defaults to two active plus sixteen queued requests and exposes
+smaller bounded limits. Task cancellation stops in-flight work or removes a
+queued waiter. The returned cartridge `Data` must still be passed explicitly to
+`TinyArcadeCartridgeCacheV1.activate`; transport success grants no provenance.
+
 Generate a self-contained directory from the repository root:
 
 ```sh

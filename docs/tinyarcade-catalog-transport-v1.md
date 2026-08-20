@@ -74,6 +74,8 @@ The app supplies an HTTPS directory URL, such as
 URL: it contains no slash, traversal, query, fragment or percent-encoded path,
 ends in `-<game_version>.wasm`, and resolves on the same scheme/host/port as the
 directory. A configurable positive per-cartridge ceiling defaults to 8 MiB.
+The catalog document URL and cartridge directory must also share the same
+scheme, host and port before the client starts a request.
 
 The conventional publication layout is therefore:
 
@@ -84,9 +86,24 @@ https://partnernetsoftware.com/wasm/
 └── paddle-guard-0.1.0.wasm
 ```
 
-Transport code owns HTTPS policy, redirects, response status, timeout and the
-download byte ceiling. TinyVM owns none of those network decisions and a guest
-has no network import.
+`TinyArcadeHTTPSClientV1` is the reference app-side transport. It uses ephemeral
+HTTPS GET requests, requests identity encoding, clamps timeout to 5...120
+seconds, rejects every redirect and requires HTTP 200. Catalog responses require
+`application/json`; cartridge responses require `application/wasm` or
+`application/octet-stream`. A declared length above the ceiling fails before
+body acceptance, every received delegate chunk rechecks the remaining budget,
+and a cartridge's final received length must exactly match its signed entry.
+Task cancellation cancels the URLSession task and resumes the caller once.
+
+One client allows 1...4 active requests (default 2) and 0...64 queued requests
+(default 16). The same active limit is applied to URLSession's per-host
+connections. A saturated queue returns typed `requestQueueFull`; queued task
+cancellation removes and resumes that waiter rather than retaining it until a
+network slot opens. Thus both bytes and request ownership are bounded.
+
+The client returns discovery or cartridge bytes only. It does not activate the
+cache, open a runtime, add authentication headers or expose network to a guest.
+The app explicitly passes a complete cartridge response into the verified cache.
 
 ## Deep links
 

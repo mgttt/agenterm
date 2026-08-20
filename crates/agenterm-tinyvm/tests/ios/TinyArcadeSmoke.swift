@@ -2,6 +2,203 @@ import Foundation
 import UIKit
 import TinyArcade
 
+private final class TinyArcadeFixtureConcurrency: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = 0
+    private var peak = 0
+
+    func reset() {
+        lock.lock()
+        active = 0
+        peak = 0
+        lock.unlock()
+    }
+
+    func begin() {
+        lock.lock()
+        active += 1
+        peak = max(peak, active)
+        lock.unlock()
+    }
+
+    func end() {
+        lock.lock()
+        active -= 1
+        lock.unlock()
+    }
+
+    func peakValue() -> Int {
+        lock.lock()
+        let value = peak
+        lock.unlock()
+        return value
+    }
+
+    func activeValue() -> Int {
+        lock.lock()
+        let value = active
+        lock.unlock()
+        return value
+    }
+}
+
+private final class TinyArcadeFixtureURLProtocol: URLProtocol, @unchecked Sendable {
+    static let concurrency = TinyArcadeFixtureConcurrency()
+    private let lock = NSLock()
+    private var stopped = false
+    private var delayedWork: DispatchWorkItem?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "tinyarcade.test"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        switch url.path {
+        case "/catalog-v1.json":
+            respond(status: 200, mime: "application/json", body: Self.catalogData())
+        case "/short-catalog.json":
+            respond(
+                status: 200,
+                mime: "application/json",
+                body: Data(
+                    String(decoding: Self.catalogData(), as: UTF8.self)
+                        .replacingOccurrences(
+                            of: "paddle-guard-0.1.0.wasm",
+                            with: "paddle-guard-short-0.1.0.wasm"
+                        ).utf8
+                )
+            )
+        case "/wasm/paddle-guard-0.1.0.wasm":
+            respond(status: 200, mime: "application/wasm", body: Data(repeating: 0x2a, count: 5_280))
+        case "/wasm/paddle-guard-short-0.1.0.wasm":
+            respond(status: 200, mime: "application/wasm", body: Data(repeating: 0x2a, count: 5_279))
+        case "/oversize.json":
+            respond(
+                status: 200,
+                mime: "application/json",
+                body: Data(),
+                declaredLength: TinyArcadeCatalogV1.maximumDocumentBytes + 1
+            )
+        case "/wrong-mime.json":
+            respond(status: 200, mime: "text/plain", body: Self.catalogData())
+        case "/chunk-oversize.json":
+            respond(
+                status: 200,
+                mime: "application/json",
+                body: Data(count: TinyArcadeCatalogV1.maximumDocumentBytes + 1),
+                includesLength: false
+            )
+        case "/redirect.json":
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 302,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Location": "https://tinyarcade.test/catalog-v1.json"]
+            )!
+            client?.urlProtocol(
+                self,
+                wasRedirectedTo: URLRequest(
+                    url: URL(string: "https://tinyarcade.test/catalog-v1.json")!
+                ),
+                redirectResponse: response
+            )
+        case "/slow.json":
+            let work = DispatchWorkItem { [weak self] in
+                self?.respond(status: 200, mime: "application/json", body: Self.catalogData())
+            }
+            lock.lock()
+            delayedWork = work
+            let stopped = self.stopped
+            lock.unlock()
+            if stopped {
+                work.cancel()
+            } else {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: work)
+            }
+        case let path where path.hasPrefix("/limited-"):
+            Self.concurrency.begin()
+            let work = DispatchWorkItem { [weak self] in
+                self?.respond(status: 200, mime: "application/json", body: Self.catalogData())
+                Self.concurrency.end()
+            }
+            lock.lock()
+            delayedWork = work
+            lock.unlock()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1, execute: work)
+        default:
+            respond(status: 404, mime: "text/plain", body: Data())
+        }
+    }
+
+    override func stopLoading() {
+        lock.lock()
+        stopped = true
+        let work = delayedWork
+        delayedWork = nil
+        lock.unlock()
+        work?.cancel()
+    }
+
+    private func respond(
+        status: Int,
+        mime: String,
+        body: Data,
+        declaredLength: Int? = nil,
+        includesLength: Bool = true
+    ) {
+        lock.lock()
+        let stopped = self.stopped
+        lock.unlock()
+        guard !stopped, let url = request.url else { return }
+        var headers = ["Content-Type": mime]
+        if includesLength {
+            headers["Content-Length"] = String(declaredLength ?? body.count)
+        }
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: headers
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if !body.isEmpty { client?.urlProtocol(self, didLoad: body) }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    static func catalogData() -> Data {
+        let signature = Data(repeating: 0, count: 64).base64EncodedString()
+        return Data(
+            """
+            {
+              "schema_version": 1,
+              "catalog_id": "com.partnernet.tinyarcade",
+              "games": [{
+                "game_id": "com.partnernet.paddle-guard",
+                "game_version": "0.1.0",
+                "title": "Paddle Guard",
+                "summary": "Defend the field.",
+                "localizations": {
+                  "zh-Hans": {"title": "护盾弹球", "summary": "守住球场。"}
+                },
+                "cartridge": "paddle-guard-0.1.0.wasm",
+                "abi_version": 1,
+                "state_version": 1,
+                "wasm_length": 5280,
+                "wasm_sha256": "\(String(repeating: "0", count: 64))",
+                "signing_key_id": "catalog-test",
+                "signature": "\(signature)"
+              }]
+            }
+            """.utf8
+        )
+    }
+}
+
 @main
 struct TinyArcadeSmoke {
     static func appendLEB(_ value: Int, to output: inout [UInt8]) {
@@ -135,7 +332,7 @@ struct TinyArcadeSmoke {
     }
 
     @MainActor
-    static func main() throws {
+    static func main() async throws {
         precondition(tinyarcade_v1_abi_version() == TINYARCADE_ABI_VERSION)
         var config = tinyarcade_config_v1()
         precondition(tinyarcade_v1_default_config(&config) == TINYARCADE_OK)
@@ -180,31 +377,7 @@ struct TinyArcadeSmoke {
         try cache.close()
         try emptyTrust.close()
 
-        let catalogSignature = Data(repeating: 0, count: 64).base64EncodedString()
-        let catalogData = Data(
-            """
-            {
-              "schema_version": 1,
-              "catalog_id": "com.partnernet.tinyarcade",
-              "games": [{
-                "game_id": "com.partnernet.paddle-guard",
-                "game_version": "0.1.0",
-                "title": "Paddle Guard",
-                "summary": "Defend the field.",
-                "localizations": {
-                  "zh-Hans": {"title": "护盾弹球", "summary": "守住球场。"}
-                },
-                "cartridge": "paddle-guard-0.1.0.wasm",
-                "abi_version": 1,
-                "state_version": 1,
-                "wasm_length": 5280,
-                "wasm_sha256": "\(String(repeating: "0", count: 64))",
-                "signing_key_id": "catalog-test",
-                "signature": "\(catalogSignature)"
-              }]
-            }
-            """.utf8
-        )
+        let catalogData = TinyArcadeFixtureURLProtocol.catalogData()
         let catalogBaseURL = URL(string: "https://partnernetsoftware.com/wasm/")!
         let catalog = try TinyArcadeCatalogV1.decode(
             catalogData,
@@ -255,6 +428,140 @@ struct TinyArcadeSmoke {
         } catch let error as TinyArcadeCatalogDecodeError {
             precondition(error == .invalidEntry(0))
         }
+
+        let transportConfiguration = URLSessionConfiguration.ephemeral
+        transportConfiguration.protocolClasses = [TinyArcadeFixtureURLProtocol.self]
+        let transport = TinyArcadeHTTPSClientV1(
+            configuration: transportConfiguration,
+            timeoutInterval: 5
+        )
+        let fixtureRoot = URL(string: "https://tinyarcade.test/")!
+        do {
+            _ = try await transport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("catalog-v1.json"),
+                cartridgeBaseURL: URL(string: "https://other.test/wasm/")!
+            )
+            preconditionFailure("catalog and cartridge origins must match")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .invalidURL)
+        }
+        let fixtureCatalog = try await transport.fetchCatalog(
+            at: fixtureRoot.appendingPathComponent("catalog-v1.json"),
+            cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+        )
+        precondition(fixtureCatalog.games.count == 1)
+        let transportedCartridge = try await transport.fetchCartridge(fixtureCatalog.games[0])
+        precondition(transportedCartridge == Data(repeating: 0x2a, count: 5_280))
+
+        let shortCatalog = try await transport.fetchCatalog(
+            at: fixtureRoot.appendingPathComponent("short-catalog.json"),
+            cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+        )
+        do {
+            _ = try await transport.fetchCartridge(shortCatalog.games[0])
+            preconditionFailure("cartridge length must match its signed entry")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .lengthMismatch)
+        }
+
+        do {
+            _ = try await transport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("oversize.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+            preconditionFailure("declared oversize catalog must fail before body buffering")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .responseTooLarge)
+        }
+        do {
+            _ = try await transport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("chunk-oversize.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+            preconditionFailure("undeclared oversize body must fail while streaming")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .responseTooLarge)
+        }
+        do {
+            _ = try await transport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("wrong-mime.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+            preconditionFailure("wrong catalog MIME must fail")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .unsupportedContentType)
+        }
+        do {
+            _ = try await transport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("redirect.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+            preconditionFailure("catalog redirects must fail")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .redirectRejected)
+        }
+        let cancelledRequest = Task {
+            try await transport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("slow.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+        }
+        cancelledRequest.cancel()
+        do {
+            _ = try await cancelledRequest.value
+            preconditionFailure("cancelled catalog request must fail")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .cancelled)
+        }
+        TinyArcadeFixtureURLProtocol.concurrency.reset()
+        let limitedTransport = TinyArcadeHTTPSClientV1(
+            configuration: transportConfiguration,
+            timeoutInterval: 5,
+            maximumConcurrentRequests: 2
+        )
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<6 {
+                group.addTask {
+                    _ = try await limitedTransport.fetchCatalog(
+                        at: fixtureRoot.appendingPathComponent("limited-\(index).json"),
+                        cartridgeBaseURL: fixtureRoot.appendingPathComponent(
+                            "wasm",
+                            isDirectory: true
+                        )
+                    )
+                }
+            }
+            try await group.waitForAll()
+        }
+        precondition(TinyArcadeFixtureURLProtocol.concurrency.peakValue() == 2)
+
+        TinyArcadeFixtureURLProtocol.concurrency.reset()
+        let noQueueTransport = TinyArcadeHTTPSClientV1(
+            configuration: transportConfiguration,
+            timeoutInterval: 5,
+            maximumConcurrentRequests: 1,
+            maximumQueuedRequests: 0
+        )
+        let occupyingRequest = Task {
+            try await noQueueTransport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("limited-occupying.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+        }
+        for _ in 0..<10_000 where TinyArcadeFixtureURLProtocol.concurrency.activeValue() == 0 {
+            await Task.yield()
+        }
+        precondition(TinyArcadeFixtureURLProtocol.concurrency.activeValue() == 1)
+        do {
+            _ = try await noQueueTransport.fetchCatalog(
+                at: fixtureRoot.appendingPathComponent("limited-rejected.json"),
+                cartridgeBaseURL: fixtureRoot.appendingPathComponent("wasm", isDirectory: true)
+            )
+            preconditionFailure("a saturated zero-queue transport must reject")
+        } catch let error as TinyArcadeHTTPError {
+            precondition(error == .requestQueueFull)
+        }
+        _ = try await occupyingRequest.value
 
         var nativeCalls = 0
         let nativeRuntime = try TinyArcadeRuntimeV1(

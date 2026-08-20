@@ -682,3 +682,43 @@ Evidence on 2026-08-21:
 - A live hosted/signed catalog, bounded HTTPS client, public per-game universal
   links, moderation/commerce/age metadata, Apple permission and physical-device
   evidence remain open. Distribution and the overall goal are not complete.
+
+## Twenty-first executable increment — bounded app-owned HTTPS
+
+`TinyArcadeHTTPSClientV1` closes the network gap between official discovery and
+the verified cache without adding guest network authority. It issues ephemeral
+HTTPS GETs, requests identity encoding, clamps timeout to 5...120 seconds,
+rejects redirects and non-200 responses, and accepts only the catalog or WASM
+MIME types. Declared length is checked before body acceptance, every delegate
+chunk is checked against remaining capacity, and final cartridge length must
+equal the signed catalog record before `Data` returns.
+
+The client bounds global ownership as well as individual bytes: 1...4 active
+requests (default 2), 0...64 queued waiters (default 16), with the active limit
+also applied per host. Queue saturation returns `requestQueueFull`. Task
+cancellation cancels an in-flight URLSession task or removes a queued waiter;
+all completion paths resume exactly once. Transport never activates the cache
+or opens a runtime, so HTTPS success cannot create reviewed provenance.
+
+Evidence on 2026-08-21:
+
+- An in-process URLProtocol black box streams a valid catalog and exact 5,280
+  byte cartridge, rejects an oversized declared response before body buffering,
+  rejects an undeclared oversized body while chunks arrive, rejects a cartridge
+  shorter than its signed entry, rejects cross-origin catalog configuration,
+  wrong MIME and redirect, and proves in-flight Task cancellation.
+- Six concurrent requests through a limit-two client observe an exact peak of
+  two. A separate one-active/zero-queue client rejects its second request with
+  `requestQueueFull` while the first is visibly in flight.
+- The Swift 6 source builds with warnings as errors for generic iOS device and
+  universal simulator. On a booted iPhone 17 Pro simulator all transport cases
+  pass before the existing 600-frame Paddle Guard run (0.195 ms average, 0.246
+  ms p95, 0.973 ms maximum). The fully exercised linked smokes are 1,220,072
+  bytes arm64 and 1,280,608 bytes x86_64, within the 1.25 MiB consumer gate;
+  x86_64 has 30,112 bytes of remaining headroom.
+- The complete 174-test suite, Swift warnings-as-errors compilation,
+  all-feature/all-target Clippy with warnings denied, no-default library compile
+  and exact 70,904-byte static-core/self-test gate remain clean.
+- Live-server TLS/status/MIME evidence, hosted signed metadata, public universal
+  links, Apple permission and physical-iPhone behavior remain open. The runtime
+  goal is not complete.

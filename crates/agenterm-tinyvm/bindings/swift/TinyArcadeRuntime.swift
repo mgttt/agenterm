@@ -663,7 +663,7 @@ public struct TinyArcadeCatalogV1: Sendable {
         self.games = games
     }
 
-    private static func validBaseURL(_ url: URL) -> Bool {
+    fileprivate static func validBaseURL(_ url: URL) -> Bool {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return false
         }
@@ -676,7 +676,7 @@ public struct TinyArcadeCatalogV1: Sendable {
             && url.hasDirectoryPath
     }
 
-    private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+    fileprivate static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
         lhs.scheme == rhs.scheme && lhs.host == rhs.host && lhs.port == rhs.port
     }
 
@@ -785,6 +785,393 @@ public struct TinyArcadeCatalogV1: Sendable {
     private struct WireLocalization: Decodable {
         let title: String
         let summary: String
+    }
+}
+
+public enum TinyArcadeHTTPError: Error, Equatable {
+    case invalidURL
+    case invalidResponse
+    case httpStatus(Int)
+    case redirectRejected
+    case unsupportedContentType
+    case responseTooLarge
+    case lengthMismatch
+    case requestQueueFull
+    case cancelled
+    case transportFailure
+}
+
+/// App-owned HTTPS transport for official discovery and cartridge objects.
+/// Bytes are accumulated through URLSession delegate chunks and cancellation
+/// occurs as soon as the declared or received length exceeds the caller's cap.
+/// The guest and interpreter receive no network capability.
+public final class TinyArcadeHTTPSClientV1: @unchecked Sendable {
+    public let timeoutInterval: TimeInterval
+    public let maximumConcurrentRequests: Int
+    public let maximumQueuedRequests: Int
+    private let configuration: URLSessionConfiguration
+    private let requestGate: TinyArcadeHTTPRequestGate
+
+    public convenience init(
+        timeoutInterval: TimeInterval = 30,
+        maximumConcurrentRequests: Int = 2,
+        maximumQueuedRequests: Int = 16
+    ) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        self.init(
+            configuration: configuration,
+            timeoutInterval: timeoutInterval,
+            maximumConcurrentRequests: maximumConcurrentRequests,
+            maximumQueuedRequests: maximumQueuedRequests
+        )
+    }
+
+    init(
+        configuration: URLSessionConfiguration,
+        timeoutInterval: TimeInterval,
+        maximumConcurrentRequests: Int = 2,
+        maximumQueuedRequests: Int = 16
+    ) {
+        let requestLimit = min(4, max(1, maximumConcurrentRequests))
+        let queueLimit = min(64, max(0, maximumQueuedRequests))
+        let copied = configuration.copy() as? URLSessionConfiguration ?? configuration
+        copied.httpMaximumConnectionsPerHost = requestLimit
+        self.configuration = copied
+        self.timeoutInterval = min(120, max(5, timeoutInterval))
+        self.maximumConcurrentRequests = requestLimit
+        self.maximumQueuedRequests = queueLimit
+        requestGate = TinyArcadeHTTPRequestGate(
+            activeLimit: requestLimit,
+            queueLimit: queueLimit
+        )
+    }
+
+    public func fetchCatalog(
+        at catalogURL: URL,
+        cartridgeBaseURL: URL,
+        maximumCartridgeBytes: UInt64 = 8 * 1_024 * 1_024
+    ) async throws -> TinyArcadeCatalogV1 {
+        guard TinyArcadeCatalogV1.validBaseURL(cartridgeBaseURL),
+              TinyArcadeCatalogV1.sameOrigin(catalogURL, cartridgeBaseURL) else {
+            throw TinyArcadeHTTPError.invalidURL
+        }
+        let data = try await fetch(
+            catalogURL,
+            maximumBytes: TinyArcadeCatalogV1.maximumDocumentBytes,
+            exactBytes: nil,
+            contentTypes: ["application/json"]
+        )
+        return try TinyArcadeCatalogV1.decode(
+            data,
+            cartridgeBaseURL: cartridgeBaseURL,
+            maximumCartridgeBytes: maximumCartridgeBytes
+        )
+    }
+
+    public func fetchCartridge(_ game: TinyArcadeCatalogGameV1) async throws -> Data {
+        guard game.entry.wasmLength <= UInt64(Int.max) else {
+            throw TinyArcadeHTTPError.responseTooLarge
+        }
+        return try await fetch(
+            game.cartridgeURL,
+            maximumBytes: Int(game.entry.wasmLength),
+            exactBytes: Int(game.entry.wasmLength),
+            contentTypes: ["application/wasm", "application/octet-stream"]
+        )
+    }
+
+    private func fetch(
+        _ url: URL,
+        maximumBytes: Int,
+        exactBytes: Int?,
+        contentTypes: Set<String>
+    ) async throws -> Data {
+        guard url.scheme == "https", url.host != nil,
+              url.user == nil, url.password == nil,
+              url.fragment == nil, maximumBytes > 0 else {
+            throw TinyArcadeHTTPError.invalidURL
+        }
+        do {
+            try await requestGate.acquire()
+        } catch let error as TinyArcadeHTTPError {
+            throw error
+        } catch {
+            throw TinyArcadeHTTPError.cancelled
+        }
+        do {
+            let result = try await performFetch(
+                url,
+                maximumBytes: maximumBytes,
+                exactBytes: exactBytes,
+                contentTypes: contentTypes
+            )
+            await requestGate.release()
+            return result
+        } catch {
+            await requestGate.release()
+            throw error
+        }
+    }
+
+    private func performFetch(
+        _ url: URL,
+        maximumBytes: Int,
+        exactBytes: Int?,
+        contentTypes: Set<String>
+    ) async throws -> Data {
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: timeoutInterval
+        )
+        request.httpMethod = "GET"
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        let transfer = TinyArcadeBoundedHTTPTransfer(
+            configuration: configuration,
+            request: request,
+            maximumBytes: maximumBytes,
+            exactBytes: exactBytes,
+            contentTypes: contentTypes
+        )
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Data, any Error>) in
+                transfer.start(continuation)
+            }
+        } onCancel: {
+            transfer.cancel()
+        }
+    }
+}
+
+private actor TinyArcadeHTTPRequestGate {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
+    private let activeLimit: Int
+    private let queueLimit: Int
+    private var active = 0
+    private var waiters: [Waiter] = []
+
+    init(activeLimit: Int, queueLimit: Int) {
+        self.activeLimit = activeLimit
+        self.queueLimit = queueLimit
+    }
+
+    func acquire() async throws {
+        try Task.checkCancellation()
+        if active < activeLimit {
+            active += 1
+            return
+        }
+        guard waiters.count < queueLimit else {
+            throw TinyArcadeHTTPError.requestQueueFull
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, any Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: TinyArcadeHTTPError.cancelled)
+                } else {
+                    waiters.append(Waiter(id: id, continuation: continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            active -= 1
+        } else {
+            waiters.removeFirst().continuation.resume()
+        }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: TinyArcadeHTTPError.cancelled)
+    }
+}
+
+private final class TinyArcadeBoundedHTTPTransfer: NSObject,
+    URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private let configuration: URLSessionConfiguration
+    private let request: URLRequest
+    private let maximumBytes: Int
+    private let exactBytes: Int?
+    private let contentTypes: Set<String>
+    private let lock = NSLock()
+    private let delegateQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
+    private var continuation: CheckedContinuation<Data, any Error>?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var data = Data()
+    private var completed = false
+    private var cancellationRequested = false
+
+    init(
+        configuration: URLSessionConfiguration,
+        request: URLRequest,
+        maximumBytes: Int,
+        exactBytes: Int?,
+        contentTypes: Set<String>
+    ) {
+        self.configuration = configuration
+        self.request = request
+        self.maximumBytes = maximumBytes
+        self.exactBytes = exactBytes
+        self.contentTypes = contentTypes
+    }
+
+    func start(_ continuation: CheckedContinuation<Data, any Error>) {
+        lock.lock()
+        if completed || cancellationRequested {
+            completed = true
+            lock.unlock()
+            continuation.resume(throwing: TinyArcadeHTTPError.cancelled)
+            return
+        }
+        self.continuation = continuation
+        let session = URLSession(
+            configuration: configuration,
+            delegate: self,
+            delegateQueue: delegateQueue
+        )
+        let task = session.dataTask(with: request)
+        self.session = session
+        self.task = task
+        lock.unlock()
+        task.resume()
+    }
+
+    func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let task = self.task
+        let hasContinuation = continuation != nil
+        lock.unlock()
+        task?.cancel()
+        if hasContinuation { finish(.failure(TinyArcadeHTTPError.cancelled)) }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+        finish(.failure(TinyArcadeHTTPError.redirectRejected))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let response = response as? HTTPURLResponse else {
+            completionHandler(.cancel)
+            finish(.failure(TinyArcadeHTTPError.invalidResponse))
+            return
+        }
+        guard response.statusCode == 200 else {
+            completionHandler(.cancel)
+            finish(.failure(TinyArcadeHTTPError.httpStatus(response.statusCode)))
+            return
+        }
+        guard let mime = response.mimeType?.lowercased(), contentTypes.contains(mime) else {
+            completionHandler(.cancel)
+            finish(.failure(TinyArcadeHTTPError.unsupportedContentType))
+            return
+        }
+        let declared = response.expectedContentLength
+        if declared > Int64(maximumBytes) {
+            completionHandler(.cancel)
+            finish(.failure(TinyArcadeHTTPError.responseTooLarge))
+            return
+        }
+        if let exactBytes, declared >= 0, declared != Int64(exactBytes) {
+            completionHandler(.cancel)
+            finish(.failure(TinyArcadeHTTPError.lengthMismatch))
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive chunk: Data
+    ) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        guard chunk.count <= maximumBytes - data.count else {
+            let task = self.task
+            lock.unlock()
+            task?.cancel()
+            finish(.failure(TinyArcadeHTTPError.responseTooLarge))
+            return
+        }
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: (any Error)?
+    ) {
+        if let error {
+            let code = (error as NSError).code
+            finish(
+                .failure(
+                    code == NSURLErrorCancelled
+                        ? TinyArcadeHTTPError.cancelled
+                        : TinyArcadeHTTPError.transportFailure
+                )
+            )
+            return
+        }
+        lock.lock()
+        let received = data
+        lock.unlock()
+        if let exactBytes, received.count != exactBytes {
+            finish(.failure(TinyArcadeHTTPError.lengthMismatch))
+        } else {
+            finish(.success(received))
+        }
+    }
+
+    private func finish(_ result: Result<Data, any Error>) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let session = self.session
+        self.task = nil
+        self.session = nil
+        lock.unlock()
+        session?.invalidateAndCancel()
+        continuation?.resume(with: result)
     }
 }
 

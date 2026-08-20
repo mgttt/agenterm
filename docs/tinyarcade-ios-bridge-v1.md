@@ -42,6 +42,13 @@ same-origin cartridge filenames plus selection-only deep links, but never
 performs a request or grants execution trust. This keeps transport policy in
 the app while giving sites/converters one interoperable lobby schema.
 
+`TinyArcadeHTTPSClientV1` is the bounded app-owned transport between that
+schema and the verified cache. It streams URLSession delegate chunks rather
+than buffering an unchecked `data(from:)` result, rejects redirects and
+non-200/MIME mismatches, checks declared and received lengths, propagates Task
+cancellation, and bounds both active and queued requests. It still exposes no
+network import to WASM and never opens or activates content implicitly.
+
 ## Ownership
 
 ABI v1.4 exposes three non-interchangeable origins: bundled
@@ -190,6 +197,10 @@ owner and proves that a cartridge naming an absent trust key cannot activate.
 Rust's public C black box separately installs a valid signed cartridge, reloads
 its exact bytes, rejects cross-thread access, then proves live revocation clears
 the pending copy result and blocks the cached object.
+An in-process URLProtocol fixture additionally proves the Swift transport's
+catalog/cartridge success path, early declared-length rejection, MIME and
+redirect failure, in-flight cancellation, exact active concurrency and typed
+zero-queue saturation without relying on an external server.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,
