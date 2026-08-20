@@ -354,5 +354,9 @@ Evidence on 2026-08-21:
 - A generic `iphoneos` build with signing disabled links successfully after the
   UI switch, and the cartridge preparation/conformance script runs in a shell
   where Cargo is installed but absent from `PATH`.
+- `nostalgia-arcade` 0.16.4 (29) was archived with automatic signing and
+  accepted by App Store Connect for TestFlight processing. Build 28 was first
+  rejected as already used, so the build number was advanced and committed
+  before the successful archive/upload.
 - A physical-iPhone lifecycle/performance session and TestFlight feel check
   remain open; this goal is not complete until that device evidence exists.
