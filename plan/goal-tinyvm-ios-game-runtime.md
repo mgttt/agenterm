@@ -436,3 +436,33 @@ Evidence on 2026-08-21:
   callback-failure and native-dispatch-budget tests remain the public trap
   isolation owner.
 - Physical-iPhone lifecycle/performance and TestFlight feel checks remain open.
+
+## Fourteenth executable increment — v1.3 consumer-app delivery
+
+The real `nostalgia-arcade` consumer regenerated its app-local Swift package
+from the current TinyVM main and linked the C ABI v1.3 XCFramework into both
+simulator and generic iOS-device targets. Depth Well remains the same ordinary
+6,076-byte WASM 1.0 cartridge with only the seven `tinyarcade:core/v1` imports;
+the native-import registry is available to future reviewed cartridges without
+granting this cartridge any additional capability.
+
+The WASM-owned route now preserves the product's untimed VoiceOver contract:
+automatic gravity stops while assist mode is active, but explicit player input
+continues to execute. The new WASM session key also participates in the app's
+central UI-test reset, preventing a previous game-over snapshot from leaking
+between language, accessibility and navigation scenarios.
+
+Evidence on 2026-08-21:
+
+- The complete iPhone 17 Pro simulator app plan passed 39 tests with zero
+  failures; five iPad-viewport-only cases were explicitly skipped (44 total).
+- A focused post-pull gate re-proved the real cartridge unit tests plus the
+  three repaired language/accessibility UI paths, and a generic `iphoneos`
+  build linked successfully with signing disabled.
+- The signed `nostalgia-arcade` 0.16.4 (30) archive contains an arm64 app and a
+  cartridge whose SHA-256 exactly matches the converter-checked input. Xcode
+  accepted the upload and reported that the package entered App Store Connect
+  processing.
+- App Store Connect processing is not physical-device evidence. The
+  physical-iPhone lifecycle/performance session and TestFlight feel check
+  remain open, so this goal remains incomplete.
