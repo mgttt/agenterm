@@ -28,10 +28,10 @@ tinyvm iOS game runtime
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [~]
 │   └── storage without guest network [~]
-├── artifact trust                    [ ]
+├── artifact trust                    [~]
 │   ├── manifest + compatibility      [x]
-│   ├── content hash/signature        [ ]
-│   ├── atomic cache/rollback         [ ]
+│   ├── content hash/signature        [x]
+│   ├── atomic cache/rollback         [x]
 │   └── reviewed catalog only         [ ]
 ├── cartridge ownership              [ ]
 │   ├── official reviewed catalog     [ ]
@@ -231,3 +231,26 @@ Evidence on 2026-08-21:
 - Repeating the same hard drop after restore produces byte-identical render and
   audio under a 100,000-instruction per-call ceiling.
 - Physical iPhone rendering/input and measured frame-time evidence remain open.
+
+## Sixth executable increment — signed objects and atomic rollback
+
+Official catalog entries now use a canonical Ed25519 message binding game and
+schema identity to the exact object length and SHA-256. An app-bundled keyring
+supports key rotation, key revocation and content-hash revocation. Verification
+also parses the embedded WASM manifest and requires it to match the signed
+record before runtime loading.
+
+The app-owned cache stores verified content-addressed objects and atomically
+promotes one fixed-size current/previous activation record. Current load and
+rollback both re-verify bytes against the current trust/revocation state;
+previously valid cached bytes never bypass a later revocation. Cache calls are
+owned by the app's single runtime actor and are not a concurrent downloader.
+
+Evidence on 2026-08-21:
+
+- A signed real Depth Well object verifies; one changed byte is rejected.
+- Revoking either its key or content hash rejects the otherwise valid object.
+- Two valid generations activate and roll back; revoking the previous
+  generation prevents reactivation.
+- Trust/cache code builds for arm64 iOS device and simulator; the no-feature
+  static interpreter core remains independent of the crypto dependency.

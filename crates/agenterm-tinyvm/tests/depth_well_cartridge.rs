@@ -7,6 +7,11 @@ use agenterm_tinyvm::{
     GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, WasmError,
 };
 
+#[cfg(feature = "cartridge-trust")]
+use agenterm_tinyvm::{CartridgeCache, CartridgeTrustStore, CatalogEntry, cartridge_sha256};
+#[cfg(feature = "cartridge-trust")]
+use ring::signature::{Ed25519KeyPair, KeyPair};
+
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
         Ok(value) => value,
@@ -180,4 +185,115 @@ fn standard_depth_well_plays_and_restores_deterministically() {
         "decode clear event",
     );
     assert_eq!(clear_tone.kind, 2);
+}
+
+#[cfg(feature = "cartridge-trust")]
+#[test]
+fn reviewed_depth_well_requires_exact_signed_bytes_and_honours_revocation() {
+    let wasm = build_cartridge();
+    let key_pair = Ed25519KeyPair::from_seed_unchecked(&[0x2a; 32]).expect("test signing key");
+    let mut entry = CatalogEntry {
+        game_id: "com.partnernet.depth-well".into(),
+        game_version: "0.1.0".into(),
+        abi_version: 1,
+        state_version: 1,
+        wasm_length: wasm.len() as u64,
+        wasm_sha256: cartridge_sha256(&wasm),
+        signing_key_id: "catalog-2026-a".into(),
+        signature: [0; 64],
+    };
+    let signing_bytes = must_ok(entry.signing_bytes(), "encode signed catalog entry");
+    entry
+        .signature
+        .copy_from_slice(key_pair.sign(&signing_bytes).as_ref());
+
+    let mut trust = CartridgeTrustStore::new();
+    must_ok(
+        trust.add_key("catalog-2026-a", key_pair.public_key().as_ref()),
+        "add catalog key",
+    );
+    let manifest = must_ok(trust.verify(&entry, &wasm), "verify reviewed cartridge");
+    assert_eq!(manifest.game_id, entry.game_id);
+
+    let mut changed = wasm.clone();
+    let last = changed.len() - 1;
+    changed[last] ^= 1;
+    assert!(trust.verify(&entry, &changed).is_err());
+
+    trust.revoke_content(entry.wasm_sha256);
+    assert!(trust.verify(&entry, &wasm).is_err());
+
+    let mut rotated = CartridgeTrustStore::new();
+    must_ok(
+        rotated.add_key("catalog-2026-a", key_pair.public_key().as_ref()),
+        "add key before revocation",
+    );
+    must_ok(rotated.revoke_key("catalog-2026-a"), "revoke catalog key");
+    assert!(rotated.verify(&entry, &wasm).is_err());
+}
+
+#[cfg(feature = "cartridge-trust")]
+#[test]
+fn signed_cache_activation_and_rollback_reverify_current_trust() {
+    let wasm = build_cartridge();
+    let key_pair = Ed25519KeyPair::from_seed_unchecked(&[0x3b; 32]).expect("test signing key");
+    let signed = |bytes: &[u8]| {
+        let mut entry = CatalogEntry {
+            game_id: "com.partnernet.depth-well".into(),
+            game_version: "0.1.0".into(),
+            abi_version: 1,
+            state_version: 1,
+            wasm_length: bytes.len() as u64,
+            wasm_sha256: cartridge_sha256(bytes),
+            signing_key_id: "catalog-cache-test".into(),
+            signature: [0; 64],
+        };
+        let signing = must_ok(entry.signing_bytes(), "cache entry signing bytes");
+        entry
+            .signature
+            .copy_from_slice(key_pair.sign(&signing).as_ref());
+        entry
+    };
+    let v1 = signed(&wasm);
+    // A standard unknown custom section makes a distinct valid generation
+    // without changing the cartridge's declared semantic version.
+    let mut wasm_v2 = wasm.clone();
+    wasm_v2.extend_from_slice(&[0, 17, 16]);
+    wasm_v2.extend_from_slice(b"cache-generation");
+    let v2 = signed(&wasm_v2);
+
+    let mut trust = CartridgeTrustStore::new();
+    must_ok(
+        trust.add_key("catalog-cache-test", key_pair.public_key().as_ref()),
+        "add cache test key",
+    );
+    let directory = tempfile::tempdir().expect("temporary cartridge cache");
+    let cache = must_ok(
+        CartridgeCache::open(directory.path(), 16 * 1024),
+        "open cache",
+    );
+    must_ok(cache.activate(&v1, &wasm, &trust), "activate v1");
+    assert_eq!(
+        must_ok(
+            cache.load_active("com.partnernet.depth-well", &v1, &trust),
+            "load v1",
+        ),
+        wasm
+    );
+    must_ok(cache.activate(&v2, &wasm_v2, &trust), "activate v2");
+    assert_eq!(
+        must_ok(
+            cache.rollback("com.partnernet.depth-well", &v1, &trust),
+            "rollback to v1",
+        ),
+        wasm
+    );
+
+    trust.revoke_content(v2.wasm_sha256);
+    assert!(
+        cache
+            .rollback("com.partnernet.depth-well", &v2, &trust)
+            .is_err(),
+        "revoked previous generation must not reactivate"
+    );
 }

@@ -204,6 +204,8 @@ name = "agenterm-tinyvm"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "ring",
+ "tempfile",
 ]
 
 [[package]]

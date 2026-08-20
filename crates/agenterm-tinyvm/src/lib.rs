@@ -54,6 +54,16 @@ pub use game::{
 pub mod media;
 pub use media::{Grid3dCell, Grid3dFrame, ToneBatch, ToneEvent};
 
+#[cfg(feature = "cartridge-trust")]
+pub mod trust;
+#[cfg(feature = "cartridge-trust")]
+pub use trust::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
+
+#[cfg(feature = "cartridge-trust")]
+pub mod cartridge_cache;
+#[cfg(feature = "cartridge-trust")]
+pub use cartridge_cache::CartridgeCache;
+
 #[cfg(feature = "ios-c-api")]
 mod ios_c_api;
 
