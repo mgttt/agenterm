@@ -6,6 +6,7 @@
 
 use alloc::rc::Rc;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cell::{Ref, RefCell, RefMut};
 
 use crate::{
@@ -119,10 +120,14 @@ enum Function {
     FdPrestatGet,
     FdPrestatDirName,
     FdClose,
+    FdRead,
+    FdWrite,
+    FdSeek,
+    FdFilestatGet,
 }
 
 impl Function {
-    const COUNT: usize = 9;
+    const COUNT: usize = 13;
     const ALL: [Self; Self::COUNT] = [
         Self::ArgsGet,
         Self::ArgsSizesGet,
@@ -133,6 +138,10 @@ impl Function {
         Self::FdPrestatGet,
         Self::FdPrestatDirName,
         Self::FdClose,
+        Self::FdRead,
+        Self::FdWrite,
+        Self::FdSeek,
+        Self::FdFilestatGet,
     ];
 
     fn from_name(name: &str) -> Option<Self> {
@@ -146,6 +155,10 @@ impl Function {
             "fd_prestat_get" => Self::FdPrestatGet,
             "fd_prestat_dir_name" => Self::FdPrestatDirName,
             "fd_close" => Self::FdClose,
+            "fd_read" => Self::FdRead,
+            "fd_write" => Self::FdWrite,
+            "fd_seek" => Self::FdSeek,
+            "fd_filestat_get" => Self::FdFilestatGet,
             _ => return None,
         })
     }
@@ -161,6 +174,10 @@ impl Function {
             Self::FdPrestatGet => "fd_prestat_get",
             Self::FdPrestatDirName => "fd_prestat_dir_name",
             Self::FdClose => "fd_close",
+            Self::FdRead => "fd_read",
+            Self::FdWrite => "fd_write",
+            Self::FdSeek => "fd_seek",
+            Self::FdFilestatGet => "fd_filestat_get",
         }
     }
 
@@ -168,6 +185,18 @@ impl Function {
         const I32_I32: &[ValueType] = &[ValueType::I32, ValueType::I32];
         const I32_I32_I32: &[ValueType] = &[ValueType::I32, ValueType::I32, ValueType::I32];
         const CLOCK: &[ValueType] = &[ValueType::I32, ValueType::I64, ValueType::I32];
+        const FOUR_I32: &[ValueType] = &[
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I32,
+        ];
+        const SEEK: &[ValueType] = &[
+            ValueType::I32,
+            ValueType::I64,
+            ValueType::I32,
+            ValueType::I32,
+        ];
         const I32: &[ValueType] = &[ValueType::I32];
         match self {
             Self::ArgsGet
@@ -179,6 +208,9 @@ impl Function {
             Self::FdPrestatDirName => (I32_I32_I32, I32),
             Self::ClockTimeGet => (CLOCK, I32),
             Self::FdClose => (I32, I32),
+            Self::FdRead | Self::FdWrite => (FOUR_I32, I32),
+            Self::FdSeek => (SEEK, I32),
+            Self::FdFilestatGet => (I32_I32, I32),
         }
     }
 
@@ -218,6 +250,10 @@ fn dispatch<B: HostBackend>(
         Function::FdPrestatGet => fd_prestat_get(context, args, memory),
         Function::FdPrestatDirName => fd_prestat_dir_name(context, args, memory),
         Function::FdClose => fd_close(context, args),
+        Function::FdRead => fd_read(context, args, memory),
+        Function::FdWrite => fd_write(context, args, memory),
+        Function::FdSeek => fd_seek(context, args, memory),
+        Function::FdFilestatGet => fd_filestat_get(context, args, memory),
     }
 }
 
@@ -437,6 +473,208 @@ fn fd_close<B: HostBackend>(context: &Rc<RefCell<HostContext<B>>>, args: &[Val])
         Ok(()) => WasiErrno::SUCCESS,
         Err(error) => error.into(),
     }
+}
+
+const MAX_IOVECS: u32 = 64;
+
+fn fd_read<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    args: &[Val],
+    memory: &mut [u8],
+) -> WasiErrno {
+    let [
+        Val::I32(fd),
+        Val::I32(iovs),
+        Val::I32(iov_count),
+        Val::I32(result),
+    ] = args
+    else {
+        return WasiErrno::INVAL;
+    };
+    let iov_count = *iov_count as u32;
+    if memory_range(memory, *result as u32, 4).is_none() {
+        return WasiErrno::FAULT;
+    }
+    let iovecs = match snapshot_iovecs(memory, *iovs as u32, iov_count) {
+        Ok(iovecs) => iovecs,
+        Err(error) => return error,
+    };
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return WasiErrno::IO;
+    };
+    let mut total = 0u32;
+    for (pointer, length) in iovecs {
+        let Some(output) = memory_range_mut(memory, pointer, length) else {
+            return WasiErrno::FAULT;
+        };
+        let count = match context.fd_read(GuestFd::new(*fd as u32), output) {
+            Ok(count) if count <= output.len() => count,
+            Ok(_) => return WasiErrno::IO,
+            Err(error) => return error.into(),
+        };
+        let Ok(count) = u32::try_from(count) else {
+            return WasiErrno::OVERFLOW;
+        };
+        let Some(next) = total.checked_add(count) else {
+            return WasiErrno::OVERFLOW;
+        };
+        total = next;
+        if count < length {
+            break;
+        }
+    }
+    let _ = write_u32(memory, *result as u32, total);
+    WasiErrno::SUCCESS
+}
+
+fn fd_write<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    args: &[Val],
+    memory: &mut [u8],
+) -> WasiErrno {
+    let [
+        Val::I32(fd),
+        Val::I32(iovs),
+        Val::I32(iov_count),
+        Val::I32(result),
+    ] = args
+    else {
+        return WasiErrno::INVAL;
+    };
+    let iov_count = *iov_count as u32;
+    if memory_range(memory, *result as u32, 4).is_none() {
+        return WasiErrno::FAULT;
+    }
+    let iovecs = match snapshot_iovecs(memory, *iovs as u32, iov_count) {
+        Ok(iovecs) => iovecs,
+        Err(error) => return error,
+    };
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return WasiErrno::IO;
+    };
+    let mut total = 0u32;
+    for (pointer, length) in iovecs {
+        let Some(input) = memory_range(memory, pointer, length) else {
+            return WasiErrno::FAULT;
+        };
+        let count = match context.fd_write(GuestFd::new(*fd as u32), input) {
+            Ok(count) if count <= input.len() => count,
+            Ok(_) => return WasiErrno::IO,
+            Err(error) => return error.into(),
+        };
+        let Ok(count) = u32::try_from(count) else {
+            return WasiErrno::OVERFLOW;
+        };
+        let Some(next) = total.checked_add(count) else {
+            return WasiErrno::OVERFLOW;
+        };
+        total = next;
+        if count < length {
+            break;
+        }
+    }
+    let _ = write_u32(memory, *result as u32, total);
+    WasiErrno::SUCCESS
+}
+
+fn fd_seek<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    args: &[Val],
+    memory: &mut [u8],
+) -> WasiErrno {
+    let [
+        Val::I32(fd),
+        Val::I64(offset),
+        Val::I32(raw_whence),
+        Val::I32(result),
+    ] = args
+    else {
+        return WasiErrno::INVAL;
+    };
+    if memory_range(memory, *result as u32, 8).is_none() {
+        return WasiErrno::FAULT;
+    }
+    let whence = match raw_whence {
+        0 => crate::SeekWhence::Start,
+        1 => crate::SeekWhence::Current,
+        2 => crate::SeekWhence::End,
+        _ => return WasiErrno::INVAL,
+    };
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return WasiErrno::IO;
+    };
+    let value = match context.fd_seek(GuestFd::new(*fd as u32), *offset, whence) {
+        Ok(value) => value,
+        Err(error) => return error.into(),
+    };
+    let _ = write_u64(memory, *result as u32, value);
+    WasiErrno::SUCCESS
+}
+
+fn fd_filestat_get<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    args: &[Val],
+    memory: &mut [u8],
+) -> WasiErrno {
+    let Some((fd, result)) = two_i32(args) else {
+        return WasiErrno::INVAL;
+    };
+    if memory_range(memory, result, 64).is_none() {
+        return WasiErrno::FAULT;
+    }
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return WasiErrno::IO;
+    };
+    let stat = match context.fd_stat(GuestFd::new(fd)) {
+        Ok(stat) => stat,
+        Err(error) => return error.into(),
+    };
+    let Some(output) = memory_range_mut(memory, result, 64) else {
+        return WasiErrno::FAULT;
+    };
+    output.fill(0);
+    output[16] = match stat.file_type {
+        crate::FileType::Unknown => 0,
+        crate::FileType::BlockDevice => 1,
+        crate::FileType::CharacterDevice => 2,
+        crate::FileType::Directory => 3,
+        crate::FileType::RegularFile => 4,
+        crate::FileType::Socket => 6,
+        crate::FileType::SymbolicLink => 7,
+    };
+    output[32..40].copy_from_slice(&stat.size.to_le_bytes());
+    WasiErrno::SUCCESS
+}
+
+fn snapshot_iovecs(memory: &[u8], table: u32, count: u32) -> Result<Vec<(u32, u32)>, WasiErrno> {
+    if count > MAX_IOVECS {
+        return Err(WasiErrno::INVAL);
+    }
+    let Some(table_bytes) = count.checked_mul(8) else {
+        return Err(WasiErrno::FAULT);
+    };
+    if memory_range(memory, table, table_bytes).is_none() {
+        return Err(WasiErrno::FAULT);
+    }
+    let mut iovecs = Vec::new();
+    iovecs
+        .try_reserve_exact(count as usize)
+        .map_err(|_| WasiErrno::NOMEM)?;
+    for index in 0..count {
+        let (pointer, length) = iovec(memory, table, index).ok_or(WasiErrno::FAULT)?;
+        memory_range(memory, pointer, length).ok_or(WasiErrno::FAULT)?;
+        iovecs.push((pointer, length));
+    }
+    Ok(iovecs)
+}
+
+fn iovec(memory: &[u8], table: u32, index: u32) -> Option<(u32, u32)> {
+    let offset = index.checked_mul(8)?;
+    let record = memory_range(memory, table.checked_add(offset)?, 8)?;
+    Some((
+        u32::from_le_bytes(record[0..4].try_into().ok()?),
+        u32::from_le_bytes(record[4..8].try_into().ok()?),
+    ))
 }
 
 fn two_i32(args: &[Val]) -> Option<(u32, u32)> {

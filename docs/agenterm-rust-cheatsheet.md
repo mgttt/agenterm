@@ -2702,3 +2702,9 @@ that boundary. Preflight every guest output range before a backend call or the
 first write, so an invalid later pointer cannot leave partial metadata or cause
 an unnecessary platform side effect; translate supported-call failures to the
 standard errno without turning an optional host profile into VM opcodes.
+
+For vectored guest I/O, cap the record count and preflight the complete iovec
+table, every referenced range and the result pointer before the first backend
+call. Reject a backend count larger than its supplied slice, accumulate totals
+with checked arithmetic, and stop on a short transfer. These rules keep a
+portable adapter bounded even when the platform backend is buggy or adversarial.

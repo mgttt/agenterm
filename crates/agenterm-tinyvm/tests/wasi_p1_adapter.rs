@@ -8,6 +8,7 @@ use agenterm_tinyvm::{
 #[derive(Default)]
 struct FixtureBackend {
     closed: Vec<u32>,
+    written: Vec<u8>,
 }
 
 impl HostBackend for FixtureBackend {
@@ -27,21 +28,30 @@ impl HostBackend for FixtureBackend {
         Ok(())
     }
 
-    fn fd_read(&mut self, _handle: HostHandle, _output: &mut [u8]) -> HostResult<usize> {
-        Err(HostError::NotSupported)
+    fn fd_read(&mut self, handle: HostHandle, output: &mut [u8]) -> HostResult<usize> {
+        if handle.raw() != 10 {
+            return Err(HostError::NotSupported);
+        }
+        let input = b"read";
+        let count = input.len().min(output.len());
+        output[..count].copy_from_slice(&input[..count]);
+        Ok(count)
     }
 
-    fn fd_write(&mut self, _handle: HostHandle, _input: &[u8]) -> HostResult<usize> {
-        Err(HostError::NotSupported)
+    fn fd_write(&mut self, handle: HostHandle, input: &[u8]) -> HostResult<usize> {
+        if handle.raw() != 11 {
+            return Err(HostError::NotSupported);
+        }
+        self.written.extend_from_slice(input);
+        Ok(input.len())
     }
 
-    fn fd_seek(
-        &mut self,
-        _handle: HostHandle,
-        _offset: i64,
-        _whence: SeekWhence,
-    ) -> HostResult<u64> {
-        Err(HostError::NotSupported)
+    fn fd_seek(&mut self, handle: HostHandle, offset: i64, whence: SeekWhence) -> HostResult<u64> {
+        if handle.raw() == 12 && offset == 5 && whence == SeekWhence::Current {
+            Ok(123)
+        } else {
+            Err(HostError::NotSupported)
+        }
     }
 
     fn fd_close(&mut self, handle: HostHandle) -> HostResult<()> {
@@ -49,11 +59,17 @@ impl HostBackend for FixtureBackend {
         Ok(())
     }
 
-    fn fd_stat(&mut self, _handle: HostHandle) -> HostResult<FileStat> {
-        Ok(FileStat {
-            file_type: FileType::Directory,
-            size: 0,
-        })
+    fn fd_stat(&mut self, handle: HostHandle) -> HostResult<FileStat> {
+        match handle.raw() {
+            13 => Ok(FileStat {
+                file_type: FileType::RegularFile,
+                size: 999,
+            }),
+            _ => Ok(FileStat {
+                file_type: FileType::Directory,
+                size: 0,
+            }),
+        }
     }
 
     fn path_open(
@@ -136,6 +152,115 @@ fn wasi_p1_rejects_unknown_or_wrongly_typed_imports_before_instantiation() {
     assert!(wasi.bind(&mut wrong).is_err());
 }
 
+#[test]
+fn wasi_p1_fd_io_seek_and_stat_use_guest_descriptors_and_standard_layouts() {
+    let mut context = HostContext::new(FixtureBackend::default(), HostLimits::default());
+    assert_eq!(
+        must(
+            context.register_descriptor(HostHandle::new(10), DescriptorRights::READ),
+            "register readable descriptor",
+        )
+        .raw(),
+        0
+    );
+    assert_eq!(
+        must(
+            context.register_descriptor(HostHandle::new(11), DescriptorRights::WRITE),
+            "register writable descriptor",
+        )
+        .raw(),
+        1
+    );
+    assert_eq!(
+        must(
+            context.register_descriptor(HostHandle::new(12), DescriptorRights::SEEK),
+            "register seekable descriptor",
+        )
+        .raw(),
+        2
+    );
+    assert_eq!(
+        must(
+            context.register_descriptor(HostHandle::new(13), DescriptorRights::STAT),
+            "register stat descriptor",
+        )
+        .raw(),
+        3
+    );
+
+    let wasi = WasiPreview1::new(context);
+    let mut module = must(
+        WasmModule::from_bytes(&fd_fixture_module()),
+        "decode fd fixture",
+    );
+    must(wasi.bind(&mut module), "bind fd imports");
+    let mut instance = must(module.instantiate(), "instantiate fd fixture");
+    let results = must(instance.invoke_by_name("main", &[]), "invoke fd fixture");
+    assert!(matches!(results.as_slice(), [Val::I32(0)]));
+
+    let memory = must(instance.memory(), "memory");
+    assert_eq!(&memory[64..68], b"read");
+    assert_eq!(u32_at(&memory, 32), 4);
+    assert_eq!(u32_at(&memory, 36), 5);
+    assert_eq!(u64_at(&memory, 40), 123);
+    assert_eq!(memory[128 + 16], 4);
+    assert_eq!(u64_at(&memory, 128 + 32), 999);
+    drop(memory);
+
+    let context = wasi.try_context().expect("borrow context after fd calls");
+    assert_eq!(context.backend().written, b"hello");
+}
+
+#[test]
+fn wasi_p1_rejects_excessive_iovecs_before_calling_the_backend() {
+    let mut context = HostContext::new(FixtureBackend::default(), HostLimits::default());
+    must(
+        context.register_descriptor(HostHandle::new(11), DescriptorRights::WRITE),
+        "register writable descriptor",
+    );
+    let wasi = WasiPreview1::new(context);
+    let mut module = must(
+        WasmModule::from_bytes(&excessive_iovec_module()),
+        "decode excessive-iovec fixture",
+    );
+    must(wasi.bind(&mut module), "bind fd_write import");
+    let mut instance = must(module.instantiate(), "instantiate excessive-iovec fixture");
+    let results = must(
+        instance.invoke_by_name("main", &[]),
+        "invoke excessive-iovec fixture",
+    );
+    assert!(matches!(results.as_slice(), [Val::I32(28)]));
+    let context = wasi.try_context().expect("borrow context after rejection");
+    assert!(context.backend().written.is_empty());
+}
+
+#[test]
+fn wasi_p1_snapshots_iovecs_before_guest_output_can_overlap_the_table() {
+    let mut context = HostContext::new(FixtureBackend::default(), HostLimits::default());
+    must(
+        context.register_descriptor(HostHandle::new(10), DescriptorRights::READ),
+        "register readable descriptor",
+    );
+    let wasi = WasiPreview1::new(context);
+    let mut module = must(
+        WasmModule::from_bytes(&overlapping_iovec_module()),
+        "decode overlapping-iovec fixture",
+    );
+    must(wasi.bind(&mut module), "bind fd_read import");
+    let mut instance = must(
+        module.instantiate(),
+        "instantiate overlapping-iovec fixture",
+    );
+    let results = must(
+        instance.invoke_by_name("main", &[]),
+        "invoke overlapping-iovec fixture",
+    );
+    assert!(matches!(results.as_slice(), [Val::I32(0)]));
+    let memory = must(instance.memory(), "memory");
+    assert_eq!(&memory[64..68], b"read");
+    assert_eq!(u32_at(&memory, 32), 8);
+}
+
 fn fixture_module() -> Vec<u8> {
     let types = vec![
         function_type(&[0x7f, 0x7f], &[0x7f]),
@@ -175,7 +300,74 @@ fn fixture_module() -> Vec<u8> {
     call(&mut body, 8);
     body.push(0x0b);
 
-    module(types, &imports, 4, Some(body))
+    module(types, &imports, 4, Some(body), &[])
+}
+
+fn fd_fixture_module() -> Vec<u8> {
+    let types = vec![
+        function_type(&[0x7f, 0x7f, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[0x7f, 0x7e, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[0x7f, 0x7f], &[0x7f]),
+        function_type(&[], &[0x7f]),
+    ];
+    let imports = [
+        ("fd_read", 0),
+        ("fd_write", 0),
+        ("fd_seek", 1),
+        ("fd_filestat_get", 2),
+    ];
+    let mut body = vec![0];
+    call4(&mut body, 0, 0, 0, 1, 32);
+    call4(&mut body, 1, 1, 8, 1, 36);
+    i32_const(&mut body, 2);
+    body.extend_from_slice(&[0x42, 0x05]);
+    i32_const(&mut body, 1);
+    i32_const(&mut body, 40);
+    call_drop(&mut body, 2);
+    i32_const(&mut body, 3);
+    i32_const(&mut body, 128);
+    call(&mut body, 3);
+    body.push(0x0b);
+
+    let iovecs = [64, 0, 0, 0, 4, 0, 0, 0, 68, 0, 0, 0, 5, 0, 0, 0];
+    module(
+        types,
+        &imports,
+        3,
+        Some(body),
+        &[(0, &iovecs), (68, b"hello")],
+    )
+}
+
+fn excessive_iovec_module() -> Vec<u8> {
+    let types = vec![
+        function_type(&[0x7f, 0x7f, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[], &[0x7f]),
+    ];
+    let mut body = vec![0];
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 65);
+    i32_const(&mut body, 32);
+    call(&mut body, 0);
+    body.push(0x0b);
+    module(types, &[("fd_write", 0)], 1, Some(body), &[])
+}
+
+fn overlapping_iovec_module() -> Vec<u8> {
+    let types = vec![
+        function_type(&[0x7f, 0x7f, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[], &[0x7f]),
+    ];
+    let mut body = vec![0];
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 2);
+    i32_const(&mut body, 32);
+    call(&mut body, 0);
+    body.push(0x0b);
+    let iovecs = [8, 0, 0, 0, 4, 0, 0, 0, 64, 0, 0, 0, 4, 0, 0, 0];
+    module(types, &[("fd_read", 0)], 1, Some(body), &[(0, &iovecs)])
 }
 
 fn single_import_module(field: &str, type_index: u32) -> Vec<u8> {
@@ -189,6 +381,7 @@ fn single_import_module(field: &str, type_index: u32) -> Vec<u8> {
         &[(field, type_index)],
         2,
         Some(vec![0, 0x41, 0, 0x0b]),
+        &[],
     )
 }
 
@@ -197,6 +390,7 @@ fn module(
     imports: &[(&str, u32)],
     main_type: u32,
     body: Option<Vec<u8>>,
+    data: &[(u32, &[u8])],
 ) -> Vec<u8> {
     let mut wasm = b"\0asm\x01\0\0\0".to_vec();
     let mut type_payload = Vec::new();
@@ -232,6 +426,19 @@ fn module(
         u32_leb(body.len() as u32, &mut code);
         code.extend_from_slice(&body);
         section(10, &code, &mut wasm);
+
+        if !data.is_empty() {
+            let mut segments = Vec::new();
+            u32_leb(data.len() as u32, &mut segments);
+            for (offset, bytes) in data {
+                segments.push(0);
+                i32_const(&mut segments, *offset as i32);
+                segments.push(0x0b);
+                u32_leb(bytes.len() as u32, &mut segments);
+                segments.extend_from_slice(bytes);
+            }
+            section(11, &segments, &mut wasm);
+        }
     }
     wasm
 }
@@ -248,6 +455,14 @@ fn function_type(params: &[u8], results: &[u8]) -> Vec<u8> {
 fn call2(body: &mut Vec<u8>, function: u32, first: i32, second: i32) {
     i32_const(body, first);
     i32_const(body, second);
+    call_drop(body, function);
+}
+
+fn call4(body: &mut Vec<u8>, function: u32, a: i32, b: i32, c: i32, d: i32) {
+    i32_const(body, a);
+    i32_const(body, b);
+    i32_const(body, c);
+    i32_const(body, d);
     call_drop(body, function);
 }
 

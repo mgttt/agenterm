@@ -3228,3 +3228,27 @@ wrong standard signature before instantiation. The isolated no-default-feature
 WASI test/Clippy gate and the complete all-feature/all-target suite pass;
 the isolated `no_std` arm64 iOS feature build, generic-device/universal-simulator
 Swift linkage and the three-engine game differential remain green.
+
+## Ninety-eighth executable increment — bounded WASI descriptor I/O
+
+The optional `wasi-p1` adapter now implements the standard `fd_read`,
+`fd_write`, `fd_seek` and `fd_filestat_get` signatures over `HostContext`.
+Guest descriptors remain rights-checked mappings to opaque backend handles.
+Vectored I/O caps each call at 64 records and validates the entire iovec table,
+all data ranges and the result pointer before its first backend call. It rejects
+backend over-reporting and checked-count overflow instead of trusting platform
+code. Seek and the 64-byte Preview 1 filestat layout likewise preflight output
+before host mutation.
+
+Evidence on 2026-08-22: a standards-shaped binary fixture performs read, write,
+seek and stat through four separately rights-scoped guest descriptors and proves
+the resulting memory layouts and backend bytes. An adversarial fixture passes
+65 iovecs and receives `INVAL` without a backend write; another proves that an
+output overlapping the iovec table cannot corrupt later records because the
+adapter snapshots the bounded table first. The focused no-default-feature WASI
+tests, warnings-denied Clippy and arm64 iOS `no_std` feature check pass. The
+complete all-feature/all-target suite passes all 127 library tests and every
+non-ignored integration test, including the real iOS XCFramework/Swift link and
+the three-game tinyvm/JSC/H5 differential. Linked sizes remain 1,602,104 bytes
+arm64 and 1,677,136 bytes x86_64; the stripped static core remains 101,256 bytes
+with selftest 42.

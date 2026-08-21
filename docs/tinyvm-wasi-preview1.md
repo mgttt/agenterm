@@ -39,14 +39,20 @@ the guest sees a physical path, Unix fd, Windows HANDLE or iOS container path.
 | `fd_prestat_get` | `(i32, i32) → i32` | directory tag + virtual-root byte length |
 | `fd_prestat_dir_name` | `(i32, i32, i32) → i32` | virtual-root bytes only |
 | `fd_close` | `(i32) → i32` | closes and invalidates the guest mapping |
+| `fd_read` | `(i32, i32, i32, i32) → i32` | bounded mutable iovecs through a readable guest descriptor |
+| `fd_write` | `(i32, i32, i32, i32) → i32` | bounded immutable iovecs through a writable guest descriptor |
+| `fd_seek` | `(i32, i64, i32, i32) → i32` | seek through a seekable guest descriptor and write the new offset |
+| `fd_filestat_get` | `(i32, i32) → i32` | standard 64-byte filestat record from descriptor metadata |
 
 Every present import is type-checked before instantiation. An unknown
 `wasi_snapshot_preview1` field or wrong signature fails binding; it is not left
 as a late unbound trap. Guest-memory ranges are checked before host mutation.
+Vectored I/O accepts at most 64 records and preflights the complete table, every
+buffer and the result pointer before the first backend call. Backend byte counts
+must fit the supplied slice, and aggregate counts use checked arithmetic.
 
 ## Explicitly not implemented yet
 
-- `fd_read`, `fd_write`, `fd_seek` and file-stat records;
 - `path_open` and `path_unlink_file`;
 - `proc_exit` and its non-returning instance outcome;
 - sockets, polling, threads and ambient network access.
@@ -57,8 +63,9 @@ implemented import maps to an explicit WASI errno such as `NOSYS` or
 
 ## Current evidence
 
-`tests/wasi_p1_adapter.rs` builds a standards-shaped binary module with all nine
-implemented imports. Through a real persistent tinyvm instance it verifies
+`tests/wasi_p1_adapter.rs` builds standards-shaped binary modules with all
+thirteen implemented imports. Through real persistent tinyvm instances it verifies
 argument/environment layouts, monotonic clock output, random bytes, preopen
-metadata/name and descriptor close. A second case rejects both an unknown field
+metadata/name, descriptor close, vectored I/O, seek and filestat layouts. Other
+cases reject an excessive iovec count before any backend write, an unknown field
 and a known field with the wrong standard type before instantiation.
