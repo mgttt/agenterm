@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 31] = [
+const REJECTED: [(&str, &str); 32] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -135,10 +135,14 @@ const REJECTED: [(&str, &str); 31] = [
         "custom_section_invalid_utf8_name",
         "0061736d01000000000201ff",
     ),
+    (
+        "load_with_empty_memory_section",
+        "0061736d010000000105016000017f03020100050100070801046d61696e00000a0901070041002802000b",
+    ),
 ];
 
 /// Legal counterparts that must keep loading and running.
-const ACCEPTED: [(&str, &str); 9] = [
+const ACCEPTED: [(&str, &str); 10] = [
     (
         "add_two_consts",
         "0061736d010000000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
@@ -174,6 +178,10 @@ const ACCEPTED: [(&str, &str); 9] = [
     (
         "custom_section_with_opaque_payload",
         "0061736d0100000000040178ff000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
+    ),
+    (
+        "pure_compute_with_empty_memory_section",
+        "0061736d010000000105016000017f03020100050100070801046d61696e00000a09010700410141026a0b",
     ),
 ];
 
@@ -235,6 +243,28 @@ fn standard_bytes_require_declared_memory() {
         .unwrap_or_else(|e| panic!("instantiate pure compute module: {}", e.message()));
     assert_eq!(instance.memory_pages(), 0);
     assert!(instance.memory().is_empty());
+
+    let (_, empty_memory_hex) = ACCEPTED
+        .into_iter()
+        .find(|(name, _)| *name == "pure_compute_with_empty_memory_section")
+        .expect("empty memory vector fixture");
+    let empty_memory_instance = WasmModule::from_bytes(&bytes(empty_memory_hex))
+        .unwrap_or_else(|e| panic!("empty memory vector: {}", e.message()))
+        .instantiate()
+        .unwrap_or_else(|e| panic!("instantiate empty memory vector: {}", e.message()));
+    assert_eq!(empty_memory_instance.memory_pages(), 0);
+    assert!(empty_memory_instance.memory().is_empty());
+
+    let (_, empty_memory_load_hex) = REJECTED
+        .into_iter()
+        .find(|(name, _)| *name == "load_with_empty_memory_section")
+        .expect("load with empty memory vector fixture");
+    assert!(matches!(
+        WasmModule::from_bytes(&bytes(empty_memory_load_hex)),
+        Err(WasmError::Decode(
+            "validation: memory instruction requires memory"
+        ))
+    ));
 
     let active_empty = bytes("0061736d010000000b06010041000b00");
     assert!(matches!(

@@ -1338,11 +1338,18 @@ fn parse_table_section(
     Ok(tables)
 }
 
-/// Parse the element section into `(offset, func_indices)` per active segment.
-/// Parse the memory section (id 5) into `(min_pages, max_pages)`. WASM 1.0
-/// allows at most one memory per module.
+const EMPTY_MEMORY_VECTOR: usize = usize::MAX;
+
+/// Parse the memory section (id 5). Its standard vector may be empty; WASM 1.0
+/// otherwise allows at most one memory per module.
 fn parse_memory_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
+    if count == 0 {
+        if i != p.len() {
+            return Err(WasmError::Decode("trailing memory section bytes"));
+        }
+        return Ok((EMPTY_MEMORY_VECTOR, None));
+    }
     if count != 1 {
         return Err(WasmError::Decode("unsupported memory count"));
     }
@@ -2383,7 +2390,12 @@ impl Module {
                 2 => imports = parse_import_section(payload, &types, &mut budget)?,
                 3 => func_types = parse_func_section(payload, &mut budget)?,
                 4 => table_limits = parse_table_section(payload, &mut budget)?,
-                5 => mem_limits = Some(parse_memory_section(payload)?),
+                5 => {
+                    let limits = parse_memory_section(payload)?;
+                    if limits.0 != EMPTY_MEMORY_VECTOR {
+                        mem_limits = Some(limits);
+                    }
+                }
                 6 => globals = parse_global_section(payload, &mut budget)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
                 8 => {

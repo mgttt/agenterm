@@ -2410,6 +2410,16 @@ smaller than calling an allocating parser and immediately dropping its result.
 Cover missing names, truncated length LEBs, invalid UTF-8, and a legal name with
 arbitrary opaque bytes against an independent validator.
 
+Do not confuse section presence with a declared resource. Standard Wasm
+sections encode vectors, and an explicitly present memory section with count
+zero is legal and semantically identical to no memory section. Preserve the
+three-way parse result—empty vector, one declaration, unsupported multiplicity—
+until validation has derived resource existence. Prove that pure computation
+still runs with the empty vector while every memory instruction fails at load.
+In a tightly size-gated parser, a private out-of-domain sentinel can preserve a
+compact existing return ABI when a nested `Option` adds a code-size page; name
+the sentinel, consume it immediately, and never expose it as a real limit.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

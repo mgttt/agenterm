@@ -28,6 +28,7 @@ tinyvm iOS game runtime
 │   ├── canonical function expressions [x]
 │   ├── strict i64 signed-LEB range    [x]
 │   ├── valid custom-section names     [x]
+│   ├── empty memory-section vector    [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -2025,5 +2026,36 @@ Evidence on 2026-08-21:
   below their gates at 1,554,008 bytes arm64 and 1,625,560 bytes x86_64;
   catalog/replay/private/session consumers are 1,426,856 / 1,417,800 /
   1,419,456 / 1,418,608 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-sixth executable increment — empty memory-section vectors
+
+The loader now preserves the standard distinction between a memory section
+and a memory declaration. A present section whose vector count is zero is
+legal and leaves the module with zero memory pages, exactly like an absent
+section. Pure computation therefore remains executable, while loads, stores,
+memory size/grow, bulk-memory operations and active data still fail the load
+gate because no memory was declared. Counts above one remain outside the
+current single-memory profile.
+
+Evidence on 2026-08-21:
+
+- Public raw-byte black boxes load and run a pure-compute module containing an
+  empty memory vector, observe zero pages/bytes after instantiation, and reject
+  the counterpart that executes `i32.load` before producing a module.
+- WABT independently accepts the pure-compute binary and rejects the memory
+  access binary; it also accepts a non-minimal but in-range LEB encoding of the
+  zero vector count.
+- All 233 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
+  oracles, the two-game WebKit differential, all-target Clippy, formatting,
+  relevant ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,553,928 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,776 / 1,417,720 /
+  1,419,376 / 1,418,528 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

@@ -372,6 +372,8 @@ are no longer backward compatible.
    host integer truncation is never cartridge validation.
    Every custom section must retain its standard UTF-8 name envelope even when
    its opaque payload is ignored by tinyvm.
+   A missing or empty memory-section vector declares no linear memory, so such
+   a cartridge must not contain memory instructions or active data segments.
 2. Export all five exact lifecycle functions.
 3. Derive every manifest capability from the standard non-core import table;
    never maintain a second hand-written capability list.
