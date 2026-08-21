@@ -5,7 +5,7 @@
 | **Document** | Product / architecture design for `partnernetsoftware/rh` |
 | **Author** | AgenTerm systems architecture (draft for owner review) |
 | **Date** | 2026-08-21 |
-| **Status** | Draft (rev 6, D39: the product is the interpreter; JIT/AOT are later desktop under-the-hood) |
+| **Status** | Living SSOT. One-page now-state: `design-rh-standalone-product-summary.md`. Locks: Key Decisions. |
 | **Audience** | Senior engineers who know `crates/agenterm-rh`, the root host, and Chassis-L1 |
 | **Related** | `prd/PRD_02_10_rhai_scripting.md`, `plan/design-rh-aot.md`, `plan/ARCHITECTURE.md`, `plan/reference-cross-target-execution.md` §5 / §6.2 / §6.3, `plan/plan-v0.1.18.md` (APE parked for *workbench*), `plan/plan-ape-thin-shell-dynamic-packages.md` (name collision) |
 
@@ -13,17 +13,21 @@
 
 ## Overview
 
-`crates/agenterm-rh` is a library-only AOT pack compiler: it parses with the `rhai` crate, subset-checks, transpiles to a Rust cdylib, shells out to `cargo`/`rustc`, and `dlopen`s `rh_entry(): i64`. The **runnable** host (`print`, `args`, `std::fs`, `process`, Fleet) lives in the AgenTerm root package (`src/script_rh_host.rs`). `agenterm rh eval` always rustc-packs then calls that root host. There is no shebang runtime, no embeddable interpreter, and no way to run `.rh` without the workbench host.
+**rh** is a shebang-able, embeddable dynamic language. Default execution is a tree-walk of Language 1. The product is that interpreter (host, honest errors, a checker that does not lie). JIT/AOT are not the goal; if they exist later they are a desktop optimisation of this same language.
 
-This document designs **rh** as a Bun/Node/Python-like **dynamic language product**: a private GitHub repo `partnernetsoftware/rh` that later goes public; a loader named **`rh.com`** that is **not** the language runtime; six per-cell native runtime slices named `rh-{osx\|lnx\|win}{64}{arm\|x86}.com`; an embeddable Rust crate equal in rank to the CLI; and **interpreter-default** execution of a **closed Language 1** (strict rh-3 subset + a named `std::`/`rh::` allowlist), with AOT/JIT reserved behind a **crate-private** `Backend` so later Cranelift/`rustc`/copy-and-patch cannot break embedders or the slice ABI.
+Live code: private `partnernetsoftware/rh` (`rh-lang` / `rh-cli` / `rh-loader`). AgenTerm still path-depends the in-tree crate and must not git-pin while the rh repo is private. `agenterm rh eval`/`run` use the interpreter; `pack`/`qualify`/`task` keep AOT.
 
-The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh` extractable in-tree so a script runs without the root package **and** without `libloading` on the default graph, (b) create the **private** repo from that extractable surface for product CLI/releases — **AgenTerm stays on a path workspace member until rh is public**, (c) when `partnernetsoftware/rh` is world-readable, AgenTerm git-pins `rh-lang` at a full SHA (the wbox pattern applies only to **public** repos).
+`rh.com` is a loader only. Six native slices (`rh-{osx|lnx|win}{64}{arm|x86}.com`). iOS embeds `rh-lang` in a signed app — no seventh cell, no runtime machine code.
+
+The rest of this document is the freeze (Language 1, Host, decisions). A morning-of-extract snapshot of AgenTerm-before-interp is under **Background**; do not treat it as current runtime.
 
 ---
 
 ## Background & Motivation
 
-### Current state (verified)
+Historical snapshot of AgenTerm **before** the sibling `rh` interpreter shipped. Kept so the decisions have evidence. For what runs today, see Overview and `design-rh-standalone-product-summary.md`.
+
+### Current state (verified, morning of extract)
 
 | Fact | Evidence |
 |------|----------|
@@ -873,7 +877,7 @@ Polyglot (old C3) is **not** on this graph.
 
 ## Open Questions
 
-None. Owner locked 2026-08-21 (D24): crates.io **0.1.0**; populate via **squash/copy + NOTICE**; collaborators = **org members only**. rh loader has **no** chassis-style `native_cell: null` (D4). D38: App Store iOS = signed interpreter. D39: the product is the interpreter; JIT/AOT are later desktop under-the-hood, not a goal.
+None. Product locks live in **Key Decisions**. Do not append session notes here.
 
 ---
 
