@@ -13271,6 +13271,8 @@ fn entry() {
         );
     }
 
+    // Builds a real rustc pack; only meaningful with the AOT pipeline.
+    #[cfg(feature = "compile")]
     #[test]
     fn build_rh_project_transpiles_native() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -13915,6 +13917,8 @@ fn entry() { stage_copy(args[0], args[1]) }
         assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
     }
 
+    // Builds a real rustc pack; only meaningful with the AOT pipeline.
+    #[cfg(feature = "compile")]
     #[test]
     fn qualification_selftest_project_transpiles_native() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -15015,6 +15019,8 @@ fn entry() {
         assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
     }
 
+    // Builds a real rustc pack; only meaningful with the AOT pipeline.
+    #[cfg(feature = "compile")]
     #[test]
     fn command_output_file_redirection_stays_native() {
         let source = r#"
@@ -15380,6 +15386,8 @@ fn entry() {
         assert_eq!(output.rust.matches("rh_host_eval_int(\"").count(), 0);
     }
 
+    // Builds a real rustc pack; only meaningful with the AOT pipeline.
+    #[cfg(feature = "compile")]
     #[test]
     fn string_list_param_in_json_map_literal_stays_typed() {
         let output = transpile_cdylib_with_mode(
@@ -15452,6 +15460,8 @@ fn entry() {
         assert!(pack.native_path.exists());
     }
 
+    // Builds a real rustc pack; only meaningful with the AOT pipeline.
+    #[cfg(feature = "compile")]
     #[test]
     fn json_param_mutation_emits_mutable_binding() {
         let output = transpile_cdylib_with_mode(

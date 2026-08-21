@@ -37,7 +37,9 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("agenterm-
 agenterm-chassis = { path = "crates/agenterm-chassis" }
 agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "console-line-editor", "filesystem", "font", "ime", "input", "ipc", "locking", "portable-pixel-window", "process", "pty", "screenshot", "serde", "webview", "window"] }
 agenterm-ui-core = { path = "crates/agenterm-ui-core", features = ["terminal-selection"] }
-agenterm-rh = { path = "crates/agenterm-rh" }
+# The root package owns the AOT pipeline (codegen 107, qualify, task gates),
+# so it turns on the `compile` feature. The default embedder graph stays clean.
+agenterm-rh = { path = "crates/agenterm-rh", features = ["compile"] }
 agenterm-lua = { path = "crates/agenterm-lua", optional = true }
 agenterm-qjs = { path = "crates/agenterm-qjs", optional = true }
 agenterm-sql = { path = "crates/agenterm-sql", optional = true }

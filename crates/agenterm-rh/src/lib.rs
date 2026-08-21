@@ -4,6 +4,7 @@ pub mod bundle;
 pub mod caller_inventory;
 pub mod check;
 pub mod check_many;
+#[cfg(feature = "compile")]
 pub mod compile;
 pub mod corpus;
 pub mod engine;
@@ -18,11 +19,15 @@ pub mod host_std;
 pub(crate) mod interp;
 pub(crate) mod ir;
 pub mod lang_error;
+#[cfg(feature = "compile")]
 pub mod load;
 pub(crate) mod lower;
+#[cfg(feature = "compile")]
 pub mod manifest;
+#[cfg(feature = "compile")]
 pub mod pack;
 pub mod project_import;
+#[cfg(feature = "compile")]
 pub mod qualify;
 pub mod shipped_surfaces;
 pub mod subset;
@@ -40,6 +45,7 @@ pub use check_many::{
     CheckManyManifest, CheckManyOptions, CheckManyReport, ParsedCheckManyCli, parse_check_many_cli,
     read_manifest, run_check_many,
 };
+#[cfg(feature = "compile")]
 pub use compile::{
     CompileOutput, compile_native, compile_native_for_target, hash_bytes, hash_file,
 };
@@ -60,9 +66,13 @@ pub use host_api::{
 };
 pub use host_std::StdHost;
 pub use lang_error::Error;
+#[cfg(feature = "compile")]
 pub use load::{RhNativeModule, load_and_call_entry, verify_native_hash};
+#[cfg(feature = "compile")]
 pub use manifest::RhPackManifest;
+#[cfg(feature = "compile")]
 pub use pack::{PackBuildOutput, RhPack, build_pack_dir};
+#[cfg(feature = "compile")]
 pub use qualify::{RhQualificationReceipt, qualify_pack_dir, write_receipt};
 pub use transpile::{
     CdylibExecutionMode, CdylibTranspileOutput, transpile, transpile_cdylib,

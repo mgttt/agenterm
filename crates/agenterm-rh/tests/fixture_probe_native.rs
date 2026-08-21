@@ -1,3 +1,6 @@
+//! Native transpile fixtures: require `feature = "compile"`.
+#![cfg(feature = "compile")]
+
 //! Native check locks for newly added fixtures/rh process and bytes probes.
 
 use std::path::PathBuf;

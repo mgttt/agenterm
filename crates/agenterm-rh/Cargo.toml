@@ -19,5 +19,27 @@ rhai = { version = "1.22", default-features = false, features = ["std", "interna
 sha2 = { version = "0.11", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# AOT-only. Both are behind `feature = "compile"` so the default embedder
+# graph is rhai + serde_json + sha2 (design D8 / D12, PR-A5).
+tempfile = { version = "3.25", optional = true }
+libloading = { version = "0.9", optional = true }
+
+[dev-dependencies]
+# Tests may use tempfile freely; it just must not be in the default *lib* graph.
 tempfile = "3.25"
-libloading = "0.9"
+
+[features]
+default = ["interp", "std-host"]
+interp = []
+std-host = []
+# Pulls in the rustc-pack pipeline: transpile -> cargo -> dlopen.
+# The product crate (`rh-lang`) will not have this feature at all; in-tree the
+# root `agenterm` package enables it so workspace AOT stays green.
+compile = ["dep:libloading", "dep:tempfile"]
+
+# Drives the rustc pack pipeline end to end, so it only builds with the AOT
+# feature. `standalone_eval` (the PR-A4 extractability gate) deliberately has
+# no such requirement: it must build on the default graph.
+[[example]]
+name = "mode_probe"
+required-features = ["compile"]

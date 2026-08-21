@@ -1,3 +1,6 @@
+//! Codegen pack fixtures: require `feature = "compile"`.
+#![cfg(feature = "compile")]
+
 //! Native-only locks for crate-local Phase B codegen fixtures.
 
 use std::path::PathBuf;

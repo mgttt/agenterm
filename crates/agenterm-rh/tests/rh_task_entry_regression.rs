@@ -1,3 +1,6 @@
+//! AOT pack regression: requires `feature = "compile"`.
+#![cfg(feature = "compile")]
+
 //! Pack qualification regression for crate-local codegen fixtures.
 
 use std::path::PathBuf;
