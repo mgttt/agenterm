@@ -952,24 +952,44 @@ fn run_host_profile_inspect(path: &str) -> ExitCode {
 }
 
 fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
-    let result: Result<(CartridgeDescriptor, usize), String> = (|| {
+    let result = (|| {
         let wasm = read_cartridge(cartridge_path).map_err(str::to_string)?;
         let profile_bytes = read_host_profile(profile_path)?;
         let profile =
             HostProfileV1::decode(&profile_bytes).map_err(|error| error.message().to_string())?;
-        let descriptor = profile
-            .inspect_cartridge(&wasm)
+        let report = profile
+            .compatibility_report(&wasm)
             .map_err(|error| error.message().to_string())?;
-        Ok((descriptor, profile_bytes.len()))
+        Ok::<_, String>((report, profile_bytes.len()))
     })();
     match result {
-        Ok((descriptor, profile_bytes)) => {
-            println!("game_id={}", descriptor.manifest.game_id);
-            println!("game_version={}", descriptor.manifest.game_version);
+        Ok((report, profile_bytes)) => {
+            println!("game_id={}", report.descriptor.manifest.game_id);
+            println!("game_version={}", report.descriptor.manifest.game_version);
             println!("profile_bytes={profile_bytes}");
-            println!("function_imports={}", descriptor.imports.len());
-            println!("OK: cartridge is statically compatible with exact host profile");
-            ExitCode::SUCCESS
+            println!("function_imports={}", report.descriptor.imports.len());
+            println!("compatibility_issues={}", report.issues.len());
+            for issue in &report.issues {
+                match (issue.available_params, issue.available_results) {
+                    (Some(params), Some(results)) => println!(
+                        "issue={}.{} reason=signature required_params={} required_results={} available_params={params} available_results={results}",
+                        issue.module, issue.field, issue.required_params, issue.required_results
+                    ),
+                    _ => println!(
+                        "issue={}.{} reason=missing required_params={} required_results={}",
+                        issue.module, issue.field, issue.required_params, issue.required_results
+                    ),
+                }
+            }
+            if report.is_compatible() {
+                println!("compatible=true");
+                println!("OK: cartridge is statically compatible with exact host profile");
+                ExitCode::SUCCESS
+            } else {
+                println!("compatible=false");
+                eprintln!("tinyvm: host profile has incompatible native imports");
+                ExitCode::FAILURE
+            }
         }
         Err(message) => {
             eprintln!("tinyvm: {message}");

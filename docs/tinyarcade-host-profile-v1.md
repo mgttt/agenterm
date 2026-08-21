@@ -84,6 +84,20 @@ tinyvm host-profile inspect ios-build.tahost
 tinyvm cartridge check-profile game.wasm ios-build.tahost
 ```
 
+`check-profile` prints a stable key/value compatibility report. A compatible
+cartridge reports `compatibility_issues=0` and `compatible=true`. A valid but
+incompatible cartridge still reports its identity and one `issue=` row per
+native import, distinguishing a wholly missing function from an exact
+parameter/result signature mismatch; it then exits unsuccessfully. Parse,
+resource-limit and malformed-profile errors remain separate failures rather
+than being flattened into compatibility issues.
+
+Library converters use `HostProfileV1::compatibility_report` for the same
+non-executing result. Each issue carries the required module, field and arity,
+plus the available arity when that app build has the same named function with
+the wrong signature. `inspect_cartridge` remains the fail-fast compatibility
+door for existing consumers.
+
 Rust app hosts use `NativeModuleRegistry::host_profile`; C hosts use the
 two-stage `tinyarcade_v1_copy_host_profile`; Swift uses
 `TinyArcadeHostProfileV1.appBuild`. All three encode the same TAH1 bytes.

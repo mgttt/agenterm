@@ -842,9 +842,17 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
         .output()
         .expect("reject unavailable native import");
     assert!(!rejected.status.success());
+    let rejected_stdout = String::from_utf8_lossy(&rejected.stdout);
+    assert!(
+        rejected_stdout.contains("compatibility_issues=1")
+            && rejected_stdout.contains(
+                "issue=fan:physics/v1.step_world reason=missing required_params=2 required_results=1"
+            )
+            && rejected_stdout.contains("compatible=false")
+    );
     assert!(
         String::from_utf8_lossy(&rejected.stderr)
-            .contains("host profile native import unavailable")
+            .contains("host profile has incompatible native imports")
     );
 }
 
@@ -1189,6 +1197,18 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     );
 
     let missing = must_ok(HostProfileV1::new(limits, game_limits), "empty profile");
+    let report = must_ok(
+        missing.compatibility_report(&wasm),
+        "report missing profile function",
+    );
+    assert!(!report.is_compatible());
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].module, "fan:physics/v1");
+    assert_eq!(report.issues[0].field, "step_world");
+    assert_eq!(report.issues[0].required_params, 2);
+    assert_eq!(report.issues[0].required_results, 1);
+    assert_eq!(report.issues[0].available_params, None);
+    assert_eq!(report.issues[0].available_results, None);
     assert!(matches!(
         missing.inspect_cartridge(&wasm),
         Err(WasmError::Trap("host profile native import unavailable"))
@@ -1198,6 +1218,14 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
         wrong.add_native_function("fan:physics/v1", "step_world", 1, 1, 8),
         "add wrong signature",
     );
+    let report = must_ok(
+        wrong.compatibility_report(&wasm),
+        "report native signature mismatch",
+    );
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].required_params, 2);
+    assert_eq!(report.issues[0].available_params, Some(1));
+    assert_eq!(report.issues[0].available_results, Some(1));
     assert!(matches!(
         wrong.inspect_cartridge(&wasm),
         Err(WasmError::Trap("host profile native import unavailable"))

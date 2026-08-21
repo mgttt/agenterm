@@ -22,6 +22,9 @@ cargo run -p agenterm-tinyvm --bin tinyvm -- \
 
 cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check path/to/game.wasm
+
+cargo run -p agenterm-tinyvm --bin tinyvm -- \
+  cartridge check-profile path/to/game.wasm path/to/app-build.tahost
 ```
 
 `inspect` parses canonical identity/schema metadata and the normal WASM import
@@ -33,6 +36,12 @@ ceiling, 64 memory pages, 1,024
 table elements, one million interpreted instructions per lifecycle call and
 the ordinary frame/audio/state byte budgets. The table ceiling is the
 aggregate live element count across all internally defined tables.
+
+`check-profile` targets one exact app-build TAH1. It does not execute the
+cartridge. Success reports zero compatibility issues; failure enumerates each
+missing native function or same-name signature mismatch with the exact required
+and available arities. Converter UI should surface those rows directly instead
+of reducing them to “unsupported game.”
 
 ```text
 converter check

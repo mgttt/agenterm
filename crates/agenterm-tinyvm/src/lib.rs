@@ -54,7 +54,10 @@ pub use game::{
 };
 
 pub mod host_profile;
-pub use host_profile::{HostFunctionV1, HostProfileV1, MAX_HOST_PROFILE_BYTES};
+pub use host_profile::{
+    HostCompatibilityIssueV1, HostCompatibilityReportV1, HostFunctionV1, HostProfileV1,
+    MAX_HOST_PROFILE_BYTES,
+};
 
 pub mod host;
 pub use host::{

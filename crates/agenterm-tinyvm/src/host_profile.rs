@@ -28,6 +28,32 @@ pub struct HostFunctionV1 {
     pub max_calls_per_lifecycle: u32,
 }
 
+/// One exact native-import incompatibility found before cartridge execution.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HostCompatibilityIssueV1 {
+    pub module: String,
+    pub field: String,
+    pub required_params: u8,
+    pub required_results: u8,
+    /// Present when the profile has the same module/field with a different
+    /// signature; absent when the function is wholly unavailable.
+    pub available_params: Option<u8>,
+    pub available_results: Option<u8>,
+}
+
+/// Converter-facing result of comparing a valid cartridge with one exact host
+/// profile. No guest code is instantiated or executed.
+pub struct HostCompatibilityReportV1 {
+    pub descriptor: CartridgeDescriptor,
+    pub issues: Vec<HostCompatibilityIssueV1>,
+}
+
+impl HostCompatibilityReportV1 {
+    pub fn is_compatible(&self) -> bool {
+        self.issues.is_empty()
+    }
+}
+
 /// Canonical static compatibility profile for one reviewed app build.
 ///
 /// The profile contains no callbacks or executable code. It lets a converter
@@ -231,28 +257,54 @@ impl HostProfileV1 {
         Ok(profile)
     }
 
-    /// Statically check one cartridge against this exact app-build profile.
-    pub fn inspect_cartridge(&self, wasm: &[u8]) -> Result<CartridgeDescriptor, WasmError> {
+    /// Produce an exact, non-executing compatibility report for converter UI
+    /// and CI. Parse/profile-limit failures remain typed errors; a valid
+    /// cartridge with unavailable native imports returns a report with issues.
+    pub fn compatibility_report(
+        &self,
+        wasm: &[u8],
+    ) -> Result<HostCompatibilityReportV1, WasmError> {
         if wasm.len() > MAX_CARTRIDGE_BYTES {
             return Err(WasmError::Decode("cartridge exceeds byte limit"));
         }
         let descriptor = CartridgeDescriptor::inspect(wasm, self.vm_limits)?;
+        let mut issues = Vec::new();
         for import in descriptor
             .imports
             .iter()
             .filter(|import| import.module != "tinyarcade:core/v1")
         {
-            let available = self.functions.iter().any(|function| {
-                function.module == import.module
-                    && function.field == import.field
-                    && usize::from(function.n_params) == import.n_params
-                    && usize::from(function.n_results) == import.n_results
+            let available = self.functions.iter().find(|function| {
+                function.module == import.module && function.field == import.field
             });
-            if !available {
-                return Err(WasmError::Trap("host profile native import unavailable"));
+            if available.is_some_and(|function| {
+                usize::from(function.n_params) == import.n_params
+                    && usize::from(function.n_results) == import.n_results
+            }) {
+                continue;
             }
+            issues
+                .try_reserve(1)
+                .map_err(|_| WasmError::Trap("host compatibility report allocation"))?;
+            issues.push(HostCompatibilityIssueV1 {
+                module: import.module.clone(),
+                field: import.field.clone(),
+                required_params: import.n_params as u8,
+                required_results: import.n_results as u8,
+                available_params: available.map(|function| function.n_params),
+                available_results: available.map(|function| function.n_results),
+            });
         }
-        Ok(descriptor)
+        Ok(HostCompatibilityReportV1 { descriptor, issues })
+    }
+
+    /// Statically check one cartridge against this exact app-build profile.
+    pub fn inspect_cartridge(&self, wasm: &[u8]) -> Result<CartridgeDescriptor, WasmError> {
+        let report = self.compatibility_report(wasm)?;
+        if !report.is_compatible() {
+            return Err(WasmError::Trap("host profile native import unavailable"));
+        }
+        Ok(report.descriptor)
     }
 }
 

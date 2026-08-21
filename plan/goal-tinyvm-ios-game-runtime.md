@@ -3278,6 +3278,33 @@ XCFramework/Swift link and three-game tinyvm/JSC/H5 differential. Linked sizes
 remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the stripped static core
 remains 101,256 bytes with selftest 42.
 
+## One-hundred-fourth executable increment — converter compatibility report
+
+The existing TAH1 host profile now exposes a structured, non-executing
+`HostCompatibilityReportV1`. A standards-valid cartridge produces all native
+import issues in deterministic import order: wholly missing module/function
+pairs are distinct from same-name parameter/result signature mismatches. Parse,
+resource-limit and malformed-profile failures remain typed errors, while the
+old fail-fast `inspect_cartridge` API is preserved as a wrapper.
+
+The converter CLI now prints stable key/value rows for cartridge identity,
+issue count, each exact required/available signature and final compatibility.
+An incompatible result remains a failing process status, but creators no longer
+receive only an opaque “unavailable” message. This formalizes the already-
+enforced lowercase major-versioned native namespace convention without changing
+TAH1 bytes, cartridge bytes, runtime authority or App Store policy.
+
+Evidence on 2026-08-22: library black boxes distinguish missing
+`fan:physics/v1.step_world` from its wrong-arity form and preserve the legacy
+fail-fast error. The CLI black box targets a core-only app profile with a native
+cartridge and verifies the exact missing row plus `compatible=false`. The
+30-test game-runtime suite and warnings-denied all-feature/all-target Clippy
+pass. The complete all-feature/all-target package passes all 128 library tests
+and every non-ignored integration test, including both iOS XCFramework gates
+and the three-game tinyvm/JSC/H5 differential. Default linked sizes are
+1,602,424 bytes arm64 and 1,681,600 bytes x86_64; all remain inside their
+product gates. The stripped static core remains 101,256 bytes with selftest 42.
+
 ## One-hundredth executable increment — non-returning WASI process exit
 
 The optional Preview 1 subset now includes the exact `(i32) → ()` `proc_exit`

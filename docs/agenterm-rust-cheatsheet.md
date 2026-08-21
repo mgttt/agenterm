@@ -2748,3 +2748,10 @@ to release its exclusive context borrow before another index can be accessed.
 This preserves aliases for imported memories, avoids whole-memory copies, and
 lets `RefCell` reject shared-handle conflicts without using `unsafe` to defeat
 the ownership model.
+
+For converter-facing compatibility, keep malformed input and valid-but-
+unsupported input as different result classes. Parse and resource-limit faults
+stay errors; a valid artifact receives a bounded report containing every exact
+missing function or same-name signature mismatch. Keep the old fail-fast API as
+a wrapper over the report so runtime callers remain simple while CLI/UI callers
+can give actionable diagnostics without parsing error prose.
