@@ -9,6 +9,7 @@ public struct TinyArcadeRuntimeError: Error, Sendable {
     public let message: String
 }
 
+#if TINYARCADE_EXTERNAL_CARTRIDGES
 public enum TinyArcadeDistributionPolicyError: Error, Sendable, Equatable {
     case externalCartridgesDisabled
     case invalidAppleApprovalReference
@@ -53,6 +54,7 @@ public struct TinyArcadeDistributionPolicyV1: Sendable, Equatable {
         externalApprovalReference: "sdk-test-only"
     )
 }
+#endif
 
 public enum TinyArcadeImportClassV1: UInt8, Sendable, Equatable {
     case core = 0
@@ -714,6 +716,7 @@ public struct TinyArcadeExecutionStatsV2: Sendable, Equatable {
     public let stateBytes: UInt32
 }
 
+#if TINYARCADE_EXTERNAL_CARTRIDGES
 public struct TinyArcadeReviewedCatalogEntry: Sendable {
     public let gameID: String
     public let gameVersion: String
@@ -1533,6 +1536,8 @@ private final class TinyArcadeBoundedHTTPTransfer: NSObject,
     }
 }
 
+#endif
+
 /// One exact, versioned native capability exposed to a bundled or reviewed cartridge.
 /// The handler runs synchronously on the runtime owner thread. It must not retain `memory`
 /// or call into any `TinyArcadeRuntimeV1` until it returns; runtime reentry is rejected.
@@ -1737,6 +1742,7 @@ private func tinyArcadeNativeCallback(
     }
 }
 
+#if TINYARCADE_EXTERNAL_CARTRIDGES
 /// Main-actor owner for official catalog keys and live revocations.
 @MainActor
 public final class TinyArcadeTrustStoreV1 {
@@ -2043,6 +2049,8 @@ public final class TinyArcadeReviewedLibraryV1 {
     }
 }
 
+#endif
+
 /// Main-actor owner for the single-threaded C runtime handle.
 @MainActor
 public final class TinyArcadeRuntimeV1 {
@@ -2071,6 +2079,7 @@ public final class TinyArcadeRuntimeV1 {
         }
     }
 
+    #if TINYARCADE_EXTERNAL_CARTRIDGES
     public init(
         privateCartridge cartridge: Data,
         distributionPolicy: TinyArcadeDistributionPolicyV1 = .appStoreBundledOnly,
@@ -2137,6 +2146,7 @@ public final class TinyArcadeRuntimeV1 {
         try Self.check(status)
         handle = try Self.requireHandle(opened)
     }
+    #endif
 
     isolated deinit {
         if let handle {
@@ -2971,6 +2981,7 @@ public final class TinyArcadeGameSessionV1 {
     }
 }
 
+#if TINYARCADE_EXTERNAL_CARTRIDGES
 public enum TinyArcadePrivateLibraryError: Error, Equatable {
     case invalidDirectory
     case invalidLimit
@@ -3277,3 +3288,4 @@ public final class TinyArcadePrivateLibraryV1 {
         }
     }
 }
+#endif

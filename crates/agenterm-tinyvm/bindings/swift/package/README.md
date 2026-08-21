@@ -1,17 +1,16 @@
 # TinyArcadeRuntime Swift package
 
 This generated package is the iOS app integration artifact. It contains the
-device/simulator `TinyArcade.xcframework` and the main-actor Swift ownership,
-media-decoding and signed-catalog wrapper as one `TinyArcadeRuntime` library
-product.
+device/simulator `TinyArcade.xcframework` and the main-actor Swift ownership
+and media-decoding wrapper as one `TinyArcadeRuntime` library product.
 
-The Swift execution default is `TinyArcadeDistributionPolicyV1.appStoreBundledOnly`.
-Private and reviewed external runtime/library initializers fail before I/O or
-execution unless the app supplies a policy created with
-`appleApprovedExternalCartridges(approvalReference:)`. The reference is an
-auditable release assertion, not technical proof of permission; keep external
-paths absent from App Store UI/builds until Apple has approved this exact custom
-WASM use case. SDK black boxes use a non-public test-only policy.
+The generated package is physically bundled-only: external distribution policy,
+HTTP/catalog, trust/cache, reviewed-library and private-import Swift APIs are
+compiled out unless the source is built with
+`TINYARCADE_EXTERNAL_CARTRIDGES`. The repository's SDK black boxes define that
+flag to keep developing those paths, but App Store package generation does not.
+Do not add it to an iOS product until Apple has approved the exact custom WASM
+use case and a separate release review re-enables the surface deliberately.
 
 Call `TinyArcadeCartridgeDescriptorV1.inspect(_:)` before presenting an import.
 It statically validates the standard WASM manifest, lifecycle exports and exact
@@ -64,7 +63,8 @@ equivalent monotonic source—not `Date`. On scene resignation call
 `deactivateAndSave(to:)`; it clears controls and makes further input/ticks fail.
 Before foreground presentation resumes, reset the pacer and call `activate()`.
 
-Reviewed downloads should be handed to `TinyArcadeCartridgeCacheV1.activate`
+When `TINYARCADE_EXTERNAL_CARTRIDGES` is deliberately enabled for SDK research,
+reviewed downloads should be handed to `TinyArcadeCartridgeCacheV1.activate`
 only after the app has received the complete response. The cache verifies the
 signed entry and atomically selects it; `loadActive` and `rollback` recheck live
 revocations before returning executable bytes. The cache performs no network

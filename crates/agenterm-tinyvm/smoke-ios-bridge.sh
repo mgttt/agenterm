@@ -20,6 +20,7 @@ xcrun --sdk iphonesimulator clang \
   "$CRATE/tests/ios/header_smoke.c"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -32,6 +33,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeSmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target x86_64-apple-ios14.0-simulator \
@@ -44,6 +46,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeSmoke-x86_64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -56,6 +59,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -69,6 +73,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeReviewedFlowSmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -81,6 +86,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeSnapshotStoreSmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -93,6 +99,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadeReplaySmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -105,6 +112,7 @@ xcrun --sdk iphonesimulator swiftc \
   -o "$TEMP/TinyArcadePrivateLibrarySmoke-arm64"
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
+  -D TINYARCADE_EXTERNAL_CARTRIDGES \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \

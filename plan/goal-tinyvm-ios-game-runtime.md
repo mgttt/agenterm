@@ -3092,3 +3092,27 @@ this Codex session has no connected browser surface. The archive itself records
 upload event `c1ca0832-ad3b-4c3c-b4c9-57161afd2d5b` at
 2026-08-21T15:45:26Z with `state=success`. This is distribution evidence, not
 the still-open physical-iPhone lifecycle/performance/feel result.
+
+## Ninety-second executable increment — physically bundled-only Swift surface
+
+The first archive audit caught a release-policy mismatch that runtime tests did
+not: build 31 never called an external cartridge path, but its monolithic Swift
+wrapper still linked `URLSession` and compiled catalog, reviewed-download and
+private-import APIs. That contradicted the stated compile/link-time exclusion
+gate and was not acceptable as the next App Review candidate.
+
+The generated Swift package now compiles those surfaces only under the explicit
+`TINYARCADE_EXTERNAL_CARTRIDGES` condition. Default App package generation omits
+the external distribution policy, HTTP/catalog, trust/cache, reviewed-library
+and private-import Swift APIs. SDK black boxes define the condition and continue
+testing the future mechanisms, so the review-safe product boundary does not
+erase the research path.
+
+Evidence on 2026-08-21: the default package builds for generic iOS and universal
+simulator with warnings denied and contains no external API marker strings. The
+explicit research build still compiles every existing direct Swift black box;
+the complete iOS bridge gate passes with arm64/x86_64 consumers at 1,601,272 and
+1,676,856 bytes, and catalog, replay, private-library and session consumers all
+remain inside their release budgets. A replacement app archive must now prove
+the final executable has no `URLSession`, catalog/private-import markers,
+WebKit or JavaScriptCore before superseding TestFlight build 31.
