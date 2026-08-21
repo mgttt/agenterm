@@ -1,7 +1,7 @@
 # TinyArcade standard WASM cartridge ABI v1
 
 This document is the converter-facing contract for a TinyArcade cartridge.
-A cartridge is an ordinary WebAssembly 1.0 binary module. It has the standard
+A cartridge is an ordinary standard WebAssembly binary module. It has the standard
 `.wasm` magic/version, standard sections and standard function imports/exports.
 There are no tinyvm-only opcodes and no executable wrapper format.
 The v1 runtime rejects an empty cartridge or any whole module above 2 MiB
@@ -10,11 +10,28 @@ downloading rather than use the runtime as a network buffer.
 
 ## Standard module and decode complexity
 
-Standard non-custom sections must appear at most once, in ascending WebAssembly
-1.0 order, and each parser must consume its complete declared payload. Unknown
+Standard non-custom sections must appear at most once, in WebAssembly-specified
+order, and each parser must consume its complete declared payload. DataCount
+(section id 12) is correctly ordered before code rather than numerically after
+data. Unknown
 non-custom section ids, duplicate/out-of-order sections and trailing bytes fail
 before a `Module` exists. Custom sections may appear between standard sections;
 they do not change ordering.
+
+The v1 executable profile is MVP scalar instructions plus mutable globals,
+tables/`call_indirect`, and the standard bulk-memory `memory.copy` and
+`memory.fill` operations. DataCount is accepted and checked against the data
+section. Passive data, `memory.init`/`data.drop`, bulk table operations,
+reference types, multivalue, SIMD, exceptions, threads and multiple memories
+remain outside v1 and fail loudly at load time. This is feature negotiation by
+converter profile: future runtimes may add standard proposals without changing
+the `.wasm` container or inventing tinyvm-only opcodes.
+
+Bulk copy/fill first bounds-check every range, then charge deterministic fuel
+proportional to length (one unit per 16 bytes, in addition to the instruction
+unit), then mutate memory. An out-of-bounds or fuel trap therefore cannot leave
+a partial copy/fill behind. `memory.copy` has the standard overlap-safe memmove
+semantics; `memory.fill` uses the low byte of its i32 value.
 
 One module may materialize at most 262,144 allocation-amplifying decode records
 in total. The shared count covers section entries, function parameter/result
@@ -267,7 +284,8 @@ are no longer backward compatible.
 
 ## Converter conformance checklist
 
-1. Emit a valid WebAssembly 1.0 module, then attach exactly one canonical
+1. Emit a standards-valid WebAssembly module within the v1 executable profile,
+   then attach exactly one canonical
    manifest without rewriting its executable sections.
 2. Export all five exact lifecycle functions.
 3. Derive every manifest capability from the standard non-core import table;

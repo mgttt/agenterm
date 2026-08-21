@@ -3,7 +3,7 @@ name = "agenterm-tinyvm"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
-description = "Tiny no_std, fmt-free WebAssembly 1.0 MVP interpreter (< 100 KiB static core); runs where JIT is forbidden (iOS, wasm)"
+description = "Tiny no_std, fmt-free standard WebAssembly VM (< 100 KiB static core); runs where JIT is forbidden (iOS, wasm)"
 license = "MIT OR Apache-2.0"
 publish = false
 

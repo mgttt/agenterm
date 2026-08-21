@@ -207,7 +207,7 @@ fn standard_sections_are_unique_ordered_and_fully_consumed() {
     let trailing_type_byte = module_with_sections(&[&[0x01, 0x02, 0x00, 0x00]]);
     assert_eq!(err_msg(&trailing_type_byte), "trailing type section bytes");
 
-    let unknown_standard_section = module_with_sections(&[&[0x0c, 0x00]]);
+    let unknown_standard_section = module_with_sections(&[&[0x0d, 0x00]]);
     assert_eq!(err_msg(&unknown_standard_section), "unsupported section id");
 
     let custom_around_type = module_with_sections(&[

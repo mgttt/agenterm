@@ -6,8 +6,8 @@ if [ "$#" -ne 3 ]; then
   exit 2
 fi
 
-crate_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_dir=$(CDPATH= cd -- "$crate_dir/../.." && pwd)
+crate_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH='' cd -- "$crate_dir/../.." && pwd)
 source=$1
 crate_name=$2
 output=$3
@@ -48,12 +48,17 @@ trap 'rm -f "$raw"' EXIT HUP INT TERM
   "$source" \
   -o "$raw"
 
-# Rust's precompiled core may still introduce memory.copy/fill. Lower those
-# standard post-MVP instructions so the published cartridge is strict MVP.
+# Keep Rust's standard bulk memory.copy/fill instructions. The cartridge
+# profile still disables passive segments/reference types and the other broad
+# post-MVP feature families above; tinyvm meters copied/filled bytes as fuel.
 "$wasm_opt" "$raw" \
-  --llvm-memory-copy-fill-lowering \
-  --mvp-features \
+  --enable-bulk-memory \
   --enable-mutable-globals \
+  --disable-reference-types \
+  --disable-multivalue \
+  --disable-sign-ext \
+  --disable-nontrapping-float-to-int \
+  --disable-simd \
   --strip-debug \
   --strip-producers \
   -Oz \

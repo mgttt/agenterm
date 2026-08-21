@@ -17,9 +17,9 @@ cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check target/tinyvm-depth-well/depth-well-0.1.0.wasm
 ```
 
-The pinned Rust compiler emits the guest, then Binaryen lowers compiler-added
-`memory.copy`/`memory.fill` operations to strict WebAssembly MVP. Install
-Binaryen so `wasm-opt` is available, or set `WASM_OPT` to its executable.
+The pinned Rust compiler emits the guest, and Binaryen retains its standard
+`memory.copy`/`memory.fill` operations in the bounded TinyArcade v1 Wasm
+profile. Install Binaryen so `wasm-opt` is available, or set `WASM_OPT` to its executable.
 Build output belongs under `target/`; a cartridge binary is not committed.
 
 Input mapping:

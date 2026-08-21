@@ -227,6 +227,10 @@ enum Op {
     MemorySize,
     /// `memory.grow` — pop delta pages, grow, push old size (or -1 on failure).
     MemoryGrow,
+    /// Bulk-memory `memory.copy` (0xfc 10). Overlap has memmove semantics.
+    MemoryCopy,
+    /// Bulk-memory `memory.fill` (0xfc 11). The low byte of the value is used.
+    MemoryFill,
     /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
     I64Load {
         offset: u32,
@@ -602,6 +606,30 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 }
                 i += 1;
                 ops.push(Op::MemoryGrow);
+            }
+            0xFC => {
+                let (subopcode, ni) = leb_u32(body, i)?;
+                i = ni;
+                match subopcode {
+                    10 => {
+                        let (destination_memory, n1) = leb_u32(body, i)?;
+                        let (source_memory, n2) = leb_u32(body, n1)?;
+                        i = n2;
+                        if destination_memory != 0 || source_memory != 0 {
+                            return Err(WasmError::Decode("memory.copy memory indices must be 0"));
+                        }
+                        ops.push(Op::MemoryCopy);
+                    }
+                    11 => {
+                        let (memory, ni) = leb_u32(body, i)?;
+                        i = ni;
+                        if memory != 0 {
+                            return Err(WasmError::Decode("memory.fill memory index must be 0"));
+                        }
+                        ops.push(Op::MemoryFill);
+                    }
+                    _ => return Err(WasmError::Decode("unsupported 0xfc opcode")),
+                }
             }
             0x20 => {
                 let (x, ni) = leb_u32(body, i)?;
@@ -1607,7 +1635,8 @@ impl Module {
         let mut mem_limits: Option<(usize, Option<usize>)> = None;
         let mut data: Vec<(usize, Vec<u8>)> = Vec::new();
         let mut budget = DecodeBudget::new();
-        let mut last_standard_section = 0u8;
+        let mut last_standard_section_rank = 0u8;
+        let mut data_count: Option<usize> = None;
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1622,13 +1651,19 @@ impl Module {
                 .ok_or(WasmError::Decode("section runs past end of module"))?;
             let payload = &wasm[start..end];
             if id != 0 {
-                if id > 11 {
-                    return Err(WasmError::Decode("unsupported section id"));
-                }
-                if id <= last_standard_section {
+                // DataCount (id 12) is ordered between element (9) and code
+                // (10), so numeric section ids are not an ordering relation.
+                let rank = match id {
+                    1..=9 => id,
+                    12 => 10,
+                    10 => 11,
+                    11 => 12,
+                    _ => return Err(WasmError::Decode("unsupported section id")),
+                };
+                if rank <= last_standard_section_rank {
                     return Err(WasmError::Decode("duplicate or out-of-order section"));
                 }
-                last_standard_section = id;
+                last_standard_section_rank = rank;
             }
             match id {
                 0 => {}
@@ -1647,6 +1682,13 @@ impl Module {
                     start_fn = Some(function as usize);
                 }
                 9 => elems = parse_elem_section(payload, &mut budget)?,
+                12 => {
+                    let (count, consumed) = leb_u32(payload, 0)?;
+                    if consumed != payload.len() {
+                        return Err(WasmError::Decode("trailing data count section bytes"));
+                    }
+                    data_count = Some(count as usize);
+                }
                 10 => codes = parse_code_section(payload, &mut budget)?,
                 11 => data = parse_data_section(payload, &mut budget)?,
                 _ => unreachable!("standard section id checked above"),
@@ -1656,6 +1698,9 @@ impl Module {
 
         if func_types.len() != codes.len() {
             return Err(WasmError::Decode("function count"));
+        }
+        if data_count.is_some_and(|count| count != data.len()) {
+            return Err(WasmError::Decode("data count does not match data section"));
         }
 
         let mut module = Module::new_with_limits(limits);
@@ -2460,6 +2505,23 @@ impl Module {
                         stack.push(Val::I32(-1));
                     }
                 }
+                Op::MemoryCopy => {
+                    let len = pop(&mut stack)? as u32 as usize;
+                    let source = pop(&mut stack)? as u32 as usize;
+                    let destination = pop(&mut stack)? as u32 as usize;
+                    let source_range = bulk_memory_range(mem.len(), source, len)?;
+                    bulk_memory_range(mem.len(), destination, len)?;
+                    charge_bulk_steps(steps, len, self.limits.max_steps)?;
+                    mem.copy_within(source_range, destination);
+                }
+                Op::MemoryFill => {
+                    let len = pop(&mut stack)? as u32 as usize;
+                    let value = pop(&mut stack)? as u8;
+                    let destination = pop(&mut stack)? as u32 as usize;
+                    let range = bulk_memory_range(mem.len(), destination, len)?;
+                    charge_bulk_steps(steps, len, self.limits.max_steps)?;
+                    mem[range].fill(value);
+                }
                 Op::I64Load { offset } => {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
                     let bytes = le8(&mem[ea..ea + 8]);
@@ -2854,6 +2916,34 @@ fn mem_ea(mem_len: usize, addr: i32, offset: u32, width: usize) -> Result<usize,
         return Err(WasmError::Trap("memory access ["));
     }
     Ok(ea)
+}
+
+/// Bounds-check one bulk-memory range before any byte is changed. In
+/// particular, a zero-length operation at exactly `mem_len` is valid.
+fn bulk_memory_range(
+    mem_len: usize,
+    start: usize,
+    len: usize,
+) -> Result<core::ops::Range<usize>, WasmError> {
+    let end = start
+        .checked_add(len)
+        .ok_or(WasmError::Trap("bulk memory access overflow"))?;
+    if end > mem_len {
+        return Err(WasmError::Trap("bulk memory access out of bounds"));
+    }
+    Ok(start..end)
+}
+
+/// Bulk operations do work proportional to their byte length. Charge one
+/// deterministic fuel unit per 16 bytes in addition to the instruction's
+/// ordinary unit, and always charge before mutation so a fuel trap is atomic.
+fn charge_bulk_steps(steps: &mut u64, len: usize, max_steps: u64) -> Result<(), WasmError> {
+    let units = u64::try_from(len.div_ceil(16)).unwrap_or(u64::MAX);
+    *steps = steps.saturating_add(units);
+    if *steps > max_steps {
+        return Err(WasmError::Trap("step budget"));
+    }
+    Ok(())
 }
 
 fn mem_read_i32(mem: &[u8], addr: i32, offset: u32) -> Result<i32, WasmError> {
@@ -3619,6 +3709,96 @@ mod tests {
             run_body(0, 1, &[0x41, 0x01, 0x40, 0x00, 0x1A, 0x3F, 0x00, 0x0B]).unwrap(),
             vec![2]
         );
+    }
+
+    #[test]
+    fn bulk_memory_copy_is_overlap_safe_and_fill_uses_low_byte() {
+        let mut module = Module::new();
+        // (dst, src, len) memory.copy
+        let copy = module
+            .add_function(
+                3,
+                0,
+                0,
+                &[
+                    0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x0A, 0x00, 0x00, 0x0B,
+                ],
+            )
+            .unwrap();
+        // (dst, value, len) memory.fill
+        let fill = module
+            .add_function(
+                3,
+                0,
+                0,
+                &[0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x0B, 0x00, 0x0B],
+            )
+            .unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.memory_mut()[0..8].copy_from_slice(b"abcdefgh");
+
+        instance.invoke(copy, &[2, 0, 6]).unwrap();
+        assert_eq!(&instance.memory()[0..8], b"ababcdef");
+        instance.invoke(fill, &[1, 0x1234, 3]).unwrap();
+        assert_eq!(&instance.memory()[0..8], b"a444cdef");
+    }
+
+    #[test]
+    fn bulk_memory_traps_atomically_on_bounds_or_fuel() {
+        let body = [0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x0B, 0x00, 0x0B];
+        let mut module = Module::new_with_limits(Limits {
+            max_steps: 6,
+            ..Limits::default()
+        });
+        let fill = module.add_function(3, 0, 0, &body).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.memory_mut()[0..8].fill(0xA5);
+
+        assert!(matches!(
+            instance.invoke(fill, &[0, 7, 64]),
+            Err(WasmError::Trap("step budget"))
+        ));
+        assert_eq!(&instance.memory()[0..8], &[0xA5; 8]);
+        assert!(matches!(
+            instance.invoke(fill, &[65_530, 7, 16]),
+            Err(WasmError::Trap("bulk memory access out of bounds"))
+        ));
+        assert_eq!(&instance.memory()[0..8], &[0xA5; 8]);
+    }
+
+    #[test]
+    fn bulk_memory_decoder_rejects_other_memories_and_unknown_subopcodes() {
+        let mut module = Module::new();
+        assert!(matches!(
+            module.add_function(0, 0, 0, &[0xFC, 0x0A, 0x01, 0x00, 0x0B]),
+            Err(WasmError::Decode("memory.copy memory indices must be 0"))
+        ));
+        assert!(matches!(
+            module.add_function(0, 0, 0, &[0xFC, 0x0C, 0x0B]),
+            Err(WasmError::Decode("unsupported 0xfc opcode"))
+        ));
+    }
+
+    #[test]
+    fn data_count_has_spec_section_order_and_must_match_data_section() {
+        let mut wasm = alloc::vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+        wasm.extend_from_slice(&[0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F]);
+        wasm.extend_from_slice(&[0x03, 0x02, 0x01, 0x00]);
+        wasm.extend_from_slice(&[0x05, 0x03, 0x01, 0x00, 0x01]);
+        wasm.extend_from_slice(&[0x0C, 0x01, 0x00]);
+        wasm.extend_from_slice(&[0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x00, 0x0B]);
+        wasm.extend_from_slice(&[0x0B, 0x01, 0x00]);
+        assert_eq!(
+            Module::from_bytes(&wasm).unwrap().eval(&[]).unwrap(),
+            vec![Val::I32(0)]
+        );
+
+        let count_payload = wasm.iter().position(|&byte| byte == 0x0C).unwrap() + 2;
+        wasm[count_payload] = 1;
+        assert!(matches!(
+            Module::from_bytes(&wasm),
+            Err(WasmError::Decode("data count does not match data section"))
+        ));
     }
 
     #[test]

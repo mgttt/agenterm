@@ -1,8 +1,11 @@
 # TinyArcade converter conformance v1
 
-Fan tools should emit an ordinary WebAssembly 1.0 MVP `.wasm`, not a TinyArcade
-bytecode wrapper. The app-specific contract consists only of standard imports,
-exports, a standard custom manifest section and versioned media/state records.
+Fan tools should emit an ordinary standards-valid WebAssembly `.wasm`, not a
+TinyArcade bytecode wrapper. The app-specific contract consists only of
+standard imports, exports, a standard custom manifest section and versioned
+media/state records. The accepted v1 compiler profile includes the MVP plus
+standard bulk-memory `memory.copy` and `memory.fill`; it is intentionally a
+bounded subset of WebAssembly, not a different VM instruction set.
 
 Run the same black-box gate used by the runtime repository:
 
@@ -42,9 +45,10 @@ converter check
 
 Two compiler-produced reference cartridges own both media branches:
 `depth-well-0.1.0.wasm` exercises `grid3d/v1`, while
-`paddle-guard-0.1.0.wasm` exercises `indexed2d/v1`. Both are ordinary strict
-WASM MVP modules built through the shared `build-rust-cartridge.sh` profile and
-accepted by this same converter path; neither receives a fixture-only loader.
+`paddle-guard-0.1.0.wasm` exercises `indexed2d/v1`. Both are ordinary standard
+WASM modules built through the shared `build-rust-cartridge.sh` profile. Their
+real Rust output retains `memory.copy`/`memory.fill` and DataCount instead of
+lowering bulk work into MVP loops; neither receives a fixture-only loader.
 
 Before upload, a converter may additionally consume the exact app-build TAH1
 profile defined in

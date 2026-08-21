@@ -399,6 +399,11 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_expect(I32)?;
             v.push(I32);
         }
+        MemoryCopy | MemoryFill => {
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+        }
 
         // --- locals and globals ---
         LocalGet(i) => {

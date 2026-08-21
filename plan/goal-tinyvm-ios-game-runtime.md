@@ -1340,3 +1340,40 @@ Evidence on 2026-08-21:
 - All 195 package tests plus one doctest, default/all-feature/no-default/replay
   gates, all-target Clippy, formatting, ShellCheck and document redaction pass.
   The stripped static core remains 71,064 bytes with self-test 42.
+
+## Thirty-eighth executable increment — standard bulk memory, not MVP lowering
+
+The real Rust cartridges exposed the next architecture boundary: both contain
+standard `memory.copy`/`memory.fill`, but the old publisher lowered those
+instructions into MVP loops. tinyvm now owns these standard operations directly
+and the shared compiler profile preserves them. This advances an ordinary Wasm
+VM rather than growing a game-specific bytecode dialect.
+
+The decoder accepts canonical 0xfc subopcodes 10/11 and only memory index zero;
+the validator requires the three i32 operands. Execution implements overlap-safe
+copy and low-byte fill. It checks every range and charges one deterministic fuel
+unit per 16 bytes before mutation, so an out-of-bounds or fuel trap cannot leave
+partial memory changes. DataCount section id 12 is parsed at its spec-defined
+position before code and must match the data section; numeric section-id sorting
+is no longer incorrectly used as the Wasm ordering rule.
+
+The v1 profile deliberately does not claim the whole bulk-memory proposal:
+passive data, `memory.init`/`data.drop` and bulk table operations remain rejected
+until their per-instance state and resource contracts are implemented. Standard
+features graduate one coherent profile at a time, with unsupported features
+failing at load rather than being silently reinterpreted.
+
+Evidence on 2026-08-21:
+
+- Depth Well retains two `memory.copy` and two `memory.fill` instructions;
+  Paddle Guard retains one copy and two fills. Both compiler artifacts load and
+  pass the ordinary converter/runtime paths without a fixture-only decoder.
+- JavaScriptCore and tinyvm match all four exact replay frames for each game
+  after the lowering removal, covering grid3d, indexed2d and tones.
+- 200 package tests plus one doctest pass across the exercised all-feature
+  matrix; default/no-default/replay checks, all-target Clippy, formatting,
+  ShellCheck and diff hygiene pass. The new PRD leaf has a public black-box
+  integration test, not only an internal decoder test.
+- Device/simulator Swift linkage remains below its gates at 1,506,552 bytes
+  arm64 and 1,581,976 bytes x86_64. The isolated stripped static core is 87,640
+  bytes, below 100 KiB, and its C self-test returns 42.
