@@ -17,6 +17,17 @@ fn wabt_compiled_imported_table_decodes_in_standard_index_space() {
             .expect("TINYVM_WABT_IMPORTED_TABLE_WASM is set by the smoke script"),
     );
     let bytes = std::fs::read(path).expect("read WABT-produced wasm");
+    let provider_path = PathBuf::from(
+        std::env::var_os("TINYVM_WABT_EXPORTED_TABLE_WASM")
+            .expect("TINYVM_WABT_EXPORTED_TABLE_WASM is set by the smoke script"),
+    );
+    let provider_bytes = std::fs::read(provider_path).expect("read WABT-produced provider wasm");
+    let linked_consumer_path = PathBuf::from(
+        std::env::var_os("TINYVM_WABT_LINKED_TABLE_CONSUMER_WASM")
+            .expect("TINYVM_WABT_LINKED_TABLE_CONSUMER_WASM is set by the smoke script"),
+    );
+    let linked_consumer_bytes =
+        std::fs::read(linked_consumer_path).expect("read WABT-produced linked consumer wasm");
     let module = must_ok(
         WasmModule::from_bytes_with(
             &bytes,
@@ -41,7 +52,40 @@ fn wabt_compiled_imported_table_decodes_in_standard_index_space() {
         Err(WasmError::Trap("unbound imported table"))
     ));
 
-    let table = must_ok(WasmTable::new(1, Some(3)), "create host table");
+    let mut provider = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&provider_bytes),
+            "load table provider",
+        )
+        .instantiate(),
+        "instantiate table provider",
+    );
+    let table = must_ok(
+        provider.exported_table_handle("dispatch"),
+        "resolve exported table",
+    )
+    .expect("dispatch table export");
+    let mut linked_consumer = must_ok(
+        WasmModule::from_bytes(&linked_consumer_bytes),
+        "load linked table consumer",
+    );
+    must_ok(
+        linked_consumer.bind_table_import("host", "dispatch", &table),
+        "link provider table",
+    );
+    let mut linked_consumer = must_ok(
+        linked_consumer.instantiate(),
+        "instantiate linked table consumer",
+    );
+    drop(provider);
+    assert!(matches!(
+        must_ok(
+            linked_consumer.invoke_by_name("run", &[]),
+            "invoke provider function after handle drop",
+        )
+        .as_slice(),
+        [Val::I32(42)]
+    ));
     let open = || {
         let mut module = must_ok(
             WasmModule::from_bytes_with(

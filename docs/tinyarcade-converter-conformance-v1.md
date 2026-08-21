@@ -91,13 +91,15 @@ They agree on the single-import result `516`, while a multi-index alias test pro
 overlap-safe copy result `593`. TinyArcade v1 deliberately rejects this general
 engine capability.
 `smoke-wabt-imported-table.sh` covers the general VM's imported-table work:
-WABT validates imported table zero plus defined table one, binding and active
-initialization use a shared host object, and a two-index alias fixture proves a
-single aggregate allocation plus overlap-safe copy result `16`. Table cells
-carry their originating instance identity. JavaScriptCore's sibling result `4`
-records the remaining cross-instance dispatch target; tinyvm currently traps a
-foreign address rather than misrouting it into caller-local state. TinyArcade
-v1 rejects table imports.
+WABT compiles a provider whose defined exported table already contains a
+provider function and a consumer that imports and invokes it after the provider
+handle is dropped. It also validates imported table zero plus defined table
+one, binding and active initialization through that same store object. A
+two-index alias fixture proves one aggregate allocation plus overlap-safe copy
+result `16`. Table cells carry their originating instance identity; tinyvm and
+JavaScriptCore agree on sibling dispatch result `4`. TinyVM additionally runs a
+4,000-call A/B cycle with shared fuel/depth/activation accounting through the
+store trampoline. TinyArcade v1 rejects table imports.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.

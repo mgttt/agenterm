@@ -11,19 +11,28 @@ enum OracleError: Error {
 @main
 struct ImportedTableOracle {
     static func main() throws {
-        guard CommandLine.arguments.count == 2 else { throw OracleError.usage }
+        guard CommandLine.arguments.count == 4 else { throw OracleError.usage }
         let bytes = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
+        let providerBytes = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
+        let linkedConsumerBytes = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3]))
         guard let context = JSContext() else { throw OracleError.context }
         var javascriptError: String?
         context.exceptionHandler = { _, exception in
             javascriptError = exception?.toString() ?? "unknown JavaScript exception"
         }
         context.setObject(Array(bytes), forKeyedSubscript: "hostBytes" as NSString)
+        context.setObject(Array(providerBytes), forKeyedSubscript: "providerBytes" as NSString)
+        context.setObject(Array(linkedConsumerBytes), forKeyedSubscript: "linkedConsumerBytes" as NSString)
         let value = context.evaluateScript(
             """
             (() => {
               const module = new WebAssembly.Module(Uint8Array.from(hostBytes));
-              const dispatch = new WebAssembly.Table({initial: 1, maximum: 3, element: "anyfunc"});
+              const providerModule = new WebAssembly.Module(Uint8Array.from(providerBytes));
+              const provider = new WebAssembly.Instance(providerModule);
+              const dispatch = provider.exports.dispatch;
+              const linkedConsumerModule = new WebAssembly.Module(Uint8Array.from(linkedConsumerBytes));
+              const linkedConsumer = new WebAssembly.Instance(linkedConsumerModule, {host: {dispatch}});
+              if (linkedConsumer.exports.run() !== 42) return -3;
               const imports = {host: {dispatch}};
               const first = new WebAssembly.Instance(module, imports);
               if (first.exports.dispatch !== dispatch) return -1;

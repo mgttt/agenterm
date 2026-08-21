@@ -151,6 +151,8 @@ active element segment 和跨表 `table.copy` 均使用标准 table index。初�
 预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。标准 imported table
 由显式 `WasmStore` 持有；跨 instance funcref、owner signature、normal/tail dispatch、
 循环回入和统一 fuel/activation 预算均由 store trampoline 执行，不消耗 native stack。
+defined table export 可按需把原 element vector 零拷贝提升进同一 store，再作为另一个
+module 的标准 table import；provider function owner 由 store 保活。
 TinyArcade v1 仍拒绝 table import，因为单卡带 ABI 尚未定义多 module 链接契约。
 通用 VM 同样接受标准 multiple-memory proposal 中的多张 internally defined linear
 memory：scalar memarg、size/grow、active data、init/fill 与同内存或跨内存 copy 都按

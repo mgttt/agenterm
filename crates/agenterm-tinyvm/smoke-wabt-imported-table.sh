@@ -9,17 +9,27 @@ CARGO=${CARGO:-cargo}
 WAT2WASM=${WAT2WASM:-wat2wasm}
 WASM_VALIDATE=${WASM_VALIDATE:-wasm-validate}
 WASM="$TEMP/imported-table-v1.wasm"
+PROVIDER_WASM="$TEMP/exported-table-v1.wasm"
+LINKED_CONSUMER_WASM="$TEMP/linked-table-consumer-v1.wasm"
 ALIAS_WASM="$TEMP/imported-table-alias-v1.wasm"
 CYCLE_WASM="$TEMP/imported-table-cycle-v1.wasm"
 ORACLE="$TEMP/ImportedTableOracle"
 
 "$WAT2WASM" "$CRATE/tests/fixtures/imported-table-v1.wat" -o "$WASM"
 "$WASM_VALIDATE" "$WASM"
+"$WAT2WASM" "$CRATE/tests/fixtures/exported-table-v1.wat" -o "$PROVIDER_WASM"
+"$WASM_VALIDATE" "$PROVIDER_WASM"
+"$WAT2WASM" "$CRATE/tests/fixtures/linked-table-consumer-v1.wat" \
+  -o "$LINKED_CONSUMER_WASM"
+"$WASM_VALIDATE" "$LINKED_CONSUMER_WASM"
 "$WAT2WASM" "$CRATE/tests/fixtures/imported-table-alias-v1.wat" -o "$ALIAS_WASM"
 "$WASM_VALIDATE" "$ALIAS_WASM"
 "$WAT2WASM" "$CRATE/tests/fixtures/imported-table-cycle-v1.wat" -o "$CYCLE_WASM"
 "$WASM_VALIDATE" "$CYCLE_WASM"
-TINYVM_WABT_IMPORTED_TABLE_WASM="$WASM" "$CARGO" test -q -p agenterm-tinyvm \
+TINYVM_WABT_IMPORTED_TABLE_WASM="$WASM" \
+  TINYVM_WABT_EXPORTED_TABLE_WASM="$PROVIDER_WASM" \
+  TINYVM_WABT_LINKED_TABLE_CONSUMER_WASM="$LINKED_CONSUMER_WASM" \
+  "$CARGO" test -q -p agenterm-tinyvm \
   --test wabt_imported_table_oracle \
   wabt_compiled_imported_table_decodes_in_standard_index_space \
   -- --ignored --exact
@@ -37,6 +47,6 @@ xcrun swiftc \
   -framework JavaScriptCore \
   "$CRATE/tests/webkit/ImportedTableOracle.swift" \
   -o "$ORACLE"
-"$ORACLE" "$WASM"
+"$ORACLE" "$WASM" "$PROVIDER_WASM" "$LINKED_CONSUMER_WASM"
 
-echo "OK: imported-table decode/alias gate and JavaScriptCore sibling oracle"
+echo "OK: linked exported-table decode/alias gate and JavaScriptCore sibling oracle"

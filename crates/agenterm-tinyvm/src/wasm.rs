@@ -180,6 +180,32 @@ impl Store {
         })
     }
 
+    fn adopt_table(
+        &self,
+        elements: &mut Vec<Option<FunctionAddress>>,
+        max: Option<usize>,
+    ) -> Result<Table, WasmError> {
+        let len = elements.len();
+        let mut state = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+        state
+            .tables
+            .try_reserve(1)
+            .map_err(|_| WasmError::Trap("table size"))?;
+        let index = state.tables.len();
+        state.tables.push(SharedTableState {
+            elements: core::mem::take(elements),
+        });
+        Ok(Table {
+            store: self.clone(),
+            index,
+            len: Rc::new(Cell::new(len)),
+            max,
+        })
+    }
+
     fn same(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.inner, &other.inner)
     }
@@ -6618,6 +6644,51 @@ impl Instance {
             .module
             .table_export_index(name)
             .and_then(|index| self.table_elements_at(index))
+    }
+
+    /// Resolve one standard funcref table export as the same live store object.
+    ///
+    /// A defined table stays instance-local until this method is called. Its
+    /// existing element vector is then moved, without copying entries, into
+    /// this instance's [`Store`] and can be bound through
+    /// [`Module::bind_table_import`].
+    pub fn exported_table_handle(&mut self, name: &str) -> Result<Option<Table>, WasmError> {
+        let index = self
+            .state
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("instance is already mutably borrowed"))?
+            .module
+            .table_export_index(name);
+        let Some(index) = index else {
+            return Ok(None);
+        };
+
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
+        let slot = state
+            .tables
+            .get_mut(index)
+            .ok_or(WasmError::Trap("table index"))?;
+        let table = match slot {
+            TableSlot::Imported { index, len, max } => Table {
+                store: self.store.clone(),
+                index: *index,
+                len: len.clone(),
+                max: *max,
+            },
+            TableSlot::Defined { elements, max } => {
+                let table = self.store.adopt_table(elements, *max)?;
+                *slot = TableSlot::Imported {
+                    index: table.index,
+                    len: table.len.clone(),
+                    max: table.max,
+                };
+                table
+            }
+        };
+        Ok(Some(table))
     }
 
     /// Read-only access to memory zero, for bounded native host I/O.

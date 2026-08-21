@@ -687,6 +687,78 @@ fn standard_resource_exports_are_resolved_by_name() {
     assert!(must_ok(instance.exported_memory("missing"), "missing memory").is_none());
 }
 
+fn exported_funcref_table_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    section(&mut wasm, 4, &[0x01, 0x70, 0x01, 0x01, 0x03]);
+    let mut exports = vec![0x01];
+    name(&mut exports, "dispatch");
+    exports.extend_from_slice(&[0x01, 0x00]);
+    section(&mut wasm, 7, &exports);
+    section(&mut wasm, 9, &[0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00]);
+    section(&mut wasm, 10, &[0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B]);
+    wasm
+}
+
+fn imported_funcref_dispatch_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    let mut imports = vec![0x01];
+    name(&mut imports, "host");
+    name(&mut imports, "dispatch");
+    imports.extend_from_slice(&[0x01, 0x70, 0x01, 0x01, 0x03]);
+    section(&mut wasm, 2, &imports);
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    let mut exports = vec![0x01];
+    name(&mut exports, "run");
+    exports.extend_from_slice(&[0x00, 0x00]);
+    section(&mut wasm, 7, &exports);
+    section(
+        &mut wasm,
+        10,
+        &[0x01, 0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B],
+    );
+    wasm
+}
+
+#[test]
+fn standard_exported_table_handle_links_through_the_same_store() {
+    let mut provider = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&exported_funcref_table_module()),
+            "load table provider",
+        )
+        .instantiate(),
+        "instantiate table provider",
+    );
+    let table = must_ok(
+        provider.exported_table_handle("dispatch"),
+        "resolve table export",
+    )
+    .expect("dispatch table export");
+    assert_eq!(table.len(), 1);
+
+    let mut consumer = must_ok(
+        WasmModule::from_bytes(&imported_funcref_dispatch_module()),
+        "load table consumer",
+    );
+    must_ok(
+        consumer.bind_table_import("host", "dispatch", &table),
+        "link table export",
+    );
+    let mut consumer = must_ok(consumer.instantiate(), "instantiate table consumer");
+    drop(provider);
+    assert!(matches!(
+        must_ok(consumer.invoke_by_name("run", &[]), "linked indirect call").as_slice(),
+        [Val::I32(42)]
+    ));
+    assert_eq!(
+        must_ok(table.is_null(0), "linked table visibility"),
+        Some(false)
+    );
+}
+
 #[test]
 fn standard_imported_tables_decode_before_store_binding_exists() {
     let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];

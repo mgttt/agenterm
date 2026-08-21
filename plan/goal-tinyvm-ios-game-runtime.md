@@ -2825,3 +2825,28 @@ no-default/replay, Clippy, rustfmt and shell gates pass. The stripped static
 core remains 101,240 bytes with selftest 42. All iOS linked sizes are unchanged:
 1,599,752 arm64, 1,667,864 x86_64, and 1,472,600 / 1,447,032 / 1,448,704 /
 1,447,856 bytes for profile-catalog / replay / private-library / session.
+
+## Eighty-third executable increment — linked table exports
+
+`Instance::exported_table_handle` now resolves a standard defined funcref-table
+export as an object another module can bind through
+`Module::bind_table_import`. Like linked memory, promotion is lazy: the
+existing element vector moves without copying into the instance's current
+`WasmStore`; modules that never request the handle retain direct table storage.
+An imported-table re-export reconstructs a handle to its existing store table.
+
+The stronger WABT fixture places a provider function in its defined exported
+table. A separate consumer imports that table and invokes the function after
+the provider's public `Instance` handle is dropped. Store ownership preserves
+both the table entry and its function owner; the unified store trampoline
+returns 42 without native recursion. The existing sibling overwrite, alias,
+foreign-store rejection and 4,000-call cross-instance cycle cases remain in
+the same oracle. JavaScriptCore executes the provider/consumer pair and sibling
+sequence from the same WABT-produced bytes.
+
+Evidence on 2026-08-21: 249 non-ignored all-feature package tests plus the
+doctest pass; WABT/JSC, no-default/replay, Clippy, rustfmt and shell gates pass.
+The stripped static core remains 101,240 bytes with selftest 42. All iOS linked
+sizes remain unchanged at 1,599,752 arm64, 1,667,864 x86_64, and 1,472,600 /
+1,447,032 / 1,448,704 / 1,447,856 bytes for profile-catalog / replay /
+private-library / session.
