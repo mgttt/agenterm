@@ -124,13 +124,16 @@ Reject for the iOS cartridge runtime:
 
 ## Executable follow-ups
 
-1. Add a tinyvm boundary benchmark that separately records empty-call cost,
-   scalar argument conversion, borrowed guest-memory access and an intentional
-   host copy at 0, 64, 1 KiB, 64 KiB and one frame-sized payload.
-2. Keep the benchmark fixture identical for tinyvm and development-only
-   JavaScriptCore so interpreter cost is not confused with data movement.
-3. Add lifetime tests for memory/global/table/function handles after public
-   instance handles are dropped, including wrong-store and stale-token cases.
-4. If background execution becomes a product requirement, first specify and
+1. [x] `smoke-boundary-benchmark.sh` separately records empty-call cost,
+   scalar argument conversion, borrowed guest-memory access, an intentional
+   host copy and a constant-work guest call at 0, 64, 1 KiB, 64 KiB and one
+   76,800-byte frame-sized payload.
+2. [x] Tinyvm and development-only JavaScriptCore execute the identical WABT
+   fixture and emit the same CSV dimensions, so execution is not confused with
+   data movement. Timings are observations, never pass/fail thresholds.
+3. [~] Continue lifetime tests for memory/global/table/function handles after
+   public instance handles are dropped, including wrong-store and stale-token
+   cases.
+4. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

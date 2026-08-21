@@ -2959,3 +2959,24 @@ PRD leaf map and the independently compiled WABT/JavaScriptCore linked-function
 oracle. The stripped static core is unchanged at 101,240 bytes with selftest
 42; the store-reference machinery is absent from that deliberately minimal
 profile.
+
+## Eighty-sixth executable increment — decomposed boundary benchmark
+
+The QJWasm review now has an executable consequence rather than a borrowed
+headline multiplier. `smoke-boundary-benchmark.sh` compiles and validates one
+standard WAT fixture, then runs those exact bytes through release tinyvm and
+public JavaScriptCore. Both engines emit compatible CSV rows for empty calls,
+mixed numeric arguments, borrowed linear-memory reads, intentional host copies
+and a constant-work guest memory touch.
+
+Payload points are 0, 64, 1,024, 65,536 and 76,800 bytes. This exposes the
+copy-size curve independently of interpreter/call cost and includes one full
+TinyArcade-sized frame. The benchmark validates results but never gates on
+elapsed time, so host load cannot create a false conformance failure. A
+monotonic host clock gives JavaScriptCore sub-millisecond observations without
+adding browser/H5 runtime code to the app.
+
+Evidence on 2026-08-21: WABT validation, the ignored release Rust benchmark and
+the optimized Swift/JavaScriptCore benchmark all pass through the one command.
+The low-iteration smoke confirms all five cost dimensions and payload sizes;
+normal research runs default to 20,000 operations per point.
