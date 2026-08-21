@@ -5,7 +5,7 @@
 | **Document** | Product / architecture design for `partnernetsoftware/rh` |
 | **Author** | AgenTerm systems architecture (draft for owner review) |
 | **Date** | 2026-08-21 |
-| **Status** | Draft (rev 4, opus0 gate pass + owner lock D24) |
+| **Status** | Draft (rev 5, D38 iOS = signed interpreter; native door does not invent executable pages) |
 | **Audience** | Senior engineers who know `crates/agenterm-rh`, the root host, and Chassis-L1 |
 | **Related** | `prd/PRD_02_10_rhai_scripting.md`, `plan/design-rh-aot.md`, `plan/ARCHITECTURE.md`, `plan/reference-cross-target-execution.md` §5 / §6.2 / §6.3, `plan/plan-v0.1.18.md` (APE parked for *workbench*), `plan/plan-ape-thin-shell-dynamic-packages.md` (name collision) |
 
@@ -125,7 +125,7 @@ The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh`
 | D24 | crates.io first public number is **0.1.0**. Populate private repo by **squash/copy** of language files + fixtures + licenses (not `check_many` / `fleet` / AOT); `NOTICE` records the AgenTerm source SHA. **No `git filter-repo` of AgenTerm history.** Collaborators = **org members only**; no extra personal-account invites. | Owner lock 2026-08-21 (grok-mcu). 0.1.0 is honest until Language 1 has six-cell CI. Squash keeps rh's git log about rh. Org ACL already covers the private placeholder. |
 | D25 | Language-1 `rh::fail(msg)` **raises** (`Error::Host`). It does **not** evaluate to the AOT utility sentinel `-5`. Native packs may still return `-5` from `RH_HOST_UTILITY_FAIL` as an **i64 ABI encoding** after `record_host_error`; that encoding is not the language value. | Owner lock 2026-08-21 after A2. Sentinel integers are AOT ABI, not Rust-alike semantics. |
 | D26 | After A3: (1) `Child.stdout` / `Child.stderr` **read to EOF and return `Bytes`**. Do **not** add `Stream` to Language 1. (2) `std::process::list` stays on the name allowlist but **StdHost returns `unsupported`**; AgenTerm `Host` may implement later — no `agenterm-platform` in the default crate. (3) `Engine::new()` installs `StdHost`; `Engine::sandboxed()` installs a no-op `Host`. (4) Dotted host calls (`fleet.tabs.list`) already go through `Host::call`; leave the interpreter alone for PR-D1. `read_dir` is sorted by file name. | Owner lock 2026-08-21 after A3. Bytes-at-EOF is Rust `Output.stdout`, not a PHP/Node stream. |
-| D27 | rh **must expose an assembly / live-native door**, but it is **not Language 1 default**. Default `Engine::new()` / `sandboxed()` stay free of emit/enter/`dlcall`. Native is an explicit, `unsafe`-shaped capability (feature `native` and/or `Engine::with_native`): stage ISA bytes (safe), flip to executable, enter a declared C ABI (unsafe). Discipline copies `agenterm-dyn` `CodeBuffer`: **W^X, never RWX**. iOS/App Store: the **API exists**; runtime may return typed `Error::unsupported("native: wx")` or use Darwin JIT write-protect (`MAP_JIT` + `pthread_jit_write_protect_np`) where entitlements allow; no silent RWX, no pretending iOS is Linux. Do **not** merge dyn's S-expr language into rh. Assembler can follow; v1 of this door may be raw bytes + `enter_i64`. | Owner opinion 2026-08-21: rust-alike needs a metal path without becoming Perl/PHP; iOS is restricted, not omitted. |
+| D27 | rh **must expose an assembly / live-native door**, but it is **not Language 1 default**. Default `Engine::new()` / `sandboxed()` stay free of emit/enter/`dlcall`. Native is an explicit, `unsafe`-shaped capability (feature `native` and/or `Engine::with_native`): stage ISA bytes (safe), flip to executable, enter a declared C ABI (unsafe). Discipline copies `agenterm-dyn` `CodeBuffer`: **W^X, never RWX**. iOS/App Store: the **API exists**; runtime returns typed `Error::unsupported("native: wx")` on the App Store third-party path (D38). `MAP_JIT` / `pthread_jit_write_protect_np` only where the process actually has the entitlement — do not document that as “iOS can JIT”. No silent RWX, no pretending iOS is Linux. Do **not** merge dyn's S-expr language into rh. Assembler can follow; v1 of this door may be raw bytes + `enter_i64`. | Owner opinion 2026-08-21: rust-alike needs a metal path without becoming Perl/PHP; iOS is restricted, not omitted. |
 | D28 | Treat `partnernetsoftware/rh` as **already public in tone**. Comments, README, CI, commit messages, and tests in that repo must make sense to a stranger who only knows rh, not the AgenTerm workbench. Allowed: short provenance in `NOTICE` (AgenTerm path + source SHA) because that repo is public and license-traceable. **Not allowed:** mux/agent nicknames, local homedirs, owner titles, PR-A1…PR-D1 issue IDs, `codegen 107`, internal plan paths, “董事长/政委”, secrets. Describe embedder hooks as `Host::call` names, not “AgenTerm will inject Fleet in PR-D1”. | Owner 2026-08-21: private now, public later like bun/node/python. |
 | D29 | Language 1 adds bounded **stdin**: `std::io::read_to_string()` and `std::io::read()` (UTF-8 string / `Bytes`), same size cap as file reads. Pipes must work. Do **not** add `f64`. Do **not** attach source locations to `Error::Host` / `Error::Unsupported` payloads this beat (keep `Error::Runtime` diagnostics with statement line only). Windows slices stay compile-checked, link-fail typed; no fake run CI; no installing mingw just to claim a PE exists. | Owner 2026-08-21 after Windows honesty + missing-line-number fix. Shell tools must read pipes; value model stays i64. |
 | D30 | `Options` does not host I/O caps: `fs_read_cap` / `output_bytes` live on `StdHost` (0.1.0, never published — field removal stays). HostObject **type_id mapping is unchanged** (PathBuf / Metadata / SystemTime stay HostObject, not Map/i64). The table leak is an implementation bug: **refcount slots** on clone/drop of `Value`; the cap remains a backstop. Do not unbox “value-like” handles this beat. | Owner 2026-08-21. Dummy security knobs are worse than none. Unboxing would change `type_of` and freeze. |
@@ -136,6 +136,7 @@ The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh`
 | D35 | Map `==` is **by keys and values**, not insertion order (`#{a:1, b:2} == #{b:2, a:1}`). Arrays stay order-sensitive. Iteration order is still insertion order. | Owner 2026-08-21. Ordered dicts iterate stably; equality is content, like Python. |
 | D36 | Nested arrays/maps have a **construction depth cap** (default **32**, embedder-tunable). Inserting a container that would exceed it is a runtime error, not a bomb. Cache depth on each container so the check is O(1), not a walk. Independently, `Drop` (and recursive `Clone` / `==` / display) of `Array`/`Map` must be **iterative**: `Engine::sandboxed()` must not `abort` the embedder process. Do not document “don't nest unbounded structures.” Fuel/timeout still do not catch stack loss. Default 32 is for debug threads (~2 MiB stack); 64 sat on the abort cliff. | Owner 2026-08-21. A sandboxed pure-value program must not SIGABRT the host. |
 | D37 | Collection methods (interpreter builtins, variable receiver for mutating ones): **`Array.sort()`** in-place; strings lexicographic, ints numeric; mixed incomparable types **error**, do not coerce. **`Array.pop()`** errors if empty. **`Array.remove(i)`** errors on OOB (same as `[]`). **`Map.remove(k)`** updates both the hash index and the insertion-order list; missing key is a no-op (ask, like `.get`). Skip `String.lines` / `trim_start` / `trim_end` / `Array.index_of` / `Array.reverse` this beat. Do not buffer `print`. | Owner 2026-08-21 after real-script use. Sort is the one everyone would rewrite badly. |
+| D38 | **App Store iOS runs rh the way it runs CPython in Pyto / Pythonista: a signed interpreter in the app, user programs as data.** `.rh` (and any future “pip” of pure Language-1 libraries) is files. Native extensions, `libtcc`, generated `.dylib`, and `enter_i64` are the same wall: the kernel will not execute unsigned pages, and third-party App Store apps do not get `dynamic-codesigning`. Existence proof: Pyto’s pip is complete **except C extensions**; those packages work only when **precompiled into signed Frameworks**. Pyto’s “C compiler” is Clang → LLVM bitcode → **interpret bitcode**, not `mprotect(RX)`. rh does **not** take a bitcode-interpreter backend in v1. **No iOS cell** in the D4 six-row table; iOS is `rh-lang` embedded and signed with the host app, not `rh.com` + sibling slice staging ISA bytes. | Owner 2026-08-21 after Pyto/libtcc discussion: iOS is not “no dynamic language”; it is “no runtime native codegen”. |
 
 ### Distribution filename bijection (D4)
 
@@ -766,6 +767,10 @@ Until rh is **public**, AgenTerm does **not** gain a `git = "https://github.com/
 
 **Rejected.** Fights Mach-O/PE signatures. Named section, then sign.
 
+### A10. libtcc / in-process C compiler / generated `.dylib` on iOS
+
+**Rejected.** Same wall as `enter_i64` on App Store iOS: compile-to-memory then jump requires unsigned executable pages. Pyto is not a counterexample — it **interprets** CPython bytecode (and optionally LLVM bitcode); pip of C extensions is pre-signed Frameworks, not a runtime compiler. A bitcode interpreter for C is Later / not scheduled, not a way to smuggle D27 onto the phone.
+
 ---
 
 ## Security & Privacy Considerations
@@ -774,6 +779,7 @@ Until rh is **public**, AgenTerm does **not** gain a `git = "https://github.com/
 |--------|----------|------------|
 | Untrusted `.rh` with `StdHost` can FS/process | **High** (by design, like Node) | Document local-unrestricted. Custom `Host` defaults fail closed. Caps on `StdHost`/`Options` (16 MiB, 256×4 KiB, 256 env). No network in Language 1. |
 | Arbitrary native FFI / `dlcall` | **High** if added | **Forbidden** on default path. rustc-pack `dlopen` stays in AgenTerm adapter. |
+| iOS App Store: runtime machine code (`enter_i64`, libtcc, generated dylib) | **High** if pretended to work | D38: API exists, `unsupported("native: wx")`. Scripts still run (signed interpreter). |
 | Wrong ISA/OS slice | **High** | Fail-closed cell + ABI. No QEMU. |
 | Slice substitution same-dir | **Med** | v1 trusts same-dir. Later: hash-pin / minisign; not v1. |
 | Self-modifying loader vs notarization | **High** | No rewrite. Named section + sign. |
@@ -860,12 +866,13 @@ Polyglot (old C3) is **not** on this graph.
 | `Error` exhaustiveness | **Med** | `#[non_exhaustive]`. |
 | Windows parent vs job control | **Med** | Specified wait + Ctrl-C ignore; test exit 3 on `-e`. |
 | `.com` vs 16-bit COM | **Low** | Files are PE; Windows loads PE from `.com`. |
+| Treating iOS “no JIT” as “rh cannot ship” | **Med** | D38: ship the interpreter inside the signed app. Native door stays desktop (and entitlement-bearing Darwin), not a phone JIT. |
 
 ---
 
 ## Open Questions
 
-None. Owner locked 2026-08-21 (D24): crates.io **0.1.0**; populate via **squash/copy + NOTICE**; collaborators = **org members only**. rh loader has **no** chassis-style `native_cell: null` (D4).
+None. Owner locked 2026-08-21 (D24): crates.io **0.1.0**; populate via **squash/copy + NOTICE**; collaborators = **org members only**. rh loader has **no** chassis-style `native_cell: null` (D4). D38 (same day): App Store iOS = signed interpreter, not runtime native codegen.
 
 ---
 
@@ -998,4 +1005,4 @@ Each PR is independently reviewable. **No GitHub repo until PR-A4 and PR-A5 are 
 - Parser replacement (drop `rhai`)
 - Slice payload hash / minisign
 - Prometheus in AgenTerm wrapper
-- **rh native/asm door (D27):** feature `native`, W^X `CodeBuffer` (reuse dyn discipline, not dyn's S-expr), `enter_i64`; iOS fail-closed or MAP_JIT. Not C2/C1. No default FFI.
+- **rh native/asm door (D27 / D38):** feature `native`, W^X `CodeBuffer` (reuse dyn discipline, not dyn's S-expr), `enter_i64`. App Store iOS: `unsupported("native: wx")`; embed `rh-lang`, do not add an iOS loader cell. No libtcc. No LLVM-bitcode interpreter in v1. Not C2/C1. No default FFI.

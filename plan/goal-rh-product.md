@@ -30,14 +30,19 @@
 
 ## 当前缺口（按序啃，做完划掉）
 
-**主线：解释器验收套件（TDD），不要重写引擎。**
+**主线仍是 TDD，不要重写引擎。核已经能站住；下一程是拿真实脚本去撞 Language 1，看它停在哪，而不是加语法去像 bun。**
 
-1. 立一份 **Language 1 验收语料**（`crates/rh-lang/tests/accept/` 或同等）：每个 `.rh` + 期望（值 / stdout / 退出码 / 错误码）。**先提交会红的测试，再改代码到绿。** 禁止先改解释器再补测。
-2. 套件必须覆盖用户路径，不只内部节点：shebang、BOM、stdin 管道、`args` 越界、沙箱、无 rustc、`check` 与 `run` 对同一源码、溢出/越界、try 抓 host 失败但不抓燃料。
-3. README 的 rh / console / rust 块继续当测试跑。
-4. 干净 clone + `cargo test` + `install.sh` 仍是常规闸。
-5. ~~D27 native~~ 已收。Windows 只编不链。REPL / f64 / 公开仓 仍禁止。
-6. 语料继续扩，优先还没钉死的用户路径：空 stdin、二进制 stdin（`read()`）、相对/绝对路径、环境变量、并发 `Engine: Send`、取消正在跑的循环、目录遍历 + catch、sort/pop/join。没有洞也要写进语料（钉住，不是包装成修复）。
+1. ~~立验收语料~~ `crates/rh-lang/tests/accept/` 已有（117+）。继续钉还没单独覆盖的 host 名；禁止为了绿改期望。
+2. ~~用户路径骨架~~ shebang / BOM / stdin（含非 UTF-8）/ args / 沙箱 / 无 rustc / check↔run / 溢出 / try 不抓燃料 — 已钉。
+3. README 的 rh / console / rust 块继续当测试跑（依赖列表、性能形状、D28 脱敏已开始守）。
+4. 干净 clone + `cargo test` + `install.sh` / 解开包再跑 / 交叉整包目标格 — 常规闸。
+5. ~~D27 native~~ 已收。Windows 只编不链。REPL / f64 / 公开仓 / HTTP / 闭包 仍禁止。
+6. **下一程（用真实脚本量天花板，先写测试再改）：**
+   - 把 AgenTerm 里只依赖 `std`/`rh::json`/`command_status` 的脚本（如 `internal-version-policy.rh` 这一类）在独立 `rh` 上跑通。AOT 时代的 `bool == 0` 在 Language 1 里不是假：改脚本，不要加强制转换。
+   - `import` / `rh::task::sleep` / Fleet / GUI 子进程 **不进 Language 1**。工作台脚本继续走 AgenTerm `Host` 注入。发现缺的是 host 名就加名字，不是加语法。
+   - `task`/`qualify`/`pack` 仍是 AOT；`eval`/`run` 已是解释器。不要把 rustc 请回默认路径。
+   - Windows 真跑是下一堵硬件墙，不是这程的语言墙。
+   - **iOS（D38）：** 能走的是 Pyto 那条 — 签过名的解释器进 App，`.rh` 当数据；不是现场出码。native 门保持 `unsupported("native: wx")`。不上 libtcc，不编第七格，不把 LLVM bitcode 解释器当 v1。纯脚本库可以后加（类似纯 Python 的 pip）；带原生扩展的只能预编译进包再签。
 
 TDD 纪律：发现洞 → **先写断言失败的测试（断言值或错误，不靠 exit=1 当成功）** → 再改 → 证明该测试在修前红、修后绿。
 
