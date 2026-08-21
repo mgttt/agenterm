@@ -494,6 +494,17 @@ fn indexed2d_frame() -> Vec<u8> {
     bytes
 }
 
+fn indexed2d_frame_with_metadata() -> Vec<u8> {
+    let mut bytes = indexed2d_frame();
+    bytes[14..16].copy_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(b"TAM1");
+    bytes.extend_from_slice(&0x3147_4c53u32.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&[1, 2, 3, 4]);
+    bytes
+}
+
 #[test]
 fn standard_wasm_cartridge_drives_one_bounded_frame() {
     let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
@@ -1002,6 +1013,90 @@ fn standard_core_only_cartridge_drives_an_indexed2d_frame() {
 }
 
 #[test]
+fn indexed2d_metadata_requires_an_explicit_core_capability() {
+    let frame = indexed2d_frame_with_metadata();
+    let frame_length = u8::try_from(frame.len()).expect("small test frame");
+    let without_metadata_capability = game_module(
+        &[(CORE, "indexed2d_version", 0), (CORE, "submit_render", 1)],
+        1,
+        &[
+            0x10,
+            0x00,
+            0x1a,
+            0x41,
+            0x00,
+            0x41,
+            frame_length,
+            0x10,
+            0x01,
+            0x1a,
+            0x41,
+            0x00,
+            0x0b,
+        ],
+        &frame,
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_private_bytes(
+            &without_metadata_capability,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+        ),
+        "load indexed2d metadata cartridge without capability",
+    );
+    assert!(matches!(
+        runtime.tick(GameInput::default()),
+        Err(WasmError::Trap(
+            "indexed2d metadata capability not declared"
+        ))
+    ));
+
+    let wasm = game_module(
+        &[
+            (CORE, "indexed2d_version", 0),
+            (CORE, "indexed2d_metadata_version", 0),
+            (CORE, "submit_render", 1),
+        ],
+        1,
+        &[
+            0x10,
+            0x00,
+            0x1a,
+            0x10,
+            0x01,
+            0x1a,
+            0x41,
+            0x00,
+            0x41,
+            frame_length,
+            0x10,
+            0x02,
+            0x1a,
+            0x41,
+            0x00,
+            0x0b,
+        ],
+        &frame,
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_private_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        "load indexed2d metadata cartridge",
+    );
+    let output = must_ok(
+        runtime.tick(GameInput::default()),
+        "tick metadata cartridge",
+    );
+    match must_ok(RenderFrame::decode(&output.render), "decode metadata frame") {
+        RenderFrame::Indexed2d(frame) => {
+            assert_eq!(frame.metadata_schema, Some(0x3147_4c53));
+            assert_eq!(frame.metadata(), &[1, 2, 3, 4]);
+        }
+        RenderFrame::Grid3d(_) => panic!("indexed2d cartridge decoded as grid3d"),
+    }
+}
+
+#[test]
 fn core_v1_media_versions_are_explicit_and_format_matched() {
     for (magic, submit, version, undeclared_trap, render) in [
         (
@@ -1182,8 +1277,8 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
         "add native profile function",
     );
     let encoded = must_ok(profile.encode(), "encode host profile");
-    assert_eq!(u16::from_le_bytes([encoded[4], encoded[5]]), 2);
-    assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 64);
+    assert_eq!(u16::from_le_bytes([encoded[4], encoded[5]]), 3);
+    assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 68);
     let decoded = must_ok(HostProfileV1::decode(&encoded), "decode host profile");
     assert_eq!(must_ok(decoded.encode(), "re-encode host profile"), encoded);
     assert_eq!(decoded.native_functions().len(), 1);
@@ -1257,18 +1352,42 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     ));
 
     let mut duplicate = encoded.clone();
-    duplicate[50..52].copy_from_slice(&2u16.to_le_bytes());
-    duplicate.extend_from_slice(&encoded[64..]);
+    duplicate[52..54].copy_from_slice(&2u16.to_le_bytes());
+    duplicate.extend_from_slice(&encoded[68..]);
     assert!(matches!(
         HostProfileV1::decode(&duplicate),
         Err(WasmError::Decode("host profile is not canonical"))
     ));
 
-    let mut legacy = encoded[..52].to_vec();
+    let mut prior = encoded[..50].to_vec();
+    prior[4..6].copy_from_slice(&2u16.to_le_bytes());
+    prior[6..8].copy_from_slice(&64u16.to_le_bytes());
+    prior.extend_from_slice(&encoded[52..54]);
+    prior.extend_from_slice(&encoded[56..64]);
+    prior.extend_from_slice(&0u32.to_le_bytes());
+    prior.extend_from_slice(&encoded[68..]);
+    let prior = must_ok(HostProfileV1::decode(&prior), "decode schema-2 profile");
+    assert!(!prior.supports_indexed2d_metadata());
+    let metadata_wasm = game_module(
+        &[(CORE, "indexed2d_metadata_version", 0)],
+        1,
+        &[0x41, 0x00, 0x0b],
+        &[],
+    );
+    let report = must_ok(
+        prior.compatibility_report(&metadata_wasm),
+        "check schema-2 metadata compatibility",
+    );
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].module, CORE);
+    assert_eq!(report.issues[0].field, "indexed2d_metadata_version");
+
+    let mut legacy = encoded[..50].to_vec();
     legacy[4..6].copy_from_slice(&1u16.to_le_bytes());
     legacy[6..8].copy_from_slice(&56u16.to_le_bytes());
+    legacy.extend_from_slice(&encoded[52..54]);
     legacy.extend_from_slice(&0u32.to_le_bytes());
-    legacy.extend_from_slice(&encoded[64..]);
+    legacy.extend_from_slice(&encoded[68..]);
     let legacy = must_ok(HostProfileV1::decode(&legacy), "decode schema-1 profile");
     assert_eq!(legacy.vm_limits().max_call_depth, 512);
     assert_eq!(legacy.vm_limits().max_activation_slots, 1 << 20);

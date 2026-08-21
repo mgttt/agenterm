@@ -48,15 +48,33 @@ header_bytes       u16 = 16
 width              u16; 1..512
 height             u16; 1..512
 palette_count      u16; 1..256
-flags              u16 = 0
+flags              u16; bit 0 = application metadata trailer
 ```
 
 Exactly `palette_count` four-byte colors follow. Each color is encoded as the
 four bytes R, G, B, A and is exposed by the Rust/Swift SDKs as one
-little-endian RGBA8 `u32`/`UInt32`. The remainder is exactly `width × height`
+little-endian RGBA8 `u32`/`UInt32`. The next `width × height` bytes are
 one-byte palette indices in row-major top-to-bottom order. Every index must be
-less than `palette_count`; trailing bytes, unknown flags and malformed sizes
-are rejected before native presentation.
+less than `palette_count`.
+
+With flags bit 0 clear, the pixel plane must end the stream exactly. With bit 0
+set, this bounded trailer follows the pixel plane:
+
+```text
+"TAM1"             4 bytes
+application_schema u32; non-zero, cartridge/app-owned
+metadata_bytes     u16; 1..1024
+reserved           u16 = 0
+metadata           exactly metadata_bytes opaque bytes
+```
+
+The cartridge must then import and check
+`indexed2d_metadata_version() -> i32` from `tinyarcade:core/v1`. The SDK
+validates, bounds and transports the schema-tagged bytes but never interprets
+game rules. This lets a native HUD/accessibility layer consume state already
+produced by the tick instead of calling `game_suspend` every display frame.
+Unknown flags, malformed trailers and trailing bytes are rejected before
+native presentation. Base v1 frames remain byte-for-byte compatible.
 
 Each dimension is at most 512, the pixel plane is at most 65,535 bytes and the
 whole stream is at most 64 KiB. Therefore ordinary 256 × 240 and 320 × 200
@@ -74,7 +92,8 @@ no Apple framework type crosses the WASM boundary.
 
 Each cartridge must import and check the `() -> i32` version function for every
 media schema it emits: `grid3d_version`, `indexed2d_version` and/or
-`tones_version` in `tinyarcade:core/v1`. These ordinary WASM imports make
+`tones_version` in `tinyarcade:core/v1`; indexed application metadata also
+requires `indexed2d_metadata_version`. These ordinary WASM imports make
 compatibility fail at load on runtimes that predate a format; emitting `TAG3`,
 `TAI2` or `TAT1` without its declaration traps the current cartridge.
 

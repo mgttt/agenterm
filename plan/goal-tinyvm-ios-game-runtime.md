@@ -87,6 +87,7 @@ tinyvm iOS game runtime
 │   ├── frame pacing + scene state    [x]
 │   ├── stable two-pass copy lengths  [x]
 │   ├── indexed 2D presentation       [x]
+│   │   └── bounded app metadata hot path [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   │   └── current-main consumer gate [x]
@@ -3919,3 +3920,37 @@ clock arithmetic. The complete consumer gate still passes seven Depth Well
 tests, four Signal Lock tests, the two-game UI journey and the generic arm64
 Release build. The executable PRD trace now binds 122 completed claims.
 Physical iPhone and TestFlight evidence remain open, so the goal stays active.
+
+## One-hundred-twenty-third executable increment — frame-owned app metadata
+
+Indexed2d v1 now has a backward-compatible, explicitly negotiated application
+metadata extension. Flags bit 0 adds an exact `TAM1` trailer containing a
+non-zero cartridge-owned schema and 1..1,024 opaque bytes. Rust and Swift
+reject unknown flags, bad magic, zero schemas, reserved bits, oversize payloads
+and trailing bytes. A cartridge using the trailer must import
+`tinyarcade:core/v1.indexed2d_metadata_version`; a missing declaration traps,
+while base indexed2d cartridges remain unchanged. TAH1 schema 3 records this
+capability, and decoded schema-1/2 profiles fail compatibility for the new
+import instead of falsely describing an older app build as capable.
+
+Signal Lock now places its existing 64-byte `SLG1` state in every 19,324-byte
+render frame. The native adapter validates that game-owned schema and consumes
+the state returned by the same session tick. Its 30 Hz ViewModel therefore no
+longer calls `runtime.state()`/`game_suspend` on every frame; suspend remains an
+explicit persistence operation.
+
+Evidence on 2026-08-22: consumer commit `ff42f6c` and TinyVM media/game-runtime
+tests cover old/new frame
+compatibility, strict trailer decoding and the capability gate. The real App's
+600-frame test decodes metadata within its 8 ms p95 budget and verifies every
+execution lifecycle remains `.tick`; a ViewModel regression asserts the same
+hot path. All seven Depth Well tests, four Signal Lock tests, the one two-game
+UI journey and an unsigned arm64 device Release build pass with the exact
+6,040-byte cartridge
+(`6e4d45981b8a7468d57764b76c51fdc12e24abfca0cafd3ee7c0f5ed0edca961`).
+Strict Swift/Rust decoding and TAH1 negotiation move the default linked smokes
+to 1,682,008 bytes arm64 and 1,765,576 bytes x86_64; both remain below one
+new, explicit 16 KiB graduation step rather than an unbounded size gate.
+The executable PRD trace now binds 123 completed claims. Physical iPhone and
+TestFlight lifecycle, audio and performance evidence remain open, so the
+persistent goal stays active.

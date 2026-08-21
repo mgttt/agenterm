@@ -143,9 +143,65 @@ fn indexed2d_decodes_palette_and_exact_pixel_plane() {
         vec![0xff00_00ff, 0x00ff_00ff]
     );
     assert_eq!(frame.pixels(), &[0, 1, 1, 0, 1, 0]);
+    assert_eq!(frame.metadata_schema, None);
+    assert!(frame.metadata().is_empty());
     assert!(matches!(
         must_ok(RenderFrame::decode(&bytes), "decode render frame"),
         RenderFrame::Indexed2d(_)
+    ));
+}
+
+#[test]
+fn indexed2d_metadata_is_bounded_schema_tagged_and_exact() {
+    let mut bytes = indexed2d_frame();
+    bytes[14..16].copy_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(b"TAM1");
+    bytes.extend_from_slice(&0x3147_4c53u32.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&[1, 2, 3, 4]);
+
+    let frame = must_ok(Indexed2dFrame::decode(&bytes), "decode indexed2d metadata");
+    assert_eq!(frame.metadata_schema, Some(0x3147_4c53));
+    assert_eq!(frame.metadata(), &[1, 2, 3, 4]);
+    assert_eq!(frame.pixels(), &[0, 1, 1, 0, 1, 0]);
+
+    let metadata_offset = indexed2d_frame().len();
+    for invalid in [
+        {
+            let mut invalid = bytes.clone();
+            invalid[metadata_offset] = b'X';
+            invalid
+        },
+        {
+            let mut invalid = bytes.clone();
+            invalid[metadata_offset + 4..metadata_offset + 8].copy_from_slice(&0u32.to_le_bytes());
+            invalid
+        },
+        {
+            let mut invalid = bytes.clone();
+            invalid[metadata_offset + 10] = 1;
+            invalid
+        },
+        {
+            let mut invalid = bytes.clone();
+            invalid.push(5);
+            invalid
+        },
+    ] {
+        assert!(Indexed2dFrame::decode(&invalid).is_err());
+    }
+
+    let mut oversized = indexed2d_frame();
+    oversized[14..16].copy_from_slice(&1u16.to_le_bytes());
+    oversized.extend_from_slice(b"TAM1");
+    oversized.extend_from_slice(&1u32.to_le_bytes());
+    oversized.extend_from_slice(&1_025u16.to_le_bytes());
+    oversized.extend_from_slice(&0u16.to_le_bytes());
+    oversized.resize(oversized.len() + 1_025, 0);
+    assert!(matches!(
+        Indexed2dFrame::decode(&oversized),
+        Err(WasmError::Trap("indexed2d metadata size"))
     ));
 }
 
@@ -159,7 +215,7 @@ fn indexed2d_rejects_unknown_indices_flags_trailing_bytes_and_oversize() {
     ));
 
     let mut bytes = indexed2d_frame();
-    bytes[14] = 1;
+    bytes[14] = 2;
     assert!(matches!(
         Indexed2dFrame::decode(&bytes),
         Err(WasmError::Trap("indexed2d frame size"))

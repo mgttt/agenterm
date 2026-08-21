@@ -25,6 +25,8 @@ TINYARCADE_IMPORT_V1("input_bits") int tinyarcade_input_bits_v1(void);
 TINYARCADE_IMPORT_V1("clock_ms") int tinyarcade_clock_ms_v1(void);
 TINYARCADE_IMPORT_V1("random_u32") int tinyarcade_random_u32_v1(void);
 TINYARCADE_IMPORT_V1("indexed2d_version") int tinyarcade_indexed2d_version_v1(void);
+TINYARCADE_IMPORT_V1("indexed2d_metadata_version")
+int tinyarcade_indexed2d_metadata_version_v1(void);
 TINYARCADE_IMPORT_V1("grid3d_version") int tinyarcade_grid3d_version_v1(void);
 TINYARCADE_IMPORT_V1("tones_version") int tinyarcade_tones_version_v1(void);
 TINYARCADE_IMPORT_V1("submit_render") int tinyarcade_submit_render_v1(

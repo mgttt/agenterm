@@ -1115,7 +1115,7 @@ fn validate_import_contract(
     module: &WasmModule,
     manifest: &CartridgeManifest,
 ) -> Result<(), WasmError> {
-    let mut seen = [false; 10];
+    let mut seen = [false; 11];
     let mut native_function_count = 0usize;
     let mut actual_capabilities: Vec<&str> = Vec::new();
     actual_capabilities
@@ -1157,6 +1157,7 @@ fn validate_import_contract(
             "indexed2d_version" => (7, 0),
             "grid3d_version" => (8, 0),
             "tones_version" => (9, 0),
+            "indexed2d_metadata_version" => (10, 0),
             _ => return Err(WasmError::Trap("game import is not allowed")),
         };
         if seen[slot] || import.n_params != params || import.n_results != 1 {
@@ -1212,6 +1213,7 @@ fn bind_imports(
         SubmitRender,
         SubmitAudio,
         Indexed2dVersion,
+        Indexed2dMetadataVersion,
         Grid3dVersion,
         TonesVersion,
         SaveState,
@@ -1227,6 +1229,9 @@ fn bind_imports(
             .imports()
             .iter()
             .any(|import| import.module == ABI_MODULE && import.field == "indexed2d_version"),
+        indexed2d_metadata: module.imports().iter().any(|import| {
+            import.module == ABI_MODULE && import.field == "indexed2d_metadata_version"
+        }),
         tones: module
             .imports()
             .iter()
@@ -1252,6 +1257,7 @@ fn bind_imports(
                     "submit_render" => ImportPlan::SubmitRender,
                     "submit_audio" => ImportPlan::SubmitAudio,
                     "indexed2d_version" => ImportPlan::Indexed2dVersion,
+                    "indexed2d_metadata_version" => ImportPlan::Indexed2dMetadataVersion,
                     "grid3d_version" => ImportPlan::Grid3dVersion,
                     "tones_version" => ImportPlan::TonesVersion,
                     "save_state" => ImportPlan::SaveState,
@@ -1311,7 +1317,10 @@ fn bind_imports(
             }
             ImportPlan::SubmitRender => bind_submit(module, position, shared, true, media)?,
             ImportPlan::SubmitAudio => bind_submit(module, position, shared, false, media)?,
-            ImportPlan::Indexed2dVersion | ImportPlan::Grid3dVersion | ImportPlan::TonesVersion => {
+            ImportPlan::Indexed2dVersion
+            | ImportPlan::Indexed2dMetadataVersion
+            | ImportPlan::Grid3dVersion
+            | ImportPlan::TonesVersion => {
                 module.bind_import_at_bounded(position, move |_, results, _| {
                     results[0] = 1;
                     Ok(())
@@ -1365,6 +1374,7 @@ fn bind_imports(
 struct MediaDeclarations {
     grid3d: bool,
     indexed2d: bool,
+    indexed2d_metadata: bool,
     tones: bool,
 }
 
@@ -1385,6 +1395,17 @@ fn bind_submit(
             }
             if bytes.starts_with(INDEXED2D_MAGIC) && !media.indexed2d {
                 return Err(WasmError::Trap("indexed2d capability not declared"));
+            }
+            if bytes.starts_with(INDEXED2D_MAGIC)
+                && bytes.get(14..16).is_some_and(|flags| {
+                    u16::from_le_bytes([flags[0], flags[1]]) & crate::media::INDEXED2D_METADATA_FLAG
+                        != 0
+                })
+                && !media.indexed2d_metadata
+            {
+                return Err(WasmError::Trap(
+                    "indexed2d metadata capability not declared",
+                ));
             }
             if state.render_submitted || bytes.len() > state.limits.max_render_bytes {
                 return Err(WasmError::Trap("game output budget"));

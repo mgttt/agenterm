@@ -6,8 +6,11 @@ const WIDTH: usize = 160;
 const HEIGHT: usize = 120;
 const PALETTE_COUNT: usize = 8;
 const PIXEL_OFFSET: usize = 16 + PALETTE_COUNT * 4;
-const FRAME_BYTES: usize = PIXEL_OFFSET + WIDTH * HEIGHT;
 const STATE_BYTES: usize = 64;
+const PIXEL_END: usize = PIXEL_OFFSET + WIDTH * HEIGHT;
+const METADATA_OFFSET: usize = PIXEL_END + 12;
+const FRAME_BYTES: usize = METADATA_OFFSET + STATE_BYTES;
+const STATE_METADATA_SCHEMA: u32 = 0x3147_4c53;
 const SECTORS: u8 = 8;
 
 const OUTER_LEFT: u32 = 1 << 0;
@@ -24,6 +27,7 @@ unsafe extern "C" {
     fn clock_ms() -> i32;
     fn random_u32() -> i32;
     fn indexed2d_version() -> i32;
+    fn indexed2d_metadata_version() -> i32;
     fn tones_version() -> i32;
     fn submit_render(pointer: *const u8, length: u32) -> i32;
     fn submit_audio(pointer: *const u8, length: u32) -> i32;
@@ -85,7 +89,10 @@ pub extern "C" fn game_abi_version() -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn game_init() -> i32 {
-    if unsafe { indexed2d_version() } != 1 || unsafe { tones_version() } != 1 {
+    if unsafe { indexed2d_version() } != 1
+        || unsafe { indexed2d_metadata_version() } != 1
+        || unsafe { tones_version() } != 1
+    {
         return 1;
     }
     reset(game_mut());
@@ -308,7 +315,7 @@ fn rebuild_frame(game: &Game) {
     put_u16(frame, 8, WIDTH as u16);
     put_u16(frame, 10, HEIGHT as u16);
     put_u16(frame, 12, PALETTE_COUNT as u16);
-    put_u16(frame, 14, 0);
+    put_u16(frame, 14, 1);
     let palette = [
         [7, 13, 25, 255],
         [31, 53, 74, 255],
@@ -379,6 +386,13 @@ fn rebuild_frame(game: &Game) {
         fill_rect(53, 51, 54, 13, 6);
         fill_rect(56, 54, 48, 7, 0);
     }
+    frame[PIXEL_END..PIXEL_END + 4].copy_from_slice(b"TAM1");
+    put_u32(frame, PIXEL_END + 4, STATE_METADATA_SCHEMA);
+    put_u16(frame, PIXEL_END + 8, STATE_BYTES as u16);
+    put_u16(frame, PIXEL_END + 10, 0);
+    let state = snapshot_mut();
+    encode_state(game, state);
+    frame[METADATA_OFFSET..].copy_from_slice(state);
 }
 
 fn sector_point(radius: i32, sector: u8) -> (i32, i32) {

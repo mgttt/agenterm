@@ -35,8 +35,14 @@ grep -Fq 'TinyArcadeFramePacerV1' "$DEPTH_SCREEN"
 grep -Fq 'TinyArcadeFramePacerV1' "$SIGNAL_SCREEN"
 grep -Fq 'tickSession(' "$DEPTH_SCREEN"
 grep -Fq 'tickSession(' "$SIGNAL_SCREEN"
+grep -Fq 'state = output.state' "$SIGNAL_SCREEN"
+grep -Fq 'SignalLockCartridgeState.decode(frame: frame)' "$SIGNAL_RUNTIME"
 grep -Fq 'deactivateAndSave(to:' "$DEPTH_SCREEN"
 grep -Fq 'deactivateAndSave(to:' "$SIGNAL_SCREEN"
+if grep -Fq 'runtime.state()' "$SIGNAL_SCREEN"; then
+  echo 'FAIL: Signal Lock display ticks must consume bounded frame metadata, not suspend the runtime' >&2
+  exit 1
+fi
 if grep -Fq 'gameClockMilliseconds &+=' "$DEPTH_SCREEN" "$SIGNAL_SCREEN"; then
   echo 'FAIL: real App must not maintain a wrapping game clock beside TinyArcadeGameSessionV1' >&2
   exit 1

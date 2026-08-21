@@ -214,6 +214,7 @@ clock_ms() -> i32
 random_u32() -> i32
 grid3d_version() -> i32
 indexed2d_version() -> i32
+indexed2d_metadata_version() -> i32
 tones_version() -> i32
 submit_render(pointer: i32, length: i32) -> i32
 submit_audio(pointer: i32, length: i32) -> i32
@@ -234,6 +235,12 @@ unknown core import before instantiation, and the current runtime traps a
 recognized media stream from a cartridge that omitted its declaration. A
 cartridge should check every required version during init before relying on
 that media schema.
+
+An indexed2d frame with the application-metadata flag additionally requires
+`indexed2d_metadata_version`; omitting it traps at submission. The base
+`indexed2d_version` contract is unchanged, so old frames and old cartridges do
+not acquire a new import. Hosts predating the extension reject a new cartridge
+at ordinary WASM import resolution rather than partially decoding its state.
 
 The v1 input bit assignments are:
 

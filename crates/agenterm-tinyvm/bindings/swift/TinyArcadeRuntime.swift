@@ -342,6 +342,11 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
     public let height: UInt16
     public let paletteRGBA: [UInt32]
     public let pixels: Data
+    /// Optional game-defined, presentation-only bytes negotiated through
+    /// `indexed2d_metadata_version`. The schema is cartridge-owned; the SDK
+    /// bounds and transports it but does not interpret it.
+    public let applicationMetadataSchema: UInt32?
+    public let applicationMetadata: Data
 
     fileprivate init(data: Data) throws {
         guard data.count >= 16,
@@ -357,12 +362,13 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         let flags = TinyArcadeGrid3DFrame.u16(data, 14)
         let pixelCount = Int(width) * Int(height)
         let pixelOffset = 16 + paletteCount * 4
+        let pixelEnd = pixelOffset + pixelCount
         guard width > 0, height > 0,
               width <= 512, height <= 512,
               pixelCount <= Int(UInt16.max),
               (1...256).contains(paletteCount),
-              flags == 0,
-              data.count == pixelOffset + pixelCount else {
+              flags & ~UInt16(1) == 0,
+              pixelEnd <= data.count else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d frame size")
         }
         var decodedPalette: [UInt32] = []
@@ -371,9 +377,32 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
             decodedPalette.append(TinyArcadeGrid3DFrame.u32(data, 16 + index * 4))
         }
         paletteRGBA = decodedPalette
-        pixels = data.subdata(in: pixelOffset..<data.count)
+        pixels = data.subdata(in: pixelOffset..<pixelEnd)
         guard !pixels.contains(where: { Int($0) >= paletteCount }) else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d pixel")
+        }
+        if flags & 1 == 0 {
+            guard pixelEnd == data.count else {
+                throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d frame size")
+            }
+            applicationMetadataSchema = nil
+            applicationMetadata = Data()
+        } else {
+            let headerEnd = pixelEnd + 12
+            guard headerEnd <= data.count,
+                  data.subdata(in: pixelEnd..<(pixelEnd + 4)) == Data("TAM1".utf8) else {
+                throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d metadata header")
+            }
+            let schema = TinyArcadeGrid3DFrame.u32(data, pixelEnd + 4)
+            let metadataCount = Int(TinyArcadeGrid3DFrame.u16(data, pixelEnd + 8))
+            guard schema != 0,
+                  (1...1_024).contains(metadataCount),
+                  TinyArcadeGrid3DFrame.u16(data, pixelEnd + 10) == 0,
+                  headerEnd + metadataCount == data.count else {
+                throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d metadata size")
+            }
+            applicationMetadataSchema = schema
+            applicationMetadata = data.subdata(in: headerEnd..<data.count)
         }
     }
 

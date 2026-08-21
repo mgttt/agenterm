@@ -230,6 +230,13 @@ copy contract, clears the completed-frame state on error, and never lends Rust
 storage across the ABI; steady frames therefore avoid rebuilding the bounded
 host buffers without weakening pointer ownership.
 
+An indexed frame may also expose `applicationMetadataSchema` and at most 1,024
+opaque `applicationMetadata` bytes after the cartridge negotiates the optional
+core extension. The generic SDK does not decode a game's schema. Signal Lock's
+App adapter decodes its 64-byte state from the same completed frame, so its
+30 Hz render path remains a `.tick` lifecycle and does not allocate a portable
+snapshot or call `game_suspend` merely to update native UI/accessibility state.
+
 Replay recording is state on the same owner-thread runtime handle. Begin
 captures a portable snapshot and clears the previous completed trace; ordinary
 tick calls then append monotonic input plus exact media digests. Finish retains
@@ -409,8 +416,8 @@ one emitted under this repository's `target/`, checks that the final executable
 contains the ABI v1.10 completion-channel symbol, and rejects any implicit
 rewrite of the committed cartridges or Xcode project. Evidence on 2026-08-22
 has archive SHA-256
-`c97b762fe023a9a625037d555d216a89087b162105fab416b0a5686cac11e2cf`;
-the App contains only the 6,116-byte Depth Well and 5,784-byte Signal Lock
+`44b6cc20abc0c655d8a7d7ddfecc7313fbccfa709bbea8bf432da82298ffdad8`;
+the App contains only the 6,116-byte Depth Well and 6,040-byte Signal Lock
 cartridges, with no WebKit/JavaScriptCore, URLSession, external-library surface
 or archived native game engine. A counted App-target test now takes a tone from
 the real Depth Well cartridge, plays its exact pitch/duration/amplitude through

@@ -8,6 +8,10 @@ pub const TONES_MAGIC: &[u8; 4] = b"TAT1";
 const GRID3D_HEADER_BYTES: usize = 32;
 const GRID3D_CELL_BYTES: usize = 8;
 const INDEXED2D_HEADER_BYTES: usize = 16;
+const INDEXED2D_METADATA_HEADER_BYTES: usize = 12;
+const INDEXED2D_METADATA_MAGIC: &[u8; 4] = b"TAM1";
+pub const INDEXED2D_METADATA_FLAG: u16 = 1;
+pub const INDEXED2D_MAX_METADATA_BYTES: usize = 1024;
 const INDEXED2D_MAX_DIMENSION: usize = 512;
 const INDEXED2D_MAX_PIXELS: usize = u16::MAX as usize;
 const INDEXED2D_MAX_BYTES: usize = 64 * 1024;
@@ -126,8 +130,10 @@ impl<'a> Grid3dFrame<'a> {
 pub struct Indexed2dFrame<'a> {
     pub width: u16,
     pub height: u16,
+    pub metadata_schema: Option<u32>,
     palette: &'a [u8],
     pixels: &'a [u8],
+    metadata: &'a [u8],
 }
 
 impl<'a> Indexed2dFrame<'a> {
@@ -150,7 +156,7 @@ impl<'a> Indexed2dFrame<'a> {
         let palette_bytes = palette_count
             .checked_mul(4)
             .ok_or(WasmError::Trap("indexed2d frame size"))?;
-        let expected = INDEXED2D_HEADER_BYTES
+        let pixel_end = INDEXED2D_HEADER_BYTES
             .checked_add(palette_bytes)
             .and_then(|prefix| prefix.checked_add(pixel_count))
             .ok_or(WasmError::Trap("indexed2d frame size"))?;
@@ -160,17 +166,49 @@ impl<'a> Indexed2dFrame<'a> {
             || usize::from(height) > INDEXED2D_MAX_DIMENSION
             || pixel_count > INDEXED2D_MAX_PIXELS
             || !(1..=256).contains(&palette_count)
-            || flags != 0
-            || expected != bytes.len()
+            || flags & !INDEXED2D_METADATA_FLAG != 0
+            || pixel_end > bytes.len()
         {
             return Err(WasmError::Trap("indexed2d frame size"));
         }
         let pixel_offset = INDEXED2D_HEADER_BYTES + palette_bytes;
+        let (metadata_schema, metadata) = if flags & INDEXED2D_METADATA_FLAG == 0 {
+            if pixel_end != bytes.len() {
+                return Err(WasmError::Trap("indexed2d frame size"));
+            }
+            (None, &bytes[bytes.len()..])
+        } else {
+            let header_end = pixel_end
+                .checked_add(INDEXED2D_METADATA_HEADER_BYTES)
+                .ok_or(WasmError::Trap("indexed2d metadata size"))?;
+            if header_end > bytes.len()
+                || &bytes[pixel_end..pixel_end + 4] != INDEXED2D_METADATA_MAGIC
+            {
+                return Err(WasmError::Trap("invalid indexed2d metadata header"));
+            }
+            let schema = read_u32(bytes, pixel_end + 4)?;
+            let length = read_u16(bytes, pixel_end + 8)? as usize;
+            let reserved = read_u16(bytes, pixel_end + 10)?;
+            let expected = header_end
+                .checked_add(length)
+                .ok_or(WasmError::Trap("indexed2d metadata size"))?;
+            if schema == 0
+                || length == 0
+                || length > INDEXED2D_MAX_METADATA_BYTES
+                || reserved != 0
+                || expected != bytes.len()
+            {
+                return Err(WasmError::Trap("indexed2d metadata size"));
+            }
+            (Some(schema), &bytes[header_end..])
+        };
         let frame = Self {
             width,
             height,
+            metadata_schema,
             palette: &bytes[INDEXED2D_HEADER_BYTES..pixel_offset],
-            pixels: &bytes[pixel_offset..],
+            pixels: &bytes[pixel_offset..pixel_end],
+            metadata,
         };
         if frame
             .pixels
@@ -194,6 +232,10 @@ impl<'a> Indexed2dFrame<'a> {
 
     pub fn pixels(&self) -> &'a [u8] {
         self.pixels
+    }
+
+    pub fn metadata(&self) -> &'a [u8] {
+        self.metadata
     }
 }
 

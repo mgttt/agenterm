@@ -104,11 +104,15 @@ fn standard_signal_lock_rotates_channels_and_renders_a_readable_radar() {
     );
     assert_eq!((frame.width, frame.height), (160, 120));
     assert_eq!(frame.palette_count(), 8);
+    assert_eq!(frame.metadata_schema, Some(0x3147_4c53));
+    assert_eq!(frame.metadata().len(), 64);
+    assert_eq!(&frame.metadata()[..5], b"SLG1\x01");
     assert!(frame.pixels().contains(&2), "current bearings are visible");
     assert!(frame.pixels().contains(&3), "route targets are visible");
     assert!(frame.pixels().contains(&7), "forecast path is visible");
 
     let before = snapshot(&mut game);
+    assert_eq!(frame.metadata(), guest(&before));
     let old_outer = guest(&before)[8];
     let moved = tick(&mut game, RIGHT[0], 0);
     let tone = must_ok(ToneBatch::decode(&moved.audio), "decode movement tone");

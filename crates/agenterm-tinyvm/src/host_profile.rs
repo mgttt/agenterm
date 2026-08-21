@@ -13,8 +13,10 @@ use crate::{
 const MAGIC: &[u8; 4] = b"TAH1";
 const LEGACY_SCHEMA_VERSION: u16 = 1;
 const LEGACY_HEADER_LENGTH: usize = 56;
-const SCHEMA_VERSION: u16 = 2;
-const HEADER_LENGTH: usize = 64;
+const PRIOR_SCHEMA_VERSION: u16 = 2;
+const PRIOR_HEADER_LENGTH: usize = 64;
+const SCHEMA_VERSION: u16 = 3;
+const HEADER_LENGTH: usize = 68;
 const FUNCTION_HEADER_LENGTH: usize = 12;
 pub const MAX_HOST_PROFILE_BYTES: usize = 64 * 1024;
 
@@ -64,6 +66,7 @@ impl HostCompatibilityReportV1 {
 pub struct HostProfileV1 {
     vm_limits: Limits,
     game_limits: GameLimits,
+    indexed2d_metadata: bool,
     functions: Vec<HostFunctionV1>,
 }
 
@@ -73,6 +76,7 @@ impl HostProfileV1 {
         Ok(Self {
             vm_limits,
             game_limits,
+            indexed2d_metadata: true,
             functions: Vec::new(),
         })
     }
@@ -87,6 +91,10 @@ impl HostProfileV1 {
 
     pub fn native_functions(&self) -> &[HostFunctionV1] {
         &self.functions
+    }
+
+    pub fn supports_indexed2d_metadata(&self) -> bool {
+        self.indexed2d_metadata
     }
 
     pub fn add_native_function(
@@ -162,7 +170,9 @@ impl HostProfileV1 {
         output.extend_from_slice(&1u16.to_le_bytes()); // grid3d v1
         output.extend_from_slice(&1u16.to_le_bytes()); // indexed2d v1
         output.extend_from_slice(&1u16.to_le_bytes()); // tones v1
+        output.extend_from_slice(&1u16.to_le_bytes()); // indexed2d metadata v1
         output.extend_from_slice(&(self.functions.len() as u16).to_le_bytes());
+        output.extend_from_slice(&0u16.to_le_bytes());
         output.extend_from_slice(&(self.vm_limits.max_call_depth as u32).to_le_bytes());
         output.extend_from_slice(&(self.vm_limits.max_activation_slots as u32).to_le_bytes());
         output.extend_from_slice(&0u32.to_le_bytes());
@@ -196,15 +206,31 @@ impl HostProfileV1 {
         }
         let schema = read_u16(bytes, 4)?;
         let header_length = read_u16(bytes, 6)? as usize;
-        let (max_call_depth, max_activation_slots) = match (schema, header_length) {
-            (LEGACY_SCHEMA_VERSION, LEGACY_HEADER_LENGTH) if read_u32(bytes, 52)? == 0 => {
-                (WASM_MAX_DEPTH, WASM_MAX_ACTIVATION_SLOTS)
-            }
-            (SCHEMA_VERSION, HEADER_LENGTH) if read_u32(bytes, 60)? == 0 => {
-                (read_u32(bytes, 52)? as usize, read_u32(bytes, 56)? as usize)
-            }
-            _ => return Err(WasmError::Decode("invalid host profile header")),
-        };
+        let (max_call_depth, max_activation_slots, count_offset, indexed2d_metadata) =
+            match (schema, header_length) {
+                (LEGACY_SCHEMA_VERSION, LEGACY_HEADER_LENGTH) if read_u32(bytes, 52)? == 0 => {
+                    (WASM_MAX_DEPTH, WASM_MAX_ACTIVATION_SLOTS, 50, false)
+                }
+                (PRIOR_SCHEMA_VERSION, PRIOR_HEADER_LENGTH) if read_u32(bytes, 60)? == 0 => (
+                    read_u32(bytes, 52)? as usize,
+                    read_u32(bytes, 56)? as usize,
+                    50,
+                    false,
+                ),
+                (SCHEMA_VERSION, HEADER_LENGTH)
+                    if read_u16(bytes, 50)? == 1
+                        && read_u16(bytes, 54)? == 0
+                        && read_u32(bytes, 64)? == 0 =>
+                {
+                    (
+                        read_u32(bytes, 56)? as usize,
+                        read_u32(bytes, 60)? as usize,
+                        52,
+                        true,
+                    )
+                }
+                _ => return Err(WasmError::Decode("invalid host profile header")),
+            };
         let vm_limits = Limits {
             max_table_elems: read_u32(bytes, 16)? as usize,
             max_memory_pages: read_u32(bytes, 20)? as usize,
@@ -217,12 +243,13 @@ impl HostProfileV1 {
             max_audio_bytes: read_u32(bytes, 36)? as usize,
             max_state_bytes: read_u32(bytes, 40)? as usize,
         };
-        let count = read_u16(bytes, 50)? as usize;
+        let count = read_u16(bytes, count_offset)? as usize;
         if count > MAX_NATIVE_FUNCTIONS {
             return Err(WasmError::Decode("host profile function limit"));
         }
         let mut profile = Self::new(vm_limits, game_limits)
             .map_err(|_| WasmError::Decode("invalid host profile limits"))?;
+        profile.indexed2d_metadata = indexed2d_metadata;
         let mut cursor = header_length;
         let mut previous: Option<(String, String)> = None;
         for _ in 0..count {
@@ -269,6 +296,24 @@ impl HostProfileV1 {
         }
         let descriptor = CartridgeDescriptor::inspect(wasm, self.vm_limits)?;
         let mut issues = Vec::new();
+        if !self.indexed2d_metadata
+            && descriptor.imports.iter().any(|import| {
+                import.module == "tinyarcade:core/v1"
+                    && import.field == "indexed2d_metadata_version"
+            })
+        {
+            issues
+                .try_reserve(1)
+                .map_err(|_| WasmError::Trap("host compatibility report allocation"))?;
+            issues.push(HostCompatibilityIssueV1 {
+                module: "tinyarcade:core/v1".to_string(),
+                field: "indexed2d_metadata_version".to_string(),
+                required_params: 0,
+                required_results: 1,
+                available_params: None,
+                available_results: None,
+            });
+        }
         for import in descriptor
             .imports
             .iter()

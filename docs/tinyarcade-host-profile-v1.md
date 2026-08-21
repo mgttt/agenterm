@@ -13,8 +13,8 @@ All integers are little-endian. The complete artifact is at most 64 KiB.
 
 ```text
 "TAH1"                       4 bytes
-schema_version                u16; exactly 2
-header_length                 u16; exactly 64
+schema_version                u16; exactly 3
+header_length                 u16; exactly 68
 game_abi_version              u32; exactly 1
 max_cartridge_bytes           u32; exactly 2 MiB
 max_table_elems               u32; non-zero aggregate across all tables
@@ -26,7 +26,9 @@ max_state_bytes               u32; non-zero
 grid3d_version                u16; exactly 1
 indexed2d_version             u16; exactly 1
 tones_version                 u16; exactly 1
+indexed2d_metadata_version    u16; exactly 1
 native_function_count         u16; at most 64
+reserved                      u16; zero
 max_call_depth                u32; non-zero defined activations
 max_activation_slots          u32; non-zero aggregate live VM slots
 reserved                      u32; zero
@@ -41,11 +43,13 @@ repeated native function, sorted by module then field bytes:
   field                       canonical snake_case UTF-8
 ```
 
-Decoders also accept the original schema-1, 56-byte header. Because that
-artifact predates configurable call resources, it maps deterministically to
-512 live defined activations and 1,048,576 aggregate activation slots. Encoders
-always emit schema 2. This preserves already published profiles without making
-the new limits implicit in future app-build identity.
+Decoders also accept schema-1 (56 bytes) and schema-2 (64 bytes). Schema 1
+predates configurable call resources and maps deterministically to 512 live
+defined activations and 1,048,576 aggregate activation slots. Both older
+schemas predate indexed2d application metadata and therefore report that core
+import unavailable during compatibility checks. Encoders always emit schema
+3. This preserves already published profiles without falsely claiming a newer
+host capability.
 
 Duplicate, unordered, malformed, unknown-version and trailing data fail closed.
 Changing any limit, media version, namespace, signature or quota changes the

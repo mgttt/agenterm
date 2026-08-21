@@ -933,6 +933,10 @@ fn print_host_profile(profile: &HostProfileV1, bytes: usize) {
     println!("max_audio_bytes={}", game.max_audio_bytes);
     println!("max_state_bytes={}", game.max_state_bytes);
     println!("media=tinyarcade:grid3d/v1,tinyarcade:indexed2d/v1,tinyarcade:tones/v1");
+    println!(
+        "indexed2d_metadata_version={}",
+        u8::from(profile.supports_indexed2d_metadata())
+    );
     println!("native_functions={}", profile.native_functions().len());
     for function in profile.native_functions() {
         println!(

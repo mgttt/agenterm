@@ -79,6 +79,9 @@
       indexed2d_version: function () {
         return 1;
       },
+      indexed2d_metadata_version: function () {
+        return 1;
+      },
       grid3d_version: function () {
         return 1;
       },

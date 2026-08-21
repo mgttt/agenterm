@@ -2734,9 +2734,10 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(&profile[..4], b"TAH1");
-        assert_eq!(u16::from_le_bytes([profile[4], profile[5]]), 2);
-        assert_eq!(u16::from_le_bytes([profile[6], profile[7]]), 64);
+        assert_eq!(u16::from_le_bytes([profile[4], profile[5]]), 3);
+        assert_eq!(u16::from_le_bytes([profile[6], profile[7]]), 68);
         assert_eq!(u16::from_le_bytes([profile[50], profile[51]]), 1);
+        assert_eq!(u16::from_le_bytes([profile[52], profile[53]]), 1);
         let decoded = HostProfileV1::decode(&profile).expect("decode exported host profile");
         assert_eq!(decoded.vm_limits().max_call_depth, 37);
         assert_eq!(decoded.vm_limits().max_activation_slots, 4096);
