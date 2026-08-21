@@ -2644,6 +2644,12 @@ store are removed from live module state. Resolve them to numeric store-local
 slots first, clear the decoded binding handles, and test invocation after the
 public owner handle has been dropped.
 
+When removing native recursion from a multi-instance interpreter, first make a
+foreign call an owned runner outcome: target address, argument vector and the
+suspended guest activation. Do not switch instances inside an opcode arm while
+it holds borrowed memories/globals. Returning the boundary to the trampoline
+lets it release the owner borrow before selecting another store record.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode

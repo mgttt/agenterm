@@ -3134,6 +3134,15 @@ enum DefinedOutcome {
         index: usize,
         args: Vec<Val>,
     },
+    ForeignCall {
+        address: FunctionAddress,
+        args: Vec<Val>,
+        caller: DefinedActivation,
+    },
+    ForeignTailCall {
+        address: FunctionAddress,
+        args: Vec<Val>,
+    },
 }
 
 enum CallValues {
@@ -4884,6 +4893,85 @@ impl Module {
                     index = next;
                     args = next_args;
                 }
+                DefinedOutcome::ForeignCall {
+                    address,
+                    args: foreign_args,
+                    mut caller,
+                } => {
+                    let base_depth = context
+                        .base_depth
+                        .checked_add(callers.len())
+                        .and_then(|depth| depth.checked_add(1))
+                        .ok_or(WasmError::Trap("call depth"))?;
+                    let values = bulk.store.invoke_registered(
+                        &address,
+                        &foreign_args,
+                        steps,
+                        base_depth,
+                        context.stats,
+                    )?;
+                    let resumed_slots = caller
+                        .live_slots()?
+                        .checked_add(values.len())
+                        .ok_or(WasmError::Trap("call stack"))?;
+                    if resumed_slots > available_slots
+                        || caller
+                            .stack
+                            .len()
+                            .checked_add(values.len())
+                            .filter(|&len| len <= WASM_STACK_LIMIT)
+                            .is_none()
+                    {
+                        return Err(WasmError::Trap("call stack"));
+                    }
+                    caller
+                        .stack
+                        .try_reserve(values.len())
+                        .map_err(|_| WasmError::Trap("call stack"))?;
+                    caller.stack.extend(values);
+                    activation = Some(caller);
+                }
+                DefinedOutcome::ForeignTailCall {
+                    address,
+                    args: foreign_args,
+                } => {
+                    let base_depth = context
+                        .base_depth
+                        .checked_add(callers.len())
+                        .ok_or(WasmError::Trap("call depth"))?;
+                    let values = bulk.store.invoke_registered(
+                        &address,
+                        &foreign_args,
+                        steps,
+                        base_depth,
+                        context.stats,
+                    )?;
+                    if let Some(mut caller) = callers.pop() {
+                        let caller_slots = caller.live_slots()?;
+                        suspended_slots = suspended_slots
+                            .checked_sub(caller_slots)
+                            .ok_or(WasmError::Trap("call stack"))?;
+                        let resumed_slots = caller_slots
+                            .checked_add(values.len())
+                            .ok_or(WasmError::Trap("call stack"))?;
+                        let available_slots = self
+                            .limits
+                            .max_activation_slots
+                            .checked_sub(suspended_slots)
+                            .ok_or(WasmError::Trap("call stack"))?;
+                        if resumed_slots > available_slots {
+                            return Err(WasmError::Trap("call stack"));
+                        }
+                        caller
+                            .stack
+                            .try_reserve(values.len())
+                            .map_err(|_| WasmError::Trap("call stack"))?;
+                        caller.stack.extend(values);
+                        activation = Some(caller);
+                    } else {
+                        return Ok(values);
+                    }
+                }
             }
         }
     }
@@ -5915,17 +6003,17 @@ impl Module {
                     }
                     let args = take_values(&mut stack, n, "call arguments")?;
                     if address.instance_id != bulk.instance_id {
-                        let values = bulk.store.invoke_registered(
-                            &address,
-                            &args,
-                            steps,
-                            resources.call_depth,
-                            resources.stats,
-                        )?;
-                        for value in values {
-                            push_operand(&mut stack, value, live_slots, resources.available_slots)?;
-                        }
-                        continue;
+                        return Ok(DefinedOutcome::ForeignCall {
+                            address,
+                            args,
+                            caller: DefinedActivation {
+                                def_idx,
+                                locals,
+                                stack,
+                                control,
+                                pc,
+                            },
+                        });
                     }
                     return Ok(DefinedOutcome::Call {
                         index: address.index,
@@ -5971,14 +6059,7 @@ impl Module {
                     }
                     let args = take_values(&mut stack, n, "call arguments")?;
                     if address.instance_id != bulk.instance_id {
-                        let values = bulk.store.invoke_registered(
-                            &address,
-                            &args,
-                            steps,
-                            resources.call_depth.saturating_sub(1),
-                            resources.stats,
-                        )?;
-                        return Ok(DefinedOutcome::Values(CallValues::Owned(values)));
+                        return Ok(DefinedOutcome::ForeignTailCall { address, args });
                     }
                     return Ok(DefinedOutcome::TailCall {
                         index: address.index,

@@ -2692,3 +2692,18 @@ foreign calls still cross a bounded native recursion bridge. The next increment
 must make owner switching an explicit state in the activation trampoline so
 cross-instance call cycles obey the same guest call-depth and activation-slot
 budgets without consuming native stack.
+
+## Seventy-seventh executable increment — explicit foreign-call outcomes
+
+The instruction runner no longer invokes a foreign instance from inside the
+`call_indirect` opcode arm. It returns owned `ForeignCall` or
+`ForeignTailCall` outcomes carrying the owner address, arguments and (for a
+normal call) the suspended defined activation. The existing module trampoline
+is now the only place that crosses the temporary owner-runtime bridge and
+resumes or tail-unwinds callers with the returned values.
+
+This preserves the passing sibling, tail-call and resource gates while making
+the owner switch an explicit interpreter transition. The next step can move
+those owned outcomes into a store-level continuation stack without trying to
+serialize borrowed locals, operand stacks or control frames out of an opcode
+arm.
