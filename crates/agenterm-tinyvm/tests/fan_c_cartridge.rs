@@ -68,6 +68,11 @@ fn dot_x(frame: &Indexed2dFrame<'_>) -> usize {
         .expect("visible C-authored dot")
 }
 
+fn metadata_dot_x(frame: &Indexed2dFrame<'_>) -> u32 {
+    let bytes: [u8; 4] = frame.metadata().try_into().expect("C metadata is one u32");
+    u32::from_le_bytes(bytes)
+}
+
 #[test]
 fn ordinary_c_toolchain_emits_a_portable_standard_cartridge() {
     let wasm = build_cartridge();
@@ -84,6 +89,8 @@ fn ordinary_c_toolchain_emits_a_portable_standard_cartridge() {
     assert_eq!((initial.width, initial.height), (32, 16));
     assert_eq!(initial.palette_count(), 3);
     assert_eq!(dot_x(&initial), 16);
+    assert_eq!(initial.metadata_schema, Some(0x314e_4146));
+    assert_eq!(metadata_dot_x(&initial), 16);
 
     let moved = must_ok(
         game.tick(GameInput {
@@ -94,6 +101,7 @@ fn ordinary_c_toolchain_emits_a_portable_standard_cartridge() {
     );
     let moved = must_ok(Indexed2dFrame::decode(&moved.render), "decode moved frame");
     assert_eq!(dot_x(&moved), 17);
+    assert_eq!(metadata_dot_x(&moved), 17);
 
     let snapshot = must_ok(game.suspend(), "suspend C cartridge");
     let mut restored = runtime(&wasm);
@@ -110,4 +118,5 @@ fn ordinary_c_toolchain_emits_a_portable_standard_cartridge() {
         "decode restored C frame",
     );
     assert_eq!(dot_x(&resumed), 17);
+    assert_eq!(metadata_dot_x(&resumed), 17);
 }

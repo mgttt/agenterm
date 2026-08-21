@@ -41,13 +41,16 @@ same standard imports, exports, memory and custom section.
 
 The checked-in `fan-c-cartridge.c` fixture is deliberately small but complete:
 
-- five `tinyarcade:core/v1` imports for input, indexed2d, render and state;
+- six `tinyarcade:core/v1` imports for input, indexed2d plus its optional
+  metadata extension, render and state;
 - the exact init/tick/suspend/resume lifecycle;
-- one bounded 32×16 indexed frame and four-byte portable state;
+- one bounded 32×16 indexed frame with a schema-tagged four-byte position
+  trailer, plus independent four-byte portable suspend state;
 - canonical manifest attachment after linking;
 - static descriptor and normal runtime execution;
 - suspend into a fresh instance with exact gameplay-state preservation; and
-- the same replay producing exact frames in tinyvm, JavaScriptCore and H5.
+- the same metadata-bearing replay producing exact frames in tinyvm,
+  JavaScriptCore and H5.
 
 The fixture is authoring/conformance evidence, not a fourth nostalgia-arcade
 product game and not permission to distribute downloaded executable content on

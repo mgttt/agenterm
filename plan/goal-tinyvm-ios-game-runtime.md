@@ -77,6 +77,7 @@ tinyvm iOS game runtime
 │   ├── canonical manifest authoring  [x]
 │   ├── freestanding C authoring       [x]
 │   │   └── header-only core v1 declarations [x]
+│   │       └── indexed2d metadata extension [x]
 │   ├── app-build host profile        [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
@@ -3972,3 +3973,21 @@ CLI test also requires `indexed2d_metadata_version=1`, joining dynamic media
 evidence to the exact TAH1 app-build declaration. The executable PRD trace now
 binds 124 completed claims. Physical iPhone/TestFlight evidence remains open,
 so the persistent goal stays active.
+
+## One-hundred-twenty-fifth executable increment — C-authored frame metadata
+
+The freestanding C17 authoring fixture now negotiates
+`indexed2d_metadata_version` through the public header and emits a strict
+schema-tagged four-byte dot position after its 32 × 16 pixel plane. It still
+links with `-nostdlib` into an ordinary standard `.wasm`; the trailer is
+produced with explicit little-endian writes and is independent of the same
+four-byte state saved by the suspend lifecycle.
+
+Evidence on 2026-08-22: the 816-byte C artifact runs through TinyVM and exposes
+matching position values in pixels and application metadata before movement,
+after movement and after fresh-instance restore. The exact replay also matches
+system JavaScriptCore and a real headless browser for all four frames. This
+proves the extension is a toolchain-neutral standard import/media contract,
+not behavior available only to Rust-authored guests. The executable PRD trace
+now binds 125 completed claims. Physical iPhone/TestFlight evidence remains
+open, so the persistent goal stays active.
