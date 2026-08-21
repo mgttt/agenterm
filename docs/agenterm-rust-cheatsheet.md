@@ -2611,6 +2611,14 @@ dispatch a foreign address against its owning globals, memories and tables,
 trap that boundary explicitly and keep the capability partial rather than
 silently executing caller-local state.
 
+Give imported tables an explicit store before implementing cross-instance
+dispatch. Instance ids are meaningful only inside that store, so tables bound
+to one module must come from the same owner; two distinct tables are not aliases
+merely because their limits match. Allocate ids monotonically inside the store
+and keep function addresses numeric `(instance, function)` records. This avoids
+global registries and raw-pointer identity, and creates the lookup key for a
+later store-owned activation trampoline.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode

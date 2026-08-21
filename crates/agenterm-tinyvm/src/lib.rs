@@ -84,8 +84,8 @@ pub mod wasm;
 pub use wasm::{
     Global as WasmGlobal, GlobalImportDesc, ImportDesc, Instance as WasmInstance, Limits,
     Memory as WasmMemory, MemoryImportDesc, MemoryView as WasmMemoryView,
-    MemoryViewMut as WasmMemoryViewMut, Module as WasmModule, Table as WasmTable, TableImportDesc,
-    Val, ValueType, WasmError, eval, eval_with,
+    MemoryViewMut as WasmMemoryViewMut, Module as WasmModule, Store as WasmStore,
+    Table as WasmTable, TableImportDesc, Val, ValueType, WasmError, eval, eval_with,
 };
 
 /// One bytecode instruction.

@@ -125,24 +125,33 @@ pub struct Memory {
     max: Option<usize>,
 }
 
-/// A standard host-owned funcref table shared by importing instances.
-///
-/// New host tables contain only null references. Guest element initialization
-/// and table instructions install instance-bound function addresses; clones
-/// retain the same store object.
+/// A standard WebAssembly store. Tables created from one store can be imported
+/// into the same instance and carry store-local function addresses.
 #[derive(Clone)]
-pub struct Table {
-    state: Rc<SharedTableState>,
-    max: Option<usize>,
+pub struct Store {
+    inner: Rc<RefCell<StoreState>>,
+}
+
+struct StoreState {
+    next_instance_id: usize,
+    tables: Vec<SharedTableState>,
 }
 
 struct SharedTableState {
-    elements: RefCell<Vec<Option<FunctionAddress>>>,
-    len: Cell<usize>,
+    elements: Vec<Option<FunctionAddress>>,
 }
 
-impl Table {
-    pub fn new(min: usize, max: Option<usize>) -> Result<Self, WasmError> {
+impl Store {
+    pub fn new() -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(StoreState {
+                next_instance_id: 0,
+                tables: Vec::new(),
+            })),
+        }
+    }
+
+    pub fn create_table(&self, min: usize, max: Option<usize>) -> Result<Table, WasmError> {
         if max.is_some_and(|limit| limit < min) {
             return Err(WasmError::Trap("table binding limits"));
         }
@@ -151,17 +160,65 @@ impl Table {
             .try_reserve_exact(min)
             .map_err(|_| WasmError::Trap("table size"))?;
         elements.resize(min, None);
-        Ok(Self {
-            state: Rc::new(SharedTableState {
-                elements: RefCell::new(elements),
-                len: Cell::new(min),
-            }),
+        let mut state = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+        state
+            .tables
+            .try_reserve(1)
+            .map_err(|_| WasmError::Trap("table size"))?;
+        let index = state.tables.len();
+        state.tables.push(SharedTableState { elements });
+        Ok(Table {
+            store: self.clone(),
+            index,
+            len: Rc::new(Cell::new(min)),
             max,
         })
     }
 
+    fn same(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    fn allocate_instance_id(&self) -> Result<usize, WasmError> {
+        let mut state = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+        let id = state.next_instance_id;
+        state.next_instance_id = id
+            .checked_add(1)
+            .ok_or(WasmError::Trap("instance address space"))?;
+        Ok(id)
+    }
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A standard host-owned funcref table shared by importing instances.
+#[derive(Clone)]
+pub struct Table {
+    store: Store,
+    index: usize,
+    len: Rc<Cell<usize>>,
+    max: Option<usize>,
+}
+
+impl Table {
+    /// Convenience constructor for a table in a fresh store. Use
+    /// [`Store::create_table`] when one module imports multiple table objects.
+    pub fn new(min: usize, max: Option<usize>) -> Result<Self, WasmError> {
+        Store::new().create_table(min, max)
+    }
+
     pub fn len(&self) -> usize {
-        self.state.len.get()
+        self.len.get()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -174,15 +231,21 @@ impl Table {
 
     /// Whether one selected host-visible element is null.
     pub fn is_null(&self, index: usize) -> Result<Option<bool>, WasmError> {
-        self.state
-            .elements
+        self.store
+            .inner
             .try_borrow()
-            .map_err(|_| WasmError::Trap("table is already mutably borrowed"))
-            .map(|elements| elements.get(index).map(Option::is_none))
+            .map_err(|_| WasmError::Trap("store is already mutably borrowed"))
+            .map(|store| {
+                store
+                    .tables
+                    .get(self.index)
+                    .and_then(|table| table.elements.get(index))
+                    .map(Option::is_none)
+            })
     }
 
-    fn same_store(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.state, &other.state)
+    fn same_object(&self, other: &Self) -> bool {
+        self.store.same(&other.store) && self.index == other.index
     }
 }
 
@@ -2707,13 +2770,13 @@ struct TableDesc {
 
 #[derive(Clone)]
 struct FunctionAddress {
-    owner: Rc<()>,
+    instance_id: usize,
     index: usize,
 }
 
 impl FunctionAddress {
-    fn local_index(&self, owner: &Rc<()>) -> Result<usize, WasmError> {
-        if Rc::ptr_eq(&self.owner, owner) {
+    fn local_index(&self, instance_id: usize) -> Result<usize, WasmError> {
+        if self.instance_id == instance_id {
             Ok(self.index)
         } else {
             Err(WasmError::Trap("cross-instance funcref"))
@@ -2746,7 +2809,7 @@ impl TableSlot {
 
     fn aliases(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Imported(left), Self::Imported(right)) => left.same_store(right),
+            (Self::Imported(left), Self::Imported(right)) => left.same_object(right),
             _ => false,
         }
     }
@@ -2758,11 +2821,13 @@ impl TableSlot {
                 .cloned()
                 .ok_or(WasmError::Trap("table element out of bounds")),
             Self::Imported(table) => table
-                .state
-                .elements
+                .store
+                .inner
                 .try_borrow()
-                .map_err(|_| WasmError::Trap("table is already mutably borrowed"))?
-                .get(index)
+                .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+                .tables
+                .get(table.index)
+                .and_then(|shared| shared.elements.get(index))
                 .cloned()
                 .ok_or(WasmError::Trap("table element out of bounds")),
         }
@@ -2781,11 +2846,13 @@ impl TableSlot {
             }
             Self::Imported(table) => {
                 *table
-                    .state
-                    .elements
+                    .store
+                    .inner
                     .try_borrow_mut()
-                    .map_err(|_| WasmError::Trap("table is already borrowed"))?
-                    .get_mut(index)
+                    .map_err(|_| WasmError::Trap("store is already borrowed"))?
+                    .tables
+                    .get_mut(table.index)
+                    .and_then(|shared| shared.elements.get_mut(index))
                     .ok_or(WasmError::Trap("table element out of bounds"))? = address;
             }
         }
@@ -2806,17 +2873,22 @@ impl TableSlot {
                 elements.resize(new_size, fill);
             }
             Self::Imported(table) => {
-                let mut elements = table
-                    .state
-                    .elements
+                let mut store = table
+                    .store
+                    .inner
                     .try_borrow_mut()
-                    .map_err(|_| WasmError::Trap("table is already borrowed"))?;
+                    .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+                let elements = &mut store
+                    .tables
+                    .get_mut(table.index)
+                    .ok_or(WasmError::Trap("table index"))?
+                    .elements;
                 let delta = new_size.saturating_sub(elements.len());
                 if elements.try_reserve(delta).is_err() {
                     return Ok(false);
                 }
                 elements.resize(new_size, fill);
-                table.state.len.set(new_size);
+                table.len.set(new_size);
             }
         }
         Ok(true)
@@ -2878,10 +2950,8 @@ pub struct Module {
 /// exactly once during [`Module::instantiate`].
 pub struct Instance {
     module: Module,
-    /// Stable identity carried by every function address created by this
-    /// instance. Shared tables must never reinterpret another instance's
-    /// function as a local combined-function index.
-    owner: Rc<()>,
+    store: Store,
+    instance_id: usize,
     memories: Vec<MemorySlot>,
     globals: Vec<GlobalSlot>,
     data_live: Vec<bool>,
@@ -2899,7 +2969,7 @@ struct BulkState<'a> {
     data_live: &'a mut [bool],
     tables: &'a mut [TableSlot],
     elem_live: &'a mut [bool],
-    owner: &'a Rc<()>,
+    instance_id: usize,
 }
 
 struct WasmCall<'a> {
@@ -3939,13 +4009,14 @@ impl Module {
         let mut globals = self.new_globals()?;
         let mut memories = self.new_memories(&globals)?;
         let mut data_live = self.new_data_state()?;
-        let owner = Rc::new(());
-        let (mut tables, mut elem_live) = self.new_table_state(&globals, &owner)?;
+        let store = self.execution_store()?;
+        let instance_id = store.allocate_instance_id()?;
+        let (mut tables, mut elem_live) = self.new_table_state(&globals, instance_id)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
             tables: &mut tables,
             elem_live: &mut elem_live,
-            owner: &owner,
+            instance_id,
         };
         let mut resources = CallResourceStats::default();
         if let Some(start) = self.start {
@@ -4041,13 +4112,14 @@ impl Module {
         let mut globals = self.new_globals()?;
         let mut memories = self.new_memories(&globals)?;
         let mut data_live = self.new_data_state()?;
-        let owner = Rc::new(());
-        let (mut tables, mut elem_live) = self.new_table_state(&globals, &owner)?;
+        let store = self.execution_store()?;
+        let instance_id = store.allocate_instance_id()?;
+        let (mut tables, mut elem_live) = self.new_table_state(&globals, instance_id)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
             tables: &mut tables,
             elem_live: &mut elem_live,
-            owner: &owner,
+            instance_id,
         };
         let mut resources = CallResourceStats::default();
         let mut call_context = CallContext {
@@ -4155,12 +4227,29 @@ impl Module {
         Ok(state)
     }
 
+    fn execution_store(&self) -> Result<Store, WasmError> {
+        let mut selected: Option<Store> = None;
+        for table in self.tables.iter().filter(|table| table.imported) {
+            let Some(import) = &table.import else {
+                continue;
+            };
+            if let Some(store) = &selected {
+                if !store.same(&import.store) {
+                    return Err(WasmError::Trap("table imports belong to different stores"));
+                }
+            } else {
+                selected = Some(import.store.clone());
+            }
+        }
+        Ok(selected.unwrap_or_default())
+    }
+
     /// Create one instance's table and passive-element liveness without any
     /// infallible guest-sized allocation.
     fn new_table_state(
         &self,
         globals: &[GlobalSlot],
-        owner: &Rc<()>,
+        instance_id: usize,
     ) -> Result<TableState, WasmError> {
         let mut tables = Vec::new();
         tables
@@ -4179,12 +4268,12 @@ impl Module {
             elements
                 .try_reserve_exact(template.elements.len())
                 .map_err(|_| WasmError::Trap("table size"))?;
-            elements.extend(template.elements.iter().map(|function| {
-                function.map(|index| FunctionAddress {
-                    owner: owner.clone(),
-                    index,
-                })
-            }));
+            elements.extend(
+                template
+                    .elements
+                    .iter()
+                    .map(|function| function.map(|index| FunctionAddress { instance_id, index })),
+            );
             tables.push(TableSlot::Defined {
                 elements,
                 max: template.max,
@@ -4226,10 +4315,7 @@ impl Module {
                 for (relative, &function) in segment.refs.iter().enumerate() {
                     table.set_address(
                         offset + relative,
-                        function.map(|index| FunctionAddress {
-                            owner: owner.clone(),
-                            index,
-                        }),
+                        function.map(|index| FunctionAddress { instance_id, index }),
                     )?;
                 }
             }
@@ -4276,7 +4362,7 @@ impl Module {
             .ok_or(WasmError::Trap(
                 "call_indirect: uninitialised table element",
             ))?
-            .local_index(bulk.owner)?;
+            .local_index(bulk.instance_id)?;
         let expected = self
             .types
             .get(type_index as usize)
@@ -5259,7 +5345,7 @@ impl Module {
                         table.set_address(
                             destination + relative,
                             function.map(|index| FunctionAddress {
-                                owner: bulk.owner.clone(),
+                                instance_id: bulk.instance_id,
                                 index,
                             }),
                         )?;
@@ -5332,14 +5418,14 @@ impl Module {
                         .ok_or(WasmError::Trap("table.get table index"))?
                         .address(index)?
                         .as_ref()
-                        .map(|address| address.local_index(bulk.owner))
+                        .map(|address| address.local_index(bulk.instance_id))
                         .transpose()?;
                     stack.push(Val::FuncRef(function));
                 }
                 Op::TableSet(table_index) => {
                     let function = pop_funcref(&mut stack)?;
                     let function = function.map(|index| FunctionAddress {
-                        owner: bulk.owner.clone(),
+                        instance_id: bulk.instance_id,
                         index,
                     });
                     let index = pop(&mut stack)? as u32 as usize;
@@ -5352,7 +5438,7 @@ impl Module {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let function = pop_funcref(&mut stack)?;
                     let function = function.map(|index| FunctionAddress {
-                        owner: bulk.owner.clone(),
+                        instance_id: bulk.instance_id,
                         index,
                     });
                     let table_index = table_index as usize;
@@ -5417,7 +5503,7 @@ impl Module {
                     let len = pop(&mut stack)? as u32 as usize;
                     let function = pop_funcref(&mut stack)?;
                     let function = function.map(|index| FunctionAddress {
-                        owner: bulk.owner.clone(),
+                        instance_id: bulk.instance_id,
                         index,
                     });
                     let destination = pop(&mut stack)? as u32 as usize;
@@ -5869,11 +5955,13 @@ impl Instance {
         let globals = module.new_globals()?;
         let memories = module.new_memories(&globals)?;
         let data_live = module.new_data_state()?;
-        let owner = Rc::new(());
-        let (tables, elem_live) = module.new_table_state(&globals, &owner)?;
+        let store = module.execution_store()?;
+        let instance_id = store.allocate_instance_id()?;
+        let (tables, elem_live) = module.new_table_state(&globals, instance_id)?;
         let mut instance = Self {
             module,
-            owner,
+            store,
+            instance_id,
             memories,
             globals,
             data_live,
@@ -5889,7 +5977,7 @@ impl Instance {
                 data_live: &mut instance.data_live,
                 tables: &mut instance.tables,
                 elem_live: &mut instance.elem_live,
-                owner: &instance.owner,
+                instance_id: instance.instance_id,
             };
             let mut resources = CallResourceStats::default();
             let mut call_context = CallContext {
@@ -5913,6 +6001,11 @@ impl Instance {
             result?;
         }
         Ok(instance)
+    }
+
+    /// Store that owns this instance's table/function address space.
+    pub fn store(&self) -> Store {
+        self.store.clone()
     }
 
     /// Resolve and invoke an exported function while retaining instance state.
@@ -5941,7 +6034,7 @@ impl Instance {
             data_live: &mut self.data_live,
             tables: &mut self.tables,
             elem_live: &mut self.elem_live,
-            owner: &self.owner,
+            instance_id: self.instance_id,
         };
         let mut resources = CallResourceStats::default();
         let mut call_context = CallContext {

@@ -1,5 +1,5 @@
 use agenterm_tinyvm::{
-    Limits, Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule, WasmTable,
+    Limits, Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule, WasmStore, WasmTable,
 };
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
@@ -607,7 +607,8 @@ fn standard_imported_tables_decode_before_store_binding_exists() {
         Err(WasmError::Trap("unbound imported table"))
     ));
 
-    let table = must_ok(WasmTable::new(1, Some(3)), "allocate imported table");
+    let store = WasmStore::new();
+    let table = must_ok(store.create_table(1, Some(3)), "allocate imported table");
     let mut module = must_ok(
         WasmModule::from_bytes_with(
             &wasm,

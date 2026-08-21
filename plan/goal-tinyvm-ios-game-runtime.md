@@ -2574,3 +2574,31 @@ Evidence on 2026-08-21:
   static core is 101,208 bytes with self-test result 42. The real Nostalgia
   Arcade gate passes five runtime/App tests, one UI journey and the arm64
   device Release build against this runtime.
+
+## Seventy-second executable increment — explicit table address store
+
+The host table API now has an explicit cloneable `WasmStore`. Multiple distinct
+tables intended for one module are created through that store; the convenience
+`WasmTable::new` creates a fresh one-table store. Every instantiation receives
+a monotonically allocated store-local instance id, and every function address
+uses that id rather than an `Rc<()>` token. This supplies the stable lookup key
+needed by the next cross-instance dispatcher without global mutable state,
+pointer identity tricks or unsafe code.
+
+A module with multiple imported tables must bind all of them from the same
+store. Two indices may alias one table object and count once, while two distinct
+tables from that store count independently. Bindings from different stores
+trap before active elements or start execute. Existing defined-table,
+single-table convenience and TinyArcade behavior remain unchanged.
+
+Evidence on 2026-08-21:
+
+- The WABT imported-table gate proves one-object aliases, two distinct tables
+  in one store, and deterministic rejection of two foreign stores.
+- Public standard-extension tests construct and bind through `WasmStore`; all
+  existing funcref/multi-table and JavaScriptCore gates remain green.
+- All 246 non-ignored package tests plus one doctest, feature checks, Clippy,
+  formatting and the real App 5+1/device gate pass. The stripped static core is
+  101,192 bytes. iOS links at 1,579,272 bytes arm64 and 1,656,384 bytes x86_64;
+  profile-catalog, replay, private-library and session consumers link at
+  1,452,120, 1,443,064, 1,444,720 and 1,443,888 bytes.

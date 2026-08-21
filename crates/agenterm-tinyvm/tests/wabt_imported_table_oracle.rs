@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use agenterm_tinyvm::{Limits, Val, WasmError, WasmModule, WasmTable};
+use agenterm_tinyvm::{Limits, Val, WasmError, WasmModule, WasmStore, WasmTable};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -117,4 +117,58 @@ fn aliased_import_indices_keep_one_table_identity() {
         must_ok(instance.invoke_by_name("overlap", &[]), "overlapping copy").as_slice(),
         [Val::I32(16)]
     ));
+
+    let first_store = WasmStore::new();
+    let second_store = WasmStore::new();
+    let first_table = must_ok(first_store.create_table(6, Some(6)), "first table");
+    let second_table = must_ok(second_store.create_table(6, Some(6)), "second table");
+    let mut split_module = must_ok(
+        WasmModule::from_bytes_with(
+            &bytes,
+            Limits {
+                max_table_elems: 12,
+                ..Limits::default()
+            },
+        ),
+        "load split-store module",
+    );
+    must_ok(
+        split_module.bind_table_import("host", "a", &first_table),
+        "bind split a",
+    );
+    must_ok(
+        split_module.bind_table_import("host", "b", &second_table),
+        "bind split b",
+    );
+    assert!(matches!(
+        split_module.instantiate(),
+        Err(WasmError::Trap("table imports belong to different stores"))
+    ));
+
+    let shared_store = WasmStore::new();
+    let first_table = must_ok(shared_store.create_table(6, Some(6)), "same-store a");
+    let second_table = must_ok(shared_store.create_table(6, Some(6)), "same-store b");
+    let mut same_store_module = must_ok(
+        WasmModule::from_bytes_with(
+            &bytes,
+            Limits {
+                max_table_elems: 12,
+                ..Limits::default()
+            },
+        ),
+        "load same-store module",
+    );
+    must_ok(
+        same_store_module.bind_table_import("host", "a", &first_table),
+        "bind same-store a",
+    );
+    must_ok(
+        same_store_module.bind_table_import("host", "b", &second_table),
+        "bind same-store b",
+    );
+    let same_store_instance = must_ok(
+        same_store_module.instantiate(),
+        "instantiate same-store tables",
+    );
+    assert_eq!(same_store_instance.table_elements(), 12);
 }
