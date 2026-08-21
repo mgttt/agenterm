@@ -89,6 +89,15 @@ frame: each frame stores constant-size views into the already-budgeted type
 section. A large signature combined with deep nesting therefore cannot amplify
 validation memory quadratically.
 
+Guest function calls never recurse through the host language stack. Direct and
+indirect calls use an explicit, fallibly grown VM activation vector; tail calls
+replace its current activation. One top-level invocation admits at most 512
+nested defined-call levels and 1,048,576 aggregate live locals, operand values
+and control frames across the current function and suspended callers. Both
+debug and release artifacts enforce the same limits. Exceeding either bound is
+a typed runtime trap before another wide activation is allocated, while all
+executed call instructions remain charged to ordinary deterministic fuel.
+
 ## Required manifest custom section
 
 Exactly one standard custom section named `tinyarcade.manifest.v1` is required.

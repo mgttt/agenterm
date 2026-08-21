@@ -22,6 +22,7 @@ agenterm-tinyvm (35)
 │   ├── persistent instance [x]
 │   ├── start once          [x]
 │   ├── per-call fuel       [x]
+│   ├── explicit guest call stack [x]
 │   ├── memory budget       [x]
 │   ├── table budget        [x]
 │   ├── deterministic execution stats [x]
@@ -83,15 +84,17 @@ Multi-value 包含多结果函数、s33 type-index block signature、带参数 b
 多值 branch；validator 控制帧只引用已经预算的 type section，不按嵌套层次复制签名。
 当前 reference-types 面先完成标准 single-table `funcref` 闭环：reference 值、局部变量、
 全局变量、typed select、`ref.null`/`ref.is_null`/`ref.func`、table get/set/grow/size/fill，
-以及 expression element segment flags 4..7。`externref`、multiple tables、typed function
-references 和 GC 尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
+以及 expression element segment flags 4..7。`externref`、typed function references 和 GC
+尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
 在此基础上，模块可定义多张 `funcref` table；所有 table instruction、`call_indirect`、
 active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
 预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。当前仍不接受 imported
 tables；定义表的 export 会完整验证，但产品 embedding 暂只公开 function lookup。
 标准 tail-call proposal 的 `return_call` 与 `return_call_indirect` 已进入 profile；执行器以
 trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native stack。普通非尾调用
-仍受独立 call-depth 上限约束。尾调用也能落到版本化 native import，但 imported table
+也使用显式、fallible VM activation vector，不再递归进入 Rust；direct/indirect 调用统一受
+512 activation 与 1,048,576 aggregate live-slot 上限约束，debug/release 行为一致。尾调用
+也能落到版本化 native import，但 imported table
 仍需跨 instance 的 store-level function identity 后才能合规共享。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。

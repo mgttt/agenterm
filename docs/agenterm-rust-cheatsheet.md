@@ -2383,6 +2383,16 @@ exactly matches the current function's results. Prove the boundary with a tail
 chain far beyond the ordinary depth limit, an indirect target, a host-import
 target and independently compiled standard bytes in reference engines.
 
+Do not carry ordinary guest calls on the Rust/native stack either. Store the
+complete program counter, locals, operand stack and control frames in an
+explicit activation; suspend it on direct/indirect calls, resume it with exact
+results, and let tail calls replace it. Bound both activation count and the
+aggregate live slots across all suspended callers, check the aggregate before
+allocating the next function's locals, and use fallible vector growth. Prove
+the architecture in an unoptimized build at a depth that previously overflowed
+the native stack, including indirect recursion and a wide-locals amplification
+case—not merely a shallow factorial.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a

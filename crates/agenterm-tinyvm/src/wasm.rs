@@ -1974,7 +1974,10 @@ enum DefinedOutcome {
         args: Vec<Val>,
         caller: DefinedActivation,
     },
-    TailCall { index: usize, args: Vec<Val> },
+    TailCall {
+        index: usize,
+        args: Vec<Val>,
+    },
 }
 
 /// One guest-defined function activation. Guest calls are represented by a
@@ -2829,12 +2832,7 @@ impl Module {
         })
     }
 
-    fn call_host(
-        &self,
-        index: usize,
-        args: &[Val],
-        mem: &mut [u8],
-    ) -> Result<Vec<Val>, WasmError> {
+    fn call_host(&self, index: usize, args: &[Val], mem: &mut [u8]) -> Result<Vec<Val>, WasmError> {
         let host = self
             .hosts
             .get(index)
@@ -2870,7 +2868,7 @@ impl Module {
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
-        globals: &mut Vec<Val>,
+        globals: &mut [Val],
         bulk: &mut BulkState<'_>,
     ) -> Result<Vec<Val>, WasmError> {
         let mut index = call.index;
@@ -2972,7 +2970,7 @@ impl Module {
         available_slots: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
-        globals: &mut Vec<Val>,
+        globals: &mut [Val],
         bulk: &mut BulkState<'_>,
     ) -> Result<DefinedOutcome, WasmError> {
         let DefinedActivation {

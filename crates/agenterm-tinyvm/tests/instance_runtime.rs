@@ -1,7 +1,8 @@
 //! Public black-box ownership for the persistent game-runtime instance.
 
-use agenterm_tinyvm::wasm::WASM_PAGE_SIZE;
+use agenterm_tinyvm::wasm::WASM_MAX_DECODE_ITEMS;
 use agenterm_tinyvm::wasm::WASM_MAX_DEPTH;
+use agenterm_tinyvm::wasm::WASM_PAGE_SIZE;
 use agenterm_tinyvm::{Limits, Val, WasmError, WasmModule};
 
 // (global (mut i32) (i32.const 0))
@@ -194,8 +195,8 @@ fn guest_call_stack_is_explicit_bounded_and_native_stack_independent() {
             0,
             1,
             &[
-                0x20, 0x00, 0x45, 0x04, 0x7F, 0x41, 0x2A, 0x05, 0x20, 0x00, 0x41, 0x01, 0x6B,
-                0x10, 0x00, 0x0B, 0x0B,
+                0x20, 0x00, 0x45, 0x04, 0x7F, 0x41, 0x2A, 0x05, 0x20, 0x00, 0x41, 0x01, 0x6B, 0x10,
+                0x00, 0x0B, 0x0B,
             ],
         ),
         "add recursive countdown",
@@ -253,12 +254,54 @@ fn guest_call_stack_is_explicit_bounded_and_native_stack_independent() {
     );
     assert_eq!(
         only_i32(&must_ok(
-            indirect_instance.invoke_val(
-                indirect_countdown,
-                &[Val::I32(WASM_MAX_DEPTH as i32)],
-            ),
+            indirect_instance.invoke_val(indirect_countdown, &[Val::I32(WASM_MAX_DEPTH as i32)],),
             "run indirect recursion at exact call-depth boundary",
         )),
         42
     );
+}
+
+#[test]
+fn guest_call_stack_aggregate_slots_trap_before_next_activation_allocation() {
+    fn leb(output: &mut Vec<u8>, mut value: u32) {
+        loop {
+            let byte = (value & 0x7F) as u8;
+            value >>= 7;
+            output.push(byte | if value == 0 { 0 } else { 0x80 });
+            if value == 0 {
+                return;
+            }
+        }
+    }
+    fn section(output: &mut Vec<u8>, id: u8, payload: &[u8]) {
+        output.push(id);
+        leb(output, payload.len() as u32);
+        output.extend_from_slice(payload);
+    }
+
+    // One ordinary standard module spends nearly all of its decode-item budget
+    // on a legal locals declaration, then recursively calls that function. The
+    // aggregate live-slot cap must reject the next activation before cloning
+    // that wide locals template again.
+    let local_count = WASM_MAX_DECODE_ITEMS as u32 - 64;
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x01, 0x7F, 0x01, 0x7F]);
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    let mut body = vec![0x01];
+    leb(&mut body, local_count);
+    body.extend_from_slice(&[
+        0x7F, 0x20, 0x00, 0x45, 0x04, 0x7F, 0x41, 0x2A, 0x05, 0x20, 0x00, 0x41, 0x01, 0x6B, 0x10,
+        0x00, 0x0B, 0x0B,
+    ]);
+    let mut code = vec![0x01];
+    leb(&mut code, body.len() as u32);
+    code.extend_from_slice(&body);
+    section(&mut wasm, 10, &code);
+
+    let module = must_ok(WasmModule::from_bytes(&wasm), "load wide countdown");
+    let mut instance = must_ok(module.instantiate(), "instantiate wide countdown");
+    assert!(matches!(
+        instance.invoke_val(0, &[Val::I32(5)]),
+        Err(WasmError::Trap("call stack"))
+    ));
 }

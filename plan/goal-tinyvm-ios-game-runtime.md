@@ -16,6 +16,7 @@ tinyvm iOS game runtime
 │   ├── persistent instance           [x]
 │   ├── start exactly once            [x]
 │   ├── per-call instruction budget   [x]
+│   ├── VM-owned call activations      [x]
 │   ├── host memory/table budgets     [x]
 │   ├── decode complexity budget      [x]
 │   ├── single-table funcref profile  [x]
@@ -1605,3 +1606,43 @@ Evidence on 2026-08-21:
   bytes x86_64. The isolated stripped static core is 87,720 bytes, below
   100 KiB, and its C self-test returns 42. The owning tests are rerun after the
   mandatory main pull before push.
+
+## Forty-fifth executable increment — VM-owned call activations
+
+All guest-defined calls now execute through one explicit activation machine.
+`call` and `call_indirect` suspend a caller in a fallibly grown VM vector;
+defined returns resume that caller and append results, host calls pass through
+the existing typed import door, and tail calls replace the current activation.
+No guest call instruction recursively enters Rust or consumes the iOS native
+stack.
+
+The former debug/release depth split is gone. Both profiles now accept at most
+512 nested defined-call levels and return `Trap("call depth")` at the same exact
+boundary. A second aggregate ceiling admits at most 1,048,576 live locals,
+operand values and control frames across the current function plus every
+suspended caller. The runtime checks that ceiling before allocating a new wide
+activation and grows the activation/caller vectors fallibly, so a legal large
+locals declaration multiplied by recursion becomes a typed `call stack` trap
+rather than an allocator abort.
+
+This is an interpreter architecture invariant, not a game-specific behavior.
+It makes ordinary recursion, indirect dispatch, tail calls and versioned native
+imports share one bounded cross-platform execution model suitable for small
+iOS thread stacks and future non-game Wasm hosts.
+
+Evidence on 2026-08-21:
+
+- Public black-box tests execute 512 levels of both direct and indirect
+  non-tail recursion in a debug build and unwind to the exact result 42. The
+  next direct level traps deterministically at the documented boundary.
+- A separate wide-locals recursion consumes the maximum standard decode-item
+  scale and traps on aggregate activation slots before allocating its next
+  frame.
+- All 217 non-ignored package tests plus one doctest pass under all features;
+  no-default and replay-only matrices, both real-game replay differentials, all
+  six WABT/JavaScriptCore proposal oracles, all-target Clippy, package
+  formatting, ShellCheck and document redaction pass. Device/simulator Swift
+  linkage stays below its gates at 1,548,856 bytes arm64 and 1,612,512 bytes
+  x86_64. The stripped static core remains 87,720 bytes, below 100 KiB, and its
+  C self-test returns 42. Owning tests are rerun after the mandatory main pull
+  before push.
