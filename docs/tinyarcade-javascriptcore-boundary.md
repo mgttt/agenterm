@@ -60,6 +60,7 @@ this Apple Silicon host. It is discovery evidence, not a compatibility promise:
 | module/instance + function import | pass | pass |
 | memory/grow/maximum | pass | pass |
 | table/call_indirect | pass | pass |
+| extended constant expressions | pass | not claimed |
 | SIMD | pass | pass |
 | Wasm exceptions | pass | pass |
 | shared memory/atomics | reject | pass |

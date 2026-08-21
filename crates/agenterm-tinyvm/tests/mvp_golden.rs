@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 63] = [
+const LEAF_TESTS: [(&str, &str); 64] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -709,6 +709,10 @@ const LEAF_TESTS: [(&str, &str); 63] = [
     (
         "multiple internally defined memories",
         "wabt_compiled_multi_memory_matches_tinyvm",
+    ),
+    (
+        "extended constant expressions",
+        "standard_extended_const_executes_and_rejects_invalid_expression_stacks",
     ),
     (
         "tail-call proposal",

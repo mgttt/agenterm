@@ -356,6 +356,55 @@ fn only_i64(values: Vec<Val>) -> i64 {
     }
 }
 
+fn module_with_i32_global_initializer(expression: &[u8]) -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    let mut globals = vec![0x01, 0x7F, 0x00];
+    globals.extend_from_slice(expression);
+    section(&mut wasm, 6, &globals);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
+    section(&mut wasm, 10, &[0x01, 0x04, 0x00, 0x23, 0x00, 0x0B]);
+    wasm
+}
+
+#[test]
+fn standard_extended_const_executes_and_rejects_invalid_expression_stacks() {
+    let wasm = module_with_i32_global_initializer(&[
+        0x41, 40, 0x41, 5, 0x6A, 0x41, 3, 0x6B, 0x41, 1, 0x6C, 0x0B,
+    ]);
+    let module = must_ok(WasmModule::from_bytes(&wasm), "load extended const module");
+    let mut instance = must_ok(module.instantiate(), "instantiate extended const module");
+    assert_eq!(
+        only_i32(must_ok(instance.invoke_by_name("run", &[]), "read global")),
+        42
+    );
+
+    let underflow = module_with_i32_global_initializer(&[0x41, 1, 0x6A, 0x0B]);
+    assert!(matches!(
+        WasmModule::from_bytes(&underflow),
+        Err(WasmError::Decode("const expr operand stack"))
+    ));
+
+    let wrong_type = module_with_i32_global_initializer(&[0x41, 1, 0x42, 2, 0x6A, 0x0B]);
+    assert!(matches!(
+        WasmModule::from_bytes(&wrong_type),
+        Err(WasmError::Decode("const expr type mismatch"))
+    ));
+
+    let extra_result = module_with_i32_global_initializer(&[0x41, 1, 0x41, 2, 0x0B]);
+    assert!(matches!(
+        WasmModule::from_bytes(&extra_result),
+        Err(WasmError::Decode("const expr result arity"))
+    ));
+
+    let unavailable_global = module_with_i32_global_initializer(&[0x23, 0x00, 0x0B]);
+    assert!(matches!(
+        WasmModule::from_bytes(&unavailable_global),
+        Err(WasmError::Decode("unsupported const-expr opcode 0x"))
+    ));
+}
+
 #[test]
 fn standard_sign_extension_proposal_executes() {
     let mut module = WasmModule::new();

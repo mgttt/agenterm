@@ -22,8 +22,8 @@ The v1 executable profile is MVP scalar instructions plus mutable globals,
 tables/`call_indirect`, an internally defined multi-table `funcref` subset of
 reference types,
 the standard sign-extension and non-trapping
-float-to-integer conversion proposals, the standard multi-value and tail-call
-proposals, and
+float-to-integer conversion proposals, extended constant expressions over
+i32/i64 add/sub/mul, the standard multi-value and tail-call proposals, and
 the standard bulk-memory proposal over its single memory and MVP funcref tables.
 Any cartridge that uses linear-memory instructions or active data segments must
 declare its standard memory section; the loader never supplies an implicit page.
@@ -49,6 +49,14 @@ threads and multiple memories remain outside the TinyArcade v1 profile and fail
 loudly at load time. This is feature negotiation by converter profile: future
 runtimes may add standard proposals without changing the `.wasm` container or
 inventing tinyvm-only opcodes.
+
+Extended constant expressions may initialize globals and compute active data
+or element offsets with wrapping `i32.add/sub/mul` and `i64.add/sub/mul`.
+Validation executes them as typed stack programs: underflow, mixed operand
+types or any final arity other than one rejects the cartridge. Their
+instructions consume the shared decode complexity budget. Constant
+`global.get` remains unavailable because v1 has no standard imported-global
+binding; it will not be approximated by exposing a defined guest global.
 
 This single-memory rule belongs to the game embedding, not the general engine.
 tinyvm itself supports multiple internally defined standard memories, including

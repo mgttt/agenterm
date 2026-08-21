@@ -59,7 +59,9 @@ ABI and catches a decoder that only accepts its own hand-built fixtures.
 `smoke-wabt-scalar-proposals.sh` applies the same exact-byte gate to sign
 extension and saturating conversions; `smoke-wabt-multi-value.sh` covers
 multi-result functions, type-indexed parameter/result block signatures and
-multi-value branches. `smoke-wabt-funcref.sh` covers the standard single-table
+multi-value branches. `smoke-wabt-extended-const.sh` covers typed i32/i64
+add/sub/mul inside global, data and element initializers.
+`smoke-wabt-funcref.sh` covers the standard single-table
 funcref profile, including expression element segments and table operations;
 `smoke-wabt-multi-table.sh` extends the same oracle to indexed and cross-table
 execution over two internally defined tables. `smoke-wabt-tail-call.sh` covers

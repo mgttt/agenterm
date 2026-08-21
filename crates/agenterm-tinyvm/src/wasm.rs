@@ -1369,7 +1369,7 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
         i = ni;
         let mode = match flag {
             0 => {
-                let (offset_val, ni) = parse_const_expr(p, i)?;
+                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
                 i = ni;
                 match offset_val {
                     Val::I32(v) => DataMode::Active {
@@ -1383,7 +1383,7 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
             2 => {
                 let (memory, ni) = leb_u32(p, i)?;
                 i = ni;
-                let (offset_val, ni) = parse_const_expr(p, i)?;
+                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
                 i = ni;
                 match offset_val {
                     Val::I32(v) => DataMode::Active {
@@ -1435,7 +1435,7 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
         i = ni;
         let mode = match flag {
             0 => {
-                let (offset_val, ni) = parse_const_expr(p, i)?;
+                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
                 i = ni;
                 match offset_val {
                     Val::I32(v) => ElemMode::Active {
@@ -1456,7 +1456,7 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
             2 => {
                 let (table, ni) = leb_u32(p, i)?;
                 i = ni;
-                let (offset_val, ni) = parse_const_expr(p, i)?;
+                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
                 i = ni;
                 let mode = match offset_val {
                     Val::I32(v) => ElemMode::Active {
@@ -1481,7 +1481,7 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 ElemMode::Declarative
             }
             4 => {
-                let (offset_val, ni) = parse_const_expr(p, i)?;
+                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
                 i = ni;
                 match offset_val {
                     Val::I32(v) => ElemMode::Active {
@@ -1506,7 +1506,7 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
             6 => {
                 let (table, ni) = leb_u32(p, i)?;
                 i = ni;
-                let (offset_val, ni) = parse_const_expr(p, i)?;
+                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
                 i = ni;
                 let mode = match offset_val {
                     Val::I32(v) => ElemMode::Active {
@@ -1552,7 +1552,7 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 i = next;
                 refs.push(Some(function as usize));
             } else {
-                let (value, next) = parse_const_expr(p, i)?;
+                let (value, next) = parse_const_expr(p, i, budget)?;
                 i = next;
                 match value {
                     Val::FuncRef(function) => refs.push(function),
@@ -1572,58 +1572,95 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
     Ok(out)
 }
 
-/// Evaluate a constant init expression (`<t.const imm> end`) to a value.
-fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
-    let op = *p.get(i).ok_or(WasmError::Decode("truncated const expr"))?;
-    let (val, mut j) = match op {
-        0x41 => {
-            let (v, ni) = leb_s32(p, i + 1)?;
-            (Val::I32(v), ni)
+/// Evaluate one standard constant expression. Besides scalar/reference
+/// constants, the extended-const profile accepts wrapping i32/i64 add, sub and
+/// mul. `global.get` remains unavailable because this VM does not yet have a
+/// standard imported-global store/binding model.
+fn parse_const_expr(
+    p: &[u8],
+    i: usize,
+    budget: &mut DecodeBudget,
+) -> Result<(Val, usize), WasmError> {
+    let mut stack = Vec::new();
+    let mut j = i;
+    loop {
+        let op = match p.get(j) {
+            Some(op) => *op,
+            None if stack.is_empty() => return Err(WasmError::Decode("truncated const expr")),
+            None => return Err(WasmError::Decode("const expr missing end")),
+        };
+        if op == 0x0B {
+            return match stack.as_slice() {
+                [value] => Ok((*value, j + 1)),
+                _ => Err(WasmError::Decode("const expr result arity")),
+            };
         }
-        0x42 => {
-            let (v, ni) = leb_s64(p, i + 1)?;
-            (Val::I64(v), ni)
-        }
-        0x43 => {
-            let end = (i + 1)
-                .checked_add(4)
-                .filter(|&e| e <= p.len())
-                .ok_or(WasmError::Decode("truncated f32 const expr"))?;
-            let b = le4(&p[i + 1..end]);
-            (Val::F32(f32::from_le_bytes(b)), end)
-        }
-        0x44 => {
-            let end = (i + 1)
-                .checked_add(8)
-                .filter(|&e| e <= p.len())
-                .ok_or(WasmError::Decode("truncated f64 const expr"))?;
-            let b = le8(&p[i + 1..end]);
-            (Val::F64(f64::from_le_bytes(b)), end)
-        }
-        0xD0 => {
-            let reftype = *p
-                .get(i + 1)
-                .ok_or(WasmError::Decode("truncated ref.null const expr"))?;
-            if reftype != 0x70 {
-                return Err(WasmError::Decode("only funcref ref.null is supported"));
+        budget.charge(1)?;
+        let (value, next) = match op {
+            0x41 => {
+                let (value, next) = leb_s32(p, j + 1)?;
+                (Some(Val::I32(value)), next)
             }
-            (Val::FuncRef(None), i + 2)
+            0x42 => {
+                let (value, next) = leb_s64(p, j + 1)?;
+                (Some(Val::I64(value)), next)
+            }
+            0x43 => {
+                let end = (j + 1)
+                    .checked_add(4)
+                    .filter(|&end| end <= p.len())
+                    .ok_or(WasmError::Decode("truncated f32 const expr"))?;
+                let bytes = le4(&p[j + 1..end]);
+                (Some(Val::F32(f32::from_le_bytes(bytes))), end)
+            }
+            0x44 => {
+                let end = (j + 1)
+                    .checked_add(8)
+                    .filter(|&end| end <= p.len())
+                    .ok_or(WasmError::Decode("truncated f64 const expr"))?;
+                let bytes = le8(&p[j + 1..end]);
+                (Some(Val::F64(f64::from_le_bytes(bytes))), end)
+            }
+            0xD0 => {
+                let reftype = *p
+                    .get(j + 1)
+                    .ok_or(WasmError::Decode("truncated ref.null const expr"))?;
+                if reftype != 0x70 {
+                    return Err(WasmError::Decode("only funcref ref.null is supported"));
+                }
+                (Some(Val::FuncRef(None)), j + 2)
+            }
+            0xD2 => {
+                let (function, next) = leb_u32(p, j + 1)?;
+                (Some(Val::FuncRef(Some(function as usize))), next)
+            }
+            0x6A..=0x6C | 0x7C..=0x7E => {
+                let rhs = stack
+                    .pop()
+                    .ok_or(WasmError::Decode("const expr operand stack"))?;
+                let lhs = stack
+                    .pop()
+                    .ok_or(WasmError::Decode("const expr operand stack"))?;
+                let result = match (op, lhs, rhs) {
+                    (0x6A, Val::I32(lhs), Val::I32(rhs)) => Val::I32(lhs.wrapping_add(rhs)),
+                    (0x6B, Val::I32(lhs), Val::I32(rhs)) => Val::I32(lhs.wrapping_sub(rhs)),
+                    (0x6C, Val::I32(lhs), Val::I32(rhs)) => Val::I32(lhs.wrapping_mul(rhs)),
+                    (0x7C, Val::I64(lhs), Val::I64(rhs)) => Val::I64(lhs.wrapping_add(rhs)),
+                    (0x7D, Val::I64(lhs), Val::I64(rhs)) => Val::I64(lhs.wrapping_sub(rhs)),
+                    (0x7E, Val::I64(lhs), Val::I64(rhs)) => Val::I64(lhs.wrapping_mul(rhs)),
+                    _ => return Err(WasmError::Decode("const expr type mismatch")),
+                };
+                (Some(result), j + 1)
+            }
+            _other => return Err(WasmError::Decode("unsupported const-expr opcode 0x")),
+        };
+        if let Some(value) = value {
+            stack
+                .try_reserve(1)
+                .map_err(|_| WasmError::Decode("const expr allocation"))?;
+            stack.push(value);
         }
-        0xD2 => {
-            let (function, ni) = leb_u32(p, i + 1)?;
-            (Val::FuncRef(Some(function as usize)), ni)
-        }
-        _other => {
-            return Err(WasmError::Decode("unsupported const-expr opcode 0x"));
-        }
-    };
-    // Expect a closing `end` (0x0B).
-    match p.get(j) {
-        Some(0x0B) => {
-            j += 1;
-            Ok((val, j))
-        }
-        _ => Err(WasmError::Decode("const expr missing end")),
+        j = next;
     }
 }
 
@@ -1651,7 +1688,7 @@ fn parse_global_section(
             _ => return Err(WasmError::Decode("invalid global mutability")),
         };
         i += 2;
-        let (val, ni) = parse_const_expr(p, i)?;
+        let (val, ni) = parse_const_expr(p, i, budget)?;
         i = ni;
         if valtype_of(&val) != valtype {
             return Err(WasmError::Decode("global initializer type mismatch"));

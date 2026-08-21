@@ -22,6 +22,7 @@ tinyvm iOS game runtime
 │   ├── single-table funcref profile  [x]
 │   ├── multiple defined tables       [x]
 │   ├── multiple internally defined memories [x]
+│   ├── extended constant expressions [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2354,3 +2355,43 @@ Evidence on 2026-08-21:
 - Physical-device lifecycle, sound/input/performance, TestFlight and
   Apple-review evidence remain open; the persistent goal therefore remains
   active.
+
+## Sixty-sixth executable increment — standard extended constant expressions
+
+tinyvm now evaluates the standard extended-const proposal's wrapping
+`i32.add/sub/mul` and `i64.add/sub/mul` inside module constant expressions.
+The same typed evaluator owns global initializers, active data offsets and
+element offsets, so these sites no longer assume a single `*.const` opcode.
+Every expression instruction consumes the shared decode complexity budget;
+operand underflow, mixed numeric types and any final arity other than one fail
+before a Module is produced.
+
+Constant `global.get` remains outside the accepted profile because tinyvm has
+not yet implemented imported globals and their store-level identity/binding.
+The VM does not substitute a previously defined guest global as a partial host
+model. This keeps the current extension standard, independently testable and
+separate from the later imported-resource architecture.
+
+Evidence on 2026-08-21:
+
+- WABT 1.0.41 compiles, validates and interprets one shared fixture with all
+  six integer operations across global, data and element initializers. WABT,
+  tinyvm and public JavaScriptCore all execute the exact bytes to result `199`.
+- Public raw-byte tests prove nested execution and load-time rejection for
+  stack underflow, i32/i64 mixing, extra expression results and unavailable
+  `global.get`.
+- All 239 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, both whole-corpus WABT gates, all nine
+  proposal/host oracles, the two-game WebKit differential, all-target Clippy,
+  formatting, ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 101,112
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,555,112 bytes arm64 and 1,629,928 bytes x86_64;
+  catalog/replay/private/session consumers are 1,427,944 / 1,418,888 /
+  1,420,592 / 1,419,712 bytes.
+- Current Nostalgia Arcade main passes all five selected App/runtime tests, its
+  full two-game UI journey and a Release arm64 device build against this VM;
+  the bundled Depth Well cartridge remains byte-identical at 6,022 bytes.
+- Physical-device lifecycle, sound/input/performance, TestFlight and
+  Apple-review evidence remain open; the persistent goal remains active.

@@ -5,7 +5,8 @@ TinyArcade bytecode wrapper. The app-specific contract consists only of
 standard imports, exports, a standard custom manifest section and versioned
 media/state records. The accepted v1 compiler profile includes the scalar MVP,
 the standard sign-extension and non-trapping float-to-integer conversion
-proposals, the standard multi-value proposal, the internally defined
+proposals, standard extended constant expressions over i32/i64 add/sub/mul,
+the standard multi-value proposal, the internally defined
 multiple-table `funcref`
 reference profile, the standard tail-call proposal, plus the standard
 bulk-memory proposal for one memory and
@@ -65,6 +66,9 @@ from a module that exercises passive data and funcref element lifetimes.
 `smoke-wabt-scalar-proposals.sh` applies the same WABT validation and exact-byte
 tinyvm/JavaScriptCore comparison to all five sign-extension and all eight
 saturating conversion instructions; both engines must return 143.
+`smoke-wabt-extended-const.sh` covers typed and nested integer constant
+expressions in global, data and element initializers; all three engines must
+return 199 from the same WABT-produced bytes.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.

@@ -79,6 +79,7 @@ agenterm-tinyvm (35)
 │       ├── single-table funcref profile [x]
 │       ├── multiple defined funcref tables [x]
 │       ├── multiple internally defined memories [x]
+│       ├── extended constant expressions [x]
 │       └── tail-call proposal [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
@@ -126,6 +127,10 @@ Custom section 可以重复并出现在标准 section 之间，name 之后的 pa
 当前 scalar MVP 面双绿，并已原生接受完整的 bulk-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
+初始化表达式同时接受标准 extended-const 的 i32/i64 add/sub/mul；它们以 wrapping
+整数语义用于 global initializer、active data offset 与 element offset，并在 decode
+complexity budget 中逐条计数。表达式必须类型正确且最终恰好留下一个值。当前 VM 尚无
+imported-global store/binding，因此 const `global.get` 不以半套私有规则提前开放。
 三个 golden corpus 中的每一个标准模块（包括预期运行期 trap 的样例）还必须先通过
 WABT validation；这条独立门禁防止测试把 malformed bytes 错误归类为执行语义。
 加载门的 reject/accept raw cases 也有共享 oracle fixture：Rust 黑盒强制 fixture 与

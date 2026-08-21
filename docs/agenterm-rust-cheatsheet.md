@@ -2595,3 +2595,12 @@ module loader; otherwise a game ABI convenience silently becomes the VM's
 language limit. Do not accept imported memories until the host has an explicit
 store-level binding and identity model—an internal-memory vector alone is not
 an import implementation.
+
+Treat extended WebAssembly constant expressions as small typed programs, not
+as a special case that reads one opcode and expects `end`. Evaluate them with a
+fallibly grown value stack, charge every instruction to the module decode
+budget, use wrapping integer arithmetic, and require exactly one final value of
+the surrounding declaration's type. Keep the expression's global context
+honest: if the runtime has no imported-global store/binding model, do not make
+`global.get` appear supported by pointing it at an unrelated defined-global
+vector.
