@@ -54,7 +54,9 @@ agenterm-tinyvm (35)
 │   ├── conv             [x]
 │   └── standard proposal profile [~]
 │       ├── bulk memory copy/fill [x]
-│       └── bulk memory passive lifecycle [x]
+│       ├── bulk memory passive lifecycle [x]
+│       ├── sign extension proposal [x]
+│       └── nontrapping float-to-int [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
 ├── slot-B               [ ]
@@ -86,6 +88,12 @@ profile，不改变 `.wasm` 格式或增加私有 opcode。
 解释器路线是 iOS 发行边界驱动的架构选择，不是 PRD 为了缩小产品面而任意排除更快的执行方式。在目标 App Store 分发模型下，下载的 `.wasm` 只由 tinyvm 解释执行；不在设备上生成可执行原生代码，也不把下载模块编译或装载为原生动态代码。
 
 这里排除的 AOT 特指“设备端把下载模块预编译成可执行原生代码”。开发或发布阶段把源码编译为标准 `.wasm`，以及应用本身的构建期 AOT，都不在此排除范围。`agenterm-dyn` 的本地原生动态调用面也不是 iOS tinyvm 执行路径。槽 B 暂停，直到目标分发模型与平台权限发生可验证的变化。
+
+tinyvm 已经按事实上的 WebAssembly VM 建设，而不是只够运行现有游戏的专用解释器。
+标准 `.wasm` 是长期执行格式；TinyArcade v1 只冻结当前可接受的能力 profile 和 host ABI，
+不冻结 VM 的标准能力上限。标准 proposal 按解码、验证、执行、预算、独立引擎差分证据
+逐项进入，平台专有需求只能通过版本化 standard imports 扩展，不能发明私有 guest opcode。
+这是跨平台可扩展应用的底层选择，也为未来非游戏宿主保留同一 VM 内核。
 
 tinyvm 的产品身份是自有、跨平台、可预算的标准 WebAssembly VM，不是 H5 小游戏、
 JavaScript miniApp、WKWebView 容器，也不再由早期 compact bytecode 实验定义。TinyArcade

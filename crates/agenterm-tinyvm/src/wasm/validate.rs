@@ -316,19 +316,19 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_expect(I32)?;
             v.push(I64);
         }
-        I32TruncF32S | I32TruncF32U | I32ReinterpretF32 => {
+        I32TruncF32S | I32TruncF32U | I32TruncSatF32S | I32TruncSatF32U | I32ReinterpretF32 => {
             v.pop_expect(F32)?;
             v.push(I32);
         }
-        I32TruncF64S | I32TruncF64U => {
+        I32TruncF64S | I32TruncF64U | I32TruncSatF64S | I32TruncSatF64U => {
             v.pop_expect(F64)?;
             v.push(I32);
         }
-        I64TruncF32S | I64TruncF32U => {
+        I64TruncF32S | I64TruncF32U | I64TruncSatF32S | I64TruncSatF32U => {
             v.pop_expect(F32)?;
             v.push(I64);
         }
-        I64TruncF64S | I64TruncF64U | I64ReinterpretF64 => {
+        I64TruncF64S | I64TruncF64U | I64TruncSatF64S | I64TruncSatF64U | I64ReinterpretF64 => {
             v.pop_expect(F64)?;
             v.push(I64);
         }
@@ -355,6 +355,14 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
         F64PromoteF32 => {
             v.pop_expect(F32)?;
             v.push(F64);
+        }
+        I32Extend8S | I32Extend16S => {
+            v.pop_expect(I32)?;
+            v.push(I32);
+        }
+        I64Extend8S | I64Extend16S | I64Extend32S => {
+            v.pop_expect(I64)?;
+            v.push(I64);
         }
 
         // --- memory ---

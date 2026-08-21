@@ -1,4 +1,4 @@
-use agenterm_tinyvm::{WasmError, WasmModule};
+use agenterm_tinyvm::{Val, WasmError, WasmModule};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -103,6 +103,153 @@ fn assert_copy_fill_semantics() {
     assert_eq!(&instance.memory()[0..8], b"ababcdef");
     must_ok(instance.invoke(fill, &[1, 0x1234, 3]), "low-byte fill");
     assert_eq!(&instance.memory()[0..8], b"a444cdef");
+}
+
+fn only_i32(values: Vec<Val>) -> i32 {
+    match values.as_slice() {
+        [Val::I32(value)] => *value,
+        _ => panic!("expected one i32 result"),
+    }
+}
+
+fn only_i64(values: Vec<Val>) -> i64 {
+    match values.as_slice() {
+        [Val::I64(value)] => *value,
+        _ => panic!("expected one i64 result"),
+    }
+}
+
+#[test]
+fn standard_sign_extension_proposal_executes() {
+    let mut module = WasmModule::new();
+    let i32_extend8 = must_ok(
+        module.add_function(1, 0, 1, &[0x20, 0x00, 0xC0, 0x0B]),
+        "decode i32.extend8_s",
+    );
+    let i32_extend16 = must_ok(
+        module.add_function(1, 0, 1, &[0x20, 0x00, 0xC1, 0x0B]),
+        "decode i32.extend16_s",
+    );
+    let i64_extend8 = must_ok(
+        module.add_function(1, 0, 1, &[0x20, 0x00, 0xC2, 0x0B]),
+        "decode i64.extend8_s",
+    );
+    let i64_extend16 = must_ok(
+        module.add_function(1, 0, 1, &[0x20, 0x00, 0xC3, 0x0B]),
+        "decode i64.extend16_s",
+    );
+    let i64_extend32 = must_ok(
+        module.add_function(1, 0, 1, &[0x20, 0x00, 0xC4, 0x0B]),
+        "decode i64.extend32_s",
+    );
+
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(i32_extend8, &[Val::I32(0x80)]),
+            "run i32.extend8_s"
+        )),
+        -128
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(i32_extend16, &[Val::I32(0x8000)]),
+            "run i32.extend16_s"
+        )),
+        -32768
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(i64_extend8, &[Val::I64(0x80)]),
+            "run i64.extend8_s"
+        )),
+        -128
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(i64_extend16, &[Val::I64(0x8000)]),
+            "run i64.extend16_s"
+        )),
+        -32768
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(i64_extend32, &[Val::I64(0x8000_0000)]),
+            "run i64.extend32_s"
+        )),
+        i64::from(i32::MIN)
+    );
+}
+
+#[test]
+fn standard_nontrapping_conversion_proposal_saturates() {
+    fn conversion(module: &mut WasmModule, subopcode: u8) -> usize {
+        must_ok(
+            module.add_function(1, 0, 1, &[0x20, 0x00, 0xFC, subopcode, 0x0B]),
+            "decode trunc_sat conversion",
+        )
+    }
+
+    let mut module = WasmModule::new();
+    let functions: Vec<_> = (0..=7)
+        .map(|subopcode| conversion(&mut module, subopcode))
+        .collect();
+
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(functions[0], &[Val::F32(f32::NAN)]),
+            "NaN to signed i32"
+        )),
+        0
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(functions[1], &[Val::F32(f32::INFINITY)]),
+            "+infinity to unsigned i32"
+        )),
+        -1
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(functions[2], &[Val::F64(f64::NEG_INFINITY)]),
+            "-infinity to signed i32"
+        )),
+        i32::MIN
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(functions[3], &[Val::F64(-42.75)]),
+            "negative to unsigned i32"
+        )),
+        0
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(functions[4], &[Val::F32(f32::INFINITY)]),
+            "+infinity to signed i64"
+        )),
+        i64::MAX
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(functions[5], &[Val::F32(f32::NAN)]),
+            "NaN to unsigned i64"
+        )),
+        0
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(functions[6], &[Val::F64(-42.75)]),
+            "finite signed i64 truncation"
+        )),
+        -42
+    );
+    assert_eq!(
+        only_i64(must_ok(
+            module.invoke_val(functions[7], &[Val::F64(f64::INFINITY)]),
+            "+infinity to unsigned i64"
+        )),
+        -1
+    );
 }
 
 #[test]

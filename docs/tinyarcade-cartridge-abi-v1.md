@@ -19,8 +19,11 @@ before a `Module` exists. Custom sections may appear between standard sections;
 they do not change ordering.
 
 The v1 executable profile is MVP scalar instructions plus mutable globals,
-tables/`call_indirect`, and the standard bulk-memory proposal over the single
-memory and MVP funcref table. It accepts active/passive data and index-encoded
+tables/`call_indirect`, the standard sign-extension and non-trapping
+float-to-integer conversion proposals, and the standard bulk-memory proposal
+over the single memory and MVP funcref table. It accepts all five integer
+sign-extension instructions and all eight saturating float-to-integer
+conversions, as well as active/passive data and index-encoded
 funcref element segments, `memory.init`, `data.drop`, `memory.copy`,
 `memory.fill`, `table.init`, `elem.drop` and `table.copy`. DataCount is checked
 against the data section and is mandatory when code uses a data-segment
@@ -30,8 +33,10 @@ loudly at load time. This is feature negotiation by converter profile: future
 runtimes may add standard proposals without changing the `.wasm` container or
 inventing tinyvm-only opcodes.
 
-The segment flags, DataCount ordering, instruction immediates and drop
-semantics follow the WebAssembly specification's
+Scalar instruction encodings and semantics follow the current
+[WebAssembly core instruction specification](https://webassembly.github.io/spec/core/binary/instructions.html).
+The segment flags, DataCount ordering, instruction immediates and drop semantics
+follow the WebAssembly specification's
 [bulk-memory proposal](https://github.com/WebAssembly/spec/blob/main/proposals/bulk-memory-operations/Overview.md).
 
 Bulk copy/fill first bounds-check every range, then charge deterministic fuel

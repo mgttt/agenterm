@@ -386,6 +386,14 @@ enum Op {
     I64TruncF32U,
     I64TruncF64S,
     I64TruncF64U,
+    I32TruncSatF32S,
+    I32TruncSatF32U,
+    I32TruncSatF64S,
+    I32TruncSatF64U,
+    I64TruncSatF32S,
+    I64TruncSatF32U,
+    I64TruncSatF64S,
+    I64TruncSatF64U,
     F32ConvertI32S,
     F32ConvertI32U,
     F32ConvertI64S,
@@ -400,6 +408,11 @@ enum Op {
     I64ReinterpretF64,
     F32ReinterpretI32,
     F64ReinterpretI64,
+    I32Extend8S,
+    I32Extend16S,
+    I64Extend8S,
+    I64Extend16S,
+    I64Extend32S,
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
@@ -629,6 +642,14 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 let (subopcode, ni) = leb_u32(body, i)?;
                 i = ni;
                 match subopcode {
+                    0 => ops.push(Op::I32TruncSatF32S),
+                    1 => ops.push(Op::I32TruncSatF32U),
+                    2 => ops.push(Op::I32TruncSatF64S),
+                    3 => ops.push(Op::I32TruncSatF64U),
+                    4 => ops.push(Op::I64TruncSatF32S),
+                    5 => ops.push(Op::I64TruncSatF32U),
+                    6 => ops.push(Op::I64TruncSatF64S),
+                    7 => ops.push(Op::I64TruncSatF64U),
                     8 => {
                         let (data_index, n1) = leb_u32(body, i)?;
                         let (memory, n2) = leb_u32(body, n1)?;
@@ -999,6 +1020,11 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
             0xBD => ops.push(Op::I64ReinterpretF64),
             0xBE => ops.push(Op::F32ReinterpretI32),
             0xBF => ops.push(Op::F64ReinterpretI64),
+            0xC0 => ops.push(Op::I32Extend8S),
+            0xC1 => ops.push(Op::I32Extend16S),
+            0xC2 => ops.push(Op::I64Extend8S),
+            0xC3 => ops.push(Op::I64Extend16S),
+            0xC4 => ops.push(Op::I64Extend32S),
             _other => {
                 return Err(WasmError::Decode("unsupported opcode 0x"));
             }
@@ -2539,6 +2565,38 @@ impl Module {
                     let x = pop_f64(&mut stack)?;
                     stack.push(Val::I64(trunc_f64_to_i64_u(x)?));
                 }
+                Op::I32TruncSatF32S => {
+                    let x = f64::from(pop_f32(&mut stack)?);
+                    stack.push(Val::I32(sat_f64_to_i32_s(x)));
+                }
+                Op::I32TruncSatF32U => {
+                    let x = f64::from(pop_f32(&mut stack)?);
+                    stack.push(Val::I32(sat_f64_to_i32_u(x)));
+                }
+                Op::I32TruncSatF64S => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I32(sat_f64_to_i32_s(x)));
+                }
+                Op::I32TruncSatF64U => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I32(sat_f64_to_i32_u(x)));
+                }
+                Op::I64TruncSatF32S => {
+                    let x = f64::from(pop_f32(&mut stack)?);
+                    stack.push(Val::I64(sat_f64_to_i64_s(x)));
+                }
+                Op::I64TruncSatF32U => {
+                    let x = f64::from(pop_f32(&mut stack)?);
+                    stack.push(Val::I64(sat_f64_to_i64_u(x)));
+                }
+                Op::I64TruncSatF64S => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I64(sat_f64_to_i64_s(x)));
+                }
+                Op::I64TruncSatF64U => {
+                    let x = pop_f64(&mut stack)?;
+                    stack.push(Val::I64(sat_f64_to_i64_u(x)));
+                }
                 Op::F32ConvertI32S => {
                     let a = pop(&mut stack)?;
                     stack.push(Val::F32(a as f32));
@@ -2594,6 +2652,26 @@ impl Module {
                 Op::F64ReinterpretI64 => {
                     let a = pop_i64(&mut stack)?;
                     stack.push(Val::F64(f64::from_bits(a as u64)));
+                }
+                Op::I32Extend8S => {
+                    let value = pop(&mut stack)?;
+                    stack.push(Val::I32(value as i8 as i32));
+                }
+                Op::I32Extend16S => {
+                    let value = pop(&mut stack)?;
+                    stack.push(Val::I32(value as i16 as i32));
+                }
+                Op::I64Extend8S => {
+                    let value = pop_i64(&mut stack)?;
+                    stack.push(Val::I64(value as i8 as i64));
+                }
+                Op::I64Extend16S => {
+                    let value = pop_i64(&mut stack)?;
+                    stack.push(Val::I64(value as i16 as i64));
+                }
+                Op::I64Extend32S => {
+                    let value = pop_i64(&mut stack)?;
+                    stack.push(Val::I64(value as i32 as i64));
                 }
                 Op::F32Const(v) => stack.push(Val::F32(v)),
                 Op::F32Eq => bin_f32_cmp(&mut stack, |a, b| a == b)?,
@@ -3418,6 +3496,50 @@ fn trunc_f64_to_i64_u(x: f64) -> Result<i64, WasmError> {
         return Err(trunc_trap("i64.trunc_f64_u"));
     }
     Ok((t as u64) as i64)
+}
+
+fn sat_f64_to_i32_s(x: f64) -> i32 {
+    if x.is_nan() {
+        0
+    } else if x <= -2147483648.0 {
+        i32::MIN
+    } else if x >= 2147483648.0 {
+        i32::MAX
+    } else {
+        libm::trunc(x) as i32
+    }
+}
+
+fn sat_f64_to_i32_u(x: f64) -> i32 {
+    if x.is_nan() || x <= 0.0 {
+        0
+    } else if x >= 4294967296.0 {
+        u32::MAX as i32
+    } else {
+        (libm::trunc(x) as u32) as i32
+    }
+}
+
+fn sat_f64_to_i64_s(x: f64) -> i64 {
+    if x.is_nan() {
+        0
+    } else if x <= -9223372036854775808.0 {
+        i64::MIN
+    } else if x >= 9223372036854775808.0 {
+        i64::MAX
+    } else {
+        libm::trunc(x) as i64
+    }
+}
+
+fn sat_f64_to_i64_u(x: f64) -> i64 {
+    if x.is_nan() || x <= 0.0 {
+        0
+    } else if x >= 18446744073709551616.0 {
+        u64::MAX as i64
+    } else {
+        (libm::trunc(x) as u64) as i64
+    }
 }
 
 /// Pop `b` then `a` and push `f(a, b)` — the shape of every binary f32 op.
@@ -5032,9 +5154,9 @@ mod tests {
     #[test]
     fn unsupported_opcode_fails_to_decode() {
         let mut m = Module::new();
-        // 0xC0 is i32.extend8_s (sign-extension proposal), outside this cut.
+        // 0xD1 is ref.is_null (reference-types proposal), outside this profile.
         assert!(matches!(
-            m.add_function(0, 0, 1, &[0xC0, 0x0B]),
+            m.add_function(0, 0, 1, &[0xD1, 0x0B]),
             Err(WasmError::Decode(_))
         ));
     }

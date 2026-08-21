@@ -631,7 +631,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 38] = [
+const LEAF_TESTS: [(&str, &str); 40] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -646,6 +646,14 @@ const LEAF_TESTS: [(&str, &str); 38] = [
     (
         "bulk memory passive lifecycle",
         "standard_bulk_memory_proposal_executes_with_instance_semantics",
+    ),
+    (
+        "sign extension proposal",
+        "standard_sign_extension_proposal_executes",
+    ),
+    (
+        "nontrapping float-to-int",
+        "standard_nontrapping_conversion_proposal_saturates",
     ),
     (
         "decode complexity budget",

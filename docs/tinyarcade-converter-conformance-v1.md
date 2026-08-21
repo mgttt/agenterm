@@ -3,10 +3,12 @@
 Fan tools should emit an ordinary standards-valid WebAssembly `.wasm`, not a
 TinyArcade bytecode wrapper. The app-specific contract consists only of
 standard imports, exports, a standard custom manifest section and versioned
-media/state records. The accepted v1 compiler profile includes the scalar MVP
-plus the standard bulk-memory proposal for one memory and one MVP funcref table:
-copy/fill, passive data/element segments, init/drop and table.copy. It is a
-bounded standards profile, not a different VM instruction set.
+media/state records. The accepted v1 compiler profile includes the scalar MVP,
+the standard sign-extension and non-trapping float-to-integer conversion
+proposals, plus the standard bulk-memory proposal for one memory and one MVP
+funcref table: copy/fill, passive data/element segments, init/drop and
+table.copy. It is a bounded standards profile, not a different VM instruction
+set.
 
 Run the same black-box gate used by the runtime repository:
 
@@ -56,6 +58,9 @@ WABT, validates the generated module with `wasm-validate`, then executes those
 same bytes in tinyvm and system JavaScriptCore. Run
 `crates/agenterm-tinyvm/smoke-wabt-bulk-memory.sh`; both engines must return 143
 from a module that exercises passive data and funcref element lifetimes.
+`smoke-wabt-scalar-proposals.sh` applies the same WABT validation and exact-byte
+tinyvm/JavaScriptCore comparison to all five sign-extension and all eight
+saturating conversion instructions; both engines must return 143.
 
 Before upload, a converter may additionally consume the exact app-build TAH1
 profile defined in
