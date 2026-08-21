@@ -35,13 +35,16 @@ struct ImportedFunctionsOracle {
                   add: provider.exports.add,
                   sub: provider.exports.sub,
                   mixed: provider.exports.mixed,
-                  identity_ref: provider.exports.identity_ref
+                  identity_ref: provider.exports.identity_ref,
+                  answer_ref: provider.exports.answer_ref
                 }}
               );
               const relay = new WebAssembly.Instance(
                 new WebAssembly.Module(Uint8Array.from(relayBytes)),
                 {relay: {function: consumer.exports.reexport}}
               );
+              if (consumer.exports.ref_roundtrip() !== 42) return -5;
+              if (consumer.exports.global_roundtrip() !== 43) return -6;
               return consumer.exports.run() * 100000
                 + consumer.exports.tail() * 1000
                 + relay.exports.run() * 10

@@ -19,6 +19,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::{Cell, Ref, RefCell, RefMut};
 use core::ops::{Deref, DerefMut};
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+use core::sync::atomic::{AtomicU64, Ordering};
 
 mod validate;
 
@@ -56,6 +58,17 @@ pub const WASM_MAX_LOCALS: usize = 1 << 20;
 /// than their shortest wire encoding.
 pub const WASM_MAX_DECODE_ITEMS: usize = 262_144;
 
+/// An opaque, non-null standard function reference with store identity.
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct FunctionReference {
+    token: u64,
+}
+
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+static NEXT_FUNCTION_REFERENCE: AtomicU64 = AtomicU64::new(1);
+
 /// A tagged WebAssembly value. The operand stack, locals, arguments, and
 /// results are all sequences of these so the four numeric types can coexist.
 #[cfg_attr(test, derive(Debug))]
@@ -68,6 +81,9 @@ pub enum Val {
     /// A nullable reference into this module instance's combined function
     /// index space. `None` is the standard null `funcref` value.
     FuncRef(Option<usize>),
+    /// A non-null function reference whose owner survives instance crossings.
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    StoreFuncRef(FunctionReference),
 }
 
 /// A standard value type accepted by this VM profile.
@@ -113,6 +129,8 @@ pub struct Global {
     value: Rc<Cell<Val>>,
     value_type: ValueType,
     mutable: bool,
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    store: Option<Store>,
 }
 
 /// A standard host-owned linear memory shared by every importing instance.
@@ -136,6 +154,14 @@ struct StoreState {
     next_instance_id: usize,
     tables: Vec<SharedTableState>,
     instances: Vec<Option<Rc<RefCell<InstanceState>>>>,
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    references: Vec<SharedFunctionReference>,
+}
+
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+struct SharedFunctionReference {
+    token: u64,
+    address: FunctionAddress,
 }
 
 struct SharedTableState {
@@ -149,6 +175,8 @@ impl Store {
                 next_instance_id: 0,
                 tables: Vec::new(),
                 instances: Vec::new(),
+                #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+                references: Vec::new(),
             })),
         }
     }
@@ -208,6 +236,51 @@ impl Store {
 
     fn same(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    fn intern_reference(&self, address: &FunctionAddress) -> Result<FunctionReference, WasmError> {
+        let mut state = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+        if let Some(reference) = state.references.iter().find(|reference| {
+            reference.address.instance_id == address.instance_id
+                && reference.address.index == address.index
+        }) {
+            return Ok(FunctionReference {
+                token: reference.token,
+            });
+        }
+        state
+            .references
+            .try_reserve(1)
+            .map_err(|_| WasmError::Trap("function references"))?;
+        let token = NEXT_FUNCTION_REFERENCE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                next.checked_add(1)
+            })
+            .map_err(|_| WasmError::Trap("function reference address space"))?;
+        state.references.push(SharedFunctionReference {
+            token,
+            address: address.clone(),
+        });
+        Ok(FunctionReference { token })
+    }
+
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    fn resolve_reference(
+        &self,
+        reference: FunctionReference,
+    ) -> Result<FunctionAddress, WasmError> {
+        self.inner
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+            .references
+            .iter()
+            .find(|candidate| candidate.token == reference.token)
+            .map(|candidate| candidate.address.clone())
+            .ok_or(WasmError::Trap("funcref belongs to different store"))
     }
 
     fn allocate_instance_id(&self) -> Result<usize, WasmError> {
@@ -283,6 +356,14 @@ impl Store {
         base_depth: usize,
         stats: &mut CallResourceStats,
     ) -> Result<Vec<Val>, WasmError> {
+        #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+        {
+            for value in args {
+                if let Val::StoreFuncRef(reference) = value {
+                    self.resolve_reference(*reference)?;
+                }
+            }
+        }
         enum StoreEntry {
             Call {
                 address: FunctionAddress,
@@ -398,12 +479,13 @@ impl Store {
             drop(state);
 
             match boundary {
-                CallBoundary::Values(values) => {
-                    if let Some((instance_id, continuation, base_depth, base_slots)) =
+                CallBoundary::Values(mut values) => {
+                    canonicalize_funcrefs(&mut values, self, instance_id)?;
+                    if let Some((resume_instance_id, continuation, base_depth, base_slots)) =
                         suspended.pop()
                     {
                         entry = StoreEntry::Resume {
-                            instance_id,
+                            instance_id: resume_instance_id,
                             continuation,
                             values,
                             base_depth,
@@ -415,9 +497,10 @@ impl Store {
                 }
                 CallBoundary::Foreign {
                     address,
-                    args,
+                    mut args,
                     continuation,
                 } => {
+                    canonicalize_funcrefs(&mut args, self, instance_id)?;
                     let foreign_base_depth = call_base_depth
                         .checked_add(continuation.callers.len())
                         .ok_or(WasmError::Trap("call depth"))?;
@@ -486,6 +569,14 @@ impl Function {
     /// Exact standard type of one result.
     pub fn result_type(&self, index: usize) -> Option<ValueType> {
         ValueType::from_byte(*self.function_type.results.get(index)?)
+    }
+
+    /// This exported function as an opaque, store-owned standard funcref value.
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    pub fn reference_value(&self) -> Result<Val, WasmError> {
+        self.store
+            .intern_reference(&self.address)
+            .map(Val::StoreFuncRef)
     }
 }
 
@@ -737,7 +828,81 @@ impl Global {
             value_type: ValueType::from_byte(valtype_of(&value))
                 .expect("Val always has a supported value type"),
             mutable,
+            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+            store: None,
         }
+    }
+
+    fn owned(
+        value: Val,
+        mutable: bool,
+        store: &Store,
+        instance_id: usize,
+    ) -> Result<Self, WasmError> {
+        let mut values = [value];
+        canonicalize_funcrefs(&mut values, store, instance_id)?;
+        Ok(Self {
+            value: Rc::new(Cell::new(values[0])),
+            value_type: ValueType::from_byte(valtype_of(&values[0]))
+                .expect("Val always has a supported value type"),
+            mutable,
+            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+            store: None,
+        })
+    }
+
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    fn owner_store(&self) -> Option<Store> {
+        self.store.clone()
+    }
+
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    fn for_slot(&self, store: &Store, instance_id: usize) -> Result<Self, WasmError> {
+        if let Some(owner) = self.owner_store()
+            && !owner.same(store)
+        {
+            return Err(WasmError::Trap("global belongs to different store"));
+        }
+        let mut value = self.value();
+        if let Val::StoreFuncRef(reference) = value {
+            store.resolve_reference(reference)?;
+        }
+        if matches!(value, Val::FuncRef(Some(_))) {
+            let mut values = [value];
+            canonicalize_funcrefs(&mut values, store, instance_id)?;
+            value = values[0];
+            self.value.set(value);
+        }
+        Ok(Self {
+            value: self.value.clone(),
+            value_type: self.value_type,
+            mutable: self.mutable,
+            store: None,
+        })
+    }
+
+    #[cfg(all(feature = "staticcore", not(feature = "std")))]
+    fn for_slot(&self, _store: &Store, _instance_id: usize) -> Result<Self, WasmError> {
+        Ok(self.clone())
+    }
+
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    fn linked_handle(&self, store: &Store) -> Self {
+        Self {
+            value: self.value.clone(),
+            value_type: self.value_type,
+            mutable: self.mutable,
+            store: if self.value_type == ValueType::FuncRef {
+                Some(store.clone())
+            } else {
+                None
+            },
+        }
+    }
+
+    #[cfg(all(feature = "staticcore", not(feature = "std")))]
+    fn linked_handle(&self, _store: &Store) -> Self {
+        self.clone()
     }
 
     pub fn value(&self) -> Val {
@@ -755,6 +920,12 @@ impl Global {
     pub fn set(&self, value: Val) -> Result<(), WasmError> {
         if !self.mutable || valtype_of(&value) != self.value_type.to_byte() {
             return Err(WasmError::Trap("global binding type"));
+        }
+        #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+        {
+            if let (Val::StoreFuncRef(reference), Some(store)) = (value, &self.store) {
+                store.resolve_reference(reference)?;
+            }
         }
         self.value.set(value);
         Ok(())
@@ -2553,7 +2724,7 @@ pub struct ImportDesc {
     pub i32_only: bool,
 }
 
-/// A standard numeric global import in global-index order.
+/// A standard numeric or funcref global import in global-index order.
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
 pub struct GlobalImportDesc {
@@ -2638,7 +2809,7 @@ fn parse_import_section(
                 let value_type = *p
                     .get(i)
                     .ok_or(WasmError::Decode("truncated imported global type"))?;
-                if !matches!(value_type, 0x7C..=0x7F) {
+                if !matches!(value_type, 0x70 | 0x7C..=0x7F) {
                     return Err(WasmError::Decode("unsupported imported global type"));
                 }
                 let mutable = match p.get(i + 1) {
@@ -2837,6 +3008,8 @@ fn valtype_of(v: &Val) -> u8 {
         Val::F32(_) => 0x7D,
         Val::F64(_) => 0x7C,
         Val::FuncRef(_) => 0x70,
+        #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+        Val::StoreFuncRef(_) => 0x70,
     }
 }
 
@@ -2865,6 +3038,33 @@ fn host_refs_are_valid(values: &[Val], function_count: usize) -> bool {
         }
     }
     true
+}
+
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+fn canonicalize_funcrefs(
+    values: &mut [Val],
+    store: &Store,
+    instance_id: usize,
+) -> Result<(), WasmError> {
+    for value in values {
+        if let Val::FuncRef(Some(index)) = value {
+            let reference = store.intern_reference(&FunctionAddress {
+                instance_id,
+                index: *index,
+            })?;
+            *value = Val::StoreFuncRef(reference);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "staticcore", not(feature = "std")))]
+fn canonicalize_funcrefs(
+    _values: &mut [Val],
+    _store: &Store,
+    _instance_id: usize,
+) -> Result<(), WasmError> {
+    Ok(())
 }
 
 fn adapt_i32_host(callback: Rc<HostImpl>) -> Rc<TypedHostImpl> {
@@ -3072,16 +3272,6 @@ struct TableDesc {
 struct FunctionAddress {
     instance_id: usize,
     index: usize,
-}
-
-impl FunctionAddress {
-    fn local_index(&self, instance_id: usize) -> Result<usize, WasmError> {
-        if self.instance_id == instance_id {
-            Ok(self.index)
-        } else {
-            Err(WasmError::Trap("cross-instance funcref value"))
-        }
-    }
 }
 
 enum TableSlot {
@@ -4177,15 +4367,6 @@ impl Module {
         field: &str,
         function: &Function,
     ) -> Result<(), WasmError> {
-        if function
-            .function_type
-            .params
-            .iter()
-            .chain(&function.function_type.results)
-            .any(|&value_type| value_type == 0x70)
-        {
-            return Err(WasmError::Trap("linked function reference type"));
-        }
         let mut bound = 0usize;
         for (position, desc) in self.import_descs.iter().enumerate() {
             if desc.module == module && desc.field == field {
@@ -4398,11 +4579,11 @@ impl Module {
         // One instance: the start function and the entry point share the same
         // linear memory and globals, so start-time host writes are visible.
         let mut steps: u64 = 0;
-        let mut globals = self.new_globals()?;
-        let mut memories = self.new_memories(&globals)?;
-        let mut data_live = self.new_data_state()?;
         let store = self.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
+        let mut globals = self.new_globals(&store, instance_id)?;
+        let mut memories = self.new_memories(&globals)?;
+        let mut data_live = self.new_data_state()?;
         let (mut tables, mut elem_live) = self.new_table_state(&globals, &store, instance_id)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
@@ -4504,11 +4685,11 @@ impl Module {
     /// convenience wrapper over it.
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
-        let mut globals = self.new_globals()?;
-        let mut memories = self.new_memories(&globals)?;
-        let mut data_live = self.new_data_state()?;
         let store = self.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
+        let mut globals = self.new_globals(&store, instance_id)?;
+        let mut memories = self.new_memories(&globals)?;
+        let mut data_live = self.new_data_state()?;
         let (mut tables, mut elem_live) = self.new_table_state(&globals, &store, instance_id)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
@@ -4590,19 +4771,25 @@ impl Module {
         Ok(memories)
     }
 
-    fn new_globals(&self) -> Result<Vec<GlobalSlot>, WasmError> {
+    fn new_globals(&self, store: &Store, instance_id: usize) -> Result<Vec<GlobalSlot>, WasmError> {
         let mut globals = Vec::new();
         globals
             .try_reserve_exact(self.globals.len())
             .map_err(|_| WasmError::Trap("global state"))?;
         for global in &self.globals {
             let slot = match &global.init {
-                GlobalInit::Value(value) => GlobalSlot::Local(Global::new(*value, global.mutable)),
-                GlobalInit::Expr(expr) => GlobalSlot::Local(Global::new(
+                GlobalInit::Value(value) => {
+                    GlobalSlot::Local(Global::owned(*value, global.mutable, store, instance_id)?)
+                }
+                GlobalInit::Expr(expr) => GlobalSlot::Local(Global::owned(
                     eval_const_expr(expr, &globals)?,
                     global.mutable,
-                )),
-                GlobalInit::Import(Some(global)) => GlobalSlot::Imported(global.clone()),
+                    store,
+                    instance_id,
+                )?),
+                GlobalInit::Import(Some(global)) => {
+                    GlobalSlot::Imported(global.for_slot(store, instance_id)?)
+                }
                 GlobalInit::Import(None) => {
                     return Err(WasmError::Trap("unbound imported global"));
                 }
@@ -4656,6 +4843,24 @@ impl Module {
                 }
             } else {
                 selected = Some(store.clone());
+            }
+        }
+        #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+        {
+            for global in &self.globals {
+                let GlobalInit::Import(Some(global)) = &global.init else {
+                    continue;
+                };
+                let Some(store) = global.owner_store() else {
+                    continue;
+                };
+                if let Some(selected) = &selected {
+                    if !selected.same(&store) {
+                        return Err(WasmError::Trap("global belongs to different store"));
+                    }
+                } else {
+                    selected = Some(store);
+                }
             }
         }
         Ok(selected.unwrap_or_default())
@@ -5493,10 +5698,15 @@ impl Module {
                     memory[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
                 Op::GlobalGet(g) => {
-                    let v = globals
+                    let mut v = globals
                         .get(g as usize)
                         .ok_or(WasmError::Trap("global.get"))?
                         .get();
+                    canonicalize_funcrefs(
+                        core::slice::from_mut(&mut v),
+                        bulk.store,
+                        bulk.instance_id,
+                    )?;
                     push_operand(&mut stack, v, live_slots, resources.available_slots)?;
                 }
                 Op::GlobalSet(g) => {
@@ -6001,18 +6211,28 @@ impl Module {
                         .tables
                         .get(table_index as usize)
                         .ok_or(WasmError::Trap("table.get table index"))?
-                        .address(bulk.store, index)?
-                        .as_ref()
-                        .map(|address| address.local_index(bulk.instance_id))
-                        .transpose()?;
-                    stack.push(Val::FuncRef(function));
+                        .address(bulk.store, index)?;
+                    let value = match function {
+                        None => Val::FuncRef(None),
+                        Some(address) if address.instance_id == bulk.instance_id => {
+                            Val::FuncRef(Some(address.index))
+                        }
+                        Some(address) => {
+                            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+                            {
+                                Val::StoreFuncRef(bulk.store.intern_reference(&address)?)
+                            }
+                            #[cfg(all(feature = "staticcore", not(feature = "std")))]
+                            {
+                                let _ = address;
+                                return Err(WasmError::Trap("cross-instance funcref value"));
+                            }
+                        }
+                    };
+                    stack.push(value);
                 }
                 Op::TableSet(table_index) => {
-                    let function = pop_funcref(&mut stack)?;
-                    let function = function.map(|index| FunctionAddress {
-                        instance_id: bulk.instance_id,
-                        index,
-                    });
+                    let function = pop_funcref(&mut stack, bulk.store, bulk.instance_id)?;
                     let index = pop(&mut stack)? as u32 as usize;
                     bulk.tables
                         .get_mut(table_index as usize)
@@ -6021,11 +6241,7 @@ impl Module {
                 }
                 Op::TableGrow(table_index) => {
                     let delta = pop(&mut stack)? as u32 as usize;
-                    let function = pop_funcref(&mut stack)?;
-                    let function = function.map(|index| FunctionAddress {
-                        instance_id: bulk.instance_id,
-                        index,
-                    });
+                    let function = pop_funcref(&mut stack, bulk.store, bulk.instance_id)?;
                     let table_index = table_index as usize;
                     let old_size = bulk
                         .tables
@@ -6086,11 +6302,7 @@ impl Module {
                 }
                 Op::TableFill(table_index) => {
                     let len = pop(&mut stack)? as u32 as usize;
-                    let function = pop_funcref(&mut stack)?;
-                    let function = function.map(|index| FunctionAddress {
-                        instance_id: bulk.instance_id,
-                        index,
-                    });
+                    let function = pop_funcref(&mut stack, bulk.store, bulk.instance_id)?;
                     let destination = pop(&mut stack)? as u32 as usize;
                     let table = bulk
                         .tables
@@ -6531,7 +6743,7 @@ impl Module {
                     )?;
                 }
                 Op::RefIsNull => {
-                    let reference = pop_funcref(&mut stack)?;
+                    let reference = pop_funcref(&mut stack, bulk.store, bulk.instance_id)?;
                     stack.push(Val::I32(i32::from(reference.is_none())));
                 }
                 Op::RefFunc(function) => {
@@ -6569,11 +6781,11 @@ impl Module {
 
 impl Instance {
     fn new(mut module: Module) -> Result<Self, WasmError> {
-        let globals = module.new_globals()?;
-        let memories = module.new_memories(&globals)?;
-        let data_live = module.new_data_state()?;
         let store = module.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
+        let globals = module.new_globals(&store, instance_id)?;
+        let memories = module.new_memories(&globals)?;
+        let data_live = module.new_data_state()?;
         let (tables, elem_live) = module.new_table_state(&globals, &store, instance_id)?;
         for table in &mut module.tables {
             if table.imported {
@@ -6583,6 +6795,11 @@ impl Instance {
         for host in &mut module.hosts {
             if let HostBinding::Wasm { store, .. } = &mut host.binding {
                 *store = None;
+            }
+        }
+        for global in &mut module.globals {
+            if matches!(global.init, GlobalInit::Import(Some(_))) {
+                global.init = GlobalInit::Import(None);
             }
         }
         let imported_memories = memories
@@ -6957,7 +7174,11 @@ impl Instance {
     pub fn exported_global_handle(&self, name: &str) -> Option<Global> {
         let state = self.state.borrow();
         let index = state.module.global_export_index(name)?;
-        state.globals.get(index).map(GlobalSlot::handle)
+        state
+            .globals
+            .get(index)
+            .map(GlobalSlot::handle)
+            .map(|global| global.linked_handle(&self.store))
     }
 
     /// Resolve one standard function export into a cloneable store-owned
@@ -7476,9 +7697,17 @@ fn pop_f64(stack: &mut Vec<Val>) -> Result<f64, WasmError> {
     }
 }
 
-fn pop_funcref(stack: &mut Vec<Val>) -> Result<Option<usize>, WasmError> {
+fn pop_funcref(
+    stack: &mut Vec<Val>,
+    store: &Store,
+    instance_id: usize,
+) -> Result<Option<FunctionAddress>, WasmError> {
+    #[cfg(all(feature = "staticcore", not(feature = "std")))]
+    let _ = store;
     match pop_val(stack)? {
-        Val::FuncRef(function) => Ok(function),
+        Val::FuncRef(function) => Ok(function.map(|index| FunctionAddress { instance_id, index })),
+        #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+        Val::StoreFuncRef(function) => store.resolve_reference(function).map(Some),
         _other => Err(WasmError::Trap("expected funcref on stack, got")),
     }
 }

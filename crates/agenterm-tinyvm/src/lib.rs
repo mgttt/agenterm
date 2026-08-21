@@ -81,6 +81,8 @@ pub use cartridge_cache::CartridgeCache;
 mod ios_c_api;
 
 pub mod wasm;
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+pub use wasm::FunctionReference as WasmFunctionReference;
 pub use wasm::{
     Function as WasmFunction, Global as WasmGlobal, GlobalImportDesc, ImportDesc,
     Instance as WasmInstance, Limits, Memory as WasmMemory, MemoryImportDesc,

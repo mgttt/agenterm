@@ -216,6 +216,7 @@ fn describe_vals(vals: &[Val]) -> String {
             Val::F64(n) => format!("f64bits:{:#x}", n.to_bits()),
             Val::FuncRef(None) => "funcref:null".to_string(),
             Val::FuncRef(Some(index)) => format!("funcref:{index}"),
+            Val::StoreFuncRef(_) => "funcref:store".to_string(),
         })
         .collect::<Vec<_>>()
         .join(",")
@@ -633,7 +634,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 72] = [
+const LEAF_TESTS: [(&str, &str); 74] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -715,7 +716,7 @@ const LEAF_TESTS: [(&str, &str); 72] = [
         "standard_extended_const_executes_and_rejects_invalid_expression_stacks",
     ),
     (
-        "standard imported numeric globals",
+        "standard imported globals",
         "standard_imported_globals_bind_types_and_share_mutation",
     ),
     (
@@ -743,7 +744,15 @@ const LEAF_TESTS: [(&str, &str); 72] = [
         "wabt_compiled_imported_table_decodes_in_standard_index_space",
     ),
     (
+        "linked exported functions",
+        "wabt_compiled_exported_functions_link_across_instances",
+    ),
+    (
         "numeric value signatures",
+        "wabt_compiled_exported_functions_link_across_instances",
+    ),
+    (
+        "store-owned funcref values",
         "wabt_compiled_exported_functions_link_across_instances",
     ),
     (

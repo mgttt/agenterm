@@ -23,14 +23,14 @@ tinyvm iOS game runtime
 │   ├── multiple defined tables       [x]
 │   ├── multiple internally defined memories [x]
 │   ├── extended constant expressions [x]
-│   ├── standard imported numeric globals [x]
+│   ├── standard imported globals         [x]
 │   ├── named standard resource exports [x]
 │   ├── standard imported linear memories [x]
 │   ├── standard imported funcref tables [x]
 │   ├── linked exported globals/memories/tables [x]
-│   ├── linked exported functions    [~]
+│   ├── linked exported functions    [x]
 │   │   ├── numeric value signatures [x]
-│   │   └── store-owned funcref values [ ]
+│   │   └── store-owned funcref values [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -117,6 +117,29 @@ artifact manifest + trust
         → cache/rollback/revocation
             → distribution evidence
 ```
+
+## Queued runtime research — QJWasm / WA2X
+
+After the store-owned funcref increment is complete, review the QJWasm paper
+and its published implementation together with the WA2X runtime. This is a
+source-level engineering task, not a name-only related-work citation:
+
+- locate the authoritative repositories and pin the exact revisions evaluated;
+- audit licenses and provenance before reusing any code or derived structure;
+- map QJWasm's cross-runtime ownership graph, reference-count handoff and
+  zero/low-copy argument representation against `WasmStore`, linked resources
+  and the TinyArcade native capability registry;
+- trace its request, callback and Promise/result channels, including queue
+  bounds, cancellation, re-entrancy, ordering and event-loop wakeups;
+- reproduce the relevant memory and boundary-call benchmarks, separating Wasm
+  execution time from scheduling, serialization and large-argument copying;
+- record an adopt/adapt/reject decision for each mechanism and add executable
+  tinyvm benchmarks before changing the runtime architecture.
+
+QuickJS, a JS event loop and WA2X's AOT execution are not product dependencies:
+downloaded cartridges remain standard `.wasm` interpreted by tinyvm on iOS.
+The reusable target is ownership, bounded communication and measurement design.
+Paper: [QJWasm, Journal of Systems Architecture 179 (2026)](https://www.sciencedirect.com/science/article/pii/S1383762126002444).
 
 The execution kernel and artifact-trust branch can mature independently. The
 iOS bridge must not freeze a game ABI before the native Rust black-box owner
@@ -2895,3 +2918,38 @@ profile-catalog, replay, private-library and session consumers link at
 ceiling advances by one explicit 16 KiB linker bucket; the arm64 product
 ceiling is unchanged. Nostalgia Arcade consumes current main with 6 unit tests,
 1 UI test and an arm64 device build.
+
+## Eighty-fifth executable increment — store-owned funcref values
+
+Non-null funcref values now carry one process-unique opaque 64-bit token. The
+owning Store maps that token to its instance and combined function index;
+another Store cannot resolve it, including after an old Store is dropped and
+allocator addresses are reused. Local `ref.func` values are canonicalized only
+when they leave their owner through a top-level result or cross-instance call,
+so ordinary single-instance execution retains the compact local
+representation. `table.get/set/grow/fill`, globals, typed arguments and results
+all preserve the canonical owner; a value presented to another store traps
+before guest execution or table/global mutation.
+
+Function-reference globals now participate in common-store selection. A
+registered instance's global cells carry canonical values but no Store handle;
+exported funcref-global handles retain the Store strongly, while imported
+binding-only handles are cleared before instance registration. This preserves
+provider lifetime for a linked reference without introducing
+`Store → InstanceState → Global → Store` cycles. The general decoder now
+accepts the standard funcref global import type in addition to the four numeric
+types.
+
+The WABT/JSC provider-consumer oracle now round-trips a consumer `ref.func`
+through a provider function, stores it in a table and calls it indirectly to
+42. It also imports a provider's exported funcref global, places that reference
+in the consumer table and calls the original provider function to 43 after the
+provider's public instance handle is dropped. Cross-store value and global
+bindings trap explicitly; JavaScriptCore runs the same standard bytes.
+
+Evidence on 2026-08-21: the 249 non-ignored all-feature package tests and the
+no-default-feature suite pass, as do Clippy with warnings denied, rustfmt, the
+PRD leaf map and the independently compiled WABT/JavaScriptCore linked-function
+oracle. The stripped static core is unchanged at 101,240 bytes with selftest
+42; the store-reference machinery is absent from that deliberately minimal
+profile.

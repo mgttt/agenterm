@@ -59,6 +59,9 @@ fn wabt_compiled_exported_functions_link_across_instances() {
         "resolve identity_ref export",
     )
     .expect("identity_ref export");
+    let answer_ref = provider
+        .exported_global_handle("answer_ref")
+        .expect("answer_ref global export");
     assert_eq!(add.parameter_count(), 2);
     assert_eq!(add.result_count(), 1);
     assert!(add.parameter_type(0) == Some(ValueType::I32));
@@ -70,11 +73,6 @@ fn wabt_compiled_exported_functions_link_across_instances() {
         mismatch.bind_function_import("provider", "add", &unary),
         Err(WasmError::Trap("function binding type"))
     ));
-    assert!(matches!(
-        mismatch.bind_function_import("provider", "identity_ref", &identity_ref),
-        Err(WasmError::Trap("linked function reference type"))
-    ));
-
     let mut consumer = must_ok(WasmModule::from_bytes(&consumer_bytes), "load consumer");
     must_ok(
         consumer.bind_function_import("provider", "add", &add),
@@ -88,6 +86,14 @@ fn wabt_compiled_exported_functions_link_across_instances() {
         consumer.bind_function_import("provider", "mixed", &mixed),
         "bind mixed numeric function",
     );
+    must_ok(
+        consumer.bind_function_import("provider", "identity_ref", &identity_ref),
+        "bind reference identity",
+    );
+    must_ok(
+        consumer.bind_global_import("provider", "answer_ref", &answer_ref),
+        "bind reference global",
+    );
     let mut consumer = must_ok(consumer.instantiate(), "instantiate consumer");
     drop(provider);
     assert_eq!(
@@ -96,10 +102,24 @@ fn wabt_compiled_exported_functions_link_across_instances() {
     );
     assert_eq!(
         only_i32(must_ok(
+            consumer.invoke_by_name("global_roundtrip", &[]),
+            "store-owned global funcref roundtrip"
+        )),
+        43
+    );
+    assert_eq!(
+        only_i32(must_ok(
             consumer.invoke_by_name("typed", &[]),
             "mixed numeric call"
         )),
         4
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            consumer.invoke_by_name("ref_roundtrip", &[]),
+            "store-owned funcref roundtrip"
+        )),
+        42
     );
     assert_eq!(
         only_i32(must_ok(
@@ -126,7 +146,7 @@ fn wabt_compiled_exported_functions_link_across_instances() {
         42
     );
 
-    let second_provider = must_ok(
+    let mut second_provider = must_ok(
         must_ok(
             WasmModule::from_bytes(&provider_bytes),
             "load second provider",
@@ -139,6 +159,54 @@ fn wabt_compiled_exported_functions_link_across_instances() {
         "resolve second sub",
     )
     .expect("second sub export");
+    let second_add = must_ok(
+        second_provider.exported_function_handle("add"),
+        "resolve second add",
+    )
+    .expect("second add export");
+    let second_mixed = must_ok(
+        second_provider.exported_function_handle("mixed"),
+        "resolve second mixed",
+    )
+    .expect("second mixed export");
+    let second_identity_ref = must_ok(
+        second_provider.exported_function_handle("identity_ref"),
+        "resolve second identity_ref",
+    )
+    .expect("second identity_ref export");
+    let add_reference = must_ok(add.reference_value(), "export add as funcref");
+    assert!(matches!(
+        second_provider.invoke_by_name("identity_ref", &[add_reference]),
+        Err(WasmError::Trap("funcref belongs to different store"))
+    ));
+    let mut split_global = must_ok(
+        WasmModule::from_bytes(&consumer_bytes),
+        "load split-global consumer",
+    );
+    must_ok(
+        split_global.bind_function_import("provider", "add", &second_add),
+        "bind second-store add",
+    );
+    must_ok(
+        split_global.bind_function_import("provider", "sub", &second_sub),
+        "bind second-store sub",
+    );
+    must_ok(
+        split_global.bind_function_import("provider", "mixed", &second_mixed),
+        "bind second-store mixed",
+    );
+    must_ok(
+        split_global.bind_function_import("provider", "identity_ref", &second_identity_ref),
+        "bind second-store reference function",
+    );
+    must_ok(
+        split_global.bind_global_import("provider", "answer_ref", &answer_ref),
+        "bind first-store reference global",
+    );
+    assert!(matches!(
+        split_global.instantiate(),
+        Err(WasmError::Trap("global belongs to different store"))
+    ));
     let mut split = must_ok(
         WasmModule::from_bytes(&consumer_bytes),
         "load split consumer",
@@ -154,6 +222,14 @@ fn wabt_compiled_exported_functions_link_across_instances() {
     must_ok(
         split.bind_function_import("provider", "mixed", &mixed),
         "bind first-store mixed function",
+    );
+    must_ok(
+        split.bind_function_import("provider", "identity_ref", &identity_ref),
+        "bind first-store reference function",
+    );
+    must_ok(
+        split.bind_global_import("provider", "answer_ref", &answer_ref),
+        "bind first-store reference global",
     );
     assert!(matches!(
         split.instantiate(),
