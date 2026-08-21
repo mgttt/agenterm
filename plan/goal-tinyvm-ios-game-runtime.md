@@ -11,7 +11,7 @@ Legend: `[x]` proven · `[~]` partial · `[ ]` required
 
 ```text
 tinyvm iOS game runtime
-├── execution kernel                 [~]
+├── execution kernel                 [x]
 │   ├── WASM 1.0 validation/opcodes   [x]
 │   ├── persistent instance           [x]
 │   ├── start exactly once            [x]
@@ -26,7 +26,7 @@ tinyvm iOS game runtime
 │   ├── standard imported numeric globals [x]
 │   ├── named standard resource exports [x]
 │   ├── standard imported linear memories [x]
-│   ├── standard imported funcref tables [~]
+│   ├── standard imported funcref tables [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2737,3 +2737,19 @@ and 1,447,568 bytes. The arm64 full-runtime ceiling advances by one fixed
 strict 100 KiB static-core gate and common ceiling for all arm64 consumers
 remain enforced. Nostalgia Arcade consumes the unified trampoline build with
 5 unit tests, 1 UI test and an arm64 device build.
+
+## Seventy-ninth executable increment — imported-table graduation boundary
+
+Standard imported funcref tables and the execution kernel graduate from partial
+to proven. The general VM now covers decode, limits subtyping, common-store
+binding, aliases, active/passive/bulk mutation, exact owner signatures,
+store-owned lifetime, cross-instance normal/tail dispatch, cyclic re-entry,
+shared fuel and aggregate activation budgets without native recursion.
+
+TinyArcade cartridge ABI v1 deliberately continues to reject table imports in
+both static inspection and runtime opening. A v1 cartridge is one standard
+`.wasm` module and may define multiple internal funcref tables; its app-owned
+capability registry grants only exact versioned function imports. Supplying a
+shared host function table would be a new multi-module product contract, not a
+hidden consequence of engine support, and must arrive under an explicit future
+ABI/manifest design if needed.
