@@ -13,7 +13,7 @@
 
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
-use alloc::rc::Rc;
+use alloc::rc::{Rc, Weak};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -136,6 +136,7 @@ struct StoreState {
     next_instance_id: usize,
     tables: Vec<SharedTableState>,
     instance_functions: Vec<Option<Vec<FuncType>>>,
+    instances: Vec<Option<Weak<RefCell<InstanceState>>>>,
 }
 
 struct SharedTableState {
@@ -149,6 +150,7 @@ impl Store {
                 next_instance_id: 0,
                 tables: Vec::new(),
                 instance_functions: Vec::new(),
+                instances: Vec::new(),
             })),
         }
     }
@@ -197,7 +199,12 @@ impl Store {
             .instance_functions
             .try_reserve(1)
             .map_err(|_| WasmError::Trap("instance address space"))?;
+        state
+            .instances
+            .try_reserve(1)
+            .map_err(|_| WasmError::Trap("instance address space"))?;
         state.instance_functions.push(None);
+        state.instances.push(None);
         Ok(id)
     }
 
@@ -221,11 +228,31 @@ impl Store {
         Ok(())
     }
 
+    fn register_instance_state(
+        &self,
+        instance_id: usize,
+        instance: &Rc<RefCell<InstanceState>>,
+    ) -> Result<(), WasmError> {
+        let mut state = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+        let slot = state
+            .instances
+            .get_mut(instance_id)
+            .ok_or(WasmError::Trap("unknown function instance"))?;
+        *slot = Some(Rc::downgrade(instance));
+        Ok(())
+    }
+
     fn unregister_instance_functions(&self, instance_id: usize) {
         if let Ok(mut state) = self.inner.try_borrow_mut()
             && let Some(slot) = state.instance_functions.get_mut(instance_id)
         {
             *slot = None;
+            if let Some(slot) = state.instances.get_mut(instance_id) {
+                *slot = None;
+            }
         }
     }
 
@@ -239,6 +266,56 @@ impl Store {
             .and_then(|functions| functions.get(address.index))
             .cloned()
             .ok_or(WasmError::Trap("unknown function address"))
+    }
+
+    fn invoke_registered(
+        &self,
+        address: &FunctionAddress,
+        args: &[Val],
+        steps: &mut u64,
+        base_depth: usize,
+        stats: &mut CallResourceStats,
+    ) -> Result<Vec<Val>, WasmError> {
+        let instance = self
+            .inner
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+            .instances
+            .get(address.instance_id)
+            .and_then(Option::as_ref)
+            .and_then(Weak::upgrade)
+            .ok_or(WasmError::Trap("unknown function instance"))?;
+        let mut state = instance
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
+        let InstanceState {
+            module,
+            memories,
+            globals,
+            data_live,
+            tables,
+            elem_live,
+            ..
+        } = &mut *state;
+        let mut bulk = BulkState {
+            data_live,
+            tables,
+            elem_live,
+            store: self,
+            instance_id: address.instance_id,
+        };
+        let mut context = CallContext { base_depth, stats };
+        module.call_any(
+            WasmCall {
+                index: address.index,
+                args,
+            },
+            steps,
+            memories,
+            globals,
+            &mut bulk,
+            &mut context,
+        )
     }
 }
 
@@ -375,6 +452,7 @@ pub struct MemoryView<'a>(MemoryViewInner<'a>);
 enum MemoryViewInner<'a> {
     Direct(&'a [u8]),
     Shared(Ref<'a, Vec<u8>>),
+    Instance(Ref<'a, Vec<u8>>),
     Empty,
 }
 
@@ -385,6 +463,7 @@ impl Deref for MemoryView<'_> {
         match &self.0 {
             MemoryViewInner::Direct(bytes) => bytes,
             MemoryViewInner::Shared(bytes) => bytes.as_slice(),
+            MemoryViewInner::Instance(bytes) => bytes.as_slice(),
             MemoryViewInner::Empty => &[],
         }
     }
@@ -396,6 +475,7 @@ pub struct MemoryViewMut<'a>(MemoryViewMutInner<'a>);
 enum MemoryViewMutInner<'a> {
     Direct(&'a mut [u8]),
     Shared(RefMut<'a, Vec<u8>>),
+    Instance(RefMut<'a, Vec<u8>>),
     Empty,
 }
 
@@ -406,6 +486,7 @@ impl Deref for MemoryViewMut<'_> {
         match &self.0 {
             MemoryViewMutInner::Direct(bytes) => bytes,
             MemoryViewMutInner::Shared(bytes) => bytes.as_slice(),
+            MemoryViewMutInner::Instance(bytes) => bytes.as_slice(),
             MemoryViewMutInner::Empty => &[],
         }
     }
@@ -416,6 +497,7 @@ impl DerefMut for MemoryViewMut<'_> {
         match &mut self.0 {
             MemoryViewMutInner::Direct(bytes) => bytes,
             MemoryViewMutInner::Shared(bytes) => bytes.as_mut_slice(),
+            MemoryViewMutInner::Instance(bytes) => bytes.as_mut_slice(),
             MemoryViewMutInner::Empty => &mut [],
         }
     }
@@ -2822,7 +2904,7 @@ impl FunctionAddress {
         if self.instance_id == instance_id {
             Ok(self.index)
         } else {
-            Err(WasmError::Trap("cross-instance funcref"))
+            Err(WasmError::Trap("cross-instance funcref value"))
         }
     }
 }
@@ -3001,9 +3083,14 @@ pub struct Module {
 /// memory and mutable globals across exported calls. Its start function runs
 /// exactly once during [`Module::instantiate`].
 pub struct Instance {
-    module: Module,
     store: Store,
     instance_id: usize,
+    state: Rc<RefCell<InstanceState>>,
+    imported_memories: Vec<Option<Memory>>,
+}
+
+struct InstanceState {
+    module: Module,
     memories: Vec<MemorySlot>,
     globals: Vec<GlobalSlot>,
     data_live: Vec<bool>,
@@ -5849,14 +5936,34 @@ impl Module {
                 } => {
                     let ti = pop(&mut stack)? as u32 as usize;
                     let address = self.indirect_target(table_index, type_index, ti, bulk)?;
-                    let combined = address.local_index(bulk.instance_id)?;
-                    let n = self.param_count(combined)?;
+                    let n = if address.instance_id == bulk.instance_id {
+                        self.param_count(address.index)?
+                    } else {
+                        self.types
+                            .get(type_index as usize)
+                            .ok_or(WasmError::Trap("call_indirect: bad type index"))?
+                            .params
+                            .len()
+                    };
                     if stack.len() < n {
                         return Err(WasmError::Trap("call_indirect: stack has"));
                     }
                     let args = take_values(&mut stack, n, "call arguments")?;
+                    if address.instance_id != bulk.instance_id {
+                        let values = bulk.store.invoke_registered(
+                            &address,
+                            &args,
+                            steps,
+                            resources.call_depth,
+                            resources.stats,
+                        )?;
+                        for value in values {
+                            push_operand(&mut stack, value, live_slots, resources.available_slots)?;
+                        }
+                        continue;
+                    }
                     return Ok(DefinedOutcome::Call {
-                        index: combined,
+                        index: address.index,
                         args,
                         caller: DefinedActivation {
                             def_idx,
@@ -5885,14 +5992,31 @@ impl Module {
                 } => {
                     let element = pop(&mut stack)? as u32 as usize;
                     let address = self.indirect_target(table_index, type_index, element, bulk)?;
-                    let combined = address.local_index(bulk.instance_id)?;
-                    let n = self.param_count(combined)?;
+                    let n = if address.instance_id == bulk.instance_id {
+                        self.param_count(address.index)?
+                    } else {
+                        self.types
+                            .get(type_index as usize)
+                            .ok_or(WasmError::Trap("call_indirect: bad type index"))?
+                            .params
+                            .len()
+                    };
                     if stack.len() < n {
                         return Err(WasmError::Trap("return_call_indirect"));
                     }
                     let args = take_values(&mut stack, n, "call arguments")?;
+                    if address.instance_id != bulk.instance_id {
+                        let values = bulk.store.invoke_registered(
+                            &address,
+                            &args,
+                            steps,
+                            resources.call_depth.saturating_sub(1),
+                            resources.stats,
+                        )?;
+                        return Ok(DefinedOutcome::Values(CallValues::Owned(values)));
+                    }
                     return Ok(DefinedOutcome::TailCall {
-                        index: combined,
+                        index: address.index,
                         args,
                     });
                 }
@@ -6073,10 +6197,15 @@ impl Instance {
         let instance_id = store.allocate_instance_id()?;
         let (tables, elem_live) = module.new_table_state(&globals, &store, instance_id)?;
         store.register_instance_functions(instance_id, function_types)?;
-        let mut instance = Self {
+        let imported_memories = memories
+            .iter()
+            .map(|memory| match memory {
+                MemorySlot::Imported(memory) => Some(memory.clone()),
+                MemorySlot::Defined { .. } => None,
+            })
+            .collect();
+        let state = Rc::new(RefCell::new(InstanceState {
             module,
-            store,
-            instance_id,
             memories,
             globals,
             data_live,
@@ -6085,13 +6214,33 @@ impl Instance {
             last_steps: 0,
             last_peak_call_depth: 0,
             last_peak_activation_slots: 0,
+        }));
+        store.register_instance_state(instance_id, &state)?;
+        let instance = Self {
+            store,
+            instance_id,
+            state,
+            imported_memories,
         };
-        if let Some(start) = instance.module.start {
+        let start = instance.state.borrow().module.start;
+        if let Some(start) = start {
+            let mut state = instance.state.borrow_mut();
+            let InstanceState {
+                module,
+                memories,
+                globals,
+                data_live,
+                tables,
+                elem_live,
+                last_steps,
+                last_peak_call_depth,
+                last_peak_activation_slots,
+            } = &mut *state;
             let mut steps = 0;
             let mut bulk = BulkState {
-                data_live: &mut instance.data_live,
-                tables: &mut instance.tables,
-                elem_live: &mut instance.elem_live,
+                data_live,
+                tables,
+                elem_live,
                 store: &instance.store,
                 instance_id: instance.instance_id,
             };
@@ -6100,21 +6249,22 @@ impl Instance {
                 base_depth: 0,
                 stats: &mut resources,
             };
-            let result = instance.module.call_any(
+            let result = module.call_any(
                 WasmCall {
                     index: start,
                     args: &[],
                 },
                 &mut steps,
-                &mut instance.memories,
-                &mut instance.globals,
+                memories,
+                globals,
                 &mut bulk,
                 &mut call_context,
             );
-            instance.last_steps = steps;
-            instance.last_peak_call_depth = resources.peak_call_depth;
-            instance.last_peak_activation_slots = resources.peak_activation_slots;
+            *last_steps = steps;
+            *last_peak_call_depth = resources.peak_call_depth;
+            *last_peak_activation_slots = resources.peak_activation_slots;
             if let Err(error) = result {
+                drop(state);
                 instance.store.unregister_instance_functions(instance_id);
                 return Err(error);
             }
@@ -6130,6 +6280,9 @@ impl Instance {
     /// Resolve and invoke an exported function while retaining instance state.
     pub fn invoke_by_name(&mut self, name: &str, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let idx = self
+            .state
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("instance is already borrowed"))?
             .module
             .exports
             .get(name)
@@ -6148,11 +6301,26 @@ impl Instance {
     /// Invoke a function with typed values. The instruction counter starts at
     /// zero for this top-level call; memory and globals remain live.
     pub fn invoke_val(&mut self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
+        let InstanceState {
+            module,
+            memories,
+            globals,
+            data_live,
+            tables,
+            elem_live,
+            last_steps,
+            last_peak_call_depth,
+            last_peak_activation_slots,
+        } = &mut *state;
         let mut steps = 0;
         let mut bulk = BulkState {
-            data_live: &mut self.data_live,
-            tables: &mut self.tables,
-            elem_live: &mut self.elem_live,
+            data_live,
+            tables,
+            elem_live,
             store: &self.store,
             instance_id: self.instance_id,
         };
@@ -6161,43 +6329,45 @@ impl Instance {
             base_depth: 0,
             stats: &mut resources,
         };
-        let result = self.module.call_any(
+        let result = module.call_any(
             WasmCall { index: idx, args },
             &mut steps,
-            &mut self.memories,
-            &mut self.globals,
+            memories,
+            globals,
             &mut bulk,
             &mut call_context,
         );
-        self.last_steps = steps;
-        self.last_peak_call_depth = resources.peak_call_depth;
-        self.last_peak_activation_slots = resources.peak_activation_slots;
+        *last_steps = steps;
+        *last_peak_call_depth = resources.peak_call_depth;
+        *last_peak_activation_slots = resources.peak_activation_slots;
         result
     }
 
     /// Instructions consumed by the last completed top-level invocation,
     /// including a call that returned a guest trap.
     pub fn last_steps(&self) -> u64 {
-        self.last_steps
+        self.state.borrow().last_steps
     }
 
     /// Peak number of simultaneously live guest-defined activations during
     /// the last top-level invocation, including an invocation that trapped.
     pub fn last_peak_call_depth(&self) -> usize {
-        self.last_peak_call_depth
+        self.state.borrow().last_peak_call_depth
     }
 
     /// Peak aggregate locals, operand values and control frames across the
     /// active function and all suspended callers in the last invocation.
     pub fn last_peak_activation_slots(&self) -> usize {
-        self.last_peak_activation_slots
+        self.state.borrow().last_peak_activation_slots
     }
 
     /// Aggregate live linear-memory size in WebAssembly 64 KiB pages.
     pub fn memory_pages(&self) -> usize {
+        let state = self.state.borrow();
+        let memories = &state.memories;
         let mut total = 0usize;
-        for (index, memory) in self.memories.iter().enumerate() {
-            if !self.memories[..index]
+        for (index, memory) in memories.iter().enumerate() {
+            if !memories[..index]
                 .iter()
                 .any(|previous| previous.aliases(memory))
             {
@@ -6209,20 +6379,26 @@ impl Instance {
 
     /// Number of memories in this live instance's standard index space.
     pub fn memory_count(&self) -> usize {
-        self.memories.len()
+        self.state.borrow().memories.len()
     }
 
     /// Current pages in one selected memory.
     pub fn memory_pages_at(&self, memory_index: usize) -> Option<usize> {
-        self.memories.get(memory_index).map(MemorySlot::pages)
+        self.state
+            .borrow()
+            .memories
+            .get(memory_index)
+            .map(MemorySlot::pages)
     }
 
     /// Aggregate live funcref elements across all tables. For the original
     /// single-table profile this is exactly the table-zero length.
     pub fn table_elements(&self) -> usize {
+        let state = self.state.borrow();
+        let tables = &state.tables;
         let mut total = 0usize;
-        for (index, table) in self.tables.iter().enumerate() {
-            if !self.tables[..index]
+        for (index, table) in tables.iter().enumerate() {
+            if !tables[..index]
                 .iter()
                 .any(|previous| previous.aliases(table))
             {
@@ -6234,44 +6410,57 @@ impl Instance {
 
     /// Number of internally defined funcref tables in this live instance.
     pub fn table_count(&self) -> usize {
-        self.tables.len()
+        self.state.borrow().tables.len()
     }
 
     /// Current length of a selected funcref table.
     pub fn table_elements_at(&self, table_index: usize) -> Option<usize> {
-        self.tables.get(table_index).map(TableSlot::len)
+        self.state
+            .borrow()
+            .tables
+            .get(table_index)
+            .map(TableSlot::len)
     }
 
     /// Current length of a standard exported table.
     pub fn exported_table_elements(&self, name: &str) -> Option<usize> {
-        self.module
+        self.state
+            .borrow()
+            .module
             .table_export_index(name)
             .and_then(|index| self.table_elements_at(index))
     }
 
     /// Read-only access to memory zero, for bounded native host I/O.
     pub fn memory(&self) -> Result<MemoryView<'_>, WasmError> {
-        match self.memories.first() {
-            Some(memory) => memory.view(),
-            None => Ok(MemoryView(MemoryViewInner::Empty)),
-        }
+        self.memory_at(0)
+            .map(|memory| memory.unwrap_or(MemoryView(MemoryViewInner::Empty)))
     }
 
     /// Mutable access to memory zero, for writing bounded input or state
     /// payloads before an exported call.
     pub fn memory_mut(&mut self) -> Result<MemoryViewMut<'_>, WasmError> {
-        match self.memories.first_mut() {
-            Some(memory) => memory.view_mut(),
-            None => Ok(MemoryViewMut(MemoryViewMutInner::Empty)),
-        }
+        self.memory_at_mut(0)
+            .map(|memory| memory.unwrap_or(MemoryViewMut(MemoryViewMutInner::Empty)))
     }
 
     /// Read-only access to one selected live linear memory.
     pub fn memory_at(&self, memory_index: usize) -> Result<Option<MemoryView<'_>>, WasmError> {
-        self.memories
-            .get(memory_index)
-            .map(MemorySlot::view)
-            .transpose()
+        let Some(imported) = self.imported_memories.get(memory_index) else {
+            return Ok(None);
+        };
+        if let Some(memory) = imported {
+            return memory.view().map(Some);
+        }
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("instance is already mutably borrowed"))?;
+        let view = Ref::map(state, |state| match &state.memories[memory_index] {
+            MemorySlot::Defined { bytes, .. } => bytes,
+            MemorySlot::Imported(_) => unreachable!(),
+        });
+        Ok(Some(MemoryView(MemoryViewInner::Instance(view))))
     }
 
     /// Mutable access to one selected live linear memory.
@@ -6279,15 +6468,27 @@ impl Instance {
         &mut self,
         memory_index: usize,
     ) -> Result<Option<MemoryViewMut<'_>>, WasmError> {
-        self.memories
-            .get_mut(memory_index)
-            .map(MemorySlot::view_mut)
-            .transpose()
+        let Some(imported) = self.imported_memories.get(memory_index) else {
+            return Ok(None);
+        };
+        if let Some(memory) = imported {
+            return memory.view_mut().map(Some);
+        }
+        let state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
+        let view = RefMut::map(state, |state| match &mut state.memories[memory_index] {
+            MemorySlot::Defined { bytes, .. } => bytes,
+            MemorySlot::Imported(_) => unreachable!(),
+        });
+        Ok(Some(MemoryViewMut(MemoryViewMutInner::Instance(view))))
     }
 
     /// Read-only access to one standard exported memory.
     pub fn exported_memory(&self, name: &str) -> Result<Option<MemoryView<'_>>, WasmError> {
-        match self.module.memory_export_index(name) {
+        let index = self.state.borrow().module.memory_export_index(name);
+        match index {
             Some(index) => self.memory_at(index),
             None => Ok(None),
         }
@@ -6298,7 +6499,8 @@ impl Instance {
         &mut self,
         name: &str,
     ) -> Result<Option<MemoryViewMut<'_>>, WasmError> {
-        match self.module.memory_export_index(name) {
+        let index = self.state.borrow().module.memory_export_index(name);
+        match index {
             Some(index) => self.memory_at_mut(index),
             None => Ok(None),
         }
@@ -6306,17 +6508,19 @@ impl Instance {
 
     /// Read one standard exported numeric or funcref global.
     pub fn exported_global(&self, name: &str) -> Option<Val> {
-        let index = self.module.global_export_index(name)?;
-        self.globals.get(index).map(GlobalSlot::get)
+        let state = self.state.borrow();
+        let index = state.module.global_export_index(name)?;
+        state.globals.get(index).map(GlobalSlot::get)
     }
 
     /// Set one mutable standard exported global with exact value type.
     pub fn set_exported_global(&mut self, name: &str, value: Val) -> Result<(), WasmError> {
-        let index = self
+        let mut state = self.state.borrow_mut();
+        let index = state
             .module
             .global_export_index(name)
             .ok_or(WasmError::Trap("no exported global named"))?;
-        let descriptor = self
+        let descriptor = state
             .module
             .globals
             .get(index)
@@ -6324,7 +6528,8 @@ impl Instance {
         if !descriptor.mutable || valtype_of(&value) != descriptor.value_type {
             return Err(WasmError::Trap("global binding type"));
         }
-        self.globals
+        state
+            .globals
             .get_mut(index)
             .ok_or(WasmError::Trap("global index"))?
             .set(value)

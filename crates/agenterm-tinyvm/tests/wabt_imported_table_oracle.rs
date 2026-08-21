@@ -66,12 +66,16 @@ fn wabt_compiled_imported_table_decodes_in_standard_index_space() {
     ));
     let mut second = open();
     assert!(matches!(
-        first.invoke_by_name("run", &[]),
-        Err(WasmError::Trap("cross-instance funcref"))
+        must_ok(
+            first.invoke_by_name("run", &[]),
+            "cross-instance indirect call"
+        )
+        .as_slice(),
+        [Val::I32(1)]
     ));
     assert!(matches!(
         must_ok(second.invoke_by_name("run", &[]), "second indirect call").as_slice(),
-        [Val::I32(1)]
+        [Val::I32(2)]
     ));
     assert_eq!(
         must_ok(table.is_null(0), "host table visibility"),

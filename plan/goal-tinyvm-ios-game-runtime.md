@@ -2641,3 +2641,33 @@ dangling shared-table address traps as unknown rather than borrowing stale
 module data. The imported-table sibling oracle now crosses owner-based type
 resolution before reaching the still-explicit execution boundary. The next
 increment moves live owner state into the store and removes that boundary.
+
+## Seventy-fifth executable increment — cross-instance table dispatch
+
+Persistent instances now place weakly registered live runtime records in their
+common `WasmStore`. `call_indirect` and `return_call_indirect` can therefore
+resolve a foreign function address, borrow the address owner's memories,
+globals, tables and segment liveness, and execute the correct module. Public
+instance memory guards were adapted to the shared runtime record without
+copying defined memory or changing imported-memory identity.
+
+The independent WABT fixture now exercises the complete sibling sequence:
+instance A returns 1; instantiating B overwrites the shared table; invoking A
+dispatches into B and returns 1; invoking B returns 2. TinyVM therefore matches
+the JavaScriptCore oracle's aggregate result 4. Exact owner signature checks,
+table aliasing, start-once behavior and existing instance APIs remain intact.
+
+This is deliberately an intermediate execution bridge: foreign calls currently
+enter the owner's existing trampoline through bounded native recursion, and a
+runtime record is weak while its public instance handle lives. Before imported
+tables graduate from the experimental profile, replace this bridge with one
+store-owned activation trampoline and store-owned instance lifetime, including
+cross-instance cycles and aggregate activation accounting.
+
+Evidence on 2026-08-21: 246 non-ignored all-feature tests plus the doctest pass;
+Clippy, rustfmt, replay/no-default and the WABT/JavaScriptCore imported-table
+differential pass. The static core is 101,208 bytes with selftest 42. iOS links
+at 1,582,520 bytes arm64 and 1,667,320 bytes x86_64; profile-catalog, replay,
+private-library and session consumers link at 1,455,368, 1,446,296, 1,447,968
+and 1,447,120 bytes. Nostalgia Arcade consumes the result with 5 unit tests,
+1 UI test and an arm64 device build.

@@ -2631,6 +2631,12 @@ function-index space. Resolve `(instance_id, function_index)` through the store
 and compare the owner's exact `FuncType` with the caller's expected table-call
 type. Equal numeric indices in sibling modules have no semantic relationship.
 
+An `Instance` handle can expose zero-copy memory guards while its execution
+state lives behind `Rc<RefCell<_>>`: map the outer `Ref`/`RefMut` directly onto
+defined-memory bytes, but keep cloned imported-memory handles beside it because
+nested `RefCell` guards cannot safely borrow through a temporary outer guard.
+This preserves both lifetimes and imported object identity without `unsafe`.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode
