@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Validate the isolated agenterm-net research workspace without linking it
 // into the AgenTerm product graph or stable artifact manifest.
 //
@@ -15,16 +22,9 @@ fn entry() {
 
     let stdout_path = research + ".agenterm-net-research.stdout.tmp";
 
-    let clippy_code = std::process::command_stdout_file(
-        "cargo",
-        ["clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
-        300000,
-        stdout_path,
-        #{
-            current_dir: research,
-            env: #{ "CARGO_TERM_COLOR": "never" }
-        }
-    );
+    let clippy_code = { let c = std::process::command("cargo"); c.args(["clippy", "--locked", "--all-targets", "--", "-D", "warnings"]); c.timeout(300000);
+      c.stdout_file(stdout_path); c.current_dir(research); c.env("CARGO_TERM_COLOR", "never");
+      c.output().exit_code };
     if clippy_code != 0 {
         let output = std::fs::read_to_string(stdout_path);
         print(output);
@@ -33,16 +33,9 @@ fn entry() {
     }
     std::fs::try_remove_file(stdout_path);
 
-    let test_code = std::process::command_stdout_file(
-        "cargo",
-        ["test", "--locked", "--quiet"],
-        300000,
-        stdout_path,
-        #{
-            current_dir: research,
-            env: #{ "CARGO_TERM_COLOR": "never" }
-        }
-    );
+    let test_code = { let c = std::process::command("cargo"); c.args(["test", "--locked", "--quiet"]); c.timeout(300000);
+      c.stdout_file(stdout_path); c.current_dir(research); c.env("CARGO_TERM_COLOR", "never");
+      c.output().exit_code };
     if test_code != 0 {
         let output = std::fs::read_to_string(stdout_path);
         print(output);
@@ -51,16 +44,9 @@ fn entry() {
     }
     std::fs::try_remove_file(stdout_path);
 
-    let self_test_code = std::process::command_stdout_file(
-        "cargo",
-        ["run", "--locked", "--quiet", "--", "self-test", "--json"],
-        120000,
-        stdout_path,
-        #{
-            current_dir: research,
-            env: #{ "CARGO_TERM_COLOR": "never" }
-        }
-    );
+    let self_test_code = { let c = std::process::command("cargo"); c.args(["run", "--locked", "--quiet", "--", "self-test", "--json"]); c.timeout(120000);
+      c.stdout_file(stdout_path); c.current_dir(research); c.env("CARGO_TERM_COLOR", "never");
+      c.output().exit_code };
     if self_test_code != 0 {
         let output = std::fs::read_to_string(stdout_path);
         print(output);

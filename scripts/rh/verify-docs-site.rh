@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 fn entry() {
     if args.len != 1 {
         return rh::fail("expected: DOCS_ROOT");
@@ -13,60 +20,60 @@ fn entry() {
     let preview_zh = std::fs::read_to_string(preview_zh_path);
 
     let image_reference = html.contains("src=\"assets/agenterm-workspace.png\"");
-    if image_reference == 0 {
+    if !image_reference {
         return rh::fail("docs index must use the case-exact workspace image reference");
     }
     let script_specification = html.contains("docs/agenterm-rh-runtime.md");
-    if script_specification == 0 {
+    if !script_specification {
         return rh::fail("docs index must use the case-exact script specification path");
     }
     let copyright = html.contains("© 2026 PARTNERNET SOFTWARE PTY LTD");
-    if copyright == 0 {
+    if !copyright {
         return rh::fail("docs index must publish the product copyright owner");
     }
     let locale_en = html.contains("hreflang=\"en\"");
     let locale_zh = html.contains("hreflang=\"zh-Hant\"");
     let locale_choice = html.contains("data-locale-choice=\"zh-Hant\"");
-    if locale_en == 0 {
+    if !locale_en {
         return rh::fail("docs index must publish English discovery");
     }
-    if locale_zh == 0 {
+    if !locale_zh {
         return rh::fail("docs index must publish Traditional Chinese discovery");
     }
-    if locale_choice == 0 {
+    if !locale_choice {
         return rh::fail("docs index must publish the Traditional Chinese locale choice");
     }
     let zh_product = html.contains("本機 Agent 艦隊工作 OS");
     let multiplatform_desktop = html.contains("全平台桌面");
     let preview_guidance = html.contains("macos-unsigned-preview.md");
-    if zh_product == 0 {
+    if !zh_product {
         return rh::fail("docs index must include reviewed Traditional Chinese product copy");
     }
-    if multiplatform_desktop == 0 {
+    if !multiplatform_desktop {
         return rh::fail("docs index must include the multiplatform desktop statement");
     }
-    if preview_guidance == 0 {
+    if !preview_guidance {
         return rh::fail("docs index must include preview guidance");
     }
 
     let preview_prd = preview.contains("../prd/PRD_02_17_delivery_quality.md");
     let preview_peer = preview.contains("macos-unsigned-preview.zh-Hant.md");
-    if preview_prd == 0 {
+    if !preview_prd {
         return rh::fail("English macOS preview guidance must link its owning PRD");
     }
-    if preview_peer == 0 {
+    if !preview_peer {
         return rh::fail("English macOS preview guidance must link its Traditional Chinese peer");
     }
     let preview_zh_prd = preview_zh.contains("../prd/PRD_02_17_delivery_quality.md");
     let preview_zh_peer = preview_zh.contains("macos-unsigned-preview.md");
     let preview_zh_safety = preview_zh.contains("請勿停用整個系統的保護");
-    if preview_zh_prd == 0 {
+    if !preview_zh_prd {
         return rh::fail("Traditional Chinese preview guidance must link its owning PRD");
     }
-    if preview_zh_peer == 0 {
+    if !preview_zh_peer {
         return rh::fail("Traditional Chinese preview guidance must link its English peer");
     }
-    if preview_zh_safety == 0 {
+    if !preview_zh_safety {
         return rh::fail("Traditional Chinese preview guidance must preserve safety boundaries");
     }
 

@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Build the exact, recoverable GitHub Release draft identity from one sealed
 // Candidate manifest. GitHub API calls remain thin workflow adapters.
 //
@@ -83,7 +90,7 @@ fn entry() {
     for asset in manifest.assets {
         let asset_os = "" + asset.os;
         let asset_channel = "" + asset.channel;
-        if asset_os == "macos" && channels.contains(asset_channel) == 0 {
+        if asset_os == "macos" && !channels.contains(asset_channel) {
             channels.push(asset_channel);
         }
     }

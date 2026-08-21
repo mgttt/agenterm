@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Build and validate one exact-SHA Candidate manifest from a closed payload.
 //
 // Usage:
@@ -268,7 +275,7 @@ fn verify_platform(
 
 fn verify_checksum(path, hash, name) {
     let text = std::fs::read_to_string(path);
-    text.trim();
+    let text = text.trim();
     require(
         text == hash + "  " + name,
         "candidate_checksum_content:" + name
@@ -878,7 +885,7 @@ fn build_manifest(
             "candidate_platform_archive_count:" + spec_os + "-" + spec_arch
         );
         let archive_name = spec_release_name;
-        if release_exists == 0 {
+        if !release_exists {
             archive_name = spec_preview_name;
         }
         let name = "" + archive_name;

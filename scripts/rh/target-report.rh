@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Deterministic Cargo target inventory.
 //
 // Usage:
@@ -26,7 +33,7 @@ fn entry() {
     }
     let target_candidate = std::path::PathBuf::from(target_argument);
     let target_path = std::path::join(repo_path, target_argument).display;
-    if target_candidate.is_absolute != 0 {
+    if target_candidate.is_absolute {
         target_path = std::path::absolute(target_argument).display;
     }
 
@@ -39,11 +46,11 @@ fn entry() {
     }
 
     let target_lower = target_path;
-    target_lower.to_lower();
+    let target_lower = target_lower.to_lower();
     let repo_target_lower = repo_target_path;
-    repo_target_lower.to_lower();
+    let repo_target_lower = repo_target_lower.to_lower();
     let repo_release_lower = repo_release_target_path;
-    repo_release_lower.to_lower();
+    let repo_release_lower = repo_release_lower.to_lower();
 
     let repo_local = 0;
     if target_lower == repo_target_lower {
@@ -61,14 +68,14 @@ fn entry() {
     }
 
     let exists = std::fs::exists(target_path);
-    if exists != 0 {
-        if std::fs::metadata(target_path).is_dir == 0 {
+    if exists {
+        if !std::fs::metadata(target_path).is_dir {
             return rh::fail("Cargo target path is not a directory");
         }
     }
 
     let pending = rh::json::parse("[]");
-    if exists != 0 {
+    if exists {
         let root_path = "" + target_path;
         let root_profile = "(root)";
         pending.push(#{ queue_root: root_path, queue_profile: root_profile });
@@ -90,7 +97,7 @@ fn entry() {
         let scan_path = std::path::absolute(item_path).display;
         head += 1;
         for dir_entry in std::fs::read_dir(scan_path) {
-            if dir_entry.is_dir != 0 {
+            if dir_entry.is_dir {
                 let child = "" + dir_entry.path.display;
                 let child_profile = "" + item_profile;
                 if item_profile == "(root)" {
@@ -99,7 +106,7 @@ fn entry() {
                 }
                 pending.push(#{ queue_root: child, queue_profile: child_profile });
             }
-            if dir_entry.is_file != 0 {
+            if dir_entry.is_file {
                 let metadata = dir_entry.metadata;
                 let modified = metadata.modified;
                 let modified_millis = modified.unix_millis;
@@ -122,7 +129,7 @@ fn entry() {
                     newest_text = modified.rfc3339;
                 }
 
-                if seen_profiles.contains(item_profile) == 0 {
+                if !seen_profiles.contains(item_profile) {
                     seen_profiles[item_profile] = true;
                 }
                 file_rows.push(#{ profile: item_profile, bytes: bytes });

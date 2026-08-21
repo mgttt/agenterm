@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Run one ordered cold-to-warm Windows Quick experiment. The workflow owns
 // runner selection and sccache setup; this native script owns sample semantics.
 //
@@ -21,19 +28,11 @@ fn entry() {
         sample_tag += sample;
 
         if sample == 1 || cache != "target" {
-            let clean_code = std::process::command_status(
-                "cargo",
-                ["clean"],
-                300000
-            );
+            let clean_code = { let c = std::process::command("cargo"); c.args(["clean"]); c.timeout(300000); c.output().exit_code };
             require(clean_code == 0, "performance_samples_clean:" + sample_tag);
         }
         if cache == "sccache" {
-            let reset_code = std::process::command_status(
-                "sccache",
-                ["--zero-stats"],
-                30000
-            );
+            let reset_code = { let c = std::process::command("sccache"); c.args(["--zero-stats"]); c.timeout(30000); c.output().exit_code };
             require(
                 reset_code == 0,
                 "performance_samples_sccache_reset:" + sample_tag
@@ -44,11 +43,7 @@ fn entry() {
         let timing = std::path::join(evidence, timing_name).display;
         let quick_cmdline =
             "check.cmd --quick --timing \"" + timing + "\"";
-        let quick_code = std::process::command_status(
-            "cmd.exe",
-            ["/d", "/s", "/c", quick_cmdline],
-            900000
-        );
+        let quick_code = { let c = std::process::command("cmd.exe"); c.args(["/d", "/s", "/c", quick_cmdline]); c.timeout(900000); c.output().exit_code };
         require(quick_code == 0, "performance_samples_quick:" + sample_tag);
 
         if cache == "sccache" {
@@ -56,12 +51,7 @@ fn entry() {
             let stderr_name = "sccache-" + sample_tag + ".stderr";
             let stats_path = std::path::absolute(stats_name).display;
             let stderr_path = std::path::absolute(stderr_name).display;
-            let stats_code = std::process::command_stdout_file(
-                "sccache",
-                ["--show-stats", "--stats-format", "json"],
-                30000,
-                stats_path
-            );
+            let stats_code = { let c = std::process::command("sccache"); c.args(["--show-stats", "--stats-format", "json"]); c.timeout(30000); c.stdout_file(stats_path); c.output().exit_code };
             if std::fs::exists(stderr_path) {
                 let stderr = std::fs::read_to_string(stderr_path);
                 if stderr != "" {

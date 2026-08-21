@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Validate one AgenTerm quality-timing report and render a bounded Markdown
 // summary. In GitHub Actions, preserve earlier step summaries by appending via
 // atomic_write; elsewhere write the Markdown to stdout.

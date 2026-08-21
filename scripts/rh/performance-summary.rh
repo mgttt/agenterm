@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Validate three ordered AgenTerm Quick timing samples and emit one typed
 // cold-to-warm comparison. This describes the Quick lane only; it must not be
 // used alone to claim Candidate release/stress runner speedups.

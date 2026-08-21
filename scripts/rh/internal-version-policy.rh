@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 fn entry() {
     if args.len != 1 {
         return rh::fail("expected: REPO");
@@ -7,22 +14,18 @@ fn entry() {
     let cargo_path = std::path::join(repo, "Cargo.toml").display;
     let cargo = std::fs::read_to_string(cargo_path);
     let governed = cargo.contains("version = \"0.1.7\"");
-    if governed == 0 {
+    if !governed {
         return 0;
     }
 
-    let tag_status = std::process::command_status(
-        "git",
-        [
+    let tag_status = { let c = std::process::command("git"); c.args([
             "-C",
             repo,
             "show-ref",
             "--verify",
             "--quiet",
             "refs/tags/v0.1.7"
-        ],
-        2000
-    );
+        ]); c.timeout(2000); c.output().exit_code };
     if tag_status == 0 {
         return rh::fail("Internal-only v0.1.7 must not have a local Git tag.");
     }
@@ -37,11 +40,11 @@ fn entry() {
     let release_rejects = release.contains("version != \"0.1.7\"");
     let workflow_rejects_ps = workflow.contains("expected -eq 'v0.1.7'");
     let workflow_rejects_sh = workflow.contains("expected == \"v0.1.7\"");
-    if release_rejects == 0 {
+    if !release_rejects {
         return rh::fail("The local coordinator and tag workflow must both reject v0.1.7.");
     }
-    if workflow_rejects_ps == 0 {
-        if workflow_rejects_sh == 0 {
+    if !workflow_rejects_ps {
+        if !workflow_rejects_sh {
             return rh::fail("The local coordinator and tag workflow must both reject v0.1.7.");
         }
     }

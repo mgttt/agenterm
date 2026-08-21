@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Report stage-0 inputs without performing a build or changing the repository.
 //
 // Named task:
@@ -11,45 +18,25 @@ fn entry() {
         std::path::join(repo, "bootstrap-info.stdout.tmp").display;
     let stdout_path = std::path::absolute(stdout_joined).display;
 
-    let commit_code = std::process::command_stdout_file(
-        "git",
-        ["rev-parse", "HEAD"],
-        10000,
-        stdout_path
-    );
+    let commit_code = { let c = std::process::command("git"); c.args(["rev-parse", "HEAD"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(commit_code == 0, "bootstrap-git-head");
     let commit = std::fs::read_to_string(stdout_path);
-    commit.trim();
+    let commit = commit.trim();
 
-    let branch_code = std::process::command_stdout_file(
-        "git",
-        ["branch", "--show-current"],
-        10000,
-        stdout_path
-    );
+    let branch_code = { let c = std::process::command("git"); c.args(["branch", "--show-current"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(branch_code == 0, "bootstrap-git-branch");
     let branch = std::fs::read_to_string(stdout_path);
-    branch.trim();
+    let branch = branch.trim();
 
-    let cargo_code = std::process::command_stdout_file(
-        "cargo",
-        ["--version"],
-        10000,
-        stdout_path
-    );
+    let cargo_code = { let c = std::process::command("cargo"); c.args(["--version"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(cargo_code == 0, "bootstrap-cargo");
     let cargo = std::fs::read_to_string(stdout_path);
-    cargo.trim();
+    let cargo = cargo.trim();
 
-    let rustc_code = std::process::command_stdout_file(
-        "rustc",
-        ["--version"],
-        10000,
-        stdout_path
-    );
+    let rustc_code = { let c = std::process::command("rustc"); c.args(["--version"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(rustc_code == 0, "bootstrap-rustc");
     let rustc = std::fs::read_to_string(stdout_path);
-    rustc.trim();
+    let rustc = rustc.trim();
 
     std::fs::try_remove_file(stdout_path);
 

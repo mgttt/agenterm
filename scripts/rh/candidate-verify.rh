@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Verify an exact-SHA Candidate manifest and every payload byte.
 //
 // Args:
@@ -263,7 +270,7 @@ fn verify_platform(
 
 fn verify_checksum(path, hash, name) {
     let text = std::fs::read_to_string(path);
-    text.trim();
+    let text = text.trim();
     require(
         text == hash + "  " + name,
         "candidate_checksum_content:" + name
@@ -755,7 +762,7 @@ fn verify_manifest(
 
 fn parse_int_ms(text) {
     let value = "" + text;
-    value.trim();
+    let value = value.trim();
     require(value != "", "candidate_verify_now_ms");
     let result = 0;
     for character in value {

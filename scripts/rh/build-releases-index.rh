@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Derive machine-readable releases.json from one sealed Candidate.
 //
 // Pure index: every field is copied or mapped from the candidate-manifest

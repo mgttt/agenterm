@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Validate an exact repository-local Cargo target and install CACHEDIR.TAG.
 //
 // Args:
@@ -9,26 +16,17 @@ fn entry() {
     }
 
     let repo = std::path::absolute(args[0]).display;
-    let toplevel = std::process::command_status(
-        "git",
-        ["-C", repo, "rev-parse", "--show-toplevel"],
-        10000
-    );
+    let toplevel = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--show-toplevel"]); c.timeout(10000); c.output().exit_code };
     require(toplevel == 0, "target-clean-git-root");
 
     // Git resolves Windows 8.3 aliases to a long path for --show-toplevel.
     // Comparing those spellings would reject the same directory on hosted runners.
     // An empty Git-relative prefix proves that -C itself names the repository root.
     let stdout_path = repo + ".prepare-target-clean.stdout.tmp";
-    let prefix_code = std::process::command_stdout_file(
-        "git",
-        ["-C", repo, "rev-parse", "--show-prefix"],
-        10000,
-        stdout_path
-    );
+    let prefix_code = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--show-prefix"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(prefix_code == 0, "target-clean-git-prefix");
     let prefix = std::fs::read_to_string(stdout_path);
-    prefix.trim();
+    let prefix = prefix.trim();
     std::fs::try_remove_file(stdout_path);
     require(
         prefix == "",
@@ -48,11 +46,11 @@ fn entry() {
     let release_joined = std::path::join(repo, "target-release").display;
     let release_target = std::path::absolute(release_joined).display;
     let target_lower = target;
-    target_lower.to_lower();
+    let target_lower = target_lower.to_lower();
     let development_lower = development_target;
-    development_lower.to_lower();
+    let development_lower = development_lower.to_lower();
     let release_lower = release_target;
-    release_lower.to_lower();
+    let release_lower = release_lower.to_lower();
     require(
         target_lower == development_lower || target_lower == release_lower,
         "target_clean_path_not_allowed:" + target

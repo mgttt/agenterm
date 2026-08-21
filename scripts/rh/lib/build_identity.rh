@@ -37,38 +37,23 @@ fn facts(repo_value, profile) {
 
     let stdout_path = repo + ".build-identity.stdout.tmp";
 
-    let prefix_code = std::process::command_stdout_file(
-        "git",
-        ["-C", repo, "rev-parse", "--show-prefix"],
-        10000,
-        stdout_path
-    );
+    let prefix_code = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--show-prefix"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(prefix_code == 0, "build-identity-git-root");
     let prefix = std::fs::read_to_string(stdout_path);
-    prefix.trim();
+    let prefix = prefix.trim();
     require(prefix == "", "build_identity_repo_not_exact_git_root:" + repo);
 
-    let commit_code = std::process::command_stdout_file(
-        "git",
-        ["-C", repo, "rev-parse", "--verify", "HEAD"],
-        10000,
-        stdout_path
-    );
+    let commit_code = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--verify", "HEAD"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(commit_code == 0, "build-identity-git-commit");
     let commit = std::fs::read_to_string(stdout_path);
-    commit.trim();
-    commit.to_lower();
+    let commit = commit.trim();
+    let commit = commit.to_lower();
     require(is_git_commit(commit), "build_identity_git_commit_invalid");
 
-    let status_code = std::process::command_stdout_file(
-        "git",
-        ["-C", repo, "status", "--porcelain=v1", "--untracked-files=normal"],
-        10000,
-        stdout_path
-    );
+    let status_code = { let c = std::process::command("git"); c.args(["-C", repo, "status", "--porcelain=v1", "--untracked-files=normal"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
     require(status_code == 0, "build-identity-git-status");
     let status = std::fs::read_to_string(stdout_path);
-    status.trim();
+    let status = status.trim();
 
     let dirty = 0;
     if status != "" {

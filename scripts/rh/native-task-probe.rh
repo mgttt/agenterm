@@ -1,10 +1,19 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 fn entry() {
     let root = args[0];
     let path = std::path::join(root, "Cargo.toml").display;
     let present = std::fs::exists(path);
     let content = std::fs::read_to_string(path);
     let marker = content.contains("name = \"agenterm\"");
-    let total = args.len + root.len + present + marker;
+    let present_count = if present { 1 } else { 0 };
+    let marker_count = if marker { 1 } else { 0 };
+    let total = args.len + root.len + present_count + marker_count;
     for value in 1..5 {
         total += value;
     }

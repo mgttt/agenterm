@@ -1,3 +1,10 @@
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 // Mark one already accepted, signed macOS archive provenance as notarized.
 //
 // The caller owns Apple notarytool submission and may invoke this task only
