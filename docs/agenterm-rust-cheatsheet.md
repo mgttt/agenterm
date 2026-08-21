@@ -2678,3 +2678,20 @@ the surrounding declaration's type. Keep the expression's global context
 honest: if the runtime has no imported-global store/binding model, do not make
 `global.get` appear supported by pointing it at an unrelated defined-global
 vector.
+
+## Keep guest descriptors separate from platform handles
+
+A portable Wasm host layer must never expose a Unix fd, Windows HANDLE, drive
+letter or iOS container path as guest identity. Map bounded guest `u32`
+descriptors to opaque backend handles, and resolve every guest path relative to
+an explicitly registered virtual preopen before calling a platform backend.
+Reject empty, absolute, parent, dot, repeated-component, backslash and NUL paths
+at that common boundary so backends cannot disagree about traversal. Requested
+read/write open modes and delegated descriptor rights must agree exactly.
+
+Opening a native handle and publishing its guest descriptor is one ownership
+transaction. Reserve descriptor capacity before the platform call when
+possible; if publication still fails, close the newly opened backend handle and
+return the original typed failure. Keep unsupported platform operations
+explicit (`NotSupported` / `NotCapable`) rather than inventing results or
+embedding OS policy in the VM engine.

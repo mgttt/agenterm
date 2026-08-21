@@ -175,7 +175,9 @@ require it. tinyvm remains the portable, deterministic baseline.
 
 H5, DOM, JavaScript mini-app and WKWebView semantics are excluded. Runtime JIT,
 device-side native AOT of downloaded modules, dynamic native-code loading,
-WASI, guest network access and arbitrary third-party uploads are excluded.
+implicit/default WASI, guest network access and arbitrary third-party uploads
+are excluded from the game profile. A separately enabled, versioned WASI P1
+subset may reuse the same platform-neutral host contract for non-game embedders.
 The tested public/private JavaScriptCore boundary and capability matrix live in
 [`docs/tinyarcade-javascriptcore-boundary.md`](../docs/tinyarcade-javascriptcore-boundary.md).
 
@@ -3165,3 +3167,42 @@ static core is 101,256 bytes, below the unchanged 100 KiB ceiling, and its C
 selftest returns 42. The current-main nostalgia-arcade consumer also passes six
 runtime unit tests, the complete cartridge-hall UI test and an unsigned arm64
 device Release build against this exact worktree.
+
+## Ninety-fifth executable increment — two real WASM games in the iOS consumer
+
+Signal Lock is now a second standard cartridge rather than a Swift game engine.
+Its rules, deterministic state, indexed-2D frame and tones live in the same
+`.wasm` exercised by tinyvm, JavaScriptCore and a real browser-WASM oracle. The
+shipping App target retains only the native shell, controls, lifecycle and
+atomic snapshot owner; the old Signal implementation and the other three native
+prototype games are excluded from compilation and linkage.
+
+Evidence on 2026-08-22: nostalgia-arcade main `f420ff8` rebuilds both cartridges
+from agenterm main, passes ten real-App runtime tests and one two-cartridge UI
+journey, and produces an arm64 device Release App containing exactly the two
+byte-identical reviewed `.wasm` files. The executable contains no archived game
+engine markers, WebKit/JavaScriptCore dependency, URLSession import or external
+cartridge surface. Physical-iPhone play remains open.
+
+## Ninety-sixth executable increment — platform-neutral host contract
+
+The unified crate now exposes a default-`no_std + alloc` host boundary beneath
+future import adapters. `HostBackend` owns native clock, random, descriptor,
+relative-path and exit mechanisms; `HostContext` owns bounded guest descriptor
+numbers, opaque backend handles, process strings, rights and virtual preopens.
+Guest paths can only be relative to a registered preopen and never reveal an OS
+descriptor, drive letter or physical path. Missing platform operations fail
+with an explicit typed result instead of being invented by the VM.
+
+The contract is not itself WASI and does not change TinyArcade imports. A future
+optional WASI P1 adapter will translate standard imports/errno into this layer;
+Unix, Windows and iOS backends remain separately gated work inside the same
+crate.
+
+Evidence on 2026-08-22: five public host-contract tests cover opaque mapping,
+rights, preopen path escape, transactional process values, explicit unsupported
+results and capacity rejection before a platform open. The no-default-feature
+library check, all-target Clippy with warnings denied, PRD leaf map and complete
+all-feature/all-target suite pass. The real iOS XCFramework/Swift link remains
+green, the three-game tinyvm/JSC/H5 replay differential agrees exactly, and the
+stripped static core remains 101,256 bytes with selftest 42.
