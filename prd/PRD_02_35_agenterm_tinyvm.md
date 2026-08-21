@@ -330,6 +330,11 @@ Unix may share an implementation with cfg-gated macOS sandbox handling, while Wi
 iOS require separate path/handle/storage policy. Unsupported operations return explicit
 `NOSYS`/`NOTCAPABLE`-equivalent errors.
 
+This remains one published `agenterm-tinyvm` crate. Core, contracts, host abstractions and
+optional platform backends may be separate modules and feature gates, but there are no
+forked Unix/iOS/Windows VM crates with drifting semantics. The default build stays
+`no_std + alloc`; enabling a backend must not alter standard Wasm validation or execution.
+
 `host/` itself is not a standard. Normative inputs are WebAssembly Core imports/exports and
 linear memory, WASI Preview 1 when that optional adapter is selected, and—only for a future
 component profile—WIT, Canonical ABI and the Component Model. Wasmtime/Wasmi/WAMR/wasm3 and
