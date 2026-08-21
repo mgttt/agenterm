@@ -104,6 +104,11 @@ impl CartridgeDescriptor {
                 "game cartridge does not support memory imports",
             ));
         }
+        if !module.table_imports().is_empty() {
+            return Err(WasmError::Decode(
+                "game cartridge does not support table imports",
+            ));
+        }
         Ok(Self {
             manifest,
             imports: module.imports().to_vec(),
@@ -522,6 +527,11 @@ impl GameRuntime {
         if !module.global_imports().is_empty() {
             return Err(WasmError::Decode(
                 "game cartridge does not support global imports",
+            ));
+        }
+        if !module.table_imports().is_empty() {
+            return Err(WasmError::Decode(
+                "game cartridge does not support table imports",
             ));
         }
         validate_native_availability(&module, registry)?;

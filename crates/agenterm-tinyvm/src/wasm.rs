@@ -2158,12 +2158,24 @@ pub struct MemoryImportDesc {
     pub max: Option<usize>,
 }
 
+/// A standard funcref-table import in table-index order.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct TableImportDesc {
+    pub module: String,
+    pub field: String,
+    pub min: usize,
+    pub max: Option<usize>,
+}
+
 struct ParsedImports {
     functions: Vec<(ImportDesc, usize)>,
     global_descs: Vec<GlobalDesc>,
     global_imports: Vec<GlobalImportDesc>,
     memory_descs: Vec<MemoryDesc>,
     memory_imports: Vec<MemoryImportDesc>,
+    table_descs: Vec<TableDesc>,
+    table_imports: Vec<TableImportDesc>,
 }
 
 /// Parse the supported standard function and numeric-global imports while
@@ -2179,6 +2191,8 @@ fn parse_import_section(
     let mut global_imports = Vec::new();
     let mut memory_descs = Vec::new();
     let mut memory_imports = Vec::new();
+    let mut table_descs = Vec::new();
+    let mut table_imports = Vec::new();
     let count = count as usize;
     budget.charge(count)?;
     for _ in 0..count {
@@ -2267,6 +2281,46 @@ fn parse_import_section(
                     imported: true,
                 });
             }
+            0x01 => {
+                let reftype = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated imported table type"))?;
+                if reftype != 0x70 {
+                    return Err(WasmError::Decode("unsupported imported table reftype"));
+                }
+                i += 1;
+                let flag = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated imported table limits"))?;
+                i += 1;
+                let (min, ni) = leb_u32(p, i)?;
+                i = ni;
+                let max = match flag {
+                    0x00 => None,
+                    0x01 => {
+                        let (max, ni) = leb_u32(p, i)?;
+                        i = ni;
+                        Some(max as usize)
+                    }
+                    _ => return Err(WasmError::Decode("unsupported table limits flag 0x")),
+                };
+                let min = min as usize;
+                if max.is_some_and(|limit| limit < min) {
+                    return Err(WasmError::Decode("table limits out of range"));
+                }
+                table_imports.push(TableImportDesc {
+                    module,
+                    field,
+                    min,
+                    max,
+                });
+                table_descs.push(TableDesc {
+                    elements: Vec::new(),
+                    min,
+                    max,
+                    imported: true,
+                });
+            }
             _other => {
                 return Err(WasmError::Decode("unsupported import kind 0x"));
             }
@@ -2281,6 +2335,8 @@ fn parse_import_section(
         global_imports,
         memory_descs,
         memory_imports,
+        table_descs,
+        table_imports,
     })
 }
 
@@ -2576,10 +2632,14 @@ impl GlobalSlot {
     }
 }
 
-/// One internally defined funcref table template and its declared maximum.
+/// One funcref table declaration in the standard combined table index space.
 struct TableDesc {
+    /// Defined-table template. Imported tables deliberately allocate nothing
+    /// until a host store object is bound.
     elements: Vec<Option<usize>>,
+    min: usize,
     max: Option<usize>,
+    imported: bool,
 }
 
 type TableState = (Vec<Vec<Option<usize>>>, Vec<bool>);
@@ -2604,6 +2664,8 @@ pub struct Module {
     global_import_descs: Vec<GlobalImportDesc>,
     /// Imported linear memories in their independent memory index space.
     memory_import_descs: Vec<MemoryImportDesc>,
+    /// Imported funcref tables in their independent table index space.
+    table_import_descs: Vec<TableImportDesc>,
     /// Global initializers and mutability. A working copy is created for each
     /// fresh convenience call or persistent [`Instance`].
     globals: Vec<GlobalDesc>,
@@ -2889,6 +2951,8 @@ impl Module {
         let mut global_import_descs: Vec<GlobalImportDesc> = Vec::new();
         let mut imported_memories: Vec<MemoryDesc> = Vec::new();
         let mut memory_import_descs: Vec<MemoryImportDesc> = Vec::new();
+        let mut imported_tables: Vec<TableDesc> = Vec::new();
+        let mut table_import_descs: Vec<TableImportDesc> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<CodeEntry> = Vec::new();
         let mut exports: Vec<ExportEntry> = Vec::new();
@@ -2941,6 +3005,8 @@ impl Module {
                     global_import_descs = parsed.global_imports;
                     imported_memories = parsed.memory_descs;
                     memory_import_descs = parsed.memory_imports;
+                    imported_tables = parsed.table_descs;
+                    table_import_descs = parsed.table_imports;
                 }
                 3 => func_types = parse_func_section(payload, &mut budget)?,
                 4 => table_limits = parse_table_section(payload, &mut budget)?,
@@ -2975,7 +3041,7 @@ impl Module {
         if data_count.is_some_and(|count| count != data.len()) {
             return Err(WasmError::Decode("data count does not match data section"));
         }
-        let table_count = table_limits.len();
+        let table_count = imported_tables.len() + table_limits.len();
 
         let memory_count = imported_memories.len() + defined_memories.len();
         let mut module = Module {
@@ -2998,6 +3064,8 @@ impl Module {
         }
         module.global_import_descs = global_import_descs;
         module.memory_import_descs = memory_import_descs;
+        module.table_import_descs = table_import_descs;
+        module.tables = imported_tables;
         module.globals = imported_globals;
         budget.memory_count = memory_count;
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
@@ -3166,9 +3234,14 @@ impl Module {
         // their early bounds check here. The host
         // budget caps their aggregate live element count, not each table in
         // isolation, so many small guest tables cannot amplify allocation.
-        let total_table_size = table_limits.iter().try_fold(0usize, |total, (min, _)| {
-            total.checked_add(*min).ok_or(WasmError::Trap("table size"))
-        })?;
+        let total_table_size = module
+            .tables
+            .iter()
+            .map(|table| table.min)
+            .chain(table_limits.iter().map(|(min, _)| *min))
+            .try_fold(0usize, |total, min| {
+                total.checked_add(min).ok_or(WasmError::Trap("table size"))
+            })?;
         if total_table_size > limits.max_table_elems {
             return Err(WasmError::Trap("table size"));
         }
@@ -3184,7 +3257,9 @@ impl Module {
             elements.resize(table_size, None);
             module.tables.push(TableDesc {
                 elements,
+                min: table_size,
                 max: table_max,
+                imported: false,
             });
         }
         let function_count = module.hosts.len() + module.funcs.len();
@@ -3206,10 +3281,12 @@ impl Module {
                     .tables
                     .get(*table_index)
                     .ok_or(WasmError::Decode("active element segment table index"))?;
-                if let Some(Val::I32(offset)) = static_const_value(offset)? {
+                if !table.imported
+                    && let Some(Val::I32(offset)) = static_const_value(offset)?
+                {
                     (offset as u32 as usize)
                         .checked_add(segment.refs.len())
-                        .filter(|&end| end <= table.elements.len())
+                        .filter(|&end| end <= table.min)
                         .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
                 }
             }
@@ -3237,7 +3314,9 @@ impl Module {
     pub fn add_table(&mut self, size: usize) {
         let table = TableDesc {
             elements: vec![None; size],
+            min: size,
             max: None,
+            imported: false,
         };
         if self.tables.is_empty() {
             self.tables.push(table);
@@ -3276,7 +3355,12 @@ impl Module {
             .try_reserve(1)
             .map_err(|_| WasmError::Trap("table size"))?;
         let index = self.tables.len();
-        self.tables.push(TableDesc { elements, max });
+        self.tables.push(TableDesc {
+            elements,
+            min: size,
+            max,
+            imported: false,
+        });
         Ok(index)
     }
 
@@ -3355,6 +3439,11 @@ impl Module {
     /// Linear-memory imports in their independent standard index order.
     pub fn memory_imports(&self) -> &[MemoryImportDesc] {
         &self.memory_import_descs
+    }
+
+    /// Funcref-table imports in their independent standard index order.
+    pub fn table_imports(&self) -> &[TableImportDesc] {
+        &self.table_import_descs
     }
 
     /// Bind one shared host memory to every matching standard import.
@@ -3842,6 +3931,9 @@ impl Module {
             .try_reserve_exact(self.tables.len())
             .map_err(|_| WasmError::Trap("table size"))?;
         for template in &self.tables {
+            if template.imported {
+                return Err(WasmError::Trap("unbound imported table"));
+            }
             let mut table = Vec::new();
             table
                 .try_reserve_exact(template.elements.len())

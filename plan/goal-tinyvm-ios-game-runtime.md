@@ -26,6 +26,7 @@ tinyvm iOS game runtime
 │   ├── standard imported numeric globals [x]
 │   ├── named standard resource exports [x]
 │   ├── standard imported linear memories [x]
+│   ├── standard imported funcref tables [~]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2502,3 +2503,34 @@ Evidence on 2026-08-21:
   one full UI journey and an arm64 device Release build. Its DEBUG reset now
   removes persisted TinyArcade snapshots as well as defaults, so repeated UI
   runs cannot revive a previously ended cartridge session.
+
+## Seventieth executable increment — imported-table decoding and profile boundary
+
+The general VM now decodes standard funcref-table imports, preserves their
+independent import descriptors, places them before defined tables in the
+combined standard table index space, validates named exports and accounts for
+all declared minima in the aggregate host table budget. Instantiation fails
+loudly with `unbound imported table` until a host store object is supplied.
+TinyArcade v1 rejects table imports during both static inspection and runtime
+opening, so this standards work does not silently widen the shipped game ABI.
+
+This increment deliberately does not claim shared imported-table execution.
+Unlike memory bytes, a non-null `funcref` is an instance-bound function
+reference, not merely a module-local integer index. Correct sibling/cross-module
+sharing therefore needs a first-class function-address representation before
+the table binding API can preserve standard store identity. The next increment
+will build that representation and the binding/execution oracle instead of
+mapping shared entries back onto the caller instance incorrectly.
+
+Evidence on 2026-08-21:
+
+- WABT validates a module with imported table zero, defined table one, active
+  elements, named exports and `call_indirect`; tinyvm reports the exact import
+  descriptor and indices, then rejects unbound instantiation deterministically.
+- Non-ignored tests prove descriptor/limit handling, aggregate host budgeting,
+  unbound instantiation and TinyArcade inspection/runtime rejection.
+- All 246 non-ignored package tests plus one doctest pass with all features.
+  The stripped static core is 101,176 bytes with self-test result 42.
+  The iOS bridge links at 1,577,080 bytes arm64 and 1,650,656 bytes x86_64;
+  the profile-catalog, replay, private-library and session consumers link at
+  1,449,928, 1,424,344, 1,442,528 and 1,441,680 bytes.

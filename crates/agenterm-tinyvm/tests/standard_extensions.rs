@@ -1,4 +1,4 @@
-use agenterm_tinyvm::{Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule};
+use agenterm_tinyvm::{Limits, Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -11,6 +11,12 @@ fn section(module: &mut Vec<u8>, id: u8, payload: &[u8]) {
     assert!(payload.len() < 128);
     module.extend_from_slice(&[id, payload.len() as u8]);
     module.extend_from_slice(payload);
+}
+
+fn name(bytes: &mut Vec<u8>, value: &str) {
+    assert!(value.len() < 128);
+    bytes.push(value.len() as u8);
+    bytes.extend_from_slice(value.as_bytes());
 }
 
 fn passive_data_module() -> Vec<u8> {
@@ -559,6 +565,56 @@ fn standard_resource_exports_are_resolved_by_name() {
         Err(WasmError::Trap("global binding type"))
     ));
     assert!(must_ok(instance.exported_memory("missing"), "missing memory").is_none());
+}
+
+#[test]
+fn standard_imported_tables_decode_before_store_binding_exists() {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    let mut imports = vec![0x01];
+    name(&mut imports, "host");
+    name(&mut imports, "dispatch");
+    imports.extend_from_slice(&[0x01, 0x70, 0x01, 0x01, 0x03]);
+    section(&mut wasm, 2, &imports);
+    section(&mut wasm, 4, &[0x01, 0x70, 0x00, 0x01]);
+    let mut exports = vec![0x02];
+    name(&mut exports, "dispatch");
+    exports.extend_from_slice(&[0x01, 0x00]);
+    name(&mut exports, "local");
+    exports.extend_from_slice(&[0x01, 0x01]);
+    section(&mut wasm, 7, &exports);
+
+    let module = must_ok(
+        WasmModule::from_bytes_with(
+            &wasm,
+            Limits {
+                max_table_elems: 2,
+                ..Limits::default()
+            },
+        ),
+        "decode table import",
+    );
+    assert_eq!(module.table_imports().len(), 1);
+    assert_eq!(module.table_imports()[0].module, "host");
+    assert_eq!(module.table_imports()[0].field, "dispatch");
+    assert_eq!(module.table_imports()[0].min, 1);
+    assert_eq!(module.table_imports()[0].max, Some(3));
+    assert_eq!(module.table_export_index("dispatch"), Some(0));
+    assert_eq!(module.table_export_index("local"), Some(1));
+    assert!(matches!(
+        module.instantiate(),
+        Err(WasmError::Trap("unbound imported table"))
+    ));
+
+    assert!(matches!(
+        WasmModule::from_bytes_with(
+            &wasm,
+            Limits {
+                max_table_elems: 1,
+                ..Limits::default()
+            }
+        ),
+        Err(WasmError::Trap("table size"))
+    ));
 }
 
 #[test]

@@ -176,7 +176,7 @@ fn usage() -> ExitCode {
 }
 
 fn run_module_validate(path: &str) -> ExitCode {
-    let result: Result<(usize, usize, usize, usize, bool), String> = (|| {
+    let result: Result<(usize, usize, usize, usize, usize, bool), String> = (|| {
         let wasm = read_bounded_regular(Path::new(path), MAX_CARTRIDGE_BYTES, "Wasm module")?;
         let module = WasmModule::from_bytes(&wasm).map_err(|error| error.message().to_string())?;
         Ok((
@@ -184,15 +184,24 @@ fn run_module_validate(path: &str) -> ExitCode {
             module.imports().len(),
             module.global_imports().len(),
             module.memory_imports().len(),
+            module.table_imports().len(),
             module.start_index().is_some(),
         ))
     })();
     match result {
-        Ok((wasm_bytes, function_imports, global_imports, memory_imports, has_start)) => {
+        Ok((
+            wasm_bytes,
+            function_imports,
+            global_imports,
+            memory_imports,
+            table_imports,
+            has_start,
+        )) => {
             println!("wasm_bytes={wasm_bytes}");
             println!("function_imports={function_imports}");
             println!("global_imports={global_imports}");
             println!("memory_imports={memory_imports}");
+            println!("table_imports={table_imports}");
             println!(
                 "start_function={}",
                 if has_start { "present" } else { "absent" }

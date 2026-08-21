@@ -83,6 +83,11 @@ alias identity. WABT validates both fixtures; tinyvm and JavaScriptCore agree
 on the single-import result `516`, while a multi-index alias test proves
 overlap-safe copy result `593`. TinyArcade v1 deliberately rejects this general
 engine capability.
+`smoke-wabt-imported-table.sh` covers the general VM's first imported-table
+gate: WABT validates imported table zero plus defined table one, and tinyvm
+proves exact descriptor/index/budget handling before deterministically rejecting
+an unbound store object. Shared execution remains gated on first-class,
+instance-bound function references; TinyArcade v1 rejects table imports.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.
