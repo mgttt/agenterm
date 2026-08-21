@@ -131,9 +131,9 @@ Reject for the iOS cartridge runtime:
 2. [x] Tinyvm and development-only JavaScriptCore execute the identical WABT
    fixture and emit the same CSV dimensions, so execution is not confused with
    data movement. Timings are observations, never pass/fail thresholds.
-3. [~] Continue lifetime tests for memory/global/table/function handles after
-   public instance handles are dropped, including wrong-store and stale-token
-   cases.
+3. [x] Memory/global/table/function handle tests retain live resources after
+   public instance handles are dropped. Function-reference tests also reject
+   wrong-store values and a stale token whose original Store is already gone.
 4. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

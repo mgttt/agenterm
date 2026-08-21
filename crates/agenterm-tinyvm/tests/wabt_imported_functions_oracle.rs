@@ -179,6 +179,26 @@ fn wabt_compiled_exported_functions_link_across_instances() {
         second_provider.invoke_by_name("identity_ref", &[add_reference]),
         Err(WasmError::Trap("funcref belongs to different store"))
     ));
+    let stale_reference = {
+        let stale_provider = must_ok(
+            must_ok(
+                WasmModule::from_bytes(&provider_bytes),
+                "load stale-reference provider",
+            )
+            .instantiate(),
+            "instantiate stale-reference provider",
+        );
+        let stale_add = must_ok(
+            stale_provider.exported_function_handle("add"),
+            "resolve stale-reference add",
+        )
+        .expect("stale-reference add export");
+        must_ok(stale_add.reference_value(), "create stale funcref")
+    };
+    assert!(matches!(
+        second_provider.invoke_by_name("identity_ref", &[stale_reference]),
+        Err(WasmError::Trap("funcref belongs to different store"))
+    ));
     let mut split_global = must_ok(
         WasmModule::from_bytes(&consumer_bytes),
         "load split-global consumer",

@@ -618,6 +618,7 @@ fn standard_exported_memory_handle_links_without_copying_bytes() {
         must_ok(provider.exported_memory("ram"), "provider memory").expect("ram export")[0],
         65
     );
+    drop(provider);
     must_ok(memory.view_mut(), "host write")[0] = 66;
     assert_eq!(
         only_i32(must_ok(

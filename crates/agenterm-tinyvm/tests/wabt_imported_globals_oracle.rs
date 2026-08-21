@@ -72,6 +72,7 @@ fn wabt_compiled_imported_globals_match_tinyvm() {
         module.bind_global_import("host", "counter", &counter),
         "bind counter",
     );
+    drop(provider);
 
     let mut first = must_ok(module.instantiate(), "instantiate first");
     assert_eq!(
@@ -105,8 +106,4 @@ fn wabt_compiled_imported_globals_match_tinyvm() {
         97
     );
     assert!(matches!(counter.value(), Val::I32(21)));
-    assert!(matches!(
-        provider.exported_global("counter"),
-        Some(Val::I32(21))
-    ));
 }

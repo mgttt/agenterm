@@ -2980,3 +2980,21 @@ Evidence on 2026-08-21: WABT validation, the ignored release Rust benchmark and
 the optimized Swift/JavaScriptCore benchmark all pass through the one command.
 The low-iteration smoke confirms all five cost dimensions and payload sizes;
 normal research runs default to 20,000 operations per point.
+
+## Eighty-seventh executable increment — exported-resource lifetime closure
+
+The resource-linking oracles now exercise every exported handle after its
+public provider instance is dropped. Linked table and function execution
+already retained their provider Store; the memory oracle now mutates and reads
+the exported allocation after provider drop, and the global oracle links,
+mutates and shares exported cells after provider drop.
+
+The funcref oracle adds the stronger stale-token case: it creates a function
+reference, drops every handle to the original Store, constructs another Store
+and submits the old value there. The new Store traps it as foreign rather than
+accepting an allocator-reused address. Together with live wrong-store tests,
+this makes the process-unique token invariant executable.
+
+Evidence on 2026-08-21: the focused memory lifetime test, independently
+compiled WABT/JavaScriptCore global and function-linking oracles, rustfmt and
+all-target/all-feature Clippy with warnings denied pass.
