@@ -57,7 +57,8 @@ agenterm-tinyvm (35)
 │       ├── bulk memory passive lifecycle [x]
 │       ├── sign extension proposal [x]
 │       ├── nontrapping float-to-int [x]
-│       └── multi-value proposal [x]
+│       ├── multi-value proposal [x]
+│       └── single-table funcref profile [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
 ├── slot-B               [ ]
@@ -78,6 +79,10 @@ bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
 Multi-value 包含多结果函数、s33 type-index block signature、带参数 block/loop/if 和
 多值 branch；validator 控制帧只引用已经预算的 type section，不按嵌套层次复制签名。
+当前 reference-types 面先完成标准 single-table `funcref` 闭环：reference 值、局部变量、
+全局变量、typed select、`ref.null`/`ref.is_null`/`ref.func`、table get/set/grow/size/fill，
+以及 expression element segment flags 4..7。`externref`、multiple tables、typed function
+references 和 GC 尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。
 核 strip `<100KiB`。

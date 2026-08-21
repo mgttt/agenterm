@@ -18,6 +18,7 @@ tinyvm iOS game runtime
 │   ├── per-call instruction budget   [x]
 │   ├── host memory/table budgets     [x]
 │   ├── decode complexity budget      [x]
+│   ├── single-table funcref profile  [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1489,4 +1490,40 @@ Evidence on 2026-08-21:
   Clippy, formatting, ShellCheck and diff hygiene pass.
 - Device/simulator Swift linkage remains below its gates at 1,526,376 bytes
   arm64 and 1,596,720 bytes x86_64. The isolated stripped static core is 87,672
+  bytes, below 100 KiB, and its C self-test returns 42.
+
+## Forty-second executable increment — standard single-table funcref profile
+
+tinyvm now carries standard `funcref` values through function signatures,
+locals, mutable/immutable globals and typed select. It decodes, validates and
+executes `ref.null`, `ref.is_null`, `ref.func`, table get/set/grow/size/fill and
+expression element segment encodings 4 through 7. Function references must be
+forward-declared by an element segment, as required by the standard. Table
+growth observes both the module maximum and host budget; fill/grow charge
+deterministic fuel for every affected element before mutation.
+
+This deliberately closes one useful standards slice rather than claiming the
+whole reference-types family. `externref`, multiple tables, typed function
+references and GC remain outside the accepted profile and fail at load time.
+The boundary is a versioned capability profile of the general-purpose Wasm VM,
+not a game-specific opcode set; TinyArcade remains only its first host.
+
+Evidence on 2026-08-21:
+
+- WABT compiles and validates a checked-in fixture covering funcref locals and
+  globals, typed select, all reference/table instructions, expression element
+  lifecycles, table bulk operations and indirect calls. The exact bytes return
+  143 in WABT's interpreter, tinyvm and system JavaScriptCore.
+- Public black-box tests prove instance-local table state, declared table
+  maxima, null/reference behavior, pre-mutation fuel failure, undeclared
+  `ref.func` rejection and explicit flag-6 table-zero initialization. They also
+  reject `externref` and a nonzero table index.
+- The shared Rust/Binaryen cartridge profile now enables reference types. Both
+  real games rebuild and pass converter, lifecycle, snapshot and deterministic
+  replay gates; JavaScriptCore still matches all four frames of each game.
+- 213 package tests plus one doctest pass under all features. No-default and
+  replay-only matrices, all four explicit WABT/JavaScriptCore proposal oracles,
+  all-target Clippy, formatting, ShellCheck and diff hygiene pass.
+- Device/simulator Swift linkage remains below its gates at 1,527,336 bytes
+  arm64 and 1,601,456 bytes x86_64. The isolated stripped static core is 87,688
   bytes, below 100 KiB, and its C self-test returns 42.

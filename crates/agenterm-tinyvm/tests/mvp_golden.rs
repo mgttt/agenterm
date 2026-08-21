@@ -214,6 +214,8 @@ fn describe_vals(vals: &[Val]) -> String {
             Val::I64(n) => format!("i64:{n}"),
             Val::F32(n) => format!("f32bits:{:#x}", n.to_bits()),
             Val::F64(n) => format!("f64bits:{:#x}", n.to_bits()),
+            Val::FuncRef(None) => "funcref:null".to_string(),
+            Val::FuncRef(Some(index)) => format!("funcref:{index}"),
         })
         .collect::<Vec<_>>()
         .join(",")
@@ -631,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 41] = [
+const LEAF_TESTS: [(&str, &str); 42] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -658,6 +660,10 @@ const LEAF_TESTS: [(&str, &str); 41] = [
     (
         "multi-value proposal",
         "standard_multi_value_proposal_executes",
+    ),
+    (
+        "single-table funcref profile",
+        "standard_funcref_table_profile_executes_with_instance_semantics",
     ),
     (
         "decode complexity budget",

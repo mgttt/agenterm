@@ -59,7 +59,8 @@ ABI and catches a decoder that only accepts its own hand-built fixtures.
 `smoke-wabt-scalar-proposals.sh` applies the same exact-byte gate to sign
 extension and saturating conversions; `smoke-wabt-multi-value.sh` covers
 multi-result functions, type-indexed parameter/result block signatures and
-multi-value branches.
+multi-value branches. `smoke-wabt-funcref.sh` covers the standard single-table
+funcref profile, including expression element segments and table operations.
 
 ## Interpreting a mismatch
 

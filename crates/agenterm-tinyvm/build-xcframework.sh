@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 CRATE="$ROOT/crates/agenterm-tinyvm"
 OUTPUT=${1:-"$ROOT/dist/TinyArcade.xcframework"}
 PROFILE=tinyvm-ios-release

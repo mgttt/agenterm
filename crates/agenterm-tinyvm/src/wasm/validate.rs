@@ -40,6 +40,9 @@ pub(super) struct ModuleCtx<'a> {
     /// Number of element segments and whether table index zero exists.
     pub elem_count: usize,
     pub has_table: bool,
+    /// Function indices forward-declared by element segments and therefore
+    /// legal operands of `ref.func`.
+    pub declared_refs: &'a [bool],
 }
 
 /// A non-owning value-type vector. Control frames point into the already
@@ -617,6 +620,15 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
         }
         RefFunc(function) => {
             v.func_type_index(*function)?;
+            if !v
+                .m
+                .declared_refs
+                .get(*function as usize)
+                .copied()
+                .unwrap_or(false)
+            {
+                return Err(WasmError::Decode("validation: undeclared ref.func"));
+            }
             v.push(FUNCREF);
         }
         TableGet => {

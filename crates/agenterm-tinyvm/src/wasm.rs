@@ -2164,6 +2164,28 @@ impl Module {
             }
         }
         module.data = data;
+        let mut declared_refs = Vec::new();
+        declared_refs
+            .try_reserve(function_count)
+            .map_err(|_| WasmError::Decode("module allocation"))?;
+        declared_refs.resize(function_count, false);
+        for segment in &elems {
+            for &function in segment.refs.iter().flatten() {
+                let declared = declared_refs
+                    .get_mut(function)
+                    .ok_or(WasmError::Decode("element function index out of bounds"))?;
+                *declared = true;
+            }
+        }
+        for global in &module.globals {
+            if let Val::FuncRef(Some(function)) = global.init
+                && !declared_refs.get(function).copied().unwrap_or(false)
+            {
+                return Err(WasmError::Decode(
+                    "global initializer has undeclared ref.func",
+                ));
+            }
+        }
         // --- load gate: prove every body before this Module is handed out ---
         // A module that fails validation is a Decode error here; it never
         // becomes something the caller can invoke, and no invalid program is
@@ -2185,6 +2207,7 @@ impl Module {
                 data_count,
                 elem_count: elems.len(),
                 has_table,
+                declared_refs: &declared_refs,
             };
             for f in &module.funcs {
                 let ft = f

@@ -19,18 +19,22 @@ before a `Module` exists. Custom sections may appear between standard sections;
 they do not change ordering.
 
 The v1 executable profile is MVP scalar instructions plus mutable globals,
-tables/`call_indirect`, the standard sign-extension and non-trapping
+tables/`call_indirect`, a single-table `funcref` subset of reference types,
+the standard sign-extension and non-trapping
 float-to-integer conversion proposals, the standard multi-value proposal, and
 the standard bulk-memory proposal over the single memory and MVP funcref table.
 It accepts multi-result functions and type-indexed parameter/result signatures
 on blocks, loops and ifs, all five integer
 sign-extension instructions and all eight saturating float-to-integer
-conversions, as well as active/passive data and index-encoded
-funcref element segments, `memory.init`, `data.drop`, `memory.copy`,
-`memory.fill`, `table.init`, `elem.drop` and `table.copy`. DataCount is checked
+conversions. The `funcref` profile includes reference-typed values, locals and
+globals, typed select, `ref.null`, `ref.is_null`, `ref.func`, table get/set/
+grow/size/fill and expression element segment encodings 4 through 7. It also
+accepts active/passive data and index-encoded funcref element segments,
+`memory.init`, `data.drop`, `memory.copy`, `memory.fill`, `table.init`,
+`elem.drop` and `table.copy`. DataCount is checked
 against the data section and is mandatory when code uses a data-segment
-instruction. Reference-typed element expressions, reference types, SIMD,
-exceptions, threads and multiple memories remain outside v1 and fail
+instruction. `externref`, multiple tables, typed function references, GC,
+SIMD, exceptions, threads and multiple memories remain outside v1 and fail
 loudly at load time. This is feature negotiation by converter profile: future
 runtimes may add standard proposals without changing the `.wasm` container or
 inventing tinyvm-only opcodes.
@@ -51,6 +55,9 @@ unit per funcref before mutation. Passive data and element liveness is owned by
 each instance: dropping a segment in one game cannot affect a sibling instance.
 Active and declarative segments are unavailable to init after instantiation,
 while a dropped segment still permits only source offset zero with length zero.
+Table fill and grow likewise charge one deterministic fuel unit per affected
+element before mutation; a fuel failure cannot partially fill or enlarge a
+table. Growth obeys both the module-declared maximum and the host table budget.
 
 One module may materialize at most 262,144 allocation-amplifying decode records
 in total. The shared count covers section entries, function parameter/result

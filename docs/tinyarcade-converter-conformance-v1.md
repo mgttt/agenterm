@@ -5,8 +5,9 @@ TinyArcade bytecode wrapper. The app-specific contract consists only of
 standard imports, exports, a standard custom manifest section and versioned
 media/state records. The accepted v1 compiler profile includes the scalar MVP,
 the standard sign-extension and non-trapping float-to-integer conversion
-proposals, the standard multi-value proposal, plus the standard bulk-memory
-proposal for one memory and one MVP funcref table: copy/fill, passive
+proposals, the standard multi-value proposal, the single-table `funcref`
+reference profile, plus the standard bulk-memory proposal for one memory and
+one funcref table: copy/fill, passive
 data/element segments, init/drop and table.copy. It is a bounded standards
 profile, not a different VM instruction set.
 
@@ -64,6 +65,9 @@ saturating conversion instructions; both engines must return 143.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.
+`smoke-wabt-funcref.sh` covers funcref values/locals/globals, typed select,
+reference and table instructions, expression element segments, table bulk
+operations and indirect calls; WABT, tinyvm and JavaScriptCore must return 143.
 
 Before upload, a converter may additionally consume the exact app-build TAH1
 profile defined in

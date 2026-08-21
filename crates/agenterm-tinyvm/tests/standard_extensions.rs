@@ -87,6 +87,71 @@ fn multi_result_module() -> Vec<u8> {
     wasm
 }
 
+fn funcref_module() -> Vec<u8> {
+    fn body(code: &mut Vec<u8>, instructions: &[u8]) {
+        code.push((instructions.len() + 1) as u8);
+        code.push(0);
+        code.extend_from_slice(instructions);
+    }
+
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(&mut wasm, 3, &[0x05, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    section(&mut wasm, 4, &[0x01, 0x70, 0x01, 0x01, 0x05]);
+    section(&mut wasm, 9, &[0x01, 0x05, 0x70, 0x01, 0xD2, 0x00, 0x0B]);
+    let mut code = vec![0x05];
+    body(&mut code, &[0x41, 0x2A, 0x0B]);
+    body(
+        &mut code,
+        &[
+            0x41, 0x00, 0xD2, 0x00, 0x26, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B,
+        ],
+    );
+    body(&mut code, &[0x41, 0x00, 0x25, 0x00, 0xD1, 0x0B]);
+    body(&mut code, &[0xD0, 0x70, 0x41, 0x02, 0xFC, 0x0F, 0x00, 0x0B]);
+    body(
+        &mut code,
+        &[
+            0x41, 0x01, 0xD2, 0x00, 0x41, 0x02, 0xFC, 0x11, 0x00, 0x41, 0x02, 0x25, 0x00, 0xD1,
+            0x45, 0x0B,
+        ],
+    );
+    section(&mut wasm, 10, &code);
+    wasm
+}
+
+fn explicit_table_expression_elem_module(table_index: u8) -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(&mut wasm, 3, &[0x02, 0x00, 0x00]);
+    section(&mut wasm, 4, &[0x01, 0x70, 0x00, 0x01]);
+    section(
+        &mut wasm,
+        9,
+        &[
+            0x01,
+            0x06,
+            table_index,
+            0x41,
+            0x00,
+            0x0B,
+            0x70,
+            0x01,
+            0xD2,
+            0x00,
+            0x0B,
+        ],
+    );
+    section(
+        &mut wasm,
+        10,
+        &[
+            0x02, 0x04, 0x00, 0x41, 0x2A, 0x0B, 0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B,
+        ],
+    );
+    wasm
+}
+
 fn assert_copy_fill_semantics() {
     let mut module = WasmModule::new();
     let copy = must_ok(
@@ -359,6 +424,114 @@ fn standard_multi_value_s33_block_type_index_64_executes() {
             .is_err(),
         "an s33 block type must sign-extend its unused high payload bits"
     );
+}
+
+#[test]
+fn standard_funcref_table_profile_executes_with_instance_semantics() {
+    let bytes = funcref_module();
+    let module_a = must_ok(WasmModule::from_bytes(&bytes), "load funcref module A");
+    let module_b = must_ok(WasmModule::from_bytes(&bytes), "load funcref module B");
+    let mut instance_a = must_ok(module_a.instantiate(), "instantiate funcref module A");
+    let mut instance_b = must_ok(module_b.instantiate(), "instantiate funcref module B");
+
+    assert_eq!(must_ok(instance_a.invoke(2, &[]), "A starts null"), vec![1]);
+    assert_eq!(must_ok(instance_b.invoke(2, &[]), "B starts null"), vec![1]);
+    assert_eq!(
+        must_ok(instance_a.invoke(1, &[]), "A table.set/call"),
+        vec![42]
+    );
+    assert_eq!(must_ok(instance_a.invoke(2, &[]), "A is non-null"), vec![0]);
+    assert_eq!(
+        must_ok(instance_b.invoke(2, &[]), "B remains independent"),
+        vec![1]
+    );
+
+    assert_eq!(must_ok(instance_a.invoke(3, &[]), "A grow 1 to 3"), vec![1]);
+    assert_eq!(must_ok(instance_a.invoke(4, &[]), "A table.fill"), vec![1]);
+    assert_eq!(
+        must_ok(instance_b.invoke(3, &[]), "B independently grows"),
+        vec![1]
+    );
+    assert_eq!(must_ok(instance_a.invoke(3, &[]), "A grow 3 to 5"), vec![3]);
+    assert_eq!(
+        must_ok(instance_a.invoke(3, &[]), "A declared maximum"),
+        vec![-1]
+    );
+
+    let mut undeclared = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut undeclared, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(&mut undeclared, 3, &[0x01, 0x00]);
+    section(
+        &mut undeclared,
+        10,
+        &[0x01, 0x07, 0x00, 0xD2, 0x00, 0x1A, 0x41, 0x00, 0x0B],
+    );
+    assert!(WasmModule::from_bytes(&undeclared).is_err());
+
+    let mut externref = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut externref, 1, &[0x01, 0x60, 0x01, 0x6F, 0x00]);
+    assert!(WasmModule::from_bytes(&externref).is_err());
+
+    let explicit = explicit_table_expression_elem_module(0);
+    let mut explicit = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&explicit),
+            "load flag-6 element segment",
+        )
+        .instantiate(),
+        "instantiate flag-6 element segment",
+    );
+    assert_eq!(
+        must_ok(explicit.invoke(1, &[]), "call flag-6 initialized funcref"),
+        vec![42]
+    );
+    assert!(
+        WasmModule::from_bytes(&explicit_table_expression_elem_module(1)).is_err(),
+        "the single-table profile must reject a nonzero explicit table index"
+    );
+}
+
+#[test]
+fn standard_funcref_bulk_work_traps_before_mutation() {
+    use agenterm_tinyvm::Limits;
+
+    let mut module = WasmModule::new_with_limits(Limits {
+        max_steps: 6,
+        max_table_elems: 128,
+        ..Limits::default()
+    });
+    module.add_table(64);
+    let fill = must_ok(
+        module.add_function(
+            0,
+            0,
+            0,
+            &[
+                0x41, 0x00, 0xD0, 0x70, 0x41, 0xC0, 0x00, 0xFC, 0x11, 0x00, 0x0B,
+            ],
+        ),
+        "decode metered table.fill",
+    );
+    let grow = must_ok(
+        module.add_function(0, 0, 1, &[0xD0, 0x70, 0x41, 0x20, 0xFC, 0x0F, 0x00, 0x0B]),
+        "decode metered table.grow",
+    );
+    let first_is_null = must_ok(
+        module.add_function(0, 0, 1, &[0x41, 0x00, 0x25, 0x00, 0xD1, 0x0B]),
+        "decode table null check",
+    );
+    let size = must_ok(
+        module.add_function(0, 0, 1, &[0xFC, 0x10, 0x00, 0x0B]),
+        "decode table.size",
+    );
+    let mut instance = must_ok(module.instantiate(), "instantiate metered table");
+    assert!(instance.invoke(fill, &[]).is_err());
+    assert_eq!(
+        must_ok(instance.invoke(first_is_null, &[]), "fill atomic"),
+        vec![1]
+    );
+    assert!(instance.invoke(grow, &[]).is_err());
+    assert_eq!(must_ok(instance.invoke(size, &[]), "grow atomic"), vec![64]);
 }
 
 #[test]
