@@ -468,6 +468,7 @@ fn module_validate_cli_is_static_and_rejects_invalid_bytes() {
     );
     let stdout = String::from_utf8_lossy(&accepted.stdout);
     assert!(stdout.contains("start_function=present"));
+    assert!(stdout.contains("standard_features=(mvp-only)"));
     assert!(stdout.contains("OK: standard Wasm module validated without instantiation"));
 
     let rejected = Command::new(env!("CARGO_BIN_EXE_tinyvm"))

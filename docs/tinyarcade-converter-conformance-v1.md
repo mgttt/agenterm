@@ -43,6 +43,13 @@ missing native function or same-name signature mismatch with the exact required
 and available arities. Converter UI should surface those rows directly instead
 of reducing them to “unsupported game.”
 
+For proposal diagnostics, `tinyvm module validate FILE.wasm` also prints the
+post-MVP families actually used by the accepted bytes as
+`standard_features=`. This is usage metadata, not a request to lower missing
+features into private opcodes. A converter should show it before attaching the
+TinyArcade manifest so authors can compare compiler output with the documented
+cartridge baseline.
+
 ```text
 converter check
 ├── regular non-empty file within 2 MiB

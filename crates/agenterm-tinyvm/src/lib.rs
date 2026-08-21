@@ -109,11 +109,11 @@ pub use wasm::{
     HostMemories as WasmHostMemories,
 };
 pub use wasm::{
-    Function as WasmFunction, Global as WasmGlobal, GlobalImportDesc, ImportDesc,
-    Instance as WasmInstance, Limits, Memory as WasmMemory, MemoryImportDesc,
-    MemoryView as WasmMemoryView, MemoryViewMut as WasmMemoryViewMut, Module as WasmModule,
-    Store as WasmStore, Table as WasmTable, TableImportDesc, Val, ValueType, WasmError, eval,
-    eval_with,
+    FeatureUsage as WasmFeatureUsage, Function as WasmFunction, Global as WasmGlobal,
+    GlobalImportDesc, ImportDesc, Instance as WasmInstance, Limits, Memory as WasmMemory,
+    MemoryImportDesc, MemoryView as WasmMemoryView, MemoryViewMut as WasmMemoryViewMut,
+    Module as WasmModule, Store as WasmStore, Table as WasmTable, TableImportDesc, Val, ValueType,
+    WasmError, eval, eval_with,
 };
 
 /// One bytecode instruction.

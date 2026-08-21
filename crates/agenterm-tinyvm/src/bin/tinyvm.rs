@@ -23,7 +23,8 @@ use std::collections::{BTreeMap, HashSet};
 
 use agenterm_tinyvm::{
     CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, HostProfileV1,
-    Limits, MAX_HOST_PROFILE_BYTES, RenderFrame, ToneBatch, Vm, WasmError, WasmModule,
+    Limits, MAX_HOST_PROFILE_BYTES, RenderFrame, ToneBatch, Vm, WasmError, WasmFeatureUsage,
+    WasmModule,
 };
 #[cfg(feature = "catalog-publisher")]
 use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
@@ -175,36 +176,71 @@ fn usage() -> ExitCode {
     ExitCode::FAILURE
 }
 
+struct ModuleValidationReport {
+    wasm_bytes: usize,
+    function_imports: usize,
+    global_imports: usize,
+    memory_imports: usize,
+    table_imports: usize,
+    has_start: bool,
+    features: WasmFeatureUsage,
+}
+
 fn run_module_validate(path: &str) -> ExitCode {
-    let result: Result<(usize, usize, usize, usize, usize, bool), String> = (|| {
+    let result: Result<ModuleValidationReport, String> = (|| {
         let wasm = read_bounded_regular(Path::new(path), MAX_CARTRIDGE_BYTES, "Wasm module")?;
         let module = WasmModule::from_bytes(&wasm).map_err(|error| error.message().to_string())?;
-        Ok((
-            wasm.len(),
-            module.imports().len(),
-            module.global_imports().len(),
-            module.memory_imports().len(),
-            module.table_imports().len(),
-            module.start_index().is_some(),
-        ))
+        Ok(ModuleValidationReport {
+            wasm_bytes: wasm.len(),
+            function_imports: module.imports().len(),
+            global_imports: module.global_imports().len(),
+            memory_imports: module.memory_imports().len(),
+            table_imports: module.table_imports().len(),
+            has_start: module.start_index().is_some(),
+            features: module.feature_usage(),
+        })
     })();
     match result {
-        Ok((
-            wasm_bytes,
-            function_imports,
-            global_imports,
-            memory_imports,
-            table_imports,
-            has_start,
-        )) => {
-            println!("wasm_bytes={wasm_bytes}");
-            println!("function_imports={function_imports}");
-            println!("global_imports={global_imports}");
-            println!("memory_imports={memory_imports}");
-            println!("table_imports={table_imports}");
+        Ok(report) => {
+            println!("wasm_bytes={}", report.wasm_bytes);
+            println!("function_imports={}", report.function_imports);
+            println!("global_imports={}", report.global_imports);
+            println!("memory_imports={}", report.memory_imports);
+            println!("table_imports={}", report.table_imports);
             println!(
                 "start_function={}",
-                if has_start { "present" } else { "absent" }
+                if report.has_start {
+                    "present"
+                } else {
+                    "absent"
+                }
+            );
+            let mut names = Vec::new();
+            for (used, name) in [
+                (report.features.bulk_memory, "bulk-memory"),
+                (report.features.sign_extension, "sign-extension"),
+                (
+                    report.features.nontrapping_float_to_int,
+                    "nontrapping-float-to-int",
+                ),
+                (report.features.multi_value, "multi-value"),
+                (report.features.reference_types, "reference-types"),
+                (report.features.multiple_tables, "multiple-tables"),
+                (report.features.multiple_memories, "multiple-memories"),
+                (report.features.extended_const, "extended-const"),
+                (report.features.tail_call, "tail-call"),
+            ] {
+                if used {
+                    names.push(name);
+                }
+            }
+            println!(
+                "standard_features={}",
+                if names.is_empty() {
+                    "(mvp-only)".to_string()
+                } else {
+                    names.join(",")
+                }
             );
             println!("OK: standard Wasm module validated without instantiation");
             ExitCode::SUCCESS

@@ -2763,3 +2763,11 @@ then separate legacy memory-zero view, indexed view and intentional copy rows.
 Compare the metric/payload matrix across engines, but never gate correctness on
 elapsed time; timing values vary while missing or malformed dimensions are a
 deterministic test failure.
+
+Do not prioritize Wasm proposals from the engine's implementation checklist.
+Derive a static usage report from each successfully decoded module, prove each
+reported family with an independent standard fixture, then rebuild real
+production artifacts and gate their exact current profiles. An exact-profile
+change is a review trigger rather than an automatic incompatibility: update
+the oracle, resource evidence and product baseline together when the workload
+legitimately expands.

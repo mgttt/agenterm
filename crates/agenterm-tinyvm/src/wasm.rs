@@ -132,6 +132,23 @@ pub enum ValueType {
     ExternRef,
 }
 
+/// Standard post-MVP features used by one decoded module.
+///
+/// This is static authoring/tooling evidence. It does not instantiate or run
+/// guest code and does not grant a feature that the decoder rejected.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct FeatureUsage {
+    pub bulk_memory: bool,
+    pub sign_extension: bool,
+    pub nontrapping_float_to_int: bool,
+    pub multi_value: bool,
+    pub reference_types: bool,
+    pub multiple_tables: bool,
+    pub multiple_memories: bool,
+    pub extended_const: bool,
+    pub tail_call: bool,
+}
+
 impl ValueType {
     fn from_byte(value: u8) -> Option<Self> {
         match value {
@@ -2409,6 +2426,20 @@ struct ConstExpr {
     result_type: u8,
 }
 
+fn const_expr_uses_extended_arithmetic(expression: &ConstExpr) -> bool {
+    expression.ops.iter().any(|operation| {
+        matches!(
+            operation,
+            ConstOp::I32Add
+                | ConstOp::I32Sub
+                | ConstOp::I32Mul
+                | ConstOp::I64Add
+                | ConstOp::I64Sub
+                | ConstOp::I64Mul
+        )
+    })
+}
+
 enum DataMode {
     Active { memory: usize, offset: ConstExpr },
     Passive,
@@ -4532,6 +4563,91 @@ impl Module {
     /// Function imports in module-index order. Bind each with [`Module::bind_import`].
     pub fn imports(&self) -> &[ImportDesc] {
         &self.import_descs
+    }
+
+    /// Report the accepted standard feature families actually present in this
+    /// module. Baseline scalar MVP instructions are intentionally omitted.
+    pub fn feature_usage(&self) -> FeatureUsage {
+        let mut usage = FeatureUsage {
+            multiple_tables: self.tables.len() > 1,
+            multiple_memories: self.memories.len() > 1,
+            multi_value: self.types.iter().any(|ty| ty.results.len() > 1),
+            reference_types: self.types.iter().any(|ty| {
+                ty.params
+                    .iter()
+                    .chain(&ty.results)
+                    .any(|ty| matches!(*ty, 0x6F | 0x70))
+            }),
+            ..FeatureUsage::default()
+        };
+        for function in &self.funcs {
+            for operation in &function.code {
+                match operation {
+                    Op::MemoryCopy { .. }
+                    | Op::MemoryFill(_)
+                    | Op::MemoryInit { .. }
+                    | Op::DataDrop { .. }
+                    | Op::TableInit { .. }
+                    | Op::ElemDrop { .. }
+                    | Op::TableCopy { .. } => usage.bulk_memory = true,
+                    Op::I32Extend8S
+                    | Op::I32Extend16S
+                    | Op::I64Extend8S
+                    | Op::I64Extend16S
+                    | Op::I64Extend32S => usage.sign_extension = true,
+                    Op::I32TruncSatF32S
+                    | Op::I32TruncSatF32U
+                    | Op::I32TruncSatF64S
+                    | Op::I32TruncSatF64U
+                    | Op::I64TruncSatF32S
+                    | Op::I64TruncSatF32U
+                    | Op::I64TruncSatF64S
+                    | Op::I64TruncSatF64U => usage.nontrapping_float_to_int = true,
+                    Op::Block {
+                        ty: BlockType::TypeIndex(_),
+                        ..
+                    }
+                    | Op::Loop {
+                        ty: BlockType::TypeIndex(_),
+                        ..
+                    }
+                    | Op::If {
+                        ty: BlockType::TypeIndex(_),
+                        ..
+                    } => usage.multi_value = true,
+                    Op::TableGet(_)
+                    | Op::TableSet(_)
+                    | Op::TableGrow(_)
+                    | Op::TableSize(_)
+                    | Op::TableFill(_)
+                    | Op::TypedSelect(_)
+                    | Op::RefNull(_)
+                    | Op::RefIsNull
+                    | Op::RefFunc(_) => usage.reference_types = true,
+                    Op::ReturnCall(_) | Op::ReturnCallIndirect { .. } => usage.tail_call = true,
+                    _ => {}
+                }
+            }
+        }
+        usage.bulk_memory |= self
+            .data
+            .iter()
+            .any(|segment| matches!(segment.mode, DataMode::Passive));
+        usage.bulk_memory |= self
+            .elems
+            .iter()
+            .any(|segment| !matches!(segment.mode, ElemMode::Active { .. }));
+        usage.extended_const = self.globals.iter().any(|global| match &global.init {
+            GlobalInit::Expr(expression) => const_expr_uses_extended_arithmetic(expression),
+            _ => false,
+        }) || self.data.iter().any(|segment| match &segment.mode {
+            DataMode::Active { offset, .. } => const_expr_uses_extended_arithmetic(offset),
+            DataMode::Passive => false,
+        }) || self.elems.iter().any(|segment| match &segment.mode {
+            ElemMode::Active { offset, .. } => const_expr_uses_extended_arithmetic(offset),
+            ElemMode::Passive | ElemMode::Declarative => false,
+        });
+        usage
     }
 
     /// Numeric global imports in their independent standard index order.

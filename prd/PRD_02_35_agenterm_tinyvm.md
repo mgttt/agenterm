@@ -167,7 +167,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │           ├── iOS Simulator App container wiring        [x]
 │   │           └── physical iPhone container evidence        [ ]
 │   ├── P2 — standard Wasm coverage                      [ ]
-│   │   ├── proposal priority by real cartridge workload  [ ]
+│   │   ├── proposal priority by real cartridge workload  [x]
 │   │   ├── independent WABT/JSC differential per leaf    [ ]
 │   │   └── size/resource budget retained per leaf        [ ]
 │   ├── P3 — cartridge authoring ecosystem               [~]
@@ -393,6 +393,7 @@ Current evidence owners:
 - [Catalog publisher](../docs/tinyarcade-catalog-publisher-v1.md)
 - [QJWasm/WA2X source review](../docs/qjwasm-wa2x-source-review.md)
 - [Cross-boundary benchmark](../docs/tinyvm-boundary-benchmark.md)
+- [Real-cartridge feature usage](../docs/tinyvm-feature-usage.md)
 - `crates/agenterm-tinyvm/tests/` — public Rust black boxes and independent fixtures
 - `crates/agenterm-tinyvm/ios/` — C/Swift package and platform smoke gates
 

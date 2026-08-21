@@ -3332,6 +3332,31 @@ shellcheck, rustfmt, document redaction and the 97-leaf PRD trace gate pass.
 Default linked sizes remain 1,602,424 bytes arm64 and 1,681,600 bytes x86_64;
 the stripped static core remains 101,256 bytes with selftest 42.
 
+## One-hundred-sixth executable increment — real-cartridge feature priority
+
+Decoded modules now expose a static `WasmFeatureUsage` report for nine accepted
+post-MVP standard families. The CLI prints the same deterministic
+`standard_features=` row without instantiation or start execution. A minimal
+module proves that engine support is not falsely reported as module use, while
+independent standard fixtures exercise every positive flag.
+
+A new production-cartridge smoke rebuilds Depth Well, Paddle Guard and Signal
+Lock and gates their exact current profiles. All three require bulk memory;
+Depth Well and Signal Lock additionally require sign extension. None currently
+requires SIMD, typed function references, GC, memory64, exceptions or threads.
+Those proposals therefore remain behind real-workload, independent-engine and
+resource/size evidence rather than entering because another VM implements them.
+
+Evidence on 2026-08-22: the three production builds and static CLI reports pass
+with the profiles above; the independent nine-family usage test and minimal
+false-positive test pass. The complete all-feature/all-target package passes all
+128 library tests and every non-ignored integration test, including both iOS
+XCFramework gates and the three-game tinyvm/JSC/H5 differential. The no-default
+library passes all 115 tests; warnings-denied Clippy, shellcheck, rustfmt,
+document redaction and the 98-leaf PRD trace gate pass. Default linked sizes
+remain 1,602,424 bytes arm64 and 1,681,600 bytes x86_64; the stripped static
+core remains 101,256 bytes with selftest 42.
+
 ## One-hundredth executable increment — non-returning WASI process exit
 
 The optional Preview 1 subset now includes the exact `(i32) → ()` `proc_exit`
