@@ -2438,6 +2438,14 @@ independent validator in one reproducible gate, report the exact fixture id on
 failure, and keep proposal execution oracles separate. Re-run the generator
 before this gate so source and generated rows cannot diverge.
 
+Give malformed/load-time cases the symmetric independent check. Keep accepted
+and rejected raw modules in an oracle fixture that a black-box Rust test proves
+is an exact byte-for-byte mirror of its load-gate cases; then make WABT agree
+with every verdict. Require both verdict classes, reject malformed fixture rows
+and report the case id. This catches missing negative evidence, accidental
+fixture drift and a decoder/reference disagreement without making Cargo tests
+depend on a separately installed validator.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

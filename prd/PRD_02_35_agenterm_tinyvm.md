@@ -21,7 +21,8 @@ agenterm-tinyvm (35)
 │   │   ├── strict i64 signed-LEB range [x]
 │   │   ├── valid custom-section names [x]
 │   │   ├── empty memory-section vector [x]
-│   │   └── mutable global.set target [x]
+│   │   ├── mutable global.set target [x]
+│   │   └── WABT load-gate oracle [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -121,6 +122,8 @@ bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
 三个 golden corpus 中的每一个标准模块（包括预期运行期 trap 的样例）还必须先通过
 WABT validation；这条独立门禁防止测试把 malformed bytes 错误归类为执行语义。
+加载门的 reject/accept raw cases 也有共享 oracle fixture：Rust 黑盒强制 fixture 与
+自身 case 集逐字节一致，WABT 再独立证明相同的 33 reject / 11 accept verdict。
 Multi-value 包含多结果函数、s33 type-index block signature、带参数 block/loop/if 和
 多值 branch；validator 控制帧只引用已经预算的 type section，不按嵌套层次复制签名。
 当前 reference-types 面先完成标准 single-table `funcref` 闭环：reference 值、局部变量、

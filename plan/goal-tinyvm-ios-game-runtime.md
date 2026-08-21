@@ -31,6 +31,7 @@ tinyvm iOS game runtime
 │   ├── empty memory-section vector    [x]
 │   ├── mutable global.set target      [x]
 │   ├── WABT-valid golden corpus       [x]
+│   ├── WABT load-gate oracle          [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -2113,6 +2114,36 @@ Evidence on 2026-08-21:
   tinyvm's own decoder or interpreter.
 - All 234 non-ignored package tests plus one doctest pass under all features.
   No-default/replay-only checks, the new whole-corpus gate, all seven
+  WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
+  all-target Clippy, formatting, relevant ShellCheck and document redaction
+  pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,553,848 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,696 / 1,417,640 /
+  1,419,312 / 1,418,448 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-ninth executable increment — WABT load-gate oracle
+
+Accepted and rejected raw load-gate cases now have a shared independent oracle
+fixture. A Rust black box proves that the fixture is an exact byte-for-byte
+mirror of the in-test case arrays, including every id and verdict; a separate
+WABT smoke then requires the reference validator to agree with all verdicts.
+Cargo remains independent of the external tool, while fixture drift or a
+one-sided corpus fails with the responsible case id.
+
+Evidence on 2026-08-21:
+
+- `smoke-wabt-load-gate.sh` agrees with tinyvm on all 33 rejected and 11
+  accepted raw modules and passes ShellCheck.
+- The public integration test rejects malformed fixture rows, proves the exact
+  44-row mirror and keeps every case in the common load/eval/non-invokable
+  black boxes.
+- All 235 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, both whole-corpus WABT gates, all seven
   WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
   all-target Clippy, formatting, relevant ShellCheck and document redaction
   pass.

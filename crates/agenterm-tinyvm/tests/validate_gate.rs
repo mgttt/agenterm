@@ -193,11 +193,47 @@ const ACCEPTED: [(&str, &str); 11] = [
     ),
 ];
 
+const WABT_ORACLE: &str = include_str!("fixtures/validate_gate.txt");
+
+fn oracle_rows() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    WABT_ORACLE
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let mut columns = line.split('|');
+            let name = columns.next().expect("load-gate oracle id");
+            let verdict = columns.next().expect("load-gate oracle verdict");
+            let hex = columns.next().expect("load-gate oracle wasm hex");
+            assert!(columns.next().is_none(), "{name}: extra oracle column");
+            assert!(matches!(verdict, "reject" | "accept"));
+            assert!(hex.len() % 2 == 0 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            (name, verdict, hex)
+        })
+}
+
 fn bytes(hex: &str) -> Vec<u8> {
     (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex"))
         .collect()
+}
+
+#[test]
+fn wabt_oracle_fixture_exactly_matches_the_rust_load_gate() {
+    let rows: Vec<_> = oracle_rows().collect();
+    assert_eq!(rows.len(), REJECTED.len() + ACCEPTED.len());
+    for (name, hex) in REJECTED {
+        assert!(
+            rows.contains(&(name, "reject", hex)),
+            "{name}: rejected Rust case missing from WABT oracle"
+        );
+    }
+    for (name, hex) in ACCEPTED {
+        assert!(
+            rows.contains(&(name, "accept", hex)),
+            "{name}: accepted Rust case missing from WABT oracle"
+        );
+    }
 }
 
 #[test]
