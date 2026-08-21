@@ -63,6 +63,20 @@ audio digest. The wire format, ceilings, commands and checked-in Depth
 Well/Paddle Guard goldens are specified in
 [`docs/tinyarcade-replay-v1.md`](tinyarcade-replay-v1.md).
 
+During converter and runtime development, the same replay can also be executed
+by a second standards implementation. On macOS the repository's
+`smoke-webkit-differential.sh` runs the unmodified `.wasm` in the system
+JavaScriptCore WebAssembly engine with the same snapshot, RNG, input and clock,
+then compares every render/audio length and SHA-256 with tinyvm. This is a
+differential oracle, not a substitute runtime: a match increases confidence in
+WASM/ABI semantics, while a mismatch must be reduced and adjudicated against
+the WebAssembly and TinyArcade contracts.
+
+The oracle is development-only. It has no DOM, browser UI or network surface;
+JavaScriptCore, JavaScript and H5 are not linked into the nostalgia-arcade iOS
+runtime. A browser preview may be useful to a cartridge author, but passing one
+does not grant App compatibility, catalog trust or Apple distribution approval.
+
 Passing this command establishes technical compatibility for a user's private
 library. It does not sign, publish or approve the game for the official catalog.
 Official review additionally owns product quality, rights/provenance, metadata,
@@ -75,3 +89,4 @@ The normative wire details remain in:
 - `docs/tinyarcade-signed-catalog-v1.md`
 - `docs/tinyarcade-catalog-transport-v1.md`
 - `docs/tinyarcade-replay-v1.md`
+- `docs/tinyarcade-webkit-differential.md`

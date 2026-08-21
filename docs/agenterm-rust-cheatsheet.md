@@ -2357,3 +2357,18 @@ share the same pass: reject duplicate or out-of-order singleton sections,
 unknown standard ids and unconsumed section payload. Run each count-bomb case
 inside a child-process black box as well as asserting the typed error; only the
 child exit proves a hidden allocator abort did not escape the API.
+
+## Differential engines need identical host facts, not similar screens
+
+When comparing an interpreter with a reference WebAssembly engine, run the
+same module from the same portable state and normalize every host-owned input:
+button snapshot, monotonic clock, RNG state and import semantics. Compare exact
+render/audio bytes or their length-bound cryptographic digests per step. A
+screenshot comparison cannot expose stale pixels, palette records or audio
+drift, while independent execution against a canonical replay can.
+
+Keep the reference adapter in development tests and out of the shipped runtime
+dependency graph. It is an oracle for finding decoder, execution and ABI bugs,
+not a second product authority. When engines disagree, reduce the case and use
+the language/ABI specifications to adjudicate it rather than blindly copying
+the reference behavior.

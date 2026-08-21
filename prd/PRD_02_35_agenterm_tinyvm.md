@@ -39,6 +39,7 @@ agenterm-tinyvm (35)
 │   ├── Depth Well grid3d             [x]
 │   ├── Paddle Guard indexed2d        [x]
 │   ├── deterministic replay vectors  [x]
+│   ├── development WebKit differential [x]
 │   └── physical-device play          [ ]
 ├── slot-A
 │   ├── control          [x]
@@ -81,6 +82,12 @@ profile，不改变 `.wasm` 格式或增加私有 opcode。
 tinyvm 是自有 native WASM 平台的执行核，不是 H5 小游戏、JavaScript miniApp 或 WKWebView 容器。上层平台通过自有 host ABI 向 `.wasm` 提供经预算的原生渲染、输入、音频、时钟与存储面；不依赖 DOM、JavaScript 或 Web 容器语义。App Store 可接受性是该平台上层的独立发布门，不反向改写 tinyvm 的运行时架构。
 
 JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是 `JSContext` 中的 JavaScript 执行，不是独立的原生 WASM module/instance API。JSC 可以作为后续对照基准或实验后端，但 tinyvm 是权威、可移植、可预算的 baseline；任何游戏都不得依赖 JSC 才能运行。
+
+开发期对照已经成为可执行回归门：同一个标准 `.wasm`、同一份 TAR1 输入/时钟、同一
+portable snapshot 与 host RNG，分别交给 tinyvm 和系统 JavaScriptCore WebAssembly
+执行，并逐帧比较 render/audio 的精确长度与 SHA-256。Depth Well 与 Paddle Guard
+同时覆盖 grid3d、indexed2d 和 tones。该 adapter/runner 只位于 macOS 测试目录，
+不链接 iOS package、不进入 nostalgia-arcade，也不构成 H5 小游戏平台。
 
 完整的 iOS 游戏运行底层验收树与依赖路径见 [`plan/goal-tinyvm-ios-game-runtime.md`](../plan/goal-tinyvm-ios-game-runtime.md)。
 

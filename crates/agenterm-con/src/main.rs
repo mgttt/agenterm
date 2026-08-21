@@ -1735,7 +1735,9 @@ impl ConApp {
             self.workspace.active(),
             self.composer.focused,
         ) {
-            return Err("clipboard paste was cancelled because the active input changed".to_owned());
+            return Err(
+                "clipboard paste was cancelled because the active input changed".to_owned(),
+            );
         }
         let session = self
             .sessions

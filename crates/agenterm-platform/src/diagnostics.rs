@@ -172,7 +172,10 @@ mod tests {
     impl Scratch {
         fn new(name: &str) -> Self {
             let mut path = std::env::temp_dir();
-            path.push(format!("agenterm-diagnostics-{name}-{}", std::process::id()));
+            path.push(format!(
+                "agenterm-diagnostics-{name}-{}",
+                std::process::id()
+            ));
             let _ = std::fs::remove_dir_all(&path);
             Self(path)
         }

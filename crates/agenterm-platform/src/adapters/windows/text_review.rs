@@ -465,7 +465,10 @@ mod tests {
         // WM_CLOSE followed by WM_DESTROY is an ordinary teardown sequence: the
         // second must not turn a confirmation into a cancellation.
         state.finish(false);
-        assert!(state.confirmed, "a later message must not rewrite the answer");
+        assert!(
+            state.confirmed,
+            "a later message must not rewrite the answer"
+        );
         assert_eq!(
             wakes.load(Ordering::Acquire),
             1,

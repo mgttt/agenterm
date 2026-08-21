@@ -2444,7 +2444,9 @@ mod tests {
                 .expect("queue capacity");
         }
         let error = control
-            .enqueue(DeferredNative::Event(PendingNativeEvent::FocusChanged(true)))
+            .enqueue(DeferredNative::Event(PendingNativeEvent::FocusChanged(
+                true,
+            )))
             .expect_err("overflow must fail");
         match error {
             PixelWindowError::Failed { code, .. } => {

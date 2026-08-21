@@ -63,6 +63,7 @@ tinyvm iOS game runtime
 │   ├── Depth Well WASM vertical cut  [x]
 │   ├── Paddle Guard 2D vertical cut   [x]
 │   ├── portable replay goldens        [x]
+│   ├── development WebKit differential [x]
 │   ├── frame-time/resource evidence  [~]
 │   └── suspend/resume/save evidence  [x]
 └── distribution gate                 [~]
@@ -98,9 +99,9 @@ Apple's JavaScriptCore contains an internal WebAssembly implementation, and
 its public JavaScript VM headers mention WebAssembly compilation work. Apple
 does not expose a dedicated native `WasmModule` / `WasmInstance` embedding
 contract; the public route is JavaScript execution through `JSContext`.
-JavaScriptCore can therefore serve as a later comparison or experimental
-accelerator behind parity tests, but it is not the platform authority and no
-game may require it. tinyvm remains the portable, deterministic baseline.
+JavaScriptCore therefore serves as a development-only comparison engine behind
+exact replay parity tests, but it is not the platform authority and no game may
+require it. tinyvm remains the portable, deterministic baseline.
 
 H5, DOM, JavaScript mini-app and WKWebView semantics are excluded. Runtime JIT,
 device-side native AOT of downloaded modules, dynamic native-code loading,
@@ -1267,3 +1268,32 @@ Evidence on 2026-08-21:
   replay, private and session consumers remain below 1.38 MiB. The stripped
   static core is 71,064 bytes with self-test 42, below its unchanged 100 KiB
   hard gate.
+
+## Thirty-sixth executable increment — development-only WebKit differential
+
+A macOS black-box gate now runs the exact same standard cartridge in two
+independent engines. tinyvm records a canonical TAR1 trace containing the
+cartridge hash, initial portable snapshot, host RNG, monotonic input/clock and
+per-frame output evidence. A standalone Swift runner then uses the system
+JavaScriptCore WebAssembly implementation, supplies the same frozen
+`tinyarcade:core/v1` host semantics, and compares every render/audio length and
+SHA-256. It does not reuse tinyvm's decoder or executor.
+
+The reference adapter intentionally has no DOM, canvas, networking or product
+UI. It lives under tests, links only into a temporary macOS oracle, and does not
+enter the iOS XCFramework or Swift package. This catches interpreter or ABI
+drift without turning nostalgia-arcade into an H5/mini-app platform. tinyvm
+remains the product runtime and JavaScriptCore remains test evidence only.
+
+Evidence on 2026-08-21:
+
+- Compiler-produced Depth Well and Paddle Guard each match JavaScriptCore for
+  four exact replay frames, covering grid3d, indexed2d and tones outputs.
+- The public Cargo integration test compiles the Swift oracle with warnings as
+  errors, independently verifies the tinyvm trace, then runs both cartridges.
+- The test uses the checked-in input plans and generated `.wasm` artifacts; no
+  fixture-only guest, H5 page or JavaScript runtime is linked into the app.
+- All 194 package tests plus one doctest, all-feature/all-target Clippy, default,
+  no-default and replay-only checks, full-repository formatting and document
+  redaction pass. The production static core is unchanged at 71,064 bytes with
+  self-test 42.

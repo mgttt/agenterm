@@ -631,7 +631,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 34] = [
+const LEAF_TESTS: [(&str, &str); 35] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -702,6 +702,10 @@ const LEAF_TESTS: [(&str, &str); 34] = [
     (
         "deterministic replay vectors",
         "depth_well_replay_is_portable_bounded_and_tamper_evident",
+    ),
+    (
+        "development WebKit differential",
+        "webkit_matches_tinyvm_replay",
     ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
     ("#78", "issue78_runtimes_stay_out_of_the_crate"),
