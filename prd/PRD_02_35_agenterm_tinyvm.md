@@ -24,7 +24,8 @@ agenterm-tinyvm (35)
 │   │   ├── mutable global.set target [x]
 │   │   ├── WABT load-gate oracle [x]
 │   │   ├── static module validation CLI [x]
-│   │   ├── imported globals/memories [x]
+│   │   ├── standard imported numeric globals [x]
+│   │   ├── standard imported linear memories [x]
 │   │   └── store-owned imported funcref tables [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
@@ -131,8 +132,10 @@ bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
 初始化表达式同时接受标准 extended-const 的 i32/i64 add/sub/mul；它们以 wrapping
 整数语义用于 global initializer、active data offset 与 element offset，并在 decode
-complexity budget 中逐条计数。表达式必须类型正确且最终恰好留下一个值。当前 VM 尚无
-imported-global store/binding，因此 const `global.get` 不以半套私有规则提前开放。
+complexity budget 中逐条计数。表达式必须类型正确且最终恰好留下一个值。标准 numeric
+global import 已有精确类型/mutability binding；const `global.get` 仅允许读取 imported
+immutable global。defined global 的 export 可取得同一 live handle 并直接绑定到另一个
+module，因此两侧观察的是同一可变 store cell，而不是初始化值的副本。
 三个 golden corpus 中的每一个标准模块（包括预期运行期 trap 的样例）还必须先通过
 WABT validation；这条独立门禁防止测试把 malformed bytes 错误归类为执行语义。
 加载门的 reject/accept raw cases 也有共享 oracle fixture：Rust 黑盒强制 fixture 与
@@ -145,20 +148,23 @@ Multi-value 包含多结果函数、s33 type-index block signature、带参数 b
 尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
 在此基础上，模块可定义多张 `funcref` table；所有 table instruction、`call_indirect`、
 active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
-预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。当前仍不接受 imported
-tables；定义表的 export 会完整验证，但产品 embedding 暂只公开 function lookup。
+预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。标准 imported table
+由显式 `WasmStore` 持有；跨 instance funcref、owner signature、normal/tail dispatch、
+循环回入和统一 fuel/activation 预算均由 store trampoline 执行，不消耗 native stack。
+TinyArcade v1 仍拒绝 table import，因为单卡带 ABI 尚未定义多 module 链接契约。
 通用 VM 同样接受标准 multiple-memory proposal 中的多张 internally defined linear
 memory：scalar memarg、size/grow、active data、init/fill 与同内存或跨内存 copy 都按
 标准 memory index 执行。宿主 `max_memory_pages` 是实例内所有 memory 的聚合上限，
-每张 memory 仍服从自身 declared maximum；当前没有 store/binding model，因此 imported
-memory 仍明确排除。TinyArcade v1 继续要求恰好一张 memory，这是其 core callback、
+每张 memory 仍服从自身 declared maximum。标准 imported memory 绑定显式 host object，
+clone、别名 import、跨 sibling mutation/grow 和 named re-export 保持同一 identity；借用冲突
+返回确定性 trap。TinyArcade v1 继续要求恰好一张 defined memory，这是其 core callback、
 snapshot 和媒体 ABI 固定使用 memory zero 的 embedding 约束，不是 tinyvm 的能力上限。
 标准 tail-call proposal 的 `return_call` 与 `return_call_indirect` 已进入 profile；执行器以
 trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native stack。普通非尾调用
 也使用显式、fallible VM activation vector，不再递归进入 Rust；direct/indirect 调用统一受
 512 activation 与 1,048,576 aggregate live-slot 上限约束，debug/release 行为一致。尾调用
-也能落到版本化 native import，但 imported table
-仍需跨 instance 的 store-level function identity 后才能合规共享。
+也能落到版本化 native import 或通过 imported table 跨 instance 调度；两者都进入同一
+显式 activation trampoline。
 执行期的 operand/control 增长会先检查 live-slot/operand 上限并 `try_reserve`，然后才执行
 指令；call/tail-call 参数与函数结果先完整 fallible allocation，再从源 stack 移走。
 `br_table` targets 在 decode 时进入每函数的扁平、不可变 arena，执行指令只保存 range 并

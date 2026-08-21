@@ -2954,25 +2954,28 @@ impl GlobalDesc {
 }
 
 enum GlobalSlot {
-    Local(Val),
+    Local(Global),
     Imported(Global),
 }
 
 impl GlobalSlot {
     fn get(&self) -> Val {
         match self {
-            Self::Local(value) => *value,
+            Self::Local(global) => global.value(),
             Self::Imported(global) => global.value(),
         }
     }
 
     fn set(&mut self, value: Val) -> Result<(), WasmError> {
         match self {
-            Self::Local(slot) => {
-                *slot = value;
-                Ok(())
-            }
+            Self::Local(global) => global.set(value),
             Self::Imported(global) => global.set(value),
+        }
+    }
+
+    fn handle(&self) -> Global {
+        match self {
+            Self::Local(global) | Self::Imported(global) => global.clone(),
         }
     }
 }
@@ -4472,8 +4475,11 @@ impl Module {
             .map_err(|_| WasmError::Trap("global state"))?;
         for global in &self.globals {
             let slot = match &global.init {
-                GlobalInit::Value(value) => GlobalSlot::Local(*value),
-                GlobalInit::Expr(expr) => GlobalSlot::Local(eval_const_expr(expr, &globals)?),
+                GlobalInit::Value(value) => GlobalSlot::Local(Global::new(*value, global.mutable)),
+                GlobalInit::Expr(expr) => GlobalSlot::Local(Global::new(
+                    eval_const_expr(expr, &globals)?,
+                    global.mutable,
+                )),
                 GlobalInit::Import(Some(global)) => GlobalSlot::Imported(global.clone()),
                 GlobalInit::Import(None) => {
                     return Err(WasmError::Trap("unbound imported global"));
@@ -6683,6 +6689,16 @@ impl Instance {
         let state = self.state.borrow();
         let index = state.module.global_export_index(name)?;
         state.globals.get(index).map(GlobalSlot::get)
+    }
+
+    /// Resolve one standard global export as the same live store object.
+    ///
+    /// The returned handle can be bound through [`Module::bind_global_import`]
+    /// so mutations remain visible to both exporting and importing instances.
+    pub fn exported_global_handle(&self, name: &str) -> Option<Global> {
+        let state = self.state.borrow();
+        let index = state.module.global_export_index(name)?;
+        state.globals.get(index).map(GlobalSlot::handle)
     }
 
     /// Set one mutable standard exported global with exact value type.

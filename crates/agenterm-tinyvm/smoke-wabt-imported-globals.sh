@@ -9,13 +9,18 @@ CARGO=${CARGO:-cargo}
 WAT2WASM=${WAT2WASM:-wat2wasm}
 WASM_VALIDATE=${WASM_VALIDATE:-wasm-validate}
 WASM="$TEMP/imported-globals-v1.wasm"
+PROVIDER_WASM="$TEMP/exported-globals-v1.wasm"
 ORACLE="$TEMP/ImportedGlobalsOracle"
 
 "$WAT2WASM" --enable-extended-const \
   "$CRATE/tests/fixtures/imported-globals-v1.wat" -o "$WASM"
 "$WASM_VALIDATE" --enable-extended-const "$WASM"
+"$WAT2WASM" "$CRATE/tests/fixtures/exported-globals-v1.wat" -o "$PROVIDER_WASM"
+"$WASM_VALIDATE" "$PROVIDER_WASM"
 
-TINYVM_WABT_IMPORTED_GLOBALS_WASM="$WASM" "$CARGO" test -q -p agenterm-tinyvm \
+TINYVM_WABT_IMPORTED_GLOBALS_WASM="$WASM" \
+  TINYVM_WABT_EXPORTED_GLOBALS_WASM="$PROVIDER_WASM" \
+  "$CARGO" test -q -p agenterm-tinyvm \
   --test wabt_imported_globals_oracle wabt_compiled_imported_globals_match_tinyvm \
   -- --ignored --exact
 
@@ -26,6 +31,6 @@ xcrun swiftc \
   -framework JavaScriptCore \
   "$CRATE/tests/webkit/ImportedGlobalsOracle.swift" \
   -o "$ORACLE"
-"$ORACLE" "$WASM"
+"$ORACLE" "$WASM" "$PROVIDER_WASM"
 
-echo "OK: WABT validation, tinyvm and JavaScriptCore agree on imported globals"
+echo "OK: WABT validation, tinyvm and JavaScriptCore agree on linked exported globals"

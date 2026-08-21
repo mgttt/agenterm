@@ -11,20 +11,24 @@ enum OracleError: Error {
 @main
 struct ImportedGlobalsOracle {
     static func main() throws {
-        guard CommandLine.arguments.count == 2 else { throw OracleError.usage }
+        guard CommandLine.arguments.count == 3 else { throw OracleError.usage }
         let bytes = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
+        let providerBytes = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
         guard let context = JSContext() else { throw OracleError.context }
         var javascriptError: String?
         context.exceptionHandler = { _, exception in
             javascriptError = exception?.toString() ?? "unknown JavaScript exception"
         }
         context.setObject(Array(bytes), forKeyedSubscript: "hostBytes" as NSString)
+        context.setObject(Array(providerBytes), forKeyedSubscript: "providerBytes" as NSString)
         let value = context.evaluateScript(
             """
             (() => {
               const module = new WebAssembly.Module(Uint8Array.from(hostBytes));
-              const base = new WebAssembly.Global({value: "i32", mutable: false}, 3);
-              const counter = new WebAssembly.Global({value: "i32", mutable: true}, 10);
+              const providerModule = new WebAssembly.Module(Uint8Array.from(providerBytes));
+              const provider = new WebAssembly.Instance(providerModule);
+              const base = provider.exports.base;
+              const counter = provider.exports.counter;
               const imports = {host: {base, counter}};
               const first = new WebAssembly.Instance(module, imports);
               const a = first.exports.run();

@@ -74,6 +74,9 @@ global imports, constant `global.get`, active segment offsets and shared store
 identity; WABT validation, tinyvm and JavaScriptCore agree on result `878897`.
 This is a general-engine conformance case: TinyArcade v1 cartridge inspection
 deliberately rejects global imports.
+Both imported values come from a separately WABT-compiled provider module's
+standard exports, so the oracle proves live module-to-module global identity
+rather than only two instances sharing host-constructed values.
 `smoke-wabt-resource-exports.sh` independently covers named table, memory and
 global exports plus host mutation; WABT validates the bytes and tinyvm and
 JavaScriptCore both return `76`.

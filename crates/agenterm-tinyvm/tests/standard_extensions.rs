@@ -403,6 +403,26 @@ fn imported_i32_globals_module(initializer: &[u8]) -> Vec<u8> {
     wasm
 }
 
+fn exported_i32_globals_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(
+        &mut wasm,
+        6,
+        &[
+            0x02, 0x7F, 0x00, 0x41, 0x03, 0x0B, 0x7F, 0x01, 0x41, 0x0A, 0x0B,
+        ],
+    );
+    section(
+        &mut wasm,
+        7,
+        &[
+            0x02, 0x04, b'b', b'a', b's', b'e', 0x03, 0x00, 0x07, b'c', b'o', b'u', b'n', b't',
+            b'e', b'r', 0x03, 0x01,
+        ],
+    );
+    wasm
+}
+
 #[test]
 fn standard_imported_globals_bind_types_and_share_mutation() {
     let bytes = imported_i32_globals_module(&[0x23, 0x00, 0x41, 0x02, 0x6A, 0x0B]);
@@ -444,6 +464,49 @@ fn standard_imported_globals_bind_types_and_share_mutation() {
     assert!(matches!(
         WasmModule::from_bytes(&mutable_const),
         Err(WasmError::Decode("const expr global index"))
+    ));
+}
+
+#[test]
+fn standard_exported_global_handle_links_sibling_instances() {
+    let provider = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&exported_i32_globals_module()),
+            "load global provider",
+        )
+        .instantiate(),
+        "instantiate global provider",
+    );
+    let base = provider
+        .exported_global_handle("base")
+        .expect("base export");
+    let counter = provider
+        .exported_global_handle("counter")
+        .expect("counter export");
+    assert!(!base.is_mutable());
+    assert!(counter.is_mutable());
+
+    let bytes = imported_i32_globals_module(&[0x23, 0x00, 0x41, 0x02, 0x6A, 0x0B]);
+    let mut consumer = must_ok(WasmModule::from_bytes(&bytes), "load global consumer");
+    must_ok(
+        consumer.bind_global_import("host", "base", &base),
+        "link base export",
+    );
+    must_ok(
+        consumer.bind_global_import("host", "counter", &counter),
+        "link counter export",
+    );
+    let mut consumer = must_ok(consumer.instantiate(), "instantiate global consumer");
+    assert_eq!(
+        only_i32(must_ok(
+            consumer.invoke_by_name("run", &[]),
+            "run linked consumer",
+        )),
+        5
+    );
+    assert!(matches!(
+        provider.exported_global("counter"),
+        Some(Val::I32(13))
     ));
 }
 

@@ -2778,3 +2778,25 @@ at 0.178 ms average, 0.207 ms p95 and 0.386 ms maximum, with 23,203 peak steps,
 17 pages, call depth 6 and 62 activation slots. No physical iPhone is connected
 to this Mac mini, so the goal's physical lifecycle/performance checkbox remains
 open while the executable collection path is ready.
+
+## Eighty-first executable increment — linked standard global exports
+
+A defined standard global no longer lives as an instance-private copied `Val`.
+Each live slot owns the same cloneable `WasmGlobal` cell used by imported
+globals, and `Instance::exported_global_handle` exposes that exact object for
+binding through `Module::bind_global_import`. Mutable writes made by an
+importing sibling are immediately visible through the exporting instance;
+immutable exports retain their exact type and mutability checks.
+
+The imported-global differential now compiles a separate provider and consumer
+with WABT. TinyVM links the provider's two exported global handles into two
+consumer instances; JavaScriptCore links the same two `.wasm` files through
+ordinary `WebAssembly.Instance` exports/imports. Both produce the unchanged
+combined result `878897`, including sibling mutation and a later host update.
+
+Evidence on 2026-08-21: 247 non-ignored all-feature package tests plus the
+doctest pass; the linked WABT/JavaScriptCore oracle, no-default and replay
+checks, Clippy, rustfmt and all shell checks pass. The stripped static core is
+101,240 bytes with selftest 42. iOS links at 1,599,752 bytes arm64 and
+1,667,864 bytes x86_64; profile-catalog, replay, private-library and session
+consumers link at 1,472,600, 1,447,032, 1,448,704 and 1,447,856 bytes.

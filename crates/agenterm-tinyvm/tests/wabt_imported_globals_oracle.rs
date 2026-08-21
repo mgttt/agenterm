@@ -24,6 +24,11 @@ fn wabt_compiled_imported_globals_match_tinyvm() {
             .expect("TINYVM_WABT_IMPORTED_GLOBALS_WASM is set by the smoke script"),
     );
     let bytes = std::fs::read(path).expect("read WABT-produced wasm");
+    let provider_path = PathBuf::from(
+        std::env::var_os("TINYVM_WABT_EXPORTED_GLOBALS_WASM")
+            .expect("TINYVM_WABT_EXPORTED_GLOBALS_WASM is set by the smoke script"),
+    );
+    let provider_bytes = std::fs::read(provider_path).expect("read WABT-produced provider wasm");
 
     let unbound = must_ok(WasmModule::from_bytes(&bytes), "load unbound module");
     assert!(matches!(
@@ -45,8 +50,20 @@ fn wabt_compiled_imported_globals_match_tinyvm() {
         Err(WasmError::Trap("global binding type"))
     ));
 
-    let base = WasmGlobal::new(Val::I32(3), false);
-    let counter = WasmGlobal::new(Val::I32(10), true);
+    let provider = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&provider_bytes),
+            "load exported globals",
+        )
+        .instantiate(),
+        "instantiate exported globals",
+    );
+    let base = provider
+        .exported_global_handle("base")
+        .expect("base global export");
+    let counter = provider
+        .exported_global_handle("counter")
+        .expect("counter global export");
     must_ok(
         module.bind_global_import("host", "base", &base),
         "bind base",
@@ -88,4 +105,8 @@ fn wabt_compiled_imported_globals_match_tinyvm() {
         97
     );
     assert!(matches!(counter.value(), Val::I32(21)));
+    assert!(matches!(
+        provider.exported_global("counter"),
+        Some(Val::I32(21))
+    ));
 }
