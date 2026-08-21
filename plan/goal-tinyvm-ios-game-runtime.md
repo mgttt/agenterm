@@ -3732,6 +3732,31 @@ iOS device/universal-simulator XCFramework, optional WASI container and the
 four-cartridge tinyvm/JSC/H5 differential. All 115 isolated `no_std` library
 tests, warnings-denied all-feature and isolated `no_std` Clippy, arm64 iOS
 `no_std`, rustfmt, shell syntax, documentation-redaction and diff gates pass.
-Linked sizes are 1,637,144 bytes arm64, 1,725,840 bytes x86_64 and 1,142,688
+Linked sizes are 1,637,144 bytes arm64, 1,725,840 bytes x86_64 and 1,160,048
 bytes for the focused completion consumer. The stripped static core remains
 101,256 bytes with selftest 42.
+
+## One-hundred-sixteenth executable increment — Swift completion on Simulator
+
+The completion contract now has one independently authored standard cartridge,
+not only an inline protocol test. `async-completion-v1.wat` imports one
+module-specific `start`, the three common completion functions, standard
+indexed-frame versioning/submission, and nothing engine-private. Its builder
+compiles WAT with the ordinary producer toolchain and attaches a canonical
+manifest that derives the exact `fan:async/v1` capability; the result is 511
+bytes.
+
+The Swift smoke now opens that cartridge with `TinyArcadeCompletionV1`, renders
+one valid pending frame, completes the captured ticket with native status 7 and
+four RGBA bytes, then observes the guest validate poll status/length, take the
+payload into linear memory and render the resulting pixel. It also proves that
+a consumed ticket fails and that delivery after runtime close is rejected by a
+still-live but unbound channel. The booted-Simulator branch builds and runs this
+consumer alongside the existing game/session/replay flows.
+
+Evidence on 2026-08-22: the focused executable ran successfully inside the
+booted iPhone 17 Pro Simulator and printed
+`Swift MainActor completion → guest poll/take → indexed frame → safe teardown`.
+An additional host-neutral Rust integration test compiles the same WAT fixture,
+runs its pending/ready frames and confirms queue quiescence. The executable PRD
+trace now binds 113 completed claims.

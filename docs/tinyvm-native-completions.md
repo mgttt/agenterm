@@ -93,3 +93,13 @@ runtime. The runtime borrows the channel handle until close, while Swift retains
 the channel for that exact interval. `copy_host_profile_with_completions`
 publishes the ordinary start function and all three common imports, keeping
 converter preflight identical to runtime binding.
+
+The independently authored `async-completion-v1.wat` fixture is a 511-byte
+standard cartridge after its canonical manifest is attached. It imports no
+engine-private function: one module-specific `start`, the three common
+completion functions, and the standard TinyArcade indexed-frame functions are
+its complete host surface. The same cartridge runs through the host-neutral
+Rust registry and the Swift owner inside a booted iOS Simulator. The Simulator
+path proves pending rendering, owner-thread delivery, guest poll/status/length,
+payload take into linear memory, decoded indexed output, consumed-ticket
+rejection and safe late-delivery rejection after runtime close.

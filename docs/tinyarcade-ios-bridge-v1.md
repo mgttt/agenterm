@@ -326,7 +326,7 @@ the later 1.375 MiB gate accounted for the recoverable snapshot-store owner;
 the current arm64 1.5625 MiB gate additionally includes the app-owned completion
 channel, process-lifetime ticket domains and safe late-delivery boundary.
 Current linked evidence is 1,637,144 bytes arm64, 1,725,840 bytes x86_64 and
-1,142,688 bytes for the focused completion consumer.
+1,160,048 bytes for the focused completion consumer.
 Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 
@@ -345,6 +345,11 @@ decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 suspend into a fresh instance during the measured run. Its real launch event is
 also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
 explicitly deactivated on the booted simulator.
+The focused completion executable also runs its independently compiled
+511-byte standard cartridge: Swift allocates the request during the native
+start callback, renders the pending state, delivers RGBA bytes on the main
+actor, and observes guest poll/take plus the decoded pixel. Runtime teardown
+then rejects a late result through the still-live unbound channel.
 The same simulator smoke creates a real cache directory through the Swift v1.8
 owner and proves that a cartridge naming an absent trust key cannot activate.
 Rust's public C black box separately installs a valid signed cartridge, reloads

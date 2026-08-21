@@ -202,8 +202,10 @@ swift package --package-path "$PACKAGE" dump-package >/dev/null
 if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
   DEPTH_CARTRIDGE="$TEMP/depth-well-0.1.0.wasm"
   PADDLE_CARTRIDGE="$TEMP/paddle-guard-0.1.0.wasm"
+  COMPLETION_CARTRIDGE="$TEMP/async-completion-0.1.0.wasm"
   "$CRATE/build-depth-well-cartridge.sh" "$DEPTH_CARTRIDGE" >/dev/null
   "$CRATE/build-paddle-guard-cartridge.sh" "$PADDLE_CARTRIDGE" >/dev/null
+  "$CRATE/build-async-completion-cartridge.sh" "$COMPLETION_CARTRIDGE" >/dev/null
   xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
     "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
   xcrun simctl spawn booted "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64"
@@ -217,6 +219,8 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
     "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
   xcrun simctl spawn booted "$TEMP/TinyArcadeGameSessionSmoke-arm64" \
     "$PADDLE_CARTRIDGE"
+  xcrun simctl spawn booted "$TEMP/TinyArcadeCompletionSmoke-arm64" \
+    "$COMPLETION_CARTRIDGE"
 fi
 
 echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} bytes"
