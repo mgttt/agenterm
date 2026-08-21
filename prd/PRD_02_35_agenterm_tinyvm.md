@@ -183,8 +183,10 @@ agenterm-tinyvm (35)                                      [~]
 │   └── research queue                                   [~]
 │       ├── QJWasm ownership + low-copy lessons           [~]
 │       ├── unified host/guest handle lifetimes            [x]
-│       ├── bounded call/callback/completion channels      [ ]
-│       ├── event-loop-neutral async completion ABI        [ ]
+│       ├── bounded call/callback/completion channels      [x]
+│       ├── event-loop-neutral async completion ABI        [~]
+│       │   ├── owner-thread completion queue core           [x]
+│       │   └── versioned guest import protocol              [ ]
 │       ├── cross-boundary copy/call benchmarks            [x]
 │       └── JavaScriptCore remains development oracle     [~]
 │
@@ -259,6 +261,10 @@ as “almost approved” or “safe to ship externally.”
   mutable view of memory zero. Future multi-memory context must identify the selected memory,
   remain synchronous and bounded, and be impossible to retain after callback return; it must
   not use `unsafe` merely to bypass borrow checking.
+- Native async work uses an event-loop-neutral bounded completion queue. It reserves request
+  count and maximum response bytes before work starts, uses runtime-local generation-checked
+  tickets, transfers completed payload ownership without a second copy, and must quiesce before
+  portable suspend. Platform scheduling and versioned module imports remain outside the VM.
 
 ### 6. App Store distribution is a separate authority gate
 
@@ -278,7 +284,7 @@ as “almost approved” or “safe to ship externally.”
 | Execution | Persistent instance, explicit activation trampoline, fuel and resource telemetry | Deterministic trap local to the instance |
 | Values | i32/i64/f32/f64, funcref and opaque externref through supported standard locations | Exact type mismatch rejection |
 | Resources | Defined/imported/exported globals, memories and funcref/externref tables | Binding/type/limit rejection or borrow-conflict trap |
-| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path, generation-checked guest resource table and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction; stale tokens never name replacements within an allocator lifetime, while persisted snapshots must quiesce native resources |
+| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path, generation-checked guest resources, bounded native completion queue and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction; saturation/oversize/stale completion fails typed, while persisted snapshots must quiesce native resources |
 | Optional WASI P1 | Sixteen exact process/clock/random/preopen/descriptor/path/exit imports over the neutral host contract | Unknown/wrong imports fail binding; bad memory, path, rights or backend absence returns explicit errno/interruption |
 | TinyArcade | Manifest, core v1, native registry, lifecycle, deterministic RNG/clock, render/audio/state bounds | Cartridge fails closed; App owner remains alive |
 | iOS | C ABI, XCFramework, Swift package, input/frame pacing, persistence, replay and native 2D/3D/audio owners | Main-actor owner latches bad runtime and clears stale output |
@@ -396,6 +402,7 @@ Current evidence owners:
 - [Optional iOS WASI host](../docs/tinyvm-ios-wasi-host.md)
 - [Selected-memory host callbacks](../docs/tinyvm-selected-memory-host.md)
 - [Host resource table](../docs/tinyvm-host-resource-table.md)
+- [Native completion channel](../docs/tinyvm-native-completions.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [C cartridge authoring](../docs/tinyarcade-c-authoring-v1.md)

@@ -71,6 +71,11 @@ pub use resource_table::{
     MAX_RESOURCE_SLOTS, ResourceDomainAllocator, ResourceHandleDomain, ResourceTableError,
 };
 
+pub mod completion;
+pub use completion::{
+    CompletionError, CompletionPoll, CompletionRejection, HostCompletion, HostCompletionQueue,
+};
+
 #[cfg(feature = "std-host")]
 pub mod std_host;
 #[cfg(feature = "std-host")]

@@ -1897,6 +1897,15 @@ Enforce both a per-item payload ceiling and an aggregate queued-byte ceiling,
 account bytes before ownership transfer, and return the exact allowance when a
 batch drains. Expose queued bytes alongside item/drop counts.
 
+For native work that completes after a Wasm import returns, reserve both the
+request slot and its maximum response bytes before starting external work. Use
+the same non-reused domain/generation identity as other guest-visible resources,
+return payload ownership on rejected completion, and count pending plus ready-
+but-unclaimed requests as live during snapshot quiescence. Keep the common VM
+primitive event-loop-neutral: platform workers marshal results to the runtime
+owner, while each versioned native module defines its own ordinary Wasm import
+protocol and replay normalization.
+
 ## Saturate native geometry before narrowing coordinates
 
 Treat window dimensions, DPI scales, pointer coordinates, and row indexes as

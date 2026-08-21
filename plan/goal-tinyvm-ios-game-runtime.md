@@ -3636,3 +3636,35 @@ fresh-instance snapshot restore and four-engine replay differential remain
 green. The executable PRD trace now binds all 105 completed claims; shell
 syntax, rustfmt, document redaction and diff checks pass. Runtime/iOS/static-core
 artifacts are unchanged because the header is guest authoring source only.
+
+## One-hundred-thirteenth executable increment — bounded native completions
+
+The unified crate now supplies an event-loop-neutral `HostCompletionQueue` for
+native work that cannot finish inside one synchronous Wasm import. A request
+reserves both one bounded resource-table slot and its maximum response bytes
+before external work starts. Its guest-visible ticket inherits the table's
+non-reused runtime domain and slot generation. Completion moves an owned byte
+vector into the queue without another copy; stale, duplicate and oversized
+results return typed failures and preserve rejected payload ownership.
+
+The queue embeds no thread, executor, wake primitive, Promise or platform API.
+Each platform performs work through its own mechanism and marshals completion
+onto the runtime owner. Pending and ready-but-unclaimed requests remain tracked
+native resources, so portable suspend fails until they are taken or cancelled.
+Versioned native modules still own their ordinary Wasm `start`/`poll`/`close`
+import protocol and any replay normalization; no engine-private import entered
+the VM.
+
+Evidence on 2026-08-22: one public black box proves item and aggregate-byte
+saturation, pending/ready/take/cancel states, no-copy payload ownership,
+oversize and duplicate rejection, reservation release, stale-token rejection
+and distinct replacement-runtime domains. A second runtime black box proves an
+outstanding async request blocks portable snapshot and latches the normal
+native-resource quiescence failure. The executable PRD trace binds both new
+completed leaves, bringing the map to 107 claims. The complete all-feature
+package and every non-ignored integration test pass, including both iOS
+XCFramework gates and the four-cartridge tinyvm/JSC/H5 differential. All 115
+isolated `no_std` library tests, warnings-denied all-feature and isolated
+`no_std` Clippy, arm64 iOS `no_std`, rustfmt and document-redaction gates pass.
+Default linked sizes remain 1,603,208 bytes arm64 and 1,682,184 bytes x86_64;
+the stripped static core remains 101,256 bytes with selftest 42.

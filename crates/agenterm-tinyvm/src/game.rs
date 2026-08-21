@@ -197,6 +197,21 @@ impl NativeModuleRegistry {
         Ok(table)
     }
 
+    /// Create one bounded, event-loop-neutral async completion queue for a
+    /// versioned native module. Pending and ready requests participate in the
+    /// same runtime-local handle identity and snapshot-quiescence contract as
+    /// every other native resource.
+    pub fn completion_queue(
+        &mut self,
+        module: &str,
+        max_pending: u16,
+        max_reserved_bytes: usize,
+        allocator: &mut crate::ResourceDomainAllocator,
+    ) -> Result<crate::HostCompletionQueue, WasmError> {
+        let table = self.resource_table(module, max_pending, allocator)?;
+        Ok(crate::HostCompletionQueue::new(table, max_reserved_bytes))
+    }
+
     /// Inspect an already assigned table domain without changing the registry.
     pub fn assigned_resource_table_domain(
         &self,

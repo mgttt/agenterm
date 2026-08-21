@@ -6,9 +6,10 @@ use std::rc::Rc;
 
 use agenterm_tinyvm::GuestResourceHandle;
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameFrame, GameInput, GameLifecycle, GameLimits,
-    GameRuntime, HostProfileV1, HostResourceTable, Limits, MAX_CARTRIDGE_BYTES,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame, WasmError,
+    CartridgeDescriptor, CartridgeManifest, CompletionError, CompletionPoll, GameFrame, GameInput,
+    GameLifecycle, GameLimits, GameRuntime, HostProfileV1, HostResourceTable, Limits,
+    MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
+    WasmError,
 };
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
@@ -1553,6 +1554,117 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
     assert!(nonquiescent.tick(GameInput::default()).is_err());
     replacement_resources.borrow_mut().clear();
     assert!(replacement_resources.borrow().is_empty());
+}
+
+#[test]
+fn native_completion_queue_bounds_identity_items_and_reserved_bytes() {
+    let mut allocator = agenterm_tinyvm::ResourceDomainAllocator::new();
+    let mut registry = NativeModuleRegistry::new();
+    let mut queue = must_ok(
+        registry.completion_queue("fan:network/v1", 2, 8, &mut allocator),
+        "create completion queue",
+    );
+
+    let first = queue.begin(5).expect("reserve first completion");
+    assert!(matches!(
+        queue.begin(4),
+        Err(CompletionError::ByteBudgetExceeded)
+    ));
+    let second = queue.begin(3).expect("reserve second completion");
+    assert!(matches!(queue.begin(0), Err(CompletionError::Full)));
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue.reserved_bytes(), 8);
+    assert!(matches!(
+        queue.poll(first).expect("poll pending completion"),
+        CompletionPoll::Pending
+    ));
+    assert!(matches!(queue.take(first), Err(CompletionError::NotReady)));
+
+    let rejected = queue
+        .try_complete(first, 7, vec![1, 2, 3, 4, 5, 6])
+        .expect_err("oversized completion must retain ownership");
+    assert_eq!(rejected.error, CompletionError::PayloadTooLarge);
+    assert_eq!(rejected.payload, [1, 2, 3, 4, 5, 6]);
+    queue
+        .try_complete(first, 7, vec![1, 2, 3, 4])
+        .expect("complete reserved request");
+    match queue.poll(first).expect("poll ready completion") {
+        CompletionPoll::Ready { status, payload } => {
+            assert_eq!(status, 7);
+            assert_eq!(payload, [1, 2, 3, 4]);
+        }
+        CompletionPoll::Pending => panic!("completion remained pending"),
+    }
+    let duplicate = queue
+        .try_complete(first, 8, vec![9])
+        .expect_err("duplicate completion must fail");
+    assert_eq!(duplicate.error, CompletionError::AlreadyCompleted);
+    assert_eq!(duplicate.payload, [9]);
+
+    let completed = queue.take(first).expect("take ready completion");
+    assert_eq!(completed.status, 7);
+    assert_eq!(completed.payload, [1, 2, 3, 4]);
+    assert_eq!(queue.reserved_bytes(), 3);
+    assert!(matches!(
+        queue.poll(first),
+        Err(CompletionError::StaleHandle)
+    ));
+    queue.cancel(second).expect("cancel pending completion");
+    assert!(queue.is_empty());
+    assert_eq!(queue.reserved_bytes(), 0);
+
+    let mut replacement = NativeModuleRegistry::new();
+    let mut replacement_queue = must_ok(
+        replacement.completion_queue("fan:network/v1", 1, 8, &mut allocator),
+        "create replacement completion queue",
+    );
+    let replacement_handle = replacement_queue
+        .begin(1)
+        .expect("reserve replacement request");
+    assert_ne!(replacement_handle.domain(), first.domain());
+    let stale = replacement_queue
+        .try_complete(first, 0, vec![1])
+        .expect_err("old runtime completion id must fail");
+    assert_eq!(stale.error, CompletionError::StaleHandle);
+    assert_eq!(stale.payload, [1]);
+    replacement_queue
+        .cancel(replacement_handle)
+        .expect("cancel replacement request");
+}
+
+#[test]
+fn pending_native_completion_prevents_portable_snapshot() {
+    let wasm = game_module(&[], 1, &[0x41, 0x00, 0x0b], &[]);
+    let mut allocator = agenterm_tinyvm::ResourceDomainAllocator::new();
+    let mut registry = NativeModuleRegistry::new();
+    let queue = Rc::new(RefCell::new(must_ok(
+        registry.completion_queue("fan:network/v1", 1, 16, &mut allocator),
+        "create tracked completion queue",
+    )));
+    let request = queue
+        .borrow_mut()
+        .begin(16)
+        .expect("start native async request");
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            registry,
+        ),
+        "open runtime with completion queue",
+    );
+    assert!(matches!(
+        runtime.suspend(),
+        Err(WasmError::Trap("native resources not quiescent"))
+    ));
+    assert!(runtime.is_failed());
+    queue
+        .borrow_mut()
+        .cancel(request)
+        .expect("cancel failed request");
+    assert!(queue.borrow().is_empty());
 }
 
 #[test]
