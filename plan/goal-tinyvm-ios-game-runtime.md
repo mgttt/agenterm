@@ -3069,3 +3069,26 @@ rebuilt cartridge, links current tinyvm, and has no WebKit/JavaScriptCore
 dependency. Re-running the preparation after commit leaves the consumer
 worktree clean, proving byte reproducibility. Nostalgia Arcade main contains
 commit `6ff3262`; physical-device execution remains the separate open gate.
+
+## Ninety-first executable increment — current runtime TestFlight candidate
+
+Nostalgia Arcade 0.16.4 build 31 packages current tinyvm and the refreshed
+6,116-byte Depth Well cartridge in a signed arm64 archive. Before upload, the
+archive passed strict code-signature verification, contained exactly one Wasm
+file with the committed SHA-256, targeted iOS, and had no WebKit/JavaScriptCore
+dynamic dependency. Xcode then completed App Store Connect analysis/SPI
+analysis and recorded `Upload succeeded` with no upload warnings or errors.
+
+The consumer repository binds the candidate to both source commits, a canonical
+archive content-tree digest, executable and `Info.plist` hashes, dSYM UUID,
+cartridge hash, toolchain and Apple upload event in
+`docs/releases/0.16.4-31-testflight.md`. Its retained simulator attachment is
+also decoded rather than inferred from the test name: 600 frames measure
+0.175 ms average, 0.205 ms p95 and 0.351 ms maximum with 23,203 fuel, 17 pages,
+call depth 6 and 62 activation slots.
+
+Apple-side processing/availability is not yet independently observed because
+this Codex session has no connected browser surface. The archive itself records
+upload event `c1ca0832-ad3b-4c3c-b4c9-57161afd2d5b` at
+2026-08-21T15:45:26Z with `state=success`. This is distribution evidence, not
+the still-open physical-iPhone lifecycle/performance/feel result.
