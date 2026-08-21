@@ -139,7 +139,7 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── Signal Lock Swift-to-Wasm migration               [x]
 │   ├── deterministic replay vectors                      [x]
 │   ├── development JSC + H5 differential                [x]
-│   ├── real iOS app consumer                            [~]
+│   ├── real iOS app consumer                            [x]
 │   ├── TestFlight bundled-only candidate                [~]
 │   └── physical-device play                             [ ]
 │

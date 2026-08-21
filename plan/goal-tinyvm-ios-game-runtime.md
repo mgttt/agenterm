@@ -3760,3 +3760,26 @@ booted iPhone 17 Pro Simulator and printed
 An additional host-neutral Rust integration test compiles the same WAT fixture,
 runs its pending/ready frames and confirms queue quiescence. The executable PRD
 trace now binds 113 completed claims.
+
+## One-hundred-seventeenth executable increment — runtime-owned real-App gate
+
+The exact-current-runtime acceptance criterion now has an owner inside tinyvm,
+not only a command in the consumer repository. `smoke-nostalgia-consumer.sh`
+invokes Nostalgia Arcade's complete gate against this checkout, then proves the
+arm64 static archive copied into its Swift package is byte-identical to the
+producer archive. It also requires the final App executable to contain the ABI
+v1.10 native-completion entry point and rejects an implicit rewrite of either
+committed cartridge or the generated Xcode project.
+
+Evidence on 2026-08-22: the real App passes all 10 runtime unit tests, the one
+two-game hall/UI journey, and an unsigned generic-device arm64 Release build.
+The producer and consumed archives share SHA-256
+`4d468ef9f50aac9db266aa446bc48f0e191362427ddb3935e55b91479ffdd656`.
+The product contains exactly the 6,116-byte Depth Well cartridge
+(`d1a61599e6877da2b27bd4859f49ba9e0bc0fd4b80df8f66145893ebb2317e6f`)
+and 5,784-byte Signal Lock cartridge
+(`759c978d8ba3bf70818556f797181f3a8d9ce253b8e89727631b533823f91fd4`),
+with no web runtime, network fetch surface or archived native game engine. The
+PRD trace now binds 114 completed claims. Physical-iPhone/TestFlight lifecycle,
+audio and performance evidence remain open, so the persistent goal stays
+active.
