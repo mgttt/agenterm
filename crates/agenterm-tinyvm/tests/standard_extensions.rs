@@ -1,4 +1,4 @@
-use agenterm_tinyvm::{Val, ValueType, WasmError, WasmGlobal, WasmModule};
+use agenterm_tinyvm::{Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -334,12 +334,12 @@ fn assert_copy_fill_semantics() {
         "decode standard memory.fill",
     );
     let mut instance = must_ok(module.instantiate(), "instantiate module");
-    instance.memory_mut()[0..8].copy_from_slice(b"abcdefgh");
+    must_ok(instance.memory_mut(), "memory mut")[0..8].copy_from_slice(b"abcdefgh");
 
     must_ok(instance.invoke(copy, &[2, 0, 6]), "overlap-safe copy");
-    assert_eq!(&instance.memory()[0..8], b"ababcdef");
+    assert_eq!(&must_ok(instance.memory(), "memory")[0..8], b"ababcdef");
     must_ok(instance.invoke(fill, &[1, 0x1234, 3]), "low-byte fill");
-    assert_eq!(&instance.memory()[0..8], b"a444cdef");
+    assert_eq!(&must_ok(instance.memory(), "memory")[0..8], b"a444cdef");
 }
 
 fn only_i32(values: Vec<Val>) -> i32 {
@@ -439,6 +439,69 @@ fn standard_imported_globals_bind_types_and_share_mutation() {
     ));
 }
 
+fn imported_memory_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(
+        &mut wasm,
+        2,
+        &[
+            0x01, 0x04, b'h', b'o', b's', b't', 0x03, b'r', b'a', b'm', 0x02, 0x01, 0x01, 0x03,
+        ],
+    );
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
+    section(
+        &mut wasm,
+        10,
+        &[0x01, 0x07, 0x00, 0x41, 0x00, 0x2D, 0x00, 0x00, 0x0B],
+    );
+    section(&mut wasm, 11, &[0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, b'A']);
+    wasm
+}
+
+#[test]
+fn standard_imported_memory_binds_limits_and_shares_store_identity() {
+    let bytes = imported_memory_module();
+    let unbound = must_ok(WasmModule::from_bytes(&bytes), "load unbound memory");
+    assert!(matches!(
+        unbound.instantiate(),
+        Err(WasmError::Trap("unbound imported memory"))
+    ));
+
+    let memory = must_ok(WasmMemory::new(1, Some(3)), "allocate imported memory");
+    let mut module = must_ok(WasmModule::from_bytes(&bytes), "load memory import");
+    assert_eq!(module.memory_imports().len(), 1);
+    assert_eq!(module.memory_imports()[0].min, 1);
+    assert_eq!(module.memory_imports()[0].max, Some(3));
+    must_ok(
+        module.bind_memory_import("host", "ram", &memory),
+        "bind imported memory",
+    );
+    let mut first = must_ok(module.instantiate(), "instantiate memory import");
+    assert!(matches!(
+        must_ok(first.invoke_by_name("run", &[]), "read active data").as_slice(),
+        [Val::I32(65)]
+    ));
+    must_ok(memory.view_mut(), "host write")[0] = 66;
+    assert!(matches!(
+        must_ok(first.invoke_by_name("run", &[]), "read host write").as_slice(),
+        [Val::I32(66)]
+    ));
+
+    let too_small = must_ok(WasmMemory::new(0, Some(3)), "allocate too-small memory");
+    let mut module = must_ok(WasmModule::from_bytes(&bytes), "reload memory import");
+    assert!(matches!(
+        module.bind_memory_import("host", "ram", &too_small),
+        Err(WasmError::Trap("memory binding limits"))
+    ));
+    let unbounded = must_ok(WasmMemory::new(1, None), "allocate unbounded memory");
+    assert!(matches!(
+        module.bind_memory_import("host", "ram", &unbounded),
+        Err(WasmError::Trap("memory binding limits"))
+    ));
+}
+
 #[test]
 fn standard_resource_exports_are_resolved_by_name() {
     let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
@@ -470,14 +533,13 @@ fn standard_resource_exports_are_resolved_by_name() {
     let mut instance = must_ok(module.instantiate(), "instantiate resource exports");
     assert_eq!(instance.exported_table_elements("t"), Some(2));
     assert_eq!(
-        instance.exported_memory("mem").map(|memory| memory[0]),
+        must_ok(instance.exported_memory("mem"), "exported memory").map(|memory| memory[0]),
         Some(b'A')
     );
-    instance
-        .exported_memory_mut("mem")
-        .expect("exported memory")[1] = b'B';
+    must_ok(instance.exported_memory_mut("mem"), "exported memory mut").expect("exported memory")
+        [1] = b'B';
     assert_eq!(
-        &instance.exported_memory("mem").expect("memory")[..2],
+        &must_ok(instance.exported_memory("mem"), "exported memory").expect("memory")[..2],
         b"AB"
     );
     assert!(matches!(
@@ -496,7 +558,7 @@ fn standard_resource_exports_are_resolved_by_name() {
         instance.set_exported_global("fixed", Val::I64(10)),
         Err(WasmError::Trap("global binding type"))
     ));
-    assert!(instance.exported_memory("missing").is_none());
+    assert!(must_ok(instance.exported_memory("missing"), "missing memory").is_none());
 }
 
 #[test]
@@ -1166,10 +1228,10 @@ fn standard_bulk_memory_proposal_executes_with_instance_semantics() {
         "instantiate passive data B",
     );
     must_ok(data_a.invoke(0, &[8, 1, 3]), "init and drop data A");
-    assert_eq!(&data_a.memory()[8..11], b"ell");
+    assert_eq!(&must_ok(data_a.memory(), "memory A")[8..11], b"ell");
     assert!(data_a.invoke(0, &[0, 0, 1]).is_err());
     must_ok(data_b.invoke(0, &[0, 0, 5]), "independent data B");
-    assert_eq!(&data_b.memory()[0..5], b"hello");
+    assert_eq!(&must_ok(data_b.memory(), "memory B")[0..5], b"hello");
 
     let elem_bytes = passive_elem_module();
     let mut elem = must_ok(

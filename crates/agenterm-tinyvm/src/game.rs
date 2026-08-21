@@ -99,6 +99,11 @@ impl CartridgeDescriptor {
                 "game cartridge does not support global imports",
             ));
         }
+        if !module.memory_imports().is_empty() {
+            return Err(WasmError::Decode(
+                "game cartridge does not support memory imports",
+            ));
+        }
         Ok(Self {
             manifest,
             imports: module.imports().to_vec(),
@@ -507,6 +512,11 @@ impl GameRuntime {
         if module.memory_count() != 1 {
             return Err(WasmError::Decode(
                 "game cartridge requires exactly one memory",
+            ));
+        }
+        if !module.memory_imports().is_empty() {
+            return Err(WasmError::Decode(
+                "game cartridge does not support memory imports",
             ));
         }
         if !module.global_imports().is_empty() {

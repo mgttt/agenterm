@@ -77,6 +77,12 @@ deliberately rejects global imports.
 `smoke-wabt-resource-exports.sh` independently covers named table, memory and
 global exports plus host mutation; WABT validates the bytes and tinyvm and
 JavaScriptCore both return `76`.
+`smoke-wabt-imported-memory.sh` covers the general VM's standard imported
+memory binding, active data, shared sibling writes/growth, exact limits and
+alias identity. WABT validates both fixtures; tinyvm and JavaScriptCore agree
+on the single-import result `516`, while a multi-index alias test proves
+overlap-safe copy result `593`. TinyArcade v1 deliberately rejects this general
+engine capability.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.

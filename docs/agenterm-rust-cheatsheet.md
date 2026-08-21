@@ -2592,9 +2592,14 @@ fuel before writing, just as same-memory `copy_within` does.
 An embedding whose callbacks and snapshots name memory zero may still require
 exactly one memory at its own load gate. Keep that check above the general
 module loader; otherwise a game ABI convenience silently becomes the VM's
-language limit. Do not accept imported memories until the host has an explicit
+language limit. Accept imported memories only after the host has an explicit
 store-level binding and identity model—an internal-memory vector alone is not
-an import implementation.
+an import implementation. Use a shared object with scoped read/write guards;
+copying bytes before and after a call is not equivalent because sibling writes,
+growth, active segments and re-exports must all observe one identity. Treat two
+indices bound to the same object as aliases for aggregate budgets and
+overlapping `memory.copy`, and turn conflicting host borrows into traps rather
+than `RefCell` panics.
 
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a

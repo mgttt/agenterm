@@ -25,6 +25,7 @@ tinyvm iOS game runtime
 │   ├── extended constant expressions [x]
 │   ├── standard imported numeric globals [x]
 │   ├── named standard resource exports [x]
+│   ├── standard imported linear memories [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2456,3 +2457,48 @@ Evidence on 2026-08-21:
 - All 241 non-ignored package tests plus one doctest pass with all features;
   the full iOS bridge links at 1,557,656 bytes arm64 and 1,640,400 bytes
   x86_64, and the stripped static core remains 101,128 bytes.
+
+## Sixty-ninth executable increment — standard imported linear memories
+
+tinyvm now accepts standard linear-memory imports and binds them to explicit
+host-owned store objects. A cloned `WasmMemory` is the same object: guest
+writes, host writes, active data initialization and `memory.grow` are visible
+to every importing sibling instance. Import matching implements standard
+limits subtyping (current size at least the required minimum, and an actual
+declared maximum no wider than a required maximum).
+
+Imported memories use a guarded shared store, while VM-defined memories retain
+their direct `Vec` fast path. Loads, stores, scalar memory ops, bulk
+init/copy/fill, growth and function host callbacks dispatch through that dual
+representation without unsafe aliasing. A conflicting host borrow returns a
+deterministic trap rather than panicking. If two distinct import indices bind
+the same memory, aggregate page accounting counts the object once and
+cross-index overlapping `memory.copy` retains memmove semantics.
+
+The public memory accessors return scoped read/write guards, preventing a slice
+from outliving or racing a shared memory mutation. Named re-export of an
+imported memory resolves to that same object. TinyArcade v1 rejects memory
+imports during both static inspection and runtime opening; this remains a
+general VM capability rather than an accidental game-ABI expansion.
+
+Evidence on 2026-08-21:
+
+- WABT validates the shared imported-memory fixture; tinyvm and public
+  JavaScriptCore run the exact bytes with two sibling instances to result
+  `516`, including shared write and grow visibility.
+- A WABT-validated two-index alias fixture proves one-page aggregate budgeting,
+  borrow-conflict trapping and overlapping cross-index copy result `593` /
+  bytes `aabcdf`.
+- Public tests cover unbound instantiation, descriptor order, exact limits
+  matching, active data, host mutation and TinyArcade profile rejection.
+- All 244 non-ignored package tests plus one doctest pass with all features;
+  every WABT/WebKit oracle passes. The stripped static core is 101,160 bytes.
+  The iOS bridge and Swift package link at 1,576,776 bytes arm64 and 1,650,496
+  bytes x86_64; the host-profile catalog, replay, private-library and session
+  consumers link at 1,449,640, 1,424,040, 1,442,256 and 1,441,408 bytes. The
+  arm64 product ceiling moved by one explicit 16 KiB bucket for imported-memory
+  store identity.
+- The real Nostalgia Arcade consumer gate passes five runtime/App unit tests,
+  one full UI journey and an arm64 device Release build. Its DEBUG reset now
+  removes persisted TinyArcade snapshots as well as defaults, so repeated UI
+  runs cannot revive a previously ended cartridge session.

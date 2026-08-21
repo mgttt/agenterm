@@ -124,7 +124,10 @@ HOST_PROFILE_CATALOG_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeHostProfileCatalo
 REPLAY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeReplaySmoke-arm64")
 PRIVATE_LIBRARY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadePrivateLibrarySmoke-arm64")
 GAME_SESSION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeGameSessionSmoke-arm64")
-MAX_ARM64_LINKED_BYTES=1572864
+# Imported-memory store identity adds the guarded shared path while defined
+# memories retain their direct fast path. Keep one explicit 16 KiB product step
+# for that standard capability; later increments stay within this ceiling.
+MAX_ARM64_LINKED_BYTES=1589248
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
 # Imported-global store identity crosses the next x86_64 linker size bucket;

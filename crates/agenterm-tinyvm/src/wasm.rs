@@ -17,7 +17,8 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::Cell;
+use core::cell::{Cell, Ref, RefCell, RefMut};
+use core::ops::{Deref, DerefMut};
 
 mod validate;
 
@@ -112,6 +113,206 @@ pub struct Global {
     value: Rc<Cell<Val>>,
     value_type: ValueType,
     mutable: bool,
+}
+
+/// A standard host-owned linear memory shared by every importing instance.
+///
+/// Clones retain one store object. Guest writes and growth are therefore
+/// immediately visible through the host handle and sibling instances.
+#[derive(Clone)]
+pub struct Memory {
+    state: Rc<MemoryState>,
+    max: Option<usize>,
+}
+
+struct MemoryState {
+    bytes: RefCell<Vec<u8>>,
+    pages: Cell<usize>,
+}
+
+impl Memory {
+    /// Allocate a zeroed standard 64 KiB/page memory with declared limits.
+    pub fn new(min: usize, max: Option<usize>) -> Result<Self, WasmError> {
+        if min > WASM_MAX_PAGES || max.is_some_and(|limit| limit > WASM_MAX_PAGES || limit < min) {
+            return Err(WasmError::Trap("memory binding limits"));
+        }
+        let size = min
+            .checked_mul(WASM_PAGE_SIZE)
+            .ok_or(WasmError::Trap("memory size"))?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| WasmError::Trap("memory size"))?;
+        bytes.resize(size, 0);
+        Ok(Self {
+            state: Rc::new(MemoryState {
+                bytes: RefCell::new(bytes),
+                pages: Cell::new(min),
+            }),
+            max,
+        })
+    }
+
+    pub fn pages(&self) -> usize {
+        self.state.pages.get()
+    }
+
+    pub fn max_pages(&self) -> Option<usize> {
+        self.max
+    }
+
+    pub fn view(&self) -> Result<MemoryView<'_>, WasmError> {
+        self.state
+            .bytes
+            .try_borrow()
+            .map(|bytes| MemoryView(MemoryViewInner::Shared(bytes)))
+            .map_err(|_| WasmError::Trap("memory is already mutably borrowed"))
+    }
+
+    pub fn view_mut(&self) -> Result<MemoryViewMut<'_>, WasmError> {
+        self.state
+            .bytes
+            .try_borrow_mut()
+            .map(|bytes| MemoryViewMut(MemoryViewMutInner::Shared(bytes)))
+            .map_err(|_| WasmError::Trap("memory is already borrowed"))
+    }
+
+    fn same_store(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.state, &other.state)
+    }
+
+    fn grow_to(&self, new_pages: usize) -> Result<bool, WasmError> {
+        let new_size = new_pages
+            .checked_mul(WASM_PAGE_SIZE)
+            .ok_or(WasmError::Trap("memory size"))?;
+        let mut bytes = self
+            .state
+            .bytes
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("memory is already borrowed"))?;
+        let extra = new_size
+            .checked_sub(bytes.len())
+            .ok_or(WasmError::Trap("memory size"))?;
+        if bytes.try_reserve(extra).is_err() {
+            return Ok(false);
+        }
+        bytes.resize(new_size, 0);
+        self.state.pages.set(new_pages);
+        Ok(true)
+    }
+}
+
+/// Read guard for a shared standard linear memory.
+pub struct MemoryView<'a>(MemoryViewInner<'a>);
+
+enum MemoryViewInner<'a> {
+    Direct(&'a [u8]),
+    Shared(Ref<'a, Vec<u8>>),
+    Empty,
+}
+
+impl Deref for MemoryView<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match &self.0 {
+            MemoryViewInner::Direct(bytes) => bytes,
+            MemoryViewInner::Shared(bytes) => bytes.as_slice(),
+            MemoryViewInner::Empty => &[],
+        }
+    }
+}
+
+/// Mutable guard for a shared standard linear memory.
+pub struct MemoryViewMut<'a>(MemoryViewMutInner<'a>);
+
+enum MemoryViewMutInner<'a> {
+    Direct(&'a mut [u8]),
+    Shared(RefMut<'a, Vec<u8>>),
+    Empty,
+}
+
+impl Deref for MemoryViewMut<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match &self.0 {
+            MemoryViewMutInner::Direct(bytes) => bytes,
+            MemoryViewMutInner::Shared(bytes) => bytes.as_slice(),
+            MemoryViewMutInner::Empty => &[],
+        }
+    }
+}
+
+impl DerefMut for MemoryViewMut<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match &mut self.0 {
+            MemoryViewMutInner::Direct(bytes) => bytes,
+            MemoryViewMutInner::Shared(bytes) => bytes.as_mut_slice(),
+            MemoryViewMutInner::Empty => &mut [],
+        }
+    }
+}
+
+enum MemorySlot {
+    Defined { bytes: Vec<u8>, max: Option<usize> },
+    Imported(Memory),
+}
+
+impl MemorySlot {
+    fn pages(&self) -> usize {
+        match self {
+            Self::Defined { bytes, .. } => bytes.len() / WASM_PAGE_SIZE,
+            Self::Imported(memory) => memory.pages(),
+        }
+    }
+
+    fn max_pages(&self) -> Option<usize> {
+        match self {
+            Self::Defined { max, .. } => *max,
+            Self::Imported(memory) => memory.max_pages(),
+        }
+    }
+
+    fn aliases(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Imported(left), Self::Imported(right)) => left.same_store(right),
+            _ => false,
+        }
+    }
+
+    fn view(&self) -> Result<MemoryView<'_>, WasmError> {
+        match self {
+            Self::Defined { bytes, .. } => Ok(MemoryView(MemoryViewInner::Direct(bytes))),
+            Self::Imported(memory) => memory.view(),
+        }
+    }
+
+    fn view_mut(&mut self) -> Result<MemoryViewMut<'_>, WasmError> {
+        match self {
+            Self::Defined { bytes, .. } => Ok(MemoryViewMut(MemoryViewMutInner::Direct(bytes))),
+            Self::Imported(memory) => memory.view_mut(),
+        }
+    }
+
+    fn grow_to(&mut self, new_pages: usize) -> Result<bool, WasmError> {
+        match self {
+            Self::Defined { bytes, .. } => {
+                let new_size = new_pages
+                    .checked_mul(WASM_PAGE_SIZE)
+                    .ok_or(WasmError::Trap("memory size"))?;
+                let extra = new_size
+                    .checked_sub(bytes.len())
+                    .ok_or(WasmError::Trap("memory size"))?;
+                if bytes.try_reserve(extra).is_err() {
+                    return Ok(false);
+                }
+                bytes.resize(new_size, 0);
+                Ok(true)
+            }
+            Self::Imported(memory) => memory.grow_to(new_pages),
+        }
+    }
 }
 
 impl Global {
@@ -1358,10 +1559,12 @@ fn parse_table_section(
     Ok(tables)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MemoryDesc {
     min: usize,
     max: Option<usize>,
+    import: Option<Memory>,
+    imported: bool,
 }
 
 /// Parse the memory section (id 5). Its vector may be empty and the
@@ -1392,7 +1595,12 @@ fn parse_memory_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Memor
         if min > WASM_MAX_PAGES || max.is_some_and(|m| m > WASM_MAX_PAGES || m < min) {
             return Err(WasmError::Decode("memory limits out of range"));
         }
-        memories.push(MemoryDesc { min, max });
+        memories.push(MemoryDesc {
+            min,
+            max,
+            import: None,
+            imported: false,
+        });
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing memory section bytes"));
@@ -1940,10 +2148,22 @@ pub struct GlobalImportDesc {
     pub mutable: bool,
 }
 
+/// A standard linear-memory import in memory-index order.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct MemoryImportDesc {
+    pub module: String,
+    pub field: String,
+    pub min: usize,
+    pub max: Option<usize>,
+}
+
 struct ParsedImports {
     functions: Vec<(ImportDesc, usize)>,
     global_descs: Vec<GlobalDesc>,
     global_imports: Vec<GlobalImportDesc>,
+    memory_descs: Vec<MemoryDesc>,
+    memory_imports: Vec<MemoryImportDesc>,
 }
 
 /// Parse the supported standard function and numeric-global imports while
@@ -1957,6 +2177,8 @@ fn parse_import_section(
     let mut functions = Vec::new();
     let mut global_descs = Vec::new();
     let mut global_imports = Vec::new();
+    let mut memory_descs = Vec::new();
+    let mut memory_imports = Vec::new();
     let count = count as usize;
     budget.charge(count)?;
     for _ in 0..count {
@@ -2010,6 +2232,41 @@ fn parse_import_section(
                     mutable,
                 });
             }
+            0x02 => {
+                let flag = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated imported memory limits"))?;
+                i += 1;
+                let (min, ni) = leb_u32(p, i)?;
+                i = ni;
+                let max = match flag {
+                    0x00 => None,
+                    0x01 => {
+                        let (max, ni) = leb_u32(p, i)?;
+                        i = ni;
+                        Some(max as usize)
+                    }
+                    _ => return Err(WasmError::Decode("unsupported memory limits flag 0x")),
+                };
+                let min = min as usize;
+                if min > WASM_MAX_PAGES
+                    || max.is_some_and(|limit| limit > WASM_MAX_PAGES || limit < min)
+                {
+                    return Err(WasmError::Decode("memory limits out of range"));
+                }
+                memory_imports.push(MemoryImportDesc {
+                    module,
+                    field,
+                    min,
+                    max,
+                });
+                memory_descs.push(MemoryDesc {
+                    min,
+                    max,
+                    import: None,
+                    imported: true,
+                });
+            }
             _other => {
                 return Err(WasmError::Decode("unsupported import kind 0x"));
             }
@@ -2022,6 +2279,8 @@ fn parse_import_section(
         functions,
         global_descs,
         global_imports,
+        memory_descs,
+        memory_imports,
     })
 }
 
@@ -2343,6 +2602,8 @@ pub struct Module {
     import_descs: Vec<ImportDesc>,
     /// Imported numeric globals in their independent global index space.
     global_import_descs: Vec<GlobalImportDesc>,
+    /// Imported linear memories in their independent memory index space.
+    memory_import_descs: Vec<MemoryImportDesc>,
     /// Global initializers and mutability. A working copy is created for each
     /// fresh convenience call or persistent [`Instance`].
     globals: Vec<GlobalDesc>,
@@ -2374,7 +2635,7 @@ pub struct Module {
 /// exactly once during [`Module::instantiate`].
 pub struct Instance {
     module: Module,
-    memories: Vec<Vec<u8>>,
+    memories: Vec<MemorySlot>,
     globals: Vec<GlobalSlot>,
     data_live: Vec<bool>,
     tables: Vec<Vec<Option<usize>>>,
@@ -2531,7 +2792,12 @@ impl Module {
             limits,
             ..Self::default()
         };
-        module.memories.push(MemoryDesc { min: 1, max: None });
+        module.memories.push(MemoryDesc {
+            min: 1,
+            max: None,
+            import: None,
+            imported: false,
+        });
         module
     }
 
@@ -2589,15 +2855,16 @@ impl Module {
 
     /// Load a standard `.wasm` **module** (magic `\0asm` + version 1).
     ///
-    /// Sections read: type (1), import (2, function imports), function (3),
+    /// Sections read: type (1), import (2, function/global/memory imports), function (3),
     /// table (4), memory (5), global (6), export (7), start (8), element (9),
     /// code (10), and data (11). Custom sections are skipped.
     ///
     /// A parsed module without a memory section has no linear memory and any
-    /// memory instruction fails load-time validation. Every internally defined
-    /// memory gets its declared minimum, with indexed data segments applied at
-    /// each invocation and growth bounded by both its declared maximum and the
-    /// aggregate host page budget.
+    /// memory instruction fails load-time validation. Every defined memory gets
+    /// its declared minimum and every imported memory requires an exact host
+    /// binding, with indexed data segments applied at instantiation and growth
+    /// bounded by both its actual declared maximum and the aggregate host page
+    /// budget.
     ///
     /// Function bodies are decoded with the same instruction subset as
     /// [`Module::add_function`]; result/param counts come from the type section
@@ -2620,6 +2887,8 @@ impl Module {
         let mut imports: Vec<(ImportDesc, usize)> = Vec::new();
         let mut imported_globals: Vec<GlobalDesc> = Vec::new();
         let mut global_import_descs: Vec<GlobalImportDesc> = Vec::new();
+        let mut imported_memories: Vec<MemoryDesc> = Vec::new();
+        let mut memory_import_descs: Vec<MemoryImportDesc> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<CodeEntry> = Vec::new();
         let mut exports: Vec<ExportEntry> = Vec::new();
@@ -2627,7 +2896,7 @@ impl Module {
         let mut start_fn: Option<usize> = None;
         let mut table_limits: Vec<(usize, Option<usize>)> = Vec::new();
         let mut elems: Vec<ElemSegment> = Vec::new();
-        let mut memories: Vec<MemoryDesc> = Vec::new();
+        let mut defined_memories: Vec<MemoryDesc> = Vec::new();
         let mut data: Vec<DataSegment> = Vec::new();
         let mut budget = DecodeBudget::new();
         let mut last_standard_section_rank = 0u8;
@@ -2670,10 +2939,12 @@ impl Module {
                     imports = parsed.functions;
                     imported_globals = parsed.global_descs;
                     global_import_descs = parsed.global_imports;
+                    imported_memories = parsed.memory_descs;
+                    memory_import_descs = parsed.memory_imports;
                 }
                 3 => func_types = parse_func_section(payload, &mut budget)?,
                 4 => table_limits = parse_table_section(payload, &mut budget)?,
-                5 => memories = parse_memory_section(payload, &mut budget)?,
+                5 => defined_memories = parse_memory_section(payload, &mut budget)?,
                 6 => globals = parse_global_section(payload, &mut budget, &imported_globals)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
                 8 => {
@@ -2706,7 +2977,7 @@ impl Module {
         }
         let table_count = table_limits.len();
 
-        let memory_count = memories.len();
+        let memory_count = imported_memories.len() + defined_memories.len();
         let mut module = Module {
             limits,
             ..Module::default()
@@ -2726,6 +2997,7 @@ impl Module {
             module.import_descs.push(desc);
         }
         module.global_import_descs = global_import_descs;
+        module.memory_import_descs = memory_import_descs;
         module.globals = imported_globals;
         budget.memory_count = memory_count;
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
@@ -2797,7 +3069,7 @@ impl Module {
             }
         }
         module.start = start_fn;
-        let initial_pages = memories.iter().try_fold(0usize, |total, memory| {
+        let initial_pages = defined_memories.iter().try_fold(0usize, |total, memory| {
             total
                 .checked_add(memory.min)
                 .ok_or(WasmError::Trap("memory size"))
@@ -2807,14 +3079,18 @@ impl Module {
         }
         for segment in &data {
             if let DataMode::Active { memory, offset } = &segment.mode {
-                let memory = memories
-                    .get(*memory)
+                let memory = imported_memories
+                    .iter()
+                    .chain(&defined_memories)
+                    .nth(*memory)
                     .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
                 let memory_bytes = memory
                     .min
                     .checked_mul(WASM_PAGE_SIZE)
                     .ok_or(WasmError::Decode("memory size"))?;
-                if let Some(Val::I32(offset)) = static_const_value(offset)? {
+                if !memory.imported
+                    && let Some(Val::I32(offset)) = static_const_value(offset)?
+                {
                     (offset as u32 as usize)
                         .checked_add(segment.bytes.len())
                         .filter(|&end| end <= memory_bytes)
@@ -2822,7 +3098,8 @@ impl Module {
                 }
             }
         }
-        module.memories = memories;
+        module.memories = imported_memories;
+        module.memories.extend(defined_memories);
         module.data = data;
         let mut declared_refs = Vec::new();
         declared_refs
@@ -3035,7 +3312,7 @@ impl Module {
         self.start
     }
 
-    /// Number of internally defined standard linear memories.
+    /// Number of standard linear memories in the combined import-first index space.
     pub fn memory_count(&self) -> usize {
         self.memories.len()
     }
@@ -3073,6 +3350,46 @@ impl Module {
     /// Numeric global imports in their independent standard index order.
     pub fn global_imports(&self) -> &[GlobalImportDesc] {
         &self.global_import_descs
+    }
+
+    /// Linear-memory imports in their independent standard index order.
+    pub fn memory_imports(&self) -> &[MemoryImportDesc] {
+        &self.memory_import_descs
+    }
+
+    /// Bind one shared host memory to every matching standard import.
+    pub fn bind_memory_import(
+        &mut self,
+        module: &str,
+        field: &str,
+        memory: &Memory,
+    ) -> Result<(), WasmError> {
+        let actual_pages = memory.pages();
+        let mut bound = 0usize;
+        for desc in &self.memory_import_descs {
+            if desc.module == module && desc.field == field {
+                let limits_match = actual_pages >= desc.min
+                    && match desc.max {
+                        Some(expected_max) => memory
+                            .max_pages()
+                            .is_some_and(|actual_max| actual_max <= expected_max),
+                        None => true,
+                    };
+                if !limits_match {
+                    return Err(WasmError::Trap("memory binding limits"));
+                }
+                bound += 1;
+            }
+        }
+        if bound == 0 {
+            return Err(WasmError::Trap("no imported memory named"));
+        }
+        for (index, desc) in self.memory_import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.memories[index].import = Some(memory.clone());
+            }
+        }
+        Ok(())
     }
 
     /// Resolve one standard table export to its table index.
@@ -3428,33 +3745,45 @@ impl Module {
 
     /// Fresh zeroed linear memories with active data segments applied. The
     /// host page limit is aggregate across every memory in the instance.
-    fn new_memories(&self, globals: &[GlobalSlot]) -> Result<Vec<Vec<u8>>, WasmError> {
+    fn new_memories(&self, globals: &[GlobalSlot]) -> Result<Vec<MemorySlot>, WasmError> {
         let mut memories = Vec::new();
         memories
             .try_reserve_exact(self.memories.len())
             .map_err(|_| WasmError::Trap("memory size"))?;
-        let mut total_pages = 0usize;
         for descriptor in &self.memories {
-            total_pages = total_pages
-                .checked_add(descriptor.min)
-                .filter(|&pages| pages <= self.limits.max_memory_pages)
-                .ok_or(WasmError::Trap("memory size"))?;
-            let nbytes = descriptor
-                .min
-                .checked_mul(WASM_PAGE_SIZE)
-                .ok_or(WasmError::Trap("memory size"))?;
-            let mut memory = Vec::new();
-            memory
-                .try_reserve(nbytes)
-                .map_err(|_| WasmError::Trap("memory size"))?;
-            memory.resize(nbytes, 0);
+            let memory = if descriptor.imported {
+                MemorySlot::Imported(
+                    descriptor
+                        .import
+                        .clone()
+                        .ok_or(WasmError::Trap("unbound imported memory"))?,
+                )
+            } else {
+                let size = descriptor
+                    .min
+                    .checked_mul(WASM_PAGE_SIZE)
+                    .ok_or(WasmError::Trap("memory size"))?;
+                let mut bytes = Vec::new();
+                bytes
+                    .try_reserve_exact(size)
+                    .map_err(|_| WasmError::Trap("memory size"))?;
+                bytes.resize(size, 0);
+                MemorySlot::Defined {
+                    bytes,
+                    max: descriptor.max,
+                }
+            };
             memories.push(memory);
+        }
+        if aggregate_memory_pages(&memories)? > self.limits.max_memory_pages {
+            return Err(WasmError::Trap("memory size"));
         }
         for segment in &self.data {
             if let DataMode::Active { memory, offset } = &segment.mode {
                 let target = memories
                     .get_mut(*memory)
                     .ok_or(WasmError::Trap("memory index"))?;
+                let mut target = target.view_mut()?;
                 let offset = match eval_const_expr(offset, globals)? {
                     Val::I32(offset) => offset as u32 as usize,
                     _ => return Err(WasmError::Trap("data offset")),
@@ -3793,7 +4122,7 @@ impl Module {
         &self,
         call: WasmCall<'_>,
         steps: &mut u64,
-        memories: &mut [Vec<u8>],
+        memories: &mut [MemorySlot],
         globals: &mut [GlobalSlot],
         bulk: &mut BulkState<'_>,
         context: &mut CallContext<'_>,
@@ -3857,7 +4186,8 @@ impl Module {
                         .map_err(|_| WasmError::Trap("call stack"))?;
                 }
                 let values = if let Some(memory) = memories.first_mut() {
-                    self.call_host(index, &args, memory, force_owned)?
+                    let mut memory = memory.view_mut()?;
+                    self.call_host(index, &args, &mut memory, force_owned)?
                 } else {
                     let mut empty = [];
                     self.call_host(index, &args, &mut empty, force_owned)?
@@ -3962,7 +4292,7 @@ impl Module {
         &self,
         activation: DefinedActivation,
         steps: &mut u64,
-        memories: &mut [Vec<u8>],
+        memories: &mut [MemorySlot],
         globals: &mut [GlobalSlot],
         bulk: &mut BulkState<'_>,
         resources: ActivationResources<'_>,
@@ -4090,13 +4420,13 @@ impl Module {
                 Op::I32Load(arg) => {
                     let addr = pop(&mut stack)?;
                     let memory = selected_memory(memories, arg.memory)?;
-                    stack.push(Val::I32(mem_read_i32(memory, addr, arg.offset)?));
+                    stack.push(Val::I32(mem_read_i32(&memory, addr, arg.offset)?));
                 }
                 Op::I32Store(arg) => {
                     let value = pop(&mut stack)?;
                     let addr = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
-                    mem_write_i32(memory, addr, arg.offset, value)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
+                    mem_write_i32(&mut memory, addr, arg.offset, value)?;
                 }
                 Op::I32Load8S(arg) => {
                     let address = pop(&mut stack)?;
@@ -4129,14 +4459,14 @@ impl Module {
                 Op::I32Store8(arg) => {
                     let value = pop(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
                     memory[ea] = value as u8;
                 }
                 Op::I32Store16(arg) => {
                     let value = pop(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
                     memory[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
@@ -4346,7 +4676,7 @@ impl Module {
                 Op::F32Store(arg) => {
                     let value = pop_f32(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
                     memory[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
                 }
@@ -4461,7 +4791,7 @@ impl Module {
                 Op::F64Store(arg) => {
                     let value = pop_f64(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 8)?;
                     memory[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
                 }
@@ -4477,23 +4807,19 @@ impl Module {
                 Op::MemoryGrow(memory_index) => {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let memory_index = memory_index as usize;
-                    let old_pages = memories
-                        .get(memory_index)
-                        .ok_or(WasmError::Trap("memory index"))?
-                        .len()
-                        / WASM_PAGE_SIZE;
-                    let cap = self
-                        .memories
-                        .get(memory_index)
-                        .ok_or(WasmError::Trap("memory index"))?
-                        .max
-                        .unwrap_or(WASM_MAX_PAGES)
-                        .min(WASM_MAX_PAGES);
-                    let total_pages = memories.iter().try_fold(0usize, |total, memory| {
-                        total
-                            .checked_add(memory.len() / WASM_PAGE_SIZE)
-                            .ok_or(WasmError::Trap("memory size"))
-                    })?;
+                    let (old_pages, cap) = {
+                        let memory = memories
+                            .get(memory_index)
+                            .ok_or(WasmError::Trap("memory index"))?;
+                        (
+                            memory.pages(),
+                            memory
+                                .max_pages()
+                                .unwrap_or(WASM_MAX_PAGES)
+                                .min(WASM_MAX_PAGES),
+                        )
+                    };
+                    let total_pages = aggregate_memory_pages(memories)?;
                     let growth = old_pages
                         .checked_add(delta)
                         .filter(|&pages| pages <= cap)
@@ -4501,15 +4827,13 @@ impl Module {
                             total_pages
                                 .checked_add(delta)
                                 .is_some_and(|total| total <= self.limits.max_memory_pages)
-                        })
-                        .zip(delta.checked_mul(WASM_PAGE_SIZE));
-                    let memory = memories
-                        .get_mut(memory_index)
-                        .ok_or(WasmError::Trap("memory index"))?;
-                    if let Some((new_pages, extra)) = growth
-                        && memory.try_reserve(extra).is_ok()
+                        });
+                    if let Some(new_pages) = growth
+                        && memories
+                            .get_mut(memory_index)
+                            .ok_or(WasmError::Trap("memory index"))?
+                            .grow_to(new_pages)?
                     {
-                        memory.resize(new_pages * WASM_PAGE_SIZE, 0);
                         stack.push(Val::I32(old_pages as i32));
                     } else {
                         stack.push(Val::I32(-1));
@@ -4533,7 +4857,7 @@ impl Module {
                         .ok_or(WasmError::Trap("memory.init data segment state"))?;
                     let bytes = if live { segment.bytes.as_slice() } else { &[] };
                     let source_range = bulk_memory_range(bytes.len(), source, len)?;
-                    let memory = selected_memory_mut(memories, memory_index)?;
+                    let mut memory = selected_memory_mut(memories, memory_index)?;
                     let destination_range = bulk_memory_range(memory.len(), destination, len)?;
                     charge_bulk_steps(steps, len, self.limits.max_steps)?;
                     memory[destination_range].copy_from_slice(&bytes[source_range]);
@@ -4715,7 +5039,12 @@ impl Module {
                     let source_range = bulk_memory_range(source_len, source, len)?;
                     bulk_memory_range(destination_len, destination, len)?;
                     charge_bulk_steps(steps, len, self.limits.max_steps)?;
-                    if destination_memory == source_memory {
+                    let same_memory = destination_memory == source_memory
+                        || memories
+                            .get(destination_memory as usize)
+                            .zip(memories.get(source_memory as usize))
+                            .is_some_and(|(destination, source)| destination.aliases(source));
+                    if same_memory {
                         selected_memory_mut(memories, destination_memory)?
                             .copy_within(source_range, destination);
                     } else {
@@ -4730,7 +5059,7 @@ impl Module {
                     let len = pop(&mut stack)? as u32 as usize;
                     let value = pop(&mut stack)? as u8;
                     let destination = pop(&mut stack)? as u32 as usize;
-                    let memory = selected_memory_mut(memories, memory_index)?;
+                    let mut memory = selected_memory_mut(memories, memory_index)?;
                     let range = bulk_memory_range(memory.len(), destination, len)?;
                     charge_bulk_steps(steps, len, self.limits.max_steps)?;
                     memory[range].fill(value);
@@ -4745,7 +5074,7 @@ impl Module {
                 Op::I64Store(arg) => {
                     let value = pop_i64(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 8)?;
                     memory[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
                 }
@@ -4794,21 +5123,21 @@ impl Module {
                 Op::I64Store8(arg) => {
                     let value = pop_i64(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
                     memory[ea] = value as u8;
                 }
                 Op::I64Store16(arg) => {
                     let value = pop_i64(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
                     memory[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
                 Op::I64Store32(arg) => {
                     let value = pop_i64(&mut stack)?;
                     let address = pop(&mut stack)?;
-                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
                     memory[ea..ea + 4].copy_from_slice(&(value as u32).to_le_bytes());
                 }
@@ -5245,22 +5574,26 @@ impl Instance {
 
     /// Aggregate live linear-memory size in WebAssembly 64 KiB pages.
     pub fn memory_pages(&self) -> usize {
-        self.memories
-            .iter()
-            .map(|memory| memory.len() / WASM_PAGE_SIZE)
-            .sum()
+        let mut total = 0usize;
+        for (index, memory) in self.memories.iter().enumerate() {
+            if !self.memories[..index]
+                .iter()
+                .any(|previous| previous.aliases(memory))
+            {
+                total = total.saturating_add(memory.pages());
+            }
+        }
+        total
     }
 
-    /// Number of internally defined memories in this live instance.
+    /// Number of memories in this live instance's standard index space.
     pub fn memory_count(&self) -> usize {
         self.memories.len()
     }
 
     /// Current pages in one selected memory.
     pub fn memory_pages_at(&self, memory_index: usize) -> Option<usize> {
-        self.memories
-            .get(memory_index)
-            .map(|memory| memory.len() / WASM_PAGE_SIZE)
+        self.memories.get(memory_index).map(MemorySlot::pages)
     }
 
     /// Aggregate live funcref elements across all tables. For the original
@@ -5287,40 +5620,58 @@ impl Instance {
     }
 
     /// Read-only access to memory zero, for bounded native host I/O.
-    pub fn memory(&self) -> &[u8] {
-        self.memory_at(0).unwrap_or(&[])
+    pub fn memory(&self) -> Result<MemoryView<'_>, WasmError> {
+        match self.memories.first() {
+            Some(memory) => memory.view(),
+            None => Ok(MemoryView(MemoryViewInner::Empty)),
+        }
     }
 
     /// Mutable access to memory zero, for writing bounded input or state
     /// payloads before an exported call.
-    pub fn memory_mut(&mut self) -> &mut [u8] {
-        self.memories
-            .first_mut()
-            .map(Vec::as_mut_slice)
-            .unwrap_or(&mut [])
+    pub fn memory_mut(&mut self) -> Result<MemoryViewMut<'_>, WasmError> {
+        match self.memories.first_mut() {
+            Some(memory) => memory.view_mut(),
+            None => Ok(MemoryViewMut(MemoryViewMutInner::Empty)),
+        }
     }
 
     /// Read-only access to one selected live linear memory.
-    pub fn memory_at(&self, memory_index: usize) -> Option<&[u8]> {
-        self.memories.get(memory_index).map(Vec::as_slice)
+    pub fn memory_at(&self, memory_index: usize) -> Result<Option<MemoryView<'_>>, WasmError> {
+        self.memories
+            .get(memory_index)
+            .map(MemorySlot::view)
+            .transpose()
     }
 
     /// Mutable access to one selected live linear memory.
-    pub fn memory_at_mut(&mut self, memory_index: usize) -> Option<&mut [u8]> {
-        self.memories.get_mut(memory_index).map(Vec::as_mut_slice)
+    pub fn memory_at_mut(
+        &mut self,
+        memory_index: usize,
+    ) -> Result<Option<MemoryViewMut<'_>>, WasmError> {
+        self.memories
+            .get_mut(memory_index)
+            .map(MemorySlot::view_mut)
+            .transpose()
     }
 
     /// Read-only access to one standard exported memory.
-    pub fn exported_memory(&self, name: &str) -> Option<&[u8]> {
-        self.module
-            .memory_export_index(name)
-            .and_then(|index| self.memory_at(index))
+    pub fn exported_memory(&self, name: &str) -> Result<Option<MemoryView<'_>>, WasmError> {
+        match self.module.memory_export_index(name) {
+            Some(index) => self.memory_at(index),
+            None => Ok(None),
+        }
     }
 
     /// Mutable host access to one standard exported memory.
-    pub fn exported_memory_mut(&mut self, name: &str) -> Option<&mut [u8]> {
-        let index = self.module.memory_export_index(name)?;
-        self.memory_at_mut(index)
+    pub fn exported_memory_mut(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<MemoryViewMut<'_>>, WasmError> {
+        match self.module.memory_export_index(name) {
+            Some(index) => self.memory_at_mut(index),
+            None => Ok(None),
+        }
     }
 
     /// Read one standard exported numeric or funcref global.
@@ -5381,17 +5732,37 @@ fn memarg(
     Ok((MemArg { memory, offset }, next))
 }
 
-fn selected_memory(memories: &[Vec<u8>], index: u32) -> Result<&[u8], WasmError> {
-    memories
-        .get(index as usize)
-        .map(Vec::as_slice)
-        .ok_or(WasmError::Trap("memory index"))
+fn aggregate_memory_pages(memories: &[MemorySlot]) -> Result<usize, WasmError> {
+    let mut total = 0usize;
+    for (index, memory) in memories.iter().enumerate() {
+        if memories[..index]
+            .iter()
+            .any(|previous| previous.aliases(memory))
+        {
+            continue;
+        }
+        total = total
+            .checked_add(memory.pages())
+            .ok_or(WasmError::Trap("memory size"))?;
+    }
+    Ok(total)
 }
 
-fn selected_memory_mut(memories: &mut [Vec<u8>], index: u32) -> Result<&mut Vec<u8>, WasmError> {
+fn selected_memory(memories: &[MemorySlot], index: u32) -> Result<MemoryView<'_>, WasmError> {
+    memories
+        .get(index as usize)
+        .ok_or(WasmError::Trap("memory index"))
+        .and_then(MemorySlot::view)
+}
+
+fn selected_memory_mut(
+    memories: &mut [MemorySlot],
+    index: u32,
+) -> Result<MemoryViewMut<'_>, WasmError> {
     memories
         .get_mut(index as usize)
         .ok_or(WasmError::Trap("memory index"))
+        .and_then(MemorySlot::view_mut)
 }
 
 /// Effective address `addr as u32 + offset`, bounds-checked for a `width`-byte
@@ -6443,12 +6814,12 @@ mod tests {
             )
             .unwrap();
         let mut instance = module.instantiate().unwrap();
-        instance.memory_mut()[0..8].copy_from_slice(b"abcdefgh");
+        instance.memory_mut().unwrap()[0..8].copy_from_slice(b"abcdefgh");
 
         instance.invoke(copy, &[2, 0, 6]).unwrap();
-        assert_eq!(&instance.memory()[0..8], b"ababcdef");
+        assert_eq!(&instance.memory().unwrap()[0..8], b"ababcdef");
         instance.invoke(fill, &[1, 0x1234, 3]).unwrap();
-        assert_eq!(&instance.memory()[0..8], b"a444cdef");
+        assert_eq!(&instance.memory().unwrap()[0..8], b"a444cdef");
     }
 
     #[test]
@@ -6460,18 +6831,18 @@ mod tests {
         });
         let fill = module.add_function(3, 0, 0, &body).unwrap();
         let mut instance = module.instantiate().unwrap();
-        instance.memory_mut()[0..8].fill(0xA5);
+        instance.memory_mut().unwrap()[0..8].fill(0xA5);
 
         assert!(matches!(
             instance.invoke(fill, &[0, 7, 64]),
             Err(WasmError::Trap("step budget"))
         ));
-        assert_eq!(&instance.memory()[0..8], &[0xA5; 8]);
+        assert_eq!(&instance.memory().unwrap()[0..8], &[0xA5; 8]);
         assert!(matches!(
             instance.invoke(fill, &[65_530, 7, 16]),
             Err(WasmError::Trap("bulk memory access out of bounds"))
         ));
-        assert_eq!(&instance.memory()[0..8], &[0xA5; 8]);
+        assert_eq!(&instance.memory().unwrap()[0..8], &[0xA5; 8]);
     }
 
     #[test]
@@ -6525,7 +6896,7 @@ mod tests {
         let mut second = Module::from_bytes(&wasm).unwrap().instantiate().unwrap();
 
         first.invoke(0, &[10, 1, 3]).unwrap();
-        assert_eq!(&first.memory()[10..13], b"ell");
+        assert_eq!(&first.memory().unwrap()[10..13], b"ell");
         assert!(matches!(
             first.invoke(0, &[20, 0, 1]),
             Err(WasmError::Trap(_))
@@ -6536,7 +6907,7 @@ mod tests {
         // Dropping in one instance must not mutate the module definition or a
         // sibling instance's segment state.
         second.invoke(0, &[4, 0, 5]).unwrap();
-        assert_eq!(&second.memory()[4..9], b"hello");
+        assert_eq!(&second.memory().unwrap()[4..9], b"hello");
     }
 
     #[test]
@@ -6581,7 +6952,7 @@ mod tests {
             instance.invoke(0, &[0, 0, 64]),
             Err(WasmError::Trap("step budget"))
         ));
-        assert_eq!(&instance.memory()[..8], &[0; 8]);
+        assert_eq!(&instance.memory().unwrap()[..8], &[0; 8]);
     }
 
     fn passive_elem_module() -> Vec<u8> {

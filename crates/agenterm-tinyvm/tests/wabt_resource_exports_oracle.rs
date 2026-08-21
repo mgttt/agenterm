@@ -26,10 +26,11 @@ fn wabt_compiled_resource_exports_match_tinyvm() {
     let mut instance = must_ok(module.instantiate(), "instantiate resource exports");
     assert_eq!(instance.exported_table_elements("dispatch"), Some(2));
     assert_eq!(
-        instance.exported_memory("ram").map(|memory| memory[0]),
+        must_ok(instance.exported_memory("ram"), "exported ram").map(|memory| memory[0]),
         Some(b'A')
     );
-    instance.exported_memory_mut("ram").expect("exported ram")[1] = b'B';
+    must_ok(instance.exported_memory_mut("ram"), "exported ram mut").expect("exported ram")[1] =
+        b'B';
     must_ok(
         instance.set_exported_global("counter", Val::I32(11)),
         "set exported counter",

@@ -144,7 +144,7 @@ fn memory_budget_rejects_initial_min_and_caps_grow() {
         "load grow module",
     );
     let mut instance = must_ok(module.instantiate(), "instantiate grow module");
-    assert_eq!(instance.memory().len(), WASM_PAGE_SIZE);
+    assert_eq!(must_ok(instance.memory(), "memory").len(), WASM_PAGE_SIZE);
     assert_eq!(
         only_i32(&must_ok(
             instance.invoke_by_name("grow", &[Val::I32(1)]),
@@ -152,7 +152,10 @@ fn memory_budget_rejects_initial_min_and_caps_grow() {
         )),
         1
     );
-    assert_eq!(instance.memory().len(), 2 * WASM_PAGE_SIZE);
+    assert_eq!(
+        must_ok(instance.memory(), "memory").len(),
+        2 * WASM_PAGE_SIZE
+    );
     assert_eq!(
         only_i32(&must_ok(
             instance.invoke_by_name("grow", &[Val::I32(1)]),
@@ -160,7 +163,10 @@ fn memory_budget_rejects_initial_min_and_caps_grow() {
         )),
         -1
     );
-    assert_eq!(instance.memory().len(), 2 * WASM_PAGE_SIZE);
+    assert_eq!(
+        must_ok(instance.memory(), "memory").len(),
+        2 * WASM_PAGE_SIZE
+    );
 }
 
 #[test]
@@ -171,7 +177,7 @@ fn host_can_exchange_bounded_data_through_live_memory() {
         "add memory read",
     );
     let mut instance = must_ok(module.instantiate(), "instantiate memory module");
-    instance.memory_mut()[0..4].copy_from_slice(&42i32.to_le_bytes());
+    must_ok(instance.memory_mut(), "memory mut")[0..4].copy_from_slice(&42i32.to_le_bytes());
     assert_eq!(
         only_i32(&must_ok(instance.invoke_val(read, &[]), "read memory")),
         42

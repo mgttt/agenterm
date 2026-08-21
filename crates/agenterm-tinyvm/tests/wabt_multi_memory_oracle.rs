@@ -29,8 +29,14 @@ fn wabt_compiled_multi_memory_matches_tinyvm() {
     assert!(matches!(result.as_slice(), [Val::I32(1225)]));
     assert_eq!(instance.memory_pages_at(0), Some(1));
     assert_eq!(instance.memory_pages_at(1), Some(2));
-    assert_eq!(&instance.memory_at(0).expect("memory zero")[..1], b"A");
-    assert_eq!(&instance.memory_at(1).expect("memory one")[..3], b"BAC");
+    assert_eq!(
+        &must_ok(instance.memory_at(0), "memory zero").expect("memory zero")[..1],
+        b"A"
+    );
+    assert_eq!(
+        &must_ok(instance.memory_at(1), "memory one").expect("memory one")[..3],
+        b"BAC"
+    );
 
     let one_page = Limits {
         max_memory_pages: 1,

@@ -287,7 +287,12 @@ fn standard_bytes_require_declared_memory() {
         .instantiate()
         .unwrap_or_else(|e| panic!("instantiate pure compute module: {}", e.message()));
     assert_eq!(instance.memory_pages(), 0);
-    assert!(instance.memory().is_empty());
+    assert!(
+        instance
+            .memory()
+            .unwrap_or_else(|error| panic!("memory view: {}", error.message()))
+            .is_empty()
+    );
 
     let (_, empty_memory_hex) = ACCEPTED
         .into_iter()
@@ -298,7 +303,12 @@ fn standard_bytes_require_declared_memory() {
         .instantiate()
         .unwrap_or_else(|e| panic!("instantiate empty memory vector: {}", e.message()));
     assert_eq!(empty_memory_instance.memory_pages(), 0);
-    assert!(empty_memory_instance.memory().is_empty());
+    assert!(
+        empty_memory_instance
+            .memory()
+            .unwrap_or_else(|error| panic!("memory view: {}", error.message()))
+            .is_empty()
+    );
 
     let (_, empty_memory_load_hex) = REJECTED
         .into_iter()
@@ -322,7 +332,12 @@ fn standard_bytes_require_declared_memory() {
         .unwrap_or_else(|e| panic!("passive data does not name a memory: {}", e.message()))
         .instantiate()
         .unwrap_or_else(|e| panic!("instantiate passive-data-only module: {}", e.message()));
-    assert!(passive_instance.memory().is_empty());
+    assert!(
+        passive_instance
+            .memory()
+            .unwrap_or_else(|error| panic!("memory view: {}", error.message()))
+            .is_empty()
+    );
 }
 
 #[test]

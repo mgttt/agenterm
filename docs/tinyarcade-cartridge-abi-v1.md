@@ -62,12 +62,14 @@ cartridges cannot use that engine capability. A defined guest global is never
 substituted as an approximation.
 
 This single-memory rule belongs to the game embedding, not the general engine.
-tinyvm itself supports multiple internally defined standard memories, including
+tinyvm itself supports multiple standard memories, including
 explicit scalar memargs, indexed active data and bulk operations, cross-memory
 copy, and per-memory grow. TinyArcade v1 requires exactly one memory because its
 core host callbacks, snapshot ranges and media submissions deliberately address
-memory zero. Imported memories remain unsupported until the VM has an explicit
-store-level memory binding and identity model.
+memory zero. The general VM also supports imported memories through explicit
+host bindings with standard limits matching and shared store identity. Guest
+writes/growth and host writes are visible across sibling instances, while
+TinyArcade v1 rejects every memory import during inspection and opening.
 
 The same profile boundary applies to imported numeric globals: the general VM
 has shared i32/i64/f32/f64 global bindings with exact type and mutability, while
