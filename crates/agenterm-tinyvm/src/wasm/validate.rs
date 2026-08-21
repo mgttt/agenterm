@@ -20,6 +20,7 @@ const I32: u8 = 0x7F;
 const I64: u8 = 0x7E;
 const F32: u8 = 0x7D;
 const F64: u8 = 0x7C;
+const FUNCREF: u8 = 0x70;
 /// Empty block type: the block leaves nothing behind.
 const VOID: u8 = 0x40;
 /// The bottom type produced by an unreachable stack: matches anything.
@@ -600,7 +601,60 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             }
             v.push(if a == ANY { b } else { a });
         }
+        TypedSelect(ty) => {
+            v.pop_expect(I32)?;
+            v.pop_expect(*ty)?;
+            v.pop_expect(*ty)?;
+            v.push(*ty);
+        }
         Nop => {}
+
+        // --- funcref / table ---
+        RefNull => v.push(FUNCREF),
+        RefIsNull => {
+            v.pop_expect(FUNCREF)?;
+            v.push(I32);
+        }
+        RefFunc(function) => {
+            v.func_type_index(*function)?;
+            v.push(FUNCREF);
+        }
+        TableGet => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.get requires table"));
+            }
+            v.pop_expect(I32)?;
+            v.push(FUNCREF);
+        }
+        TableSet => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.set requires table"));
+            }
+            v.pop_expect(FUNCREF)?;
+            v.pop_expect(I32)?;
+        }
+        TableGrow => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.grow requires table"));
+            }
+            v.pop_expect(I32)?;
+            v.pop_expect(FUNCREF)?;
+            v.push(I32);
+        }
+        TableSize => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.size requires table"));
+            }
+            v.push(I32);
+        }
+        TableFill => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.fill requires table"));
+            }
+            v.pop_expect(I32)?;
+            v.pop_expect(FUNCREF)?;
+            v.pop_expect(I32)?;
+        }
 
         // --- calls ---
         Call(f) => {

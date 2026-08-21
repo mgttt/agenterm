@@ -63,6 +63,9 @@ pub enum Val {
     I64(i64),
     F32(f32),
     F64(f64),
+    /// A nullable reference into this module instance's combined function
+    /// index space. `None` is the standard null `funcref` value.
+    FuncRef(Option<usize>),
 }
 
 /// A decode-time or run-time WebAssembly fault. Messages are `&'static str`
@@ -249,6 +252,12 @@ enum Op {
     },
     /// Bulk-memory `table.copy` within the single supported funcref table.
     TableCopy,
+    /// Reference-types table operations over the single funcref table.
+    TableGet,
+    TableSet,
+    TableGrow,
+    TableSize,
+    TableFill,
     /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
     I64Load {
         offset: u32,
@@ -460,6 +469,11 @@ enum Op {
     Drop,
     /// `select` — pop c, b, a; push `a` if `c != 0` else `b`.
     Select,
+    /// Typed `select`: reference types require the explicit value type.
+    TypedSelect(u8),
+    RefNull,
+    RefIsNull,
+    RefFunc(u32),
     /// `local.tee` — like `local.set` but leaves the value on the stack.
     LocalTee(u32),
     Return,
@@ -741,6 +755,30 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                         }
                         ops.push(Op::TableCopy);
                     }
+                    15 => {
+                        let (table, ni) = leb_u32(body, i)?;
+                        i = ni;
+                        if table != 0 {
+                            return Err(WasmError::Decode("table.grow table index must be 0"));
+                        }
+                        ops.push(Op::TableGrow);
+                    }
+                    16 => {
+                        let (table, ni) = leb_u32(body, i)?;
+                        i = ni;
+                        if table != 0 {
+                            return Err(WasmError::Decode("table.size table index must be 0"));
+                        }
+                        ops.push(Op::TableSize);
+                    }
+                    17 => {
+                        let (table, ni) = leb_u32(body, i)?;
+                        i = ni;
+                        if table != 0 {
+                            return Err(WasmError::Decode("table.fill table index must be 0"));
+                        }
+                        ops.push(Op::TableFill);
+                    }
                     _ => return Err(WasmError::Decode("unsupported 0xfc opcode")),
                 }
             }
@@ -828,12 +866,42 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
             0x01 => ops.push(Op::Nop),
             0x1A => ops.push(Op::Drop),
             0x1B => ops.push(Op::Select),
+            0x1C => {
+                let (count, ni) = leb_u32(body, i)?;
+                if count != 1 {
+                    return Err(WasmError::Decode("typed select requires one value type"));
+                }
+                let ty = *body
+                    .get(ni)
+                    .ok_or(WasmError::Decode("truncated typed select"))?;
+                if !matches!(ty, 0x70 | 0x7C..=0x7F) {
+                    return Err(WasmError::Decode("unsupported typed select value type"));
+                }
+                i = ni + 1;
+                ops.push(Op::TypedSelect(ty));
+            }
             0x22 => {
                 let (x, ni) = leb_u32(body, i)?;
                 i = ni;
                 ops.push(Op::LocalTee(x));
             }
             0x0F => ops.push(Op::Return),
+            0x25 => {
+                let (table, ni) = leb_u32(body, i)?;
+                i = ni;
+                if table != 0 {
+                    return Err(WasmError::Decode("table.get table index must be 0"));
+                }
+                ops.push(Op::TableGet);
+            }
+            0x26 => {
+                let (table, ni) = leb_u32(body, i)?;
+                i = ni;
+                if table != 0 {
+                    return Err(WasmError::Decode("table.set table index must be 0"));
+                }
+                ops.push(Op::TableSet);
+            }
             0x0B => {
                 let end_idx = ops.len();
                 ops.push(Op::End);
@@ -1061,6 +1129,22 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
             0xC2 => ops.push(Op::I64Extend8S),
             0xC3 => ops.push(Op::I64Extend16S),
             0xC4 => ops.push(Op::I64Extend32S),
+            0xD0 => {
+                let reftype = *body
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated ref.null type"))?;
+                i += 1;
+                if reftype != 0x70 {
+                    return Err(WasmError::Decode("only funcref ref.null is supported"));
+                }
+                ops.push(Op::RefNull);
+            }
+            0xD1 => ops.push(Op::RefIsNull),
+            0xD2 => {
+                let (function, ni) = leb_u32(body, i)?;
+                i = ni;
+                ops.push(Op::RefFunc(function));
+            }
             _other => {
                 return Err(WasmError::Decode("unsupported opcode 0x"));
             }
@@ -1100,6 +1184,12 @@ fn read_valtypes(
         .ok_or(WasmError::Decode("value-type list runs past section"))?;
     let mut values = Vec::new();
     reserve_exact(&mut values, n)?;
+    if p[i..end]
+        .iter()
+        .any(|value| !matches!(value, 0x70 | 0x7C..=0x7F))
+    {
+        return Err(WasmError::Decode("unsupported value type"));
+    }
     values.extend_from_slice(&p[i..end]);
     Ok((values, end))
 }
@@ -1120,8 +1210,8 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
     Ok((s, end))
 }
 
-/// Parse the table section, returning the initial size of the (single) table.
-fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
+/// Parse the table section, returning limits of the single funcref table.
+fn parse_table_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     if count != 1 {
         return Err(WasmError::Decode("unsupported table count"));
@@ -1137,20 +1227,25 @@ fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
     i += 1;
     let (min, ni) = leb_u32(p, i)?;
     i = ni;
-    match flag {
-        0x00 => {}
+    let max = match flag {
+        0x00 => None,
         0x01 => {
-            let (_max, ni) = leb_u32(p, i)?;
+            let (max, ni) = leb_u32(p, i)?;
             i = ni;
+            Some(max as usize)
         }
         _other => {
             return Err(WasmError::Decode("unsupported table limits flag 0x"));
         }
+    };
+    let min = min as usize;
+    if max.is_some_and(|maximum| maximum < min) {
+        return Err(WasmError::Decode("table limits out of range"));
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing table section bytes"));
     }
-    Ok(min as usize)
+    Ok((min, max))
 }
 
 /// Parse the element section into `(offset, func_indices)` per active segment.
@@ -1258,7 +1353,7 @@ enum ElemMode {
 
 struct ElemSegment {
     mode: ElemMode,
-    funcs: Vec<usize>,
+    refs: Vec<Option<usize>>,
 }
 
 fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSegment>, WasmError> {
@@ -1313,24 +1408,88 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 }
                 ElemMode::Declarative
             }
-            _ => {
-                return Err(WasmError::Decode(
-                    "unsupported reference-typed elem segment flag",
-                ));
+            4 => {
+                let (offset_val, ni) = parse_const_expr(p, i)?;
+                i = ni;
+                match offset_val {
+                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                }
             }
+            5 => {
+                let reftype = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated elem reftype"))?;
+                i += 1;
+                if reftype != 0x70 {
+                    return Err(WasmError::Decode(
+                        "only funcref elem segments are supported",
+                    ));
+                }
+                ElemMode::Passive
+            }
+            6 => {
+                let (table, ni) = leb_u32(p, i)?;
+                i = ni;
+                if table != 0 {
+                    return Err(WasmError::Decode("elem segment table index must be 0"));
+                }
+                let (offset_val, ni) = parse_const_expr(p, i)?;
+                i = ni;
+                let mode = match offset_val {
+                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                };
+                let reftype = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated elem reftype"))?;
+                i += 1;
+                if reftype != 0x70 {
+                    return Err(WasmError::Decode(
+                        "only funcref elem segments are supported",
+                    ));
+                }
+                mode
+            }
+            7 => {
+                let reftype = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated elem reftype"))?;
+                i += 1;
+                if reftype != 0x70 {
+                    return Err(WasmError::Decode(
+                        "only funcref elem segments are supported",
+                    ));
+                }
+                ElemMode::Declarative
+            }
+            _ => return Err(WasmError::Decode("unsupported element segment flag")),
         };
-        let (n_funcs, ni) = leb_u32(p, i)?;
+        let (n_refs, ni) = leb_u32(p, i)?;
         i = ni;
-        let n_funcs = n_funcs as usize;
-        budget.charge(n_funcs)?;
-        let mut idxs = Vec::new();
-        reserve_exact(&mut idxs, n_funcs)?;
-        for _ in 0..n_funcs {
-            let (fidx, nj) = leb_u32(p, i)?;
-            i = nj;
-            idxs.push(fidx as usize);
+        let n_refs = n_refs as usize;
+        budget.charge(n_refs)?;
+        let mut refs = Vec::new();
+        reserve_exact(&mut refs, n_refs)?;
+        for _ in 0..n_refs {
+            if flag < 4 {
+                let (function, next) = leb_u32(p, i)?;
+                i = next;
+                refs.push(Some(function as usize));
+            } else {
+                let (value, next) = parse_const_expr(p, i)?;
+                i = next;
+                match value {
+                    Val::FuncRef(function) => refs.push(function),
+                    _other => {
+                        return Err(WasmError::Decode(
+                            "funcref element expression has non-reference value",
+                        ));
+                    }
+                }
+            }
         }
-        out.push(ElemSegment { mode, funcs: idxs });
+        out.push(ElemSegment { mode, refs });
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing element section bytes"));
@@ -1366,6 +1525,19 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
             let b = le8(&p[i + 1..end]);
             (Val::F64(f64::from_le_bytes(b)), end)
         }
+        0xD0 => {
+            let reftype = *p
+                .get(i + 1)
+                .ok_or(WasmError::Decode("truncated ref.null const expr"))?;
+            if reftype != 0x70 {
+                return Err(WasmError::Decode("only funcref ref.null is supported"));
+            }
+            (Val::FuncRef(None), i + 2)
+        }
+        0xD2 => {
+            let (function, ni) = leb_u32(p, i + 1)?;
+            (Val::FuncRef(Some(function as usize)), ni)
+        }
         _other => {
             return Err(WasmError::Decode("unsupported const-expr opcode 0x"));
         }
@@ -1391,14 +1563,24 @@ fn parse_global_section(
     budget.charge(count)?;
     for _ in 0..count {
         // globaltype = valtype byte + mutability byte
-        let _valtype = p.get(i).ok_or(WasmError::Decode("truncated global type"))?;
-        let mutable = *p
+        let valtype = *p.get(i).ok_or(WasmError::Decode("truncated global type"))?;
+        if !matches!(valtype, 0x70 | 0x7C..=0x7F) {
+            return Err(WasmError::Decode("unsupported global value type"));
+        }
+        let mutability = *p
             .get(i + 1)
-            .ok_or(WasmError::Decode("truncated global mutability"))?
-            != 0;
+            .ok_or(WasmError::Decode("truncated global mutability"))?;
+        let mutable = match mutability {
+            0 => false,
+            1 => true,
+            _ => return Err(WasmError::Decode("invalid global mutability")),
+        };
         i += 2;
         let (val, ni) = parse_const_expr(p, i)?;
         i = ni;
+        if valtype_of(&val) != valtype {
+            return Err(WasmError::Decode("global initializer type mismatch"));
+        }
         out.push((val, mutable));
     }
     if i != p.len() {
@@ -1549,6 +1731,7 @@ fn valtype_of(v: &Val) -> u8 {
         Val::I64(_) => 0x7E,
         Val::F32(_) => 0x7D,
         Val::F64(_) => 0x7C,
+        Val::FuncRef(_) => 0x70,
     }
 }
 
@@ -1560,6 +1743,7 @@ fn zero_of_valtype(vt: u8) -> Result<Val, WasmError> {
         0x7E => Ok(Val::I64(0)),
         0x7D => Ok(Val::F32(0.0)),
         0x7C => Ok(Val::F64(0.0)),
+        0x70 => Ok(Val::FuncRef(None)),
         _other => Err(WasmError::Decode("unsupported local value type 0x")),
     }
 }
@@ -1693,6 +1877,7 @@ pub struct Module {
     /// The funcref table: each slot holds a combined function index or `None`.
     /// This is the instance template; live instances own an independent copy.
     table: Vec<Option<usize>>,
+    table_max: Option<usize>,
     /// Standard active/passive/declarative funcref element segments.
     elems: Vec<ElemSegment>,
     /// The module's function types as `(n_params, n_results)`, so
@@ -1834,7 +2019,7 @@ impl Module {
         let mut exports: Vec<(String, usize)> = Vec::new();
         let mut globals: Vec<(Val, bool)> = Vec::new();
         let mut start_fn: Option<usize> = None;
-        let mut table_size: Option<usize> = None;
+        let mut table_limits: Option<(usize, Option<usize>)> = None;
         let mut elems: Vec<ElemSegment> = Vec::new();
         let mut mem_limits: Option<(usize, Option<usize>)> = None;
         let mut data: Vec<DataSegment> = Vec::new();
@@ -1874,7 +2059,7 @@ impl Module {
                 1 => types = parse_type_section(payload, &mut budget)?,
                 2 => imports = parse_import_section(payload, &types, &mut budget)?,
                 3 => func_types = parse_func_section(payload, &mut budget)?,
-                4 => table_size = Some(parse_table_section(payload)?),
+                4 => table_limits = Some(parse_table_section(payload)?),
                 5 => mem_limits = Some(parse_memory_section(payload)?),
                 6 => globals = parse_global_section(payload, &mut budget)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
@@ -1906,7 +2091,7 @@ impl Module {
         if data_count.is_some_and(|count| count != data.len()) {
             return Err(WasmError::Decode("data count does not match data section"));
         }
-        let has_table = table_size.is_some();
+        let has_table = table_limits.is_some();
 
         let mut module = Module::new_with_limits(limits);
         // Imported functions occupy the low indices; without a bound host
@@ -2016,10 +2201,11 @@ impl Module {
         // Allocate the table, then apply active element segments into it.
         // Host budget first: never `vec![None; guest_min]` a multi-gigabyte
         // table and hope the allocator fails loudly instead of aborting.
-        let table_size = table_size.unwrap_or(0);
+        let (table_size, table_max) = table_limits.unwrap_or((0, None));
         if table_size > limits.max_table_elems {
             return Err(WasmError::Trap("table size"));
         }
+        module.table_max = table_max;
         let mut table = Vec::new();
         if table_size > 0 {
             table
@@ -2030,7 +2216,12 @@ impl Module {
         module.table = table;
         let function_count = module.hosts.len() + module.funcs.len();
         for segment in &elems {
-            if segment.funcs.iter().any(|&index| index >= function_count) {
+            if segment
+                .refs
+                .iter()
+                .flatten()
+                .any(|&index| index >= function_count)
+            {
                 return Err(WasmError::Decode("element function index out of bounds"));
             }
             if let ElemMode::Active(offset) = segment.mode {
@@ -2038,14 +2229,14 @@ impl Module {
                     return Err(WasmError::Decode("active element segment requires table"));
                 }
                 let end = offset
-                    .checked_add(segment.funcs.len())
+                    .checked_add(segment.refs.len())
                     .filter(|&end| end <= module.table.len())
                     .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
                 for (slot, &function) in module.table[offset..end]
                     .iter_mut()
-                    .zip(segment.funcs.iter())
+                    .zip(segment.refs.iter())
                 {
-                    *slot = Some(function);
+                    *slot = function;
                 }
             }
         }
@@ -2943,15 +3134,15 @@ impl Module {
                         .elem_live
                         .get(index)
                         .ok_or(WasmError::Trap("table.init element segment state"))?;
-                    let funcs = if live { segment.funcs.as_slice() } else { &[] };
-                    let source_range = bulk_memory_range(funcs.len(), source, len)?;
+                    let refs = if live { segment.refs.as_slice() } else { &[] };
+                    let source_range = bulk_memory_range(refs.len(), source, len)?;
                     let destination_range = bulk_memory_range(bulk.table.len(), destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
                     for (slot, &function) in bulk.table[destination_range]
                         .iter_mut()
-                        .zip(funcs[source_range].iter())
+                        .zip(refs[source_range].iter())
                     {
-                        *slot = Some(function);
+                        *slot = function;
                     }
                 }
                 Op::ElemDrop { elem_index } => {
@@ -2969,6 +3160,53 @@ impl Module {
                     bulk_memory_range(bulk.table.len(), destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
                     bulk.table.copy_within(source_range, destination);
+                }
+                Op::TableGet => {
+                    let index = pop(&mut stack)? as u32 as usize;
+                    let function = *bulk
+                        .table
+                        .get(index)
+                        .ok_or(WasmError::Trap("table.get out of bounds"))?;
+                    stack.push(Val::FuncRef(function));
+                }
+                Op::TableSet => {
+                    let function = pop_funcref(&mut stack)?;
+                    let index = pop(&mut stack)? as u32 as usize;
+                    let slot = bulk
+                        .table
+                        .get_mut(index)
+                        .ok_or(WasmError::Trap("table.set out of bounds"))?;
+                    *slot = function;
+                }
+                Op::TableGrow => {
+                    let delta = pop(&mut stack)? as u32 as usize;
+                    let function = pop_funcref(&mut stack)?;
+                    let old_size = bulk.table.len();
+                    let cap = self
+                        .table_max
+                        .unwrap_or(u32::MAX as usize)
+                        .min(self.limits.max_table_elems);
+                    let new_size = old_size.checked_add(delta).filter(|&size| size <= cap);
+                    if let Some(new_size) = new_size {
+                        charge_bulk_elements(steps, delta, self.limits.max_steps)?;
+                        if bulk.table.try_reserve(delta).is_ok() {
+                            bulk.table.resize(new_size, function);
+                            stack.push(Val::I32(old_size as i32));
+                        } else {
+                            stack.push(Val::I32(-1));
+                        }
+                    } else {
+                        stack.push(Val::I32(-1));
+                    }
+                }
+                Op::TableSize => stack.push(Val::I32(bulk.table.len() as i32)),
+                Op::TableFill => {
+                    let len = pop(&mut stack)? as u32 as usize;
+                    let function = pop_funcref(&mut stack)?;
+                    let destination = pop(&mut stack)? as u32 as usize;
+                    let range = bulk_memory_range(bulk.table.len(), destination, len)?;
+                    charge_bulk_elements(steps, len, self.limits.max_steps)?;
+                    bulk.table[range].fill(function);
                 }
                 Op::MemoryCopy => {
                     let len = pop(&mut stack)? as u32 as usize;
@@ -3279,6 +3517,24 @@ impl Module {
                     let b = pop_val(&mut stack)?;
                     let a = pop_val(&mut stack)?;
                     stack.push(if c != 0 { a } else { b });
+                }
+                Op::TypedSelect(_) => {
+                    let c = pop(&mut stack)?;
+                    let b = pop_val(&mut stack)?;
+                    let a = pop_val(&mut stack)?;
+                    stack.push(if c != 0 { a } else { b });
+                }
+                Op::RefNull => stack.push(Val::FuncRef(None)),
+                Op::RefIsNull => {
+                    let reference = pop_funcref(&mut stack)?;
+                    stack.push(Val::I32(i32::from(reference.is_none())));
+                }
+                Op::RefFunc(function) => {
+                    let function = function as usize;
+                    if function >= self.hosts.len() + self.funcs.len() {
+                        return Err(WasmError::Trap("ref.func function index"));
+                    }
+                    stack.push(Val::FuncRef(Some(function)));
                 }
                 Op::LocalTee(l) => {
                     let v = *stack
@@ -3827,6 +4083,13 @@ fn pop_f64(stack: &mut Vec<Val>) -> Result<f64, WasmError> {
     }
 }
 
+fn pop_funcref(stack: &mut Vec<Val>) -> Result<Option<usize>, WasmError> {
+    match pop_val(stack)? {
+        Val::FuncRef(function) => Ok(function),
+        _other => Err(WasmError::Trap("expected funcref on stack, got")),
+    }
+}
+
 fn take_results(stack: &mut Vec<Val>, arity: usize) -> Result<Vec<Val>, WasmError> {
     if stack.len() < arity {
         return Err(WasmError::Trap("result arity"));
@@ -4346,7 +4609,7 @@ mod tests {
             Err(WasmError::Decode("memory.copy memory indices must be 0"))
         ));
         assert!(matches!(
-            module.add_function(0, 0, 0, &[0xFC, 0x0F, 0x0B]),
+            module.add_function(0, 0, 0, &[0xFC, 0x12, 0x0B]),
             Err(WasmError::Decode("unsupported 0xfc opcode"))
         ));
         assert!(matches!(
@@ -5236,9 +5499,9 @@ mod tests {
     #[test]
     fn unsupported_opcode_fails_to_decode() {
         let mut m = Module::new();
-        // 0xD1 is ref.is_null (reference-types proposal), outside this profile.
+        // 0xD3 is ref.eq, outside the single-table funcref profile.
         assert!(matches!(
-            m.add_function(0, 0, 1, &[0xD1, 0x0B]),
+            m.add_function(0, 0, 1, &[0xD3, 0x0B]),
             Err(WasmError::Decode(_))
         ));
     }
