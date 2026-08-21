@@ -499,6 +499,11 @@ impl GameRuntime {
         registry: &NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
         let (manifest, mut module) = parse_cartridge(wasm, vm_limits)?;
+        if module.memory_count() != 1 {
+            return Err(WasmError::Decode(
+                "game cartridge requires exactly one memory",
+            ));
+        }
         validate_native_availability(&module, registry)?;
         let mut native_calls = Vec::new();
         native_calls

@@ -63,6 +63,7 @@ this Apple Silicon host. It is discovery evidence, not a compatibility promise:
 | SIMD | pass | pass |
 | Wasm exceptions | pass | pass |
 | shared memory/atomics | reject | pass |
+| multiple memories | reject | not claimed |
 | built-in WASI host | absent | absent |
 | narrow mock WASI-style import | pass | pass |
 
@@ -71,6 +72,12 @@ must not be projected onto a physical iPhone. Threads/shared memory, GC,
 exceptions, SIMD or any later WebKit feature cannot silently enter the
 TinyArcade cartridge baseline. Each standard extension needs an explicit tinyvm
 implementation, conformance suite and host-profile version decision.
+
+The checked-in multiple-memory oracle records a narrower capability boundary:
+WABT 1.0.41 and tinyvm execute the same standard module with the same result,
+while this Mac's public `JSContext` WebAssembly path rejects a module containing
+more than one memory. That absence is recorded rather than treated as a tinyvm
+failure; WABT remains the independent executable oracle for this proposal.
 
 JSC has no built-in WASI host. Supplying `wasi_snapshot_preview1` functions in
 JavaScript can satisfy imports, but that creates a host runtime rather than

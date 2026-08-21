@@ -21,6 +21,7 @@ tinyvm iOS game runtime
 │   ├── decode complexity budget      [x]
 │   ├── single-table funcref profile  [x]
 │   ├── multiple defined tables       [x]
+│   ├── multiple internally defined memories [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2303,6 +2304,53 @@ Evidence on 2026-08-21:
   below their gates at 1,554,024 bytes arm64 and 1,629,920 bytes x86_64;
   catalog/replay/private/session consumers are 1,426,856 / 1,417,800 /
   1,419,472 / 1,418,624 bytes.
+- Physical-device lifecycle, sound/input/performance, TestFlight and
+  Apple-review evidence remain open; the persistent goal therefore remains
+  active.
+
+## Sixty-fifth executable increment — standard multiple defined memories
+
+The general VM now decodes, validates, instantiates and executes the standard
+multiple-memory proposal for internally defined memories. Explicit scalar
+memargs, `memory.size`/`memory.grow`, active data, `memory.init`/fill and both
+same-memory and cross-memory copy retain their standard indices. Each memory
+obeys its declared maximum, while the host page ceiling covers the aggregate
+instance so splitting pages across definitions cannot bypass it. Imported
+memories remain outside the profile until a store-level binding model exists.
+
+TinyArcade v1 deliberately remains a one-memory embedding. Its load gate now
+rejects zero or multiple memories before lifecycle binding because its core
+callbacks, snapshots and media ranges address memory zero. This product rule
+does not constrain ordinary `WasmModule` users or the standards-facing VM.
+
+Evidence on 2026-08-21:
+
+- WABT 1.0.41 compiles, validates and interprets one shared fixture containing
+  two memories, indexed active/passive data, all four scalar value families,
+  cross-memory copy, fill, size and grow. WABT and tinyvm both return `1225`;
+  tinyvm separately proves aggregate initial rejection and growth refusal.
+- This Mac's public JavaScriptCore WebAssembly path rejects the same standard
+  module because it does not support more than one memory. The development
+  oracle records that capability absence; WABT supplies the independent
+  proposal oracle instead of lowering the module or limiting tinyvm to JSC.
+- The TinyArcade black box rejects a two-memory cartridge through its own
+  profile gate while the underlying module remains valid and executable.
+- All 238 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, both whole-corpus WABT gates, all eight
+  proposal/host oracles, the two-game WebKit differential, all-target Clippy,
+  formatting, ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 101,112
+  bytes and its C selftest returns 42. Darwin now removes unreferenced external
+  Rust symbols from the fully linked measurement executable instead of
+  retaining them under the weaker `strip -x` mode.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,554,952 bytes arm64 and 1,629,896 bytes x86_64;
+  catalog/replay/private/session consumers are 1,427,800 / 1,418,728 /
+  1,420,432 / 1,419,536 bytes.
+- The current Nostalgia Arcade main rebuilds against this VM, passes all five
+  selected App/runtime tests and its full two-game UI journey, then produces a
+  Release arm64 device App with the byte-identical 6,022-byte Depth Well
+  cartridge and no WebKit/JavaScriptCore linkage.
 - Physical-device lifecycle, sound/input/performance, TestFlight and
   Apple-review evidence remain open; the persistent goal therefore remains
   active.

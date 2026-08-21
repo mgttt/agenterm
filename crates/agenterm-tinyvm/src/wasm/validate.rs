@@ -40,6 +40,7 @@ pub(super) struct ModuleCtx<'a> {
     /// Number of element segments and internally defined funcref tables.
     pub elem_count: usize,
     pub table_count: usize,
+    pub memory_count: usize,
     /// Function indices forward-declared by element segments and therefore
     /// legal operands of `ref.func`.
     pub declared_refs: &'a [bool],
@@ -368,6 +369,14 @@ pub(super) fn validate_body(
 
 fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
     use Op::*;
+    let memory_count = v.m.memory_count;
+    let require_memory = |index: u32| {
+        if index as usize >= memory_count {
+            Err(WasmError::Decode("validation: memory index"))
+        } else {
+            Ok(())
+        }
+    };
     match op {
         // --- constants ---
         I32Const(_) => v.push(I32),
@@ -500,59 +509,77 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
         }
 
         // --- memory ---
-        I32Load { .. }
-        | I32Load8S { .. }
-        | I32Load8U { .. }
-        | I32Load16S { .. }
-        | I32Load16U { .. } => {
+        I32Load(arg) | I32Load8S(arg) | I32Load8U(arg) | I32Load16S(arg) | I32Load16U(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(I32)?;
             v.push(I32);
         }
-        I64Load { .. }
-        | I64Load8S { .. }
-        | I64Load8U { .. }
-        | I64Load16S { .. }
-        | I64Load16U { .. }
-        | I64Load32S { .. }
-        | I64Load32U { .. } => {
+        I64Load(arg) | I64Load8S(arg) | I64Load8U(arg) | I64Load16S(arg) | I64Load16U(arg)
+        | I64Load32S(arg) | I64Load32U(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(I32)?;
             v.push(I64);
         }
-        F32Load { .. } => {
+        F32Load(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(I32)?;
             v.push(F32);
         }
-        F64Load { .. } => {
+        F64Load(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(I32)?;
             v.push(F64);
         }
-        I32Store { .. } | I32Store8 { .. } | I32Store16 { .. } => {
+        I32Store(arg) | I32Store8(arg) | I32Store16(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
         }
-        I64Store { .. } | I64Store8 { .. } | I64Store16 { .. } | I64Store32 { .. } => {
+        I64Store(arg) | I64Store8(arg) | I64Store16(arg) | I64Store32(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(I64)?;
             v.pop_expect(I32)?;
         }
-        F32Store { .. } => {
+        F32Store(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(F32)?;
             v.pop_expect(I32)?;
         }
-        F64Store { .. } => {
+        F64Store(arg) => {
+            require_memory(arg.memory)?;
             v.pop_expect(F64)?;
             v.pop_expect(I32)?;
         }
-        MemorySize => v.push(I32),
-        MemoryGrow => {
+        MemorySize(memory) => {
+            require_memory(*memory)?;
+            v.push(I32);
+        }
+        MemoryGrow(memory) => {
+            require_memory(*memory)?;
             v.pop_expect(I32)?;
             v.push(I32);
         }
-        MemoryCopy | MemoryFill => {
+        MemoryCopy {
+            destination_memory,
+            source_memory,
+        } => {
+            require_memory(*destination_memory)?;
+            require_memory(*source_memory)?;
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
         }
-        MemoryInit { data_index } => {
+        MemoryFill(memory) => {
+            require_memory(*memory)?;
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+        }
+        MemoryInit {
+            data_index,
+            memory_index,
+        } => {
+            require_memory(*memory_index)?;
             let count = v.m.data_count.ok_or(WasmError::Decode(
                 "validation: memory.init requires data count",
             ))?;

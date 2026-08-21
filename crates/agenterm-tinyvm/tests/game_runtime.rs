@@ -23,6 +23,25 @@ fn whole_cartridge_size_is_bounded_before_wasm_parsing() {
     ));
 }
 
+#[test]
+fn game_profile_rejects_multiple_memories_without_limiting_the_vm() {
+    let mut wasm = game_module(&[], 1, &[0x41, 0x00, 0x0b], &[]);
+    let memory = wasm
+        .windows(5)
+        .position(|bytes| bytes == [0x05, 0x03, 0x01, 0x00, 0x01])
+        .expect("single-memory section");
+    wasm.splice(
+        memory..memory + 5,
+        [0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01],
+    );
+    assert!(matches!(
+        GameRuntime::from_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        Err(WasmError::Decode(
+            "game cartridge requires exactly one memory"
+        ))
+    ));
+}
+
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
         Ok(value) => value,

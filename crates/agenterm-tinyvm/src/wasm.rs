@@ -32,8 +32,7 @@ pub const WASM_MAX_DEPTH: usize = 512;
 pub const WASM_MAX_ACTIVATION_SLOTS: usize = 1 << 20;
 /// Max executed instructions per top-level [`Module::invoke`].
 pub const WASM_MAX_STEPS: u64 = 16_000_000;
-/// WebAssembly linear-memory page size (64 KiB). Memory starts at one page per
-/// invocation and can grow via `memory.grow`.
+/// WebAssembly linear-memory page size (64 KiB).
 pub const WASM_PAGE_SIZE: usize = 65_536;
 /// Maximum pages `memory.grow` will allocate (the spec's 32-bit maximum).
 pub const WASM_MAX_PAGES: usize = 65_536;
@@ -107,14 +106,14 @@ pub enum WasmError {
 struct DecodeBudget {
     remaining: usize,
     /// Resource context for validating decoded standard memory instructions.
-    has_memory: bool,
+    memory_count: usize,
 }
 
 impl DecodeBudget {
     fn new() -> Self {
         Self {
             remaining: WASM_MAX_DECODE_ITEMS,
-            has_memory: false,
+            memory_count: 0,
         }
     }
 
@@ -152,9 +151,9 @@ pub struct Limits {
     /// Maximum aggregate funcref elements the host will instantiate across all
     /// tables. Compared against the sum of declared minima before allocation.
     pub max_table_elems: usize,
-    /// Maximum linear-memory pages the host will allocate. Compared against
-    /// the declared memory `min` before an instance is created and enforced
-    /// again by every `memory.grow` (one page is 64 KiB).
+    /// Maximum aggregate linear-memory pages the host will allocate across an
+    /// instance. Compared against all declared minima before allocation and
+    /// enforced again by every `memory.grow` (one page is 64 KiB).
     pub max_memory_pages: usize,
     /// Maximum instructions executed by one top-level call. Nested calls share
     /// that call's counter; the next top-level call receives a fresh budget.
@@ -193,6 +192,13 @@ pub fn eval(bytes: &[u8]) -> Result<Vec<Val>, WasmError> {
 /// Like [`eval`], but the caller supplies the host budget.
 pub fn eval_with(bytes: &[u8], limits: Limits) -> Result<Vec<Val>, WasmError> {
     Module::from_bytes_with(bytes, limits)?.eval(&[])
+}
+
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct MemArg {
+    memory: u32,
+    offset: u32,
 }
 
 /// A decoded instruction. Branch/call operands keep their WASM indices; block
@@ -235,44 +241,32 @@ enum Op {
     I32Rotr,
     /// `i32.load` — pop address, push 4 little-endian bytes at `addr + offset`.
     /// The validated memarg alignment hint does not affect scalar execution.
-    I32Load {
-        offset: u32,
-    },
+    I32Load(MemArg),
     /// `i32.store` — pop value then address; write 4 little-endian bytes at
     /// `addr + offset`. Alignment hint decoded and ignored.
-    I32Store {
-        offset: u32,
-    },
+    I32Store(MemArg),
     /// Narrow loads (sign/zero extended to i32) and stores (low bytes).
-    I32Load8S {
-        offset: u32,
-    },
-    I32Load8U {
-        offset: u32,
-    },
-    I32Load16S {
-        offset: u32,
-    },
-    I32Load16U {
-        offset: u32,
-    },
-    I32Store8 {
-        offset: u32,
-    },
-    I32Store16 {
-        offset: u32,
-    },
+    I32Load8S(MemArg),
+    I32Load8U(MemArg),
+    I32Load16S(MemArg),
+    I32Load16U(MemArg),
+    I32Store8(MemArg),
+    I32Store16(MemArg),
     /// `memory.size` — push the current size in pages.
-    MemorySize,
+    MemorySize(u32),
     /// `memory.grow` — pop delta pages, grow, push old size (or -1 on failure).
-    MemoryGrow,
+    MemoryGrow(u32),
     /// Bulk-memory `memory.copy` (0xfc 10). Overlap has memmove semantics.
-    MemoryCopy,
+    MemoryCopy {
+        destination_memory: u32,
+        source_memory: u32,
+    },
     /// Bulk-memory `memory.fill` (0xfc 11). The low byte of the value is used.
-    MemoryFill,
+    MemoryFill(u32),
     /// Bulk-memory `memory.init`: copy from a module data segment.
     MemoryInit {
         data_index: u32,
+        memory_index: u32,
     },
     /// Bulk-memory `data.drop`: make one instance's segment empty.
     DataDrop {
@@ -299,40 +293,18 @@ enum Op {
     TableSize(u32),
     TableFill(u32),
     /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
-    I64Load {
-        offset: u32,
-    },
-    I64Store {
-        offset: u32,
-    },
+    I64Load(MemArg),
+    I64Store(MemArg),
     /// Narrow i64 loads (sign/zero extended to i64) and stores (low bytes).
-    I64Load8S {
-        offset: u32,
-    },
-    I64Load8U {
-        offset: u32,
-    },
-    I64Load16S {
-        offset: u32,
-    },
-    I64Load16U {
-        offset: u32,
-    },
-    I64Load32S {
-        offset: u32,
-    },
-    I64Load32U {
-        offset: u32,
-    },
-    I64Store8 {
-        offset: u32,
-    },
-    I64Store16 {
-        offset: u32,
-    },
-    I64Store32 {
-        offset: u32,
-    },
+    I64Load8S(MemArg),
+    I64Load8U(MemArg),
+    I64Load16S(MemArg),
+    I64Load16U(MemArg),
+    I64Load32S(MemArg),
+    I64Load32U(MemArg),
+    I64Store8(MemArg),
+    I64Store16(MemArg),
+    I64Store32(MemArg),
     // --- i64 integer family ---
     I64Const(i64),
     I64Eqz,
@@ -386,12 +358,8 @@ enum Op {
     F64Min,
     F64Max,
     F64Copysign,
-    F64Load {
-        offset: u32,
-    },
-    F64Store {
-        offset: u32,
-    },
+    F64Load(MemArg),
+    F64Store(MemArg),
     // --- f32 family ---
     F32Const(f32),
     F32Eq,
@@ -414,12 +382,8 @@ enum Op {
     F32Min,
     F32Max,
     F32Copysign,
-    F32Load {
-        offset: u32,
-    },
-    F32Store {
-        offset: u32,
-    },
+    F32Load(MemArg),
+    F32Store(MemArg),
     /// `global.get` / `global.set` — read/write a module global by index.
     GlobalGet(u32),
     GlobalSet(u32),
@@ -644,7 +608,7 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
         budget.charge(1)?;
         let opcode = body[i];
         i += 1;
-        if !budget.has_memory && opcode.wrapping_sub(0x28) <= 0x18 {
+        if budget.memory_count == 0 && opcode.wrapping_sub(0x28) <= 0x18 {
             return Err(WasmError::Decode(
                 "validation: memory instruction requires memory",
             ));
@@ -685,70 +649,65 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0x4E => ops.push(Op::I32GeS),
             0x4F => ops.push(Op::I32GeU),
             0x28 => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Load { offset });
+                ops.push(Op::I32Load(arg));
             }
             0x36 => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Store { offset });
+                ops.push(Op::I32Store(arg));
             }
             0x2C => {
-                let (offset, ni) = memarg(body, i, 0)?;
+                let (arg, ni) = memarg(body, i, 0, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Load8S { offset });
+                ops.push(Op::I32Load8S(arg));
             }
             0x2D => {
-                let (offset, ni) = memarg(body, i, 0)?;
+                let (arg, ni) = memarg(body, i, 0, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Load8U { offset });
+                ops.push(Op::I32Load8U(arg));
             }
             0x2E => {
-                let (offset, ni) = memarg(body, i, 1)?;
+                let (arg, ni) = memarg(body, i, 1, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Load16S { offset });
+                ops.push(Op::I32Load16S(arg));
             }
             0x2F => {
-                let (offset, ni) = memarg(body, i, 1)?;
+                let (arg, ni) = memarg(body, i, 1, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Load16U { offset });
+                ops.push(Op::I32Load16U(arg));
             }
             0x3A => {
-                let (offset, ni) = memarg(body, i, 0)?;
+                let (arg, ni) = memarg(body, i, 0, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Store8 { offset });
+                ops.push(Op::I32Store8(arg));
             }
             0x3B => {
-                let (offset, ni) = memarg(body, i, 1)?;
+                let (arg, ni) = memarg(body, i, 1, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I32Store16 { offset });
+                ops.push(Op::I32Store16(arg));
             }
             0x3F => {
-                // memory.size — a single reserved memory-index byte (must be 0)
-                let b = *body
-                    .get(i)
-                    .ok_or(WasmError::Decode("truncated memory.size"))?;
-                if b != 0x00 {
-                    return Err(WasmError::Decode("memory.size reserved byte must be 0"));
+                let (memory, ni) = leb_u32(body, i)?;
+                i = ni;
+                if memory as usize >= budget.memory_count {
+                    return Err(WasmError::Decode("memory index"));
                 }
-                i += 1;
-                ops.push(Op::MemorySize);
+                ops.push(Op::MemorySize(memory));
             }
             0x40 => {
-                let b = *body
-                    .get(i)
-                    .ok_or(WasmError::Decode("truncated memory.grow"))?;
-                if b != 0x00 {
-                    return Err(WasmError::Decode("memory.grow reserved byte must be 0"));
+                let (memory, ni) = leb_u32(body, i)?;
+                i = ni;
+                if memory as usize >= budget.memory_count {
+                    return Err(WasmError::Decode("memory index"));
                 }
-                i += 1;
-                ops.push(Op::MemoryGrow);
+                ops.push(Op::MemoryGrow(memory));
             }
             0xFC => {
                 let (subopcode, ni) = leb_u32(body, i)?;
                 i = ni;
-                if !budget.has_memory && matches!(subopcode, 8 | 10 | 11) {
+                if budget.memory_count == 0 && matches!(subopcode, 8 | 10 | 11) {
                     return Err(WasmError::Decode(
                         "validation: memory instruction requires memory",
                     ));
@@ -766,10 +725,13 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                         let (data_index, n1) = leb_u32(body, i)?;
                         let (memory, n2) = leb_u32(body, n1)?;
                         i = n2;
-                        if memory != 0 {
-                            return Err(WasmError::Decode("memory.init memory index must be 0"));
+                        if memory as usize >= budget.memory_count {
+                            return Err(WasmError::Decode("memory index"));
                         }
-                        ops.push(Op::MemoryInit { data_index });
+                        ops.push(Op::MemoryInit {
+                            data_index,
+                            memory_index: memory,
+                        });
                     }
                     9 => {
                         let (data_index, ni) = leb_u32(body, i)?;
@@ -780,18 +742,23 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                         let (destination_memory, n1) = leb_u32(body, i)?;
                         let (source_memory, n2) = leb_u32(body, n1)?;
                         i = n2;
-                        if destination_memory != 0 || source_memory != 0 {
-                            return Err(WasmError::Decode("memory.copy memory indices must be 0"));
+                        if destination_memory as usize >= budget.memory_count
+                            || source_memory as usize >= budget.memory_count
+                        {
+                            return Err(WasmError::Decode("memory index"));
                         }
-                        ops.push(Op::MemoryCopy);
+                        ops.push(Op::MemoryCopy {
+                            destination_memory,
+                            source_memory,
+                        });
                     }
                     11 => {
                         let (memory, ni) = leb_u32(body, i)?;
                         i = ni;
-                        if memory != 0 {
-                            return Err(WasmError::Decode("memory.fill memory index must be 0"));
+                        if memory as usize >= budget.memory_count {
+                            return Err(WasmError::Decode("memory index"));
                         }
-                        ops.push(Op::MemoryFill);
+                        ops.push(Op::MemoryFill(memory));
                     }
                     12 => {
                         let (elem_index, n1) = leb_u32(body, i)?;
@@ -998,59 +965,59 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                 }
             }
             0x29 => {
-                let (offset, ni) = memarg(body, i, 3)?;
+                let (arg, ni) = memarg(body, i, 3, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load { offset });
+                ops.push(Op::I64Load(arg));
             }
             0x37 => {
-                let (offset, ni) = memarg(body, i, 3)?;
+                let (arg, ni) = memarg(body, i, 3, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Store { offset });
+                ops.push(Op::I64Store(arg));
             }
             0x30 => {
-                let (offset, ni) = memarg(body, i, 0)?;
+                let (arg, ni) = memarg(body, i, 0, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load8S { offset });
+                ops.push(Op::I64Load8S(arg));
             }
             0x31 => {
-                let (offset, ni) = memarg(body, i, 0)?;
+                let (arg, ni) = memarg(body, i, 0, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load8U { offset });
+                ops.push(Op::I64Load8U(arg));
             }
             0x32 => {
-                let (offset, ni) = memarg(body, i, 1)?;
+                let (arg, ni) = memarg(body, i, 1, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load16S { offset });
+                ops.push(Op::I64Load16S(arg));
             }
             0x33 => {
-                let (offset, ni) = memarg(body, i, 1)?;
+                let (arg, ni) = memarg(body, i, 1, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load16U { offset });
+                ops.push(Op::I64Load16U(arg));
             }
             0x34 => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load32S { offset });
+                ops.push(Op::I64Load32S(arg));
             }
             0x35 => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Load32U { offset });
+                ops.push(Op::I64Load32U(arg));
             }
             0x3C => {
-                let (offset, ni) = memarg(body, i, 0)?;
+                let (arg, ni) = memarg(body, i, 0, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Store8 { offset });
+                ops.push(Op::I64Store8(arg));
             }
             0x3D => {
-                let (offset, ni) = memarg(body, i, 1)?;
+                let (arg, ni) = memarg(body, i, 1, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Store16 { offset });
+                ops.push(Op::I64Store16(arg));
             }
             0x3E => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::I64Store32 { offset });
+                ops.push(Op::I64Store32(arg));
             }
             0x42 => {
                 let (v, ni) = leb_s64(body, i)?;
@@ -1114,14 +1081,14 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0xA5 => ops.push(Op::F64Max),
             0xA6 => ops.push(Op::F64Copysign),
             0x2B => {
-                let (offset, ni) = memarg(body, i, 3)?;
+                let (arg, ni) = memarg(body, i, 3, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::F64Load { offset });
+                ops.push(Op::F64Load(arg));
             }
             0x39 => {
-                let (offset, ni) = memarg(body, i, 3)?;
+                let (arg, ni) = memarg(body, i, 3, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::F64Store { offset });
+                ops.push(Op::F64Store(arg));
             }
             0x43 => {
                 let end = i
@@ -1153,14 +1120,14 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0x97 => ops.push(Op::F32Max),
             0x98 => ops.push(Op::F32Copysign),
             0x2A => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::F32Load { offset });
+                ops.push(Op::F32Load(arg));
             }
             0x38 => {
-                let (offset, ni) = memarg(body, i, 2)?;
+                let (arg, ni) = memarg(body, i, 2, budget.memory_count)?;
                 i = ni;
-                ops.push(Op::F32Store { offset });
+                ops.push(Op::F32Store(arg));
             }
             0x23 => {
                 let (x, ni) = leb_u32(body, i)?;
@@ -1338,49 +1305,51 @@ fn parse_table_section(
     Ok(tables)
 }
 
-const EMPTY_MEMORY_VECTOR: usize = usize::MAX;
+#[derive(Clone, Copy)]
+struct MemoryDesc {
+    min: usize,
+    max: Option<usize>,
+}
 
-/// Parse the memory section (id 5). Its standard vector may be empty; WASM 1.0
-/// otherwise allows at most one memory per module.
-fn parse_memory_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
+/// Parse the memory section (id 5). Its vector may be empty and the
+/// multiple-memory proposal permits multiple internally defined memories.
+fn parse_memory_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<MemoryDesc>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
-    if count == 0 {
-        if i != p.len() {
-            return Err(WasmError::Decode("trailing memory section bytes"));
+    let count = count as usize;
+    budget.charge(count)?;
+    let mut memories = Vec::new();
+    reserve_exact(&mut memories, count)?;
+    for _ in 0..count {
+        let flag = *p
+            .get(i)
+            .ok_or(WasmError::Decode("truncated memory limits"))?;
+        i += 1;
+        let (min, ni) = leb_u32(p, i)?;
+        i = ni;
+        let max = match flag {
+            0x00 => None,
+            0x01 => {
+                let (maximum, ni) = leb_u32(p, i)?;
+                i = ni;
+                Some(maximum as usize)
+            }
+            _other => return Err(WasmError::Decode("unsupported memory limits flag 0x")),
+        };
+        let min = min as usize;
+        if min > WASM_MAX_PAGES || max.is_some_and(|m| m > WASM_MAX_PAGES || m < min) {
+            return Err(WasmError::Decode("memory limits out of range"));
         }
-        return Ok((EMPTY_MEMORY_VECTOR, None));
-    }
-    if count != 1 {
-        return Err(WasmError::Decode("unsupported memory count"));
-    }
-    let flag = *p
-        .get(i)
-        .ok_or(WasmError::Decode("truncated memory limits"))?;
-    i += 1;
-    let (min, ni) = leb_u32(p, i)?;
-    i = ni;
-    let max = match flag {
-        0x00 => None,
-        0x01 => {
-            let (m, ni) = leb_u32(p, i)?;
-            i = ni;
-            Some(m as usize)
-        }
-        _other => return Err(WasmError::Decode("unsupported memory limits flag 0x")),
-    };
-    let min = min as usize;
-    if min > WASM_MAX_PAGES || max.is_some_and(|m| m > WASM_MAX_PAGES || m < min) {
-        return Err(WasmError::Decode("memory limits out of range"));
+        memories.push(MemoryDesc { min, max });
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing memory section bytes"));
     }
-    Ok((min, max))
+    Ok(memories)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DataMode {
-    Active(usize),
+    Active { memory: usize, offset: usize },
     Passive,
 }
 
@@ -1403,7 +1372,10 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
                 let (offset_val, ni) = parse_const_expr(p, i)?;
                 i = ni;
                 match offset_val {
-                    Val::I32(v) => DataMode::Active(v as u32 as usize),
+                    Val::I32(v) => DataMode::Active {
+                        memory: 0,
+                        offset: v as u32 as usize,
+                    },
                     _other => return Err(WasmError::Decode("data offset must be i32, got")),
                 }
             }
@@ -1411,13 +1383,13 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
             2 => {
                 let (memory, ni) = leb_u32(p, i)?;
                 i = ni;
-                if memory != 0 {
-                    return Err(WasmError::Decode("data segment memory index must be 0"));
-                }
                 let (offset_val, ni) = parse_const_expr(p, i)?;
                 i = ni;
                 match offset_val {
-                    Val::I32(v) => DataMode::Active(v as u32 as usize),
+                    Val::I32(v) => DataMode::Active {
+                        memory: memory as usize,
+                        offset: v as u32 as usize,
+                    },
                     _other => return Err(WasmError::Decode("data offset must be i32, got")),
                 }
             }
@@ -2080,13 +2052,10 @@ pub struct Module {
     /// The module's function types as `(n_params, n_results)`, so
     /// `call_indirect` can type-check the callee against a declared type.
     types: Vec<FuncType>,
-    /// Initial memory pages. Parsed standard modules without a memory section
-    /// store `Some(0)` and reject memory instructions at validation; `None` is
-    /// retained only for programmatic [`Module::new`] compatibility and gives
-    /// that builder one implicit page. `None` max means "up to
-    /// [`WASM_MAX_PAGES`]".
-    mem_min_pages: Option<usize>,
-    mem_max_pages: Option<usize>,
+    /// Internally defined linear-memory templates. Public programmatic builders
+    /// retain one implicit page; parsed standard modules use their exact memory
+    /// vector, including zero or multiple definitions.
+    memories: Vec<MemoryDesc>,
     /// Standard active/passive data segments. Their bytes belong to the module;
     /// dropped/live state belongs to each instance.
     data: Vec<DataSegment>,
@@ -2101,7 +2070,7 @@ pub struct Module {
 /// exactly once during [`Module::instantiate`].
 pub struct Instance {
     module: Module,
-    memory: Vec<u8>,
+    memories: Vec<Vec<u8>>,
     globals: Vec<Val>,
     data_live: Vec<bool>,
     tables: Vec<Vec<Option<usize>>>,
@@ -2249,15 +2218,17 @@ impl DefinedActivation {
 impl Module {
     /// An empty module.
     pub fn new() -> Self {
-        Self::default()
+        Self::new_with_limits(Limits::default())
     }
 
     /// An empty programmatic module under an explicit host budget.
     pub fn new_with_limits(limits: Limits) -> Self {
-        Self {
+        let mut module = Self {
             limits,
             ..Self::default()
-        }
+        };
+        module.memories.push(MemoryDesc { min: 1, max: None });
+        module
     }
 
     /// Register a function from its WASM body bytes, returning its index.
@@ -2273,7 +2244,7 @@ impl Module {
         body: &[u8],
     ) -> Result<usize, WasmError> {
         let mut budget = DecodeBudget::new();
-        budget.has_memory = true;
+        budget.memory_count = 1;
         let DecodedCode {
             ops: code,
             branch_targets,
@@ -2319,9 +2290,10 @@ impl Module {
     /// code (10), and data (11). Custom sections are skipped.
     ///
     /// A parsed module without a memory section has no linear memory and any
-    /// memory instruction fails load-time validation. A module that declares
-    /// one gets exactly its declared minimum, with data segments applied at
-    /// each invocation and `memory.grow` bounded by its declared maximum.
+    /// memory instruction fails load-time validation. Every internally defined
+    /// memory gets its declared minimum, with indexed data segments applied at
+    /// each invocation and growth bounded by both its declared maximum and the
+    /// aggregate host page budget.
     ///
     /// Function bodies are decoded with the same instruction subset as
     /// [`Module::add_function`]; result/param counts come from the type section
@@ -2349,7 +2321,7 @@ impl Module {
         let mut start_fn: Option<usize> = None;
         let mut table_limits: Vec<(usize, Option<usize>)> = Vec::new();
         let mut elems: Vec<ElemSegment> = Vec::new();
-        let mut mem_limits: Option<(usize, Option<usize>)> = None;
+        let mut memories: Vec<MemoryDesc> = Vec::new();
         let mut data: Vec<DataSegment> = Vec::new();
         let mut budget = DecodeBudget::new();
         let mut last_standard_section_rank = 0u8;
@@ -2390,12 +2362,7 @@ impl Module {
                 2 => imports = parse_import_section(payload, &types, &mut budget)?,
                 3 => func_types = parse_func_section(payload, &mut budget)?,
                 4 => table_limits = parse_table_section(payload, &mut budget)?,
-                5 => {
-                    let limits = parse_memory_section(payload)?;
-                    if limits.0 != EMPTY_MEMORY_VECTOR {
-                        mem_limits = Some(limits);
-                    }
-                }
+                5 => memories = parse_memory_section(payload, &mut budget)?,
                 6 => globals = parse_global_section(payload, &mut budget)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
                 8 => {
@@ -2428,7 +2395,11 @@ impl Module {
         }
         let table_count = table_limits.len();
 
-        let mut module = Module::new_with_limits(limits);
+        let memory_count = memories.len();
+        let mut module = Module {
+            limits,
+            ..Module::default()
+        };
         // Imported functions occupy the low indices; without a bound host
         // implementation they trap loudly if actually called.
         for (desc, tidx) in imports {
@@ -2443,7 +2414,7 @@ impl Module {
             });
             module.import_descs.push(desc);
         }
-        budget.has_memory = mem_limits.is_some();
+        budget.memory_count = memory_count;
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
             let ft = types.get(tidx).ok_or(WasmError::Decode("function"))?;
             let (n_params, n_results) = (ft.params.len(), ft.results.len());
@@ -2467,7 +2438,6 @@ impl Module {
         // used by the export and start sections.
         module.types = types;
         let function_count = module.hosts.len() + module.funcs.len();
-        let memory_count = usize::from(mem_limits.is_some());
         let mut export_names = BTreeMap::new();
         for export in exports {
             if export_names.insert(export.name.clone(), ()).is_some() {
@@ -2504,23 +2474,30 @@ impl Module {
             }
         }
         module.start = start_fn;
-        // Memory limits and data segments (both were previously skipped, which
-        // left every module on a hardcoded single zeroed page).
-        let (mem_min, mem_max) = mem_limits.unwrap_or((0, None));
-        module.mem_min_pages = Some(mem_min);
-        module.mem_max_pages = mem_max;
-        if module.initial_mem_pages() > limits.max_memory_pages.min(WASM_MAX_PAGES) {
+        let initial_pages = memories.iter().try_fold(0usize, |total, memory| {
+            total
+                .checked_add(memory.min)
+                .ok_or(WasmError::Trap("memory size"))
+        })?;
+        if initial_pages > limits.max_memory_pages {
             return Err(WasmError::Trap("memory size"));
         }
-        let mem_bytes = module.initial_mem_pages() * WASM_PAGE_SIZE;
         for segment in &data {
-            if let DataMode::Active(offset) = segment.mode {
+            if let DataMode::Active { memory, offset } = segment.mode {
+                let memory = memories
+                    .get(memory)
+                    .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
+                let memory_bytes = memory
+                    .min
+                    .checked_mul(WASM_PAGE_SIZE)
+                    .ok_or(WasmError::Decode("memory size"))?;
                 offset
                     .checked_add(segment.bytes.len())
-                    .filter(|&e| memory_count != 0 && e <= mem_bytes)
+                    .filter(|&end| end <= memory_bytes)
                     .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
             }
         }
+        module.memories = memories;
         module.data = data;
         let mut declared_refs = Vec::new();
         declared_refs
@@ -2563,6 +2540,7 @@ impl Module {
                 data_count,
                 elem_count: elems.len(),
                 table_count,
+                memory_count,
                 declared_refs: &declared_refs,
             };
             for f in &module.funcs {
@@ -2724,6 +2702,11 @@ impl Module {
     /// The start function's index, if the module has one.
     pub fn start_index(&self) -> Option<usize> {
         self.start
+    }
+
+    /// Number of internally defined standard linear memories.
+    pub fn memory_count(&self) -> usize {
+        self.memories.len()
     }
 
     /// Run the start function (no args, no results), if present. This is how a
@@ -2941,7 +2924,7 @@ impl Module {
         // One instance: the start function and the entry point share the same
         // linear memory and globals, so start-time host writes are visible.
         let mut steps: u64 = 0;
-        let mut mem = self.new_memory()?;
+        let mut memories = self.new_memories()?;
         let mut globals = self.new_globals()?;
         let mut data_live = self.new_data_state()?;
         let (mut tables, mut elem_live) = self.new_table_state()?;
@@ -2962,7 +2945,7 @@ impl Module {
                     args: &[],
                 },
                 &mut steps,
-                &mut mem,
+                &mut memories,
                 &mut globals,
                 &mut bulk,
                 &mut call_context,
@@ -2983,7 +2966,7 @@ impl Module {
         self.call_any(
             WasmCall { index: entry, args },
             &mut steps,
-            &mut mem,
+            &mut memories,
             &mut globals,
             &mut bulk,
             &mut call_context,
@@ -3027,8 +3010,8 @@ impl Module {
 
     /// Invoke function `idx` with `args`, returning its result values.
     ///
-    /// Fresh zero-initialised linear memory is allocated for the call and
-    /// shared across every nested `call`; it is discarded when the top-level
+    /// Fresh zero-initialised linear memories are allocated for the call and
+    /// shared across every nested `call`; they are discarded when the top-level
     /// invocation returns. Use [`Module::instantiate`] to retain state.
     pub fn invoke(&self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
         let vals = i32_args_to_vals(args)?;
@@ -3041,7 +3024,7 @@ impl Module {
     /// convenience wrapper over it.
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
-        let mut mem = self.new_memory()?;
+        let mut memories = self.new_memories()?;
         let mut globals = self.new_globals()?;
         let mut data_live = self.new_data_state()?;
         let (mut tables, mut elem_live) = self.new_table_state()?;
@@ -3058,45 +3041,49 @@ impl Module {
         self.call_any(
             WasmCall { index: idx, args },
             &mut steps,
-            &mut mem,
+            &mut memories,
             &mut globals,
             &mut bulk,
             &mut call_context,
         )
     }
 
-    /// Pages the module's linear memory starts at. Parsed modules record their
-    /// exact standard minimum (including zero for no memory); the programmatic
-    /// compatibility builder retains one implicit page.
-    fn initial_mem_pages(&self) -> usize {
-        self.mem_min_pages.unwrap_or(1)
-    }
-
-    /// A fresh zeroed linear memory with the module's active data segments
-    /// applied (spec 4.5.4 instantiation).
-    ///
-    /// Oversized `min` or an allocator refusal is `Err`, never a process abort.
-    fn new_memory(&self) -> Result<Vec<u8>, WasmError> {
-        let pages = self.initial_mem_pages();
-        if pages > self.limits.max_memory_pages.min(WASM_MAX_PAGES) {
-            return Err(WasmError::Trap("memory size"));
-        }
-        let nbytes = pages
-            .checked_mul(WASM_PAGE_SIZE)
-            .ok_or(WasmError::Trap("memory size"))?;
-        let mut mem = Vec::new();
-        mem.try_reserve(nbytes)
+    /// Fresh zeroed linear memories with active data segments applied. The
+    /// host page limit is aggregate across every memory in the instance.
+    fn new_memories(&self) -> Result<Vec<Vec<u8>>, WasmError> {
+        let mut memories = Vec::new();
+        memories
+            .try_reserve_exact(self.memories.len())
             .map_err(|_| WasmError::Trap("memory size"))?;
-        mem.resize(nbytes, 0);
+        let mut total_pages = 0usize;
+        for descriptor in &self.memories {
+            total_pages = total_pages
+                .checked_add(descriptor.min)
+                .filter(|&pages| pages <= self.limits.max_memory_pages)
+                .ok_or(WasmError::Trap("memory size"))?;
+            let nbytes = descriptor
+                .min
+                .checked_mul(WASM_PAGE_SIZE)
+                .ok_or(WasmError::Trap("memory size"))?;
+            let mut memory = Vec::new();
+            memory
+                .try_reserve(nbytes)
+                .map_err(|_| WasmError::Trap("memory size"))?;
+            memory.resize(nbytes, 0);
+            memories.push(memory);
+        }
         for segment in &self.data {
-            if let DataMode::Active(offset) = segment.mode {
+            if let DataMode::Active { memory, offset } = segment.mode {
+                let target = memories
+                    .get_mut(memory)
+                    .ok_or(WasmError::Trap("memory index"))?;
                 let end = offset + segment.bytes.len();
-                if end <= mem.len() {
-                    mem[offset..end].copy_from_slice(&segment.bytes);
+                if end <= target.len() {
+                    target[offset..end].copy_from_slice(&segment.bytes);
                 }
             }
         }
-        Ok(mem)
+        Ok(memories)
     }
 
     fn new_globals(&self) -> Result<Vec<Val>, WasmError> {
@@ -3388,7 +3375,7 @@ impl Module {
         &self,
         call: WasmCall<'_>,
         steps: &mut u64,
-        mem: &mut Vec<u8>,
+        memories: &mut [Vec<u8>],
         globals: &mut [Val],
         bulk: &mut BulkState<'_>,
         context: &mut CallContext<'_>,
@@ -3419,7 +3406,14 @@ impl Module {
                     call_depth: current_depth,
                     stats: context.stats,
                 };
-                self.run_defined(current, steps, mem, globals, bulk, activation_resources)?
+                self.run_defined(
+                    current,
+                    steps,
+                    memories,
+                    globals,
+                    bulk,
+                    activation_resources,
+                )?
             } else if index < self.hosts.len() {
                 let force_owned = callers.is_empty();
                 if let Some(caller) = callers.last_mut() {
@@ -3444,7 +3438,13 @@ impl Module {
                         .try_reserve(result_count)
                         .map_err(|_| WasmError::Trap("call stack"))?;
                 }
-                DefinedOutcome::Values(self.call_host(index, &args, mem, force_owned)?)
+                let values = if let Some(memory) = memories.first_mut() {
+                    self.call_host(index, &args, memory, force_owned)?
+                } else {
+                    let mut empty = [];
+                    self.call_host(index, &args, &mut empty, force_owned)?
+                };
+                DefinedOutcome::Values(values)
             } else {
                 let current_depth = context
                     .base_depth
@@ -3465,7 +3465,14 @@ impl Module {
                     call_depth: current_depth,
                     stats: context.stats,
                 };
-                self.run_defined(current, steps, mem, globals, bulk, activation_resources)?
+                self.run_defined(
+                    current,
+                    steps,
+                    memories,
+                    globals,
+                    bulk,
+                    activation_resources,
+                )?
             };
             match outcome {
                 DefinedOutcome::Values(values) => {
@@ -3537,7 +3544,7 @@ impl Module {
         &self,
         activation: DefinedActivation,
         steps: &mut u64,
-        mem: &mut Vec<u8>,
+        memories: &mut [Vec<u8>],
         globals: &mut [Val],
         bulk: &mut BulkState<'_>,
         resources: ActivationResources<'_>,
@@ -3662,40 +3669,58 @@ impl Module {
                 Op::I32Rotr => bin_i32(&mut stack, |a, b| {
                     (a as u32).rotate_right((b as u32) & 31) as i32
                 })?,
-                Op::I32Load { offset } => {
+                Op::I32Load(arg) => {
                     let addr = pop(&mut stack)?;
-                    stack.push(Val::I32(mem_read_i32(mem, addr, offset)?));
+                    let memory = selected_memory(memories, arg.memory)?;
+                    stack.push(Val::I32(mem_read_i32(memory, addr, arg.offset)?));
                 }
-                Op::I32Store { offset } => {
+                Op::I32Store(arg) => {
                     let value = pop(&mut stack)?;
                     let addr = pop(&mut stack)?;
-                    mem_write_i32(mem, addr, offset, value)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    mem_write_i32(memory, addr, arg.offset, value)?;
                 }
-                Op::I32Load8S { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    stack.push(Val::I32(mem[ea] as i8 as i32));
+                Op::I32Load8S(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
+                    stack.push(Val::I32(memory[ea] as i8 as i32));
                 }
-                Op::I32Load8U { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    stack.push(Val::I32(mem[ea] as i32));
+                Op::I32Load8U(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
+                    stack.push(Val::I32(memory[ea] as i32));
                 }
-                Op::I32Load16S { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    stack.push(Val::I32(i16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32));
+                Op::I32Load16S(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
+                    stack.push(Val::I32(
+                        i16::from_le_bytes([memory[ea], memory[ea + 1]]) as i32
+                    ));
                 }
-                Op::I32Load16U { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    stack.push(Val::I32(u16::from_le_bytes([mem[ea], mem[ea + 1]]) as i32));
+                Op::I32Load16U(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
+                    stack.push(Val::I32(
+                        u16::from_le_bytes([memory[ea], memory[ea + 1]]) as i32
+                    ));
                 }
-                Op::I32Store8 { offset } => {
+                Op::I32Store8(arg) => {
                     let value = pop(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    mem[ea] = value as u8;
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
+                    memory[ea] = value as u8;
                 }
-                Op::I32Store16 { offset } => {
+                Op::I32Store16(arg) => {
                     let value = pop(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
+                    memory[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
                 Op::GlobalGet(g) => {
                     let v = *globals
@@ -3892,15 +3917,19 @@ impl Module {
                 Op::F32Min => bin_f32(&mut stack, wasm_min_f32)?,
                 Op::F32Max => bin_f32(&mut stack, wasm_max_f32)?,
                 Op::F32Copysign => bin_f32(&mut stack, libm::copysignf)?,
-                Op::F32Load { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    let bytes = le4(&mem[ea..ea + 4]);
+                Op::F32Load(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
+                    let bytes = le4(&memory[ea..ea + 4]);
                     stack.push(Val::F32(f32::from_le_bytes(bytes)));
                 }
-                Op::F32Store { offset } => {
+                Op::F32Store(arg) => {
                     let value = pop_f32(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
+                    memory[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
                 }
                 Op::F64Const(bits) => {
                     push_operand(
@@ -4003,52 +4032,74 @@ impl Module {
                     let a = pop_f64(&mut stack)?;
                     stack.push(Val::F64(libm::copysign(a, b)));
                 }
-                Op::F64Load { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
-                    let bytes = le8(&mem[ea..ea + 8]);
+                Op::F64Load(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 8)?;
+                    let bytes = le8(&memory[ea..ea + 8]);
                     stack.push(Val::F64(f64::from_le_bytes(bytes)));
                 }
-                Op::F64Store { offset } => {
+                Op::F64Store(arg) => {
                     let value = pop_f64(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
-                    mem[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 8)?;
+                    memory[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
                 }
-                Op::MemorySize => {
+                Op::MemorySize(memory_index) => {
+                    let memory = selected_memory(memories, memory_index)?;
                     push_operand(
                         &mut stack,
-                        Val::I32((mem.len() / WASM_PAGE_SIZE) as i32),
+                        Val::I32((memory.len() / WASM_PAGE_SIZE) as i32),
                         live_slots,
                         resources.available_slots,
                     )?;
                 }
-                Op::MemoryGrow => {
+                Op::MemoryGrow(memory_index) => {
                     let delta = pop(&mut stack)? as u32 as usize;
-                    let old_pages = mem.len() / WASM_PAGE_SIZE;
-                    let new_pages = old_pages.checked_add(delta);
-                    // The declared maximum is the module's own ceiling; the
-                    // spec-wide cap applies when it declares none. Growth that
-                    // the allocator refuses reports -1 rather than aborting.
+                    let memory_index = memory_index as usize;
+                    let old_pages = memories
+                        .get(memory_index)
+                        .ok_or(WasmError::Trap("memory index"))?
+                        .len()
+                        / WASM_PAGE_SIZE;
                     let cap = self
-                        .mem_max_pages
+                        .memories
+                        .get(memory_index)
+                        .ok_or(WasmError::Trap("memory index"))?
+                        .max
                         .unwrap_or(WASM_MAX_PAGES)
-                        .min(self.limits.max_memory_pages)
                         .min(WASM_MAX_PAGES);
-                    let growth = new_pages.filter(|&pages| pages <= cap).and_then(|pages| {
-                        pages
-                            .checked_sub(old_pages)
-                            .and_then(|delta_pages| delta_pages.checked_mul(WASM_PAGE_SIZE))
-                            .map(|extra| (pages, extra))
-                    });
+                    let total_pages = memories.iter().try_fold(0usize, |total, memory| {
+                        total
+                            .checked_add(memory.len() / WASM_PAGE_SIZE)
+                            .ok_or(WasmError::Trap("memory size"))
+                    })?;
+                    let growth = old_pages
+                        .checked_add(delta)
+                        .filter(|&pages| pages <= cap)
+                        .filter(|_| {
+                            total_pages
+                                .checked_add(delta)
+                                .is_some_and(|total| total <= self.limits.max_memory_pages)
+                        })
+                        .zip(delta.checked_mul(WASM_PAGE_SIZE));
+                    let memory = memories
+                        .get_mut(memory_index)
+                        .ok_or(WasmError::Trap("memory index"))?;
                     if let Some((new_pages, extra)) = growth
-                        && mem.try_reserve(extra).is_ok()
+                        && memory.try_reserve(extra).is_ok()
                     {
-                        mem.resize(new_pages * WASM_PAGE_SIZE, 0);
+                        memory.resize(new_pages * WASM_PAGE_SIZE, 0);
                         stack.push(Val::I32(old_pages as i32));
                     } else {
                         stack.push(Val::I32(-1));
                     }
                 }
-                Op::MemoryInit { data_index } => {
+                Op::MemoryInit {
+                    data_index,
+                    memory_index,
+                } => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let source = pop(&mut stack)? as u32 as usize;
                     let destination = pop(&mut stack)? as u32 as usize;
@@ -4063,9 +4114,10 @@ impl Module {
                         .ok_or(WasmError::Trap("memory.init data segment state"))?;
                     let bytes = if live { segment.bytes.as_slice() } else { &[] };
                     let source_range = bulk_memory_range(bytes.len(), source, len)?;
-                    let destination_range = bulk_memory_range(mem.len(), destination, len)?;
+                    let memory = selected_memory_mut(memories, memory_index)?;
+                    let destination_range = bulk_memory_range(memory.len(), destination, len)?;
                     charge_bulk_steps(steps, len, self.limits.max_steps)?;
-                    mem[destination_range].copy_from_slice(&bytes[source_range]);
+                    memory[destination_range].copy_from_slice(&bytes[source_range]);
                 }
                 Op::DataDrop { data_index } => {
                     let live = bulk
@@ -4232,75 +4284,114 @@ impl Module {
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
                     table[range].fill(function);
                 }
-                Op::MemoryCopy => {
+                Op::MemoryCopy {
+                    destination_memory,
+                    source_memory,
+                } => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let source = pop(&mut stack)? as u32 as usize;
                     let destination = pop(&mut stack)? as u32 as usize;
-                    let source_range = bulk_memory_range(mem.len(), source, len)?;
-                    bulk_memory_range(mem.len(), destination, len)?;
+                    let source_len = selected_memory(memories, source_memory)?.len();
+                    let destination_len = selected_memory(memories, destination_memory)?.len();
+                    let source_range = bulk_memory_range(source_len, source, len)?;
+                    bulk_memory_range(destination_len, destination, len)?;
                     charge_bulk_steps(steps, len, self.limits.max_steps)?;
-                    mem.copy_within(source_range, destination);
+                    if destination_memory == source_memory {
+                        selected_memory_mut(memories, destination_memory)?
+                            .copy_within(source_range, destination);
+                    } else {
+                        for relative in 0..len {
+                            let byte = selected_memory(memories, source_memory)?[source + relative];
+                            selected_memory_mut(memories, destination_memory)?
+                                [destination + relative] = byte;
+                        }
+                    }
                 }
-                Op::MemoryFill => {
+                Op::MemoryFill(memory_index) => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let value = pop(&mut stack)? as u8;
                     let destination = pop(&mut stack)? as u32 as usize;
-                    let range = bulk_memory_range(mem.len(), destination, len)?;
+                    let memory = selected_memory_mut(memories, memory_index)?;
+                    let range = bulk_memory_range(memory.len(), destination, len)?;
                     charge_bulk_steps(steps, len, self.limits.max_steps)?;
-                    mem[range].fill(value);
+                    memory[range].fill(value);
                 }
-                Op::I64Load { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
-                    let bytes = le8(&mem[ea..ea + 8]);
+                Op::I64Load(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 8)?;
+                    let bytes = le8(&memory[ea..ea + 8]);
                     stack.push(Val::I64(i64::from_le_bytes(bytes)));
                 }
-                Op::I64Store { offset } => {
+                Op::I64Store(arg) => {
                     let value = pop_i64(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
-                    mem[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 8)?;
+                    memory[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
                 }
-                Op::I64Load8S { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    stack.push(Val::I64(mem[ea] as i8 as i64));
+                Op::I64Load8S(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
+                    stack.push(Val::I64(memory[ea] as i8 as i64));
                 }
-                Op::I64Load8U { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    stack.push(Val::I64(mem[ea] as u64 as i64));
+                Op::I64Load8U(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
+                    stack.push(Val::I64(memory[ea] as u64 as i64));
                 }
-                Op::I64Load16S { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    stack.push(Val::I64(i16::from_le_bytes([mem[ea], mem[ea + 1]]) as i64));
-                }
-                Op::I64Load16U { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
+                Op::I64Load16S(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
                     stack.push(Val::I64(
-                        u16::from_le_bytes([mem[ea], mem[ea + 1]]) as u64 as i64
+                        i16::from_le_bytes([memory[ea], memory[ea + 1]]) as i64
                     ));
                 }
-                Op::I64Load32S { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    let bytes = le4(&mem[ea..ea + 4]);
+                Op::I64Load16U(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
+                    stack.push(Val::I64(
+                        u16::from_le_bytes([memory[ea], memory[ea + 1]]) as u64 as i64,
+                    ));
+                }
+                Op::I64Load32S(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
+                    let bytes = le4(&memory[ea..ea + 4]);
                     stack.push(Val::I64(i32::from_le_bytes(bytes) as i64));
                 }
-                Op::I64Load32U { offset } => {
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    let bytes = le4(&mem[ea..ea + 4]);
+                Op::I64Load32U(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
+                    let bytes = le4(&memory[ea..ea + 4]);
                     stack.push(Val::I64(u32::from_le_bytes(bytes) as u64 as i64));
                 }
-                Op::I64Store8 { offset } => {
+                Op::I64Store8(arg) => {
                     let value = pop_i64(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 1)?;
-                    mem[ea] = value as u8;
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 1)?;
+                    memory[ea] = value as u8;
                 }
-                Op::I64Store16 { offset } => {
+                Op::I64Store16(arg) => {
                     let value = pop_i64(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 2)?;
-                    mem[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 2)?;
+                    memory[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
-                Op::I64Store32 { offset } => {
+                Op::I64Store32(arg) => {
                     let value = pop_i64(&mut stack)?;
-                    let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
-                    mem[ea..ea + 4].copy_from_slice(&(value as u32).to_le_bytes());
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
+                    memory[ea..ea + 4].copy_from_slice(&(value as u32).to_le_bytes());
                 }
                 Op::I64Const(v) => {
                     push_operand(
@@ -4623,13 +4714,13 @@ impl Module {
 
 impl Instance {
     fn new(module: Module) -> Result<Self, WasmError> {
-        let memory = module.new_memory()?;
+        let memories = module.new_memories()?;
         let globals = module.new_globals()?;
         let data_live = module.new_data_state()?;
         let (tables, elem_live) = module.new_table_state()?;
         let mut instance = Self {
             module,
-            memory,
+            memories,
             globals,
             data_live,
             tables,
@@ -4656,7 +4747,7 @@ impl Instance {
                     args: &[],
                 },
                 &mut steps,
-                &mut instance.memory,
+                &mut instance.memories,
                 &mut instance.globals,
                 &mut bulk,
                 &mut call_context,
@@ -4704,7 +4795,7 @@ impl Instance {
         let result = self.module.call_any(
             WasmCall { index: idx, args },
             &mut steps,
-            &mut self.memory,
+            &mut self.memories,
             &mut self.globals,
             &mut bulk,
             &mut call_context,
@@ -4733,9 +4824,24 @@ impl Instance {
         self.last_peak_activation_slots
     }
 
-    /// Current live linear-memory size in WebAssembly 64 KiB pages.
+    /// Aggregate live linear-memory size in WebAssembly 64 KiB pages.
     pub fn memory_pages(&self) -> usize {
-        self.memory.len() / WASM_PAGE_SIZE
+        self.memories
+            .iter()
+            .map(|memory| memory.len() / WASM_PAGE_SIZE)
+            .sum()
+    }
+
+    /// Number of internally defined memories in this live instance.
+    pub fn memory_count(&self) -> usize {
+        self.memories.len()
+    }
+
+    /// Current pages in one selected memory.
+    pub fn memory_pages_at(&self, memory_index: usize) -> Option<usize> {
+        self.memories
+            .get(memory_index)
+            .map(|memory| memory.len() / WASM_PAGE_SIZE)
     }
 
     /// Aggregate live funcref elements across all tables. For the original
@@ -4754,29 +4860,73 @@ impl Instance {
         self.tables.get(table_index).map(Vec::len)
     }
 
-    /// Read-only access to the live linear memory, for bounded native host I/O.
+    /// Read-only access to memory zero, for bounded native host I/O.
     pub fn memory(&self) -> &[u8] {
-        &self.memory
+        self.memory_at(0).unwrap_or(&[])
     }
 
-    /// Mutable access to the live linear memory, for writing bounded input or
-    /// state payloads before an exported call.
+    /// Mutable access to memory zero, for writing bounded input or state
+    /// payloads before an exported call.
     pub fn memory_mut(&mut self) -> &mut [u8] {
-        &mut self.memory
+        self.memories
+            .first_mut()
+            .map(Vec::as_mut_slice)
+            .unwrap_or(&mut [])
+    }
+
+    /// Read-only access to one selected live linear memory.
+    pub fn memory_at(&self, memory_index: usize) -> Option<&[u8]> {
+        self.memories.get(memory_index).map(Vec::as_slice)
+    }
+
+    /// Mutable access to one selected live linear memory.
+    pub fn memory_at_mut(&mut self, memory_index: usize) -> Option<&mut [u8]> {
+        self.memories.get_mut(memory_index).map(Vec::as_mut_slice)
     }
 }
 
-/// Decode a standard memarg and validate its alignment exponent against the
-/// instruction's natural alignment before returning the offset.
-fn memarg(body: &[u8], i: usize, natural_align: u32) -> Result<(u32, usize), WasmError> {
-    let (align, n1) = leb_u32(body, i)?;
+/// Decode the multiple-memory memarg. Values below 2^6 are the legacy
+/// alignment exponent with implicit memory zero; values in 2^6..2^7 carry an
+/// explicit memory index before the offset.
+fn memarg(
+    body: &[u8],
+    i: usize,
+    natural_align: u32,
+    memory_count: usize,
+) -> Result<(MemArg, usize), WasmError> {
+    let (flags, n1) = leb_u32(body, i)?;
+    if flags >= 1 << 7 {
+        return Err(WasmError::Decode("memory alignment"));
+    }
+    let (align, memory, offset_at) = if flags >= 1 << 6 {
+        let (memory, next) = leb_u32(body, n1)?;
+        (flags - (1 << 6), memory, next)
+    } else {
+        (flags, 0, n1)
+    };
+    if memory as usize >= memory_count {
+        return Err(WasmError::Decode("memory index"));
+    }
     if align > natural_align {
         return Err(WasmError::Decode(
             "memory alignment exceeds natural alignment",
         ));
     }
-    let (offset, n2) = leb_u32(body, n1)?;
-    Ok((offset, n2))
+    let (offset, next) = leb_u32(body, offset_at)?;
+    Ok((MemArg { memory, offset }, next))
+}
+
+fn selected_memory(memories: &[Vec<u8>], index: u32) -> Result<&[u8], WasmError> {
+    memories
+        .get(index as usize)
+        .map(Vec::as_slice)
+        .ok_or(WasmError::Trap("memory index"))
+}
+
+fn selected_memory_mut(memories: &mut [Vec<u8>], index: u32) -> Result<&mut Vec<u8>, WasmError> {
+    memories
+        .get_mut(index as usize)
+        .ok_or(WasmError::Trap("memory index"))
 }
 
 /// Effective address `addr as u32 + offset`, bounds-checked for a `width`-byte
@@ -5860,11 +6010,11 @@ mod tests {
     }
 
     #[test]
-    fn bulk_memory_decoder_rejects_other_memories_and_unknown_subopcodes() {
+    fn bulk_memory_decoder_rejects_out_of_bounds_memories_and_unknown_subopcodes() {
         let mut module = Module::new();
         assert!(matches!(
             module.add_function(0, 0, 0, &[0xFC, 0x0A, 0x01, 0x00, 0x0B]),
-            Err(WasmError::Decode("memory.copy memory indices must be 0"))
+            Err(WasmError::Decode("memory index"))
         ));
         assert!(matches!(
             module.add_function(0, 0, 0, &[0xFC, 0x12, 0x0B]),

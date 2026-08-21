@@ -24,7 +24,7 @@ reference types,
 the standard sign-extension and non-trapping
 float-to-integer conversion proposals, the standard multi-value and tail-call
 proposals, and
-the standard bulk-memory proposal over the single memory and MVP funcref table.
+the standard bulk-memory proposal over its single memory and MVP funcref tables.
 Any cartridge that uses linear-memory instructions or active data segments must
 declare its standard memory section; the loader never supplies an implicit page.
 Scalar load/store alignment exponents must not exceed each instruction's
@@ -45,10 +45,18 @@ instruction. A module may define multiple funcref tables: table instructions,
 `call_indirect`, active element segments and cross-table `table.copy` use their
 standard table indices. Defined-table exports are structurally validated;
 imported tables, `externref`, typed function references, GC, SIMD, exceptions,
-threads and multiple memories remain outside v1 and fail
+threads and multiple memories remain outside the TinyArcade v1 profile and fail
 loudly at load time. This is feature negotiation by converter profile: future
 runtimes may add standard proposals without changing the `.wasm` container or
 inventing tinyvm-only opcodes.
+
+This single-memory rule belongs to the game embedding, not the general engine.
+tinyvm itself supports multiple internally defined standard memories, including
+explicit scalar memargs, indexed active data and bulk operations, cross-memory
+copy, and per-memory grow. TinyArcade v1 requires exactly one memory because its
+core host callbacks, snapshot ranges and media submissions deliberately address
+memory zero. Imported memories remain unsupported until the VM has an explicit
+store-level memory binding and identity model.
 
 `return_call` and `return_call_indirect` have their standard encodings and
 validation rules. The target's complete result vector must equal the current

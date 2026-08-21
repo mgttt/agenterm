@@ -78,6 +78,7 @@ agenterm-tinyvm (35)
 │       ├── multi-value proposal [x]
 │       ├── single-table funcref profile [x]
 │       ├── multiple defined funcref tables [x]
+│       ├── multiple internally defined memories [x]
 │       └── tail-call proposal [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
@@ -122,7 +123,7 @@ definition，同时读取 value type 与 mutability，不建立第二份派生 m
 Custom section 可以重复并出现在标准 section 之间，name 之后的 payload 对 VM 保持
 透明；但每个 custom section 仍必须带有长度完整、UTF-8 合法的标准 name。name 验证
 直接借用输入 bytes，不为引擎忽略的 metadata 建立临时分配。
-当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
+当前 scalar MVP 面双绿，并已原生接受完整的 bulk-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
 三个 golden corpus 中的每一个标准模块（包括预期运行期 trap 的样例）还必须先通过
@@ -139,6 +140,12 @@ Multi-value 包含多结果函数、s33 type-index block signature、带参数 b
 active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
 预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。当前仍不接受 imported
 tables；定义表的 export 会完整验证，但产品 embedding 暂只公开 function lookup。
+通用 VM 同样接受标准 multiple-memory proposal 中的多张 internally defined linear
+memory：scalar memarg、size/grow、active data、init/fill 与同内存或跨内存 copy 都按
+标准 memory index 执行。宿主 `max_memory_pages` 是实例内所有 memory 的聚合上限，
+每张 memory 仍服从自身 declared maximum；当前没有 store/binding model，因此 imported
+memory 仍明确排除。TinyArcade v1 继续要求恰好一张 memory，这是其 core callback、
+snapshot 和媒体 ABI 固定使用 memory zero 的 embedding 约束，不是 tinyvm 的能力上限。
 标准 tail-call proposal 的 `return_call` 与 `return_call_indirect` 已进入 profile；执行器以
 trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native stack。普通非尾调用
 也使用显式、fallible VM activation vector，不再递归进入 Rust；direct/indirect 调用统一受

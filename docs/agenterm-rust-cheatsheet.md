@@ -2579,3 +2579,19 @@ the deterministic record. Those are device/run measurements; instruction,
 page, dispatch and output-byte counts are replayable VM/ABI facts. Gate both
 layers independently, and require a platform smoke to verify that copied output
 lengths agree with the interpreter record on every measured frame.
+
+## Keep VM capability separate from an embedding profile
+
+A standards-facing VM may support more resources than its first product ABI.
+For WebAssembly multiple memories, preserve the standard indices in scalar
+memargs, active data and bulk instructions, and apply the host page ceiling to
+the aggregate live pages across the instance. Each memory still observes its
+own declared maximum. Cross-memory copy must validate both ranges and charge
+fuel before writing, just as same-memory `copy_within` does.
+
+An embedding whose callbacks and snapshots name memory zero may still require
+exactly one memory at its own load gate. Keep that check above the general
+module loader; otherwise a game ABI convenience silently becomes the VM's
+language limit. Do not accept imported memories until the host has an explicit
+store-level binding and identity model—an internal-memory vector alone is not
+an import implementation.

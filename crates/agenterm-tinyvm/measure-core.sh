@@ -10,7 +10,9 @@ printf 'extern int tinyvm_selftest(void);\nint main(void){return tinyvm_selftest
 case "$(uname -s)" in
   Darwin)
     cc -Os -Wl,-dead_strip "$TD/tvmain.c" "$TD/release/libagenterm_tinyvm.a" -o "$TD/tinycore" -lm
-    strip -x "$TD/tinycore"
+    # Keep only undefined and dynamically referenced symbols. `-x` still
+    # retains external Rust symbols in a fully linked executable on Darwin.
+    strip -u -r "$TD/tinycore"
     ;;
   *)
     cc -Os -Wl,--gc-sections "$TD/tvmain.c" "$TD/release/libagenterm_tinyvm.a" -o "$TD/tinycore" -lm
