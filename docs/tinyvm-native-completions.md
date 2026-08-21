@@ -2,7 +2,7 @@
 
 Owner: [PRD 02.35](../prd/PRD_02_35_agenterm_tinyvm.md)
 
-Status: host-neutral core implemented; native-module import protocols remain module-specific
+Status: host-neutral core and reusable guest protocol implemented
 
 `HostCompletionQueue` is the common `no_std + alloc` state machine for native
 work that cannot finish inside a synchronous Wasm import. It deliberately owns
@@ -42,13 +42,35 @@ Both dimensions are bounded before work begins:
 - arithmetic overflow is the same explicit byte-budget failure;
 - `clear`/drop releases payload ownership and all reservations.
 
-A versioned native module still defines its own ordinary Wasm imports, for
-example `start(...) -> i32`, `poll(ticket, ...) -> i32` and `close(ticket) ->
-i32`. That contract must specify status values, guest-memory copy bounds,
-cancellation and replay behavior. The common queue does not invent engine-
-private imports and does not make asynchronous external results deterministic.
-If replay requires them, the embedding must record the normalized completion as
-host input at a lifecycle boundary.
+A versioned native module defines its module-specific start imports and may
+register the common sibling protocol atomically through
+`NativeModuleRegistry::register_completion_imports`:
+
+```text
+completion_poll(ticket, status_ptr, length_ptr) -> code
+completion_take(ticket, destination_ptr, capacity) -> code
+completion_cancel(ticket) -> code
+
+code 0 = pending
+code 1 = ready / consumed
+code 2 = stale ticket
+code 3 = destination too small
+```
+
+Poll preflights two non-overlapping four-byte outputs and writes the native
+status plus payload length only when ready. Take preserves a pending result or
+a result that does not fit; it validates the complete guest range before
+removing the owned payload. Cancel invalidates pending or ready work. Invalid
+guest memory remains a VM trap because it is malformed Wasm host-call state,
+while ordinary queue states remain stable result codes. Registration requires
+the queue's assigned domain to belong to the same native module, reserves all
+three function slots, and rejects collisions before publishing any of them.
+
+The native module still specifies request arguments, scheduling, native status
+values and replay behavior. The common protocol does not invent engine-private
+imports and does not make asynchronous external results deterministic. If
+replay requires them, the embedding records the normalized completion as host
+input at a lifecycle boundary.
 
 This adopts QJWasm's useful separation between call, callback and completion
 channels without adopting QuickJS, a two-runtime ownership graph, or its thread

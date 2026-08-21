@@ -1904,7 +1904,11 @@ return payload ownership on rejected completion, and count pending plus ready-
 but-unclaimed requests as live during snapshot quiescence. Keep the common VM
 primitive event-loop-neutral: platform workers marshal results to the runtime
 owner, while each versioned native module defines its own ordinary Wasm import
-protocol and replay normalization.
+protocol and replay normalization. Register a multi-function protocol
+transactionally: reserve every registry slot and reject name collisions before
+publishing the first function. Preflight every guest output and capacity before
+taking a completed payload so a malformed pointer or short buffer cannot lose
+the host-owned result.
 
 ## Saturate native geometry before narrowing coordinates
 

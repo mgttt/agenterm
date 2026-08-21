@@ -73,6 +73,7 @@ pub use resource_table::{
 
 pub mod completion;
 pub use completion::{
+    COMPLETION_BUFFER_TOO_SMALL, COMPLETION_PENDING, COMPLETION_READY, COMPLETION_STALE,
     CompletionError, CompletionPoll, CompletionRejection, HostCompletion, HostCompletionQueue,
 };
 

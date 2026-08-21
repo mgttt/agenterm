@@ -212,6 +212,149 @@ impl NativeModuleRegistry {
         Ok(crate::HostCompletionQueue::new(table, max_reserved_bytes))
     }
 
+    /// Register the common `completion_poll`, `completion_take` and
+    /// `completion_cancel` i32 imports in the queue's versioned native module.
+    ///
+    /// A module-specific start function owns request arguments and scheduling.
+    /// Poll writes native status and payload length only when ready. Take copies
+    /// into guest memory and consumes the ticket only after the complete range
+    /// and capacity have been checked. All three functions return the stable
+    /// `COMPLETION_*` result constants rather than engine-private traps for a
+    /// stale ticket, pending result, or short buffer.
+    pub fn register_completion_imports(
+        &mut self,
+        module: &str,
+        queue: Rc<RefCell<crate::HostCompletionQueue>>,
+        max_calls_per_lifecycle: u32,
+    ) -> Result<(), WasmError> {
+        let queue_domain = queue
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("native completion reentrancy"))?
+            .domain();
+        if module == ABI_MODULE
+            || !valid_native_namespace(module)
+            || self.assigned_resource_table_domain(module) != Some(queue_domain)
+            || max_calls_per_lifecycle == 0
+            || max_calls_per_lifecycle > MAX_NATIVE_CALLS_PER_LIFECYCLE
+            || self.functions.len() > MAX_NATIVE_FUNCTIONS - 3
+            || ["completion_poll", "completion_take", "completion_cancel"]
+                .iter()
+                .any(|field| self.find(module, field).is_some())
+        {
+            return Err(WasmError::Trap("invalid native completion registration"));
+        }
+        self.functions
+            .try_reserve_exact(3)
+            .map_err(|_| WasmError::Trap("native completion registration allocation"))?;
+        let poll_queue = queue.clone();
+        self.register_in_place_with_call_limit(
+            module,
+            "completion_poll",
+            3,
+            1,
+            max_calls_per_lifecycle,
+            move |args, results, memory| {
+                let Some(handle) = crate::GuestResourceHandle::from_i32(args[0]) else {
+                    results[0] = crate::COMPLETION_STALE;
+                    return Ok(());
+                };
+                let status = completion_output_range(memory.len(), args[1], 4)?;
+                let length = completion_output_range(memory.len(), args[2], 4)?;
+                if status.start < length.end && length.start < status.end {
+                    return Err(WasmError::Trap("native completion output overlap"));
+                }
+                let queue = poll_queue
+                    .try_borrow()
+                    .map_err(|_| WasmError::Trap("native completion reentrancy"))?;
+                match queue.poll(handle) {
+                    Ok(crate::CompletionPoll::Pending) => {
+                        results[0] = crate::COMPLETION_PENDING;
+                    }
+                    Ok(crate::CompletionPoll::Ready {
+                        status: native_status,
+                        payload,
+                    }) => {
+                        let payload_len = u32::try_from(payload.len())
+                            .map_err(|_| WasmError::Trap("native completion payload length"))?;
+                        memory[status].copy_from_slice(&native_status.to_le_bytes());
+                        memory[length].copy_from_slice(&payload_len.to_le_bytes());
+                        results[0] = crate::COMPLETION_READY;
+                    }
+                    Err(crate::CompletionError::StaleHandle) => {
+                        results[0] = crate::COMPLETION_STALE;
+                    }
+                    Err(_) => return Err(WasmError::Trap("native completion state")),
+                }
+                Ok(())
+            },
+        )?;
+
+        let take_queue = queue.clone();
+        self.register_in_place_with_call_limit(
+            module,
+            "completion_take",
+            3,
+            1,
+            max_calls_per_lifecycle,
+            move |args, results, memory| {
+                let Some(handle) = crate::GuestResourceHandle::from_i32(args[0]) else {
+                    results[0] = crate::COMPLETION_STALE;
+                    return Ok(());
+                };
+                let capacity = args[2] as u32 as usize;
+                let mut queue = take_queue
+                    .try_borrow_mut()
+                    .map_err(|_| WasmError::Trap("native completion reentrancy"))?;
+                let payload_len = match queue.poll(handle) {
+                    Ok(crate::CompletionPoll::Pending) => {
+                        results[0] = crate::COMPLETION_PENDING;
+                        return Ok(());
+                    }
+                    Ok(crate::CompletionPoll::Ready { payload, .. }) => payload.len(),
+                    Err(crate::CompletionError::StaleHandle) => {
+                        results[0] = crate::COMPLETION_STALE;
+                        return Ok(());
+                    }
+                    Err(_) => return Err(WasmError::Trap("native completion state")),
+                };
+                if capacity < payload_len {
+                    results[0] = crate::COMPLETION_BUFFER_TOO_SMALL;
+                    return Ok(());
+                }
+                let output = completion_output_range(memory.len(), args[1], payload_len)?;
+                let completion = queue
+                    .take(handle)
+                    .map_err(|_| WasmError::Trap("native completion changed"))?;
+                memory[output].copy_from_slice(&completion.payload);
+                results[0] = crate::COMPLETION_READY;
+                Ok(())
+            },
+        )?;
+
+        self.register_in_place_with_call_limit(
+            module,
+            "completion_cancel",
+            1,
+            1,
+            max_calls_per_lifecycle,
+            move |args, results, _| {
+                let Some(handle) = crate::GuestResourceHandle::from_i32(args[0]) else {
+                    results[0] = crate::COMPLETION_STALE;
+                    return Ok(());
+                };
+                let mut queue = queue
+                    .try_borrow_mut()
+                    .map_err(|_| WasmError::Trap("native completion reentrancy"))?;
+                results[0] = match queue.cancel(handle) {
+                    Ok(()) => crate::COMPLETION_READY,
+                    Err(crate::CompletionError::StaleHandle) => crate::COMPLETION_STALE,
+                    Err(_) => return Err(WasmError::Trap("native completion state")),
+                };
+                Ok(())
+            },
+        )
+    }
+
     /// Inspect an already assigned table domain without changing the registry.
     pub fn assigned_resource_table_domain(
         &self,
@@ -369,6 +512,19 @@ impl NativeModuleRegistry {
             .enumerate()
             .find(|(_, function)| function.module == module && function.field == field)
     }
+}
+
+fn completion_output_range(
+    memory_len: usize,
+    pointer: i32,
+    length: usize,
+) -> Result<core::ops::Range<usize>, WasmError> {
+    let start = pointer as u32 as usize;
+    let end = start
+        .checked_add(length)
+        .filter(|end| *end <= memory_len)
+        .ok_or(WasmError::Trap("native completion memory"))?;
+    Ok(start..end)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

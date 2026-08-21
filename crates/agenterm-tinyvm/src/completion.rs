@@ -9,6 +9,12 @@ use alloc::vec::Vec;
 
 use crate::{GuestResourceHandle, HostResourceTable, ResourceTableError};
 
+/// Stable results returned by the reusable versioned guest import protocol.
+pub const COMPLETION_PENDING: i32 = 0;
+pub const COMPLETION_READY: i32 = 1;
+pub const COMPLETION_STALE: i32 = 2;
+pub const COMPLETION_BUFFER_TOO_SMALL: i32 = 3;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompletionError {
     Full,
@@ -89,6 +95,10 @@ impl HostCompletionQueue {
 
     pub const fn max_reserved_bytes(&self) -> usize {
         self.max_reserved_bytes
+    }
+
+    pub const fn domain(&self) -> crate::ResourceHandleDomain {
+        self.table.domain()
     }
 
     /// Reserve one stable request identity and its complete response allowance

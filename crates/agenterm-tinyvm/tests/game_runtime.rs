@@ -1630,6 +1630,45 @@ fn native_completion_queue_bounds_identity_items_and_reserved_bytes() {
     replacement_queue
         .cancel(replacement_handle)
         .expect("cancel replacement request");
+
+    let mut collision_registry = NativeModuleRegistry::new();
+    let collision_queue = Rc::new(RefCell::new(must_ok(
+        collision_registry.completion_queue("fan:collision/v1", 1, 1, &mut allocator),
+        "create collision queue",
+    )));
+    assert!(matches!(
+        collision_registry.register_completion_imports("fan:other/v1", collision_queue.clone(), 1),
+        Err(WasmError::Trap("invalid native completion registration"))
+    ));
+    assert!(
+        must_ok(
+            collision_registry.host_profile(Limits::default(), GameLimits::default()),
+            "inspect mismatched completion registry"
+        )
+        .native_functions()
+        .is_empty(),
+        "a queue cannot be bound into another native module"
+    );
+    must_ok(
+        collision_registry.register("fan:collision/v1", "completion_take", 0, 0, |_, _| {
+            Ok(Vec::new())
+        }),
+        "register colliding function",
+    );
+    assert!(matches!(
+        collision_registry.register_completion_imports("fan:collision/v1", collision_queue, 1),
+        Err(WasmError::Trap("invalid native completion registration"))
+    ));
+    assert_eq!(
+        must_ok(
+            collision_registry.host_profile(Limits::default(), GameLimits::default()),
+            "inspect collision registry"
+        )
+        .native_functions()
+        .len(),
+        1,
+        "failed registration must not leave a partial import protocol"
+    );
 }
 
 #[test]
@@ -1665,6 +1704,175 @@ fn pending_native_completion_prevents_portable_snapshot() {
         .cancel(request)
         .expect("cancel failed request");
     assert!(queue.borrow().is_empty());
+}
+
+#[test]
+fn versioned_completion_imports_drive_pending_ready_take_and_stale_states() {
+    let module = "fan:async/v1";
+    let bare = wat::parse_str(format!(
+        r#"(module
+            (import "{module}" "start" (func $start (result i32)))
+            (import "{module}" "completion_poll"
+              (func $poll (param i32 i32 i32) (result i32)))
+            (import "{module}" "completion_take"
+              (func $take (param i32 i32 i32) (result i32)))
+            (import "{module}" "completion_cancel"
+              (func $cancel (param i32) (result i32)))
+            (import "tinyarcade:core/v1" "save_state"
+              (func $save_state (param i32 i32) (result i32)))
+            (memory 1)
+            (global $ticket (mut i32) (i32.const 0))
+            (func (export "game_abi_version") (result i32) (i32.const 1))
+            (func (export "game_init") (result i32)
+              call $start
+              global.set $ticket
+              i32.const 0)
+            (func (export "game_tick") (result i32)
+              global.get $ticket
+              i32.const 0
+              i32.const 4
+              call $poll
+              i32.const 0
+              i32.eq
+              if (result i32)
+                i32.const 0
+              else
+                i32.const 0
+                i32.load
+                i32.const 7
+                i32.ne
+                if (result i32)
+                  i32.const 10
+                else
+                  i32.const 4
+                  i32.load
+                  i32.const 4
+                  i32.ne
+                  if (result i32)
+                    i32.const 11
+                  else
+                    global.get $ticket
+                    i32.const 8
+                    i32.const 3
+                    call $take
+                    i32.const 3
+                    i32.ne
+                    if (result i32)
+                      i32.const 12
+                    else
+                      global.get $ticket
+                      i32.const 8
+                      i32.const 4
+                      call $take
+                      i32.const 1
+                      i32.ne
+                      if (result i32)
+                        i32.const 13
+                      else
+                        i32.const 8
+                        i32.load
+                        i32.const 0x04030201
+                        i32.ne
+                        if (result i32)
+                          i32.const 14
+                        else
+                          global.get $ticket
+                          i32.const 0
+                          i32.const 4
+                          call $poll
+                          i32.const 2
+                          i32.ne
+                          if (result i32)
+                            i32.const 15
+                          else
+                            global.get $ticket
+                            call $cancel
+                            i32.const 2
+                            i32.ne
+                            if (result i32)
+                              i32.const 16
+                            else
+                              call $start
+                              call $cancel
+                              i32.const 1
+                              i32.ne
+                            end
+                          end
+                        end
+                      end
+                    end
+                  end
+                end
+              end)
+            (func (export "game_suspend") (result i32)
+              i32.const 0
+              i32.const 0
+              call $save_state
+              drop
+              i32.const 0)
+            (func (export "game_resume") (result i32) (i32.const 0)))"#
+    ))
+    .expect("compile async completion cartridge");
+    let wasm = must_ok(
+        CartridgeManifest {
+            game_id: "test.async-completion".to_owned(),
+            game_version: "1.0.0".to_owned(),
+            abi_version: 1,
+            state_version: 1,
+            capabilities: vec![module.to_owned()],
+        }
+        .append_to_wasm(&bare),
+        "attach async completion manifest",
+    );
+
+    let mut allocator = agenterm_tinyvm::ResourceDomainAllocator::new();
+    let mut registry = NativeModuleRegistry::new();
+    let queue = Rc::new(RefCell::new(must_ok(
+        registry.completion_queue(module, 1, 4, &mut allocator),
+        "create async completion queue",
+    )));
+    let start_queue = queue.clone();
+    let issued = Rc::new(Cell::new(None));
+    let observed_ticket = issued.clone();
+    must_ok(
+        registry.register(module, "start", 0, 1, move |_, _| {
+            let ticket = start_queue
+                .try_borrow_mut()
+                .map_err(|_| WasmError::Trap("test completion reentrancy"))?
+                .begin(4)
+                .map_err(|_| WasmError::Trap("test completion begin"))?;
+            observed_ticket.set(Some(ticket));
+            Ok(vec![ticket.as_i32()])
+        }),
+        "register async start",
+    );
+    must_ok(
+        registry.register_completion_imports(module, queue.clone(), 8),
+        "register completion imports",
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            registry,
+        ),
+        "open async completion cartridge",
+    );
+    must_ok(
+        runtime.tick(GameInput::default()),
+        "poll pending completion",
+    );
+    assert_eq!(queue.borrow().len(), 1);
+    let ticket = issued.get().expect("start returned one completion ticket");
+    queue
+        .borrow_mut()
+        .try_complete(ticket, 7, vec![1, 2, 3, 4])
+        .expect("complete async request");
+    must_ok(runtime.tick(GameInput::default()), "take ready completion");
+    assert!(queue.borrow().is_empty());
+    must_ok(runtime.suspend(), "suspend after completion quiescence");
 }
 
 #[test]

@@ -3668,3 +3668,35 @@ isolated `no_std` library tests, warnings-denied all-feature and isolated
 `no_std` Clippy, arm64 iOS `no_std`, rustfmt and document-redaction gates pass.
 Default linked sizes remain 1,603,208 bytes arm64 and 1,682,184 bytes x86_64;
 the stripped static core remains 101,256 bytes with selftest 42.
+
+## One-hundred-fourteenth executable increment — versioned completion imports
+
+`NativeModuleRegistry::register_completion_imports` now installs one reusable
+ordinary-Wasm protocol inside any canonical versioned native namespace:
+`completion_poll(ticket,status_ptr,length_ptr)`,
+`completion_take(ticket,destination_ptr,capacity)` and
+`completion_cancel(ticket)`. Stable i32 results distinguish pending, ready,
+stale and short-buffer states. Malformed memory remains a VM trap.
+
+Registration requires the queue's assigned domain to match the same module,
+reserves all three function slots and rejects collisions before publishing any
+callback. Poll preflights disjoint output records. Take checks capacity and the
+complete guest range before consuming payload ownership, so a short buffer
+cannot lose a completed result. The module-specific start import still owns
+request arguments and platform scheduling; the common ABI adds no executor or
+engine-private instruction.
+
+Evidence on 2026-08-22: an independently WAT-compiled TinyArcade cartridge
+starts one host request during init, observes pending on its first tick, then
+observes native status and length, proves a short take preserves the result,
+takes exact payload bytes, and receives stale from both later poll and cancel.
+It then starts and cancels a second live request. The queue is empty before
+portable suspend. A separate collision path proves a cross-module queue cannot
+bind and a failed three-function registration publishes no partial protocol.
+The executable PRD trace now binds 109 completed claims. The complete all-
+feature package and every non-ignored integration test pass, including both iOS
+XCFramework gates and the four-cartridge tinyvm/JSC/H5 differential. All 115
+isolated `no_std` library tests, warnings-denied all-feature and isolated
+`no_std` Clippy, arm64 iOS `no_std`, rustfmt and document-redaction gates pass.
+Default linked sizes remain 1,603,208 bytes arm64 and 1,682,184 bytes x86_64;
+the stripped static core remains 101,256 bytes with selftest 42.
