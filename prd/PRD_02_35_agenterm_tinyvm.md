@@ -14,7 +14,8 @@ agenterm-tinyvm (35)
 │   └── dyn native loading  [–]
 ├── native wasm platform [~]
 │   ├── tinyvm engine       [x]
-│   │   └── decode complexity budget [x]
+│   │   ├── decode complexity budget [x]
+│   │   └── strict declared-memory semantics [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -87,6 +88,10 @@ tinyvm 的产品定位是事实上的、标准优先的跨平台 WebAssembly VM�
 只是第一个 embedding 和持续验收负载，不是引擎能力的边界。任何游戏便利能力都必须
 通过标准 Wasm 或显式、版本化的 host import 表达，不能演化为游戏专用私有字节码。
 槽 A 以标准 WebAssembly 为持续兼容目标，而不是停在自定义 VM 或永久冻结为 MVP。
+标准 binary 入口不会再把 builder 的测试便利当成 Wasm 语义：没有 memory section 的
+module 实例化为零页，任何 load/store、memory.size/grow、bulk-memory instruction 或
+active data segment 都在 load gate 拒绝；passive data 和纯计算 module 仍合法。手写
+`Module::new` 的一页兼容内存只属于程序化 builder，不能泄漏到下载的 `.wasm`。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。

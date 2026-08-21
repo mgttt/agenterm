@@ -25,6 +25,8 @@ the standard sign-extension and non-trapping
 float-to-integer conversion proposals, the standard multi-value and tail-call
 proposals, and
 the standard bulk-memory proposal over the single memory and MVP funcref table.
+Any cartridge that uses linear-memory instructions or active data segments must
+declare its standard memory section; the loader never supplies an implicit page.
 It accepts multi-result functions and type-indexed parameter/result signatures
 on blocks, loops and ifs, all five integer
 sign-extension instructions and all eight saturating float-to-integer

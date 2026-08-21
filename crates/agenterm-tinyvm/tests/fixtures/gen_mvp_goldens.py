@@ -892,7 +892,7 @@ def build_cases() -> list[Case]:
             "memory",
             ops(store, load, "i32.const", "end"),
             expect,
-            simple(expr, result=result),
+            simple(expr, result=result, memory_min=1),
         )
 
     cases.append(
@@ -952,7 +952,7 @@ def build_cases() -> list[Case]:
             "memory",
             ops(store, load, "i32.const", "end"),
             f"i32:{i32(loaded)}",
-            simple(expr),
+            simple(expr, memory_min=1),
         )
 
     cases.append(narrow_i32("i32.store8", "i32.load8_s", 8, 0x9C, i32(0xFFFFFF9C)))
@@ -976,7 +976,7 @@ def build_cases() -> list[Case]:
             "memory",
             ops(store, load, "i32.const", "i64.const", "end"),
             f"i64:{i64(loaded)}",
-            simple(expr, result=I64),
+            simple(expr, result=I64, memory_min=1),
         )
 
     cases.append(narrow_i64("i64.store8", "i64.load8_s", 12, 0x9C, i64(-100)))
@@ -995,7 +995,7 @@ def build_cases() -> list[Case]:
             "memory",
             ops("memory.size", "end"),
             "i32:1",
-            simple(bytes([0x3F, 0x00, 0x0B])),
+            simple(bytes([0x3F, 0x00, 0x0B]), memory_min=1),
         )
     )
     cases.append(
@@ -1004,7 +1004,7 @@ def build_cases() -> list[Case]:
             "memory",
             ops("memory.grow", "i32.const", "end"),
             "i32:1",
-            simple(i32c(3) + bytes([0x40, 0x00, 0x0B])),
+            simple(i32c(3) + bytes([0x40, 0x00, 0x0B]), memory_min=1),
         )
     )
     # Store-named rows: each builds its OWN module (store, then read back with
@@ -1023,6 +1023,7 @@ def build_cases() -> list[Case]:
                 + i32c(addr)
                 + bytes([OPS[load], 0x00, 0x00, 0x0B]),
                 result=result,
+                memory_min=1,
             ),
         )
 
@@ -1543,7 +1544,8 @@ def extra_cases() -> list[Case]:
                 + i32c(0x0A0B0C0D)
                 + bytes([0x36, 0x00, 0x0C])
                 + i32c(16)
-                + bytes([0x28, 0x00, 0x00, 0x0B])
+                + bytes([0x28, 0x00, 0x00, 0x0B]),
+                memory_min=1,
             ),
         )
     )

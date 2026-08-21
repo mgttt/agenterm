@@ -106,12 +106,15 @@ pub enum WasmError {
 
 struct DecodeBudget {
     remaining: usize,
+    /// Resource context for validating decoded standard memory instructions.
+    has_memory: bool,
 }
 
 impl DecodeBudget {
     fn new() -> Self {
         Self {
             remaining: WASM_MAX_DECODE_ITEMS,
+            has_memory: false,
         }
     }
 
@@ -641,6 +644,11 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
         budget.charge(1)?;
         let opcode = body[i];
         i += 1;
+        if !budget.has_memory && opcode.wrapping_sub(0x28) <= 0x18 {
+            return Err(WasmError::Decode(
+                "validation: memory instruction requires memory",
+            ));
+        }
         match opcode {
             0x41 => {
                 let (v, ni) = leb_s32(body, i)?;
@@ -743,6 +751,11 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0xFC => {
                 let (subopcode, ni) = leb_u32(body, i)?;
                 i = ni;
+                if !budget.has_memory && matches!(subopcode, 8 | 10 | 11) {
+                    return Err(WasmError::Decode(
+                        "validation: memory instruction requires memory",
+                    ));
+                }
                 match subopcode {
                     0 => ops.push(Op::I32TruncSatF32S),
                     1 => ops.push(Op::I32TruncSatF32U),
@@ -2050,9 +2063,11 @@ pub struct Module {
     /// The module's function types as `(n_params, n_results)`, so
     /// `call_indirect` can type-check the callee against a declared type.
     types: Vec<FuncType>,
-    /// Declared memory limits in 64 KiB pages, from the memory section. A
-    /// module without one still gets one page (this crate's lenient default),
-    /// and `None` max means "up to [`WASM_MAX_PAGES`]".
+    /// Initial memory pages. Parsed standard modules without a memory section
+    /// store `Some(0)` and reject memory instructions at validation; `None` is
+    /// retained only for programmatic [`Module::new`] compatibility and gives
+    /// that builder one implicit page. `None` max means "up to
+    /// [`WASM_MAX_PAGES`]".
     mem_min_pages: Option<usize>,
     mem_max_pages: Option<usize>,
     /// Standard active/passive data segments. Their bytes belong to the module;
@@ -2240,10 +2255,12 @@ impl Module {
         result_arity: usize,
         body: &[u8],
     ) -> Result<usize, WasmError> {
+        let mut budget = DecodeBudget::new();
+        budget.has_memory = true;
         let DecodedCode {
             ops: code,
             branch_targets,
-        } = decode(body, &mut DecodeBudget::new())?;
+        } = decode(body, &mut budget)?;
         let combined = self.hosts.len() + self.funcs.len();
         self.funcs.push(Func {
             n_params,
@@ -2284,11 +2301,10 @@ impl Module {
     /// table (4), memory (5), global (6), export (7), start (8), element (9),
     /// code (10), and data (11). Custom sections are skipped.
     ///
-    /// A module that declares no memory still gets one zeroed page, so a body
-    /// that loads and stores without a memory section keeps working; a module
-    /// that declares one gets exactly its declared minimum, with data segments
-    /// applied at each invocation and `memory.grow` bounded by its declared
-    /// maximum.
+    /// A parsed module without a memory section has no linear memory and any
+    /// memory instruction fails load-time validation. A module that declares
+    /// one gets exactly its declared minimum, with data segments applied at
+    /// each invocation and `memory.grow` bounded by its declared maximum.
     ///
     /// Function bodies are decoded with the same instruction subset as
     /// [`Module::add_function`]; result/param counts come from the type section
@@ -2403,6 +2419,7 @@ impl Module {
             });
             module.import_descs.push(desc);
         }
+        budget.has_memory = mem_limits.is_some();
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
             let ft = types.get(tidx).ok_or(WasmError::Decode("function"))?;
             let (n_params, n_results) = (ft.params.len(), ft.results.len());
@@ -2465,10 +2482,9 @@ impl Module {
         module.start = start_fn;
         // Memory limits and data segments (both were previously skipped, which
         // left every module on a hardcoded single zeroed page).
-        if let Some((min, max)) = mem_limits {
-            module.mem_min_pages = Some(min);
-            module.mem_max_pages = max;
-        }
+        let (mem_min, mem_max) = mem_limits.unwrap_or((0, None));
+        module.mem_min_pages = Some(mem_min);
+        module.mem_max_pages = mem_max;
         if module.initial_mem_pages() > limits.max_memory_pages.min(WASM_MAX_PAGES) {
             return Err(WasmError::Trap("memory size"));
         }
@@ -2477,7 +2493,7 @@ impl Module {
             if let DataMode::Active(offset) = segment.mode {
                 offset
                     .checked_add(segment.bytes.len())
-                    .filter(|&e| e <= mem_bytes)
+                    .filter(|&e| memory_count != 0 && e <= mem_bytes)
                     .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
             }
         }
@@ -3027,8 +3043,9 @@ impl Module {
         )
     }
 
-    /// Pages the module's linear memory starts at: its declared minimum, or
-    /// one page for a module that declares no memory section.
+    /// Pages the module's linear memory starts at. Parsed modules record their
+    /// exact standard minimum (including zero for no memory); the programmatic
+    /// compatibility builder retains one implicit page.
     fn initial_mem_pages(&self) -> usize {
         self.mem_min_pages.unwrap_or(1)
     }

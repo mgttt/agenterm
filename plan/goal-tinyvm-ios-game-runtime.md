@@ -23,6 +23,7 @@ tinyvm iOS game runtime
 │   ├── multiple defined tables       [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
+│   ├── strict declared-memory semantics [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1854,5 +1855,46 @@ Evidence on 2026-08-21:
 - Swift linkage remains below its gates at 1,553,848 bytes arm64 and 1,625,560
   bytes x86_64; catalog/replay/private/session consumers are 1,426,696 /
   1,401,112 / 1,419,312 / 1,418,448 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-first executable increment — strict declared-memory semantics
+
+The standard byte loader no longer grants an undeclared implicit linear
+memory. A parsed module with no memory section owns zero pages and exposes an
+empty slice to host callbacks. Loads, stores, `memory.size`, `memory.grow`,
+`memory.copy`, `memory.fill` and `memory.init` are rejected during decoding;
+even a zero-length active data segment is invalid because it still names memory
+zero. Passive data remains valid without memory. The programmatic
+`Module::new` compatibility builder retains its historical one-page test
+convenience, but that default cannot cross the standard binary load boundary.
+
+This correction also repaired the independent MVP golden generator: every
+memory case now emits a real standard memory section instead of accidentally
+depending on tinyvm's former lenience. It reinforces the architectural rule
+that tinyvm is a standards-first cross-platform Wasm VM; game cartridges are
+one embedding and cannot redefine core module validity.
+
+Evidence on 2026-08-21:
+
+- The public load gate rejects scalar, size/grow and bulk-memory instructions
+  without a declared memory, rejects an empty active segment, and accepts both
+  a zero-memory pure-compute module and passive-data-only module with an empty
+  live memory view. WABT independently rejects the same undeclared
+  `memory.size` boundary.
+- The mixed typed-import black box proves that a host callback for a module
+  without memory receives an empty slice rather than a synthetic 64 KiB page.
+- The regenerated independent MVP memory goldens all declare one standard page
+  and continue to cover the same opcode/result facts.
+- All 228 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
+  oracles, the two-game WebKit differential, all-target Clippy, formatting,
+  ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,554,008 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,856 / 1,401,288 /
+  1,419,456 / 1,418,608 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

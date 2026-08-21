@@ -833,7 +833,11 @@ fn standard_typed_host_imports_preserve_all_value_kinds() {
         "the legacy i32 door must reject a mixed standard signature at bind time"
     );
     must_ok(
-        module.bind_import_typed_in_place("host", "mix", |args, results, _memory| {
+        module.bind_import_typed_in_place("host", "mix", |args, results, memory| {
+            assert!(
+                memory.is_empty(),
+                "a module without memory exposes no host slice"
+            );
             assert!(matches!(args, [Val::I64(40), Val::F32(1.5), Val::F64(2.5)]));
             assert_eq!(results.len(), 3);
             results[0] = Val::F64(4.5);

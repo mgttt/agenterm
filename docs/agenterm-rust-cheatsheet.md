@@ -2358,6 +2358,21 @@ unknown standard ids and unconsumed section payload. Run each count-bomb case
 inside a child-process black box as well as asserting the typed error; only the
 child exit proves a hidden allocator abort did not escape the API.
 
+## Builder defaults must not leak into standard binary semantics
+
+A programmatic module builder may provide conveniences such as an implicit
+test memory, but a standards-facing byte loader must reconstruct only resources
+the module actually declares. Resource absence is itself validation state: a
+module without memory may run pure computation and carry passive data, while
+every memory instruction and every active data segment must fail at load time.
+Do not special-case an empty active segment; it still names memory zero.
+
+Keep the compatibility builder and standard parser distinguishable in stored
+module state, and test the observable boundary: zero memory pages, an empty
+host callback slice, load-time rejection rather than a runtime trap, and legal
+passive data. Regenerate independent fixtures that accidentally relied on the
+old default instead of weakening the validator to preserve invalid bytes.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

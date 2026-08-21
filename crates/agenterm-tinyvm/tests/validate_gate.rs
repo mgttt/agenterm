@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 16] = [
+const REJECTED: [(&str, &str); 20] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -77,6 +77,22 @@ const REJECTED: [(&str, &str); 16] = [
     (
         "call_arg_type_mismatch",
         "0061736d01000000010a026000017f60017f017f0303020001070801046d61696e00000a0d020600420110010b040020000b",
+    ),
+    (
+        "memory_size_without_memory",
+        "0061736d010000000105016000017f03020100070801046d61696e00000a060104003f000b",
+    ),
+    (
+        "memory_grow_without_memory",
+        "0061736d010000000105016000017f03020100070801046d61696e00000a08010600410040000b",
+    ),
+    (
+        "load_without_memory",
+        "0061736d010000000105016000017f03020100070801046d61696e00000a0901070041002802000b",
+    ),
+    (
+        "memory_copy_without_memory",
+        "0061736d0100000001040160000003020100070801046d61696e00000a0e010c00410041004100fc0a00000b",
     ),
 ];
 
@@ -155,6 +171,30 @@ fn legal_modules_still_load_and_run() {
             Err(e) => panic!("{name}: legal module failed to run: {}", e.message()),
         }
     }
+}
+
+#[test]
+fn standard_bytes_require_declared_memory() {
+    let no_memory = bytes(ACCEPTED[0].1);
+    let instance = WasmModule::from_bytes(&no_memory)
+        .unwrap_or_else(|e| panic!("pure compute module: {}", e.message()))
+        .instantiate()
+        .unwrap_or_else(|e| panic!("instantiate pure compute module: {}", e.message()));
+    assert_eq!(instance.memory_pages(), 0);
+    assert!(instance.memory().is_empty());
+
+    let active_empty = bytes("0061736d010000000b06010041000b00");
+    assert!(matches!(
+        WasmModule::from_bytes(&active_empty),
+        Err(WasmError::Decode("data segment runs past memory bounds"))
+    ));
+
+    let passive = bytes("0061736d010000000b040101012a");
+    let passive_instance = WasmModule::from_bytes(&passive)
+        .unwrap_or_else(|e| panic!("passive data does not name a memory: {}", e.message()))
+        .instantiate()
+        .unwrap_or_else(|e| panic!("instantiate passive-data-only module: {}", e.message()));
+    assert!(passive_instance.memory().is_empty());
 }
 
 /// The whole point of validating before executing: a rejected module must not
