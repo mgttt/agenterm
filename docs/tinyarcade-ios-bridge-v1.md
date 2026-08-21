@@ -159,6 +159,12 @@ borrowed parameter/result buffers plus the complete bounds-checked guest linear
 memory. It must return exactly its declared results, must not retain any pointer
 or memory view, and must not unwind through C. Throwing, returning a wrong result
 count, or returning nonzero from raw C traps and latches only that cartridge.
+While the callback is active, it must not call a TinyArcade API that takes any
+runtime handle, including a different handle. The C boundary rejects that
+reentry with `TINYARCADE_INVALID_ARGUMENT` before converting the raw handle into
+a Rust reference. An unwind-safe thread-local guard clears when the outer call
+leaves; if the callback otherwise succeeds, the successful outer lifecycle call
+also clears the nested rejection diagnostic and the cartridge remains healthy.
 The Rust/C bridge stages the bounded parameter and result buffers in fixed
 16-value stack arrays. Before entering app code, the VM fallibly reserves the
 suspended caller's operand stack (or a top-level result vector); nested host

@@ -29,6 +29,33 @@ pub const STATUS_STORAGE: i32 = 9;
 
 thread_local! {
     static LAST_ERROR: Cell<&'static str> = const { Cell::new("") };
+    /// Native callbacks may call arbitrary host code while the VM owns borrowed
+    /// guest state, so every C entry point must reject attempts to borrow any
+    /// runtime handle until the callback returns.
+    static ACTIVE_NATIVE_CALLBACK: Cell<bool> = const { Cell::new(false) };
+}
+
+struct NativeCallbackGuard;
+
+impl NativeCallbackGuard {
+    fn enter() -> Result<Self, FfiError> {
+        ACTIVE_NATIVE_CALLBACK.with(|active| {
+            if active.replace(true) {
+                Err(FfiError::new(
+                    STATUS_INVALID_ARGUMENT,
+                    "native callback reentrancy is forbidden",
+                ))
+            } else {
+                Ok(Self)
+            }
+        })
+    }
+}
+
+impl Drop for NativeCallbackGuard {
+    fn drop(&mut self) {
+        ACTIVE_NATIVE_CALLBACK.with(|active| active.set(false));
+    }
 }
 
 #[repr(C)]
@@ -226,7 +253,10 @@ fn set_error(message: &'static str) {
 fn boundary(f: impl FnOnce() -> Result<(), FfiError>) -> i32 {
     set_error("");
     match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(Ok(())) => STATUS_OK,
+        Ok(Ok(())) => {
+            set_error("");
+            STATUS_OK
+        }
         Ok(Err(error)) => {
             set_error(error.message);
             error.status
@@ -247,7 +277,10 @@ fn runtime_boundary(
         let runtime = unsafe { runtime_mut(runtime)? };
         f(runtime)
     })) {
-        Ok(Ok(())) => STATUS_OK,
+        Ok(Ok(())) => {
+            set_error("");
+            STATUS_OK
+        }
         Ok(Err(error)) => {
             set_error(error.message);
             error.status
@@ -307,6 +340,12 @@ fn cache_error(error: WasmError) -> FfiError {
 unsafe fn runtime_mut<'a>(
     runtime: *mut TinyArcadeRuntimeV1,
 ) -> Result<&'a mut TinyArcadeRuntimeV1, FfiError> {
+    if ACTIVE_NATIVE_CALLBACK.with(Cell::get) {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "runtime reentrancy is forbidden",
+        ));
+    }
     let runtime = unsafe { runtime.as_mut() }.ok_or(FfiError::new(
         STATUS_INVALID_ARGUMENT,
         "null runtime handle",
@@ -362,7 +401,10 @@ fn cache_boundary(
         cache.wasm.clear();
         f(cache)
     })) {
-        Ok(Ok(())) => STATUS_OK,
+        Ok(Ok(())) => {
+            set_error("");
+            STATUS_OK
+        }
         Ok(Err(error)) => {
             set_error(error.message);
             error.status
@@ -529,6 +571,8 @@ unsafe fn native_registry(
                 n_results,
                 max_calls_per_lifecycle,
                 move |params, results, memory| {
+                    let _active = NativeCallbackGuard::enter()
+                        .map_err(|_| WasmError::Trap("native callback reentrancy is forbidden"))?;
                     let status = unsafe {
                         callback(
                             context,
@@ -1738,6 +1782,44 @@ mod tests {
         STATUS_OK
     }
 
+    struct ReentrantProbe {
+        runtime: Cell<*mut TinyArcadeRuntimeV1>,
+        other_runtime: Cell<*mut TinyArcadeRuntimeV1>,
+        calls: Cell<u32>,
+        status: Cell<i32>,
+        other_status: Cell<i32>,
+    }
+
+    unsafe extern "C" fn reentrant_native_step(
+        context: *mut c_void,
+        params: *const i32,
+        n_params: usize,
+        results: *mut i32,
+        n_results: usize,
+        memory: *mut u8,
+        memory_len: usize,
+    ) -> i32 {
+        let probe = unsafe { &*context.cast::<ReentrantProbe>() };
+        probe.calls.set(probe.calls.get() + 1);
+        let mut failed = -1;
+        probe
+            .status
+            .set(unsafe { tinyarcade_v1_is_failed(probe.runtime.get(), &mut failed) });
+        assert_eq!(failed, -1, "reentrant call must not touch its output");
+        probe
+            .other_status
+            .set(unsafe { tinyarcade_v1_is_failed(probe.other_runtime.get(), &mut failed) });
+        assert_eq!(failed, -1, "reentrant call must not touch its output");
+        assert_eq!(unsafe { slice::from_raw_parts(params, n_params) }, [40, 2]);
+        assert_eq!(n_results, 1);
+        assert!(memory_len >= 8);
+        unsafe {
+            results.write(42);
+            memory.add(4).write(9);
+        }
+        STATUS_OK
+    }
+
     unsafe fn config() -> TinyArcadeConfigV1 {
         let mut config = MaybeUninit::uninit();
         assert_eq!(
@@ -2458,6 +2540,84 @@ mod tests {
             STATUS_INVALID_ARGUMENT
         );
         assert!(runtime.is_null());
+    }
+
+    #[test]
+    fn c_native_callback_cannot_reenter_a_runtime_handle() {
+        let wasm = native_cartridge();
+        let config = unsafe { config() };
+        let other_wasm = cartridge();
+        let mut other_runtime = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open(
+                    other_wasm.as_ptr(),
+                    other_wasm.len(),
+                    &config,
+                    &mut other_runtime,
+                )
+            },
+            STATUS_OK
+        );
+        let module = b"fan:physics/v1";
+        let field = b"step_world";
+        let mut probe = ReentrantProbe {
+            runtime: Cell::new(ptr::null_mut()),
+            other_runtime: Cell::new(other_runtime),
+            calls: Cell::new(0),
+            status: Cell::new(STATUS_OK),
+            other_status: Cell::new(STATUS_OK),
+        };
+        let function = TinyArcadeNativeFunctionV1 {
+            struct_size: size_of::<TinyArcadeNativeFunctionV1>() as u32,
+            module: module.as_ptr(),
+            module_len: module.len(),
+            field: field.as_ptr(),
+            field_len: field.len(),
+            n_params: 2,
+            n_results: 1,
+            max_calls_per_lifecycle: 2,
+            callback: Some(reentrant_native_step),
+            context: (&mut probe as *mut ReentrantProbe).cast(),
+        };
+        let mut runtime = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_with_native_modules(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &function,
+                    1,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_OK
+        );
+        probe.runtime.set(runtime);
+
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 0) }, STATUS_OK);
+        assert_eq!(probe.calls.get(), 2);
+        assert_eq!(probe.status.get(), STATUS_INVALID_ARGUMENT);
+        assert_eq!(probe.other_status.get(), STATUS_INVALID_ARGUMENT);
+        let mut error_len = usize::MAX;
+        assert_eq!(
+            unsafe { tinyarcade_v1_last_error(ptr::null_mut(), 0, &mut error_len) },
+            STATUS_OK,
+            "successful outer tick must clear the rejected nested call's error"
+        );
+        assert_eq!(error_len, 0);
+
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 1) }, STATUS_OK);
+        assert_eq!(probe.calls.get(), 4);
+        let mut other_failed = -1;
+        assert_eq!(
+            unsafe { tinyarcade_v1_is_failed(other_runtime, &mut other_failed) },
+            STATUS_OK
+        );
+        assert_eq!(other_failed, 0);
+        assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+        assert_eq!(unsafe { tinyarcade_v1_close(other_runtime) }, STATUS_OK);
     }
 
     #[test]

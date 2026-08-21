@@ -104,7 +104,10 @@ typedef struct tinyarcade_catalog_entry_v1 {
 /* Native callbacks execute synchronously on the runtime owner thread. Params,
  * results and guest memory are borrowed only for the callback duration. Return
  * zero on success; any other int32 value traps and latches the guest instance.
- * The callback must not retain pointers or unwind across this C boundary. */
+ * The callback must not retain pointers or unwind across this C boundary. While
+ * it is active, it must not call a tinyarcade function that takes any runtime
+ * handle; such reentry returns TINYARCADE_INVALID_ARGUMENT before the handle is
+ * dereferenced. */
 typedef int32_t (*tinyarcade_native_callback_v1)(
     void* context,
     const int32_t* params,

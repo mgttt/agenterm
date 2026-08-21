@@ -117,6 +117,14 @@ failure into typed fail-closed state without unwinding across C. A Swift wrapper
 should own stable pointer storage rather than rely on `Data.withUnsafeBytes`
 beyond its closure.
 
+When an FFI entry point holds `&mut Runtime` while invoking a synchronous host
+callback, a documentation-only ban on reentry does not satisfy Rust's aliasing
+rules. Reject every callback-time API that takes a runtime handle before turning
+the raw pointer into a reference. Use a scoped thread-local guard so normal
+return and unwinding both restore the boundary, and prove a rejected nested call
+cannot corrupt outputs, latch an otherwise successful outer lifecycle, or leave
+its diagnostic behind after that outer call succeeds.
+
 Do not describe elapsed-time checking after a synchronous native callback as a
 timeout: it cannot prevent a hang, and latching based on device speed makes a
 deterministic guest nondeterministic. Preemption requires a different ownership

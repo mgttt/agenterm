@@ -1534,7 +1534,8 @@ private final class TinyArcadeBoundedHTTPTransfer: NSObject,
 }
 
 /// One exact, versioned native capability exposed to a bundled or reviewed cartridge.
-/// The handler runs synchronously on the runtime owner thread. It must not retain `memory`.
+/// The handler runs synchronously on the runtime owner thread. It must not retain `memory`
+/// or call into any `TinyArcadeRuntimeV1` until it returns; runtime reentry is rejected.
 public struct TinyArcadeNativeFunctionV1 {
     public let module: String
     public let field: String

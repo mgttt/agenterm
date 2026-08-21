@@ -136,6 +136,10 @@ names: v1 core uses `tinyarcade:core/v1`; future native modules receive their
 own canonical `authority:module/vN` namespaces and must be present in a host
 capability registry. Function names and i32 signatures remain in the standard
 import table, which the converter reports without executing the guest.
+This is deliberately a de facto cross-platform WebAssembly VM for extensible
+applications; TinyArcade games are its first embedding and validation workload,
+not the boundary of the VM. Standard Wasm semantics remain below host-specific
+capability profiles so future non-game embedders reuse the same runtime.
 Unknown namespaces fail closed. Metadata may live in a standard WASM custom
 section or adjacent signed manifest, so converters can emit and validate the
 same cartridge contract without depending on the interpreter implementation.
@@ -2267,3 +2271,38 @@ Evidence on 2026-08-21:
   must increment it rather than attempting to reuse this local export.
 - Physical-device lifecycle, sound/input/performance and Apple-review evidence
   remain open; the persistent goal therefore remains active.
+
+## Sixty-fourth executable increment — native callback reentrancy guard
+
+The iOS C boundary now enforces the aliasing rule that was previously only
+implicit in synchronous native dispatch. While guest lifecycle execution owns a
+mutable runtime borrow, a callback cannot reenter an API with the same or any
+other runtime handle. Rejection happens before raw-pointer dereference, and an
+RAII thread-local guard restores the boundary on normal return or unwind. This
+is an embedding-safety property around the general Wasm VM; it does not add a
+private cartridge format or game-specific execution semantic.
+
+Evidence on 2026-08-21:
+
+- A native cartridge callback attempts to inspect both its active handle and a
+  second healthy handle. Both calls return `TINYARCADE_INVALID_ARGUMENT` without
+  touching their output parameters; the callback still returns exact results
+  and mutates guest memory as intended.
+- The outer tick succeeds, clears the rejected nested-call diagnostic, runs a
+  second lifecycle successfully, and leaves both runtime instances healthy and
+  closable. The C header, Swift wrapper and iOS bridge contract now state the
+  enforced rule.
+- All 237 non-ignored package tests plus two doctests pass under all features.
+  No-default/replay-only checks, both whole-corpus WABT gates, all seven
+  WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
+  all-target Clippy, formatting, relevant ShellCheck and document redaction
+  pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,554,024 bytes arm64 and 1,629,920 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,856 / 1,417,800 /
+  1,419,472 / 1,418,624 bytes.
+- Physical-device lifecycle, sound/input/performance, TestFlight and
+  Apple-review evidence remain open; the persistent goal therefore remains
+  active.
