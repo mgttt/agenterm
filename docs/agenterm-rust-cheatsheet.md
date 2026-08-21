@@ -2430,6 +2430,14 @@ do not pass through the standard byte loader. When correcting an old golden,
 replace its invalid “runtime trap” module with a legal mutable semantic case
 rather than weakening family coverage.
 
+Every runtime-trap golden must first be a standards-valid module. A VM can make
+an invalid fixture appear useful by accepting it too early and trapping later,
+so checking only the expected final error lets the implementation and its test
+share the same bug. Stream the complete success and trap corpus through an
+independent validator in one reproducible gate, report the exact fixture id on
+failure, and keep proposal execution oracles separate. Re-run the generator
+before this gate so source and generated rows cannot diverge.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

@@ -30,6 +30,7 @@ tinyvm iOS game runtime
 │   ├── valid custom-section names     [x]
 │   ├── empty memory-section vector    [x]
 │   ├── mutable global.set target      [x]
+│   ├── WABT-valid golden corpus       [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -2085,6 +2086,36 @@ Evidence on 2026-08-21:
   No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
   oracles, the two-game WebKit differential, all-target Clippy, formatting,
   relevant ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,553,848 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,696 / 1,417,640 /
+  1,419,312 / 1,418,448 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-eighth executable increment — WABT-valid golden corpus
+
+The standard test workflow now validates every generated MVP, family-extra and
+family-edge module with WABT before tinyvm executes it. Success and expected
+runtime-trap rows share the same requirement: their bytes must first be a legal
+standard module. The gate streams fixture hex directly to `wasm-validate`,
+reports the exact fixture id on disagreement and remains separate from the
+proposal execution oracles.
+
+Evidence on 2026-08-21:
+
+- `smoke-wabt-golden-validity.sh` independently validates all 291 current
+  golden modules, including every expected runtime trap, and passes ShellCheck.
+- The regenerated corpus remains 174 MVP goldens, 10 extra cases and 107 edge
+  cases covering all 172 MVP opcodes; no invalid standard module is hidden by
+  tinyvm's own decoder or interpreter.
+- All 234 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, the new whole-corpus gate, all seven
+  WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
+  all-target Clippy, formatting, relevant ShellCheck and document redaction
+  pass.
 - The stripped static core remains below its unchanged 100 KiB gate at 86,344
   bytes and its C selftest returns 42.
 - The complete iOS device/universal-simulator bridge and Swift consumers link

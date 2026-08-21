@@ -119,6 +119,8 @@ Custom section 可以重复并出现在标准 section 之间，name 之后的 pa
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
+三个 golden corpus 中的每一个标准模块（包括预期运行期 trap 的样例）还必须先通过
+WABT validation；这条独立门禁防止测试把 malformed bytes 错误归类为执行语义。
 Multi-value 包含多结果函数、s33 type-index block signature、带参数 block/loop/if 和
 多值 branch；validator 控制帧只引用已经预算的 type section，不按嵌套层次复制签名。
 当前 reference-types 面先完成标准 single-table `funcref` 闭环：reference 值、局部变量、
