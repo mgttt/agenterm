@@ -17,7 +17,7 @@ schema_version                u16; exactly 1
 header_length                 u16; exactly 56
 game_abi_version              u32; exactly 1
 max_cartridge_bytes           u32; exactly 2 MiB
-max_table_elems               u32; non-zero
+max_table_elems               u32; non-zero aggregate across all tables
 max_memory_pages              u32; non-zero, 64 KiB per page
 max_steps_per_lifecycle       u64; non-zero
 max_render_bytes              u32; non-zero

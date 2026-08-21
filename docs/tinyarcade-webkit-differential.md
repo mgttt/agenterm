@@ -60,7 +60,9 @@ ABI and catches a decoder that only accepts its own hand-built fixtures.
 extension and saturating conversions; `smoke-wabt-multi-value.sh` covers
 multi-result functions, type-indexed parameter/result block signatures and
 multi-value branches. `smoke-wabt-funcref.sh` covers the standard single-table
-funcref profile, including expression element segments and table operations.
+funcref profile, including expression element segments and table operations;
+`smoke-wabt-multi-table.sh` extends the same oracle to indexed and cross-table
+execution over two internally defined tables.
 
 ## Interpreting a mismatch
 

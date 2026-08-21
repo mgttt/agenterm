@@ -25,7 +25,7 @@ mod validate;
 /// build has a far larger frame, so its cap is lower. Either way, exceeding it
 /// is a loud `Trap("call depth")`, never a stack overflow.
 #[cfg(debug_assertions)]
-pub const WASM_MAX_DEPTH: usize = 48;
+pub const WASM_MAX_DEPTH: usize = 32;
 /// See the `debug_assertions` variant above.
 #[cfg(not(debug_assertions))]
 pub const WASM_MAX_DEPTH: usize = 512;
@@ -121,8 +121,8 @@ impl WasmError {
 /// also caps `memory.grow` for the complete lifetime of an [`Instance`].
 #[derive(Clone, Copy)]
 pub struct Limits {
-    /// Maximum funcref-table length the host will instantiate. Compared
-    /// against the module's declared table `min` *before* any allocation.
+    /// Maximum aggregate funcref elements the host will instantiate across all
+    /// tables. Compared against the sum of declared minima before allocation.
     pub max_table_elems: usize,
     /// Maximum linear-memory pages the host will allocate. Compared against
     /// the declared memory `min` before an instance is created and enforced
@@ -245,19 +245,23 @@ enum Op {
     /// Bulk-memory `table.init`: copy a passive funcref element segment.
     TableInit {
         elem_index: u32,
+        table_index: u32,
     },
     /// Bulk-memory `elem.drop`: make one instance's segment empty.
     ElemDrop {
         elem_index: u32,
     },
-    /// Bulk-memory `table.copy` within the single supported funcref table.
-    TableCopy,
-    /// Reference-types table operations over the single funcref table.
-    TableGet,
-    TableSet,
-    TableGrow,
-    TableSize,
-    TableFill,
+    /// Bulk-memory `table.copy`, including copies between distinct tables.
+    TableCopy {
+        destination_table: u32,
+        source_table: u32,
+    },
+    /// Reference-types table operations with their standard table immediate.
+    TableGet(u32),
+    TableSet(u32),
+    TableGrow(u32),
+    TableSize(u32),
+    TableFill(u32),
     /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
     I64Load {
         offset: u32,
@@ -438,11 +442,11 @@ enum Op {
     },
     Br(u32),
     BrIf(u32),
-    /// `call_indirect` — pop a table index, look up the funcref, type-check it
-    /// against `type_index`, and call it. (The table immediate is always 0 in
-    /// MVP and is decoded then ignored.)
+    /// `call_indirect` — pop an element index, look up the funcref in the
+    /// immediate-selected table, type-check it, and call it.
     CallIndirect {
         type_index: u32,
+        table_index: u32,
     },
     /// `br_table` — pop an index; branch to `targets[index]` or `default`.
     BrTable {
@@ -736,10 +740,10 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                         let (elem_index, n1) = leb_u32(body, i)?;
                         let (table, n2) = leb_u32(body, n1)?;
                         i = n2;
-                        if table != 0 {
-                            return Err(WasmError::Decode("table.init table index must be 0"));
-                        }
-                        ops.push(Op::TableInit { elem_index });
+                        ops.push(Op::TableInit {
+                            elem_index,
+                            table_index: table,
+                        });
                     }
                     13 => {
                         let (elem_index, ni) = leb_u32(body, i)?;
@@ -750,34 +754,25 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                         let (destination_table, n1) = leb_u32(body, i)?;
                         let (source_table, n2) = leb_u32(body, n1)?;
                         i = n2;
-                        if destination_table != 0 || source_table != 0 {
-                            return Err(WasmError::Decode("table.copy table indices must be 0"));
-                        }
-                        ops.push(Op::TableCopy);
+                        ops.push(Op::TableCopy {
+                            destination_table,
+                            source_table,
+                        });
                     }
                     15 => {
                         let (table, ni) = leb_u32(body, i)?;
                         i = ni;
-                        if table != 0 {
-                            return Err(WasmError::Decode("table.grow table index must be 0"));
-                        }
-                        ops.push(Op::TableGrow);
+                        ops.push(Op::TableGrow(table));
                     }
                     16 => {
                         let (table, ni) = leb_u32(body, i)?;
                         i = ni;
-                        if table != 0 {
-                            return Err(WasmError::Decode("table.size table index must be 0"));
-                        }
-                        ops.push(Op::TableSize);
+                        ops.push(Op::TableSize(table));
                     }
                     17 => {
                         let (table, ni) = leb_u32(body, i)?;
                         i = ni;
-                        if table != 0 {
-                            return Err(WasmError::Decode("table.fill table index must be 0"));
-                        }
-                        ops.push(Op::TableFill);
+                        ops.push(Op::TableFill(table));
                     }
                     _ => return Err(WasmError::Decode("unsupported 0xfc opcode")),
                 }
@@ -799,9 +794,12 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
             }
             0x11 => {
                 let (type_index, n1) = leb_u32(body, i)?;
-                let (_table, n2) = leb_u32(body, n1)?;
+                let (table_index, n2) = leb_u32(body, n1)?;
                 i = n2;
-                ops.push(Op::CallIndirect { type_index });
+                ops.push(Op::CallIndirect {
+                    type_index,
+                    table_index,
+                });
             }
             0x02 => {
                 let (ty, ni) = block_type(body, i)?;
@@ -889,18 +887,12 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
             0x25 => {
                 let (table, ni) = leb_u32(body, i)?;
                 i = ni;
-                if table != 0 {
-                    return Err(WasmError::Decode("table.get table index must be 0"));
-                }
-                ops.push(Op::TableGet);
+                ops.push(Op::TableGet(table));
             }
             0x26 => {
                 let (table, ni) = leb_u32(body, i)?;
                 i = ni;
-                if table != 0 {
-                    return Err(WasmError::Decode("table.set table index must be 0"));
-                }
-                ops.push(Op::TableSet);
+                ops.push(Op::TableSet(table));
             }
             0x0B => {
                 let end_idx = ops.len();
@@ -1210,42 +1202,49 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
     Ok((s, end))
 }
 
-/// Parse the table section, returning limits of the single funcref table.
-fn parse_table_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
+/// Parse every internally defined funcref table and its limits.
+fn parse_table_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+) -> Result<Vec<(usize, Option<usize>)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
-    if count != 1 {
-        return Err(WasmError::Decode("unsupported table count"));
-    }
-    let reftype = *p.get(i).ok_or(WasmError::Decode("truncated table type"))?;
-    if reftype != 0x70 {
-        return Err(WasmError::Decode("unsupported reftype 0x"));
-    }
-    i += 1;
-    let flag = *p
-        .get(i)
-        .ok_or(WasmError::Decode("truncated table limits"))?;
-    i += 1;
-    let (min, ni) = leb_u32(p, i)?;
-    i = ni;
-    let max = match flag {
-        0x00 => None,
-        0x01 => {
-            let (max, ni) = leb_u32(p, i)?;
-            i = ni;
-            Some(max as usize)
+    let count = count as usize;
+    budget.charge(count)?;
+    let mut tables = Vec::new();
+    reserve_exact(&mut tables, count)?;
+    for _ in 0..count {
+        let reftype = *p.get(i).ok_or(WasmError::Decode("truncated table type"))?;
+        if reftype != 0x70 {
+            return Err(WasmError::Decode("unsupported reftype 0x"));
         }
-        _other => {
-            return Err(WasmError::Decode("unsupported table limits flag 0x"));
+        i += 1;
+        let flag = *p
+            .get(i)
+            .ok_or(WasmError::Decode("truncated table limits"))?;
+        i += 1;
+        let (min, ni) = leb_u32(p, i)?;
+        i = ni;
+        let max = match flag {
+            0x00 => None,
+            0x01 => {
+                let (max, ni) = leb_u32(p, i)?;
+                i = ni;
+                Some(max as usize)
+            }
+            _other => {
+                return Err(WasmError::Decode("unsupported table limits flag 0x"));
+            }
+        };
+        let min = min as usize;
+        if max.is_some_and(|maximum| maximum < min) {
+            return Err(WasmError::Decode("table limits out of range"));
         }
-    };
-    let min = min as usize;
-    if max.is_some_and(|maximum| maximum < min) {
-        return Err(WasmError::Decode("table limits out of range"));
+        tables.push((min, max));
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing table section bytes"));
     }
-    Ok((min, max))
+    Ok(tables)
 }
 
 /// Parse the element section into `(offset, func_indices)` per active segment.
@@ -1346,7 +1345,7 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ElemMode {
-    Active(usize),
+    Active { table_index: usize, offset: usize },
     Passive,
     Declarative,
 }
@@ -1369,7 +1368,10 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 let (offset_val, ni) = parse_const_expr(p, i)?;
                 i = ni;
                 match offset_val {
-                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    Val::I32(v) => ElemMode::Active {
+                        table_index: 0,
+                        offset: v as u32 as usize,
+                    },
                     _other => return Err(WasmError::Decode("elem offset must be i32, got")),
                 }
             }
@@ -1384,13 +1386,13 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
             2 => {
                 let (table, ni) = leb_u32(p, i)?;
                 i = ni;
-                if table != 0 {
-                    return Err(WasmError::Decode("elem segment table index must be 0"));
-                }
                 let (offset_val, ni) = parse_const_expr(p, i)?;
                 i = ni;
                 let mode = match offset_val {
-                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    Val::I32(v) => ElemMode::Active {
+                        table_index: table as usize,
+                        offset: v as u32 as usize,
+                    },
                     _other => return Err(WasmError::Decode("elem offset must be i32, got")),
                 };
                 let kind = *p.get(i).ok_or(WasmError::Decode("truncated elem kind"))?;
@@ -1412,7 +1414,10 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 let (offset_val, ni) = parse_const_expr(p, i)?;
                 i = ni;
                 match offset_val {
-                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    Val::I32(v) => ElemMode::Active {
+                        table_index: 0,
+                        offset: v as u32 as usize,
+                    },
                     _other => return Err(WasmError::Decode("elem offset must be i32, got")),
                 }
             }
@@ -1431,13 +1436,13 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
             6 => {
                 let (table, ni) = leb_u32(p, i)?;
                 i = ni;
-                if table != 0 {
-                    return Err(WasmError::Decode("elem segment table index must be 0"));
-                }
                 let (offset_val, ni) = parse_const_expr(p, i)?;
                 i = ni;
                 let mode = match offset_val {
-                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    Val::I32(v) => ElemMode::Active {
+                        table_index: table as usize,
+                        offset: v as u32 as usize,
+                    },
                     _other => return Err(WasmError::Decode("elem offset must be i32, got")),
                 };
                 let reftype = *p
@@ -1589,12 +1594,18 @@ fn parse_global_section(
     Ok(out)
 }
 
-/// Parse the export section into `(name, kind, index)` triples, keeping only
-/// function exports (`kind == 0x00`).
+struct ExportEntry {
+    name: String,
+    kind: u8,
+    index: usize,
+}
+
+/// Parse every standard export kind. The embedding currently exposes function
+/// lookup only, but validation must still own table/memory/global exports.
 fn parse_export_section(
     p: &[u8],
     budget: &mut DecodeBudget,
-) -> Result<Vec<(String, usize)>, WasmError> {
+) -> Result<Vec<ExportEntry>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     let count = count as usize;
@@ -1604,9 +1615,14 @@ fn parse_export_section(
         let kind = *p.get(ni).ok_or(WasmError::Decode("truncated export"))?;
         let (index, nj) = leb_u32(p, ni + 1)?;
         i = nj;
-        if kind == 0x00 {
-            out.push((name, index as usize));
+        if !matches!(kind, 0x00..=0x03) {
+            return Err(WasmError::Decode("unsupported export kind"));
         }
+        out.push(ExportEntry {
+            name,
+            kind,
+            index: index as usize,
+        });
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing export section bytes"));
@@ -1857,6 +1873,14 @@ struct GlobalDesc {
     mutable: bool,
 }
 
+/// One internally defined funcref table template and its declared maximum.
+struct TableDesc {
+    elements: Vec<Option<usize>>,
+    max: Option<usize>,
+}
+
+type TableState = (Vec<Vec<Option<usize>>>, Vec<bool>);
+
 #[derive(Default)]
 pub struct Module {
     hosts: Vec<HostFunc>,
@@ -1874,10 +1898,9 @@ pub struct Module {
     globals: Vec<GlobalDesc>,
     /// Optional start function (run by [`Module::run_start`]).
     start: Option<usize>,
-    /// The funcref table: each slot holds a combined function index or `None`.
-    /// This is the instance template; live instances own an independent copy.
-    table: Vec<Option<usize>>,
-    table_max: Option<usize>,
+    /// Funcref table templates. Live instances own independent element arrays;
+    /// declared maxima remain immutable module metadata.
+    tables: Vec<TableDesc>,
     /// Standard active/passive/declarative funcref element segments.
     elems: Vec<ElemSegment>,
     /// The module's function types as `(n_params, n_results)`, so
@@ -1905,7 +1928,7 @@ pub struct Instance {
     memory: Vec<u8>,
     globals: Vec<Val>,
     data_live: Vec<bool>,
-    table: Vec<Option<usize>>,
+    tables: Vec<Vec<Option<usize>>>,
     elem_live: Vec<bool>,
     last_steps: u64,
 }
@@ -1915,7 +1938,7 @@ pub struct Instance {
 /// mutated by segment/table instructions.
 struct BulkState<'a> {
     data_live: &'a mut [bool],
-    table: &'a mut Vec<Option<usize>>,
+    tables: &'a mut [Vec<Option<usize>>],
     elem_live: &'a mut [bool],
 }
 
@@ -2016,10 +2039,10 @@ impl Module {
         let mut imports: Vec<(ImportDesc, usize)> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<CodeEntry> = Vec::new();
-        let mut exports: Vec<(String, usize)> = Vec::new();
+        let mut exports: Vec<ExportEntry> = Vec::new();
         let mut globals: Vec<(Val, bool)> = Vec::new();
         let mut start_fn: Option<usize> = None;
-        let mut table_limits: Option<(usize, Option<usize>)> = None;
+        let mut table_limits: Vec<(usize, Option<usize>)> = Vec::new();
         let mut elems: Vec<ElemSegment> = Vec::new();
         let mut mem_limits: Option<(usize, Option<usize>)> = None;
         let mut data: Vec<DataSegment> = Vec::new();
@@ -2059,7 +2082,7 @@ impl Module {
                 1 => types = parse_type_section(payload, &mut budget)?,
                 2 => imports = parse_import_section(payload, &types, &mut budget)?,
                 3 => func_types = parse_func_section(payload, &mut budget)?,
-                4 => table_limits = Some(parse_table_section(payload)?),
+                4 => table_limits = parse_table_section(payload, &mut budget)?,
                 5 => mem_limits = Some(parse_memory_section(payload)?),
                 6 => globals = parse_global_section(payload, &mut budget)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
@@ -2091,7 +2114,7 @@ impl Module {
         if data_count.is_some_and(|count| count != data.len()) {
             return Err(WasmError::Decode("data count does not match data section"));
         }
-        let has_table = table_limits.is_some();
+        let table_count = table_limits.len();
 
         let mut module = Module::new_with_limits(limits);
         // Imported functions occupy the low indices; without a bound host
@@ -2122,12 +2145,26 @@ impl Module {
         // used by the export and start sections.
         module.types = types;
         let function_count = module.hosts.len() + module.funcs.len();
-        for (name, index) in exports {
-            if index >= function_count {
-                return Err(WasmError::Decode("export function index out of bounds"));
+        let memory_count = usize::from(mem_limits.is_some());
+        let mut export_names = BTreeMap::new();
+        for export in exports {
+            if export_names.insert(export.name.clone(), ()).is_some() {
+                return Err(WasmError::Decode("duplicate export name"));
             }
-            module.exports.insert(name.clone(), index);
-            module.export_list.push((name, index));
+            let bound = match export.kind {
+                0x00 => function_count,
+                0x01 => table_count,
+                0x02 => memory_count,
+                0x03 => module.globals.len(),
+                _ => unreachable!("export kind checked while parsing"),
+            };
+            if export.index >= bound {
+                return Err(WasmError::Decode("export index out of bounds"));
+            }
+            if export.kind == 0x00 {
+                module.exports.insert(export.name.clone(), export.index);
+                module.export_list.push((export.name, export.index));
+            }
         }
         if let Some(start) = start_fn {
             let signature = if start < module.hosts.len() {
@@ -2206,7 +2243,7 @@ impl Module {
                 globals: &global_types,
                 data_count,
                 elem_count: elems.len(),
-                has_table,
+                table_count,
                 declared_refs: &declared_refs,
             };
             for f in &module.funcs {
@@ -2221,22 +2258,30 @@ impl Module {
             }
         }
 
-        // Allocate the table, then apply active element segments into it.
-        // Host budget first: never `vec![None; guest_min]` a multi-gigabyte
-        // table and hope the allocator fails loudly instead of aborting.
-        let (table_size, table_max) = table_limits.unwrap_or((0, None));
-        if table_size > limits.max_table_elems {
+        // Allocate every table, then apply active element segments. The host
+        // budget caps their aggregate live element count, not each table in
+        // isolation, so many small guest tables cannot amplify allocation.
+        let total_table_size = table_limits.iter().try_fold(0usize, |total, (min, _)| {
+            total.checked_add(*min).ok_or(WasmError::Trap("table size"))
+        })?;
+        if total_table_size > limits.max_table_elems {
             return Err(WasmError::Trap("table size"));
         }
-        module.table_max = table_max;
-        let mut table = Vec::new();
-        if table_size > 0 {
-            table
-                .try_reserve(table_size)
+        module
+            .tables
+            .try_reserve_exact(table_limits.len())
+            .map_err(|_| WasmError::Trap("table size"))?;
+        for (table_size, table_max) in table_limits {
+            let mut elements = Vec::new();
+            elements
+                .try_reserve_exact(table_size)
                 .map_err(|_| WasmError::Trap("table size"))?;
-            table.resize(table_size, None);
+            elements.resize(table_size, None);
+            module.tables.push(TableDesc {
+                elements,
+                max: table_max,
+            });
         }
-        module.table = table;
         let function_count = module.hosts.len() + module.funcs.len();
         for segment in &elems {
             if segment
@@ -2247,15 +2292,20 @@ impl Module {
             {
                 return Err(WasmError::Decode("element function index out of bounds"));
             }
-            if let ElemMode::Active(offset) = segment.mode {
-                if !has_table {
-                    return Err(WasmError::Decode("active element segment requires table"));
-                }
+            if let ElemMode::Active {
+                table_index,
+                offset,
+            } = segment.mode
+            {
+                let table = module
+                    .tables
+                    .get_mut(table_index)
+                    .ok_or(WasmError::Decode("active element segment table index"))?;
                 let end = offset
                     .checked_add(segment.refs.len())
-                    .filter(|&end| end <= module.table.len())
+                    .filter(|&end| end <= table.elements.len())
                     .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
-                for (slot, &function) in module.table[offset..end]
+                for (slot, &function) in table.elements[offset..end]
                     .iter_mut()
                     .zip(segment.refs.iter())
                 {
@@ -2277,14 +2327,61 @@ impl Module {
     }
 
     /// Allocate a funcref table of `size` uninitialised slots (for tests /
-    /// programmatic module construction).
+    /// programmatic module construction). This compatibility helper replaces
+    /// table zero; [`Module::add_funcref_table`] appends additional tables.
     pub fn add_table(&mut self, size: usize) {
-        self.table = vec![None; size];
+        let table = TableDesc {
+            elements: vec![None; size],
+            max: None,
+        };
+        if self.tables.is_empty() {
+            self.tables.push(table);
+        } else {
+            self.tables[0] = table;
+        }
+    }
+
+    /// Safely append an internally defined funcref table and return its index.
+    pub fn add_funcref_table(
+        &mut self,
+        size: usize,
+        max: Option<usize>,
+    ) -> Result<usize, WasmError> {
+        if max.is_some_and(|maximum| maximum < size) {
+            return Err(WasmError::Decode("table limits out of range"));
+        }
+        let current = self.tables.iter().try_fold(0usize, |total, table| {
+            total
+                .checked_add(table.elements.len())
+                .ok_or(WasmError::Trap("table size"))
+        })?;
+        if current
+            .checked_add(size)
+            .filter(|&total| total <= self.limits.max_table_elems)
+            .is_none()
+        {
+            return Err(WasmError::Trap("table size"));
+        }
+        let mut elements = Vec::new();
+        elements
+            .try_reserve_exact(size)
+            .map_err(|_| WasmError::Trap("table size"))?;
+        elements.resize(size, None);
+        self.tables
+            .try_reserve(1)
+            .map_err(|_| WasmError::Trap("table size"))?;
+        let index = self.tables.len();
+        self.tables.push(TableDesc { elements, max });
+        Ok(index)
     }
 
     /// Set table `slot` to point at combined function index `func_index`.
     pub fn set_table_entry(&mut self, slot: usize, func_index: usize) {
-        if let Some(cell) = self.table.get_mut(slot) {
+        if let Some(cell) = self
+            .tables
+            .get_mut(0)
+            .and_then(|table| table.elements.get_mut(slot))
+        {
             *cell = Some(func_index);
         }
     }
@@ -2373,10 +2470,10 @@ impl Module {
         let mut mem = self.new_memory()?;
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
         let mut data_live = self.new_data_state()?;
-        let (mut table, mut elem_live) = self.new_table_state()?;
+        let (mut tables, mut elem_live) = self.new_table_state()?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
-            table: &mut table,
+            tables: &mut tables,
             elem_live: &mut elem_live,
         };
         if let Some(start) = self.start {
@@ -2470,10 +2567,10 @@ impl Module {
         let mut mem = self.new_memory()?;
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
         let mut data_live = self.new_data_state()?;
-        let (mut table, mut elem_live) = self.new_table_state()?;
+        let (mut tables, mut elem_live) = self.new_table_state()?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
-            table: &mut table,
+            tables: &mut tables,
             elem_live: &mut elem_live,
         };
         self.call_any(
@@ -2536,12 +2633,19 @@ impl Module {
 
     /// Create one instance's table and passive-element liveness without any
     /// infallible guest-sized allocation.
-    fn new_table_state(&self) -> Result<(Vec<Option<usize>>, Vec<bool>), WasmError> {
-        let mut table = Vec::new();
-        table
-            .try_reserve(self.table.len())
+    fn new_table_state(&self) -> Result<TableState, WasmError> {
+        let mut tables = Vec::new();
+        tables
+            .try_reserve_exact(self.tables.len())
             .map_err(|_| WasmError::Trap("table size"))?;
-        table.extend_from_slice(&self.table);
+        for template in &self.tables {
+            let mut table = Vec::new();
+            table
+                .try_reserve_exact(template.elements.len())
+                .map_err(|_| WasmError::Trap("table size"))?;
+            table.extend_from_slice(&template.elements);
+            tables.push(table);
+        }
 
         let mut elem_live = Vec::new();
         elem_live
@@ -2552,7 +2656,7 @@ impl Module {
                 .iter()
                 .map(|segment| segment.mode == ElemMode::Passive),
         );
-        Ok((table, elem_live))
+        Ok((tables, elem_live))
     }
 
     /// Number of parameters a function index (host or defined) expects.
@@ -3144,7 +3248,10 @@ impl Module {
                         .ok_or(WasmError::Trap("data.drop segment index"))?;
                     *live = false;
                 }
-                Op::TableInit { elem_index } => {
+                Op::TableInit {
+                    elem_index,
+                    table_index,
+                } => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let source = pop(&mut stack)? as u32 as usize;
                     let destination = pop(&mut stack)? as u32 as usize;
@@ -3159,9 +3266,13 @@ impl Module {
                         .ok_or(WasmError::Trap("table.init element segment state"))?;
                     let refs = if live { segment.refs.as_slice() } else { &[] };
                     let source_range = bulk_memory_range(refs.len(), source, len)?;
-                    let destination_range = bulk_memory_range(bulk.table.len(), destination, len)?;
+                    let table = bulk
+                        .tables
+                        .get_mut(table_index as usize)
+                        .ok_or(WasmError::Trap("table.init table index"))?;
+                    let destination_range = bulk_memory_range(table.len(), destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
-                    for (slot, &function) in bulk.table[destination_range]
+                    for (slot, &function) in table[destination_range]
                         .iter_mut()
                         .zip(refs[source_range].iter())
                     {
@@ -3175,45 +3286,94 @@ impl Module {
                         .ok_or(WasmError::Trap("elem.drop segment index"))?;
                     *live = false;
                 }
-                Op::TableCopy => {
+                Op::TableCopy {
+                    destination_table,
+                    source_table,
+                } => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let source = pop(&mut stack)? as u32 as usize;
                     let destination = pop(&mut stack)? as u32 as usize;
-                    let source_range = bulk_memory_range(bulk.table.len(), source, len)?;
-                    bulk_memory_range(bulk.table.len(), destination, len)?;
+                    let source_index = source_table as usize;
+                    let destination_index = destination_table as usize;
+                    let source_len = bulk
+                        .tables
+                        .get(source_index)
+                        .ok_or(WasmError::Trap("table.copy source table index"))?
+                        .len();
+                    let destination_len = bulk
+                        .tables
+                        .get(destination_index)
+                        .ok_or(WasmError::Trap("table.copy destination table index"))?
+                        .len();
+                    let source_range = bulk_memory_range(source_len, source, len)?;
+                    bulk_memory_range(destination_len, destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
-                    bulk.table.copy_within(source_range, destination);
+                    if source_index == destination_index {
+                        bulk.tables[source_index].copy_within(source_range, destination);
+                    } else {
+                        for relative in 0..len {
+                            let function = bulk.tables[source_index][source + relative];
+                            bulk.tables[destination_index][destination + relative] = function;
+                        }
+                    }
                 }
-                Op::TableGet => {
+                Op::TableGet(table_index) => {
                     let index = pop(&mut stack)? as u32 as usize;
                     let function = *bulk
-                        .table
+                        .tables
+                        .get(table_index as usize)
+                        .ok_or(WasmError::Trap("table.get table index"))?
                         .get(index)
                         .ok_or(WasmError::Trap("table.get out of bounds"))?;
                     stack.push(Val::FuncRef(function));
                 }
-                Op::TableSet => {
+                Op::TableSet(table_index) => {
                     let function = pop_funcref(&mut stack)?;
                     let index = pop(&mut stack)? as u32 as usize;
                     let slot = bulk
-                        .table
+                        .tables
+                        .get_mut(table_index as usize)
+                        .ok_or(WasmError::Trap("table.set table index"))?
                         .get_mut(index)
                         .ok_or(WasmError::Trap("table.set out of bounds"))?;
                     *slot = function;
                 }
-                Op::TableGrow => {
+                Op::TableGrow(table_index) => {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let function = pop_funcref(&mut stack)?;
-                    let old_size = bulk.table.len();
+                    let table_index = table_index as usize;
+                    let old_size = bulk
+                        .tables
+                        .get(table_index)
+                        .ok_or(WasmError::Trap("table.grow table index"))?
+                        .len();
                     let cap = self
-                        .table_max
+                        .tables
+                        .get(table_index)
+                        .ok_or(WasmError::Trap("table.grow table metadata"))?
+                        .max
                         .unwrap_or(u32::MAX as usize)
                         .min(self.limits.max_table_elems);
+                    let total_size = bulk.tables.iter().try_fold(0usize, |total, table| {
+                        total
+                            .checked_add(table.len())
+                            .ok_or(WasmError::Trap("table size"))
+                    })?;
                     let new_size = old_size.checked_add(delta).filter(|&size| size <= cap);
+                    let aggregate_size = new_size.and_then(|size| {
+                        total_size
+                            .checked_sub(old_size)
+                            .and_then(|other| other.checked_add(size))
+                    });
+                    let new_size = new_size
+                        .zip(aggregate_size)
+                        .filter(|(_, total)| *total <= self.limits.max_table_elems)
+                        .map(|(size, _)| size);
                     if let Some(new_size) = new_size {
                         charge_bulk_elements(steps, delta, self.limits.max_steps)?;
-                        if bulk.table.try_reserve(delta).is_ok() {
-                            bulk.table.resize(new_size, function);
+                        let table = &mut bulk.tables[table_index];
+                        if table.try_reserve(delta).is_ok() {
+                            table.resize(new_size, function);
                             stack.push(Val::I32(old_size as i32));
                         } else {
                             stack.push(Val::I32(-1));
@@ -3222,14 +3382,24 @@ impl Module {
                         stack.push(Val::I32(-1));
                     }
                 }
-                Op::TableSize => stack.push(Val::I32(bulk.table.len() as i32)),
-                Op::TableFill => {
+                Op::TableSize(table_index) => {
+                    let table = bulk
+                        .tables
+                        .get(table_index as usize)
+                        .ok_or(WasmError::Trap("table.size table index"))?;
+                    stack.push(Val::I32(table.len() as i32));
+                }
+                Op::TableFill(table_index) => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let function = pop_funcref(&mut stack)?;
                     let destination = pop(&mut stack)? as u32 as usize;
-                    let range = bulk_memory_range(bulk.table.len(), destination, len)?;
+                    let table = bulk
+                        .tables
+                        .get_mut(table_index as usize)
+                        .ok_or(WasmError::Trap("table.fill table index"))?;
+                    let range = bulk_memory_range(table.len(), destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
-                    bulk.table[range].fill(function);
+                    table[range].fill(function);
                 }
                 Op::MemoryCopy => {
                     let len = pop(&mut stack)? as u32 as usize;
@@ -3396,13 +3566,17 @@ impl Module {
                     )?;
                     stack.extend(res);
                 }
-                Op::CallIndirect { type_index } => {
+                Op::CallIndirect {
+                    type_index,
+                    table_index,
+                } => {
                     let ti = pop(&mut stack)? as u32 as usize;
-                    if ti >= bulk.table.len() {
-                        return Err(WasmError::Trap("call_indirect: table index"));
-                    }
+                    let table = bulk
+                        .tables
+                        .get(table_index as usize)
+                        .ok_or(WasmError::Trap("call_indirect: table immediate"))?;
                     let combined =
-                        bulk.table.get(ti).copied().flatten().ok_or({
+                        table.get(ti).copied().flatten().ok_or({
                             WasmError::Trap("call_indirect: uninitialised table element")
                         })?;
                     // Type check (spec 4.4.8): the callee's declared type must
@@ -3585,13 +3759,13 @@ impl Instance {
         let memory = module.new_memory()?;
         let globals = module.globals.iter().map(|global| global.init).collect();
         let data_live = module.new_data_state()?;
-        let (table, elem_live) = module.new_table_state()?;
+        let (tables, elem_live) = module.new_table_state()?;
         let mut instance = Self {
             module,
             memory,
             globals,
             data_live,
-            table,
+            tables,
             elem_live,
             last_steps: 0,
         };
@@ -3599,7 +3773,7 @@ impl Instance {
             let mut steps = 0;
             let mut bulk = BulkState {
                 data_live: &mut instance.data_live,
-                table: &mut instance.table,
+                tables: &mut instance.tables,
                 elem_live: &mut instance.elem_live,
             };
             let result = instance.module.call_any(
@@ -3649,7 +3823,7 @@ impl Instance {
         let mut steps = 0;
         let mut bulk = BulkState {
             data_live: &mut self.data_live,
-            table: &mut self.table,
+            tables: &mut self.tables,
             elem_live: &mut self.elem_live,
         };
         let result = self.module.call_any(
@@ -3675,9 +3849,20 @@ impl Instance {
         self.memory.len() / WASM_PAGE_SIZE
     }
 
-    /// Current funcref-table length. MVP tables cannot grow in slot A.
+    /// Aggregate live funcref elements across all tables. For the original
+    /// single-table profile this is exactly the table-zero length.
     pub fn table_elements(&self) -> usize {
-        self.table.len()
+        self.tables.iter().map(Vec::len).sum()
+    }
+
+    /// Number of internally defined funcref tables in this live instance.
+    pub fn table_count(&self) -> usize {
+        self.tables.len()
+    }
+
+    /// Current length of a selected funcref table.
+    pub fn table_elements_at(&self, table_index: usize) -> Option<usize> {
+        self.tables.get(table_index).map(Vec::len)
     }
 
     /// Read-only access to the live linear memory, for bounded native host I/O.
@@ -4635,10 +4820,6 @@ mod tests {
             module.add_function(0, 0, 0, &[0xFC, 0x12, 0x0B]),
             Err(WasmError::Decode("unsupported 0xfc opcode"))
         ));
-        assert!(matches!(
-            module.add_function(0, 0, 0, &[0xFC, 0x0C, 0x00, 0x01, 0x0B]),
-            Err(WasmError::Decode("table.init table index must be 0"))
-        ));
     }
 
     fn passive_data_module(data: &[u8], body: &[u8], include_data_count: bool) -> Vec<u8> {
@@ -4841,7 +5022,7 @@ mod tests {
         ];
         assert!(matches!(
             Module::from_bytes(&wasm),
-            Err(WasmError::Decode("active element segment requires table"))
+            Err(WasmError::Decode("active element segment table index"))
         ));
     }
 

@@ -19,6 +19,7 @@ tinyvm iOS game runtime
 │   ├── host memory/table budgets     [x]
 │   ├── decode complexity budget      [x]
 │   ├── single-table funcref profile  [x]
+│   ├── multiple defined tables       [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1527,3 +1528,41 @@ Evidence on 2026-08-21:
 - Device/simulator Swift linkage remains below its gates at 1,527,336 bytes
   arm64 and 1,601,456 bytes x86_64. The isolated stripped static core is 87,688
   bytes, below 100 KiB, and its C self-test returns 42.
+
+## Forty-third executable increment — standard multiple defined tables
+
+tinyvm now represents every internally defined `funcref` table independently.
+The table index immediates on get/set/grow/size/fill, `call_indirect`,
+`table.init`, active element segments and both sides of `table.copy` are decoded,
+validated and executed rather than required to be zero. Cross-table copy first
+checks both ranges and fuel, then copies without guest-sized temporary storage.
+
+The host's `max_table_elems` is an aggregate limit across all live tables. It
+is checked against the sum of declared minima before allocation and again on
+growth; execution statistics report the same aggregate. This prevents a module
+from bypassing the iOS memory boundary by splitting elements across many small
+tables. Table count also consumes the shared decode-complexity budget.
+
+Export validation now owns all MVP export kinds even though the embedding only
+offers function lookup: function/table/memory/global indices are bounded,
+unknown kinds fail and names must be unique across kinds. Imported tables still
+require a real shared host-store ownership API and remain explicitly outside
+this increment rather than receiving copy-on-bind semantics that would violate
+standard instance sharing.
+
+Evidence on 2026-08-21:
+
+- WABT compiles and validates a checked-in two-table fixture. The exact bytes
+  exercise indexed active segments, get/set, cross-table copy/init, growth,
+  fill, size, a table export and indirect calls, returning 143 in WABT's
+  interpreter, tinyvm and system JavaScriptCore.
+- Public black-box tests prove two-table execution, per-table sizes, aggregate
+  statistics, initial and dynamic aggregate host caps, invalid instruction and
+  export indices, and duplicate names across function/table export kinds.
+- Both real Rust games rebuild without byte or replay-hash changes and retain
+  exact four-frame JavaScriptCore parity. No-default and replay-only matrices,
+  all five proposal oracles, all-target Clippy, formatting and ShellCheck pass.
+- 214 package tests plus one doctest pass under all features. Device/simulator
+  Swift linkage remains below its gates at 1,530,600 bytes arm64 and 1,607,792
+  bytes x86_64. The isolated stripped static core is 87,704 bytes, below
+  100 KiB, and its C self-test returns 42.

@@ -37,9 +37,9 @@ pub(super) struct ModuleCtx<'a> {
     /// DataCount section value. Bulk data instructions require it even when
     /// the final data section is available to this non-streaming decoder.
     pub data_count: Option<usize>,
-    /// Number of element segments and whether table index zero exists.
+    /// Number of element segments and internally defined funcref tables.
     pub elem_count: usize,
-    pub has_table: bool,
+    pub table_count: usize,
     /// Function indices forward-declared by element segments and therefore
     /// legal operands of `ref.func`.
     pub declared_refs: &'a [bool],
@@ -541,9 +541,12 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
                 return Err(WasmError::Decode("validation: data.drop segment index"));
             }
         }
-        TableInit { elem_index } => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.init requires table"));
+        TableInit {
+            elem_index,
+            table_index,
+        } => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: table.init table index"));
             }
             if *elem_index as usize >= v.m.elem_count {
                 return Err(WasmError::Decode(
@@ -559,9 +562,14 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
                 return Err(WasmError::Decode("validation: elem.drop segment index"));
             }
         }
-        TableCopy => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.copy requires table"));
+        TableCopy {
+            destination_table,
+            source_table,
+        } => {
+            if *destination_table as usize >= v.m.table_count
+                || *source_table as usize >= v.m.table_count
+            {
+                return Err(WasmError::Decode("validation: table.copy table index"));
             }
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
@@ -631,37 +639,37 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             }
             v.push(FUNCREF);
         }
-        TableGet => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.get requires table"));
+        TableGet(table_index) => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: table.get table index"));
             }
             v.pop_expect(I32)?;
             v.push(FUNCREF);
         }
-        TableSet => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.set requires table"));
+        TableSet(table_index) => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: table.set table index"));
             }
             v.pop_expect(FUNCREF)?;
             v.pop_expect(I32)?;
         }
-        TableGrow => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.grow requires table"));
+        TableGrow(table_index) => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: table.grow table index"));
             }
             v.pop_expect(I32)?;
             v.pop_expect(FUNCREF)?;
             v.push(I32);
         }
-        TableSize => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.size requires table"));
+        TableSize(table_index) => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: table.size table index"));
             }
             v.push(I32);
         }
-        TableFill => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode("validation: table.fill requires table"));
+        TableFill(table_index) => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: table.fill table index"));
             }
             v.pop_expect(I32)?;
             v.pop_expect(FUNCREF)?;
@@ -673,11 +681,12 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             let type_index = v.func_type_index(*f)?;
             v.apply_type_index(type_index)?;
         }
-        CallIndirect { type_index } => {
-            if !v.m.has_table {
-                return Err(WasmError::Decode(
-                    "validation: call_indirect requires table",
-                ));
+        CallIndirect {
+            type_index,
+            table_index,
+        } => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode("validation: call_indirect table index"));
             }
             let type_index = *type_index as usize;
             v.pop_expect(I32)?; // the table index

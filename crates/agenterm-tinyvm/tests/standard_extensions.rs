@@ -152,6 +152,48 @@ fn explicit_table_expression_elem_module(table_index: u8) -> Vec<u8> {
     wasm
 }
 
+fn multi_table_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(&mut wasm, 3, &[0x03, 0x00, 0x00, 0x00]);
+    section(
+        &mut wasm,
+        4,
+        &[0x02, 0x70, 0x01, 0x01, 0x03, 0x70, 0x01, 0x02, 0x04],
+    );
+    section(
+        &mut wasm,
+        7,
+        &[
+            0x02, 0x03, b'r', b'u', b'n', 0x00, 0x02, 0x01, b't', 0x01, 0x01,
+        ],
+    );
+    section(
+        &mut wasm,
+        9,
+        &[
+            0x03, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00, 0x02, 0x01, 0x41, 0x01, 0x0B, 0x00, 0x01,
+            0x01, 0x01, 0x00, 0x01, 0x00,
+        ],
+    );
+    section(
+        &mut wasm,
+        10,
+        &[
+            0x03, 0x04, 0x00, 0x41, 0x2A, 0x0B, 0x04, 0x00, 0x41, 0x07, 0x0B, 0x69, 0x01, 0x01,
+            0x7F, 0x41, 0x00, 0x11, 0x00, 0x00, 0x21, 0x00, 0x41, 0x01, 0x11, 0x00, 0x01, 0x20,
+            0x00, 0x6A, 0x21, 0x00, 0x41, 0x00, 0x41, 0x00, 0x25, 0x00, 0x26, 0x01, 0x41, 0x00,
+            0x11, 0x00, 0x01, 0x20, 0x00, 0x6A, 0x21, 0x00, 0x41, 0x00, 0x41, 0x01, 0x41, 0x01,
+            0xFC, 0x0E, 0x00, 0x01, 0x41, 0x00, 0x11, 0x00, 0x00, 0x20, 0x00, 0x6A, 0x21, 0x00,
+            0x41, 0x00, 0x41, 0x00, 0x41, 0x01, 0xFC, 0x0C, 0x02, 0x01, 0xFC, 0x0D, 0x02, 0x41,
+            0x00, 0x11, 0x00, 0x01, 0x20, 0x00, 0x6A, 0x21, 0x00, 0x41, 0x00, 0xD0, 0x70, 0x41,
+            0x00, 0xFC, 0x11, 0x01, 0xD0, 0x70, 0x41, 0x01, 0xFC, 0x0F, 0x00, 0x20, 0x00, 0x6A,
+            0xFC, 0x10, 0x00, 0x6A, 0x0B,
+        ],
+    );
+    wasm
+}
+
 fn assert_copy_fill_semantics() {
     let mut module = WasmModule::new();
     let copy = must_ok(
@@ -532,6 +574,117 @@ fn standard_funcref_bulk_work_traps_before_mutation() {
     );
     assert!(instance.invoke(grow, &[]).is_err());
     assert_eq!(must_ok(instance.invoke(size, &[]), "grow atomic"), vec![64]);
+}
+
+#[test]
+fn standard_multiple_funcref_tables_execute_and_share_one_host_budget() {
+    use agenterm_tinyvm::Limits;
+
+    let mut programmatic = WasmModule::new_with_limits(Limits {
+        max_table_elems: 3,
+        ..Limits::default()
+    });
+    assert_eq!(
+        must_ok(
+            programmatic.add_funcref_table(2, Some(3)),
+            "append bounded table",
+        ),
+        0
+    );
+    assert!(programmatic.add_funcref_table(2, None).is_err());
+    assert!(programmatic.add_funcref_table(2, Some(1)).is_err());
+
+    let bytes = multi_table_module();
+    let mut instance = must_ok(
+        must_ok(WasmModule::from_bytes(&bytes), "load multi-table module").instantiate(),
+        "instantiate multi-table module",
+    );
+    assert_eq!(instance.table_count(), 2);
+    assert_eq!(instance.table_elements_at(0), Some(1));
+    assert_eq!(instance.table_elements_at(1), Some(2));
+    let result = must_ok(
+        instance.invoke_by_name("run", &[]),
+        "run multi-table module",
+    );
+    assert!(matches!(result.as_slice(), [Val::I32(143)]));
+    assert_eq!(instance.table_elements_at(0), Some(2));
+    assert_eq!(instance.table_elements_at(1), Some(2));
+    assert_eq!(instance.table_elements(), 4);
+
+    assert!(
+        WasmModule::from_bytes_with(
+            &bytes,
+            Limits {
+                max_table_elems: 2,
+                ..Limits::default()
+            },
+        )
+        .is_err(),
+        "the host table budget applies to the aggregate, not to each table"
+    );
+
+    let mut aggregate_capped = must_ok(
+        must_ok(
+            WasmModule::from_bytes_with(
+                &bytes,
+                Limits {
+                    max_table_elems: 3,
+                    ..Limits::default()
+                },
+            ),
+            "load at exact aggregate table budget",
+        )
+        .instantiate(),
+        "instantiate at exact aggregate table budget",
+    );
+    let result = must_ok(
+        aggregate_capped.invoke_by_name("run", &[]),
+        "run with aggregate growth capped",
+    );
+    assert!(matches!(result.as_slice(), [Val::I32(140)]));
+    assert_eq!(aggregate_capped.table_elements_at(0), Some(1));
+    assert_eq!(aggregate_capped.table_elements_at(1), Some(2));
+
+    let mut invalid = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut invalid, 1, &[0x01, 0x60, 0x00, 0x00]);
+    section(&mut invalid, 3, &[0x01, 0x00]);
+    section(&mut invalid, 4, &[0x02, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01]);
+    section(
+        &mut invalid,
+        10,
+        &[0x01, 0x06, 0x00, 0xFC, 0x10, 0x02, 0x1A, 0x0B],
+    );
+    assert!(
+        WasmModule::from_bytes(&invalid).is_err(),
+        "an instruction cannot name table index two in a two-table module"
+    );
+
+    let mut invalid_export = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(
+        &mut invalid_export,
+        4,
+        &[0x02, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01],
+    );
+    section(&mut invalid_export, 7, &[0x01, 0x01, b't', 0x01, 0x02]);
+    assert!(
+        WasmModule::from_bytes(&invalid_export).is_err(),
+        "a table export must name an existing table"
+    );
+
+    let mut duplicate_export = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut duplicate_export, 1, &[0x01, 0x60, 0x00, 0x00]);
+    section(&mut duplicate_export, 3, &[0x01, 0x00]);
+    section(&mut duplicate_export, 4, &[0x01, 0x70, 0x00, 0x01]);
+    section(
+        &mut duplicate_export,
+        7,
+        &[0x02, 0x01, b'x', 0x00, 0x00, 0x01, b'x', 0x01, 0x00],
+    );
+    section(&mut duplicate_export, 10, &[0x01, 0x02, 0x00, 0x0B]);
+    assert!(
+        WasmModule::from_bytes(&duplicate_export).is_err(),
+        "export names are unique across function and table kinds"
+    );
 }
 
 #[test]

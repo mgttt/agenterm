@@ -58,7 +58,8 @@ agenterm-tinyvm (35)
 │       ├── sign extension proposal [x]
 │       ├── nontrapping float-to-int [x]
 │       ├── multi-value proposal [x]
-│       └── single-table funcref profile [x]
+│       ├── single-table funcref profile [x]
+│       └── multiple defined funcref tables [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
 ├── slot-B               [ ]
@@ -83,6 +84,10 @@ Multi-value 包含多结果函数、s33 type-index block signature、带参数 b
 全局变量、typed select、`ref.null`/`ref.is_null`/`ref.func`、table get/set/grow/size/fill，
 以及 expression element segment flags 4..7。`externref`、multiple tables、typed function
 references 和 GC 尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
+在此基础上，模块可定义多张 `funcref` table；所有 table instruction、`call_indirect`、
+active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
+预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。当前仍不接受 imported
+tables；定义表的 export 会完整验证，但产品 embedding 暂只公开 function lookup。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。
 核 strip `<100KiB`。
