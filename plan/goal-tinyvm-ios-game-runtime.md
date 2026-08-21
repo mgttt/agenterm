@@ -31,7 +31,8 @@ tinyvm iOS game runtime
 │   ├── linked exported functions    [x]
 │   │   ├── numeric value signatures [x]
 │   │   ├── store-owned funcref values [x]
-│   │   └── opaque externref function/global values [x]
+│   │   ├── opaque externref function/global values [x]
+│   │   └── standard externref tables [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -3133,3 +3134,34 @@ repository records source/artifact hashes, dSYM UUID and the supersession reason
 in `docs/releases/0.16.4-32-testflight.md`; build 31 is explicitly barred from
 selection. Apple-side processing/installability and physical-iPhone lifecycle,
 performance and owner-feel evidence remain open external gates.
+
+## Ninety-fourth executable increment — standard externref tables
+
+The general VM now carries opaque host `externref` identities through standard
+defined, imported and exported tables. Table element type is explicit in the
+decoded module, public import descriptor, host `WasmTable` handle and live table
+slot; funcref/externref bindings cannot be confused. `table.get`, `table.set`,
+`table.grow`, `table.size`, `table.fill`, same/cross-table `table.copy`, passive
+`table.init` and `elem.drop` use the table's declared reference type. The load
+validator rejects mixed-type copy/init and indirect calls through externref
+tables before execution.
+
+The host creates externref tables without storing native pointers. `get` and
+`set` preserve only the process-unique opaque token, exported tables retain
+their store allocation after the provider instance is dropped, and sibling
+instances observe the same cells. Aggregate table-element and per-table maximum
+budgets remain shared with funcref tables. TinyArcade v1 still rejects table
+imports and remains i32-only; this standards increment does not widen the
+shipping game ABI.
+
+Evidence on 2026-08-22: one WABT-compiled and independently validated fixture
+passes the same identity, import/export, provider-drop, grow, fill, copy and
+passive-init behavior in tinyvm and JavaScriptCore. The normal all-feature test
+suite covers defined tables, host type mismatch and mixed-table validation;
+all 127 library tests, every integration suite, the development WebKit replay
+differential, generic-device/universal-simulator Swift linkage and doctest pass.
+The iOS arm64 consumer remains below its gate at 1,602,104 bytes. The stripped
+static core is 101,256 bytes, below the unchanged 100 KiB ceiling, and its C
+selftest returns 42. The current-main nostalgia-arcade consumer also passes six
+runtime unit tests, the complete cartridge-hall UI test and an unsigned arm64
+device Release build against this exact worktree.

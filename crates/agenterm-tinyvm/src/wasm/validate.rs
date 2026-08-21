@@ -38,9 +38,9 @@ pub(super) struct ModuleCtx<'a> {
     /// DataCount section value. Bulk data instructions require it even when
     /// the final data section is available to this non-streaming decoder.
     pub data_count: Option<usize>,
-    /// Number of element segments and internally defined funcref tables.
-    pub elem_count: usize,
-    pub table_count: usize,
+    /// Reference type of every element segment and table in standard index order.
+    pub elem_types: &'a [u8],
+    pub table_types: &'a [u8],
     pub memory_count: usize,
     /// Function indices forward-declared by element segments and therefore
     /// legal operands of `ref.func`.
@@ -605,20 +605,25 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             elem_index,
             table_index,
         } => {
-            if *table_index as usize >= v.m.table_count {
-                return Err(WasmError::Decode("validation: table.init table index"));
-            }
-            if *elem_index as usize >= v.m.elem_count {
-                return Err(WasmError::Decode(
-                    "validation: table.init element segment index",
-                ));
+            let table_type =
+                v.m.table_types
+                    .get(*table_index as usize)
+                    .ok_or(WasmError::Decode("validation: table.init table index"))?;
+            let elem_type =
+                v.m.elem_types
+                    .get(*elem_index as usize)
+                    .ok_or(WasmError::Decode(
+                        "validation: table.init element segment index",
+                    ))?;
+            if table_type != elem_type {
+                return Err(type_error());
             }
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
         }
         ElemDrop { elem_index } => {
-            if *elem_index as usize >= v.m.elem_count {
+            if *elem_index as usize >= v.m.elem_types.len() {
                 return Err(WasmError::Decode("validation: elem.drop segment index"));
             }
         }
@@ -626,10 +631,16 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             destination_table,
             source_table,
         } => {
-            if *destination_table as usize >= v.m.table_count
-                || *source_table as usize >= v.m.table_count
-            {
-                return Err(WasmError::Decode("validation: table.copy table index"));
+            let destination_type =
+                v.m.table_types
+                    .get(*destination_table as usize)
+                    .ok_or(WasmError::Decode("validation: table.copy table index"))?;
+            let source_type =
+                v.m.table_types
+                    .get(*source_table as usize)
+                    .ok_or(WasmError::Decode("validation: table.copy table index"))?;
+            if destination_type != source_type {
+                return Err(type_error());
             }
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
@@ -703,39 +714,43 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.push(FUNCREF);
         }
         TableGet(table_index) => {
-            if *table_index as usize >= v.m.table_count {
-                return Err(WasmError::Decode("validation: table.get table index"));
-            }
+            let element_type =
+                *v.m.table_types
+                    .get(*table_index as usize)
+                    .ok_or(WasmError::Decode("validation: table.get table index"))?;
             v.pop_expect(I32)?;
-            v.push(FUNCREF);
+            v.push(element_type);
         }
         TableSet(table_index) => {
-            if *table_index as usize >= v.m.table_count {
-                return Err(WasmError::Decode("validation: table.set table index"));
-            }
-            v.pop_expect(FUNCREF)?;
+            let element_type =
+                *v.m.table_types
+                    .get(*table_index as usize)
+                    .ok_or(WasmError::Decode("validation: table.set table index"))?;
+            v.pop_expect(element_type)?;
             v.pop_expect(I32)?;
         }
         TableGrow(table_index) => {
-            if *table_index as usize >= v.m.table_count {
-                return Err(WasmError::Decode("validation: table.grow table index"));
-            }
+            let element_type =
+                *v.m.table_types
+                    .get(*table_index as usize)
+                    .ok_or(WasmError::Decode("validation: table.grow table index"))?;
             v.pop_expect(I32)?;
-            v.pop_expect(FUNCREF)?;
+            v.pop_expect(element_type)?;
             v.push(I32);
         }
         TableSize(table_index) => {
-            if *table_index as usize >= v.m.table_count {
+            if *table_index as usize >= v.m.table_types.len() {
                 return Err(WasmError::Decode("validation: table.size table index"));
             }
             v.push(I32);
         }
         TableFill(table_index) => {
-            if *table_index as usize >= v.m.table_count {
-                return Err(WasmError::Decode("validation: table.fill table index"));
-            }
+            let element_type =
+                *v.m.table_types
+                    .get(*table_index as usize)
+                    .ok_or(WasmError::Decode("validation: table.fill table index"))?;
             v.pop_expect(I32)?;
-            v.pop_expect(FUNCREF)?;
+            v.pop_expect(element_type)?;
             v.pop_expect(I32)?;
         }
 
@@ -752,7 +767,7 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             type_index,
             table_index,
         } => {
-            if *table_index as usize >= v.m.table_count {
+            if v.m.table_types.get(*table_index as usize) != Some(&FUNCREF) {
                 return Err(WasmError::Decode("validation: call_indirect table index"));
             }
             let type_index = *type_index as usize;
@@ -763,7 +778,7 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             type_index,
             table_index,
         } => {
-            if *table_index as usize >= v.m.table_count {
+            if v.m.table_types.get(*table_index as usize) != Some(&FUNCREF) {
                 return Err(WasmError::Decode(
                     "validation: return_call_indirect table index",
                 ));

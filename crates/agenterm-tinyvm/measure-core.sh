@@ -4,7 +4,8 @@
 set -e
 cd "$(dirname "$0")/../.."
 TD="${CARGO_TARGET_DIR:-target}"
-cargo rustc -p agenterm-tinyvm --lib --release --features staticcore \
+CARGO=${CARGO:-cargo}
+"$CARGO" rustc -p agenterm-tinyvm --lib --release --features staticcore \
   --crate-type staticlib -- -Copt-level=z -Cpanic=abort -Ccodegen-units=1
 printf 'extern int tinyvm_selftest(void);\nint main(void){return tinyvm_selftest();}\n' > "$TD/tvmain.c"
 case "$(uname -s)" in

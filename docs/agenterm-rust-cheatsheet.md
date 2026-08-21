@@ -2571,8 +2571,11 @@ functions, locals and globals while the embedding owns the bounded token-to-
 object registry and its lifetime. Keep the token opaque but hashable/orderable
 for host registries, never recycle it from an allocation address, and verify
 null plus non-null identity against independently compiled Wasm in a second
-engine. Supporting externref values does not imply externref tables; keep an
-unsupported resource form rejected until its storage and budget model exists.
+engine. Supporting externref values does not imply externref tables; keep that
+resource form rejected until its typed storage, import/export ownership and
+aggregate budget model exist. Once admitted, validate every bulk operation
+against the table/segment reference types and prove provider-drop aliasing and
+opaque identity in a second engine.
 
 ## Separate deterministic fuel telemetry from device timing
 

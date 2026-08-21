@@ -138,6 +138,9 @@ Reject for the iOS cartridge runtime:
    identities rather than pointer addresses. One independently WABT-compiled
    module preserves the same object identity through tinyvm and JavaScriptCore;
    tinyvm never dereferences the token or claims ownership of the host object.
-5. [ ] If background execution becomes a product requirement, first specify and
+5. [x] Standard externref tables preserve those same host identities through
+   imported/exported ownership, provider drop and bulk table operations; the
+   WABT fixture runs identically in tinyvm and JavaScriptCore.
+6. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

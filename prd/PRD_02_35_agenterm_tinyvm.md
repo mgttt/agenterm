@@ -33,7 +33,8 @@ agenterm-tinyvm (35)
 │   │   └── linked exported functions [x]
 │   │       ├── numeric value signatures [x]
 │   │       ├── store-owned funcref values [x]
-│   │       └── opaque externref function/global values [x]
+│   │       ├── opaque externref function/global values [x]
+│   │       └── standard externref tables [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -154,8 +155,11 @@ Multi-value 包含多结果函数、s33 type-index block signature、带参数 b
 以及 expression element segment flags 4..7。`externref` 的 function/local/global、
 typed select、`ref.null` 和 `ref.is_null` 也以不透明、进程唯一的 host token
 进入通用 VM；VM 不解引 token，对应对象注册表和生命期仍由宿主所有。
-`externref` table、typed function references 和 GC 尚未进入接受 profile，会在
-load gate 明确拒绝，不以私有编码代替。
+`externref` table 已进入通用 VM：defined/imported/exported table 保留同一 host token
+identity，`table.get/set/grow/size/fill/copy/init`、passive element lifecycle、table 类型
+匹配和聚合资源预算均使用标准 binary 语义。宿主 `WasmTable` 明确报告 element type，
+funcref/externref 错绑或跨类型 bulk copy 在执行前拒绝。typed function references 和 GC
+尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
 在此基础上，模块可定义多张 `funcref` table；所有 table instruction、`call_indirect`、
 active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
 预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。标准 imported table

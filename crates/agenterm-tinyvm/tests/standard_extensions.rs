@@ -1522,7 +1522,49 @@ fn standard_externref_function_and_global_values_preserve_host_identity() {
 
     let mut externref_table = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
     section(&mut externref_table, 4, &[0x01, 0x6F, 0x00, 0x01]);
-    assert!(WasmModule::from_bytes(&externref_table).is_err());
+    let table_module = must_ok(
+        WasmModule::from_bytes(&externref_table),
+        "load defined externref table",
+    );
+    let table_instance = must_ok(table_module.instantiate(), "instantiate externref table");
+    assert!(table_instance.table_count() == 1);
+    assert!(table_instance.table_elements_at(0) == Some(1));
+
+    let host_table = must_ok(
+        WasmTable::new_externref(1, Some(2)),
+        "create externref table",
+    );
+    assert!(host_table.element_type() == ValueType::ExternRef);
+    assert!(host_table.is_null(0) == Ok(Some(true)));
+    must_ok(
+        host_table.set(0, Val::ExternRef(Some(reference))),
+        "set host externref table",
+    );
+    assert!(host_table.get(0) == Ok(Some(Val::ExternRef(Some(reference)))));
+    assert!(matches!(
+        host_table.set(0, Val::FuncRef(None)),
+        Err(WasmError::Trap("table element type"))
+    ));
+
+    let mut mixed_copy = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut mixed_copy, 1, &[0x01, 0x60, 0x00, 0x00]);
+    section(&mut mixed_copy, 3, &[0x01, 0x00]);
+    section(
+        &mut mixed_copy,
+        4,
+        &[0x02, 0x70, 0x00, 0x01, 0x6F, 0x00, 0x01],
+    );
+    section(
+        &mut mixed_copy,
+        10,
+        &[
+            0x01, 0x0C, 0x00, 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xFC, 0x0E, 0x00, 0x01, 0x0B,
+        ],
+    );
+    assert!(matches!(
+        WasmModule::from_bytes(&mixed_copy),
+        Err(WasmError::Decode("validation: type mismatch"))
+    ));
 }
 
 #[test]
