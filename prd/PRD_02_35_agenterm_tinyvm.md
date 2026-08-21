@@ -92,7 +92,8 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── owned host ABI                                   [~]
 │   │   ├── typed standard function imports               [x]
 │   │   ├── bounded in-place host dispatch                [x]
-│   │   └── indexed guest-memory callback context          [x]
+│   │   ├── indexed guest-memory callback context          [x]
+│   │   └── generation-checked guest resource handles      [x]
 │   ├── standard resource imports                        [~]
 │   │   ├── standard imported globals                     [x]
 │   │   ├── standard imported linear memories             [x]
@@ -150,6 +151,7 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── P1 — reusable native modules                     [~]
 │   │   ├── generalize memory-zero call-scoped borrowing   [x]
 │   │   ├── explicit selected-memory callback context      [x]
+│   │   ├── unified host/guest handle lifetimes             [x]
 │   │   ├── versioned native import conventions           [x]
 │   │   ├── converter-visible compatibility reports       [x]
 │   │   └── platform-neutral host architecture            [~]
@@ -176,7 +178,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │   └── external distribution after Apple approval    [ ]
 │   └── research queue                                   [~]
 │       ├── QJWasm ownership + low-copy lessons           [~]
-│       ├── unified host/guest handle lifetimes            [ ]
+│       ├── unified host/guest handle lifetimes            [x]
 │       ├── bounded call/callback/completion channels      [ ]
 │       ├── event-loop-neutral async completion ABI        [ ]
 │       ├── cross-boundary copy/call benchmarks            [x]
@@ -272,7 +274,7 @@ as “almost approved” or “safe to ship externally.”
 | Execution | Persistent instance, explicit activation trampoline, fuel and resource telemetry | Deterministic trap local to the instance |
 | Values | i32/i64/f32/f64, funcref and opaque externref through supported standard locations | Exact type mismatch rejection |
 | Resources | Defined/imported/exported globals, memories and funcref/externref tables | Binding/type/limit rejection or borrow-conflict trap |
-| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction |
+| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path, generation-checked guest resource table and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction; stale tokens never name replacements |
 | Optional WASI P1 | Sixteen exact process/clock/random/preopen/descriptor/path/exit imports over the neutral host contract | Unknown/wrong imports fail binding; bad memory, path, rights or backend absence returns explicit errno/interruption |
 | TinyArcade | Manifest, core v1, native registry, lifecycle, deterministic RNG/clock, render/audio/state bounds | Cartridge fails closed; App owner remains alive |
 | iOS | C ABI, XCFramework, Swift package, input/frame pacing, persistence, replay and native 2D/3D/audio owners | Main-actor owner latches bad runtime and clears stale output |
@@ -387,6 +389,7 @@ Current evidence owners:
 - [Capability-based std host](../docs/tinyvm-std-host.md)
 - [Optional iOS WASI host](../docs/tinyvm-ios-wasi-host.md)
 - [Selected-memory host callbacks](../docs/tinyvm-selected-memory-host.md)
+- [Host resource table](../docs/tinyvm-host-resource-table.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)

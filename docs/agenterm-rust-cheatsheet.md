@@ -2771,3 +2771,12 @@ production artifacts and gate their exact current profiles. An exact-profile
 change is a review trigger rather than an automatic incompatibility: update
 the oracle, resource evidence and product baseline together when the workload
 legitimately expands.
+
+When a native Wasm module exposes host-owned objects through an `i32`, keep the
+objects in one bounded host table and encode slot plus generation in the guest
+token. Advance the generation before reusing a closed slot, and permanently
+retire the slot instead of wrapping back to a token that could revive a very
+old handle. Failed publication must drop the newly supplied object; table clear
+and drop own the remaining cleanup. Treat this as resource lifetime integrity,
+not as permission policy, and keep separate versioned native modules in
+separate typed tables rather than exchanging native pointers.

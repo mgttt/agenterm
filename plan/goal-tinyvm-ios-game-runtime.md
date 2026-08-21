@@ -58,6 +58,7 @@ tinyvm iOS game runtime
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
 │   ├── bounded in-place host dispatch [x]
+│   ├── generation-checked native resource handles [x]
 │   └── storage without guest network [x]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
@@ -3468,3 +3469,31 @@ XCFramework gates and the three-game tinyvm/JSC/H5 differential. The no-default
 library passes all 115 tests and warnings-denied Clippy. Default linked sizes are
 1,602,104 bytes arm64 and 1,677,312 bytes x86_64; the stripped static core
 remains 101,256 bytes with selftest 42.
+
+## One-hundred-seventh executable increment — native resource-handle ownership
+
+The unified crate now exposes `HostResourceTable<T>` for native modules that
+must name host-owned objects through a standard Wasm `i32`. Its nonzero token
+encodes one bounded slot and generation; close advances the generation before
+reuse, while final-generation exhaustion permanently retires the slot instead
+of wrapping an ancient token onto a new object. Insert failure drops its owned
+input, and clear/table drop own deterministic cleanup. This is a lifecycle
+primitive for any host, not a platform backend, executor or permission layer.
+
+Evidence on 2026-08-22: five public black boxes prove exact i32 bit round trips,
+bounded capacity, mutable access, close, clear, deterministic drop, stale-token
+rejection and all 65,535 generations of one slot. A sixth black box drives an
+ordinary TinyArcade cartridge through versioned create/read/close imports and
+leaves no live host resource. The complete all-feature/all-target package
+passes all 128 library tests and every non-ignored integration test, including
+both iOS XCFramework gates and the three-game tinyvm/JSC/H5 differential.
+Warnings-denied all-feature and isolated no-default Clippy, arm64 iOS device and
+Simulator checks, rustfmt, document redaction and the 100-leaf PRD trace gate
+pass. Default linked sizes remain 1,602,424 bytes arm64 and 1,681,600 bytes
+x86_64; the stripped static core remains 101,256 bytes with selftest 42.
+
+The real consumer independently passed ten runtime tests, one two-cartridge UI
+journey and its arm64 release audit. Nostalgia Arcade `0.16.4 (33)`, the first
+TestFlight candidate containing both Depth Well and Signal Lock standard WASM
+cartridges, was uploaded successfully and entered Apple processing. Physical
+iPhone installation, lifecycle, frame-time and audio evidence remain open.

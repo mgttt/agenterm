@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 98] = [
+const LEAF_TESTS: [(&str, &str); 100] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -938,12 +938,20 @@ const LEAF_TESTS: [(&str, &str); 98] = [
         "typed_host_can_borrow_selected_defined_memories_by_standard_index",
     ),
     (
+        "generation-checked guest resource handles",
+        "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
+    ),
+    (
         "generalize memory-zero call-scoped borrowing",
         "typed_host_can_borrow_selected_defined_memories_by_standard_index",
     ),
     (
         "explicit selected-memory callback context",
         "selected_memory_context_preserves_aliasing_for_imported_memories",
+    ),
+    (
+        "unified host/guest handle lifetimes",
+        "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
     ),
     (
         "versioned native import conventions",

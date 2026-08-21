@@ -1,6 +1,6 @@
 //! Black-box owner for the standard-WASM game ABI v1 boundary.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
 
@@ -9,6 +9,7 @@ use agenterm_tinyvm::{
     GameRuntime, HostProfileV1, Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE,
     NativeModuleRegistry, RenderFrame, WasmError,
 };
+use agenterm_tinyvm::{GuestResourceHandle, HostResourceTable};
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
 
@@ -1337,6 +1338,104 @@ fn replay_preserves_versioned_native_import_registration_boundary() {
         missing_registry,
         Err(WasmError::Trap("game import is not allowed"))
     ));
+}
+
+#[test]
+fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
+    let bare = wat::parse_str(
+        r#"(module
+            (import "fan:texture/v1" "create" (func $create (result i32)))
+            (import "fan:texture/v1" "read" (func $read (param i32) (result i32)))
+            (import "fan:texture/v1" "close" (func $close (param i32) (result i32)))
+            (memory 1)
+            (global $handle (mut i32) (i32.const 0))
+            (func (export "game_abi_version") (result i32) (i32.const 1))
+            (func (export "game_init") (result i32)
+              call $create
+              global.set $handle
+              i32.const 0)
+            (func (export "game_tick") (result i32)
+              global.get $handle
+              call $read
+              i32.const 41
+              i32.ne
+              if (result i32)
+                i32.const 9
+              else
+                global.get $handle
+                call $close
+                drop
+                i32.const 0
+              end)
+            (func (export "game_suspend") (result i32) (i32.const 0))
+            (func (export "game_resume") (result i32) (i32.const 0)))"#,
+    )
+    .expect("compile resource-handle cartridge");
+    let wasm = must_ok(
+        CartridgeManifest {
+            game_id: "test.resource-handle".to_owned(),
+            game_version: "1.0.0".to_owned(),
+            abi_version: 1,
+            state_version: 1,
+            capabilities: vec!["fan:texture/v1".to_owned()],
+        }
+        .append_to_wasm(&bare),
+        "attach resource-handle manifest",
+    );
+
+    let resources = Rc::new(RefCell::new(HostResourceTable::new(1)));
+    let create_resources = resources.clone();
+    let read_resources = resources.clone();
+    let close_resources = resources.clone();
+    let mut registry = NativeModuleRegistry::new();
+    must_ok(
+        registry.register("fan:texture/v1", "create", 0, 1, move |_, _| {
+            let handle = create_resources
+                .borrow_mut()
+                .insert(41)
+                .map_err(|_| WasmError::Trap("native resource table full"))?;
+            Ok(vec![handle.as_i32()])
+        }),
+        "register resource create",
+    );
+    must_ok(
+        registry.register("fan:texture/v1", "read", 1, 1, move |args, _| {
+            let handle = GuestResourceHandle::from_i32(args[0])
+                .ok_or(WasmError::Trap("native resource handle"))?;
+            let value = *read_resources
+                .borrow()
+                .get(handle)
+                .map_err(|_| WasmError::Trap("stale native resource handle"))?;
+            Ok(vec![value])
+        }),
+        "register resource read",
+    );
+    must_ok(
+        registry.register("fan:texture/v1", "close", 1, 1, move |args, _| {
+            let handle = GuestResourceHandle::from_i32(args[0])
+                .ok_or(WasmError::Trap("native resource handle"))?;
+            close_resources
+                .borrow_mut()
+                .remove(handle)
+                .map_err(|_| WasmError::Trap("stale native resource handle"))?;
+            Ok(vec![0])
+        }),
+        "register resource close",
+    );
+
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            &registry,
+        ),
+        "open resource-handle cartridge",
+    );
+    assert_eq!(resources.borrow().len(), 1);
+    must_ok(runtime.tick(GameInput::default()), "use and close resource");
+    assert!(resources.borrow().is_empty());
 }
 
 #[test]

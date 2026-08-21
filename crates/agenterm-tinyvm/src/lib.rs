@@ -65,6 +65,9 @@ pub use host::{
     HostHandle, HostLimits, HostResult, OpenOptions, SeekWhence,
 };
 
+pub mod resource_table;
+pub use resource_table::{GuestResourceHandle, HostResourceTable, ResourceTableError};
+
 #[cfg(feature = "std-host")]
 pub mod std_host;
 #[cfg(feature = "std-host")]

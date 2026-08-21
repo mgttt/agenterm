@@ -145,6 +145,10 @@ Reject for the iOS cartridge runtime:
 5. [x] Standard externref tables preserve those same host identities through
    imported/exported ownership, provider drop and bulk table operations; the
    WABT fixture runs identically in tinyvm and JavaScriptCore.
-6. [ ] If background execution becomes a product requirement, first specify and
+6. [x] `HostResourceTable<T>` gives versioned native modules a bounded,
+   generation-checked `i32` handle owner. Close, clear, slot reuse and complete
+   generation exhaustion cannot make an old token name a replacement object;
+   a real cartridge proves create/read/close through standard imports.
+7. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.
