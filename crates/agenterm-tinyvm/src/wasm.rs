@@ -18,17 +18,16 @@ use alloc::vec::Vec;
 
 mod validate;
 
-/// Max call recursion depth (via `call`/`call_indirect`).
+/// Maximum simultaneously live guest-defined call activations.
 ///
-/// The interpreter recurses on the native stack, so the cap is set to what the
-/// smallest stack this crate is expected to run on survives — an unoptimised
-/// build has a far larger frame, so its cap is lower. Either way, exceeding it
-/// is a loud `Trap("call depth")`, never a stack overflow.
-#[cfg(debug_assertions)]
-pub const WASM_MAX_DEPTH: usize = 32;
-/// See the `debug_assertions` variant above.
-#[cfg(not(debug_assertions))]
+/// Activations live in a fallibly grown VM vector rather than on the native
+/// stack, so debug and release builds enforce the same deterministic boundary.
+/// Exceeding it is a loud `Trap("call depth")`.
 pub const WASM_MAX_DEPTH: usize = 512;
+/// Maximum aggregate value/control slots held by the active function and all
+/// suspended callers in one top-level invocation. This bounds guest call-stack
+/// heap independently of linear memory and instruction fuel.
+pub const WASM_MAX_ACTIVATION_SLOTS: usize = 1 << 20;
 /// Max executed instructions per top-level [`Module::invoke`].
 pub const WASM_MAX_STEPS: u64 = 16_000_000;
 /// WebAssembly linear-memory page size (64 KiB). Memory starts at one page per
@@ -1970,7 +1969,33 @@ struct WasmCall<'a> {
 
 enum DefinedOutcome {
     Values(Vec<Val>),
+    Call {
+        index: usize,
+        args: Vec<Val>,
+        caller: DefinedActivation,
+    },
     TailCall { index: usize, args: Vec<Val> },
+}
+
+/// One guest-defined function activation. Guest calls are represented by a
+/// bounded vector of these values; they never recurse through the Rust/native
+/// call stack.
+struct DefinedActivation {
+    def_idx: usize,
+    locals: Vec<Val>,
+    stack: Vec<Val>,
+    control: Vec<Frame>,
+    pc: usize,
+}
+
+impl DefinedActivation {
+    fn live_slots(&self) -> Result<usize, WasmError> {
+        self.locals
+            .len()
+            .checked_add(self.stack.len())
+            .and_then(|slots| slots.checked_add(self.control.len()))
+            .ok_or(WasmError::Trap("call stack"))
+    }
 }
 
 impl Module {
@@ -2753,6 +2778,91 @@ impl Module {
         }
     }
 
+    fn new_defined_activation(
+        &self,
+        def_idx: usize,
+        args: Vec<Val>,
+        available_slots: usize,
+    ) -> Result<DefinedActivation, WasmError> {
+        let func = self
+            .funcs
+            .get(def_idx)
+            .ok_or(WasmError::Trap("call to unknown function"))?;
+        if args.len() != func.n_params {
+            return Err(WasmError::Trap("function"));
+        }
+        let local_count = args
+            .len()
+            .checked_add(func.locals.len())
+            .ok_or(WasmError::Trap("function locals"))?;
+        if local_count
+            .checked_add(1)
+            .filter(|&slots| slots <= available_slots)
+            .is_none()
+        {
+            return Err(WasmError::Trap("call stack"));
+        }
+        let mut locals = Vec::new();
+        locals
+            .try_reserve_exact(local_count)
+            .map_err(|_| WasmError::Trap("function locals"))?;
+        locals.extend(args);
+        // Declared locals default to the zero value of their declared type.
+        locals.extend_from_slice(&func.locals);
+
+        let mut control = Vec::new();
+        control
+            .try_reserve_exact(1)
+            .map_err(|_| WasmError::Trap("control stack"))?;
+        control.push(Frame {
+            base: 0,
+            branch_arity: func.arity,
+            cont: func.code.len(),
+            is_loop: false,
+        });
+        Ok(DefinedActivation {
+            def_idx,
+            locals,
+            stack: Vec::new(),
+            control,
+            pc: 0,
+        })
+    }
+
+    fn call_host(
+        &self,
+        index: usize,
+        args: &[Val],
+        mem: &mut [u8],
+    ) -> Result<Vec<Val>, WasmError> {
+        let host = self
+            .hosts
+            .get(index)
+            .ok_or(WasmError::Trap("host function"))?;
+        if args.len() != host.n_params {
+            return Err(WasmError::Trap("host function"));
+        }
+        // Host functions use an i32 ABI: every arg/result must be i32.
+        let i32_args: Vec<i32> = args
+            .iter()
+            .map(|value| match value {
+                Val::I32(number) => Ok(*number),
+                _other => Err(WasmError::Trap("host function")),
+            })
+            .collect::<Result<_, _>>()?;
+        if let Some(function_type) = host.sig.and_then(|signature| self.types.get(signature))
+            && (function_type.params.iter().any(|&ty| ty != 0x7F)
+                || function_type.results.iter().any(|&ty| ty != 0x7F))
+        {
+            return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+        }
+        let results = (host.f)(&i32_args, mem)?;
+        if results.len() != host.n_results {
+            return Err(WasmError::Trap("host function"));
+        }
+        Ok(results.into_iter().map(Val::I32).collect())
+    }
+
     /// Dispatch a call by combined index to a host function or a defined one.
     fn call_any(
         &self,
@@ -2764,52 +2874,93 @@ impl Module {
         bulk: &mut BulkState<'_>,
     ) -> Result<Vec<Val>, WasmError> {
         let mut index = call.index;
-        let mut tail_args: Option<Vec<Val>> = None;
+        let mut args = Vec::new();
+        args.try_reserve_exact(call.args.len())
+            .map_err(|_| WasmError::Trap("call arguments"))?;
+        args.extend_from_slice(call.args);
+        let mut activation: Option<DefinedActivation> = None;
+        let mut callers: Vec<DefinedActivation> = Vec::new();
+        let mut suspended_slots = 0usize;
         loop {
-            let args = tail_args.as_deref().unwrap_or(call.args);
-            if index < self.hosts.len() {
-                let host = &self.hosts[index];
-                if args.len() != host.n_params {
-                    return Err(WasmError::Trap("host function"));
+            let available_slots = WASM_MAX_ACTIVATION_SLOTS
+                .checked_sub(suspended_slots)
+                .ok_or(WasmError::Trap("call stack"))?;
+            let outcome = if let Some(current) = activation.take() {
+                self.run_defined(current, available_slots, steps, mem, globals, bulk)?
+            } else if index < self.hosts.len() {
+                DefinedOutcome::Values(self.call_host(index, &args, mem)?)
+            } else {
+                let current_depth = depth
+                    .checked_add(callers.len())
+                    .ok_or(WasmError::Trap("call depth"))?;
+                if current_depth > WASM_MAX_DEPTH {
+                    return Err(WasmError::Trap("call depth"));
                 }
-                // Host functions use an i32 ABI: every arg/result must be i32.
-                let i32_args: Vec<i32> = args
-                    .iter()
-                    .map(|v| match v {
-                        Val::I32(n) => Ok(*n),
-                        _other => Err(WasmError::Trap("host function")),
-                    })
-                    .collect::<Result<_, _>>()?;
-                // The host ABI is i32-only. If the module declares any other value
-                // type for this import, say so instead of handing the guest an i32
-                // where it declared an i64/f32/f64.
-                if let Some(ft) = host.sig.and_then(|s| self.types.get(s))
-                    && (ft.params.iter().any(|&t| t != 0x7F)
-                        || ft.results.iter().any(|&t| t != 0x7F))
-                {
-                    return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+                let current = self.new_defined_activation(
+                    index - self.hosts.len(),
+                    core::mem::take(&mut args),
+                    available_slots,
+                )?;
+                self.run_defined(current, available_slots, steps, mem, globals, bulk)?
+            };
+            match outcome {
+                DefinedOutcome::Values(values) => {
+                    if let Some(mut caller) = callers.pop() {
+                        let caller_slots = caller.live_slots()?;
+                        suspended_slots = suspended_slots
+                            .checked_sub(caller_slots)
+                            .ok_or(WasmError::Trap("call stack"))?;
+                        let resumed_slots = caller_slots
+                            .checked_add(values.len())
+                            .ok_or(WasmError::Trap("call stack"))?;
+                        let available_slots = WASM_MAX_ACTIVATION_SLOTS
+                            .checked_sub(suspended_slots)
+                            .ok_or(WasmError::Trap("call stack"))?;
+                        if resumed_slots > available_slots {
+                            return Err(WasmError::Trap("call stack"));
+                        }
+                        caller
+                            .stack
+                            .try_reserve(values.len())
+                            .map_err(|_| WasmError::Trap("call stack"))?;
+                        caller.stack.extend(values);
+                        activation = Some(caller);
+                    } else {
+                        return Ok(values);
+                    }
                 }
-                let res = (host.f)(&i32_args, mem)?;
-                if res.len() != host.n_results {
-                    return Err(WasmError::Trap("host function"));
-                }
-                return Ok(res.into_iter().map(Val::I32).collect());
-            }
-            match self.run_defined(
-                WasmCall {
-                    index: index - self.hosts.len(),
-                    args,
-                },
-                depth,
-                steps,
-                mem,
-                globals,
-                bulk,
-            )? {
-                DefinedOutcome::Values(values) => return Ok(values),
-                DefinedOutcome::TailCall { index: next, args } => {
+                DefinedOutcome::Call {
+                    index: next,
+                    args: next_args,
+                    caller,
+                } => {
+                    if next >= self.hosts.len() {
+                        let next_depth = depth
+                            .checked_add(callers.len())
+                            .and_then(|value| value.checked_add(1))
+                            .ok_or(WasmError::Trap("call depth"))?;
+                        if next_depth > WASM_MAX_DEPTH {
+                            return Err(WasmError::Trap("call depth"));
+                        }
+                    }
+                    callers
+                        .try_reserve(1)
+                        .map_err(|_| WasmError::Trap("call stack"))?;
+                    let caller_slots = caller.live_slots()?;
+                    suspended_slots = suspended_slots
+                        .checked_add(caller_slots)
+                        .filter(|&slots| slots <= WASM_MAX_ACTIVATION_SLOTS)
+                        .ok_or(WasmError::Trap("call stack"))?;
+                    callers.push(caller);
                     index = next;
-                    tail_args = Some(args);
+                    args = next_args;
+                }
+                DefinedOutcome::TailCall {
+                    index: next,
+                    args: next_args,
+                } => {
+                    index = next;
+                    args = next_args;
                 }
             }
         }
@@ -2817,40 +2968,24 @@ impl Module {
 
     fn run_defined(
         &self,
-        call: WasmCall<'_>,
-        depth: usize,
+        activation: DefinedActivation,
+        available_slots: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
         globals: &mut Vec<Val>,
         bulk: &mut BulkState<'_>,
     ) -> Result<DefinedOutcome, WasmError> {
-        let WasmCall {
-            index: def_idx,
-            args,
-        } = call;
-        if depth > WASM_MAX_DEPTH {
-            return Err(WasmError::Trap("call depth"));
-        }
+        let DefinedActivation {
+            def_idx,
+            mut locals,
+            mut stack,
+            mut control,
+            mut pc,
+        } = activation;
         let func = self
             .funcs
             .get(def_idx)
             .ok_or(WasmError::Trap("call to unknown function"))?;
-        if args.len() != func.n_params {
-            return Err(WasmError::Trap("function"));
-        }
-
-        let mut locals: Vec<Val> = args.to_vec();
-        // Declared locals default to the zero value of their declared type
-        // (spec 4.5.3): i32 0, i64 0, +0.0f, +0.0d.
-        locals.extend_from_slice(&func.locals);
-        let mut stack: Vec<Val> = Vec::new();
-        let mut control: Vec<Frame> = vec![Frame {
-            base: 0,
-            branch_arity: func.arity,
-            cont: func.code.len(),
-            is_loop: false,
-        }];
-        let mut pc = 0usize;
 
         loop {
             *steps += 1;
@@ -2859,6 +2994,15 @@ impl Module {
             }
             if stack.len() > WASM_STACK_LIMIT {
                 return Err(WasmError::Trap("operand stack"));
+            }
+            if locals
+                .len()
+                .checked_add(stack.len())
+                .and_then(|slots| slots.checked_add(control.len()))
+                .filter(|&slots| slots <= available_slots)
+                .is_none()
+            {
+                return Err(WasmError::Trap("call stack"));
             }
             if pc >= func.code.len() {
                 return finish_defined(&mut stack, func.arity);
@@ -3633,19 +3777,18 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap("call"));
                     }
-                    let cargs = stack.split_off(stack.len() - n);
-                    let res = self.call_any(
-                        WasmCall {
-                            index: combined,
-                            args: &cargs,
+                    let args = stack.split_off(stack.len() - n);
+                    return Ok(DefinedOutcome::Call {
+                        index: combined,
+                        args,
+                        caller: DefinedActivation {
+                            def_idx,
+                            locals,
+                            stack,
+                            control,
+                            pc,
                         },
-                        depth + 1,
-                        steps,
-                        mem,
-                        globals,
-                        bulk,
-                    )?;
-                    stack.extend(res);
+                    });
                 }
                 Op::CallIndirect {
                     type_index,
@@ -3657,19 +3800,18 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap("call_indirect: stack has"));
                     }
-                    let cargs = stack.split_off(stack.len() - n);
-                    let res = self.call_any(
-                        WasmCall {
-                            index: combined,
-                            args: &cargs,
+                    let args = stack.split_off(stack.len() - n);
+                    return Ok(DefinedOutcome::Call {
+                        index: combined,
+                        args,
+                        caller: DefinedActivation {
+                            def_idx,
+                            locals,
+                            stack,
+                            control,
+                            pc,
                         },
-                        depth + 1,
-                        steps,
-                        mem,
-                        globals,
-                        bulk,
-                    )?;
-                    stack.extend(res);
+                    });
                 }
                 Op::ReturnCall(function) => {
                     let combined = function as usize;
