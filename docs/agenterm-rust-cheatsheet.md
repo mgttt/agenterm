@@ -390,6 +390,11 @@ pub fn safe_kernel(input: &[u8], output: &mut [u8]) {
   and native-thread FFI boundaries; abort changes that containment contract
   rather than optimizing its implementation. First prove no public robustness
   invariant depends on unwind, or retain the exact-profile unwind graph.
+- A stripped-core measurement root should call the narrow interpreter entry it
+  actually needs. Do not retain an optional export-name map facade merely to
+  make one size selftest convenient; keep export parsing in the core and prove
+  public name lookup in its own black box. This can recover a file-alignment
+  boundary without deleting product semantics or raising the size gate.
 
 Always inspect emitted release code:
 
@@ -2372,6 +2377,12 @@ module state, and test the observable boundary: zero memory pages, an empty
 host callback slice, load-time rejection rather than a runtime trap, and legal
 passive data. Regenerate independent fixtures that accidentally relied on the
 old default instead of weakening the validator to preserve invalid bytes.
+
+The same distinction applies to memory alignment. Execution may ignore a valid
+scalar memarg alignment hint, but validation must still reject an exponent
+larger than the instruction's natural width. Under-alignment is legal. Cover
+every load/store width so one shared decoder helper cannot be called with the
+wrong natural exponent unnoticed.
 
 ## Differential engines need identical host facts, not similar screens
 

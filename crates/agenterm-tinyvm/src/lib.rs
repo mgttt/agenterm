@@ -697,7 +697,7 @@ mod staticcore {
             0xB0, 0x42, 0x02, 0x7E, 0xA7, 0x20, 0x00, 0x46, 0x1B, 0x41, 0x00, 0x10, 0x00, 0x0B,
         ];
         match crate::WasmModule::from_bytes(WASM) {
-            Ok(m) => match m.invoke_by_name("answer", &[]) {
+            Ok(m) => match m.invoke_val(1, &[]) {
                 Ok(r) => match r.first() {
                     Some(crate::Val::I32(v)) => *v,
                     _ => 2,

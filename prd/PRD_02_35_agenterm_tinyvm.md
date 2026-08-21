@@ -15,7 +15,8 @@ agenterm-tinyvm (35)
 ├── native wasm platform [~]
 │   ├── tinyvm engine       [x]
 │   │   ├── decode complexity budget [x]
-│   │   └── strict declared-memory semantics [x]
+│   │   ├── strict declared-memory semantics [x]
+│   │   └── strict memarg alignment [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -92,6 +93,9 @@ tinyvm 的产品定位是事实上的、标准优先的跨平台 WebAssembly VM�
 module 实例化为零页，任何 load/store、memory.size/grow、bulk-memory instruction 或
 active data segment 都在 load gate 拒绝；passive data 和纯计算 module 仍合法。手写
 `Module::new` 的一页兼容内存只属于程序化 builder，不能泄漏到下载的 `.wasm`。
+所有 scalar load/store 的 memarg alignment exponent 也按指令自然宽度在 decode
+阶段验证：低对齐合法且不改变执行结果，高于自然对齐则 load gate 拒绝，不能把
+运行时忽略 alignment 的实现选择误当成允许无效 module 的理由。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。

@@ -27,6 +27,8 @@ proposals, and
 the standard bulk-memory proposal over the single memory and MVP funcref table.
 Any cartridge that uses linear-memory instructions or active data segments must
 declare its standard memory section; the loader never supplies an implicit page.
+Scalar load/store alignment exponents must not exceed each instruction's
+natural width; lower alignments remain valid standard unaligned accesses.
 It accepts multi-result functions and type-indexed parameter/result signatures
 on blocks, loops and ifs, all five integer
 sign-extension instructions and all eight saturating float-to-integer

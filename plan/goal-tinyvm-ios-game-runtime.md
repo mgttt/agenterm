@@ -24,6 +24,7 @@ tinyvm iOS game runtime
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
+│   ├── strict scalar memarg alignment [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1896,5 +1897,43 @@ Evidence on 2026-08-21:
   below their gates at 1,554,008 bytes arm64 and 1,625,560 bytes x86_64;
   catalog/replay/private/session consumers are 1,426,856 / 1,401,288 /
   1,419,456 / 1,418,608 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-second executable increment — strict scalar memarg alignment
+
+Every scalar load/store now validates the standard memarg alignment exponent
+against that instruction's natural byte width while decoding. Under-alignment
+remains legal and has ordinary unaligned scalar semantics; over-alignment is a
+load-time `Decode` failure and never reaches execution. This covers all 23 MVP
+load/store opcodes across i32, i64, f32 and f64, including narrow integer
+accesses. The runtime still ignores a valid alignment hint during execution,
+which is permitted; it no longer confuses that implementation choice with
+permission to accept an invalid module.
+
+The stripped-core consumer now invokes the already parsed known export by
+function index. Export parsing and public name lookup remain covered by their
+own black boxes, while the static size root retains the interpreter rather than
+an optional map-lookup facade. This keeps the unchanged 100 KiB product gate
+honest after adding strict validation.
+
+Evidence on 2026-08-21:
+
+- A decoder matrix accepts the exact natural exponent and rejects natural + 1
+  for every one of the 23 scalar memory opcodes.
+- The public byte load gate rejects over-aligned 8-bit, 32-bit and 64-bit loads
+  plus a 64-bit store before producing an invokable module.
+- WABT independently rejects the same over-aligned `i32.load` module with its
+  natural-alignment validation error.
+- All 230 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
+  oracles, the two-game WebKit differential, all-target Clippy, formatting,
+  relevant ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,554,168 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,427,016 / 1,401,432 /
+  1,419,632 / 1,418,768 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

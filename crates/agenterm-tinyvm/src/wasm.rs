@@ -234,7 +234,7 @@ enum Op {
     I32Rotl,
     I32Rotr,
     /// `i32.load` — pop address, push 4 little-endian bytes at `addr + offset`.
-    /// The memarg alignment hint is decoded and ignored (a valid MVP choice).
+    /// The validated memarg alignment hint does not affect scalar execution.
     I32Load {
         offset: u32,
     },
@@ -685,45 +685,42 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0x4E => ops.push(Op::I32GeS),
             0x4F => ops.push(Op::I32GeU),
             0x28 => {
-                // memarg = align (LEB u32, ignored) then offset (LEB u32)
-                let (_align, n1) = leb_u32(body, i)?;
-                let (offset, n2) = leb_u32(body, n1)?;
-                i = n2;
+                let (offset, ni) = memarg(body, i, 2)?;
+                i = ni;
                 ops.push(Op::I32Load { offset });
             }
             0x36 => {
-                let (_align, n1) = leb_u32(body, i)?;
-                let (offset, n2) = leb_u32(body, n1)?;
-                i = n2;
+                let (offset, ni) = memarg(body, i, 2)?;
+                i = ni;
                 ops.push(Op::I32Store { offset });
             }
             0x2C => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 0)?;
                 i = ni;
                 ops.push(Op::I32Load8S { offset });
             }
             0x2D => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 0)?;
                 i = ni;
                 ops.push(Op::I32Load8U { offset });
             }
             0x2E => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 1)?;
                 i = ni;
                 ops.push(Op::I32Load16S { offset });
             }
             0x2F => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 1)?;
                 i = ni;
                 ops.push(Op::I32Load16U { offset });
             }
             0x3A => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 0)?;
                 i = ni;
                 ops.push(Op::I32Store8 { offset });
             }
             0x3B => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 1)?;
                 i = ni;
                 ops.push(Op::I32Store16 { offset });
             }
@@ -995,57 +992,57 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                 }
             }
             0x29 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 3)?;
                 i = ni;
                 ops.push(Op::I64Load { offset });
             }
             0x37 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 3)?;
                 i = ni;
                 ops.push(Op::I64Store { offset });
             }
             0x30 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 0)?;
                 i = ni;
                 ops.push(Op::I64Load8S { offset });
             }
             0x31 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 0)?;
                 i = ni;
                 ops.push(Op::I64Load8U { offset });
             }
             0x32 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 1)?;
                 i = ni;
                 ops.push(Op::I64Load16S { offset });
             }
             0x33 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 1)?;
                 i = ni;
                 ops.push(Op::I64Load16U { offset });
             }
             0x34 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 2)?;
                 i = ni;
                 ops.push(Op::I64Load32S { offset });
             }
             0x35 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 2)?;
                 i = ni;
                 ops.push(Op::I64Load32U { offset });
             }
             0x3C => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 0)?;
                 i = ni;
                 ops.push(Op::I64Store8 { offset });
             }
             0x3D => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 1)?;
                 i = ni;
                 ops.push(Op::I64Store16 { offset });
             }
             0x3E => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 2)?;
                 i = ni;
                 ops.push(Op::I64Store32 { offset });
             }
@@ -1111,12 +1108,12 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0xA5 => ops.push(Op::F64Max),
             0xA6 => ops.push(Op::F64Copysign),
             0x2B => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 3)?;
                 i = ni;
                 ops.push(Op::F64Load { offset });
             }
             0x39 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 3)?;
                 i = ni;
                 ops.push(Op::F64Store { offset });
             }
@@ -1150,12 +1147,12 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
             0x97 => ops.push(Op::F32Max),
             0x98 => ops.push(Op::F32Copysign),
             0x2A => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 2)?;
                 i = ni;
                 ops.push(Op::F32Load { offset });
             }
             0x38 => {
-                let (offset, ni) = memarg(body, i)?;
+                let (offset, ni) = memarg(body, i, 2)?;
                 i = ni;
                 ops.push(Op::F32Store { offset });
             }
@@ -4744,9 +4741,15 @@ impl Instance {
     }
 }
 
-/// Decode a memarg (align LEB, ignored; then offset LEB) and return the offset.
-fn memarg(body: &[u8], i: usize) -> Result<(u32, usize), WasmError> {
-    let (_align, n1) = leb_u32(body, i)?;
+/// Decode a standard memarg and validate its alignment exponent against the
+/// instruction's natural alignment before returning the offset.
+fn memarg(body: &[u8], i: usize, natural_align: u32) -> Result<(u32, usize), WasmError> {
+    let (align, n1) = leb_u32(body, i)?;
+    if align > natural_align {
+        return Err(WasmError::Decode(
+            "memory alignment exceeds natural alignment",
+        ));
+    }
     let (offset, n2) = leb_u32(body, n1)?;
     Ok((offset, n2))
 }
@@ -5457,6 +5460,53 @@ mod tests {
         let mut m = Module::new();
         let f = m.add_function(0, 0, 1, &body).unwrap();
         assert_eq!(m.invoke(f, &[]).unwrap(), vec![7]);
+    }
+
+    #[test]
+    fn every_scalar_memarg_rejects_alignment_above_its_natural_width() {
+        const MEMORY_OPS: [(u8, u8); 23] = [
+            (0x28, 2),
+            (0x29, 3),
+            (0x2A, 2),
+            (0x2B, 3),
+            (0x2C, 0),
+            (0x2D, 0),
+            (0x2E, 1),
+            (0x2F, 1),
+            (0x30, 0),
+            (0x31, 0),
+            (0x32, 1),
+            (0x33, 1),
+            (0x34, 2),
+            (0x35, 2),
+            (0x36, 2),
+            (0x37, 3),
+            (0x38, 2),
+            (0x39, 3),
+            (0x3A, 0),
+            (0x3B, 1),
+            (0x3C, 0),
+            (0x3D, 1),
+            (0x3E, 2),
+        ];
+
+        for (opcode, natural_align) in MEMORY_OPS {
+            let mut valid = Module::new();
+            assert!(
+                valid
+                    .add_function(0, 0, 0, &[opcode, natural_align, 0, 0x0B])
+                    .is_ok(),
+                "opcode 0x{opcode:02x} must accept its natural alignment"
+            );
+
+            let mut invalid = Module::new();
+            assert!(matches!(
+                invalid.add_function(0, 0, 0, &[opcode, natural_align + 1, 0, 0x0B]),
+                Err(WasmError::Decode(
+                    "memory alignment exceeds natural alignment"
+                ))
+            ));
+        }
     }
 
     /// Encode a small integer in [-64, 63] as a single signed-LEB byte.

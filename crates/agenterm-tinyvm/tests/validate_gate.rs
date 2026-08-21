@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 20] = [
+const REJECTED: [(&str, &str); 24] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -93,6 +93,22 @@ const REJECTED: [(&str, &str); 20] = [
     (
         "memory_copy_without_memory",
         "0061736d0100000001040160000003020100070801046d61696e00000a0e010c00410041004100fc0a00000b",
+    ),
+    (
+        "i32_load_overaligned",
+        "0061736d010000000105016000017f030201000503010001070801046d61696e00000a0901070041002803000b",
+    ),
+    (
+        "i64_load_overaligned",
+        "0061736d010000000105016000017e030201000503010001070801046d61696e00000a0901070041002904000b",
+    ),
+    (
+        "i32_load8_overaligned",
+        "0061736d010000000105016000017f030201000503010001070801046d61696e00000a0901070041002d01000b",
+    ),
+    (
+        "i64_store_overaligned",
+        "0061736d01000000010401600000030201000503010001070801046d61696e00000a0b010900410042003704000b",
     ),
 ];
 
@@ -195,6 +211,24 @@ fn standard_bytes_require_declared_memory() {
         .instantiate()
         .unwrap_or_else(|e| panic!("instantiate passive-data-only module: {}", e.message()));
     assert!(passive_instance.memory().is_empty());
+}
+
+#[test]
+fn standard_memarg_alignment_is_validated_at_load() {
+    for (name, hex) in REJECTED
+        .into_iter()
+        .filter(|(name, _)| name.ends_with("_overaligned"))
+    {
+        assert!(
+            matches!(
+                WasmModule::from_bytes(&bytes(hex)),
+                Err(WasmError::Decode(
+                    "memory alignment exceeds natural alignment"
+                ))
+            ),
+            "{name}: over-aligned memarg must fail at load"
+        );
+    }
 }
 
 /// The whole point of validating before executing: a rejected module must not
