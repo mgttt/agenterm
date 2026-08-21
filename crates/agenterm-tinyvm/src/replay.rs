@@ -4,15 +4,14 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{
-    CartridgeManifest, GameFrame, GameInput, GameRuntime, RenderFrame, ToneBatch, WasmError,
-    cartridge_sha256,
+    CartridgeManifest, GameFrame, GameInput, GameRuntime, KNOWN_BUTTON_MASK, RenderFrame,
+    ToneBatch, WasmError, cartridge_sha256,
 };
 
 const MAGIC: &[u8; 4] = b"TAR1";
 const FORMAT_VERSION: u16 = 1;
 const HEADER_BYTES: usize = 64;
 const STEP_BYTES: usize = 80;
-const KNOWN_BUTTONS: u32 = (1 << 9) - 1;
 pub const MAX_REPLAY_STEPS: usize = 65_536;
 pub const MAX_REPLAY_SNAPSHOT_BYTES: usize = 1024 * 1024;
 pub const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
@@ -341,7 +340,7 @@ fn valid_token(value: &str, min: usize, max: usize, plus: bool) -> bool {
 }
 
 fn validate_input(input: GameInput, last_clock: Option<u32>) -> Result<(), WasmError> {
-    if input.buttons & !KNOWN_BUTTONS != 0
+    if input.buttons & !KNOWN_BUTTON_MASK != 0
         || last_clock.is_some_and(|previous| input.clock_ms < previous)
     {
         return Err(WasmError::Trap("invalid replay input"));

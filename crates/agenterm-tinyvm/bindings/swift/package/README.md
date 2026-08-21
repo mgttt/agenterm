@@ -29,6 +29,13 @@ app already owns session policy. Forward interruption-began events, call
 leaving the game surface. The SDK deliberately does not resume interrupted
 gameplay tones or choose haptics for the app.
 
+Use `TinyArcadeGameSessionV1` as the foreground gameplay owner. It combines at
+most 32 touch/keyboard/controller sources without premature button releases,
+advances only a bounded monotonic game clock, rejects background-sized frame
+deltas and persists that exact clock through `TinyArcadeSnapshotStoreV1`.
+Release all inputs when the scene resigns active, save, and stop ticking until
+foreground presentation resumes.
+
 Reviewed downloads should be handed to `TinyArcadeCartridgeCacheV1.activate`
 only after the app has received the complete response. The cache verifies the
 signed entry and atomically selects it; `loadActive` and `rollback` recheck live

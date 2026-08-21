@@ -166,6 +166,9 @@ fn runtime_boundary(
 fn wasm_error(error: WasmError) -> FfiError {
     match error {
         WasmError::Decode(message) => FfiError::new(STATUS_DECODE, message),
+        WasmError::Trap("invalid game input") => {
+            FfiError::new(STATUS_INVALID_ARGUMENT, "invalid game input")
+        }
         WasmError::Trap("game instance failed") => {
             FfiError::new(STATUS_FAILED_INSTANCE, "game instance failed")
         }
@@ -1692,6 +1695,21 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(origin, CartridgeOrigin::Bundled as u32);
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 16) }, STATUS_OK);
+        assert_eq!(
+            unsafe { tinyarcade_v1_tick(runtime, 1 << 31, 17) },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_tick(runtime, 0, 15) },
+            STATUS_INVALID_ARGUMENT
+        );
+        let mut failed = -1;
+        assert_eq!(
+            unsafe { tinyarcade_v1_is_failed(runtime, &mut failed) },
+            STATUS_OK
+        );
+        assert_eq!(failed, 0);
         assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 16) }, STATUS_OK);
 
         let mut required = 0usize;

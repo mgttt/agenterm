@@ -49,8 +49,8 @@ pub use cartridge::CartridgeManifest;
 pub mod game;
 pub use game::{
     CartridgeDescriptor, CartridgeOrigin, GAME_ABI_VERSION, GameFrame, GameInput, GameLimits,
-    GameRuntime, MAX_CARTRIDGE_BYTES, MAX_NATIVE_ARITY, MAX_NATIVE_CALLS_PER_LIFECYCLE,
-    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry,
+    GameRuntime, KNOWN_BUTTON_MASK, MAX_CARTRIDGE_BYTES, MAX_NATIVE_ARITY,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry,
 };
 
 pub mod media;

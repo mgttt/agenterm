@@ -25,11 +25,13 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits,
-    RenderFrame, ToneBatch, Vm, WasmError, WasmModule,
+    CartridgeDescriptor, GameInput, GameLimits, GameRuntime, Limits, RenderFrame, ToneBatch, Vm,
+    WasmError,
 };
 #[cfg(feature = "catalog-publisher")]
-use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
+use agenterm_tinyvm::{
+    CartridgeManifest, CartridgeTrustStore, CatalogEntry, WasmModule, cartridge_sha256,
+};
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{MAX_REPLAY_BYTES, ReplayRecorderV1, ReplayTraceV1};
 

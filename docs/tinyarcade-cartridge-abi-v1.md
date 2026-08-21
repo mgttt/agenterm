@@ -96,6 +96,12 @@ bit 6 tertiary   bit 7 start      bit 8 menu
 Time is host-provided monotonic game time, not wall-clock time. RNG is owned by
 the host and its state is included in snapshots. Each lifecycle call may submit
 render/audio/state at most once and only within host-selected byte ceilings.
+The runtime rejects bits outside 0...8 and a clock below the preceding
+successful tick before guest execution. This host-input error does not latch or
+mutate the cartridge; the same or a later clock can continue. Successful resume
+starts a new host-clock validation epoch because portable runtime snapshots do
+not own the app's clock; the iOS snapshot envelope stores that clock beside the
+runtime bytes.
 Versioned, self-identifying media schemas are defined separately in
 [`tinyarcade-media-stream-v1.md`](tinyarcade-media-stream-v1.md). Unknown magic,
 unknown versions and malformed records must fail before native rendering or

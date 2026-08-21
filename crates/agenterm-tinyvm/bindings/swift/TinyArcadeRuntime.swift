@@ -2279,8 +2279,8 @@ public final class TinyArcadeSnapshotStoreV1 {
 
     public func discard(gameID: String) throws {
         let url = try fileURL(gameID: gameID)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
         try rejectUnsafeExistingFile(url)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             try FileManager.default.removeItem(at: url)
         } catch {
@@ -2296,8 +2296,8 @@ public final class TinyArcadeSnapshotStoreV1 {
 
     private func load(gameID: String) throws -> LoadedSnapshot {
         let url = try fileURL(gameID: gameID)
-        guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
         try rejectUnsafeExistingFile(url)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
         do {
             let values = try url.resourceValues(forKeys: [.fileSizeKey])
             guard let size = values.fileSize,
@@ -2337,6 +2337,9 @@ public final class TinyArcadeSnapshotStoreV1 {
     }
 
     private func rejectUnsafeExistingFile(_ url: URL) throws {
+        if (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil {
+            throw TinyArcadeSnapshotStoreError.unsafeStoredFile
+        }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
@@ -2393,6 +2396,168 @@ public final class TinyArcadeSnapshotStoreV1 {
 
     private static func u64(_ data: Data, _ offset: Int) -> UInt64 {
         UInt64(u32(data, offset)) | UInt64(u32(data, offset + 4)) << 32
+    }
+}
+
+public struct TinyArcadeButtonsV1: OptionSet, Sendable {
+    public let rawValue: UInt32
+
+    public init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+
+    public static let left = Self(rawValue: 1 << 0)
+    public static let right = Self(rawValue: 1 << 1)
+    public static let up = Self(rawValue: 1 << 2)
+    public static let down = Self(rawValue: 1 << 3)
+    public static let primary = Self(rawValue: 1 << 4)
+    public static let secondary = Self(rawValue: 1 << 5)
+    public static let tertiary = Self(rawValue: 1 << 6)
+    public static let start = Self(rawValue: 1 << 7)
+    public static let menu = Self(rawValue: 1 << 8)
+    public static let allKnown = Self(rawValue: (1 << 9) - 1)
+}
+
+public enum TinyArcadeInputStateError: Error, Equatable {
+    case unknownButtons
+    case tooManySources
+}
+
+/// Bounded multi-source input aggregation for touch controls, keyboards and
+/// game controllers. Each source replaces its own complete pressed set, so
+/// overlapping devices cannot release a button still held by another source.
+public struct TinyArcadeInputStateV1: Sendable {
+    public static let maximumSourceCount = 32
+
+    public private(set) var buttons: TinyArcadeButtonsV1 = []
+    private var sources: [UInt64: TinyArcadeButtonsV1] = [:]
+
+    public init() {}
+
+    public mutating func set(
+        _ pressed: TinyArcadeButtonsV1,
+        forSource source: UInt64
+    ) throws {
+        guard pressed.isSubset(of: .allKnown) else {
+            throw TinyArcadeInputStateError.unknownButtons
+        }
+        if pressed.isEmpty {
+            sources.removeValue(forKey: source)
+        } else {
+            guard sources[source] != nil || sources.count < Self.maximumSourceCount else {
+                throw TinyArcadeInputStateError.tooManySources
+            }
+            sources[source] = pressed
+        }
+        buttons = sources.values.reduce([]) { $0.union($1) }
+    }
+
+    public mutating func releaseAll() {
+        sources.removeAll(keepingCapacity: true)
+        buttons = []
+    }
+}
+
+public enum TinyArcadeGameSessionError: Error, Equatable {
+    case invalidMaximumFrameAdvance
+    case frameAdvanceTooLarge
+    case clockExhausted
+    case failed
+    case closed
+}
+
+/// Main-actor gameplay owner for one runtime, monotonic game clock and all
+/// input sources. The app supplies foreground elapsed time; background time is
+/// excluded by simply not ticking and releasing inputs before persistence.
+@MainActor
+public final class TinyArcadeGameSessionV1 {
+    public nonisolated static let defaultMaximumFrameAdvanceMilliseconds: UInt32 = 250
+
+    public private(set) var gameClockMilliseconds: UInt32
+    public private(set) var input = TinyArcadeInputStateV1()
+    public private(set) var isFailed = false
+    public let maximumFrameAdvanceMilliseconds: UInt32
+    private var runtime: TinyArcadeRuntimeV1?
+
+    public init(
+        runtime: TinyArcadeRuntimeV1,
+        gameClockMilliseconds: UInt32 = 0,
+        maximumFrameAdvanceMilliseconds: UInt32 = defaultMaximumFrameAdvanceMilliseconds
+    ) throws {
+        guard (1...1_000).contains(maximumFrameAdvanceMilliseconds) else {
+            throw TinyArcadeGameSessionError.invalidMaximumFrameAdvance
+        }
+        self.runtime = runtime
+        self.gameClockMilliseconds = gameClockMilliseconds
+        self.maximumFrameAdvanceMilliseconds = maximumFrameAdvanceMilliseconds
+    }
+
+    public convenience init(
+        restored session: TinyArcadeSnapshotSessionV1,
+        maximumFrameAdvanceMilliseconds: UInt32 = defaultMaximumFrameAdvanceMilliseconds
+    ) throws {
+        try self.init(
+            runtime: session.runtime,
+            gameClockMilliseconds: session.gameClockMilliseconds,
+            maximumFrameAdvanceMilliseconds: maximumFrameAdvanceMilliseconds
+        )
+    }
+
+    public func setButtons(
+        _ pressed: TinyArcadeButtonsV1,
+        forSource source: UInt64
+    ) throws {
+        _ = try liveRuntime()
+        guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        try input.set(pressed, forSource: source)
+    }
+
+    public func releaseAllInputs() {
+        input.releaseAll()
+    }
+
+    public func tick(elapsedMilliseconds: UInt32) throws -> TinyArcadeMediaFrame {
+        let runtime = try liveRuntime()
+        guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        guard elapsedMilliseconds <= maximumFrameAdvanceMilliseconds else {
+            throw TinyArcadeGameSessionError.frameAdvanceTooLarge
+        }
+        let (nextClock, overflow) = gameClockMilliseconds.addingReportingOverflow(
+            elapsedMilliseconds
+        )
+        guard !overflow else { throw TinyArcadeGameSessionError.clockExhausted }
+        do {
+            let frame = try runtime.tickMedia(
+                buttons: input.buttons.rawValue,
+                clockMilliseconds: nextClock
+            )
+            gameClockMilliseconds = nextClock
+            return frame
+        } catch {
+            isFailed = true
+            throw error
+        }
+    }
+
+    public func save(to store: TinyArcadeSnapshotStoreV1) throws {
+        let runtime = try liveRuntime()
+        guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        try store.save(
+            runtime: runtime,
+            gameClockMilliseconds: gameClockMilliseconds
+        )
+    }
+
+    public func close() throws {
+        guard let runtime else { return }
+        releaseAllInputs()
+        try runtime.close()
+        self.runtime = nil
+    }
+
+    private func liveRuntime() throws -> TinyArcadeRuntimeV1 {
+        guard let runtime else { throw TinyArcadeGameSessionError.closed }
+        return runtime
     }
 }
 

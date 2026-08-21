@@ -16,6 +16,7 @@ pub const MAX_CARTRIDGE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_NATIVE_FUNCTIONS: usize = 64;
 pub const MAX_NATIVE_ARITY: usize = 16;
 pub const MAX_NATIVE_CALLS_PER_LIFECYCLE: u32 = 64;
+pub const KNOWN_BUTTON_MASK: u32 = (1 << 9) - 1;
 const ABI_MODULE: &str = "tinyarcade:core/v1";
 const SNAPSHOT_MAGIC: &[u8; 4] = b"TGS1";
 type NativeImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
@@ -270,6 +271,7 @@ pub struct GameRuntime {
     cartridge_sha256: [u8; 32],
     origin: CartridgeOrigin,
     failed: bool,
+    last_clock_ms: Option<u32>,
 }
 
 impl GameRuntime {
@@ -411,6 +413,7 @@ impl GameRuntime {
             cartridge_sha256: crate::cartridge_sha256(wasm),
             origin,
             failed: false,
+            last_clock_ms: None,
         };
 
         let version = runtime.instance.invoke_by_name("game_abi_version", &[])?;
@@ -434,10 +437,18 @@ impl GameRuntime {
     /// Drive one deterministic frame and take ownership of its command bytes.
     pub fn tick(&mut self, input: GameInput) -> Result<GameFrame, WasmError> {
         self.ensure_live()?;
+        if input.buttons & !KNOWN_BUTTON_MASK != 0
+            || self
+                .last_clock_ms
+                .is_some_and(|previous| input.clock_ms < previous)
+        {
+            return Err(WasmError::Trap("invalid game input"));
+        }
         self.enter(Phase::Tick, input);
         let tick = self.instance.invoke_by_name("game_tick", &[]);
         self.leave();
         self.accept_lifecycle(tick, "game_tick failed")?;
+        self.last_clock_ms = Some(input.clock_ms);
         let mut host = self.host.borrow_mut();
         Ok(GameFrame {
             render: mem::take(&mut host.render),
@@ -495,6 +506,7 @@ impl GameRuntime {
             return Err(WasmError::Trap("game did not load state"));
         }
         self.host.borrow_mut().restore_state.clear();
+        self.last_clock_ms = None;
         Ok(())
     }
 

@@ -210,6 +210,9 @@ tinyarcade_status_v1 tinyarcade_v1_open_reviewed_with_native_modules(
     tinyarcade_runtime_v1** output);
 tinyarcade_status_v1 tinyarcade_v1_close(tinyarcade_runtime_v1* runtime);
 
+/* buttons may use only ABI v1 bits 0..8; clock_ms must not precede the last
+ * successful tick. Invalid host input returns TINYARCADE_INVALID_ARGUMENT
+ * before guest execution and does not latch the runtime. */
 tinyarcade_status_v1 tinyarcade_v1_tick(
     tinyarcade_runtime_v1* runtime,
     uint32_t buttons,

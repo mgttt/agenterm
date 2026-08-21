@@ -84,6 +84,17 @@ private struct TinyArcadeSnapshotStoreSmoke {
             precondition(error == .unsafeStoredFile)
         }
         try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(
+            at: file,
+            withDestinationURL: directory.appendingPathComponent("missing.snapshot-v1")
+        )
+        do {
+            _ = try store.openSession(makeRuntime: makeRuntime)
+            preconditionFailure("dangling snapshot symlink must fail closed")
+        } catch let error as TinyArcadeSnapshotStoreError {
+            precondition(error == .unsafeStoredFile)
+        }
+        try FileManager.default.removeItem(at: file)
         print("OK: atomic snapshot overwrite → restore → corrupt/oversize recovery → symlink refusal")
     }
 

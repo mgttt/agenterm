@@ -378,6 +378,70 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
 }
 
 #[test]
+fn ordinary_ticks_reject_unknown_buttons_and_backwards_time_without_latching() {
+    let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
+    let mut runtime = must_ok(
+        GameRuntime::from_private_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        "load input validation cartridge",
+    );
+    must_ok(
+        runtime.tick(GameInput {
+            buttons: 1 << 4,
+            clock_ms: 100,
+        }),
+        "first valid input",
+    );
+    for invalid in [
+        GameInput {
+            buttons: 1 << 31,
+            clock_ms: 101,
+        },
+        GameInput {
+            buttons: 0,
+            clock_ms: 99,
+        },
+    ] {
+        assert!(matches!(
+            runtime.tick(invalid),
+            Err(WasmError::Trap("invalid game input"))
+        ));
+        assert!(!runtime.is_failed());
+    }
+    must_ok(
+        runtime.tick(GameInput {
+            buttons: 0,
+            clock_ms: 100,
+        }),
+        "same clock remains valid after rejected host input",
+    );
+}
+
+#[test]
+fn successful_resume_starts_a_new_host_clock_validation_epoch() {
+    let wasm = stateful_game_module(1, "test.clock-epoch");
+    let mut runtime = must_ok(
+        GameRuntime::from_private_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        "load clock epoch cartridge",
+    );
+    must_ok(
+        runtime.tick(GameInput {
+            buttons: 0,
+            clock_ms: 10_000,
+        }),
+        "tick before suspend",
+    );
+    let snapshot = must_ok(runtime.suspend(), "suspend clock epoch cartridge");
+    must_ok(runtime.resume(&snapshot), "resume clock epoch cartridge");
+    must_ok(
+        runtime.tick(GameInput {
+            buttons: 0,
+            clock_ms: 32,
+        }),
+        "tick at restored app clock",
+    );
+}
+
+#[test]
 fn descriptor_validates_without_executing_or_granting_native_imports() {
     let wasm = game_module(
         &[("fan:physics/v1", "step_world", 1), (CORE, "input_bits", 0)],
@@ -470,12 +534,12 @@ fn input_clock_and_rng_are_host_owned_and_deterministic() {
     );
     let frame = must_ok(
         runtime.tick(GameInput {
-            buttons: 0x8000_0005,
+            buttons: 0x0000_0105,
             clock_ms: 1234,
         }),
         "deterministic tick",
     );
-    assert_eq!(&frame.render[0..4], &0x8000_0005u32.to_le_bytes());
+    assert_eq!(&frame.render[0..4], &0x0000_0105u32.to_le_bytes());
     assert_eq!(&frame.render[4..8], &1234u32.to_le_bytes());
     assert_eq!(&frame.render[8..12], &expected_rng.to_le_bytes());
 }

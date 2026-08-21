@@ -44,6 +44,7 @@ tinyvm iOS game runtime
 │   ├── stable C lifecycle ABI        [x]
 │   ├── static library/XCFramework   [x]
 │   ├── Swift ownership/threading     [x]
+│   ├── input + monotonic clock owner [x]
 │   ├── indexed 2D presentation       [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
@@ -989,3 +990,52 @@ Evidence on 2026-08-21:
   consumers measure 1,235,256 and 1,236,912 bytes arm64, all below the existing
   1.375 MiB linked-consumer ceiling. Physical-device and live distribution
   evidence remain open.
+
+## Twenty-ninth executable increment — foreground game session ownership
+
+The ordinary runtime now enforces the deterministic host-input contract that
+previously existed only in replay validation. A tick with any bit outside the
+nine ABI v1 buttons or a clock below the preceding successful tick fails before
+guest execution. It neither latches the cartridge nor advances remembered
+time, so a corrected same/later-clock call remains playable. Successful resume
+starts a new validation epoch: the portable runtime snapshot deliberately does
+not own app time, while the iOS snapshot envelope restores its associated
+clock.
+
+`TinyArcadeInputStateV1` accepts complete pressed sets from at most 32 stable
+source ids and publishes their union. Touch, keyboard and controller sources
+may therefore overlap without one source's release clearing a button still held
+by another. Unknown button bits and a thirty-third live source fail without
+changing aggregate state.
+
+`TinyArcadeGameSessionV1` owns that input state, one runtime and the monotonic
+foreground game clock on the main actor. Each requested delta is capped at
+250 ms by default under a configurable 1...1000 ms maximum; background-sized
+deltas and `UInt32` exhaustion fail before runtime mutation. Clock state commits
+only after a successful decoded media frame. The session saves the exact last
+successful clock with `TinyArcadeSnapshotStoreV1` and closes its runtime
+explicitly. On scene deactivation the app must release all inputs, save and stop
+ticking; stopped sessions do not progress. Snapshot storage now also rejects
+dangling symlinks rather than mistaking them for an absent save.
+
+Evidence on 2026-08-21:
+
+- Public Rust and C black boxes tick a real ABI cartridge, reject unknown bits
+  and backwards clocks before guest execution, prove the runtime is not failed,
+  then successfully tick again at the same valid clock.
+- A booted iPhone 17 Pro simulator combines overlapping primary/right sources,
+  launches and moves real Paddle Guard, persists clock 16, restores it into a
+  fresh runtime, advances to 32, persists again and verifies the second restore.
+- The same Swift black box rejects an unknown bit, a thirty-third input source,
+  a 251 ms frame delta, clock overflow and use after close. Corrected inputs and
+  ticks remain playable. The snapshot black box rejects both live and dangling
+  symlinks.
+- The complete package has 185 tests; Clippy, replay isolation, no-default and
+  the exact 70,904-byte static core remain required. Generic device/universal
+  simulator builds link. Consumers measure 1,412,984 bytes arm64, 1,470,008
+  bytes x86_64, 1,277,928 replay, 1,279,600 private-library and 1,278,672
+  game-session bytes arm64. The honest complete-SDK gate is now 1.5 MiB; the
+  interpreter core keeps its independent 100 KiB hard gate.
+- No physical iPhone is attached, so real touch/controller, background
+  termination, speaker and frame pacing remain open device evidence. The
+  overall goal remains partial.

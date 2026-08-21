@@ -69,6 +69,17 @@ incompatible snapshot is removed; the failed candidate runtime is closed and a
 second clean runtime is returned with `discardedInvalid`, so save damage cannot
 turn into a cartridge launch failure.
 
+`TinyArcadeGameSessionV1` is the matching foreground owner. It aggregates exact
+pressed sets for at most 32 stable input-source ids, so one touch/controller
+release cannot clear a button held by another source. Each tick advances the
+stored game clock by at most a configurable 1...1000 ms ceiling (250 ms by
+default), commits the new clock only after a successful decoded frame, and
+fails explicitly before `UInt32` exhaustion. On scene deactivation the app must
+call `releaseAllInputs()`, save and stop ticks; `save(to:)` persists runtime
+state with the exact last successful clock. Rust independently rejects unknown
+button bits and backwards clock values before guest execution, without latching
+an otherwise healthy runtime.
+
 ## Ownership
 
 ABI v1.6 exposes three non-interchangeable origins: bundled
@@ -218,11 +229,12 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked smoke executable must remain at or below 1.375 MiB; this
+The optimized linked smoke executable must remain at or below 1.5 MiB; this
 measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
 the exercised Swift consumer added the bounded official-catalog JSON decoder;
-the later 1.375 MiB gate accounts for the recoverable snapshot-store owner.
+the later 1.375 MiB gate accounted for the recoverable snapshot-store owner;
+the current 1.5 MiB gate includes the bounded input/clock/session owner.
 Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 
@@ -254,6 +266,10 @@ Another linked simulator executable records four real Paddle Guard inputs,
 atomically exchanges the resulting `.tareplay` through a file, verifies all
 steps on a fresh runtime, reproduces byte-identical trace bytes, and rejects a
 changed output digest plus different WASM bytes carrying the same manifest.
+The session black box combines overlapping input sources, launches and moves
+the real Paddle Guard cartridge, rejects unknown input, source overflow, a
+background-sized delta, backwards time and clock overflow, restores the exact
+snapshot clock and proves rejected host input leaves the runtime playable.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,

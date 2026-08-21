@@ -150,6 +150,14 @@ wrapper for the original standard executable bytes. Prove that a native-import
 descriptor succeeds without a registry while an unauthorized runtime open still
 fails closed.
 
+Deterministic host input belongs at the shared runtime boundary, not only in a
+replay recorder or one UI wrapper. Validate known bit masks and monotonic clocks
+before entering guest lifecycle code. A rejected host argument that executed no
+guest instruction must not latch the cartridge or advance its remembered
+clock; prove a corrected next call still runs. When portable snapshots exclude
+an app-owned clock, successful resume starts a new validation epoch and the app
+persistence envelope must restore that clock alongside the snapshot.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

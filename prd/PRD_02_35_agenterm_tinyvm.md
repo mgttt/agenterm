@@ -165,6 +165,15 @@ symlink fail-closed；物理设备后台终止恢复仍未验证。
 和 Depth Well 的导入、更新、排序、打开、删除，以及损坏、超限、live/dangling symlink
 拒绝。它不包含文件选择 UI、网络上传或公开发布权限。
 
+普通 tick 现在与 replay 使用同一输入事实：只接受 bit 0...8，并在 guest 执行前拒绝
+倒退的游戏时钟；这种宿主参数错误不 latch、不改变 game state，修正后可以继续。
+Swift `TinyArcadeGameSessionV1` 把最多 32 个 touch/keyboard/controller source 的完整
+pressed set 合并，避免一个 source 松开时误清另一个仍按住的键；每帧只推进最多
+250 ms（可配置上限 1...1000 ms）的 foreground game time，成功帧后才提交 clock，
+并与 snapshot store 保存/恢复同一个 clock。app 必须在 scene 退后台时 release
+inputs、save、停止 tick，后台墙钟不会偷偷推进游戏。snapshot 的 live/dangling
+symlink 均 fail closed。
+
 标准化回放不另造游戏执行格式。`tinyarcade-replay-v1` 只保存精确卡带 SHA-256、
 manifest identity、初始 portable snapshot、单调的 input/clock，以及每帧 render/audio
 的长度和 SHA-256；执行时仍由原 `.wasm` 在 tinyvm 中生成完整输出并逐字节摘要核对。
