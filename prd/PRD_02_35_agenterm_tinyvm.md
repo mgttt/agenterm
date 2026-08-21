@@ -92,7 +92,7 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── owned host ABI                                   [~]
 │   │   ├── typed standard function imports               [x]
 │   │   ├── bounded in-place host dispatch                [x]
-│   │   └── call-scoped guest-memory view                 [ ]
+│   │   └── indexed guest-memory callback context          [ ]
 │   ├── standard resource imports                        [~]
 │   │   ├── standard imported globals                     [x]
 │   │   ├── standard imported linear memories             [x]
@@ -147,7 +147,8 @@ agenterm-tinyvm (35)                                      [~]
 │   │   ├── physical frame-time/resource evidence         [ ]
 │   │   └── physical audio-session evidence               [ ]
 │   ├── P1 — reusable native modules                     [ ]
-│   │   ├── call-scoped zero-copy memory borrowing        [ ]
+│   │   ├── generalize memory-zero call-scoped borrowing   [ ]
+│   │   ├── explicit selected-memory callback context      [ ]
 │   │   ├── versioned native import conventions           [ ]
 │   │   └── converter-visible compatibility reports       [ ]
 │   ├── P2 — standard Wasm coverage                      [ ]
@@ -155,7 +156,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │   ├── independent WABT/JSC differential per leaf    [ ]
 │   │   └── size/resource budget retained per leaf        [ ]
 │   ├── P3 — cartridge authoring ecosystem               [~]
-│   │   ├── reproducible converter/conformance kit        [~]
+│   │   ├── converter/conformance ecosystem               [~]
 │   │   ├── fan-authored standard .wasm                   [ ]
 │   │   └── external distribution after Apple approval    [ ]
 │   └── research queue                                   [~]
@@ -230,9 +231,10 @@ as “almost approved” or “safe to ship externally.”
   Clone/re-export/sibling binding must preserve one live identity rather than copy snapshots.
 - `funcref` stores a store-owned function address; `externref` stores only an opaque,
   process-unique token. Tinyvm never treats a native object address as a guest value.
-- The current host callback receives call-scoped parameter/result slices and memory. Future
-  lower-copy APIs must remain synchronous, bounded and impossible to retain after callback
-  return; they must not use `unsafe` merely to bypass borrow checking.
+- The current host callback receives call-scoped parameter/result slices and a zero-copy
+  mutable view of memory zero. Future multi-memory context must identify the selected memory,
+  remain synchronous and bounded, and be impossible to retain after callback return; it must
+  not use `unsafe` merely to bypass borrow checking.
 
 ### 6. App Store distribution is a separate authority gate
 
@@ -297,12 +299,12 @@ leaves.
 
 ### P1 — native modules without a hidden copy tax
 
-The next reusable host-boundary design should let a trusted, app-compiled synchronous
-native import borrow the selected guest memory for that call only. The design must specify
-memory selection, immutable/mutable access, re-entry rejection, growth exclusion, result
-reservation before callback, C/Swift pointer lifetime and deterministic failure. QJWasm is
-useful here for ownership and low-copy lessons; QuickJS, its unsafe threading model and its
-JavaScript product dependency are not adopted.
+The existing synchronous host door already lends memory zero directly, without copying the
+whole guest memory. The next reusable design must generalize that fact for standard
+multi-memory modules: specify memory selection, immutable/mutable access, re-entry rejection,
+growth exclusion, result reservation before callback, C/Swift pointer lifetime and
+deterministic failure. QJWasm is useful here for ownership and low-copy lessons; QuickJS, its
+unsafe threading model and its JavaScript product dependency are not adopted.
 
 ### P2 — grow standard coverage from workload evidence
 
