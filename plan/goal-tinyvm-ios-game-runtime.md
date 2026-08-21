@@ -3874,3 +3874,25 @@ No physical iPhone is connected, and the available Codex browser runtime has
 no attached browser session with which to inspect App Store Connect build 33.
 Physical speaker/headphone behavior and Apple-side TestFlight processing remain
 open external evidence, so the persistent goal stays active.
+
+## One-hundred-twenty-first executable increment — real-App tone consumption
+
+Nostalgia Arcade no longer reduces a cartridge tone to its three-valued kind
+and resynthesizes unrelated App audio. Both active WASM screens now pass the
+validated `TinyArcadeToneEvent` into `TinyArcadeTonePlayer`, preserving pitch,
+duration and amplitude while still mapping `kind` to game-specific haptics.
+The shared App owner prevents its legacy cue player and cartridge player from
+competing, deactivates audio when Sound FX is disabled, and stops on game exit
+or scene resignation. The SDK remains the owner of interruption, route-loss
+and media-reset behavior.
+
+Evidence on 2026-08-22: consumer commits `a0b549e` and `0569a07` pass a counted
+App-target test built from the current tinyvm package. It obtains the lock tone
+from the real 6,116-byte Depth Well `.wasm`, observes runtime-player playback,
+then deactivates and observes stop. The complete consumer gate executes seven
+Depth Well tests, four Signal Lock tests, one two-game UI journey and an arm64
+generic-device Release build. The App still contains exactly the two reviewed
+WASM cartridges and no web runtime, network/external-cartridge surface or
+archived native game engine. The executable PRD trace now binds 121 completed
+claims. Physical speaker/headphone and TestFlight evidence remain open, so the
+persistent goal stays active.

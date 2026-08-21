@@ -394,25 +394,29 @@ It measures wall time around the real `BundledDepthWellCartridgeRuntime.tick`,
 reads v2 execution telemetry after every frame, enforces an 8 ms p95 host
 budget plus fuel/page ceilings, and retains the exact result as an `.xcresult`
 attachment. `scripts/test-tinyarcade-on-device.sh` in that repository selects
-a connected physical iPhone (or accepts `TINYARCADE_DEVICE_ID`), runs all six
-app runtime tests and the playable UI journey on it, performs the unsigned
+a connected physical iPhone (or accepts `TINYARCADE_DEVICE_ID`), runs all 11
+App runtime tests and the playable UI journey on it, performs the unsigned
 arm64 product build, and exports the performance attachment into a timestamped
 evidence directory. The same test currently records 0.207 ms p95, 23,203 peak
 steps, 17 pages, depth 6 and 62 activation slots on the iPhone 17 Pro simulator;
 these remain simulator figures until the physical command is run.
 
 `smoke-nostalgia-consumer.sh` is the runtime-owned closure of that integration
-boundary. It rebuilds the package from this checkout, executes 10 App-target
+boundary. It rebuilds the package from this checkout, executes 11 App-target
 unit tests plus the two-game UI journey, and builds the generic arm64 iOS
 product. It then requires the consumer's archive to be byte-identical to the
 one emitted under this repository's `target/`, checks that the final executable
 contains the ABI v1.10 completion-channel symbol, and rejects any implicit
 rewrite of the committed cartridges or Xcode project. Evidence on 2026-08-22
 has archive SHA-256
-`4d468ef9f50aac9db266aa446bc48f0e191362427ddb3935e55b91479ffdd656`;
+`c97b762fe023a9a625037d555d216a89087b162105fab416b0a5686cac11e2cf`;
 the App contains only the 6,116-byte Depth Well and 5,784-byte Signal Lock
 cartridges, with no WebKit/JavaScriptCore, URLSession, external-library surface
-or archived native game engine. This closes current-main App consumption, not
+or archived native game engine. A counted App-target test now takes a tone from
+the real Depth Well cartridge, plays its exact pitch/duration/amplitude through
+`TinyArcadeTonePlayer`, proves playback started and explicitly deactivates it;
+both WASM screens preserve that tone path while keeping haptics as App policy.
+This closes current-main App consumption, not
 the separate physical-iPhone lifecycle and performance requirement.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,

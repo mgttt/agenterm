@@ -638,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 120] = [
+const LEAF_TESTS: [(&str, &str); 121] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -1055,6 +1055,10 @@ const LEAF_TESTS: [(&str, &str); 120] = [
     (
         "interruption / route / reset owner",
         "ios_xcframework_swift_link",
+    ),
+    (
+        "real App exact tone-event consumption",
+        "current_main_runtime_runs_in_real_nostalgia_app_target",
     ),
 ];
 
