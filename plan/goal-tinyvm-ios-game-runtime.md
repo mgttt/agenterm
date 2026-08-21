@@ -2244,3 +2244,26 @@ Evidence on 2026-08-21:
 - No physical iPhone is connected to this Mac mini. Physical-device lifecycle,
   sound/input/performance, TestFlight and Apple-review evidence remain open, so
   the persistent goal remains active.
+
+## Sixty-third executable increment — current App Store distribution export
+
+The current Nostalgia Arcade main and current tinyvm package now pass the local
+distribution step beyond an unsigned device build or development archive. The
+existing App Store Connect export configuration produced an IPA without
+uploading it or changing the committed version/build number.
+
+Evidence on 2026-08-21:
+
+- Xcode archives version 0.16.4 build 30 for generic iOS with automatic signing;
+  strict codesign verification succeeds and the archive carries the exact
+  6,022-byte cartridge SHA-256 from the real-app consumer gate.
+- `destination=export` obtains a Cloud Managed Apple Distribution identity and
+  Store provisioning profile. The exported arm64 App has
+  `get-task-allow=false`, `beta-reports-active=true`, passes strict designated-
+  requirement verification and keeps the cartridge byte-identical.
+- The resulting IPA is structurally valid and contains the arm64 executable
+  plus the single bundled `.wasm`; no TestFlight/App Store upload was attempted.
+- Build 30 is already a historical upload number, so a future TestFlight build
+  must increment it rather than attempting to reuse this local export.
+- Physical-device lifecycle, sound/input/performance and Apple-review evidence
+  remain open; the persistent goal therefore remains active.

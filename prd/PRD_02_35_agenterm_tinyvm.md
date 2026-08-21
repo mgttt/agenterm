@@ -378,3 +378,6 @@ main 重建 XCFramework/Swift Package 与 6,022-byte Depth Well 卡带，随后�
 runtime 单测和一条可操作 UI 旅程实际执行，再构建 arm64 iOS Release target。最终
 `.app` 必须只包含该一枚 `.wasm`、与源资源 SHA-256 一致，且 Mach-O 不链接
 WebKit/JavaScriptCore。Xcode 显示成功但 selected test count 为零也明确失败。
+同一 current-main App 还已用仓内 `destination=export` 配置完成 App Store Connect
+IPA 导出：arm64 payload 通过严格 distribution codesign，`get-task-allow=false`、
+`beta-reports-active=true`，卡带仍与源资源逐字节一致；这不是上传或物理设备证据。

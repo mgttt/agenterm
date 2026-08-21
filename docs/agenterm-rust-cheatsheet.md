@@ -2471,6 +2471,14 @@ inspect the final device App: architecture/platform, exact bundled payload and
 excluded dynamic frameworks are product facts that simulator unit tests do not
 prove.
 
+Do not treat a signed `.xcarchive` as App Store distribution evidence. Automatic
+archive signing may legitimately use an Apple Development identity. Run a
+separate `destination=export` App Store Connect export, then inspect the IPA's
+distribution authority, strict designated requirement, arm64 payload,
+`get-task-allow=false`, beta entitlement and exact bundled runtime artifact.
+Keep export separate from upload: successful local distribution packaging does
+not consume a build number on the service or prove TestFlight processing.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the
