@@ -2420,6 +2420,16 @@ In a tightly size-gated parser, a private out-of-domain sentinel can preserve a
 compact existing return ABI when a nested `Option` adds a code-size page; name
 the sentinel, consume it immediately, and never expose it as a real limit.
 
+Load-time validation must retain declaration attributes, not only operand
+types. A `global.set` can have the right value type and still be invalid when
+its target is immutable; postponing that check to execution turns a malformed
+module into an invokable object. Let the validator borrow the canonical global
+definitions so type and mutability cannot drift in parallel vectors, and keep
+the execution-time immutable check as defense for programmatic builders that
+do not pass through the standard byte loader. When correcting an old golden,
+replace its invalid “runtime trap” module with a legal mutable semantic case
+rather than weakening family coverage.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

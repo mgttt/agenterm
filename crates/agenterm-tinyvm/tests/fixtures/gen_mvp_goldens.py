@@ -1891,12 +1891,12 @@ def edge_cases() -> list[Case]:
                                        (1, bytes([0x20, 0x00, 0x20, 0x01, 0x6B, 0x21, 0x02,
                                                   0x20, 0x02, 0x0B]))],
                                 exports=[("main", 0)])))
-    e.append(Case("edge.locals.global_set_immutable_traps", "locals",
-                  ops("i32.const", "global.set", "global.get", "end"), "trap",
+    e.append(Case("edge.locals.global_i32_set_get", "locals",
+                  ops("i32.const", "global.set", "global.get", "end"), "i32:9",
                   encode_module(types=[([], [I32])], func_types=[0],
                                 codes=[(0, i32c(9) + bytes([0x24, 0x00, 0x23, 0x00, 0x0B]))],
                                 exports=[("main", 0)],
-                                globals_=[(I32, False, i32c(7) + bytes([0x0B]))])))
+                                globals_=[(I32, True, i32c(7) + bytes([0x0B]))])))
     e.append(Case("edge.locals.global_i64_set_get", "locals",
                   ops("i64.const", "global.set", "global.get", "end"), "i64:-3",
                   encode_module(types=[([], [I64])], func_types=[0],

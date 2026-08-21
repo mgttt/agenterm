@@ -29,6 +29,7 @@ tinyvm iOS game runtime
 │   ├── strict i64 signed-LEB range    [x]
 │   ├── valid custom-section names     [x]
 │   ├── empty memory-section vector    [x]
+│   ├── mutable global.set target      [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -2057,5 +2058,38 @@ Evidence on 2026-08-21:
   below their gates at 1,553,928 bytes arm64 and 1,625,560 bytes x86_64;
   catalog/replay/private/session consumers are 1,426,776 / 1,417,720 /
   1,419,376 / 1,418,528 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-seventh executable increment — mutable global.set targets
+
+The standard validation context now retains each global declaration's
+mutability as well as its value type. `global.set` targeting an immutable
+global fails the load gate instead of producing a module that traps only when
+the instruction executes. The validator borrows the module's canonical global
+definitions directly, avoiding a second metadata vector; the interpreter keeps
+its immutable check as defense for programmatic builder modules that do not
+enter through the standard byte loader.
+
+Evidence on 2026-08-21:
+
+- Public raw-byte black boxes reject an immutable i32 target with a typed
+  decode failure, while the otherwise identical mutable module loads, writes
+  the global and returns the updated value.
+- WABT independently rejects the immutable binary and accepts the mutable
+  counterpart.
+- The old edge golden that mislabeled an invalid standard module as a runtime
+  trap was replaced by a legal mutable i32 roundtrip; its generator reproduces
+  all 107 edge rows and the six-per-family threshold remains unchanged.
+- All 234 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
+  oracles, the two-game WebKit differential, all-target Clippy, formatting,
+  relevant ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,553,848 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,696 / 1,417,640 /
+  1,419,312 / 1,418,448 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

@@ -14,7 +14,7 @@
 
 use alloc::vec::Vec;
 
-use super::{BlockType, FuncType, Op, WasmError};
+use super::{BlockType, FuncType, GlobalDesc, Op, WasmError, valtype_of};
 
 const I32: u8 = 0x7F;
 const I64: u8 = 0x7E;
@@ -32,8 +32,8 @@ pub(super) struct ModuleCtx<'a> {
     pub types: &'a [FuncType],
     /// Type index per function index (imported functions first).
     pub func_sigs: &'a [usize],
-    /// Value type per global.
-    pub globals: &'a [u8],
+    /// Global definitions retain both the value type and mutability proof.
+    pub globals: &'a [GlobalDesc],
     /// DataCount section value. Bulk data instructions require it even when
     /// the final data section is available to this non-streaming decoder.
     pub data_count: Option<usize>,
@@ -180,8 +180,17 @@ impl<'a> V<'a> {
         self.m
             .globals
             .get(i as usize)
-            .copied()
+            .map(|global| valtype_of(&global.init))
             .ok_or(WasmError::Decode("validation: global index out of range"))
+    }
+
+    fn mutable_global_type(&self, i: u32) -> Result<u8, WasmError> {
+        self.m
+            .globals
+            .get(i as usize)
+            .filter(|global| global.mutable)
+            .map(|global| valtype_of(&global.init))
+            .ok_or(WasmError::Decode("global.set"))
     }
 
     fn func_type_index(&self, f: u32) -> Result<usize, WasmError> {
@@ -618,7 +627,7 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.push(t);
         }
         GlobalSet(i) => {
-            let t = v.global_type(*i)?;
+            let t = v.mutable_global_type(*i)?;
             v.pop_expect(t)?;
         }
 

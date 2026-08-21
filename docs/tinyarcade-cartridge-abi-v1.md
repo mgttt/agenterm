@@ -374,6 +374,8 @@ are no longer backward compatible.
    its opaque payload is ignored by tinyvm.
    A missing or empty memory-section vector declares no linear memory, so such
    a cartridge must not contain memory instructions or active data segments.
+   `global.set` may target only a global declared mutable; converters must not
+   rely on a later execution trap for an immutable write.
 2. Export all five exact lifecycle functions.
 3. Derive every manifest capability from the standard non-core import table;
    never maintain a second hand-written capability list.

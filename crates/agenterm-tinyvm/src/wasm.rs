@@ -2556,12 +2556,10 @@ impl Module {
             for f in &module.funcs {
                 func_sigs.push(f.sig.unwrap_or(0));
             }
-            let mut global_types = Vec::new();
-            global_types.extend(module.globals.iter().map(|g| valtype_of(&g.init)));
             let ctx = validate::ModuleCtx {
                 types: &module.types,
                 func_sigs: &func_sigs,
-                globals: &global_types,
+                globals: &module.globals,
                 data_count,
                 elem_count: elems.len(),
                 table_count,

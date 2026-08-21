@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 32] = [
+const REJECTED: [(&str, &str); 33] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -139,10 +139,14 @@ const REJECTED: [(&str, &str); 32] = [
         "load_with_empty_memory_section",
         "0061736d010000000105016000017f03020100050100070801046d61696e00000a0901070041002802000b",
     ),
+    (
+        "immutable_global_set",
+        "0061736d010000000105016000017f030201000606017f0041070b070801046d61696e00000a0a0108004109240023000b",
+    ),
 ];
 
 /// Legal counterparts that must keep loading and running.
-const ACCEPTED: [(&str, &str); 10] = [
+const ACCEPTED: [(&str, &str); 11] = [
     (
         "add_two_consts",
         "0061736d010000000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
@@ -182,6 +186,10 @@ const ACCEPTED: [(&str, &str); 10] = [
     (
         "pure_compute_with_empty_memory_section",
         "0061736d010000000105016000017f03020100050100070801046d61696e00000a09010700410141026a0b",
+    ),
+    (
+        "mutable_global_set",
+        "0061736d010000000105016000017f030201000606017f0141070b070801046d61696e00000a0a0108004109240023000b",
     ),
 ];
 
@@ -354,6 +362,18 @@ fn standard_custom_section_name_is_validated_while_opaque_payload_stays_ignored(
             "{name}: malformed custom-section name must fail at load"
         );
     }
+}
+
+#[test]
+fn standard_global_set_requires_a_mutable_declaration() {
+    let (_, hex) = REJECTED
+        .into_iter()
+        .find(|(name, _)| *name == "immutable_global_set")
+        .expect("immutable global.set fixture");
+    assert!(matches!(
+        WasmModule::from_bytes(&bytes(hex)),
+        Err(WasmError::Decode("global.set"))
+    ));
 }
 
 /// The whole point of validating before executing: a rejected module must not
