@@ -2626,6 +2626,11 @@ shared scalar metadata, and pass the current store explicitly to table
 operations. The decoded module may own temporary host handles before
 instantiation; the live record should not.
 
+Likewise, never type-check a store-local function address using the caller's
+function-index space. Resolve `(instance_id, function_index)` through the store
+and compare the owner's exact `FuncType` with the caller's expected table-call
+type. Equal numeric indices in sibling modules have no semantic relationship.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode

@@ -135,6 +135,7 @@ pub struct Store {
 struct StoreState {
     next_instance_id: usize,
     tables: Vec<SharedTableState>,
+    instance_functions: Vec<Option<Vec<FuncType>>>,
 }
 
 struct SharedTableState {
@@ -147,6 +148,7 @@ impl Store {
             inner: Rc::new(RefCell::new(StoreState {
                 next_instance_id: 0,
                 tables: Vec::new(),
+                instance_functions: Vec::new(),
             })),
         }
     }
@@ -191,7 +193,52 @@ impl Store {
         state.next_instance_id = id
             .checked_add(1)
             .ok_or(WasmError::Trap("instance address space"))?;
+        state
+            .instance_functions
+            .try_reserve(1)
+            .map_err(|_| WasmError::Trap("instance address space"))?;
+        state.instance_functions.push(None);
         Ok(id)
+    }
+
+    fn register_instance_functions(
+        &self,
+        instance_id: usize,
+        functions: Vec<FuncType>,
+    ) -> Result<(), WasmError> {
+        let mut state = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
+        let slot = state
+            .instance_functions
+            .get_mut(instance_id)
+            .ok_or(WasmError::Trap("unknown function instance"))?;
+        if slot.is_some() {
+            return Err(WasmError::Trap("duplicate function instance"));
+        }
+        *slot = Some(functions);
+        Ok(())
+    }
+
+    fn unregister_instance_functions(&self, instance_id: usize) {
+        if let Ok(mut state) = self.inner.try_borrow_mut()
+            && let Some(slot) = state.instance_functions.get_mut(instance_id)
+        {
+            *slot = None;
+        }
+    }
+
+    fn function_type(&self, address: &FunctionAddress) -> Result<FuncType, WasmError> {
+        self.inner
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+            .instance_functions
+            .get(address.instance_id)
+            .and_then(Option::as_ref)
+            .and_then(|functions| functions.get(address.index))
+            .cloned()
+            .ok_or(WasmError::Trap("unknown function address"))
     }
 }
 
@@ -4362,48 +4409,84 @@ impl Module {
         }
     }
 
+    fn function_type(&self, idx: usize) -> Result<FuncType, WasmError> {
+        let (params, results, signature) = if idx < self.hosts.len() {
+            let host = &self.hosts[idx];
+            (host.n_params, host.n_results, host.sig)
+        } else {
+            let function = self
+                .funcs
+                .get(idx - self.hosts.len())
+                .ok_or(WasmError::Trap("call to unknown function"))?;
+            (function.n_params, function.arity, function.sig)
+        };
+        if let Some(signature) = signature {
+            return self
+                .types
+                .get(signature)
+                .cloned()
+                .ok_or(WasmError::Trap("function type index"));
+        }
+        let mut params_types = Vec::new();
+        params_types
+            .try_reserve_exact(params)
+            .map_err(|_| WasmError::Trap("function types"))?;
+        params_types.resize(params, 0x7f);
+        let mut result_types = Vec::new();
+        result_types
+            .try_reserve_exact(results)
+            .map_err(|_| WasmError::Trap("function types"))?;
+        result_types.resize(results, 0x7f);
+        Ok(FuncType {
+            params: params_types,
+            results: result_types,
+        })
+    }
+
+    fn function_types(&self) -> Result<Vec<FuncType>, WasmError> {
+        let count = self
+            .hosts
+            .len()
+            .checked_add(self.funcs.len())
+            .ok_or(WasmError::Trap("function types"))?;
+        let mut functions = Vec::new();
+        functions
+            .try_reserve_exact(count)
+            .map_err(|_| WasmError::Trap("function types"))?;
+        for index in 0..count {
+            functions.push(self.function_type(index)?);
+        }
+        Ok(functions)
+    }
+
     fn indirect_target(
         &self,
         table_index: u32,
         type_index: u32,
         element_index: usize,
         bulk: &BulkState<'_>,
-    ) -> Result<usize, WasmError> {
+    ) -> Result<FunctionAddress, WasmError> {
         let table = bulk
             .tables
             .get(table_index as usize)
             .ok_or(WasmError::Trap("call_indirect: table immediate"))?;
         let address = table.address(bulk.store, element_index)?;
-        let combined = address
-            .as_ref()
-            .ok_or(WasmError::Trap(
-                "call_indirect: uninitialised table element",
-            ))?
-            .local_index(bulk.instance_id)?;
+        let address = address.ok_or(WasmError::Trap(
+            "call_indirect: uninitialised table element",
+        ))?;
         let expected = self
             .types
             .get(type_index as usize)
             .ok_or(WasmError::Trap("call_indirect: bad type index"))?;
-        let (actual_params, actual_results, actual_sig) = if combined < self.hosts.len() {
-            let host = &self.hosts[combined];
-            (host.n_params, host.n_results, host.sig)
+        let actual = if address.instance_id == bulk.instance_id {
+            self.function_type(address.index)?
         } else {
-            let function = self
-                .funcs
-                .get(combined - self.hosts.len())
-                .ok_or(WasmError::Trap("call_indirect: bad table entry"))?;
-            (function.n_params, function.arity, function.sig)
+            bulk.store.function_type(&address)?
         };
-        let matches = match actual_sig.and_then(|signature| self.types.get(signature)) {
-            Some(actual) => actual == expected,
-            None => {
-                expected.params.len() == actual_params && expected.results.len() == actual_results
-            }
-        };
-        if !matches {
+        if &actual != expected {
             return Err(WasmError::Trap("call_indirect: signature mismatch"));
         }
-        Ok(combined)
+        Ok(address)
     }
 
     fn block_counts(&self, ty: BlockType) -> Result<(usize, usize), WasmError> {
@@ -5765,7 +5848,8 @@ impl Module {
                     table_index,
                 } => {
                     let ti = pop(&mut stack)? as u32 as usize;
-                    let combined = self.indirect_target(table_index, type_index, ti, bulk)?;
+                    let address = self.indirect_target(table_index, type_index, ti, bulk)?;
+                    let combined = address.local_index(bulk.instance_id)?;
                     let n = self.param_count(combined)?;
                     if stack.len() < n {
                         return Err(WasmError::Trap("call_indirect: stack has"));
@@ -5800,7 +5884,8 @@ impl Module {
                     table_index,
                 } => {
                     let element = pop(&mut stack)? as u32 as usize;
-                    let combined = self.indirect_target(table_index, type_index, element, bulk)?;
+                    let address = self.indirect_target(table_index, type_index, element, bulk)?;
+                    let combined = address.local_index(bulk.instance_id)?;
                     let n = self.param_count(combined)?;
                     if stack.len() < n {
                         return Err(WasmError::Trap("return_call_indirect"));
@@ -5980,12 +6065,14 @@ impl Module {
 
 impl Instance {
     fn new(module: Module) -> Result<Self, WasmError> {
+        let function_types = module.function_types()?;
         let globals = module.new_globals()?;
         let memories = module.new_memories(&globals)?;
         let data_live = module.new_data_state()?;
         let store = module.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
         let (tables, elem_live) = module.new_table_state(&globals, &store, instance_id)?;
+        store.register_instance_functions(instance_id, function_types)?;
         let mut instance = Self {
             module,
             store,
@@ -6027,7 +6114,10 @@ impl Instance {
             instance.last_steps = steps;
             instance.last_peak_call_depth = resources.peak_call_depth;
             instance.last_peak_activation_slots = resources.peak_activation_slots;
-            result?;
+            if let Err(error) = result {
+                instance.store.unregister_instance_functions(instance_id);
+                return Err(error);
+            }
         }
         Ok(instance)
     }
@@ -6238,6 +6328,12 @@ impl Instance {
             .get_mut(index)
             .ok_or(WasmError::Trap("global index"))?
             .set(value)
+    }
+}
+
+impl Drop for Instance {
+    fn drop(&mut self) {
+        self.store.unregister_instance_functions(self.instance_id);
     }
 }
 

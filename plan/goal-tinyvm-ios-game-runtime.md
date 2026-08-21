@@ -2625,3 +2625,19 @@ bytes. iOS links at 1,579,160 bytes arm64 and 1,656,280 bytes x86_64;
 profile-catalog, replay, private-library and session consumers link at
 1,452,008, 1,442,952, 1,444,624 and 1,443,776 bytes. Nostalgia Arcade consumes
 the result with 5 unit tests, 1 UI test and an arm64 device build.
+
+## Seventy-fourth executable increment — owner-resolved function signatures
+
+`WasmStore` now registers the exact combined function-index signature table for
+each live persistent instance. An indirect call resolves a table entry as an
+`(instance, function)` address and validates it against the address owner's
+module type table; it no longer interprets a foreign numeric function index in
+the caller's module. Programmatic i32-only functions are normalized to exact
+i32 signatures at registration, while decoded functions retain every standard
+value type.
+
+Failed start functions and dropped instances unregister their metadata, so a
+dangling shared-table address traps as unknown rather than borrowing stale
+module data. The imported-table sibling oracle now crosses owner-based type
+resolution before reaching the still-explicit execution boundary. The next
+increment moves live owner state into the store and removes that boundary.
