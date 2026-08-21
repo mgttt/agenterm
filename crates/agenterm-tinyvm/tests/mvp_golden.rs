@@ -214,6 +214,8 @@ fn describe_vals(vals: &[Val]) -> String {
             Val::I64(n) => format!("i64:{n}"),
             Val::F32(n) => format!("f32bits:{:#x}", n.to_bits()),
             Val::F64(n) => format!("f64bits:{:#x}", n.to_bits()),
+            #[cfg(feature = "simd")]
+            Val::V128(bytes) => format!("v128:{bytes:02x?}"),
             Val::FuncRef(None) => "funcref:null".to_string(),
             Val::FuncRef(Some(index)) => format!("funcref:{index}"),
             Val::StoreFuncRef(_) => "funcref:store".to_string(),
@@ -636,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 114] = [
+const LEAF_TESTS: [(&str, &str); 115] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -1016,6 +1018,10 @@ const LEAF_TESTS: [(&str, &str); 114] = [
     (
         "proposal priority by real cartridge workload",
         "real_cartridge_workload_prioritizes_standard_features",
+    ),
+    (
+        "optional SIMD signed-PCM mix subset",
+        "wabt_compiled_simd_audio_mix_matches_tinyvm",
     ),
     (
         "fan-authored standard .wasm",

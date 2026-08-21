@@ -20,6 +20,8 @@ const I32: u8 = 0x7F;
 const I64: u8 = 0x7E;
 const F32: u8 = 0x7D;
 const F64: u8 = 0x7C;
+#[cfg(feature = "simd")]
+const V128: u8 = 0x7B;
 const FUNCREF: u8 = 0x70;
 const EXTERNREF: u8 = 0x6F;
 /// Empty block type: the block leaves nothing behind.
@@ -384,6 +386,28 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
         I64Const(_) => v.push(I64),
         F32Const(_) => v.push(F32),
         F64Const(_) => v.push(F64),
+
+        // --- fixed-width SIMD audio kernel ---
+        #[cfg(feature = "simd")]
+        V128Load(arg) => {
+            require_memory(arg.memory)?;
+            v.pop_expect(I32)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        V128Const(_) => v.push(V128),
+        #[cfg(feature = "simd")]
+        V128Store(arg) => {
+            require_memory(arg.memory)?;
+            v.pop_expect(V128)?;
+            v.pop_expect(I32)?;
+        }
+        #[cfg(feature = "simd")]
+        I16x8AddSatS => {
+            v.pop_expect(V128)?;
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
 
         // --- i32 unary / binary / comparison ---
         I32Clz | I32Ctz | I32Popcnt | I32Eqz => {

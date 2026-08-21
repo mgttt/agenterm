@@ -3783,3 +3783,41 @@ with no web runtime, network fetch surface or archived native game engine. The
 PRD trace now binds 114 completed claims. Physical-iPhone/TestFlight lifecycle,
 audio and performance evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-eighteenth executable increment — workload-bounded SIMD
+
+The unified crate now has an optional `simd` profile driven by one concrete
+game-runtime workload instead of a decoder-only proposal claim: eight-lane
+signed 16-bit PCM mixing with standard saturation. It accepts the `v128` value
+type across function signatures, locals, globals, blocks, typed selection and
+typed host calls, plus `v128.const`, full-width load/store and
+`i16x8.add_sat_s`. Values remain portable little-endian bytes; execution uses
+defined scalar Rust and emits no host-ISA instruction or JIT code.
+
+The profile is explicit because inline v128 expands `Val` from at most 16 to at
+most 24 bytes. A default build rejects the first `0xfd` instruction as
+`SIMD feature is disabled`; another unimplemented SIMD instruction fails at
+decode, and an over-aligned load is rejected by standard memarg validation.
+The default static core therefore remains 101,256 bytes below its unchanged
+100 KiB gate. Opt-in `staticcore,simd` measures 117,768 bytes below a separate
+120 KiB ceiling. The full iOS device/universal-simulator Swift package also
+passes with `ios-c-api,simd`; its arm64 consumer is 1,655,704 bytes below a
+separate 1,671,168-byte opt-in ceiling, while the default product ceiling is
+unchanged.
+
+Evidence on 2026-08-22: WABT emits and validates a 71-byte audio kernel. tinyvm,
+macOS JavaScriptCore and a real headless H5 browser all produce the exact lanes
+`32767,-32768,300,-300,32767,-32768,-5000,5000`. The Rust black box additionally
+proves v128 function/local/global/constant behavior and that an out-of-bounds
+SIMD store traps without changing the destination tail. The executable PRD
+trace now binds 115 completed claims. This is an honest first SIMD workload,
+not a claim of complete SIMD proposal coverage; further op families remain
+workload-gated.
+
+A second 500-byte, manifest-bearing cartridge performs and verifies the same
+mix inside `game_init`, renders through indexed2d, and supports suspend/resume.
+The `ios-c-api,simd` runtime opens it through the public Swift/C ABI on the
+booted iPhone 17 Pro Simulator and renders the expected green pixel. Its
+focused linked consumer is 1,502,664 bytes; the broader arm64 smoke remains
+1,655,704 bytes and x86_64 remains inside its existing default ceiling at
+1,730,864 bytes.

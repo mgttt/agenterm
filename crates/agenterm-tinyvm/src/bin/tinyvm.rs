@@ -229,6 +229,7 @@ fn run_module_validate(path: &str) -> ExitCode {
                 (report.features.multiple_memories, "multiple-memories"),
                 (report.features.extended_const, "extended-const"),
                 (report.features.tail_call, "tail-call"),
+                (report.features.simd, "simd"),
             ] {
                 if used {
                     names.push(name);

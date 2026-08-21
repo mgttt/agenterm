@@ -24,6 +24,7 @@ wat = "1"
 staticcore = []
 std = []
 wasi-p1 = []
+simd = []
 std-host = ["std", "dep:cap-std", "dep:getrandom"]
 ios-wasi-host = ["std-host", "wasi-p1"]
 ios-c-api = ["cartridge-trust", "replay"]

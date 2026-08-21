@@ -42,4 +42,20 @@ fn independent_standard_fixtures_cover_every_reported_feature_family() {
     assert!(fixture("multi-memory-v1.wat").multiple_memories);
     assert!(fixture("extended-const-v1.wat").extended_const);
     assert!(fixture("tail-call-v1.wat").tail_call);
+    #[cfg(feature = "simd")]
+    assert!(fixture("simd-audio-mix-v1.wat").simd);
+}
+
+#[cfg(not(feature = "simd"))]
+#[test]
+fn simd_module_fails_explicitly_when_optional_profile_is_disabled() {
+    let bytes = wat::parse_file(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simd-audio-mix-v1.wat"),
+    )
+    .expect("compile SIMD feature fixture");
+    let error = match WasmModule::from_bytes(&bytes) {
+        Err(error) => error,
+        Ok(_) => panic!("default profile must not silently accept SIMD"),
+    };
+    assert_eq!(error.message(), "SIMD feature is disabled");
 }

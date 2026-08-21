@@ -19,7 +19,8 @@ The current report covers:
 - multiple tables;
 - multiple memories;
 - extended constant expressions;
-- tail calls.
+- tail calls;
+- SIMD, when the optional `simd` profile is compiled in.
 
 `tinyvm module validate FILE.wasm` publishes the same information as a stable
 comma-separated `standard_features=` row. A baseline scalar module reports
@@ -45,9 +46,11 @@ This makes the near-term proposal priority evidence-based:
 3. The remaining implemented families stay valuable for standard compatibility
    and fan tooling, but are not current game-build requirements.
 4. SIMD, typed function references, GC, memory64, exceptions and threads have
-   no demand from the current production cartridge set. They should enter only
-   when a real candidate workload plus independent-engine and size/resource
-   evidence justify them.
+   no demand from the current production cartridge set. The optional SIMD
+   profile therefore begins with only the signed-PCM mixing workload documented
+   in [tinyvm SIMD audio profile](tinyvm-simd-audio.md); other instruction
+   families should enter only with matching workload, independent-engine and
+   size/resource evidence.
 
 An exact profile change is not automatically a regression: a compiler or game
 may legitimately begin using another standard feature. The smoke gate makes

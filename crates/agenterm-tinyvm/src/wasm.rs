@@ -110,6 +110,10 @@ pub enum Val {
     I64(i64),
     F32(f32),
     F64(f64),
+    /// One standard 128-bit SIMD value, stored in canonical little-endian lane
+    /// order so interpretation never depends on the host ISA.
+    #[cfg(feature = "simd")]
+    V128([u8; 16]),
     /// A nullable reference into this module instance's combined function
     /// index space. `None` is the standard null `funcref` value.
     FuncRef(Option<usize>),
@@ -128,6 +132,8 @@ pub enum ValueType {
     I64,
     F32,
     F64,
+    #[cfg(feature = "simd")]
+    V128,
     FuncRef,
     ExternRef,
 }
@@ -147,6 +153,7 @@ pub struct FeatureUsage {
     pub multiple_memories: bool,
     pub extended_const: bool,
     pub tail_call: bool,
+    pub simd: bool,
 }
 
 impl ValueType {
@@ -156,6 +163,8 @@ impl ValueType {
             0x7E => Some(Self::I64),
             0x7D => Some(Self::F32),
             0x7C => Some(Self::F64),
+            #[cfg(feature = "simd")]
+            0x7B => Some(Self::V128),
             0x70 => Some(Self::FuncRef),
             0x6F => Some(Self::ExternRef),
             _ => None,
@@ -168,6 +177,8 @@ impl ValueType {
             Self::I64 => 0x7E,
             Self::F32 => 0x7D,
             Self::F64 => 0x7C,
+            #[cfg(feature = "simd")]
+            Self::V128 => 0x7B,
             Self::FuncRef => 0x70,
             Self::ExternRef => 0x6F,
         }
@@ -1439,6 +1450,16 @@ enum Op {
     F32Copysign,
     F32Load(MemArg),
     F32Store(MemArg),
+    /// Initial game-oriented SIMD subset: full-width memory traffic plus
+    /// signed saturating PCM-lane addition.
+    #[cfg(feature = "simd")]
+    V128Load(MemArg),
+    #[cfg(feature = "simd")]
+    V128Store(MemArg),
+    #[cfg(feature = "simd")]
+    V128Const([u8; 16]),
+    #[cfg(feature = "simd")]
+    I16x8AddSatS,
     /// `global.get` / `global.set` — read/write a module global by index.
     GlobalGet(u32),
     GlobalSet(u32),
@@ -1644,6 +1665,8 @@ fn block_type(bytes: &[u8], i: usize) -> Result<(BlockType, usize), WasmError> {
         -2 => Ok((BlockType::Value(0x7E), next)),
         -3 => Ok((BlockType::Value(0x7D), next)),
         -4 => Ok((BlockType::Value(0x7C), next)),
+        #[cfg(feature = "simd")]
+        -5 => Ok((BlockType::Value(0x7B), next)),
         0..=4_294_967_295 => Ok((BlockType::TypeIndex(encoded as u32), next)),
         _other => Err(WasmError::Decode("unsupported block type")),
     }
@@ -1856,6 +1879,39 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                     _ => return Err(WasmError::Decode("unsupported 0xfc opcode")),
                 }
             }
+            0xFD => {
+                #[cfg(not(feature = "simd"))]
+                return Err(WasmError::Decode("SIMD feature is disabled"));
+                #[cfg(feature = "simd")]
+                {
+                    let (simd_opcode, ni) = leb_u32(body, i)?;
+                    i = ni;
+                    match simd_opcode {
+                        0 => {
+                            let (arg, ni) = memarg(body, i, 4, budget.memory_count)?;
+                            i = ni;
+                            ops.push(Op::V128Load(arg));
+                        }
+                        11 => {
+                            let (arg, ni) = memarg(body, i, 4, budget.memory_count)?;
+                            i = ni;
+                            ops.push(Op::V128Store(arg));
+                        }
+                        12 => {
+                            let end = i
+                                .checked_add(16)
+                                .filter(|&end| end <= body.len())
+                                .ok_or(WasmError::Decode("truncated v128.const immediate"))?;
+                            let mut value = [0; 16];
+                            value.copy_from_slice(&body[i..end]);
+                            i = end;
+                            ops.push(Op::V128Const(value));
+                        }
+                        143 => ops.push(Op::I16x8AddSatS),
+                        _ => return Err(WasmError::Decode("unsupported 0xfd opcode")),
+                    }
+                }
+            }
             0x20 => {
                 let (x, ni) = leb_u32(body, i)?;
                 i = ni;
@@ -1973,7 +2029,7 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                 let ty = *body
                     .get(ni)
                     .ok_or(WasmError::Decode("truncated typed select"))?;
-                if !matches!(ty, 0x6F | 0x70 | 0x7C..=0x7F) {
+                if !is_supported_valtype(ty) {
                     return Err(WasmError::Decode("unsupported typed select value type"));
                 }
                 i = ni + 1;
@@ -2268,6 +2324,10 @@ fn le8(s: &[u8]) -> [u8; 8] {
 
 /// Read `n` value-type bytes, bounds-checked, returning them and the next
 /// offset. `call_indirect` compares these, so the bytes are kept, not skipped.
+fn is_supported_valtype(value: u8) -> bool {
+    matches!(value, 0x6F | 0x70 | 0x7C..=0x7F) || cfg!(feature = "simd") && value == 0x7B
+}
+
 fn read_valtypes(
     p: &[u8],
     i: usize,
@@ -2282,10 +2342,7 @@ fn read_valtypes(
         .ok_or(WasmError::Decode("value-type list runs past section"))?;
     let mut values = Vec::new();
     reserve_exact(&mut values, n)?;
-    if p[i..end]
-        .iter()
-        .any(|value| !matches!(value, 0x6F | 0x70 | 0x7C..=0x7F))
-    {
+    if p[i..end].iter().any(|value| !is_supported_valtype(*value)) {
         return Err(WasmError::Decode("unsupported value type"));
     }
     values.extend_from_slice(&p[i..end]);
@@ -2735,6 +2792,20 @@ fn parse_const_expr(
                     end,
                 )
             }
+            #[cfg(feature = "simd")]
+            0xFD => {
+                let (simd_opcode, immediate) = leb_u32(p, j + 1)?;
+                if simd_opcode != 12 {
+                    return Err(WasmError::Decode("unsupported const-expr SIMD opcode"));
+                }
+                let end = immediate
+                    .checked_add(16)
+                    .filter(|&end| end <= p.len())
+                    .ok_or(WasmError::Decode("truncated v128 const expr"))?;
+                let mut value = [0; 16];
+                value.copy_from_slice(&p[immediate..end]);
+                (ConstOp::Value(Val::V128(value)), Some(0x7B), end)
+            }
             0x23 => {
                 let (index, next) = leb_u32(p, j + 1)?;
                 let global = globals
@@ -2876,7 +2947,7 @@ fn parse_global_section(
     for _ in 0..count {
         // globaltype = valtype byte + mutability byte
         let valtype = *p.get(i).ok_or(WasmError::Decode("truncated global type"))?;
-        if !matches!(valtype, 0x6F | 0x70 | 0x7C..=0x7F) {
+        if !is_supported_valtype(valtype) {
             return Err(WasmError::Decode("unsupported global value type"));
         }
         let mutability = *p
@@ -3043,7 +3114,7 @@ fn parse_import_section(
                 let value_type = *p
                     .get(i)
                     .ok_or(WasmError::Decode("truncated imported global type"))?;
-                if !matches!(value_type, 0x6F | 0x70 | 0x7C..=0x7F) {
+                if !is_supported_valtype(value_type) {
                     return Err(WasmError::Decode("unsupported imported global type"));
                 }
                 let mutable = match p.get(i + 1) {
@@ -3248,6 +3319,8 @@ fn valtype_of(v: &Val) -> u8 {
         Val::I64(_) => 0x7E,
         Val::F32(_) => 0x7D,
         Val::F64(_) => 0x7C,
+        #[cfg(feature = "simd")]
+        Val::V128(_) => 0x7B,
         Val::FuncRef(_) => 0x70,
         #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
         Val::StoreFuncRef(_) => 0x70,
@@ -3343,6 +3416,8 @@ fn zero_of_valtype(vt: u8) -> Result<Val, WasmError> {
         0x7E => Ok(Val::I64(0)),
         0x7D => Ok(Val::F32(0.0)),
         0x7C => Ok(Val::F64(0.0)),
+        #[cfg(feature = "simd")]
+        0x7B => Ok(Val::V128([0; 16])),
         0x70 => Ok(Val::FuncRef(None)),
         0x6F => Ok(Val::ExternRef(None)),
         _other => Err(WasmError::Decode("unsupported local value type 0x")),
@@ -3805,6 +3880,10 @@ impl CallResourceStats {
     }
 }
 
+// The optional inline-v128 profile intentionally enlarges bounded typed host
+// results. Boxing either enum would add a fallible allocation to every
+// allocation-free host return, so the measured stack-resident variant wins.
+#[allow(clippy::large_enum_variant)]
 enum DefinedOutcome {
     Values(CallValues),
     Call {
@@ -3849,6 +3928,7 @@ enum CallEntry<'a> {
     },
 }
 
+#[allow(clippy::large_enum_variant)]
 enum CallValues {
     Owned(Vec<Val>),
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
@@ -4625,6 +4705,10 @@ impl Module {
                     | Op::RefIsNull
                     | Op::RefFunc(_) => usage.reference_types = true,
                     Op::ReturnCall(_) | Op::ReturnCallIndirect { .. } => usage.tail_call = true,
+                    #[cfg(feature = "simd")]
+                    Op::V128Load(_) | Op::V128Store(_) | Op::V128Const(_) | Op::I16x8AddSatS => {
+                        usage.simd = true
+                    }
                     _ => {}
                 }
             }
@@ -6467,6 +6551,45 @@ impl Module {
                     let ea = mem_ea(memory.len(), address, arg.offset, 4)?;
                     memory[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
                 }
+                #[cfg(feature = "simd")]
+                Op::V128Load(arg) => {
+                    let address = pop(&mut stack)?;
+                    let memory = selected_memory(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 16)?;
+                    let mut bytes = [0; 16];
+                    bytes.copy_from_slice(&memory[ea..ea + 16]);
+                    stack.push(Val::V128(bytes));
+                }
+                #[cfg(feature = "simd")]
+                Op::V128Const(value) => {
+                    push_operand(
+                        &mut stack,
+                        Val::V128(value),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
+                #[cfg(feature = "simd")]
+                Op::V128Store(arg) => {
+                    let value = pop_v128(&mut stack)?;
+                    let address = pop(&mut stack)?;
+                    let mut memory = selected_memory_mut(memories, arg.memory)?;
+                    let ea = mem_ea(memory.len(), address, arg.offset, 16)?;
+                    memory[ea..ea + 16].copy_from_slice(&value);
+                }
+                #[cfg(feature = "simd")]
+                Op::I16x8AddSatS => {
+                    let right = pop_v128(&mut stack)?;
+                    let left = pop_v128(&mut stack)?;
+                    let mut mixed = [0; 16];
+                    for lane in 0..8 {
+                        let start = lane * 2;
+                        let a = i16::from_le_bytes([left[start], left[start + 1]]);
+                        let b = i16::from_le_bytes([right[start], right[start + 1]]);
+                        mixed[start..start + 2].copy_from_slice(&a.saturating_add(b).to_le_bytes());
+                    }
+                    stack.push(Val::V128(mixed));
+                }
                 Op::F64Const(bits) => {
                     push_operand(
                         &mut stack,
@@ -8289,6 +8412,15 @@ fn pop_f64(stack: &mut Vec<Val>) -> Result<f64, WasmError> {
     match pop_val(stack)? {
         Val::F64(v) => Ok(v),
         _other => Err(WasmError::Trap("expected f64 on stack, got")),
+    }
+}
+
+/// Pop one fixed-width SIMD value without exposing host vector instructions.
+#[cfg(feature = "simd")]
+fn pop_v128(stack: &mut Vec<Val>) -> Result<[u8; 16], WasmError> {
+    match pop_val(stack)? {
+        Val::V128(value) => Ok(value),
+        _other => Err(WasmError::Trap("expected v128 on stack, got")),
     }
 }
 

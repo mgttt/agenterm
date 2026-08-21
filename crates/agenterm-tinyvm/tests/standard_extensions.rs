@@ -1575,7 +1575,12 @@ fn standard_typed_host_funcref_results_are_instance_bounded() {
 
 #[test]
 fn standard_externref_function_and_global_values_preserve_host_identity() {
+    #[cfg(not(feature = "simd"))]
     assert!(core::mem::size_of::<Val>() <= 16);
+    // Inline v128 keeps SIMD values allocation-free. The extra eight-byte tag
+    // cost is explicit and bounded rather than hiding vectors behind handles.
+    #[cfg(feature = "simd")]
+    assert!(core::mem::size_of::<Val>() <= 24);
     let bytes = externref_host_module();
     let mut module = must_ok(WasmModule::from_bytes(&bytes), "load externref host module");
     assert!(module.import_parameter_type(0, 0) == Some(ValueType::ExternRef));

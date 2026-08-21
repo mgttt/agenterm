@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tinyvm SIMD audio H5 oracle</title>
+<body data-status="running">running</body>
+<script>
+(() => {
+  const expected = "32767,-32768,300,-300,32767,-32768,-5000,5000";
+  const decode = value => {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(base64 + "=".repeat((4 - base64.length % 4) % 4));
+    return Uint8Array.from(binary, character => character.charCodeAt(0));
+  };
+  try {
+    const wasm = decode(new URLSearchParams(location.hash.slice(1)).get("wasm") || "");
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm), {});
+    const samples = new Int16Array(instance.exports.memory.buffer);
+    samples.set([30000,-30000,100,-100,32767,-32768,20000,-20000], 0);
+    samples.set([10000,-10000,200,-200,1,-1,-25000,25000], 8);
+    instance.exports.mix(0, 16, 32);
+    const result = Array.from(samples.slice(16, 24)).join(",");
+    if (result !== expected) throw new Error(`wrong result ${result}`);
+    document.body.dataset.status = "pass";
+    document.body.textContent = `OK: H5 SIMD audio mix=${result}`;
+  } catch (error) {
+    document.body.dataset.status = "fail";
+    document.body.textContent = `FAIL: ${error}`;
+  }
+})();
+</script>

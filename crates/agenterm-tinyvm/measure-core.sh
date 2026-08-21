@@ -5,7 +5,10 @@ set -e
 cd "$(dirname "$0")/../.."
 TD="${CARGO_TARGET_DIR:-target}"
 CARGO=${CARGO:-cargo}
-"$CARGO" rustc -p agenterm-tinyvm --lib --release --features staticcore \
+CORE_FEATURES=${TINYVM_CORE_FEATURES:-staticcore}
+MAX_BYTES=${TINYVM_CORE_MAX_BYTES:-102400}
+LIMIT_LABEL=${TINYVM_CORE_LIMIT_LABEL:-100 KiB}
+"$CARGO" rustc -p agenterm-tinyvm --lib --release --features "$CORE_FEATURES" \
   --crate-type staticlib -- -Copt-level=z -Cpanic=abort -Ccodegen-units=1
 printf 'extern int tinyvm_selftest(void);\nint main(void){return tinyvm_selftest();}\n' > "$TD/tvmain.c"
 case "$(uname -s)" in
@@ -23,6 +26,10 @@ esac
 SIZE=$(stat -c%s "$TD/tinycore" 2>/dev/null || stat -f%z "$TD/tinycore")
 RC=0; "$TD/tinycore" || RC=$?
 echo "static core: ${SIZE} bytes; selftest rc=${RC}"
-[ "$SIZE" -lt 102400 ] || { echo "FAIL: core >= 100 KiB"; exit 1; }
+[ "$SIZE" -lt "$MAX_BYTES" ] || { echo "FAIL: core >= $LIMIT_LABEL"; exit 1; }
 [ "$RC" -eq 42 ] || { echo "FAIL: selftest != 42"; exit 1; }
-echo "OK: < 100 KiB and selftest==42"
+if [ "$MAX_BYTES" -eq 102400 ]; then
+  echo "OK: < 100 KiB and selftest==42"
+else
+  echo "OK: < $LIMIT_LABEL and selftest==42"
+fi

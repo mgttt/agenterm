@@ -8,6 +8,7 @@ trap 'rm -rf -- "$TEMP"' EXIT HUP INT TERM
 XCFRAMEWORK="$TEMP/TinyArcade.xcframework"
 TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT/target/tinyarcade-ios-smoke"}
 CARGO=${CARGO:-cargo}
+RUST_FEATURES=${TINYVM_XCFRAMEWORK_FEATURES:-ios-c-api}
 
 CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"
@@ -53,6 +54,25 @@ xcrun --sdk iphonesimulator swiftc \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
   "$CRATE/tests/ios/TinyArcadeSmoke.swift" \
   -o "$TEMP/TinyArcadeSmoke-x86_64"
+SIMD_LINKED_BYTES=0
+case ",$RUST_FEATURES," in
+  *,simd,*)
+    xcrun --sdk iphonesimulator swiftc \
+      -parse-as-library \
+      -D TINYARCADE_EXTERNAL_CARTRIDGES \
+      -warnings-as-errors \
+      -O \
+      -target arm64-apple-ios14.0-simulator \
+      -I "$SLICE/Headers" \
+      -L "$SLICE" \
+      -lagenterm_tinyvm \
+      -Xlinker -fatal_warnings \
+      "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
+      "$CRATE/tests/ios/TinyArcadeSimdSmoke.swift" \
+      -o "$TEMP/TinyArcadeSimdSmoke-arm64"
+    SIMD_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSimdSmoke-arm64")
+    ;;
+esac
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
   -D TINYARCADE_EXTERNAL_CARTRIDGES \
@@ -163,6 +183,12 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # allocator and late-delivery guards. Fund that complete boundary with two
 # explicit 16 KiB product steps rather than hiding it in an unbounded ceiling.
 MAX_ARM64_LINKED_BYTES=1638400
+# The optional SIMD profile keeps v128 inline and adds its portable interpreter
+# path only when explicitly requested. Give that opt-in product two separate
+# 16 KiB graduation steps; never weaken the default iOS product ceiling.
+case ",$RUST_FEATURES," in
+  *,simd,*) MAX_ARM64_LINKED_BYTES=1671168 ;;
+esac
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
 # Imported-global store identity crosses the next x86_64 linker size bucket;
@@ -171,6 +197,7 @@ MAX_ARM64_LINKED_BYTES=1638400
 # arm64 product ceiling.
 # The simulator slice crosses three matching 16 KiB linker buckets.
 MAX_X86_64_LINKED_BYTES=1736704
+echo "iOS linked sizes: arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$X86_64_LINKED_BYTES" -le "$MAX_X86_64_LINKED_BYTES"
 test "$HOST_PROFILE_CATALOG_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
@@ -178,6 +205,7 @@ test "$REPLAY_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$PRIVATE_LIBRARY_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$GAME_SESSION_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$COMPLETION_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
+test "$SIMD_LINKED_BYTES" -eq 0 || test "$SIMD_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test -f "$XCFRAMEWORK/ios-arm64/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64_x86_64-simulator/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64/Headers/tinyarcade.h"
@@ -206,8 +234,19 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
   "$CRATE/build-depth-well-cartridge.sh" "$DEPTH_CARTRIDGE" >/dev/null
   "$CRATE/build-paddle-guard-cartridge.sh" "$PADDLE_CARTRIDGE" >/dev/null
   "$CRATE/build-async-completion-cartridge.sh" "$COMPLETION_CARTRIDGE" >/dev/null
-  xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
-    "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
+  case ",$RUST_FEATURES," in
+    *,simd,*)
+      SIMD_CARTRIDGE="$TEMP/simd-audio-0.1.0.wasm"
+      CARGO="$CARGO" "$CRATE/build-simd-audio-cartridge.sh" "$SIMD_CARTRIDGE" >/dev/null
+      xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
+        "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
+      xcrun simctl spawn booted "$TEMP/TinyArcadeSimdSmoke-arm64" "$SIMD_CARTRIDGE"
+      ;;
+    *)
+      xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
+        "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
+      ;;
+  esac
   xcrun simctl spawn booted "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64"
   xcrun simctl spawn booted "$TEMP/TinyArcadeReviewedFlowSmoke-arm64" \
     "$PADDLE_CARTRIDGE"
@@ -223,4 +262,4 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
     "$COMPLETION_CARTRIDGE"
 fi
 
-echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} bytes"
+echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"

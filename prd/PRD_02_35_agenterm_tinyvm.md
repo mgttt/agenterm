@@ -171,8 +171,9 @@ agenterm-tinyvm (35)                                      [~]
 │   │           ├── capability-directory std backend         [x]
 │   │           ├── iOS Simulator App container wiring        [x]
 │   │           └── physical iPhone container evidence        [ ]
-│   ├── P2 — standard Wasm coverage                      [ ]
+│   ├── P2 — standard Wasm coverage                      [~]
 │   │   ├── proposal priority by real cartridge workload  [x]
+│   │   ├── optional SIMD signed-PCM mix subset            [x]
 │   │   ├── independent WABT/JSC differential per leaf    [ ]
 │   │   └── size/resource budget retained per leaf        [ ]
 │   ├── P3 — cartridge authoring ecosystem               [~]
@@ -410,6 +411,7 @@ Current evidence owners:
 - [Selected-memory host callbacks](../docs/tinyvm-selected-memory-host.md)
 - [Host resource table](../docs/tinyvm-host-resource-table.md)
 - [Native completion channel](../docs/tinyvm-native-completions.md)
+- [Optional SIMD audio profile](../docs/tinyvm-simd-audio.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [C cartridge authoring](../docs/tinyarcade-c-authoring-v1.md)
