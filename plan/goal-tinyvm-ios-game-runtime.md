@@ -1797,7 +1797,18 @@ Evidence on 2026-08-21:
 - A public runtime black box proves two equal frames retain the exact render and
   audio allocation pointers/capacities, then proves rejected input empties the
   frame, preserves those capacities and leaves the runtime healthy.
-- The migrated C handle lifecycle and replay decoder tests pass, and the full
-  all-feature validation is required below before this increment is published.
+- All 224 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all six WABT/JavaScriptCore proposal oracles,
+  the two-game four-frame WebKit differential, all-target Clippy, formatting,
+  ShellCheck and document redaction pass.
+- The complete booted iPhone 17 Pro simulator path passes reviewed/private
+  ownership, UIKit/CGImage, audio, snapshot, replay, session and native callback
+  flows. Its 600-frame runs measure Depth Well at 0.123 ms average / 0.132 ms
+  p95 / 0.165 ms max and Paddle Guard at 0.205 / 0.262 / 0.997 ms; this remains
+  simulator regression evidence, not a physical-device claim.
+- Swift linkage remains below its gates at 1,552,664 bytes arm64 and 1,624,416
+  bytes x86_64; catalog/replay/private/session consumers are 1,425,512 /
+  1,399,944 / 1,418,112 / 1,417,280 bytes. The stripped static interpreter core
+  remains 86,328 bytes and its C selftest returns 42.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.
