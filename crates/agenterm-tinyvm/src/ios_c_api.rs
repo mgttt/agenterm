@@ -1,19 +1,22 @@
 //! Versioned C ownership boundary for Swift/Objective-C hosts.
 
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use core::ffi::c_void;
 use core::mem::size_of;
 use core::ptr;
 use core::slice;
 use std::boxed::Box;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::thread::{self, ThreadId};
 
 use crate::{
-    CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, ExecutionStats,
-    GameFrame, GameInput, GameLimits, GameRuntime, HostProfileV1, Limits,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1,
-    ReplayTraceV1, WasmError,
+    CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, CompletionError,
+    ExecutionStats, GameFrame, GameInput, GameLimits, GameRuntime, GuestResourceHandle,
+    HostCompletionQueue, HostProfileV1, Limits, MAX_NATIVE_CALLS_PER_LIFECYCLE,
+    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1,
+    ResourceDomainAllocator, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -161,6 +164,40 @@ pub struct TinyArcadeNativeFunctionV1 {
     pub context: *mut c_void,
 }
 
+/// App-owned completion channel. It may be called from a native callback and
+/// is bound to at most one live runtime at a time.
+pub struct TinyArcadeCompletionV1 {
+    owner: ThreadId,
+    module: String,
+    max_calls_per_lifecycle: u32,
+    queue: Rc<RefCell<HostCompletionQueue>>,
+    bound: bool,
+}
+
+static COMPLETION_DOMAINS: Mutex<ResourceDomainAllocator> =
+    Mutex::new(ResourceDomainAllocator::new());
+
+struct CompletionBindings {
+    channels: Vec<*mut TinyArcadeCompletionV1>,
+}
+
+impl Drop for CompletionBindings {
+    fn drop(&mut self) {
+        for channel in &self.channels {
+            // A bound channel cannot be closed, and runtime/channel operations
+            // share one owner thread, so these pointers remain live here.
+            if let Some(channel) = unsafe { channel.as_mut() } {
+                let Ok(mut queue) = channel.queue.try_borrow_mut() else {
+                    continue;
+                };
+                queue.clear();
+                drop(queue);
+                channel.bound = false;
+            }
+        }
+    }
+}
+
 pub struct TinyArcadeTrustStoreV1 {
     owner: ThreadId,
     store: CartridgeTrustStore,
@@ -179,6 +216,7 @@ pub struct TinyArcadeRuntimeV1 {
     snapshot: Vec<u8>,
     replay_recorder: Option<ReplayRecorderV1>,
     replay: Vec<u8>,
+    _completion_bindings: CompletionBindings,
 }
 
 #[derive(Clone, Copy)]
@@ -357,6 +395,47 @@ unsafe fn runtime_mut<'a>(
         ));
     }
     Ok(runtime)
+}
+
+unsafe fn completion_mut<'a>(
+    completion: *mut TinyArcadeCompletionV1,
+) -> Result<&'a mut TinyArcadeCompletionV1, FfiError> {
+    let completion = unsafe { completion.as_mut() }.ok_or(FfiError::new(
+        STATUS_INVALID_ARGUMENT,
+        "null completion channel",
+    ))?;
+    if completion.owner != thread::current().id() {
+        return Err(FfiError::new(
+            STATUS_WRONG_THREAD,
+            "completion channel used from a different thread",
+        ));
+    }
+    Ok(completion)
+}
+
+fn completion_error(error: CompletionError) -> FfiError {
+    match error {
+        CompletionError::Full => FfiError::new(STATUS_STORAGE, "completion queue is full"),
+        CompletionError::AllocationFailed => {
+            FfiError::new(STATUS_STORAGE, "completion allocation failed")
+        }
+        CompletionError::StaleHandle => {
+            FfiError::new(STATUS_INVALID_ARGUMENT, "stale completion ticket")
+        }
+        CompletionError::AlreadyCompleted => {
+            FfiError::new(STATUS_INVALID_ARGUMENT, "completion already delivered")
+        }
+        CompletionError::NotReady => {
+            FfiError::new(STATUS_INVALID_ARGUMENT, "completion is not ready")
+        }
+        CompletionError::PayloadTooLarge => FfiError::new(
+            STATUS_BUFFER_TOO_SMALL,
+            "completion payload exceeds reservation",
+        ),
+        CompletionError::ByteBudgetExceeded => {
+            FfiError::new(STATUS_BUFFER_TOO_SMALL, "completion byte budget exceeded")
+        }
+    }
 }
 
 unsafe fn trust_mut<'a>(
@@ -609,6 +688,55 @@ unsafe fn native_registry(
     Ok(registry)
 }
 
+unsafe fn bind_completion_channels(
+    registry: &mut NativeModuleRegistry,
+    channels: *const *mut TinyArcadeCompletionV1,
+    channel_count: usize,
+) -> Result<CompletionBindings, FfiError> {
+    if channel_count > MAX_NATIVE_FUNCTIONS / 3 || (channel_count != 0 && channels.is_null()) {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid completion channel table",
+        ));
+    }
+    let channels = if channel_count == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(channels, channel_count) }
+    };
+    let mut bound = Vec::new();
+    bound
+        .try_reserve_exact(channels.len())
+        .map_err(|_| FfiError::new(STATUS_STORAGE, "completion binding allocation failed"))?;
+    for &pointer in channels {
+        if bound.contains(&pointer) {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "duplicate completion channel",
+            ));
+        }
+        let channel = unsafe { completion_mut(pointer)? };
+        if channel.bound || !channel.queue.borrow().is_empty() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "completion channel is already bound or active",
+            ));
+        }
+        registry
+            .attach_completion_queue(
+                &channel.module,
+                channel.queue.clone(),
+                channel.max_calls_per_lifecycle,
+            )
+            .map_err(wasm_error)?;
+        bound.push(pointer);
+    }
+    for &pointer in &bound {
+        unsafe { completion_mut(pointer)? }.bound = true;
+    }
+    Ok(CompletionBindings { channels: bound })
+}
+
 unsafe fn copy_bytes(
     bytes: &[u8],
     output: *mut u8,
@@ -633,7 +761,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 9
+    (1 << 16) | 10
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -752,6 +880,30 @@ pub unsafe extern "C" fn tinyarcade_v1_copy_host_profile(
     })
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_copy_host_profile_with_completions(
+    config: *const TinyArcadeConfigV1,
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+    completions: *const *mut TinyArcadeCompletionV1,
+    completion_count: usize,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let config = unsafe { read_runtime_config(config)? };
+        let mut registry = unsafe { native_registry(functions, function_count)? };
+        let _bindings =
+            unsafe { bind_completion_channels(&mut registry, completions, completion_count)? };
+        let profile = registry
+            .host_profile(config.vm_limits, config.game_limits)
+            .map_err(wasm_error)?;
+        let encoded = profile.encode().map_err(wasm_error)?;
+        unsafe { copy_bytes(&encoded, output, capacity, output_len) }
+    })
+}
+
 /// Statically check standard cartridge bytes against one exact TAH1 profile.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tinyarcade_v1_check_cartridge_host_profile(
@@ -792,6 +944,191 @@ pub unsafe extern "C" fn tinyarcade_v1_default_config(config: *mut TinyArcadeCon
         };
         unsafe { config.write(value) };
         Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_completion_create(
+    module: *const u8,
+    module_len: usize,
+    max_pending: u32,
+    max_reserved_bytes: usize,
+    max_calls_per_lifecycle: u32,
+    output: *mut *mut TinyArcadeCompletionV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null completion channel output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let module = unsafe { input_string(module, module_len, 128, "invalid native module")? };
+        let max_pending = u16::try_from(max_pending).map_err(|_| {
+            FfiError::new(STATUS_INVALID_ARGUMENT, "invalid completion request limit")
+        })?;
+        if max_pending == 0
+            || max_reserved_bytes == 0
+            || max_calls_per_lifecycle == 0
+            || max_calls_per_lifecycle > MAX_NATIVE_CALLS_PER_LIFECYCLE
+        {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid completion channel limits",
+            ));
+        }
+        let queue = {
+            let mut allocator = COMPLETION_DOMAINS.lock().map_err(|_| {
+                FfiError::new(STATUS_PANIC, "completion domain allocator unavailable")
+            })?;
+            HostCompletionQueue::with_domain_allocator(
+                max_pending,
+                max_reserved_bytes,
+                &mut allocator,
+            )
+            .map_err(completion_error)?
+        };
+        let queue = Rc::new(RefCell::new(queue));
+        let mut validation_registry = NativeModuleRegistry::new();
+        validation_registry
+            .attach_completion_queue(&module, queue.clone(), max_calls_per_lifecycle)
+            .map_err(wasm_error)?;
+        let handle = Box::new(TinyArcadeCompletionV1 {
+            owner: thread::current().id(),
+            module,
+            max_calls_per_lifecycle,
+            queue,
+            bound: false,
+        });
+        unsafe { output.write(Box::into_raw(handle)) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_completion_close(
+    completion: *mut TinyArcadeCompletionV1,
+) -> i32 {
+    boundary(|| {
+        let completion_ref = unsafe { completion_mut(completion)? };
+        if completion_ref.bound {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "completion channel is bound to a runtime",
+            ));
+        }
+        drop(unsafe { Box::from_raw(completion) });
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_completion_begin(
+    completion: *mut TinyArcadeCompletionV1,
+    max_payload_bytes: usize,
+    ticket: *mut i32,
+) -> i32 {
+    boundary(|| {
+        if ticket.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null completion ticket",
+            ));
+        }
+        unsafe { ticket.write(0) };
+        let completion = unsafe { completion_mut(completion)? };
+        if !completion.bound {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "completion channel is not bound",
+            ));
+        }
+        let handle = completion
+            .queue
+            .try_borrow_mut()
+            .map_err(|_| FfiError::new(STATUS_INVALID_ARGUMENT, "completion reentrancy"))?
+            .begin(max_payload_bytes)
+            .map_err(completion_error)?;
+        unsafe { ticket.write(handle.as_i32()) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_completion_complete(
+    completion: *mut TinyArcadeCompletionV1,
+    ticket: i32,
+    native_status: i32,
+    payload: *const u8,
+    payload_len: usize,
+) -> i32 {
+    boundary(|| {
+        let completion = unsafe { completion_mut(completion)? };
+        if !completion.bound {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "completion channel is not bound",
+            ));
+        }
+        let handle = GuestResourceHandle::from_i32(ticket).ok_or(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid completion ticket",
+        ))?;
+        if payload_len
+            > completion
+                .queue
+                .try_borrow()
+                .map_err(|_| FfiError::new(STATUS_INVALID_ARGUMENT, "completion reentrancy"))?
+                .max_reserved_bytes()
+        {
+            return Err(FfiError::new(
+                STATUS_BUFFER_TOO_SMALL,
+                "completion payload exceeds channel budget",
+            ));
+        }
+        let input = if payload_len == 0 {
+            &[][..]
+        } else {
+            unsafe { input_bytes(payload, payload_len, "invalid completion payload")? }
+        };
+        let mut owned = Vec::new();
+        owned
+            .try_reserve_exact(input.len())
+            .map_err(|_| FfiError::new(STATUS_STORAGE, "completion payload allocation failed"))?;
+        owned.extend_from_slice(input);
+        completion
+            .queue
+            .try_borrow_mut()
+            .map_err(|_| FfiError::new(STATUS_INVALID_ARGUMENT, "completion reentrancy"))?
+            .try_complete(handle, native_status, owned)
+            .map_err(|rejection| completion_error(rejection.error))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_completion_cancel(
+    completion: *mut TinyArcadeCompletionV1,
+    ticket: i32,
+) -> i32 {
+    boundary(|| {
+        let completion = unsafe { completion_mut(completion)? };
+        if !completion.bound {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "completion channel is not bound",
+            ));
+        }
+        let handle = GuestResourceHandle::from_i32(ticket).ok_or(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid completion ticket",
+        ))?;
+        completion
+            .queue
+            .try_borrow_mut()
+            .map_err(|_| FfiError::new(STATUS_INVALID_ARGUMENT, "completion reentrancy"))?
+            .cancel(handle)
+            .map_err(completion_error)
     })
 }
 
@@ -1019,6 +1356,7 @@ unsafe fn open_runtime(
     wasm_len: usize,
     config: *const TinyArcadeConfigV1,
     output: *mut *mut TinyArcadeRuntimeV1,
+    completion_bindings: CompletionBindings,
     create: impl FnOnce(&[u8], Limits, GameLimits, u32) -> Result<GameRuntime, FfiError>,
 ) -> Result<(), FfiError> {
     if output.is_null() {
@@ -1044,6 +1382,7 @@ unsafe fn open_runtime(
         snapshot: Vec::new(),
         replay_recorder: None,
         replay: Vec::new(),
+        _completion_bindings: completion_bindings,
     });
     unsafe { output.write(Box::into_raw(handle)) };
     Ok(())
@@ -1057,9 +1396,18 @@ pub unsafe extern "C" fn tinyarcade_v1_open(
     output: *mut *mut TinyArcadeRuntimeV1,
 ) -> i32 {
     boundary(|| unsafe {
-        open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
-            GameRuntime::from_bytes(bytes, vm, game, seed).map_err(wasm_error)
-        })
+        open_runtime(
+            wasm,
+            wasm_len,
+            config,
+            output,
+            CompletionBindings {
+                channels: Vec::new(),
+            },
+            |bytes, vm, game, seed| {
+                GameRuntime::from_bytes(bytes, vm, game, seed).map_err(wasm_error)
+            },
+        )
     })
 }
 
@@ -1082,10 +1430,57 @@ pub unsafe extern "C" fn tinyarcade_v1_open_with_native_modules(
         unsafe { output.write(ptr::null_mut()) };
         let registry = unsafe { native_registry(functions, function_count)? };
         unsafe {
-            open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
-                GameRuntime::from_bytes_with_registry(bytes, vm, game, seed, registry)
-                    .map_err(wasm_error)
-            })
+            open_runtime(
+                wasm,
+                wasm_len,
+                config,
+                output,
+                CompletionBindings {
+                    channels: Vec::new(),
+                },
+                |bytes, vm, game, seed| {
+                    GameRuntime::from_bytes_with_registry(bytes, vm, game, seed, registry)
+                        .map_err(wasm_error)
+                },
+            )
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_open_with_native_completions(
+    wasm: *const u8,
+    wasm_len: usize,
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+    completions: *const *mut TinyArcadeCompletionV1,
+    completion_count: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null runtime output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let mut registry = unsafe { native_registry(functions, function_count)? };
+        let bindings =
+            unsafe { bind_completion_channels(&mut registry, completions, completion_count)? };
+        unsafe {
+            open_runtime(
+                wasm,
+                wasm_len,
+                config,
+                output,
+                bindings,
+                |bytes, vm, game, seed| {
+                    GameRuntime::from_bytes_with_registry(bytes, vm, game, seed, registry)
+                        .map_err(wasm_error)
+                },
+            )
         }
     })
 }
@@ -1098,9 +1493,18 @@ pub unsafe extern "C" fn tinyarcade_v1_open_private(
     output: *mut *mut TinyArcadeRuntimeV1,
 ) -> i32 {
     boundary(|| unsafe {
-        open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
-            GameRuntime::from_private_bytes(bytes, vm, game, seed).map_err(wasm_error)
-        })
+        open_runtime(
+            wasm,
+            wasm_len,
+            config,
+            output,
+            CompletionBindings {
+                channels: Vec::new(),
+            },
+            |bytes, vm, game, seed| {
+                GameRuntime::from_private_bytes(bytes, vm, game, seed).map_err(wasm_error)
+            },
+        )
     })
 }
 
@@ -1124,10 +1528,19 @@ pub unsafe extern "C" fn tinyarcade_v1_open_reviewed(
         let entry = unsafe { catalog_entry(entry)? };
         let trust = unsafe { trust_mut(trust)? };
         unsafe {
-            open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
-                GameRuntime::from_reviewed_bytes(bytes, &entry, &trust.store, vm, game, seed)
-                    .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
-            })
+            open_runtime(
+                wasm,
+                wasm_len,
+                config,
+                output,
+                CompletionBindings {
+                    channels: Vec::new(),
+                },
+                |bytes, vm, game, seed| {
+                    GameRuntime::from_reviewed_bytes(bytes, &entry, &trust.store, vm, game, seed)
+                        .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+                },
+            )
         }
     })
 }
@@ -1155,18 +1568,77 @@ pub unsafe extern "C" fn tinyarcade_v1_open_reviewed_with_native_modules(
         let trust = unsafe { trust_mut(trust)? };
         let registry = unsafe { native_registry(functions, function_count)? };
         unsafe {
-            open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
-                GameRuntime::from_reviewed_bytes_with_registry(
-                    bytes,
-                    &entry,
-                    &trust.store,
-                    vm,
-                    game,
-                    seed,
-                    registry,
-                )
-                .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
-            })
+            open_runtime(
+                wasm,
+                wasm_len,
+                config,
+                output,
+                CompletionBindings {
+                    channels: Vec::new(),
+                },
+                |bytes, vm, game, seed| {
+                    GameRuntime::from_reviewed_bytes_with_registry(
+                        bytes,
+                        &entry,
+                        &trust.store,
+                        vm,
+                        game,
+                        seed,
+                        registry,
+                    )
+                    .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+                },
+            )
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_open_reviewed_with_native_completions(
+    wasm: *const u8,
+    wasm_len: usize,
+    entry: *const TinyArcadeCatalogEntryV1,
+    trust: *mut TinyArcadeTrustStoreV1,
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+    completions: *const *mut TinyArcadeCompletionV1,
+    completion_count: usize,
+    config: *const TinyArcadeConfigV1,
+    output: *mut *mut TinyArcadeRuntimeV1,
+) -> i32 {
+    boundary(|| {
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null runtime output",
+            ));
+        }
+        unsafe { output.write(ptr::null_mut()) };
+        let entry = unsafe { catalog_entry(entry)? };
+        let trust = unsafe { trust_mut(trust)? };
+        let mut registry = unsafe { native_registry(functions, function_count)? };
+        let bindings =
+            unsafe { bind_completion_channels(&mut registry, completions, completion_count)? };
+        unsafe {
+            open_runtime(
+                wasm,
+                wasm_len,
+                config,
+                output,
+                bindings,
+                |bytes, vm, game, seed| {
+                    GameRuntime::from_reviewed_bytes_with_registry(
+                        bytes,
+                        &entry,
+                        &trust.store,
+                        vm,
+                        game,
+                        seed,
+                        registry,
+                    )
+                    .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
+                },
+            )
         }
     })
 }
@@ -1588,7 +2060,7 @@ pub unsafe extern "C" fn tinyarcade_v1_last_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CartridgeOrigin, cartridge_sha256};
+    use crate::{CartridgeManifest, CartridgeOrigin, cartridge_sha256};
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::mem::MaybeUninit;
     use std::path::PathBuf;
@@ -1780,6 +2252,32 @@ mod tests {
             memory.add(4).write(9);
         }
         STATUS_OK
+    }
+
+    struct CompletionProbe {
+        channel: *mut TinyArcadeCompletionV1,
+        ticket: Cell<i32>,
+    }
+
+    unsafe extern "C" fn native_completion_start(
+        context: *mut c_void,
+        _params: *const i32,
+        n_params: usize,
+        results: *mut i32,
+        n_results: usize,
+        _memory: *mut u8,
+        _memory_len: usize,
+    ) -> i32 {
+        assert_eq!(n_params, 0);
+        assert_eq!(n_results, 1);
+        let probe = unsafe { &*context.cast::<CompletionProbe>() };
+        let mut ticket = 0;
+        let status = unsafe { tinyarcade_v1_completion_begin(probe.channel, 4, &mut ticket) };
+        if status == STATUS_OK {
+            probe.ticket.set(ticket);
+            unsafe { results.write(ticket) };
+        }
+        status
     }
 
     struct ReentrantProbe {
@@ -1978,7 +2476,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 9);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 10);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -2543,6 +3041,180 @@ mod tests {
     }
 
     #[test]
+    fn c_completion_channel_survives_callback_and_rejects_late_delivery() {
+        let module = "fan:async/v1";
+        let bare = wat::parse_str(format!(
+            r#"(module
+                (import "{module}" "start" (func $start (result i32)))
+                (import "{module}" "completion_poll"
+                  (func $poll (param i32 i32 i32) (result i32)))
+                (import "{module}" "completion_take"
+                  (func $take (param i32 i32 i32) (result i32)))
+                (import "{module}" "completion_cancel"
+                  (func $cancel (param i32) (result i32)))
+                (import "tinyarcade:core/v1" "submit_render"
+                  (func $submit_render (param i32 i32) (result i32)))
+                (memory 1)
+                (global $ticket (mut i32) (i32.const 0))
+                (func (export "game_abi_version") (result i32) (i32.const 1))
+                (func (export "game_init") (result i32)
+                  call $start global.set $ticket i32.const 0)
+                (func (export "game_tick") (result i32)
+                  global.get $ticket i32.const 0 i32.const 4 call $poll
+                  i32.const 1 i32.eq
+                  if
+                    global.get $ticket i32.const 8 i32.const 4 call $take drop
+                    i32.const 8 i32.const 4 call $submit_render drop
+                  end
+                  i32.const 0)
+                (func (export "game_suspend") (result i32) (i32.const 0))
+                (func (export "game_resume") (result i32) (i32.const 0)))"#
+        ))
+        .expect("compile C completion cartridge");
+        let wasm = CartridgeManifest {
+            game_id: "c.async".to_owned(),
+            game_version: "1.0.0".to_owned(),
+            abi_version: 1,
+            state_version: 1,
+            capabilities: vec![module.to_owned()],
+        }
+        .append_to_wasm(&bare)
+        .expect("attach C completion manifest");
+
+        let mut completion = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_completion_create(
+                    module.as_ptr(),
+                    module.len(),
+                    2,
+                    8,
+                    8,
+                    &mut completion,
+                )
+            },
+            STATUS_OK
+        );
+        let start = b"start";
+        let mut probe = CompletionProbe {
+            channel: completion,
+            ticket: Cell::new(0),
+        };
+        let function = TinyArcadeNativeFunctionV1 {
+            struct_size: size_of::<TinyArcadeNativeFunctionV1>() as u32,
+            module: module.as_ptr(),
+            module_len: module.len(),
+            field: start.as_ptr(),
+            field_len: start.len(),
+            n_params: 0,
+            n_results: 1,
+            max_calls_per_lifecycle: 1,
+            callback: Some(native_completion_start),
+            context: (&mut probe as *mut CompletionProbe).cast(),
+        };
+        let config = unsafe { config() };
+        let mut profile_len = 0;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile_with_completions(
+                    &config,
+                    &function,
+                    1,
+                    &completion,
+                    1,
+                    ptr::null_mut(),
+                    0,
+                    &mut profile_len,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        assert!(profile_len > 56);
+        let mut runtime = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_open_with_native_completions(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    &function,
+                    1,
+                    &completion,
+                    1,
+                    &config,
+                    &mut runtime,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_completion_close(completion) },
+            STATUS_INVALID_ARGUMENT
+        );
+        let ticket = probe.ticket.get();
+        assert_ne!(ticket, 0);
+        let address = completion as usize;
+        assert_eq!(
+            std::thread::spawn(move || unsafe {
+                tinyarcade_v1_completion_complete(
+                    address as *mut TinyArcadeCompletionV1,
+                    ticket,
+                    7,
+                    [1u8, 2, 3, 4].as_ptr(),
+                    4,
+                )
+            })
+            .join()
+            .expect("wrong-thread completion probe"),
+            STATUS_WRONG_THREAD
+        );
+        let payload = [1u8, 2, 3, 4];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_completion_complete(
+                    completion,
+                    ticket,
+                    7,
+                    payload.as_ptr(),
+                    payload.len(),
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 0) }, STATUS_OK);
+        let mut render = [0; 4];
+        let mut render_len = 0;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_render(
+                    runtime,
+                    render.as_mut_ptr(),
+                    render.len(),
+                    &mut render_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(render, payload);
+        assert_eq!(unsafe { tinyarcade_v1_close(runtime) }, STATUS_OK);
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_completion_complete(
+                    completion,
+                    ticket,
+                    7,
+                    payload.as_ptr(),
+                    payload.len(),
+                )
+            },
+            STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe { tinyarcade_v1_completion_close(completion) },
+            STATUS_OK
+        );
+    }
+
+    #[test]
     fn c_native_callback_cannot_reenter_a_runtime_handle() {
         let wasm = native_cartridge();
         let config = unsafe { config() };
@@ -2851,7 +3523,13 @@ mod tests {
             "tinyarcade_v1_default_config",
             "tinyarcade_v1_copy_cartridge_descriptor",
             "tinyarcade_v1_copy_host_profile",
+            "tinyarcade_v1_copy_host_profile_with_completions",
             "tinyarcade_v1_check_cartridge_host_profile",
+            "tinyarcade_v1_completion_create",
+            "tinyarcade_v1_completion_close",
+            "tinyarcade_v1_completion_begin",
+            "tinyarcade_v1_completion_complete",
+            "tinyarcade_v1_completion_cancel",
             "tinyarcade_v1_trust_store_create",
             "tinyarcade_v1_trust_store_close",
             "tinyarcade_v1_trust_store_add_key",
@@ -2865,9 +3543,11 @@ mod tests {
             "tinyarcade_v1_cache_copy_wasm",
             "tinyarcade_v1_open",
             "tinyarcade_v1_open_with_native_modules",
+            "tinyarcade_v1_open_with_native_completions",
             "tinyarcade_v1_open_private",
             "tinyarcade_v1_open_reviewed",
             "tinyarcade_v1_open_reviewed_with_native_modules",
+            "tinyarcade_v1_open_reviewed_with_native_completions",
             "tinyarcade_v1_close",
             "tinyarcade_v1_tick",
             "tinyarcade_v1_replay_begin",

@@ -9,12 +9,13 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 9u
-#define TINYARCADE_ABI_VERSION 0x00010009u
+#define TINYARCADE_ABI_MINOR 10u
+#define TINYARCADE_ABI_VERSION 0x0001000au
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
 typedef struct tinyarcade_cartridge_cache_v1 tinyarcade_cartridge_cache_v1;
+typedef struct tinyarcade_completion_v1 tinyarcade_completion_v1;
 
 typedef enum tinyarcade_status_v1 {
     TINYARCADE_OK = 0,
@@ -133,6 +134,36 @@ typedef struct tinyarcade_native_function_v1 {
     void* context;
 } tinyarcade_native_function_v1;
 
+/* ABI v1.10 completion channels are app-owned, single-thread-owned handles.
+ * Create one before opening a runtime, capture it in the module-specific start
+ * callback, and return the ticket from completion_begin to the guest. The
+ * runtime supplies completion_poll/take/cancel in the same module. Platform
+ * work stays outside tinyvm; marshal completion back onto the owner thread.
+ * A channel cannot close while bound, and runtime close clears all requests so
+ * late delivery fails safely. Payload input is copied during complete. */
+tinyarcade_status_v1 tinyarcade_v1_completion_create(
+    const uint8_t* module,
+    size_t module_len,
+    uint32_t max_pending,
+    size_t max_reserved_bytes,
+    uint32_t max_calls_per_lifecycle,
+    tinyarcade_completion_v1** output);
+tinyarcade_status_v1 tinyarcade_v1_completion_close(
+    tinyarcade_completion_v1* completion);
+tinyarcade_status_v1 tinyarcade_v1_completion_begin(
+    tinyarcade_completion_v1* completion,
+    size_t max_payload_bytes,
+    int32_t* ticket);
+tinyarcade_status_v1 tinyarcade_v1_completion_complete(
+    tinyarcade_completion_v1* completion,
+    int32_t ticket,
+    int32_t native_status,
+    const uint8_t* payload,
+    size_t payload_len);
+tinyarcade_status_v1 tinyarcade_v1_completion_cancel(
+    tinyarcade_completion_v1* completion,
+    int32_t ticket);
+
 uint32_t tinyarcade_v1_abi_version(void);
 tinyarcade_status_v1 tinyarcade_v1_default_config(tinyarcade_config_v1* config);
 
@@ -154,6 +185,15 @@ tinyarcade_status_v1 tinyarcade_v1_copy_host_profile(
     const tinyarcade_config_v1* config,
     const tinyarcade_native_function_v1* functions,
     size_t function_count,
+    uint8_t* output,
+    size_t capacity,
+    size_t* output_len);
+tinyarcade_status_v1 tinyarcade_v1_copy_host_profile_with_completions(
+    const tinyarcade_config_v1* config,
+    const tinyarcade_native_function_v1* functions,
+    size_t function_count,
+    tinyarcade_completion_v1* const* completions,
+    size_t completion_count,
     uint8_t* output,
     size_t capacity,
     size_t* output_len);
@@ -238,6 +278,19 @@ tinyarcade_status_v1 tinyarcade_v1_open_with_native_modules(
     size_t function_count,
     const tinyarcade_config_v1* config,
     tinyarcade_runtime_v1** output);
+/* Adds the three common completion imports for each channel. Channel pointers
+ * are borrowed until runtime close and must be unique and unbound. Ordinary
+ * function callbacks may call completion_begin, but runtime reentry remains
+ * forbidden. */
+tinyarcade_status_v1 tinyarcade_v1_open_with_native_completions(
+    const uint8_t* wasm,
+    size_t wasm_len,
+    const tinyarcade_native_function_v1* functions,
+    size_t function_count,
+    tinyarcade_completion_v1* const* completions,
+    size_t completion_count,
+    const tinyarcade_config_v1* config,
+    tinyarcade_runtime_v1** output);
 /* Private imports get only tinyarcade:core/v1. This entry point never grants
  * official catalog provenance or a native capability registry. */
 tinyarcade_status_v1 tinyarcade_v1_open_private(
@@ -263,6 +316,17 @@ tinyarcade_status_v1 tinyarcade_v1_open_reviewed_with_native_modules(
     tinyarcade_trust_store_v1* trust,
     const tinyarcade_native_function_v1* functions,
     size_t function_count,
+    const tinyarcade_config_v1* config,
+    tinyarcade_runtime_v1** output);
+tinyarcade_status_v1 tinyarcade_v1_open_reviewed_with_native_completions(
+    const uint8_t* wasm,
+    size_t wasm_len,
+    const tinyarcade_catalog_entry_v1* entry,
+    tinyarcade_trust_store_v1* trust,
+    const tinyarcade_native_function_v1* functions,
+    size_t function_count,
+    tinyarcade_completion_v1* const* completions,
+    size_t completion_count,
     const tinyarcade_config_v1* config,
     tinyarcade_runtime_v1** output);
 tinyarcade_status_v1 tinyarcade_v1_close(tinyarcade_runtime_v1* runtime);

@@ -1,6 +1,6 @@
 #include "tinyarcade.h"
 
-_Static_assert(TINYARCADE_ABI_VERSION == 0x00010009u, "ABI version drift");
+_Static_assert(TINYARCADE_ABI_VERSION == 0x0001000au, "ABI version drift");
 _Static_assert(sizeof(tinyarcade_config_v1) == 48, "config layout drift");
 _Static_assert(sizeof(tinyarcade_execution_stats_v1) == 40, "stats layout drift");
 _Static_assert(sizeof(tinyarcade_execution_stats_v2) == 48, "extended stats layout drift");
@@ -27,6 +27,7 @@ static void typecheck(void) {
     tinyarcade_runtime_v1* runtime = 0;
     tinyarcade_trust_store_v1* trust = 0;
     tinyarcade_cartridge_cache_v1* cache = 0;
+    tinyarcade_completion_v1* completion = 0;
     tinyarcade_catalog_entry_v1 entry = {0};
     tinyarcade_native_function_v1 native = {
         .struct_size = sizeof(tinyarcade_native_function_v1),
@@ -45,8 +46,17 @@ static void typecheck(void) {
     tinyarcade_execution_stats_v2 stats_v2;
     (void)tinyarcade_v1_default_config(&config);
     (void)tinyarcade_v1_copy_cartridge_descriptor(0, 0, 0, 0, 0);
+    (void)tinyarcade_v1_copy_host_profile_with_completions(
+        &config, &native, 1, &completion, 1, 0, 0, 0);
     (void)tinyarcade_v1_open(0, 0, &config, &runtime);
     (void)tinyarcade_v1_open_with_native_modules(0, 0, &native, 1, &config, &runtime);
+    (void)tinyarcade_v1_completion_create(
+        (const uint8_t*)"fan:async/v1", 12, 4, 1024, 8, &completion);
+    (void)tinyarcade_v1_completion_begin(completion, 64, 0);
+    (void)tinyarcade_v1_completion_complete(completion, 1, 0, 0, 0);
+    (void)tinyarcade_v1_completion_cancel(completion, 1);
+    (void)tinyarcade_v1_open_with_native_completions(
+        0, 0, &native, 1, &completion, 1, &config, &runtime);
     (void)tinyarcade_v1_open_private(0, 0, &config, &runtime);
     (void)tinyarcade_v1_trust_store_create(&trust);
     (void)tinyarcade_v1_trust_store_add_key(trust, 0, 0, 0, 0);
@@ -61,6 +71,8 @@ static void typecheck(void) {
     (void)tinyarcade_v1_open_reviewed(0, 0, &entry, trust, &config, &runtime);
     (void)tinyarcade_v1_open_reviewed_with_native_modules(
         0, 0, &entry, trust, &native, 1, &config, &runtime);
+    (void)tinyarcade_v1_open_reviewed_with_native_completions(
+        0, 0, &entry, trust, &native, 1, &completion, 1, &config, &runtime);
     (void)tinyarcade_v1_tick(runtime, 0, 0);
     (void)tinyarcade_v1_replay_begin(runtime);
     (void)tinyarcade_v1_replay_finish(runtime);
@@ -73,6 +85,7 @@ static void typecheck(void) {
     (void)tinyarcade_v1_last_execution_stats(runtime, &stats);
     (void)tinyarcade_v1_last_execution_stats_v2(runtime, &stats_v2);
     (void)tinyarcade_v1_close(runtime);
+    (void)tinyarcade_v1_completion_close(completion);
     (void)tinyarcade_v1_trust_store_close(trust);
 }
 

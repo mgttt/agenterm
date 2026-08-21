@@ -3700,3 +3700,38 @@ isolated `no_std` library tests, warnings-denied all-feature and isolated
 `no_std` Clippy, arm64 iOS `no_std`, rustfmt and document-redaction gates pass.
 Default linked sizes remain 1,603,208 bytes arm64 and 1,682,184 bytes x86_64;
 the stripped static core remains 101,256 bytes with selftest 42.
+
+## One-hundred-fifteenth executable increment — iOS completion owner
+
+C ABI v1.10 and the Swift package now make the host-neutral completion protocol
+usable by an actual iOS app. An app creates a bounded, versioned-module channel
+before runtime open, captures it in the module-specific synchronous `start`
+callback, returns a generation-checked ticket to Wasm, and later marshals the
+result onto the owner thread. Runtime open binds the channel and installs the
+common poll/take/cancel imports; runtime close clears all work and unbinds it.
+The channel cannot close while bound, rejects cross-thread use, and rejects a
+late result after runtime teardown without retaining or reentering the runtime
+handle.
+
+The Swift `TinyArcadeCompletionV1` owner and native handler closures are
+`@MainActor`. Host-profile export accepts the identical completion-channel set,
+so converter preflight sees the same imports as execution. Both bundled and
+reviewed open paths accept completion channels without changing older ABI
+struct prefixes or entry points.
+
+Evidence on 2026-08-22: an independently WAT-compiled C-boundary cartridge
+starts work from guest init, allocates its ticket inside the native callback,
+accepts a copied four-byte result, and renders the bytes after guest poll/take.
+The same black box proves wrong-thread rejection, close-while-bound rejection,
+profile export without leaving the channel bound, and safe late-delivery
+rejection after runtime close. Public C header syntax and a Swift smoke compile
+exercise channel capture plus host-profile publication. The executable PRD
+trace now binds 111 completed claims. All 129 all-feature library tests, 34
+game-runtime tests and every non-ignored integration test pass, including the
+iOS device/universal-simulator XCFramework, optional WASI container and the
+four-cartridge tinyvm/JSC/H5 differential. All 115 isolated `no_std` library
+tests, warnings-denied all-feature and isolated `no_std` Clippy, arm64 iOS
+`no_std`, rustfmt, shell syntax, documentation-redaction and diff gates pass.
+Linked sizes are 1,637,144 bytes arm64, 1,725,840 bytes x86_64 and 1,142,688
+bytes for the focused completion consumer. The stripped static core remains
+101,256 bytes with selftest 42.

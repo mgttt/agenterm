@@ -70,6 +70,18 @@ pub struct HostCompletionQueue {
 }
 
 impl HostCompletionQueue {
+    /// Create a queue with a fresh process-lifetime handle domain.
+    pub fn with_domain_allocator(
+        max_pending: u16,
+        max_reserved_bytes: usize,
+        allocator: &mut crate::ResourceDomainAllocator,
+    ) -> Result<Self, CompletionError> {
+        let domain = allocator.claim().map_err(map_table_error)?;
+        let (table, _) =
+            crate::HostResourceTable::new_tracked(domain, max_pending).map_err(map_table_error)?;
+        Ok(Self::new(table, max_reserved_bytes))
+    }
+
     pub(crate) fn new(
         table: HostResourceTable<CompletionState>,
         max_reserved_bytes: usize,
@@ -99,6 +111,12 @@ impl HostCompletionQueue {
 
     pub const fn domain(&self) -> crate::ResourceHandleDomain {
         self.table.domain()
+    }
+
+    pub(crate) fn activity(&self) -> crate::resource_table::ResourceActivity {
+        self.table
+            .activity()
+            .expect("completion queues always use tracked resource tables")
     }
 
     /// Reserve one stable request identity and its complete response allowance

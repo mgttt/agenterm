@@ -2,7 +2,7 @@
 
 Owner: [PRD 02.35](../prd/PRD_02_35_agenterm_tinyvm.md)
 
-Status: host-neutral core and reusable guest protocol implemented
+Status: host-neutral core, reusable guest protocol and iOS C/Swift owner implemented
 
 `HostCompletionQueue` is the common `no_std + alloc` state machine for native
 work that cannot finish inside a synchronous Wasm import. It deliberately owns
@@ -75,3 +75,21 @@ input at a lifecycle boundary.
 This adopts QJWasm's useful separation between call, callback and completion
 channels without adopting QuickJS, a two-runtime ownership graph, or its thread
 protocol as an iOS dependency.
+
+## iOS ownership boundary
+
+C ABI v1.10 exposes an opaque `tinyarcade_completion_v1` independently of the
+runtime handle. The app creates it first, captures it in the module-specific
+native `start` callback, calls `completion_begin`, and returns that ticket to
+the guest. Platform work remains app-owned. The app copies its final payload
+through `completion_complete` only after marshalling back to the runtime owner
+thread. Swift exposes the same model as the `@MainActor`
+`TinyArcadeCompletionV1` owner.
+
+The channel binds to at most one live runtime. Closing it while bound fails;
+closing the runtime clears every pending/ready request and unbinds it, so a
+late platform result receives an explicit error without dereferencing a dead
+runtime. The runtime borrows the channel handle until close, while Swift retains
+the channel for that exact interval. `copy_host_profile_with_completions`
+publishes the ordinary start function and all three common imports, keeping
+converter preflight identical to runtime binding.

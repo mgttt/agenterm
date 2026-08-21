@@ -1538,6 +1538,79 @@ private final class TinyArcadeBoundedHTTPTransfer: NSObject,
 
 #endif
 
+/// Main-actor owner for one bounded native completion channel. The app starts
+/// platform work from its module-specific native callback, returns `begin`'s
+/// ticket to the guest, then marshals `complete` back to the main actor.
+@MainActor
+public final class TinyArcadeCompletionV1 {
+    private var handle: OpaquePointer?
+
+    public init(
+        module: String,
+        maxPending: UInt32,
+        maxReservedBytes: Int,
+        maxCallsPerLifecycle: UInt32 = 8
+    ) throws {
+        let moduleBytes = Data(module.utf8)
+        var created: OpaquePointer?
+        let status = moduleBytes.withUnsafeBytes { bytes in
+            tinyarcade_v1_completion_create(
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                bytes.count,
+                maxPending,
+                maxReservedBytes,
+                maxCallsPerLifecycle,
+                &created
+            )
+        }
+        try TinyArcadeRuntimeV1.check(status)
+        handle = try TinyArcadeRuntimeV1.requireHandle(created)
+    }
+
+    isolated deinit {
+        if let handle {
+            _ = tinyarcade_v1_completion_close(handle)
+        }
+    }
+
+    public func begin(maxPayloadBytes: Int) throws -> Int32 {
+        var ticket: Int32 = 0
+        try TinyArcadeRuntimeV1.check(
+            tinyarcade_v1_completion_begin(try liveHandle(), maxPayloadBytes, &ticket)
+        )
+        return ticket
+    }
+
+    public func complete(ticket: Int32, status: Int32, payload: Data = Data()) throws {
+        let result = try payload.withUnsafeBytes { bytes in
+            tinyarcade_v1_completion_complete(
+                try liveHandle(),
+                ticket,
+                status,
+                bytes.bindMemory(to: UInt8.self).baseAddress,
+                bytes.count
+            )
+        }
+        try TinyArcadeRuntimeV1.check(result)
+    }
+
+    public func cancel(ticket: Int32) throws {
+        try TinyArcadeRuntimeV1.check(
+            tinyarcade_v1_completion_cancel(try liveHandle(), ticket)
+        )
+    }
+
+    public func close() throws {
+        guard let handle else { return }
+        try TinyArcadeRuntimeV1.check(tinyarcade_v1_completion_close(handle))
+        self.handle = nil
+    }
+
+    fileprivate func liveHandle() throws -> OpaquePointer {
+        try TinyArcadeRuntimeV1.requireHandle(handle)
+    }
+}
+
 /// One exact, versioned native capability exposed to a bundled or reviewed cartridge.
 /// The handler runs synchronously on the runtime owner thread. It must not retain `memory`
 /// or call into any `TinyArcadeRuntimeV1` until it returns; runtime reentry is rejected.
@@ -1547,7 +1620,7 @@ public struct TinyArcadeNativeFunctionV1 {
     public let parameterCount: UInt32
     public let resultCount: UInt32
     public let maxCallsPerLifecycle: UInt32
-    public let handler: ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
+    public let handler: @MainActor ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
 
     public init(
         module: String,
@@ -1555,7 +1628,7 @@ public struct TinyArcadeNativeFunctionV1 {
         parameterCount: UInt32,
         resultCount: UInt32,
         maxCallsPerLifecycle: UInt32 = 1,
-        handler: @escaping ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
+        handler: @escaping @MainActor ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
     ) {
         self.module = module
         self.field = field
@@ -1578,51 +1651,58 @@ public struct TinyArcadeHostProfileV1: Sendable, Equatable {
     @MainActor
     public static func appBuild(
         nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        completionChannels: [TinyArcadeCompletionV1] = [],
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws -> Self {
         var config = tinyarcade_config_v1()
         try TinyArcadeRuntimeV1.check(tinyarcade_v1_default_config(&config))
         configure(&config)
         return try TinyArcadeRuntimeV1.withNativeFunctionTable(nativeFunctions) {
-            table,
-            count,
-            _ in
-            var required = 0
-            let query = tinyarcade_v1_copy_host_profile(
-                &config,
-                table,
-                count,
-                nil,
-                0,
-                &required
-            )
-            guard query == TINYARCADE_BUFFER_TOO_SMALL,
-                  (56...(64 * 1_024)).contains(required) else {
-                try TinyArcadeRuntimeV1.check(query)
-                throw TinyArcadeRuntimeError(
-                    status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
-                    message: "invalid host profile length"
-                )
-            }
-            var data = Data(count: required)
-            let status = data.withUnsafeMutableBytes { output in
-                tinyarcade_v1_copy_host_profile(
+            table, count, _ in
+            try TinyArcadeRuntimeV1.withCompletionTable(completionChannels) {
+                completions, completionCount in
+                var required = 0
+                let query = tinyarcade_v1_copy_host_profile_with_completions(
                     &config,
                     table,
                     count,
-                    output.bindMemory(to: UInt8.self).baseAddress,
-                    output.count,
+                    completions,
+                    completionCount,
+                    nil,
+                    0,
                     &required
                 )
+                guard query == TINYARCADE_BUFFER_TOO_SMALL,
+                      (56...(64 * 1_024)).contains(required) else {
+                    try TinyArcadeRuntimeV1.check(query)
+                    throw TinyArcadeRuntimeError(
+                        status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                        message: "invalid host profile length"
+                    )
+                }
+                var data = Data(count: required)
+                let status = data.withUnsafeMutableBytes { output in
+                    tinyarcade_v1_copy_host_profile_with_completions(
+                        &config,
+                        table,
+                        count,
+                        completions,
+                        completionCount,
+                        output.bindMemory(to: UInt8.self).baseAddress,
+                        output.count,
+                        &required
+                    )
+                }
+                try TinyArcadeRuntimeV1.check(status)
+                guard required == data.count,
+                      data.prefix(4) == Data("TAH1".utf8) else {
+                    throw TinyArcadeRuntimeError(
+                        status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                        message: "host profile length changed"
+                    )
+                }
+                return Self(encoded: data)
             }
-            try TinyArcadeRuntimeV1.check(status)
-            guard required == data.count, data.prefix(4) == Data("TAH1".utf8) else {
-                throw TinyArcadeRuntimeError(
-                    status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
-                    message: "host profile length changed"
-                )
-            }
-            return Self(encoded: data)
         }
     }
 
@@ -1655,7 +1735,7 @@ private final class TinyArcadeNativeCallbackBox {
     let parameterCount: UInt32
     let resultCount: UInt32
     let maxCallsPerLifecycle: UInt32
-    let handler: ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
+    let handler: @MainActor ([Int32], UnsafeMutableRawBufferPointer) throws -> [Int32]
 
     init(_ function: TinyArcadeNativeFunctionV1) throws {
         let module = Array(function.module.utf8)
@@ -1722,23 +1802,35 @@ private func tinyArcadeNativeCallback(
           parameterCount == 0 || params != nil,
           resultCount == 0 || results != nil,
           memoryCount == 0 || memory != nil else { return -1 }
-    let box = Unmanaged<TinyArcadeNativeCallbackBox>.fromOpaque(context).takeUnretainedValue()
-    guard parameterCount == Int(box.parameterCount), resultCount == Int(box.resultCount) else {
-        return -1
-    }
-    do {
-        let parameters = params.map { Array(UnsafeBufferPointer(start: $0, count: parameterCount)) } ?? []
-        let guestMemory = UnsafeMutableRawBufferPointer(start: memory, count: memoryCount)
-        let returned = try box.handler(parameters, guestMemory)
-        guard returned.count == resultCount else { return -1 }
-        if let results {
-            for (index, value) in returned.enumerated() {
-                results[index] = value
+    let parameters = params.map {
+        Array(UnsafeBufferPointer(start: $0, count: parameterCount))
+    } ?? []
+    let boxAddress = UInt(bitPattern: context)
+    let resultAddress = results.map { UInt(bitPattern: $0) }
+    let memoryAddress = memory.map { UInt(bitPattern: $0) }
+    return MainActor.assumeIsolated {
+        guard let boxPointer = UnsafeMutableRawPointer(bitPattern: boxAddress) else { return -1 }
+        let box = Unmanaged<TinyArcadeNativeCallbackBox>
+            .fromOpaque(boxPointer).takeUnretainedValue()
+        guard parameterCount == Int(box.parameterCount),
+              resultCount == Int(box.resultCount) else { return -1 }
+        do {
+            let guestMemory = UnsafeMutableRawBufferPointer(
+                start: memoryAddress.flatMap(UnsafeMutableRawPointer.init(bitPattern:)),
+                count: memoryCount
+            )
+            let returned = try box.handler(parameters, guestMemory)
+            guard returned.count == resultCount else { return -1 }
+            if let resultAddress,
+               let results = UnsafeMutablePointer<Int32>(bitPattern: resultAddress) {
+                for (index, value) in returned.enumerated() {
+                    results[index] = value
+                }
             }
+            return 0
+        } catch {
+            return -1
         }
-        return 0
-    } catch {
-        return -1
     }
 }
 
@@ -2002,6 +2094,7 @@ public final class TinyArcadeReviewedLibraryV1 {
     public func installAndOpen(
         _ game: TinyArcadeCatalogGameV1,
         nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        completionChannels: [TinyArcadeCompletionV1] = [],
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) async throws -> TinyArcadeRuntimeV1 {
         guard !installing else { throw TinyArcadeReviewedLibraryError.operationInProgress }
@@ -2015,6 +2108,7 @@ public final class TinyArcadeReviewedLibraryV1 {
             entry: game.entry,
             trustStore: trustStore,
             nativeFunctions: nativeFunctions,
+            completionChannels: completionChannels,
             distributionPolicy: distributionPolicy,
             configure: configure
         )
@@ -2035,6 +2129,7 @@ public final class TinyArcadeReviewedLibraryV1 {
     public func openActive(
         _ game: TinyArcadeCatalogGameV1,
         nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        completionChannels: [TinyArcadeCompletionV1] = [],
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws -> TinyArcadeRuntimeV1 {
         let cartridge = try cache.loadActive(entry: game.entry, trustStore: trustStore)
@@ -2043,6 +2138,7 @@ public final class TinyArcadeReviewedLibraryV1 {
             entry: game.entry,
             trustStore: trustStore,
             nativeFunctions: nativeFunctions,
+            completionChannels: completionChannels,
             distributionPolicy: distributionPolicy,
             configure: configure
         )
@@ -2056,13 +2152,15 @@ public final class TinyArcadeReviewedLibraryV1 {
 public final class TinyArcadeRuntimeV1 {
     private var handle: OpaquePointer?
     private var nativeCallbackBoxes: [TinyArcadeNativeCallbackBox] = []
+    private var completionChannels: [TinyArcadeCompletionV1] = []
 
     public init(
         cartridge: Data,
         nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        completionChannels: [TinyArcadeCompletionV1] = [],
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws {
-        if nativeFunctions.isEmpty {
+        if nativeFunctions.isEmpty && completionChannels.isEmpty {
             handle = try Self.open(
                 cartridge: cartridge,
                 configure: configure,
@@ -2072,10 +2170,12 @@ public final class TinyArcadeRuntimeV1 {
             let opened = try Self.openWithNativeFunctions(
                 cartridge: cartridge,
                 nativeFunctions: nativeFunctions,
+                completionChannels: completionChannels,
                 configure: configure
             )
             handle = opened.handle
             nativeCallbackBoxes = opened.boxes
+            self.completionChannels = completionChannels
         }
     }
 
@@ -2098,6 +2198,7 @@ public final class TinyArcadeRuntimeV1 {
         entry: TinyArcadeReviewedCatalogEntry,
         trustStore: TinyArcadeTrustStoreV1,
         nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        completionChannels: [TinyArcadeCompletionV1] = [],
         distributionPolicy: TinyArcadeDistributionPolicyV1 = .appStoreBundledOnly,
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws {
@@ -2115,7 +2216,7 @@ public final class TinyArcadeRuntimeV1 {
         let trust = try trustStore.liveHandle()
         let status = try entry.withCEntry { cEntry in
             try cartridge.withUnsafeBytes { cartridgeBytes in
-                if nativeFunctions.isEmpty {
+                if nativeFunctions.isEmpty && completionChannels.isEmpty {
                     return tinyarcade_v1_open_reviewed(
                         cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
                         cartridgeBytes.count,
@@ -2126,20 +2227,26 @@ public final class TinyArcadeRuntimeV1 {
                     )
                 }
                 return try Self.withNativeFunctionTable(nativeFunctions) { table, count, boxes in
-                    let result = tinyarcade_v1_open_reviewed_with_native_modules(
-                        cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
-                        cartridgeBytes.count,
-                        cEntry,
-                        trust,
-                        table,
-                        count,
-                        &config,
-                        &opened
-                    )
-                    if result == TINYARCADE_OK {
-                        nativeCallbackBoxes = boxes
+                    try Self.withCompletionTable(completionChannels) {
+                        completions, completionCount in
+                        let result = tinyarcade_v1_open_reviewed_with_native_completions(
+                            cartridgeBytes.bindMemory(to: UInt8.self).baseAddress,
+                            cartridgeBytes.count,
+                            cEntry,
+                            trust,
+                            table,
+                            count,
+                            completions,
+                            completionCount,
+                            &config,
+                            &opened
+                        )
+                        if result == TINYARCADE_OK {
+                            nativeCallbackBoxes = boxes
+                            self.completionChannels = completionChannels
+                        }
+                        return result
                     }
-                    return result
                 }
             }
         }
@@ -2159,6 +2266,7 @@ public final class TinyArcadeRuntimeV1 {
         try Self.check(tinyarcade_v1_close(handle))
         self.handle = nil
         nativeCallbackBoxes.removeAll()
+        completionChannels.removeAll()
     }
 
     public func tick(buttons: UInt32, clockMilliseconds: UInt32) throws -> TinyArcadeFrame {
@@ -2395,6 +2503,7 @@ public final class TinyArcadeRuntimeV1 {
     private static func openWithNativeFunctions(
         cartridge: Data,
         nativeFunctions: [TinyArcadeNativeFunctionV1],
+        completionChannels: [TinyArcadeCompletionV1],
         configure: (inout tinyarcade_config_v1) -> Void
     ) throws -> (handle: OpaquePointer, boxes: [TinyArcadeNativeCallbackBox]) {
         var config = tinyarcade_config_v1()
@@ -2404,15 +2513,19 @@ public final class TinyArcadeRuntimeV1 {
         var retainedBoxes: [TinyArcadeNativeCallbackBox] = []
         let status = try cartridge.withUnsafeBytes { bytes in
             try withNativeFunctionTable(nativeFunctions) { table, count, boxes in
-                retainedBoxes = boxes
-                return tinyarcade_v1_open_with_native_modules(
-                    bytes.bindMemory(to: UInt8.self).baseAddress,
-                    bytes.count,
-                    table,
-                    count,
-                    &config,
-                    &opened
-                )
+                try withCompletionTable(completionChannels) { completions, completionCount in
+                    retainedBoxes = boxes
+                    return tinyarcade_v1_open_with_native_completions(
+                        bytes.bindMemory(to: UInt8.self).baseAddress,
+                        bytes.count,
+                        table,
+                        count,
+                        completions,
+                        completionCount,
+                        &config,
+                        &opened
+                    )
+                }
             }
         }
         try check(status)
@@ -2440,7 +2553,23 @@ public final class TinyArcadeRuntimeV1 {
         }
     }
 
-    private static func requireHandle(_ handle: OpaquePointer?) throws -> OpaquePointer {
+    fileprivate static func withCompletionTable<T>(
+        _ channels: [TinyArcadeCompletionV1],
+        _ body: (UnsafePointer<OpaquePointer?>?, Int) throws -> T
+    ) throws -> T {
+        guard channels.count <= 21 else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
+                message: "a runtime accepts at most 21 completion channels"
+            )
+        }
+        let handles = try channels.map { Optional(try $0.liveHandle()) }
+        return try handles.withUnsafeBufferPointer { table in
+            try body(table.baseAddress, table.count)
+        }
+    }
+
+    fileprivate static func requireHandle(_ handle: OpaquePointer?) throws -> OpaquePointer {
         guard let handle else {
             throw TinyArcadeRuntimeError(
                 status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),

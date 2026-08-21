@@ -299,6 +299,17 @@ accepted peak defined-call depth and aggregate live activation slots without
 risking overwrite of an older caller's buffer. A limit trap records the highest
 admitted usage, never a transient rejected activation.
 
+ABI v1.10 adds app-owned native completion channels without changing the
+runtime/config layouts. A channel is created before runtime open, may allocate
+a bounded ticket from its synchronous native callback, and is supplied to the
+new native-completion open functions. It is single-thread-owned, cannot close
+while bound, and is cleared/unbound by runtime close. Payload bytes are copied
+at the C call boundary; a late delivery after close fails. The Swift
+`TinyArcadeCompletionV1` owner is `@MainActor`, and native handlers are also
+main-actor closures bridged through the runtime's proven owner-thread callback.
+The companion host-profile function includes the same generated completion
+imports used by runtime binding.
+
 ## Current evidence boundary
 
 The smoke gate builds a real arm64 iOS-device archive and a universal
@@ -306,14 +317,16 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked arm64 smoke executable must remain at or below 1.5 MiB;
-the simulator-only x86_64 compatibility slice has a separate 1.5625 MiB gate.
+The optimized linked arm64 smoke executable must remain at or below 1.5625 MiB;
+the simulator-only x86_64 compatibility slice has a separate 1.65625 MiB gate.
 This measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
 the exercised Swift consumer added the bounded official-catalog JSON decoder;
 the later 1.375 MiB gate accounted for the recoverable snapshot-store owner;
-the current arm64 1.5 MiB gate includes the bounded input/clock/session owner
-and deterministic execution telemetry.
+the current arm64 1.5625 MiB gate additionally includes the app-owned completion
+channel, process-lifetime ticket domains and safe late-delivery boundary.
+Current linked evidence is 1,637,144 bytes arm64, 1,725,840 bytes x86_64 and
+1,142,688 bytes for the focused completion consumer.
 Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 

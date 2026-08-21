@@ -200,6 +200,10 @@ impl<T> HostResourceTable<T> {
         self.domain
     }
 
+    pub(crate) fn activity(&self) -> Option<ResourceActivity> {
+        self.activity.clone()
+    }
+
     pub const fn len(&self) -> u16 {
         self.len
     }

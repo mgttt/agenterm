@@ -355,6 +355,42 @@ impl NativeModuleRegistry {
         )
     }
 
+    /// Attach a completion queue created by an embedding boundary and register
+    /// its portable guest imports. The queue retains the domain/activity pair,
+    /// so snapshot quiescence is identical to a registry-created queue.
+    pub fn attach_completion_queue(
+        &mut self,
+        module: &str,
+        queue: Rc<RefCell<crate::HostCompletionQueue>>,
+        max_calls_per_lifecycle: u32,
+    ) -> Result<(), WasmError> {
+        if module == ABI_MODULE
+            || !valid_native_namespace(module)
+            || self.assigned_resource_table_domain(module).is_some()
+        {
+            return Err(WasmError::Trap("invalid native completion registration"));
+        }
+        let queue_ref = queue
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("native completion reentrancy"))?;
+        let resource = NativeResourceTable {
+            module: module.to_string(),
+            domain: queue_ref.domain(),
+            activity: queue_ref.activity(),
+        };
+        drop(queue_ref);
+        self.resource_tables
+            .try_reserve_exact(1)
+            .map_err(|_| WasmError::Trap("native resource module allocation"))?;
+        self.resource_tables.push(resource);
+        if let Err(error) = self.register_completion_imports(module, queue, max_calls_per_lifecycle)
+        {
+            self.resource_tables.pop();
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Inspect an already assigned table domain without changing the registry.
     pub fn assigned_resource_table_domain(
         &self,

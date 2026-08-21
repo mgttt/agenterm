@@ -2815,3 +2815,13 @@ replaying an `i32` token. Consume the native registry into exactly one runtime,
 retain a type-erased live counter for each registry-created table, and reject
 suspend after guest cleanup if any counter remains nonzero. Merely documenting
 "close before snapshot" is not a lifecycle guarantee.
+
+For asynchronous work crossing a C/Swift boundary, do not make a native
+callback reenter the opaque runtime handle just to allocate or complete a
+request. Give the completion queue its own single-owner opaque handle, bind it
+to at most one runtime, and refuse to destroy it while bound. Runtime teardown
+must clear tickets and detach the channel before releasing borrowed callback
+contexts; a result arriving afterward then fails against a live, unbound
+channel instead of touching freed runtime state. Publish the generated
+completion imports through the same host-profile path used by runtime binding,
+or converter compatibility will drift from execution.

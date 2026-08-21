@@ -186,7 +186,9 @@ agenterm-tinyvm (35)                                      [~]
 │       ├── bounded call/callback/completion channels      [x]
 │       ├── event-loop-neutral async completion ABI        [x]
 │       │   ├── owner-thread completion queue core           [x]
-│       │   └── versioned guest import protocol              [x]
+│       │   ├── versioned guest import protocol              [x]
+│       │   ├── C ABI channel ownership + late delivery      [x]
+│       │   └── Swift MainActor owner + host profile         [x]
 │       ├── cross-boundary copy/call benchmarks            [x]
 │       └── JavaScriptCore remains development oracle     [~]
 │
@@ -265,6 +267,9 @@ as “almost approved” or “safe to ship externally.”
   count and maximum response bytes before work starts, uses runtime-local generation-checked
   tickets, transfers completed payload ownership without a second copy, and must quiesce before
   portable suspend. Platform scheduling and versioned module imports remain outside the VM.
+- The iOS C/Swift boundary owns completion channels separately from runtime handles. A channel
+  binds to at most one runtime, cannot close while bound, clears tickets when that runtime closes,
+  and rejects wrong-thread or late delivery. Host profiles publish the same completion imports.
 
 ### 6. App Store distribution is a separate authority gate
 

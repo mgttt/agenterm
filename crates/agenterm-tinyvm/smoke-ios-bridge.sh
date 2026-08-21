@@ -132,6 +132,18 @@ xcrun --sdk iphonesimulator swiftc \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
   "$CRATE/tests/ios/TinyArcadeGameSessionSmoke.swift" \
   -o "$TEMP/TinyArcadeGameSessionSmoke-arm64"
+xcrun --sdk iphonesimulator swiftc \
+  -parse-as-library \
+  -warnings-as-errors \
+  -O \
+  -target arm64-apple-ios14.0-simulator \
+  -I "$SLICE/Headers" \
+  -L "$SLICE" \
+  -lagenterm_tinyvm \
+  -Xlinker -fatal_warnings \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
+  "$CRATE/tests/ios/TinyArcadeCompletionSmoke.swift" \
+  -o "$TEMP/TinyArcadeCompletionSmoke-arm64"
 
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-arm64" | grep -q 'platform IOSSIMULATOR'
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-x86_64" | grep -q 'platform IOSSIMULATOR'
@@ -141,25 +153,31 @@ HOST_PROFILE_CATALOG_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeHostProfileCatalo
 REPLAY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeReplaySmoke-arm64")
 PRIVATE_LIBRARY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadePrivateLibrarySmoke-arm64")
 GAME_SESSION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeGameSessionSmoke-arm64")
+COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # Imported-memory store identity adds the guarded shared path while defined
 # memories retain their direct fast path. Keep one explicit 16 KiB product step
 # for that standard capability; later increments stay within this ceiling.
 # One fixed 16 KiB graduation step funds store-owned cross-instance funcref
 # continuations; keep every arm64 consumer under the same explicit ceiling.
-MAX_ARM64_LINKED_BYTES=1605632
+# ABI v1.10 adds the app-facing completion owner, process-lifetime domain
+# allocator and late-delivery guards. Fund that complete boundary with two
+# explicit 16 KiB product steps rather than hiding it in an unbounded ceiling.
+MAX_ARM64_LINKED_BYTES=1638400
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
 # Imported-global store identity crosses the next x86_64 linker size bucket;
 # imported-table store/address identity and direct linked functions cross two
 # more. Keep the simulator compatibility budget explicit without changing the
 # arm64 product ceiling.
-MAX_X86_64_LINKED_BYTES=1687552
+# The simulator slice crosses three matching 16 KiB linker buckets.
+MAX_X86_64_LINKED_BYTES=1736704
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$X86_64_LINKED_BYTES" -le "$MAX_X86_64_LINKED_BYTES"
 test "$HOST_PROFILE_CATALOG_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$REPLAY_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$PRIVATE_LIBRARY_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$GAME_SESSION_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
+test "$COMPLETION_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test -f "$XCFRAMEWORK/ios-arm64/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64_x86_64-simulator/libagenterm_tinyvm.a"
 test -f "$XCFRAMEWORK/ios-arm64/Headers/tinyarcade.h"
@@ -201,4 +219,4 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
     "$PADDLE_CARTRIDGE"
 fi
 
-echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} bytes"
+echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} bytes"
