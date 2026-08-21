@@ -270,7 +270,7 @@ fn entry() {
         "- Sample model: `" + sample_model + "`\n\n" +
         "Runner-purchase decisions also require real Candidate release/stress " +
         "timing evidence.\n";
-    if std::env::has("GITHUB_STEP_SUMMARY") {
+    if std::env::has("GITHUB_STEP_SUMMARY") != 0 {
         let summary_value = std::env::get("GITHUB_STEP_SUMMARY");
         if summary_value != "" {
             let summary_path = std::path::absolute(summary_value).display;
