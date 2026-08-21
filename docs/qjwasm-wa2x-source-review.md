@@ -126,11 +126,15 @@ Reject for the iOS cartridge runtime:
 
 1. [x] `smoke-boundary-benchmark.sh` separately records empty-call cost,
    scalar argument conversion, borrowed guest-memory access, an intentional
-   host copy and a constant-work guest call at 0, 64, 1 KiB, 64 KiB and one
-   76,800-byte frame-sized payload.
+   host copy, a constant-work guest call, guest-to-host memory-zero and
+   selected-memory views, and an explicit selected-memory copy at 0, 64, 1
+   KiB, 64 KiB and one 76,800-byte frame-sized payload.
 2. [x] Tinyvm and development-only JavaScriptCore execute the identical WABT
-   fixture and emit the same CSV dimensions, so execution is not confused with
-   data movement. Timings are observations, never pass/fail thresholds.
+   fixture and emit the same 32 CSV dimensions, so execution is not confused
+   with data movement. Timings are observations, never pass/fail thresholds.
+   The common fixture deliberately uses memory zero because public JSContext
+   rejects multiple memories on the tested host; tinyvm's separate WABT and
+   selected-memory tests retain the nonzero-index evidence.
 3. [x] Memory/global/table/function handle tests retain live resources after
    public instance handles are dropped. Function-reference tests also reject
    wrong-store values and a stale token whose original Store is already gone.

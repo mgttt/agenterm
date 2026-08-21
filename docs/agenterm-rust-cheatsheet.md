@@ -2755,3 +2755,11 @@ stay errors; a valid artifact receives a bounded report containing every exact
 missing function or same-name signature mismatch. Keep the old fail-fast API as
 a wrapper over the report so runtime callers remain simple while CLI/UI callers
 can give actionable diagnostics without parsing error prose.
+
+Boundary benchmarks must measure the direction and ownership operation they
+claim. Host-to-guest calls plus an external memory view do not measure a guest-
+to-host import. Use one validated Wasm fixture with explicit wrapper exports,
+then separate legacy memory-zero view, indexed view and intentional copy rows.
+Compare the metric/payload matrix across engines, but never gate correctness on
+elapsed time; timing values vary while missing or malformed dimensions are a
+deterministic test failure.

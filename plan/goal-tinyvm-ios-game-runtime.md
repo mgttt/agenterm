@@ -3305,6 +3305,33 @@ and the three-game tinyvm/JSC/H5 differential. Default linked sizes are
 1,602,424 bytes arm64 and 1,681,600 bytes x86_64; all remain inside their
 product gates. The stripped static core remains 101,256 bytes with selftest 42.
 
+## One-hundred-fifth executable increment — measured selected-memory boundary
+
+The existing QJWasm-inspired benchmark now measures the guest-to-host direction
+it previously omitted. One standard WABT fixture calls three imports: the
+legacy memory-zero view, `WasmHostMemories::memory(0)` and the same indexed path
+with an explicit copy into a preallocated host buffer. Those rows join the
+existing host-to-guest, direct view, copy and guest-touch dimensions at five
+payload sizes through both release tinyvm and public JavaScriptCore.
+
+The smoke gate now verifies that both engines emit the same complete 32-row
+metric/payload matrix, positive timing observations and valid iteration counts;
+it never fails on relative speed. Public JSContext rejected the attempted
+two-memory shared fixture, so the cross-engine benchmark truthfully stays on
+memory zero. Tinyvm's independent standard multi-memory and selected-memory
+tests remain the authority for nonzero indexes.
+
+Evidence on 2026-08-22: the full 20,000-iteration development run passes. On
+this host, tinyvm's indexed view remains close to its legacy memory-zero path
+across payload sizes, while explicit 64 KiB and 76,800-byte copies show the
+expected size-dependent cost. JavaScriptCore exhibits the same qualitative
+separation. The complete all-feature/all-target package passes all 128 library
+tests and every non-ignored integration test, including both iOS XCFramework
+gates and the three-game tinyvm/JSC/H5 differential. Warnings-denied Clippy,
+shellcheck, rustfmt, document redaction and the 97-leaf PRD trace gate pass.
+Default linked sizes remain 1,602,424 bytes arm64 and 1,681,600 bytes x86_64;
+the stripped static core remains 101,256 bytes with selftest 42.
+
 ## One-hundredth executable increment — non-returning WASI process exit
 
 The optional Preview 1 subset now includes the exact `(i32) → ()` `proc_exit`

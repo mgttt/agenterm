@@ -14,11 +14,12 @@ SWIFT_ORACLE="$TEMP/BoundaryBenchmark"
 "$WAT2WASM" "$CRATE/tests/fixtures/boundary-benchmark-v1.wat" -o "$FIXTURE"
 "$WASM_VALIDATE" "$FIXTURE"
 
-TINYVM_BOUNDARY_BENCH_WASM="$FIXTURE" \
+TINYVM_OUTPUT=$(TINYVM_BOUNDARY_BENCH_WASM="$FIXTURE" \
   "$CARGO" test --release -q -p agenterm-tinyvm \
   --test boundary_benchmark \
   boundary_benchmark_separates_call_view_copy_and_guest_costs -- \
-  --ignored --exact --nocapture
+  --ignored --exact --nocapture)
+printf '%s\n' "$TINYVM_OUTPUT"
 
 xcrun swiftc \
   -parse-as-library \
@@ -27,6 +28,25 @@ xcrun swiftc \
   -framework JavaScriptCore \
   "$CRATE/tests/webkit/BoundaryBenchmark.swift" \
   -o "$SWIFT_ORACLE"
-"$SWIFT_ORACLE" "$FIXTURE"
+JSC_OUTPUT=$("$SWIFT_ORACLE" "$FIXTURE")
+printf '%s\n' "$JSC_OUTPUT"
 
-echo "OK: tinyvm and JavaScriptCore report separated boundary-cost dimensions"
+printf '%s\n' "$TINYVM_OUTPUT" | awk -F, '
+  $1 == "tinyvm" {
+    if (NF != 5 || $4 < 100 || $5 <= 0) exit 1
+    print $2 "," $3
+    count++
+  }
+  END { if (count != 32) exit 1 }
+' >"$TEMP/tinyvm-dimensions.txt"
+printf '%s\n' "$JSC_OUTPUT" | awk -F, '
+  $1 == "javascriptcore" {
+    if (NF != 5 || $4 < 100 || $5 <= 0) exit 1
+    print $2 "," $3
+    count++
+  }
+  END { if (count != 32) exit 1 }
+' >"$TEMP/jsc-dimensions.txt"
+diff -u "$TEMP/tinyvm-dimensions.txt" "$TEMP/jsc-dimensions.txt"
+
+echo "OK: tinyvm and JavaScriptCore report the same 32 separated boundary-cost dimensions"

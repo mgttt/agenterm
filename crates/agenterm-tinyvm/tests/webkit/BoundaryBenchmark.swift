@@ -22,10 +22,26 @@ struct BoundaryBenchmark {
 
         let script = #"""
         (() => {
+          let memory;
+          const copyScratch = new Uint8Array(76800);
+          const sample = (bytes, pointer, length) =>
+            length === 0 ? 0 : bytes[pointer] ^ bytes[pointer + length - 1];
+          const imports = { bench: {
+            memory_zero(pointer, length) {
+              return sample(memory, pointer, length);
+            },
+            selected_memory(pointer, length) {
+              return sample(memory, pointer, length);
+            },
+            selected_copy(pointer, length) {
+              copyScratch.set(memory.subarray(pointer, pointer + length), 0);
+              return sample(copyScratch, 0, length);
+            }
+          }};
           const instance = new WebAssembly.Instance(
-            new WebAssembly.Module(Uint8Array.from(fixtureBytes))
+            new WebAssembly.Module(Uint8Array.from(fixtureBytes)), imports
           );
-          const memory = new Uint8Array(instance.exports.memory.buffer);
+          memory = new Uint8Array(instance.exports.memory.buffer);
           const sizes = [0, 64, 1024, 65536, 76800];
           const rows = ["engine,metric,payload_bytes,iterations,nanoseconds_per_operation"];
           const report = (metric, bytes, count, start) => {
@@ -72,6 +88,25 @@ struct BoundaryBenchmark {
               if (instance.exports.touch(0, size) !== expected) throw new Error("touch result");
             }
             report("guest_touch_call", size, benchmarkIterations, start);
+
+            for (const [metric, operation] of [
+              ["guest_host_memory0_view", instance.exports.host_memory_zero],
+              ["guest_host_selected0_view", instance.exports.host_selected_memory]
+            ]) {
+              start = monotonicNanos();
+              for (let i = 0; i < benchmarkIterations; i++) {
+                if (operation(0, size) !== expected) throw new Error(`${metric} result`);
+              }
+              report(metric, size, benchmarkIterations, start);
+            }
+
+            start = monotonicNanos();
+            for (let i = 0; i < copyCount; i++) {
+              if (instance.exports.host_selected_copy(0, size) !== expected) {
+                throw new Error("selected copy result");
+              }
+            }
+            report("guest_host_selected0_copy", size, copyCount, start);
           }
           return rows.join("\n");
         })()

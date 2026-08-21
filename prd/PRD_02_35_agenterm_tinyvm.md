@@ -179,7 +179,7 @@ agenterm-tinyvm (35)                                      [~]
 │       ├── unified host/guest handle lifetimes            [ ]
 │       ├── bounded call/callback/completion channels      [ ]
 │       ├── event-loop-neutral async completion ABI        [ ]
-│       ├── cross-boundary copy/call benchmarks            [ ]
+│       ├── cross-boundary copy/call benchmarks            [x]
 │       └── JavaScriptCore remains development oracle     [~]
 │
 ├── slot-B                                               [ ]
@@ -392,6 +392,7 @@ Current evidence owners:
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)
 - [Catalog publisher](../docs/tinyarcade-catalog-publisher-v1.md)
 - [QJWasm/WA2X source review](../docs/qjwasm-wa2x-source-review.md)
+- [Cross-boundary benchmark](../docs/tinyvm-boundary-benchmark.md)
 - `crates/agenterm-tinyvm/tests/` — public Rust black boxes and independent fixtures
 - `crates/agenterm-tinyvm/ios/` — C/Swift package and platform smoke gates
 
