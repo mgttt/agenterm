@@ -360,6 +360,18 @@ values are 0.105 ms and 0.257 ms respectively on the iPhone 17 Pro simulator.
 These numbers are regression evidence for this build and host, not a claim
 about physical-device latency.
 
+The adjacent Nostalgia Arcade consumer also owns an app-target 600-frame gate.
+It measures wall time around the real `BundledDepthWellCartridgeRuntime.tick`,
+reads v2 execution telemetry after every frame, enforces an 8 ms p95 host
+budget plus fuel/page ceilings, and retains the exact result as an `.xcresult`
+attachment. `scripts/test-tinyarcade-on-device.sh` in that repository selects
+a connected physical iPhone (or accepts `TINYARCADE_DEVICE_ID`), runs all six
+app runtime tests and the playable UI journey on it, performs the unsigned
+arm64 product build, and exports the performance attachment into a timestamped
+evidence directory. The same test currently records 0.207 ms p95, 23,203 peak
+steps, 17 pages, depth 6 and 62 activation slots on the iPhone 17 Pro simulator;
+these remain simulator figures until the physical command is run.
+
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,
 signature and revocation, origin query, tick, frame copy,

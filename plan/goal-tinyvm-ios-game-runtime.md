@@ -2753,3 +2753,28 @@ capability registry grants only exact versioned function imports. Supplying a
 shared host function table would be a new multi-module product contract, not a
 hidden consequence of engine support, and must arrive under an explicit future
 ABI/manifest design if needed.
+
+## Eightieth executable increment — app-owned physical evidence gate
+
+Nostalgia Arcade now exercises the current TinyVM through the real app target
+for 600 consecutive Depth Well frames. The XCTest times each host call, reads
+v2 execution telemetry after every frame, enforces an 8 ms p95 host budget and
+fuel/page ceilings, and retains exact latency, instruction, memory, call-depth
+and activation-slot values in the test result bundle. This keeps platform wall
+time in the platform test while the VM continues to expose deterministic
+resource facts.
+
+The consumer repository also has a one-command physical-device workflow. It
+discovers a connected iPhone or accepts an explicit UDID, rebuilds the runtime
+and cartridge from adjacent agenterm main, executes all six runtime tests and
+the playable UI journey on that device, verifies the arm64 app product, then
+exports the retained attachment into a timestamped evidence directory. With no
+iPhone connected it fails immediately with an actionable message instead of
+silently falling back to a simulator.
+
+Evidence on 2026-08-21: the complete consumer gate passes six unit tests, one
+UI test and the arm64 device build. The simulator attachment records 600 frames
+at 0.178 ms average, 0.207 ms p95 and 0.386 ms maximum, with 23,203 peak steps,
+17 pages, call depth 6 and 62 activation slots. No physical iPhone is connected
+to this Mac mini, so the goal's physical lifecycle/performance checkbox remains
+open while the executable collection path is ready.
