@@ -1,0 +1,4 @@
+module TinyWasiHost {
+    header "tinyvm_wasi_host.h"
+    export *
+}

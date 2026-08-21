@@ -8,6 +8,8 @@ PROFILE=tinyvm-ios-release
 TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT/target/tinyarcade-xcframework"}
 CARGO=${CARGO:-cargo}
 IOS_DEPLOYMENT_TARGET=${IOS_DEPLOYMENT_TARGET:-14.0}
+RUST_FEATURES=${TINYVM_XCFRAMEWORK_FEATURES:-ios-c-api}
+HEADERS=${TINYVM_XCFRAMEWORK_HEADERS:-"$CRATE/include"}
 
 if [ -e "$OUTPUT" ]; then
   echo "output already exists: $OUTPUT" >&2
@@ -18,15 +20,15 @@ mkdir -p "$(dirname -- "$OUTPUT")"
 
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
   --manifest-path "$ROOT/Cargo.toml" --profile "$PROFILE" \
-  --target aarch64-apple-ios --features ios-c-api \
+  --target aarch64-apple-ios --features "$RUST_FEATURES" \
   --lib --crate-type staticlib
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
   --manifest-path "$ROOT/Cargo.toml" --profile "$PROFILE" \
-  --target aarch64-apple-ios-sim --features ios-c-api \
+  --target aarch64-apple-ios-sim --features "$RUST_FEATURES" \
   --lib --crate-type staticlib
 IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO" rustc -p agenterm-tinyvm \
   --manifest-path "$ROOT/Cargo.toml" --profile "$PROFILE" \
-  --target x86_64-apple-ios --features ios-c-api \
+  --target x86_64-apple-ios --features "$RUST_FEATURES" \
   --lib --crate-type staticlib
 
 DEVICE="$TARGET_DIR/aarch64-apple-ios/$PROFILE/libagenterm_tinyvm.a"
@@ -42,8 +44,8 @@ xcrun lipo -create "$SIMULATOR_ARM64" "$SIMULATOR_X86_64" -output "$SIMULATOR"
 xcrun lipo "$SIMULATOR" -verify_arch arm64 x86_64
 
 xcodebuild -create-xcframework \
-  -library "$DEVICE" -headers "$CRATE/include" \
-  -library "$SIMULATOR" -headers "$CRATE/include" \
+  -library "$DEVICE" -headers "$HEADERS" \
+  -library "$SIMULATOR" -headers "$HEADERS" \
   -output "$OUTPUT"
 
 echo "$OUTPUT"

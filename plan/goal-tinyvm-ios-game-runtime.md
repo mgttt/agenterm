@@ -3331,3 +3331,33 @@ Windows GNU/LLVM and arm64 iOS, while the default no-feature library remains
 real iOS XCFramework/Swift link and three-game tinyvm/JSC/H5 differential pass.
 Linked sizes remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the
 stripped default static core remains 101,256 bytes with selftest 42.
+
+## One-hundred-second executable increment — iOS container WASI host
+
+The crate now has a separately built `ios-wasi-host` C ABI for one-shot standard
+WASI commands. Swift supplies an App-owned UTF-8 directory and explicit VM,
+guest-descriptor and backend-handle limits. Rust opens that directory once,
+publishes only virtual `/save`, binds the exact Preview 1 subset and invokes
+`_start`. Normal empty return and accepted `proc_exit` are distinct typed
+outcomes; decode, trap, storage, argument and caught-panic failures remain
+separate status values.
+
+This surface is deliberately absent from the default TinyArcade artifact. The
+optional builder selects a separate Cargo feature, header directory and Clang
+module named `TinyWasiHost`; the normal `ios-c-api`/`TinyArcade` XCFramework and
+Swift package stay unchanged.
+
+Evidence on 2026-08-22: an independently compiled standard command runs inside
+a booted iPhone 17 Pro Simulator. Swift creates and supplies a fresh temporary
+container directory; guest `_start` writes `hello` to `/save/slot.bin`, closes
+the descriptor and calls `proc_exit(7)`. Swift verifies the file bytes, exit
+presence and exact code. The optional builder also produces an arm64 device and
+universal simulator XCFramework, passes its C header check and links the Swift
+owner with warnings denied. The unchanged default builder also passes its full
+XCFramework, C/Swift/package and negative header/archive-surface gates. The
+complete all-feature/all-target suite passes all 128 library tests and every
+non-ignored integration test, including the Simulator container run and
+three-game tinyvm/JSC/H5 differential; warnings-denied Clippy passes. Linked
+default sizes remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64, while the
+stripped default static core remains 101,256 bytes with selftest 42. Physical-
+iPhone container behavior remains open.

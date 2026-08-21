@@ -13,6 +13,15 @@ CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"
 
 SLICE="$XCFRAMEWORK/ios-arm64_x86_64-simulator"
+if grep -R -q 'tinyvm_wasi_host_v1_' "$XCFRAMEWORK"/*/Headers; then
+  echo "optional WASI host header leaked into default TinyArcade XCFramework" >&2
+  exit 1
+fi
+if LC_ALL=C grep -a -q 'tinyvm_wasi_host_v1_' \
+    "$XCFRAMEWORK/ios-arm64/libagenterm_tinyvm.a"; then
+  echo "optional WASI host symbol leaked into default TinyArcade XCFramework" >&2
+  exit 1
+fi
 xcrun --sdk iphonesimulator clang \
   -target arm64-apple-ios14.0-simulator \
   -std=c11 -Wall -Wextra -Werror -fsyntax-only \

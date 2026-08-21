@@ -2731,3 +2731,11 @@ resource limits separate from guest-fd limits, preserve specific I/O failures
 through the neutral error enum, and cross-compile the exact optional feature
 graph for Linux, Windows and iOS even when behavior runs only on the current
 host.
+
+When an optional iOS host surface is not part of the shipping game ABI, feature
+gating Rust alone is insufficient: headers and module maps are product surface
+too. Build it as a separately named XCFramework input with its own header
+directory, and keep the default feature/header pair unchanged. Prove both
+directions: run the optional artifact inside a booted Simulator container, and
+scan the default archive/header tree to ensure the optional symbol prefix and
+module never leak into bundled-only consumers.

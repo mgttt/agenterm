@@ -96,6 +96,9 @@ pub use cartridge_cache::CartridgeCache;
 #[cfg(feature = "ios-c-api")]
 mod ios_c_api;
 
+#[cfg(feature = "ios-wasi-host")]
+mod ios_wasi_host;
+
 pub mod wasm;
 #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
 pub use wasm::{

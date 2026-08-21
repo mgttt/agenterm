@@ -164,7 +164,8 @@ agenterm-tinyvm (35)                                      [~]
 │   │       │   └── proc_exit                                 [x]
 │   │       └── platform backends outside VM                [~]
 │   │           ├── capability-directory std backend         [x]
-│   │           └── iOS App container wiring                  [ ]
+│   │           ├── iOS Simulator App container wiring        [x]
+│   │           └── physical iPhone container evidence        [ ]
 │   ├── P2 — standard Wasm coverage                      [ ]
 │   │   ├── proposal priority by real cartridge workload  [ ]
 │   │   ├── independent WABT/JSC differential per leaf    [ ]
@@ -384,6 +385,7 @@ Current evidence owners:
 - [Executable goal and incremental evidence](../plan/goal-tinyvm-ios-game-runtime.md)
 - [Optional WASI Preview 1 profile](../docs/tinyvm-wasi-preview1.md)
 - [Capability-based std host](../docs/tinyvm-std-host.md)
+- [Optional iOS WASI host](../docs/tinyvm-ios-wasi-host.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)

@@ -2,7 +2,7 @@
 
 Owner: [PRD 02.35](../prd/PRD_02_35_agenterm_tinyvm.md)
 
-Status: implemented optional backend; iOS App wiring remains open
+Status: implemented optional backend; Simulator wiring proven, physical iPhone open
 
 The `std-host` Cargo feature provides one `StdHostBackend` inside the unified
 `agenterm-tinyvm` crate. It implements the platform-neutral `HostBackend`
@@ -64,5 +64,6 @@ WASI binary drives the complete filesystem lifecycle through tinyvm,
 and the resulting host filesystem state.
 
 The same library feature graph compiles for Linux musl, Windows GNU/LLVM and
-arm64 iOS. Physical-iPhone container I/O remains a consumer integration gate,
-not something a cross-compile can prove.
+arm64 iOS. The separate optional iOS WASI host runs the real path through a
+booted Simulator container. Physical-iPhone container I/O remains a consumer
+integration gate, not something a cross-compile or Simulator can prove.
