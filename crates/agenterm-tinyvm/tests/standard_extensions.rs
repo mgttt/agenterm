@@ -1,4 +1,6 @@
-use agenterm_tinyvm::{Limits, Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule};
+use agenterm_tinyvm::{
+    Limits, Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule, WasmTable,
+};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -603,6 +605,38 @@ fn standard_imported_tables_decode_before_store_binding_exists() {
     assert!(matches!(
         module.instantiate(),
         Err(WasmError::Trap("unbound imported table"))
+    ));
+
+    let table = must_ok(WasmTable::new(1, Some(3)), "allocate imported table");
+    let mut module = must_ok(
+        WasmModule::from_bytes_with(
+            &wasm,
+            Limits {
+                max_table_elems: 2,
+                ..Limits::default()
+            },
+        ),
+        "reload table import",
+    );
+    must_ok(
+        module.bind_table_import("host", "dispatch", &table),
+        "bind imported table",
+    );
+    let instance = must_ok(module.instantiate(), "instantiate bound table");
+    assert_eq!(instance.table_count(), 2);
+    assert_eq!(instance.table_elements(), 2);
+    assert_eq!(instance.exported_table_elements("dispatch"), Some(1));
+
+    let too_small = must_ok(WasmTable::new(0, Some(3)), "allocate small table");
+    let mut module = must_ok(WasmModule::from_bytes(&wasm), "reload for bad binding");
+    assert!(matches!(
+        module.bind_table_import("host", "dispatch", &too_small),
+        Err(WasmError::Trap("table binding limits"))
+    ));
+    let unbounded = must_ok(WasmTable::new(1, None), "allocate unbounded table");
+    assert!(matches!(
+        module.bind_table_import("host", "dispatch", &unbounded),
+        Err(WasmError::Trap("table binding limits"))
     ));
 
     assert!(matches!(

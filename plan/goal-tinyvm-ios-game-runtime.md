@@ -2534,3 +2534,43 @@ Evidence on 2026-08-21:
   The iOS bridge links at 1,577,080 bytes arm64 and 1,650,656 bytes x86_64;
   the profile-catalog, replay, private-library and session consumers link at
   1,449,928, 1,424,344, 1,442,528 and 1,441,680 bytes.
+
+## Seventy-first executable increment — host table store and function addresses
+
+The general VM now exposes a cloneable host `WasmTable`, binds it with standard
+limits subtyping, applies active elements into the shared object and preserves
+that object across importing instances. Imported aliases count once against
+the aggregate table budget, and overlapping `table.copy` across two indices
+bound to the same object retains memmove order. Defined tables keep a direct
+vector path; imported tables use guarded shared storage.
+
+Every live non-null table cell now holds a first-class function address with
+its originating instance identity. Defined-table behavior remains unchanged,
+but a foreign address can no longer be silently reinterpreted as the caller's
+module-local function index: it traps as `cross-instance funcref`. That trap is
+an intentional intermediate correctness boundary, not the final standard
+behavior. Cross-instance dispatch still needs a store-owned callable instance
+record so the target function observes its own globals, memories and tables.
+
+Evidence on 2026-08-21:
+
+- A WABT fixture binds an imported table, initializes it with instance-local
+  functions and proves host visibility. Re-instantiating over the same table
+  replaces the entry with a sibling address; the older instance detects it as
+  foreign instead of calling the wrong local state.
+- A second WABT fixture binds two import indices to one six-element host table
+  under a six-element aggregate budget. Cross-index overlapping copy produces
+  the expected indirect-call sum `16`.
+- Public JavaScriptCore executes the sibling fixture to result `4`, proving the
+  remaining target semantics: after the second instantiation, a call made by
+  the first instance dispatches into the second instance's mutable global.
+- The iOS bridge links at 1,579,656 bytes arm64 and 1,656,480 bytes x86_64;
+  profile-catalog, replay, private-library and session consumers link at
+  1,452,504, 1,443,432, 1,445,136 and 1,444,256 bytes. Arm64 remains within its
+  existing product ceiling; x86_64 moves by one explicit 16 KiB simulator-only
+  compatibility bucket.
+- All 246 non-ignored package tests plus one doctest, every WABT/WebKit gate,
+  no-default/replay feature checks, Clippy and formatting pass. The stripped
+  static core is 101,208 bytes with self-test result 42. The real Nostalgia
+  Arcade gate passes five runtime/App tests, one UI journey and the arm64
+  device Release build against this runtime.

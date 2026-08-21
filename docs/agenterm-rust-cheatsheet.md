@@ -2601,6 +2601,16 @@ indices bound to the same object as aliases for aggregate budgets and
 overlapping `memory.copy`, and turn conflicting host borrows into traps rather
 than `RefCell` panics.
 
+Imported funcref tables need more than the memory pattern. A non-null table
+cell is an instance-bound function address, not a bare combined-function index.
+Attach stable instance identity when `ref.func`, active/passive elements or
+table writes create an address; never reinterpret a foreign address in the
+caller instance. Shared table aliases must count once in host budgets and use
+memmove ordering for overlapping cross-index copies. Until the runtime can
+dispatch a foreign address against its owning globals, memories and tables,
+trap that boundary explicitly and keep the capability partial rather than
+silently executing caller-local state.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode

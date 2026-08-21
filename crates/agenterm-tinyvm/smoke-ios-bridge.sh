@@ -131,8 +131,9 @@ MAX_ARM64_LINKED_BYTES=1589248
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
 # Imported-global store identity crosses the next x86_64 linker size bucket;
-# keep one 16 KiB compatibility-slice step without changing the arm64 budget.
-MAX_X86_64_LINKED_BYTES=1654784
+# imported-table store/address identity crosses one more. Keep the simulator
+# compatibility budget explicit without changing the arm64 product ceiling.
+MAX_X86_64_LINKED_BYTES=1671168
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
 test "$X86_64_LINKED_BYTES" -le "$MAX_X86_64_LINKED_BYTES"
 test "$HOST_PROFILE_CATALOG_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
