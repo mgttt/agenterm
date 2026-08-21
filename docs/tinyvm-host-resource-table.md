@@ -36,8 +36,11 @@ This is an ownership and lifecycle primitive, not a permission system. Each
 versioned native module owns the meaning of its table and the finite-work rules
 for operations on its resources. Handles are not native pointers, OS file
 descriptors, globally interchangeable identities or evidence that a capability
-was authorized. The registry must assign distinct domains to native modules
-whose handle types must not be exchanged.
+was authorized. `NativeModuleRegistry::resource_domain` assigns one stable,
+nonzero domain to each canonical versioned module in explicit App-registry
+construction order. Repeated claims and later function registration reuse it;
+different modules cannot accidentally configure the same domain. A claimed
+module with no registered functions does not enter the converter host profile.
 
 The API is synchronous and contains no executor, queue or hidden thread. It can
 therefore be reused by iOS, macOS, Linux, Windows and other hosts without
@@ -51,6 +54,7 @@ Executable evidence proves:
 - bounded insertion, mutable access, close, clear and deterministic value drop;
 - stale-handle rejection after slot reuse;
 - cross-domain rejection for two otherwise identical table positions;
+- stable, unique registry assignment for multiple versioned native modules;
 - permanent retirement after all 4,095 generations rather than aliasing;
 - an ordinary TinyArcade cartridge creating, reading and closing a host-owned
   resource through three versioned native imports.

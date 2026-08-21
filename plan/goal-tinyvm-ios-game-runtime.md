@@ -57,6 +57,7 @@ tinyvm iOS game runtime
 │   ├── recyclable frame buffers      [x]
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
+│   │   └── registry-owned resource domains [x]
 │   ├── bounded in-place host dispatch [x]
 │   ├── domain + generation native resource handles [x]
 │   └── storage without guest network [x]
@@ -3499,3 +3500,25 @@ journey and its arm64 release audit. Nostalgia Arcade `0.16.4 (33)`, the first
 TestFlight candidate containing both Depth Well and Signal Lock standard WASM
 cartridges, was uploaded successfully and entered Apple processing. Physical
 iPhone installation, lifecycle, frame-time and audio evidence remain open.
+
+## One-hundred-eighth executable increment — registry-owned resource domains
+
+`NativeModuleRegistry` now owns resource-domain assignment instead of asking
+each native callback to invent an integer. The first explicit claim or function
+registration for a canonical versioned module receives the next nonzero domain;
+repeated claims and every later function reuse it, while sibling modules receive
+different domains. A domain claim alone does not add a function to the
+converter-visible host profile or grant a cartridge an import.
+
+Evidence on 2026-08-22: the real resource-handle cartridge obtains its texture
+table domain from the registry, observes stable reassignment, claims a distinct
+audio domain, and completes versioned create/read/close calls. The lower-level
+six-test table suite proves that tokens at otherwise identical slot/generation
+positions are rejected across those domains. The 102-leaf executable PRD trace
+binds both registry leaves to this black-box owner. The complete all-feature/
+all-target package passes all 128 library tests and every non-ignored
+integration test, including both iOS XCFramework gates and the three-game
+tinyvm/JSC/H5 differential. Warnings-denied Clippy, arm64 iOS `no_std`, rustfmt
+and document-redaction gates pass. Default linked sizes are 1,602,872 bytes
+arm64 and 1,681,888 bytes x86_64; the stripped static core remains 101,256
+bytes with selftest 42.

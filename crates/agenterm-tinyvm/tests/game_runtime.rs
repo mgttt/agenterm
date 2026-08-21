@@ -1383,8 +1383,44 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
         "attach resource-handle manifest",
     );
 
-    let resource_domain =
-        agenterm_tinyvm::ResourceHandleDomain::new(1).expect("non-zero resource domain");
+    let mut registry = NativeModuleRegistry::new();
+    let resource_domain = must_ok(
+        registry.resource_domain("fan:texture/v1"),
+        "assign texture resource domain",
+    );
+    assert_eq!(
+        must_ok(
+            registry.resource_domain("fan:texture/v1"),
+            "reuse texture resource domain"
+        ),
+        resource_domain
+    );
+    let audio_domain = must_ok(
+        registry.resource_domain("fan:audio/v1"),
+        "assign audio resource domain",
+    );
+    assert_ne!(audio_domain, resource_domain);
+    assert_eq!(
+        registry.assigned_resource_domain("fan:texture/v1"),
+        Some(resource_domain)
+    );
+    assert_eq!(registry.assigned_resource_domain("fan:missing/v1"), None);
+    assert!(
+        must_ok(
+            registry.host_profile(Limits::default(), GameLimits::default()),
+            "profile domain-only registry"
+        )
+        .native_functions()
+        .is_empty(),
+        "a resource domain is not an advertised function"
+    );
+
+    let mut automatic = NativeModuleRegistry::new();
+    must_ok(
+        automatic.register("fan:auto/v1", "ping", 0, 1, |_, _| Ok(vec![0])),
+        "register automatically assigned module",
+    );
+    assert!(automatic.assigned_resource_domain("fan:auto/v1").is_some());
     let resources = Rc::new(RefCell::new(must_ok(
         HostResourceTable::new(resource_domain, 1)
             .map_err(|_| WasmError::Trap("native resource table config")),
@@ -1393,7 +1429,6 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
     let create_resources = resources.clone();
     let read_resources = resources.clone();
     let close_resources = resources.clone();
-    let mut registry = NativeModuleRegistry::new();
     must_ok(
         registry.register("fan:texture/v1", "create", 0, 1, move |_, _| {
             let handle = create_resources

@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 100] = [
+const LEAF_TESTS: [(&str, &str); 102] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -863,6 +863,10 @@ const LEAF_TESTS: [(&str, &str); 100] = [
         "native module registry",
         "native_dispatch_quota_is_charged_before_callback_and_resets_per_lifecycle",
     ),
+    (
+        "registry-owned resource domains",
+        "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
+    ),
     ("App Store bundled-only gate", "ios_xcframework_swift_link"),
     (
         "machine host profile",
@@ -951,6 +955,10 @@ const LEAF_TESTS: [(&str, &str); 100] = [
     ),
     (
         "unified host/guest handle lifetimes",
+        "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
+    ),
+    (
+        "registry-owned native module domains",
         "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
     ),
     (

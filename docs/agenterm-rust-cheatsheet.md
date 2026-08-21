@@ -2774,8 +2774,10 @@ legitimately expands.
 
 When a native Wasm module exposes host-owned objects through an `i32`, keep the
 objects in one bounded host table and encode native-module domain, slot and
-generation in the guest token. Distinct module domains prevent equal slot/
-generation positions in sibling tables from accepting each other's handles.
+generation in the guest token. Let the native-module registry assign and retain
+one nonzero domain per canonical versioned module; do not make each callback
+invent numeric domains independently. Distinct module domains prevent equal
+slot/generation positions in sibling tables from accepting each other's handles.
 Advance the generation before reusing a closed slot, and permanently
 retire the slot instead of wrapping back to a token that could revive a very
 old handle. Failed publication must drop the newly supplied object; table clear
