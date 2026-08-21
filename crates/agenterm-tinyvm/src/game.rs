@@ -504,6 +504,11 @@ impl GameRuntime {
                 "game cartridge requires exactly one memory",
             ));
         }
+        if !module.global_imports().is_empty() {
+            return Err(WasmError::Decode(
+                "game cartridge does not support global imports",
+            ));
+        }
         validate_native_availability(&module, registry)?;
         let mut native_calls = Vec::new();
         native_calls

@@ -17,6 +17,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
 mod validate;
 
@@ -89,6 +90,58 @@ impl ValueType {
             0x70 => Some(Self::FuncRef),
             _ => None,
         }
+    }
+
+    fn to_byte(self) -> u8 {
+        match self {
+            Self::I32 => 0x7F,
+            Self::I64 => 0x7E,
+            Self::F32 => 0x7D,
+            Self::F64 => 0x7C,
+            Self::FuncRef => 0x70,
+        }
+    }
+}
+
+/// A standard host-owned global that can be imported by one or more modules.
+///
+/// Clones share one store cell. A mutable guest `global.set` is therefore
+/// visible to the host and sibling instances that import the same handle.
+#[derive(Clone)]
+pub struct Global {
+    value: Rc<Cell<Val>>,
+    value_type: ValueType,
+    mutable: bool,
+}
+
+impl Global {
+    pub fn new(value: Val, mutable: bool) -> Self {
+        Self {
+            value: Rc::new(Cell::new(value)),
+            value_type: ValueType::from_byte(valtype_of(&value))
+                .expect("Val always has a supported value type"),
+            mutable,
+        }
+    }
+
+    pub fn value(&self) -> Val {
+        self.value.get()
+    }
+
+    pub fn value_type(&self) -> ValueType {
+        self.value_type
+    }
+
+    pub fn is_mutable(&self) -> bool {
+        self.mutable
+    }
+
+    pub fn set(&self, value: Val) -> Result<(), WasmError> {
+        if !self.mutable || valtype_of(&value) != self.value_type.to_byte() {
+            return Err(WasmError::Trap("global binding type"));
+        }
+        self.value.set(value);
+        Ok(())
     }
 }
 
@@ -1347,9 +1400,25 @@ fn parse_memory_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Memor
     Ok(memories)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
+enum ConstOp {
+    Value(Val),
+    GlobalGet(u32),
+    I32Add,
+    I32Sub,
+    I32Mul,
+    I64Add,
+    I64Sub,
+    I64Mul,
+}
+
+struct ConstExpr {
+    ops: Vec<ConstOp>,
+    result_type: u8,
+}
+
 enum DataMode {
-    Active { memory: usize, offset: usize },
+    Active { memory: usize, offset: ConstExpr },
     Passive,
 }
 
@@ -1359,7 +1428,11 @@ struct DataSegment {
 }
 
 /// Parse active and passive data segments from section id 11.
-fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSegment>, WasmError> {
+fn parse_data_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+    globals: &[GlobalDesc],
+) -> Result<Vec<DataSegment>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     let count = count as usize;
@@ -1369,28 +1442,25 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
         i = ni;
         let mode = match flag {
             0 => {
-                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
+                let (offset, ni) = parse_const_expr(p, i, budget, globals)?;
                 i = ni;
-                match offset_val {
-                    Val::I32(v) => DataMode::Active {
-                        memory: 0,
-                        offset: v as u32 as usize,
-                    },
-                    _other => return Err(WasmError::Decode("data offset must be i32, got")),
+                if offset.result_type != 0x7F {
+                    return Err(WasmError::Decode("data offset must be i32, got"));
                 }
+                DataMode::Active { memory: 0, offset }
             }
             1 => DataMode::Passive,
             2 => {
                 let (memory, ni) = leb_u32(p, i)?;
                 i = ni;
-                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
+                let (offset, ni) = parse_const_expr(p, i, budget, globals)?;
                 i = ni;
-                match offset_val {
-                    Val::I32(v) => DataMode::Active {
-                        memory: memory as usize,
-                        offset: v as u32 as usize,
-                    },
-                    _other => return Err(WasmError::Decode("data offset must be i32, got")),
+                if offset.result_type != 0x7F {
+                    return Err(WasmError::Decode("data offset must be i32, got"));
+                }
+                DataMode::Active {
+                    memory: memory as usize,
+                    offset,
                 }
             }
             _ => return Err(WasmError::Decode("unsupported data segment flag")),
@@ -1413,9 +1483,11 @@ fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSeg
     Ok(out)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum ElemMode {
-    Active { table_index: usize, offset: usize },
+    Active {
+        table_index: usize,
+        offset: ConstExpr,
+    },
     Passive,
     Declarative,
 }
@@ -1425,7 +1497,11 @@ struct ElemSegment {
     refs: Vec<Option<usize>>,
 }
 
-fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSegment>, WasmError> {
+fn parse_elem_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+    globals: &[GlobalDesc],
+) -> Result<Vec<ElemSegment>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     let count = count as usize;
@@ -1435,14 +1511,14 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
         i = ni;
         let mode = match flag {
             0 => {
-                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
+                let (offset, ni) = parse_const_expr(p, i, budget, globals)?;
                 i = ni;
-                match offset_val {
-                    Val::I32(v) => ElemMode::Active {
-                        table_index: 0,
-                        offset: v as u32 as usize,
-                    },
-                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                if offset.result_type != 0x7F {
+                    return Err(WasmError::Decode("elem offset must be i32, got"));
+                }
+                ElemMode::Active {
+                    table_index: 0,
+                    offset,
                 }
             }
             1 => {
@@ -1456,14 +1532,14 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
             2 => {
                 let (table, ni) = leb_u32(p, i)?;
                 i = ni;
-                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
+                let (offset, ni) = parse_const_expr(p, i, budget, globals)?;
                 i = ni;
-                let mode = match offset_val {
-                    Val::I32(v) => ElemMode::Active {
-                        table_index: table as usize,
-                        offset: v as u32 as usize,
-                    },
-                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                if offset.result_type != 0x7F {
+                    return Err(WasmError::Decode("elem offset must be i32, got"));
+                }
+                let mode = ElemMode::Active {
+                    table_index: table as usize,
+                    offset,
                 };
                 let kind = *p.get(i).ok_or(WasmError::Decode("truncated elem kind"))?;
                 i += 1;
@@ -1481,14 +1557,14 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 ElemMode::Declarative
             }
             4 => {
-                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
+                let (offset, ni) = parse_const_expr(p, i, budget, globals)?;
                 i = ni;
-                match offset_val {
-                    Val::I32(v) => ElemMode::Active {
-                        table_index: 0,
-                        offset: v as u32 as usize,
-                    },
-                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                if offset.result_type != 0x7F {
+                    return Err(WasmError::Decode("elem offset must be i32, got"));
+                }
+                ElemMode::Active {
+                    table_index: 0,
+                    offset,
                 }
             }
             5 => {
@@ -1506,14 +1582,14 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
             6 => {
                 let (table, ni) = leb_u32(p, i)?;
                 i = ni;
-                let (offset_val, ni) = parse_const_expr(p, i, budget)?;
+                let (offset, ni) = parse_const_expr(p, i, budget, globals)?;
                 i = ni;
-                let mode = match offset_val {
-                    Val::I32(v) => ElemMode::Active {
-                        table_index: table as usize,
-                        offset: v as u32 as usize,
-                    },
-                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                if offset.result_type != 0x7F {
+                    return Err(WasmError::Decode("elem offset must be i32, got"));
+                }
+                let mode = ElemMode::Active {
+                    table_index: table as usize,
+                    offset,
                 };
                 let reftype = *p
                     .get(i)
@@ -1552,16 +1628,18 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
                 i = next;
                 refs.push(Some(function as usize));
             } else {
-                let (value, next) = parse_const_expr(p, i, budget)?;
+                let (value, next) = parse_const_expr(p, i, budget, globals)?;
                 i = next;
-                match value {
-                    Val::FuncRef(function) => refs.push(function),
-                    _other => {
-                        return Err(WasmError::Decode(
-                            "funcref element expression has non-reference value",
-                        ));
-                    }
+                if value.result_type != 0x70 {
+                    return Err(WasmError::Decode(
+                        "funcref element expression has non-reference value",
+                    ));
                 }
+                let function = match value.ops.as_slice() {
+                    [ConstOp::Value(Val::FuncRef(function))] => *function,
+                    _ => return Err(WasmError::Decode("element const expression")),
+                };
+                refs.push(function);
             }
         }
         out.push(ElemSegment { mode, refs });
@@ -1572,38 +1650,40 @@ fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSeg
     Ok(out)
 }
 
-/// Evaluate one standard constant expression. Besides scalar/reference
-/// constants, the extended-const profile accepts wrapping i32/i64 add, sub and
-/// mul. `global.get` remains unavailable because this VM does not yet have a
-/// standard imported-global store/binding model.
+/// Decode and type-check one standard constant expression. Besides scalar and
+/// reference constants, the profile accepts immutable imported `global.get`
+/// plus wrapping i32/i64 add, sub and mul.
 fn parse_const_expr(
     p: &[u8],
     i: usize,
     budget: &mut DecodeBudget,
-) -> Result<(Val, usize), WasmError> {
-    let mut stack = Vec::new();
+    globals: &[GlobalDesc],
+) -> Result<(ConstExpr, usize), WasmError> {
+    let mut types = Vec::new();
+    let mut ops = Vec::new();
     let mut j = i;
     loop {
         let op = match p.get(j) {
             Some(op) => *op,
-            None if stack.is_empty() => return Err(WasmError::Decode("truncated const expr")),
+            None if types.is_empty() => return Err(WasmError::Decode("truncated const expr")),
             None => return Err(WasmError::Decode("const expr missing end")),
         };
         if op == 0x0B {
-            return match stack.as_slice() {
-                [value] => Ok((*value, j + 1)),
-                _ => Err(WasmError::Decode("const expr result arity")),
+            let result_type = match types.as_slice() {
+                [result_type] => *result_type,
+                _ => return Err(WasmError::Decode("const expr result arity")),
             };
+            return Ok((ConstExpr { ops, result_type }, j + 1));
         }
         budget.charge(1)?;
-        let (value, next) = match op {
+        let (decoded, result_type, next) = match op {
             0x41 => {
                 let (value, next) = leb_s32(p, j + 1)?;
-                (Some(Val::I32(value)), next)
+                (ConstOp::Value(Val::I32(value)), Some(0x7F), next)
             }
             0x42 => {
                 let (value, next) = leb_s64(p, j + 1)?;
-                (Some(Val::I64(value)), next)
+                (ConstOp::Value(Val::I64(value)), Some(0x7E), next)
             }
             0x43 => {
                 let end = (j + 1)
@@ -1611,7 +1691,11 @@ fn parse_const_expr(
                     .filter(|&end| end <= p.len())
                     .ok_or(WasmError::Decode("truncated f32 const expr"))?;
                 let bytes = le4(&p[j + 1..end]);
-                (Some(Val::F32(f32::from_le_bytes(bytes))), end)
+                (
+                    ConstOp::Value(Val::F32(f32::from_le_bytes(bytes))),
+                    Some(0x7D),
+                    end,
+                )
             }
             0x44 => {
                 let end = (j + 1)
@@ -1619,7 +1703,19 @@ fn parse_const_expr(
                     .filter(|&end| end <= p.len())
                     .ok_or(WasmError::Decode("truncated f64 const expr"))?;
                 let bytes = le8(&p[j + 1..end]);
-                (Some(Val::F64(f64::from_le_bytes(bytes))), end)
+                (
+                    ConstOp::Value(Val::F64(f64::from_le_bytes(bytes))),
+                    Some(0x7C),
+                    end,
+                )
+            }
+            0x23 => {
+                let (index, next) = leb_u32(p, j + 1)?;
+                let global = globals
+                    .get(index as usize)
+                    .filter(|global| !global.mutable && global.is_import())
+                    .ok_or(WasmError::Decode("const expr global index"))?;
+                (ConstOp::GlobalGet(index), Some(global.value_type), next)
             }
             0xD0 => {
                 let reftype = *p
@@ -1628,47 +1724,124 @@ fn parse_const_expr(
                 if reftype != 0x70 {
                     return Err(WasmError::Decode("only funcref ref.null is supported"));
                 }
-                (Some(Val::FuncRef(None)), j + 2)
+                (ConstOp::Value(Val::FuncRef(None)), Some(0x70), j + 2)
             }
             0xD2 => {
                 let (function, next) = leb_u32(p, j + 1)?;
-                (Some(Val::FuncRef(Some(function as usize))), next)
+                (
+                    ConstOp::Value(Val::FuncRef(Some(function as usize))),
+                    Some(0x70),
+                    next,
+                )
             }
             0x6A..=0x6C | 0x7C..=0x7E => {
-                let rhs = stack
+                let rhs = types
                     .pop()
                     .ok_or(WasmError::Decode("const expr operand stack"))?;
-                let lhs = stack
+                let lhs = types
                     .pop()
                     .ok_or(WasmError::Decode("const expr operand stack"))?;
-                let result = match (op, lhs, rhs) {
-                    (0x6A, Val::I32(lhs), Val::I32(rhs)) => Val::I32(lhs.wrapping_add(rhs)),
-                    (0x6B, Val::I32(lhs), Val::I32(rhs)) => Val::I32(lhs.wrapping_sub(rhs)),
-                    (0x6C, Val::I32(lhs), Val::I32(rhs)) => Val::I32(lhs.wrapping_mul(rhs)),
-                    (0x7C, Val::I64(lhs), Val::I64(rhs)) => Val::I64(lhs.wrapping_add(rhs)),
-                    (0x7D, Val::I64(lhs), Val::I64(rhs)) => Val::I64(lhs.wrapping_sub(rhs)),
-                    (0x7E, Val::I64(lhs), Val::I64(rhs)) => Val::I64(lhs.wrapping_mul(rhs)),
+                let (decoded, expected) = match op {
+                    0x6A => (ConstOp::I32Add, 0x7F),
+                    0x6B => (ConstOp::I32Sub, 0x7F),
+                    0x6C => (ConstOp::I32Mul, 0x7F),
+                    0x7C => (ConstOp::I64Add, 0x7E),
+                    0x7D => (ConstOp::I64Sub, 0x7E),
+                    0x7E => (ConstOp::I64Mul, 0x7E),
                     _ => return Err(WasmError::Decode("const expr type mismatch")),
                 };
-                (Some(result), j + 1)
+                if lhs != expected || rhs != expected {
+                    return Err(WasmError::Decode("const expr type mismatch"));
+                }
+                (decoded, Some(expected), j + 1)
             }
             _other => return Err(WasmError::Decode("unsupported const-expr opcode 0x")),
         };
-        if let Some(value) = value {
-            stack
+        ops.try_reserve(1)
+            .map_err(|_| WasmError::Decode("const expr allocation"))?;
+        ops.push(decoded);
+        if let Some(result_type) = result_type {
+            types
                 .try_reserve(1)
                 .map_err(|_| WasmError::Decode("const expr allocation"))?;
-            stack.push(value);
+            types.push(result_type);
         }
         j = next;
     }
 }
 
-/// Parse the global section into `(init_value, mutable)` per global.
+fn eval_const_expr(expr: &ConstExpr, globals: &[GlobalSlot]) -> Result<Val, WasmError> {
+    let mut stack = Vec::new();
+    for op in &expr.ops {
+        let result = match *op {
+            ConstOp::Value(value) => Some(value),
+            ConstOp::GlobalGet(index) => Some(
+                globals
+                    .get(index as usize)
+                    .ok_or(WasmError::Trap("const expr global index"))?
+                    .get(),
+            ),
+            operation => {
+                let rhs = stack
+                    .pop()
+                    .ok_or(WasmError::Trap("const expr operand stack"))?;
+                let lhs = stack
+                    .pop()
+                    .ok_or(WasmError::Trap("const expr operand stack"))?;
+                Some(match (operation, lhs, rhs) {
+                    (ConstOp::I32Add, Val::I32(lhs), Val::I32(rhs)) => {
+                        Val::I32(lhs.wrapping_add(rhs))
+                    }
+                    (ConstOp::I32Sub, Val::I32(lhs), Val::I32(rhs)) => {
+                        Val::I32(lhs.wrapping_sub(rhs))
+                    }
+                    (ConstOp::I32Mul, Val::I32(lhs), Val::I32(rhs)) => {
+                        Val::I32(lhs.wrapping_mul(rhs))
+                    }
+                    (ConstOp::I64Add, Val::I64(lhs), Val::I64(rhs)) => {
+                        Val::I64(lhs.wrapping_add(rhs))
+                    }
+                    (ConstOp::I64Sub, Val::I64(lhs), Val::I64(rhs)) => {
+                        Val::I64(lhs.wrapping_sub(rhs))
+                    }
+                    (ConstOp::I64Mul, Val::I64(lhs), Val::I64(rhs)) => {
+                        Val::I64(lhs.wrapping_mul(rhs))
+                    }
+                    _ => return Err(WasmError::Trap("const expr type mismatch")),
+                })
+            }
+        };
+        if let Some(result) = result {
+            stack
+                .try_reserve(1)
+                .map_err(|_| WasmError::Trap("const expr allocation"))?;
+            stack.push(result);
+        }
+    }
+    match stack.as_slice() {
+        [value] if valtype_of(value) == expr.result_type => Ok(*value),
+        _ => Err(WasmError::Trap("const expr result")),
+    }
+}
+
+fn static_const_value(expr: &ConstExpr) -> Result<Option<Val>, WasmError> {
+    if expr
+        .ops
+        .iter()
+        .any(|op| matches!(op, ConstOp::GlobalGet(_)))
+    {
+        Ok(None)
+    } else {
+        eval_const_expr(expr, &[]).map(Some)
+    }
+}
+
+/// Parse internally defined globals against the imported-global context.
 fn parse_global_section(
     p: &[u8],
     budget: &mut DecodeBudget,
-) -> Result<Vec<(Val, bool)>, WasmError> {
+    imported_globals: &[GlobalDesc],
+) -> Result<Vec<GlobalDesc>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     let count = count as usize;
@@ -1688,12 +1861,16 @@ fn parse_global_section(
             _ => return Err(WasmError::Decode("invalid global mutability")),
         };
         i += 2;
-        let (val, ni) = parse_const_expr(p, i, budget)?;
+        let (init, ni) = parse_const_expr(p, i, budget, imported_globals)?;
         i = ni;
-        if valtype_of(&val) != valtype {
+        if init.result_type != valtype {
             return Err(WasmError::Decode("global initializer type mismatch"));
         }
-        out.push((val, mutable));
+        out.push(GlobalDesc {
+            value_type: valtype,
+            init: GlobalInit::Expr(init),
+            mutable,
+        });
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing global section bytes"));
@@ -1754,15 +1931,33 @@ pub struct ImportDesc {
     pub i32_only: bool,
 }
 
-/// Parse the import section, returning each imported **function** in order.
-/// Only function imports are supported here.
+/// A standard numeric global import in global-index order.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct GlobalImportDesc {
+    pub module: String,
+    pub field: String,
+    pub value_type: ValueType,
+    pub mutable: bool,
+}
+
+struct ParsedImports {
+    functions: Vec<(ImportDesc, usize)>,
+    global_descs: Vec<GlobalDesc>,
+    global_imports: Vec<GlobalImportDesc>,
+}
+
+/// Parse the supported standard function and numeric-global imports while
+/// preserving each independent index space.
 fn parse_import_section(
     p: &[u8],
     types: &[FuncType],
     budget: &mut DecodeBudget,
-) -> Result<Vec<(ImportDesc, usize)>, WasmError> {
+) -> Result<ParsedImports, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
-    let mut out = Vec::new();
+    let mut functions = Vec::new();
+    let mut global_descs = Vec::new();
+    let mut global_imports = Vec::new();
     let count = count as usize;
     budget.charge(count)?;
     for _ in 0..count {
@@ -1778,7 +1973,7 @@ fn parse_import_section(
                 let t = types.get(tidx as usize).ok_or(WasmError::Decode(
                     "imported function references missing type",
                 ))?;
-                out.push((
+                functions.push((
                     ImportDesc {
                         module,
                         field,
@@ -1789,6 +1984,33 @@ fn parse_import_section(
                     tidx as usize,
                 ));
             }
+            0x03 => {
+                let value_type = *p
+                    .get(i)
+                    .ok_or(WasmError::Decode("truncated imported global type"))?;
+                if !matches!(value_type, 0x7C..=0x7F) {
+                    return Err(WasmError::Decode("unsupported imported global type"));
+                }
+                let mutable = match p.get(i + 1) {
+                    Some(0) => false,
+                    Some(1) => true,
+                    Some(_) => return Err(WasmError::Decode("invalid global mutability")),
+                    None => return Err(WasmError::Decode("truncated imported global type")),
+                };
+                i += 2;
+                global_imports.push(GlobalImportDesc {
+                    module,
+                    field,
+                    value_type: ValueType::from_byte(value_type)
+                        .ok_or(WasmError::Decode("unsupported imported global type"))?,
+                    mutable,
+                });
+                global_descs.push(GlobalDesc {
+                    value_type,
+                    init: GlobalInit::Import(None),
+                    mutable,
+                });
+            }
             _other => {
                 return Err(WasmError::Decode("unsupported import kind 0x"));
             }
@@ -1797,7 +2019,11 @@ fn parse_import_section(
     if i != p.len() {
         return Err(WasmError::Decode("trailing import section bytes"));
     }
-    Ok(out)
+    Ok(ParsedImports {
+        functions,
+        global_descs,
+        global_imports,
+    })
 }
 
 /// Parse the type section into `(n_params, n_results)` per function type.
@@ -2049,11 +2275,47 @@ struct HostFunc {
 /// `0..hosts.len()`), then WASM-defined functions. So when there are no host
 /// functions, a defined function's index equals its position — matching the
 /// pre-host behaviour.
-/// A module global: its initial value and whether `global.set` may write it.
-#[derive(Clone, Copy)]
+enum GlobalInit {
+    Value(Val),
+    Expr(ConstExpr),
+    Import(Option<Global>),
+}
+
+/// A module global declaration in the standard combined global index space.
 struct GlobalDesc {
-    init: Val,
+    value_type: u8,
+    init: GlobalInit,
     mutable: bool,
+}
+
+impl GlobalDesc {
+    fn is_import(&self) -> bool {
+        matches!(&self.init, GlobalInit::Import(_))
+    }
+}
+
+enum GlobalSlot {
+    Local(Val),
+    Imported(Global),
+}
+
+impl GlobalSlot {
+    fn get(&self) -> Val {
+        match self {
+            Self::Local(value) => *value,
+            Self::Imported(global) => global.value(),
+        }
+    }
+
+    fn set(&mut self, value: Val) -> Result<(), WasmError> {
+        match self {
+            Self::Local(slot) => {
+                *slot = value;
+                Ok(())
+            }
+            Self::Imported(global) => global.set(value),
+        }
+    }
 }
 
 /// One internally defined funcref table template and its declared maximum.
@@ -2076,6 +2338,8 @@ pub struct Module {
     export_list: Vec<(String, usize)>,
     /// Imported functions in index order (the host door).
     import_descs: Vec<ImportDesc>,
+    /// Imported numeric globals in their independent global index space.
+    global_import_descs: Vec<GlobalImportDesc>,
     /// Global initializers and mutability. A working copy is created for each
     /// fresh convenience call or persistent [`Instance`].
     globals: Vec<GlobalDesc>,
@@ -2108,7 +2372,7 @@ pub struct Module {
 pub struct Instance {
     module: Module,
     memories: Vec<Vec<u8>>,
-    globals: Vec<Val>,
+    globals: Vec<GlobalSlot>,
     data_live: Vec<bool>,
     tables: Vec<Vec<Option<usize>>>,
     elem_live: Vec<bool>,
@@ -2351,10 +2615,12 @@ impl Module {
 
         let mut types: Vec<FuncType> = Vec::new();
         let mut imports: Vec<(ImportDesc, usize)> = Vec::new();
+        let mut imported_globals: Vec<GlobalDesc> = Vec::new();
+        let mut global_import_descs: Vec<GlobalImportDesc> = Vec::new();
         let mut func_types: Vec<usize> = Vec::new();
         let mut codes: Vec<CodeEntry> = Vec::new();
         let mut exports: Vec<ExportEntry> = Vec::new();
-        let mut globals: Vec<(Val, bool)> = Vec::new();
+        let mut globals: Vec<GlobalDesc> = Vec::new();
         let mut start_fn: Option<usize> = None;
         let mut table_limits: Vec<(usize, Option<usize>)> = Vec::new();
         let mut elems: Vec<ElemSegment> = Vec::new();
@@ -2396,11 +2662,16 @@ impl Module {
                     let _ = read_name_str(payload, 0)?;
                 }
                 1 => types = parse_type_section(payload, &mut budget)?,
-                2 => imports = parse_import_section(payload, &types, &mut budget)?,
+                2 => {
+                    let parsed = parse_import_section(payload, &types, &mut budget)?;
+                    imports = parsed.functions;
+                    imported_globals = parsed.global_descs;
+                    global_import_descs = parsed.global_imports;
+                }
                 3 => func_types = parse_func_section(payload, &mut budget)?,
                 4 => table_limits = parse_table_section(payload, &mut budget)?,
                 5 => memories = parse_memory_section(payload, &mut budget)?,
-                6 => globals = parse_global_section(payload, &mut budget)?,
+                6 => globals = parse_global_section(payload, &mut budget, &imported_globals)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
                 8 => {
                     let (function, consumed) = leb_u32(payload, 0)?;
@@ -2409,7 +2680,7 @@ impl Module {
                     }
                     start_fn = Some(function as usize);
                 }
-                9 => elems = parse_elem_section(payload, &mut budget)?,
+                9 => elems = parse_elem_section(payload, &mut budget, &imported_globals)?,
                 12 => {
                     let (count, consumed) = leb_u32(payload, 0)?;
                     if consumed != payload.len() {
@@ -2418,7 +2689,7 @@ impl Module {
                     data_count = Some(count as usize);
                 }
                 10 => codes = parse_code_section(payload, &mut budget)?,
-                11 => data = parse_data_section(payload, &mut budget)?,
+                11 => data = parse_data_section(payload, &mut budget, &imported_globals)?,
                 _ => unreachable!("standard section id checked above"),
             }
             i = end;
@@ -2451,6 +2722,8 @@ impl Module {
             });
             module.import_descs.push(desc);
         }
+        module.global_import_descs = global_import_descs;
+        module.globals = imported_globals;
         budget.memory_count = memory_count;
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
             let ft = types.get(tidx).ok_or(WasmError::Decode("function"))?;
@@ -2468,9 +2741,7 @@ impl Module {
                 sig: Some(tidx),
             });
         }
-        for (init, mutable) in globals {
-            module.globals.push(GlobalDesc { init, mutable });
-        }
+        module.globals.extend(globals);
         // Record declared function types before validating indices/signatures
         // used by the export and start sections.
         module.types = types;
@@ -2520,18 +2791,20 @@ impl Module {
             return Err(WasmError::Trap("memory size"));
         }
         for segment in &data {
-            if let DataMode::Active { memory, offset } = segment.mode {
+            if let DataMode::Active { memory, offset } = &segment.mode {
                 let memory = memories
-                    .get(memory)
+                    .get(*memory)
                     .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
                 let memory_bytes = memory
                     .min
                     .checked_mul(WASM_PAGE_SIZE)
                     .ok_or(WasmError::Decode("memory size"))?;
-                offset
-                    .checked_add(segment.bytes.len())
-                    .filter(|&end| end <= memory_bytes)
-                    .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
+                if let Some(Val::I32(offset)) = static_const_value(offset)? {
+                    (offset as u32 as usize)
+                        .checked_add(segment.bytes.len())
+                        .filter(|&end| end <= memory_bytes)
+                        .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
+                }
             }
         }
         module.memories = memories;
@@ -2550,12 +2823,16 @@ impl Module {
             }
         }
         for global in &module.globals {
-            if let Val::FuncRef(Some(function)) = global.init
-                && !declared_refs.get(function).copied().unwrap_or(false)
-            {
-                return Err(WasmError::Decode(
-                    "global initializer has undeclared ref.func",
-                ));
+            if let GlobalInit::Expr(init) = &global.init {
+                for op in &init.ops {
+                    if let ConstOp::Value(Val::FuncRef(Some(function))) = op
+                        && !declared_refs.get(*function).copied().unwrap_or(false)
+                    {
+                        return Err(WasmError::Decode(
+                            "global initializer has undeclared ref.func",
+                        ));
+                    }
+                }
             }
         }
         // --- load gate: prove every body before this Module is handed out ---
@@ -2592,7 +2869,9 @@ impl Module {
             }
         }
 
-        // Allocate every table, then apply active element segments. The host
+        // Allocate every table. Active element segments are applied when the
+        // instance has its imported-global store, while static offsets retain
+        // their early bounds check here. The host
         // budget caps their aggregate live element count, not each table in
         // isolation, so many small guest tables cannot amplify allocation.
         let total_table_size = table_limits.iter().try_fold(0usize, |total, (min, _)| {
@@ -2629,21 +2908,17 @@ impl Module {
             if let ElemMode::Active {
                 table_index,
                 offset,
-            } = segment.mode
+            } = &segment.mode
             {
                 let table = module
                     .tables
-                    .get_mut(table_index)
+                    .get(*table_index)
                     .ok_or(WasmError::Decode("active element segment table index"))?;
-                let end = offset
-                    .checked_add(segment.refs.len())
-                    .filter(|&end| end <= table.elements.len())
-                    .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
-                for (slot, &function) in table.elements[offset..end]
-                    .iter_mut()
-                    .zip(segment.refs.iter())
-                {
-                    *slot = function;
+                if let Some(Val::I32(offset)) = static_const_value(offset)? {
+                    (offset as u32 as usize)
+                        .checked_add(segment.refs.len())
+                        .filter(|&end| end <= table.elements.len())
+                        .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
                 }
             }
         }
@@ -2656,7 +2931,11 @@ impl Module {
     /// persistent [`Instance`].
     pub fn add_global(&mut self, init: Val, mutable: bool) -> usize {
         let idx = self.globals.len();
-        self.globals.push(GlobalDesc { init, mutable });
+        self.globals.push(GlobalDesc {
+            value_type: valtype_of(&init),
+            init: GlobalInit::Value(init),
+            mutable,
+        });
         idx
     }
 
@@ -2774,6 +3053,38 @@ impl Module {
     /// Function imports in module-index order. Bind each with [`Module::bind_import`].
     pub fn imports(&self) -> &[ImportDesc] {
         &self.import_descs
+    }
+
+    /// Numeric global imports in their independent standard index order.
+    pub fn global_imports(&self) -> &[GlobalImportDesc] {
+        &self.global_import_descs
+    }
+
+    /// Bind one shared host global to every matching standard import.
+    pub fn bind_global_import(
+        &mut self,
+        module: &str,
+        field: &str,
+        global: &Global,
+    ) -> Result<(), WasmError> {
+        let mut bound = 0usize;
+        for desc in &self.global_import_descs {
+            if desc.module == module && desc.field == field {
+                if desc.value_type != global.value_type() || desc.mutable != global.is_mutable() {
+                    return Err(WasmError::Trap("global binding type"));
+                }
+                bound += 1;
+            }
+        }
+        if bound == 0 {
+            return Err(WasmError::Trap("no imported global named"));
+        }
+        for (index, desc) in self.global_import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.globals[index].init = GlobalInit::Import(Some(global.clone()));
+            }
+        }
+        Ok(())
     }
 
     /// Exact standard type of one imported function parameter.
@@ -2961,10 +3272,10 @@ impl Module {
         // One instance: the start function and the entry point share the same
         // linear memory and globals, so start-time host writes are visible.
         let mut steps: u64 = 0;
-        let mut memories = self.new_memories()?;
         let mut globals = self.new_globals()?;
+        let mut memories = self.new_memories(&globals)?;
         let mut data_live = self.new_data_state()?;
-        let (mut tables, mut elem_live) = self.new_table_state()?;
+        let (mut tables, mut elem_live) = self.new_table_state(&globals)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
             tables: &mut tables,
@@ -3061,10 +3372,10 @@ impl Module {
     /// convenience wrapper over it.
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
-        let mut memories = self.new_memories()?;
         let mut globals = self.new_globals()?;
+        let mut memories = self.new_memories(&globals)?;
         let mut data_live = self.new_data_state()?;
-        let (mut tables, mut elem_live) = self.new_table_state()?;
+        let (mut tables, mut elem_live) = self.new_table_state(&globals)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
             tables: &mut tables,
@@ -3087,7 +3398,7 @@ impl Module {
 
     /// Fresh zeroed linear memories with active data segments applied. The
     /// host page limit is aggregate across every memory in the instance.
-    fn new_memories(&self) -> Result<Vec<Vec<u8>>, WasmError> {
+    fn new_memories(&self, globals: &[GlobalSlot]) -> Result<Vec<Vec<u8>>, WasmError> {
         let mut memories = Vec::new();
         memories
             .try_reserve_exact(self.memories.len())
@@ -3110,25 +3421,40 @@ impl Module {
             memories.push(memory);
         }
         for segment in &self.data {
-            if let DataMode::Active { memory, offset } = segment.mode {
+            if let DataMode::Active { memory, offset } = &segment.mode {
                 let target = memories
-                    .get_mut(memory)
+                    .get_mut(*memory)
                     .ok_or(WasmError::Trap("memory index"))?;
+                let offset = match eval_const_expr(offset, globals)? {
+                    Val::I32(offset) => offset as u32 as usize,
+                    _ => return Err(WasmError::Trap("data offset")),
+                };
                 let end = offset + segment.bytes.len();
-                if end <= target.len() {
-                    target[offset..end].copy_from_slice(&segment.bytes);
-                }
+                let range = (end <= target.len())
+                    .then_some(offset..end)
+                    .ok_or(WasmError::Trap("data segment runs past memory bounds"))?;
+                target[range].copy_from_slice(&segment.bytes);
             }
         }
         Ok(memories)
     }
 
-    fn new_globals(&self) -> Result<Vec<Val>, WasmError> {
+    fn new_globals(&self) -> Result<Vec<GlobalSlot>, WasmError> {
         let mut globals = Vec::new();
         globals
             .try_reserve_exact(self.globals.len())
             .map_err(|_| WasmError::Trap("global state"))?;
-        globals.extend(self.globals.iter().map(|global| global.init));
+        for global in &self.globals {
+            let slot = match &global.init {
+                GlobalInit::Value(value) => GlobalSlot::Local(*value),
+                GlobalInit::Expr(expr) => GlobalSlot::Local(eval_const_expr(expr, &globals)?),
+                GlobalInit::Import(Some(global)) => GlobalSlot::Imported(global.clone()),
+                GlobalInit::Import(None) => {
+                    return Err(WasmError::Trap("unbound imported global"));
+                }
+            };
+            globals.push(slot);
+        }
         Ok(globals)
     }
 
@@ -3142,14 +3468,14 @@ impl Module {
         state.extend(
             self.data
                 .iter()
-                .map(|segment| segment.mode == DataMode::Passive),
+                .map(|segment| matches!(segment.mode, DataMode::Passive)),
         );
         Ok(state)
     }
 
     /// Create one instance's table and passive-element liveness without any
     /// infallible guest-sized allocation.
-    fn new_table_state(&self) -> Result<TableState, WasmError> {
+    fn new_table_state(&self, globals: &[GlobalSlot]) -> Result<TableState, WasmError> {
         let mut tables = Vec::new();
         tables
             .try_reserve_exact(self.tables.len())
@@ -3163,6 +3489,29 @@ impl Module {
             tables.push(table);
         }
 
+        for segment in &self.elems {
+            if let ElemMode::Active {
+                table_index,
+                offset,
+            } = &segment.mode
+            {
+                let offset = match eval_const_expr(offset, globals)? {
+                    Val::I32(offset) => offset as u32 as usize,
+                    _ => return Err(WasmError::Trap("element offset")),
+                };
+                let table = tables
+                    .get_mut(*table_index)
+                    .ok_or(WasmError::Trap("active element segment table index"))?;
+                let end = offset
+                    .checked_add(segment.refs.len())
+                    .filter(|&end| end <= table.len())
+                    .ok_or(WasmError::Trap("elem segment runs past table bounds"))?;
+                for (slot, &function) in table[offset..end].iter_mut().zip(&segment.refs) {
+                    *slot = function;
+                }
+            }
+        }
+
         let mut elem_live = Vec::new();
         elem_live
             .try_reserve(self.elems.len())
@@ -3170,7 +3519,7 @@ impl Module {
         elem_live.extend(
             self.elems
                 .iter()
-                .map(|segment| segment.mode == ElemMode::Passive),
+                .map(|segment| matches!(segment.mode, ElemMode::Passive)),
         );
         Ok((tables, elem_live))
     }
@@ -3413,7 +3762,7 @@ impl Module {
         call: WasmCall<'_>,
         steps: &mut u64,
         memories: &mut [Vec<u8>],
-        globals: &mut [Val],
+        globals: &mut [GlobalSlot],
         bulk: &mut BulkState<'_>,
         context: &mut CallContext<'_>,
     ) -> Result<Vec<Val>, WasmError> {
@@ -3582,7 +3931,7 @@ impl Module {
         activation: DefinedActivation,
         steps: &mut u64,
         memories: &mut [Vec<u8>],
-        globals: &mut [Val],
+        globals: &mut [GlobalSlot],
         bulk: &mut BulkState<'_>,
         resources: ActivationResources<'_>,
     ) -> Result<DefinedOutcome, WasmError> {
@@ -3760,9 +4109,10 @@ impl Module {
                     memory[ea..ea + 2].copy_from_slice(&(value as u16).to_le_bytes());
                 }
                 Op::GlobalGet(g) => {
-                    let v = *globals
+                    let v = globals
                         .get(g as usize)
-                        .ok_or(WasmError::Trap("global.get"))?;
+                        .ok_or(WasmError::Trap("global.get"))?
+                        .get();
                     push_operand(&mut stack, v, live_slots, resources.available_slots)?;
                 }
                 Op::GlobalSet(g) => {
@@ -3772,7 +4122,7 @@ impl Module {
                     }
                     let v = pop_val(&mut stack)?;
                     let cell = globals.get_mut(gi).ok_or(WasmError::Trap("global.set"))?;
-                    *cell = v;
+                    cell.set(v)?;
                 }
                 Op::I32WrapI64 => {
                     let a = pop_i64(&mut stack)?;
@@ -4751,10 +5101,10 @@ impl Module {
 
 impl Instance {
     fn new(module: Module) -> Result<Self, WasmError> {
-        let memories = module.new_memories()?;
         let globals = module.new_globals()?;
+        let memories = module.new_memories(&globals)?;
         let data_live = module.new_data_state()?;
-        let (tables, elem_live) = module.new_table_state()?;
+        let (tables, elem_live) = module.new_table_state(&globals)?;
         let mut instance = Self {
             module,
             memories,

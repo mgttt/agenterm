@@ -14,7 +14,7 @@
 
 use alloc::vec::Vec;
 
-use super::{BlockType, FuncType, GlobalDesc, Op, WasmError, valtype_of};
+use super::{BlockType, FuncType, GlobalDesc, Op, WasmError};
 
 const I32: u8 = 0x7F;
 const I64: u8 = 0x7E;
@@ -181,7 +181,7 @@ impl<'a> V<'a> {
         self.m
             .globals
             .get(i as usize)
-            .map(|global| valtype_of(&global.init))
+            .map(|global| global.value_type)
             .ok_or(WasmError::Decode("validation: global index out of range"))
     }
 
@@ -190,7 +190,7 @@ impl<'a> V<'a> {
             .globals
             .get(i as usize)
             .filter(|global| global.mutable)
-            .map(|global| valtype_of(&global.init))
+            .map(|global| global.value_type)
             .ok_or(WasmError::Decode("global.set"))
     }
 

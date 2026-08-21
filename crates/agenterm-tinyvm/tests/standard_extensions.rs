@@ -401,7 +401,7 @@ fn standard_extended_const_executes_and_rejects_invalid_expression_stacks() {
     let unavailable_global = module_with_i32_global_initializer(&[0x23, 0x00, 0x0B]);
     assert!(matches!(
         WasmModule::from_bytes(&unavailable_global),
-        Err(WasmError::Decode("unsupported const-expr opcode 0x"))
+        Err(WasmError::Decode("const expr global index"))
     ));
 }
 
