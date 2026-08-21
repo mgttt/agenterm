@@ -72,6 +72,7 @@ tinyvm iOS game runtime
 │   ├── indexed 2D presentation       [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
+│   │   └── current-main consumer gate [x]
 │   ├── reviewed install transaction  [x]
 │   ├── private atomic library         [x]
 │   ├── atomic scene persistence      [x]
@@ -2216,3 +2217,30 @@ Evidence on 2026-08-21:
   1,419,296 / 1,418,432 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.
+
+## Sixty-second executable increment — current real-app consumer gate
+
+The real Nostalgia Arcade main now owns a repeatable cross-repository consumer
+gate instead of relying on an old archive or a synthetic Swift executable. It
+rebuilds the local XCFramework/package and bundled cartridge from the adjacent
+agenterm main, exercises the App target, and inspects the final device product.
+
+Evidence on 2026-08-21:
+
+- Nostalgia Arcade commit `372fa17` refreshes the deterministic bundled Depth
+  Well artifact from 6,076 to 6,022 bytes; its current SHA-256 is
+  `8ac3292b354fd5c7f1df05e88ba25e7311f501a8041ad58566ba07e53111899e`.
+- Commit `6934f70` adds `scripts/test-tinyarcade-consumer.sh`. The gate requires
+  all five selected runtime/App unit tests and the one full playable UI journey
+  to execute with zero failures; an Xcode success containing zero selected
+  tests is rejected.
+- The UI journey enters the television catalog, opens the Wasm-backed Depth
+  Well, rotates and hard-drops a piece, pauses, returns to the catalog, reopens
+  the cartridge and proves the score persisted. A separate simulator install
+  and cold launch visibly reached the bilingual memory-room lobby.
+- The no-signing Release device build produces an arm64 iOS 17 Mach-O. Its App
+  bundle contains exactly one `.wasm`, byte-identical to the checked-in 6,022
+  byte cartridge, and has no WebKit or JavaScriptCore dynamic linkage.
+- No physical iPhone is connected to this Mac mini. Physical-device lifecycle,
+  sound/input/performance, TestFlight and Apple-review evidence remain open, so
+  the persistent goal remains active.

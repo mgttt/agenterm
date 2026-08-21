@@ -367,8 +367,14 @@ Swift 对 runtime render/audio/snapshot/replay 与 cache cartridge 的两阶段 
 写满的 Data 尾部当成有效媒体、存档或 `.wasm`。
 
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
-它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
+它是 5,252-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`
 function，用 160×120 indexed frame、通用 input bits、impact/success/failure
 tones 与 64-byte guest state 完成另一种街机循环。Rust 黑盒覆盖发射、移动、
 护盾反弹、漏球、清场升级和逐字节恢复；iOS smoke 覆盖完整原生呈现。物理设备
 仍未连接，因此 real-game proofs 和 native I/O surface 继续保持 partial。
+
+真实 `nostalgia-arcade` main 现在把跨仓消费本身做成门禁：每次从相邻 `agenterm`
+main 重建 XCFramework/Swift Package 与 6,022-byte Depth Well 卡带，随后要求五条 App
+runtime 单测和一条可操作 UI 旅程实际执行，再构建 arm64 iOS Release target。最终
+`.app` 必须只包含该一枚 `.wasm`、与源资源 SHA-256 一致，且 Mach-O 不链接
+WebKit/JavaScriptCore。Xcode 显示成功但 selected test count 为零也明确失败。

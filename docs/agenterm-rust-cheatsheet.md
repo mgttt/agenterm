@@ -2462,6 +2462,15 @@ whose start function traps: static validation must accept it, while malformed
 bytes must still fail loudly. Cartridge lifecycle and media checks remain a
 later, explicitly dynamic gate.
 
+Treat Xcode's final `TEST SUCCEEDED` as insufficient evidence for a selected
+test gate. A malformed `-only-testing` identifier can launch the runner, execute
+zero tests and still return success. Use the full target/class/method identity
+where required and assert the expected `Executed N test(s), with 0 failures`
+summary before accepting the result. For a native SDK consumer gate, also
+inspect the final device App: architecture/platform, exact bundled payload and
+excluded dynamic frameworks are product facts that simulator unit tests do not
+prove.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the
