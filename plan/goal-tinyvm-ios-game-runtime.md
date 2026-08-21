@@ -3051,3 +3051,21 @@ WABT/JavaScriptCore externref differential, full all-feature and no-default
 suites, iOS device/universal-simulator XCFramework link, rustfmt and Clippy all
 pass. `Val` remains at most 16 bytes, the arm64 linked consumer grows only 16
 bytes, and the stripped static core remains 101,240 bytes with selftest 42.
+
+## Ninetieth executable increment — current-main real-app consumer closure
+
+The real Nostalgia Arcade consumer gate rebuilt the Swift package and Depth
+Well cartridge directly from agenterm main, then executed the generated runtime
+inside the app target. This caught a real integration drift rather than merely
+reconfirming the SDK: the consumer repository still carried a 6,022-byte guest
+from before explicit Grid3D/Tones version imports. The reproducible build now
+commits the current 6,116-byte cartridge with both declarations and a stable
+SHA-256 of `d1a61599e6877da2b27bd4859f49ba9e0bc0fd4b80df8f66145893ebb2317e6f`.
+
+Evidence on 2026-08-21: six real-app runtime tests, including the 600-frame
+latency/resource gate, and the complete playable UI journey pass on the iPhone
+17 Pro simulator. A generic arm64 `iphoneos` Release build contains exactly the
+rebuilt cartridge, links current tinyvm, and has no WebKit/JavaScriptCore
+dependency. Re-running the preparation after commit leaves the consumer
+worktree clean, proving byte reproducibility. Nostalgia Arcade main contains
+commit `6ff3262`; physical-device execution remains the separate open gate.
