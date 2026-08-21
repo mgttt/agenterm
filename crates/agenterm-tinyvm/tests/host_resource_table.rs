@@ -1,11 +1,11 @@
 use agenterm_tinyvm::{
-    GuestResourceHandle, HostResourceTable, MAX_RESOURCE_GENERATION, MAX_RESOURCE_SLOTS,
-    ResourceHandleDomain, ResourceTableError,
+    GuestResourceHandle, HostResourceTable, MAX_RESOURCE_DOMAINS, MAX_RESOURCE_GENERATION,
+    MAX_RESOURCE_SLOTS, ResourceDomainAllocator, ResourceHandleDomain, ResourceTableError,
 };
 use std::cell::Cell;
 use std::rc::Rc;
 
-fn domain(raw: u8) -> ResourceHandleDomain {
+fn domain(raw: u16) -> ResourceHandleDomain {
     ResourceHandleDomain::new(raw).expect("non-zero test domain")
 }
 
@@ -98,7 +98,7 @@ fn exhausted_generation_retires_instead_of_aliasing_an_old_handle() {
 }
 
 #[test]
-fn module_domains_reject_cross_table_handle_collisions() {
+fn table_domains_reject_cross_table_handle_collisions() {
     let mut texture = HostResourceTable::new(domain(1), 1).expect("texture table");
     let mut audio = HostResourceTable::new(domain(2), 1).expect("audio table");
     let texture_handle = texture.insert("texture").expect("insert texture");
@@ -120,4 +120,27 @@ fn module_domains_reject_cross_table_handle_collisions() {
         HostResourceTable::<()>::new(domain(3), MAX_RESOURCE_SLOTS + 1),
         Err(ResourceTableError::InvalidLimit)
     ));
+}
+
+#[test]
+fn shared_allocator_prevents_cross_runtime_stale_handle_aliases() {
+    let mut allocator = ResourceDomainAllocator::new();
+    let first_domain = allocator.claim().expect("first runtime table domain");
+    let second_domain = allocator.claim().expect("second runtime table domain");
+    let mut first = HostResourceTable::new(first_domain, 1).expect("first runtime table");
+    let mut second = HostResourceTable::new(second_domain, 1).expect("second runtime table");
+    let stale = first.insert("old runtime").expect("old runtime resource");
+    let current = second.insert("new runtime").expect("new runtime resource");
+
+    assert_ne!(stale, current);
+    assert_eq!(second.get(stale), Err(ResourceTableError::StaleHandle));
+    assert_eq!(second.get(current), Ok(&"new runtime"));
+
+    for _ in 2..(MAX_RESOURCE_DOMAINS - 1) {
+        allocator.claim().expect("remaining unique domain");
+    }
+    assert_eq!(allocator.remaining(), 1);
+    allocator.claim().expect("last unique domain");
+    assert_eq!(allocator.remaining(), 0);
+    assert_eq!(allocator.claim(), Err(ResourceTableError::DomainExhausted));
 }

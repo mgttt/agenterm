@@ -2,33 +2,79 @@
 //!
 //! Native modules can keep platform objects in this table and pass only the
 //! returned 32-bit token through a standard Wasm function import. Tokens carry
-//! a module domain and slot generation, so sibling tables reject each other's
-//! handles and closing/reusing a slot cannot make an old token name a new object.
+//! a table-instance domain and slot generation, so sibling or replacement
+//! tables reject each other's handles and closing/reusing a slot cannot make
+//! an old token name a new object.
 
 use alloc::vec::Vec;
 
-const SLOT_MASK: u32 = 0x0fff;
-const GENERATION_MASK: u32 = 0x0fff;
-const GENERATION_SHIFT: u32 = 12;
-const DOMAIN_SHIFT: u32 = 24;
+const SLOT_MASK: u32 = 0x03ff;
+const GENERATION_MASK: u32 = 0x03ff;
+const GENERATION_SHIFT: u32 = 10;
+const DOMAIN_SHIFT: u32 = 20;
+const DOMAIN_MASK: u32 = 0x0fff;
 
 pub const MAX_RESOURCE_SLOTS: u16 = SLOT_MASK as u16;
 pub const MAX_RESOURCE_GENERATION: u16 = GENERATION_MASK as u16;
+pub const MAX_RESOURCE_DOMAINS: u16 = DOMAIN_MASK as u16;
 
-/// One native module's non-zero handle domain.
+/// One native resource-table instance's non-zero handle domain.
 ///
-/// The registry or embedding assigns different domains to native modules whose
-/// handles must not be interchangeable.
+/// The registry or embedding assigns different domains to every table whose
+/// handles must not be interchangeable, including replacement runtimes of the
+/// same native module.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ResourceHandleDomain(u8);
+pub struct ResourceHandleDomain(u16);
 
 impl ResourceHandleDomain {
-    pub const fn new(raw: u8) -> Option<Self> {
-        if raw == 0 { None } else { Some(Self(raw)) }
+    pub const fn new(raw: u16) -> Option<Self> {
+        if raw == 0 || raw > MAX_RESOURCE_DOMAINS {
+            None
+        } else {
+            Some(Self(raw))
+        }
     }
 
-    pub const fn raw(self) -> u8 {
+    pub const fn raw(self) -> u16 {
         self.0
+    }
+}
+
+/// Process-lifetime allocator for non-reused resource-table domains.
+///
+/// One allocator must outlive every runtime in the process that could still
+/// present a token allocated from it. Persisted guest snapshots must quiesce
+/// native resources instead of treating these runtime-local tokens as durable
+/// identities. Exhaustion fails explicitly; a domain is never wrapped onto a
+/// later table instance.
+pub struct ResourceDomainAllocator {
+    next: u16,
+}
+
+impl ResourceDomainAllocator {
+    pub const fn new() -> Self {
+        Self { next: 1 }
+    }
+
+    pub fn claim(&mut self) -> Result<ResourceHandleDomain, ResourceTableError> {
+        let domain =
+            ResourceHandleDomain::new(self.next).ok_or(ResourceTableError::DomainExhausted)?;
+        self.next += 1;
+        Ok(domain)
+    }
+
+    pub const fn remaining(&self) -> u16 {
+        if self.next > MAX_RESOURCE_DOMAINS {
+            0
+        } else {
+            MAX_RESOURCE_DOMAINS - self.next + 1
+        }
+    }
+}
+
+impl Default for ResourceDomainAllocator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -43,7 +89,7 @@ impl GuestResourceHandle {
     pub const fn from_raw(raw: u32) -> Option<Self> {
         if raw & SLOT_MASK == 0
             || (raw >> GENERATION_SHIFT) & GENERATION_MASK == 0
-            || raw >> DOMAIN_SHIFT == 0
+            || (raw >> DOMAIN_SHIFT) & DOMAIN_MASK == 0
         {
             None
         } else {
@@ -66,7 +112,7 @@ impl GuestResourceHandle {
 
     pub const fn domain(self) -> ResourceHandleDomain {
         // `from_raw` and the private constructor both reject zero.
-        ResourceHandleDomain((self.0 >> DOMAIN_SHIFT) as u8)
+        ResourceHandleDomain(((self.0 >> DOMAIN_SHIFT) & DOMAIN_MASK) as u16)
     }
 
     fn parts(self) -> (ResourceHandleDomain, usize, u16) {
@@ -78,6 +124,7 @@ impl GuestResourceHandle {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceTableError {
+    DomainExhausted,
     InvalidLimit,
     Full,
     AllocationFailed,
@@ -90,9 +137,9 @@ struct Slot<T> {
     value: Option<T>,
 }
 
-/// One native module's bounded owner for host resources exposed to a guest.
+/// One native module table's bounded owner for host resources exposed to a guest.
 ///
-/// A table supports at most 4,095 slots. Removing a value invalidates its
+/// A table supports at most 1,023 slots. Removing a value invalidates its
 /// handle before the slot can be reused. A slot is permanently retired rather
 /// than allowing its generation to wrap and alias a very old handle.
 pub struct HostResourceTable<T> {

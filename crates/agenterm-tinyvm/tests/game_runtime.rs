@@ -4,12 +4,12 @@ use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
 
+use agenterm_tinyvm::GuestResourceHandle;
 use agenterm_tinyvm::{
     CartridgeDescriptor, CartridgeManifest, GameFrame, GameInput, GameLifecycle, GameLimits,
     GameRuntime, HostProfileV1, Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE,
     NativeModuleRegistry, RenderFrame, WasmError,
 };
-use agenterm_tinyvm::{GuestResourceHandle, HostResourceTable};
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
 
@@ -1383,28 +1383,43 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
         "attach resource-handle manifest",
     );
 
+    let mut allocator = agenterm_tinyvm::ResourceDomainAllocator::new();
     let mut registry = NativeModuleRegistry::new();
-    let resource_domain = must_ok(
-        registry.resource_domain("fan:texture/v1"),
-        "assign texture resource domain",
-    );
-    assert_eq!(
-        must_ok(
-            registry.resource_domain("fan:texture/v1"),
-            "reuse texture resource domain"
+    let remaining = allocator.remaining();
+    assert!(matches!(
+        registry.resource_table::<i32>(
+            "fan:invalid/v1",
+            agenterm_tinyvm::MAX_RESOURCE_SLOTS + 1,
+            &mut allocator
         ),
-        resource_domain
+        Err(WasmError::Trap("invalid native resource table limit"))
+    ));
+    assert_eq!(allocator.remaining(), remaining);
+    let texture_table = must_ok(
+        registry.resource_table("fan:texture/v1", 1, &mut allocator),
+        "create texture resource table",
     );
-    let audio_domain = must_ok(
-        registry.resource_domain("fan:audio/v1"),
-        "assign audio resource domain",
+    let resource_domain = texture_table.domain();
+    let remaining = allocator.remaining();
+    assert!(matches!(
+        registry.resource_table::<i32>("fan:texture/v1", 1, &mut allocator),
+        Err(WasmError::Trap("native resource table already assigned"))
+    ));
+    assert_eq!(allocator.remaining(), remaining);
+    let audio_table = must_ok(
+        registry.resource_table::<i32>("fan:audio/v1", 1, &mut allocator),
+        "create audio resource table",
     );
+    let audio_domain = audio_table.domain();
     assert_ne!(audio_domain, resource_domain);
     assert_eq!(
-        registry.assigned_resource_domain("fan:texture/v1"),
+        registry.assigned_resource_table_domain("fan:texture/v1"),
         Some(resource_domain)
     );
-    assert_eq!(registry.assigned_resource_domain("fan:missing/v1"), None);
+    assert_eq!(
+        registry.assigned_resource_table_domain("fan:missing/v1"),
+        None
+    );
     assert!(
         must_ok(
             registry.host_profile(Limits::default(), GameLimits::default()),
@@ -1416,16 +1431,38 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
     );
 
     let mut automatic = NativeModuleRegistry::new();
+    let remaining = allocator.remaining();
     must_ok(
         automatic.register("fan:auto/v1", "ping", 0, 1, |_, _| Ok(vec![0])),
         "register automatically assigned module",
     );
-    assert!(automatic.assigned_resource_domain("fan:auto/v1").is_some());
-    let resources = Rc::new(RefCell::new(must_ok(
-        HostResourceTable::new(resource_domain, 1)
-            .map_err(|_| WasmError::Trap("native resource table config")),
-        "create native resource table",
-    )));
+    assert_eq!(
+        automatic.assigned_resource_table_domain("fan:auto/v1"),
+        None
+    );
+    assert_eq!(allocator.remaining(), remaining);
+
+    let mut replacement_registry = NativeModuleRegistry::new();
+    let mut replacement_table = must_ok(
+        replacement_registry.resource_table("fan:texture/v1", 1, &mut allocator),
+        "create replacement runtime table",
+    );
+    assert_ne!(replacement_table.domain(), resource_domain);
+
+    let resources = Rc::new(RefCell::new(texture_table));
+    let stale = resources
+        .borrow_mut()
+        .insert(99)
+        .expect("create old runtime token");
+    let replacement = replacement_table
+        .insert(100)
+        .expect("create replacement runtime token");
+    assert_ne!(stale, replacement);
+    assert!(replacement_table.get(stale).is_err());
+    resources
+        .borrow_mut()
+        .remove(stale)
+        .expect("remove setup resource");
     let create_resources = resources.clone();
     let read_resources = resources.clone();
     let close_resources = resources.clone();

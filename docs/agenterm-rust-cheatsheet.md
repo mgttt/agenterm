@@ -2773,14 +2773,19 @@ the oracle, resource evidence and product baseline together when the workload
 legitimately expands.
 
 When a native Wasm module exposes host-owned objects through an `i32`, keep the
-objects in one bounded host table and encode native-module domain, slot and
-generation in the guest token. Let the native-module registry assign and retain
-one nonzero domain per canonical versioned module; do not make each callback
-invent numeric domains independently. Distinct module domains prevent equal
-slot/generation positions in sibling tables from accepting each other's handles.
+objects in one bounded host table and encode table-instance domain, slot and
+generation in the guest token. Let the native-module registry create the table
+atomically from one allocator shared by all runtime instances that may overlap;
+do not make each callback invent numeric domains independently. Never reuse or
+wrap a domain: otherwise the first object in a replacement runtime can accept
+an old runtime's token at the same slot/generation position. Function
+registration itself must not allocate resource identity.
 Advance the generation before reusing a closed slot, and permanently
 retire the slot instead of wrapping back to a token that could revive a very
 old handle. Failed publication must drop the newly supplied object; table clear
 and drop own the remaining cleanup. Treat this as resource lifetime integrity,
 not as permission policy, and keep separate versioned native modules in
-separate typed tables rather than exchanging native pointers.
+separate typed tables rather than exchanging native pointers. Treat guest
+tokens as runtime-local and nonportable: portable snapshots require native
+resources to be quiesced and reconstructed explicitly, never restored by
+replaying an `i32` token.

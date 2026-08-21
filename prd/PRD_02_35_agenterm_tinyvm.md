@@ -120,7 +120,7 @@ agenterm-tinyvm (35)                                      [~]
 │       │   ├── recyclable host buffers                   [x]
 │       │   └── stable two-pass copy lengths              [x]
 │       ├── native module registry                        [x]
-│       │   └── registry-owned resource domains           [x]
+│       │   └── atomic resource-table factory             [x]
 │       ├── App Store bundled-only gate                   [x]
 │       └── machine host profile                          [x]
 │           └── catalog profile binding                   [x]
@@ -153,7 +153,8 @@ agenterm-tinyvm (35)                                      [~]
 │   │   ├── generalize memory-zero call-scoped borrowing   [x]
 │   │   ├── explicit selected-memory callback context      [x]
 │   │   ├── unified host/guest handle lifetimes             [x]
-│   │   ├── registry-owned native module domains            [x]
+│   │   ├── cross-runtime non-reused table domains          [x]
+│   │   ├── native-resource snapshot quiescence             [ ]
 │   │   ├── versioned native import conventions           [x]
 │   │   ├── converter-visible compatibility reports       [x]
 │   │   └── platform-neutral host architecture            [~]
@@ -276,7 +277,7 @@ as “almost approved” or “safe to ship externally.”
 | Execution | Persistent instance, explicit activation trampoline, fuel and resource telemetry | Deterministic trap local to the instance |
 | Values | i32/i64/f32/f64, funcref and opaque externref through supported standard locations | Exact type mismatch rejection |
 | Resources | Defined/imported/exported globals, memories and funcref/externref tables | Binding/type/limit rejection or borrow-conflict trap |
-| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path, generation-checked guest resource table and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction; stale tokens never name replacements |
+| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path, generation-checked guest resource table and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction; stale tokens never name replacements within an allocator lifetime, while persisted snapshots must quiesce native resources |
 | Optional WASI P1 | Sixteen exact process/clock/random/preopen/descriptor/path/exit imports over the neutral host contract | Unknown/wrong imports fail binding; bad memory, path, rights or backend absence returns explicit errno/interruption |
 | TinyArcade | Manifest, core v1, native registry, lifecycle, deterministic RNG/clock, render/audio/state bounds | Cartridge fails closed; App owner remains alive |
 | iOS | C ABI, XCFramework, Swift package, input/frame pacing, persistence, replay and native 2D/3D/audio owners | Main-actor owner latches bad runtime and clears stale output |

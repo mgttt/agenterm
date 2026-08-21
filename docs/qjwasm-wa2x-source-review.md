@@ -146,10 +146,11 @@ Reject for the iOS cartridge runtime:
    imported/exported ownership, provider drop and bulk table operations; the
    WABT fixture runs identically in tinyvm and JavaScriptCore.
 6. [x] `HostResourceTable<T>` gives versioned native modules a bounded,
-   domain- and generation-checked `i32` handle owner. The native registry owns
-   stable distinct module-domain assignment. Close, clear, cross-module use,
-   slot reuse and complete generation exhaustion cannot make a token name the
-   wrong object; a real cartridge proves create/read/close through standard imports.
+   domain- and generation-checked `i32` handle owner. A long-lived allocator
+   supplies non-reused table-instance domains through the native registry's
+   atomic table factory. Close, clear, cross-module/cross-runtime use, slot
+   reuse and complete generation exhaustion cannot make a token name the wrong
+   object; a real cartridge proves create/read/close through standard imports.
 7. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

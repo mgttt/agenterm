@@ -140,7 +140,7 @@ struct NativeFunction {
 #[derive(Default)]
 pub struct NativeModuleRegistry {
     functions: Vec<NativeFunction>,
-    resource_domains: Vec<String>,
+    resource_tables: Vec<(String, crate::ResourceHandleDomain)>,
 }
 
 impl NativeModuleRegistry {
@@ -148,44 +148,54 @@ impl NativeModuleRegistry {
         Self::default()
     }
 
-    /// Return this registry's stable handle domain for a versioned native
-    /// module, assigning the next non-zero domain on first use.
+    /// Create this runtime registry's one resource table for a versioned native
+    /// module and bind it to a process-lifetime domain allocation.
     ///
-    /// Call this before constructing the module's [`crate::HostResourceTable`].
-    /// Subsequent function registrations under the same module reuse the exact
-    /// domain. Assignment order is explicit app-registry configuration and is
-    /// not cartridge-controlled.
-    pub fn resource_domain(
+    /// The allocator must be shared across every runtime in the process whose
+    /// old guest state can still execute. This prevents a token from an earlier
+    /// runtime from naming a same-position object in a replacement table.
+    /// Persisted snapshots must quiesce these runtime-local resources. Function
+    /// registration neither creates a table nor consumes a domain.
+    pub fn resource_table<T>(
         &mut self,
         module: &str,
-    ) -> Result<crate::ResourceHandleDomain, WasmError> {
+        max_resources: u16,
+        allocator: &mut crate::ResourceDomainAllocator,
+    ) -> Result<crate::HostResourceTable<T>, WasmError> {
         if module == ABI_MODULE || !valid_native_namespace(module) {
             return Err(WasmError::Trap("invalid native resource module"));
         }
-        if let Some(index) = self
-            .resource_domains
+        if max_resources > crate::MAX_RESOURCE_SLOTS {
+            return Err(WasmError::Trap("invalid native resource table limit"));
+        }
+        if self
+            .resource_tables
             .iter()
-            .position(|registered| registered == module)
+            .any(|(registered, _)| registered == module)
         {
-            return resource_domain_from_index(index);
+            return Err(WasmError::Trap("native resource table already assigned"));
         }
-        if self.resource_domains.len() >= u8::MAX as usize {
-            return Err(WasmError::Trap("too many native resource modules"));
-        }
-        self.resource_domains
+        self.resource_tables
             .try_reserve_exact(1)
             .map_err(|_| WasmError::Trap("native resource module allocation"))?;
-        let domain = resource_domain_from_index(self.resource_domains.len())?;
-        self.resource_domains.push(module.to_string());
-        Ok(domain)
+        let domain = allocator
+            .claim()
+            .map_err(|_| WasmError::Trap("native resource domain exhausted"))?;
+        let table = crate::HostResourceTable::new(domain, max_resources)
+            .map_err(|_| WasmError::Trap("invalid native resource table"))?;
+        self.resource_tables.push((module.to_string(), domain));
+        Ok(table)
     }
 
-    /// Inspect an already assigned domain without changing the registry.
-    pub fn assigned_resource_domain(&self, module: &str) -> Option<crate::ResourceHandleDomain> {
-        self.resource_domains
+    /// Inspect an already assigned table domain without changing the registry.
+    pub fn assigned_resource_table_domain(
+        &self,
+        module: &str,
+    ) -> Option<crate::ResourceHandleDomain> {
+        self.resource_tables
             .iter()
-            .position(|registered| registered == module)
-            .and_then(|index| resource_domain_from_index(index).ok())
+            .find(|(registered, _)| registered == module)
+            .map(|(_, domain)| *domain)
     }
 
     /// Describe this exact app-compiled registry as a callback-free,
@@ -311,7 +321,6 @@ impl NativeModuleRegistry {
         {
             return Err(WasmError::Trap("invalid native module registration"));
         }
-        self.resource_domain(module)?;
         self.functions.push(NativeFunction {
             module: module.to_string(),
             field: field.to_string(),
@@ -335,13 +344,6 @@ impl NativeModuleRegistry {
             .enumerate()
             .find(|(_, function)| function.module == module && function.field == field)
     }
-}
-
-fn resource_domain_from_index(index: usize) -> Result<crate::ResourceHandleDomain, WasmError> {
-    let raw =
-        u8::try_from(index + 1).map_err(|_| WasmError::Trap("too many native resource modules"))?;
-    crate::ResourceHandleDomain::new(raw)
-        .ok_or(WasmError::Trap("invalid native resource module domain"))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

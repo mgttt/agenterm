@@ -57,9 +57,10 @@ tinyvm iOS game runtime
 │   ├── recyclable frame buffers      [x]
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
-│   │   └── registry-owned resource domains [x]
+│   │   └── atomic resource-table factory [x]
 │   ├── bounded in-place host dispatch [x]
 │   ├── domain + generation native resource handles [x]
+│   ├── native-resource snapshot quiescence [ ]
 │   └── storage without guest network [x]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
@@ -3522,3 +3523,39 @@ tinyvm/JSC/H5 differential. Warnings-denied Clippy, arm64 iOS `no_std`, rustfmt
 and document-redaction gates pass. Default linked sizes are 1,602,872 bytes
 arm64 and 1,681,888 bytes x86_64; the stripped static core remains 101,256
 bytes with selftest 42.
+
+## One-hundred-ninth executable increment — cross-runtime resource identity
+
+The previous module-number model was insufficient: two replacement runtime
+registries could both assign domain one, allowing the first resource created in
+the new runtime to accept an old token with the same slot and generation. The
+handle layout now spends 12 bits on a resource-table-instance domain, 10 bits
+on generation and 10 bits on `slot + 1`. A shared
+`ResourceDomainAllocator` issues 4,095 domains without reuse or wrap; each table
+supports 1,023 live slots and permanently retires a slot after 1,023
+generations. `NativeModuleRegistry::resource_table` validates and reserves
+before claiming a domain, atomically records one table per canonical native
+module, and rejects duplicate configuration. Ordinary function registration
+does not consume resource identity.
+
+The token is deliberately runtime-local rather than a native pointer or a
+durable identity. The allocator prevents aliases among replacement runtimes in
+one process lifetime. Persisted guest snapshots must quiesce native resources
+and reconstruct them explicitly; enforcing that product-level boundary remains
+an open PRD leaf. A speculative C/Swift resource-table ABI is therefore deferred
+until a real platform module can prove its owner and restore protocol; the
+existing callback ABI remains sufficient for current iOS cartridges.
+
+Evidence on 2026-08-22: seven public resource-table black boxes prove exact bit
+round trips, bounded ownership/drop, generation retirement, cross-table
+rejection, first-token rejection across replacement runtimes, all 4,095 unique
+domain claims and explicit exhaustion. The real native-import cartridge proves
+invalid and duplicate table requests do not consume allocator state, ordinary
+function registration remains identity-free, sibling texture/audio tables are
+distinct, and versioned create/read/close still completes. The 102-leaf
+executable PRD trace, all 128 library tests and every non-ignored integration
+test pass, including both iOS XCFramework gates and the three-game tinyvm/JSC/H5
+differential. Warnings-denied all-feature and isolated `no_std` Clippy, arm64
+iOS `no_std`, rustfmt and document-redaction gates pass. Default linked sizes
+are 1,602,808 bytes arm64 and 1,681,792 bytes x86_64; the stripped static core
+remains 101,256 bytes with selftest 42.

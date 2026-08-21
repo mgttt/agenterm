@@ -864,7 +864,7 @@ const LEAF_TESTS: [(&str, &str); 102] = [
         "native_dispatch_quota_is_charged_before_callback_and_resets_per_lifecycle",
     ),
     (
-        "registry-owned resource domains",
+        "atomic resource-table factory",
         "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
     ),
     ("App Store bundled-only gate", "ios_xcframework_swift_link"),
@@ -958,8 +958,8 @@ const LEAF_TESTS: [(&str, &str); 102] = [
         "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
     ),
     (
-        "registry-owned native module domains",
-        "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
+        "cross-runtime non-reused table domains",
+        "shared_allocator_prevents_cross_runtime_stale_handle_aliases",
     ),
     (
         "versioned native import conventions",

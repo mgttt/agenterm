@@ -67,8 +67,8 @@ pub use host::{
 
 pub mod resource_table;
 pub use resource_table::{
-    GuestResourceHandle, HostResourceTable, MAX_RESOURCE_GENERATION, MAX_RESOURCE_SLOTS,
-    ResourceHandleDomain, ResourceTableError,
+    GuestResourceHandle, HostResourceTable, MAX_RESOURCE_DOMAINS, MAX_RESOURCE_GENERATION,
+    MAX_RESOURCE_SLOTS, ResourceDomainAllocator, ResourceHandleDomain, ResourceTableError,
 };
 
 #[cfg(feature = "std-host")]
