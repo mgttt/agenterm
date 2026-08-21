@@ -370,6 +370,8 @@ are no longer backward compatible.
    manifest without rewriting its executable sections.
    Numeric immediates must fit their standard signed or unsigned LEB widths;
    host integer truncation is never cartridge validation.
+   Every custom section must retain its standard UTF-8 name envelope even when
+   its opaque payload is ignored by tinyvm.
 2. Export all five exact lifecycle functions.
 3. Derive every manifest capability from the standard non-core import table;
    never maintain a second hand-written capability list.

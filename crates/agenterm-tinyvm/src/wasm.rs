@@ -1270,8 +1270,9 @@ fn read_valtypes(
     Ok((values, end))
 }
 
-/// Read a UTF-8 name (LEB length + bytes), returning it and the next offset.
-fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
+/// Borrow a UTF-8 name (LEB length + bytes), returning it and the next offset.
+#[inline(always)]
+fn read_name_str(p: &[u8], i: usize) -> Result<(&str, usize), WasmError> {
     let (len, ni) = leb_u32(p, i)?;
     let end = ni
         .checked_add(len as usize)
@@ -1279,6 +1280,12 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
         .ok_or(WasmError::Decode("name runs past section"))?;
     let decoded = core::str::from_utf8(&p[ni..end])
         .map_err(|_| WasmError::Decode("name is not valid UTF-8"))?;
+    Ok((decoded, end))
+}
+
+/// Read an owned UTF-8 name used after the input module is released.
+fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
+    let (decoded, end) = read_name_str(p, i)?;
     let mut s = String::new();
     s.try_reserve_exact(decoded.len())
         .map_err(|_| WasmError::Decode("module allocation"))?;
@@ -2369,7 +2376,9 @@ impl Module {
                 last_standard_section_rank = rank;
             }
             match id {
-                0 => {}
+                0 => {
+                    let _ = read_name_str(payload, 0)?;
+                }
                 1 => types = parse_type_section(payload, &mut budget)?,
                 2 => imports = parse_import_section(payload, &types, &mut budget)?,
                 3 => func_types = parse_func_section(payload, &mut budget)?,

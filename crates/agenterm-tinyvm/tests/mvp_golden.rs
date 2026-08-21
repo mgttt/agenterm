@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 56] = [
+const LEAF_TESTS: [(&str, &str); 57] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -656,6 +656,10 @@ const LEAF_TESTS: [(&str, &str); 56] = [
     (
         "strict i64 signed-LEB range",
         "standard_i64_leb_rejects_invalid_unused_high_bits",
+    ),
+    (
+        "valid custom-section names",
+        "standard_custom_section_name_is_validated_while_opaque_payload_stays_ignored",
     ),
     (
         "bulk memory copy/fill",

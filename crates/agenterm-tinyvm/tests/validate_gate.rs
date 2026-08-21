@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 28] = [
+const REJECTED: [(&str, &str); 31] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -126,10 +126,19 @@ const REJECTED: [(&str, &str); 28] = [
         "negative_i64_leb_overflow",
         "0061736d010000000105016000017e03020100070801046d61696e00000a0f010d0042ffffffffffffffffff7e0b",
     ),
+    ("custom_section_without_name", "0061736d010000000000"),
+    (
+        "custom_section_truncated_name_length",
+        "0061736d010000000001ff",
+    ),
+    (
+        "custom_section_invalid_utf8_name",
+        "0061736d01000000000201ff",
+    ),
 ];
 
 /// Legal counterparts that must keep loading and running.
-const ACCEPTED: [(&str, &str); 8] = [
+const ACCEPTED: [(&str, &str); 9] = [
     (
         "add_two_consts",
         "0061736d010000000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
@@ -161,6 +170,10 @@ const ACCEPTED: [(&str, &str); 8] = [
     (
         "i64_max_leb_boundary",
         "0061736d010000000105016000017e03020100070801046d61696e00000a0f010d0042ffffffffffffffffff000b",
+    ),
+    (
+        "custom_section_with_opaque_payload",
+        "0061736d0100000000040178ff000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
     ),
 ];
 
@@ -286,6 +299,30 @@ fn standard_i64_leb_rejects_invalid_unused_high_bits() {
             WasmModule::from_bytes(&bytes(hex)),
             Err(WasmError::Decode("signed LEB128 too long"))
         ));
+    }
+}
+
+#[test]
+fn standard_custom_section_name_is_validated_while_opaque_payload_stays_ignored() {
+    for (name, expected) in [
+        ("custom_section_without_name", "truncated unsigned LEB128"),
+        (
+            "custom_section_truncated_name_length",
+            "truncated unsigned LEB128",
+        ),
+        (
+            "custom_section_invalid_utf8_name",
+            "name is not valid UTF-8",
+        ),
+    ] {
+        let (_, hex) = REJECTED
+            .into_iter()
+            .find(|(candidate, _)| *candidate == name)
+            .expect("named malformed custom section fixture");
+        assert!(
+            matches!(WasmModule::from_bytes(&bytes(hex)), Err(WasmError::Decode(message)) if message == expected),
+            "{name}: malformed custom-section name must fail at load"
+        );
     }
 }
 

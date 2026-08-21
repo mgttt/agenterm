@@ -18,7 +18,8 @@ agenterm-tinyvm (35)
 │   │   ├── strict declared-memory semantics [x]
 │   │   ├── strict memarg alignment [x]
 │   │   ├── canonical function expression structure [x]
-│   │   └── strict i64 signed-LEB range [x]
+│   │   ├── strict i64 signed-LEB range [x]
+│   │   └── valid custom-section names [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -104,6 +105,9 @@ Function expression 的外层 `end` 必须恰好终止 code body，之后不允�
 `i64.const` 的 signed-LEB 也会验证第十字节未使用的高位：超出 `i64` 范围的正、负
 编码在 load gate 拒绝，精确的 `i64::MIN/MAX` 仍可执行；不能依赖宿主整数移位截断来
 替代 WebAssembly binary validation。
+Custom section 可以重复并出现在标准 section 之间，name 之后的 payload 对 VM 保持
+透明；但每个 custom section 仍必须带有长度完整、UTF-8 合法的标准 name。name 验证
+直接借用输入 bytes，不为引擎忽略的 metadata 建立临时分配。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。

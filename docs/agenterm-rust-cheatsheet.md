@@ -2400,6 +2400,16 @@ validator agree on all four boundaries. For a 64-bit decoder, validating the
 tenth byte before shifting can also replace a later length branch, preserving
 the same strictness without growing a size-gated interpreter core.
 
+An extensible binary format's “ignored” section still has a standard envelope.
+For WebAssembly custom sections, validate the required length-prefixed UTF-8
+name before ignoring the remaining opaque payload; skipping the whole section
+accepts bytes that reference engines reject. Split name handling into a small
+borrowed validator and an owned wrapper for names retained by the module. This
+keeps ignored metadata allocation-free and, with deliberate inlining, can be
+smaller than calling an allocating parser and immediately dropping its result.
+Cover missing names, truncated length LEBs, invalid UTF-8, and a legal name with
+arbitrary opaque bytes against an independent validator.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the
