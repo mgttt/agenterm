@@ -161,6 +161,10 @@ Reject for the iOS cartridge runtime:
 8. [x] Indexed2d presentation expands borrowed palette indices directly into
    one final-size Swift `Data` allocation. The iOS gate rejects a return to an
    intermediate growable byte array and executes the 320 × 200 CGImage path.
-9. [ ] If background execution becomes a product requirement, first specify and
+9. [x] Native tone playback caches only immutable synthesized WAV bytes under
+   independent eight-entry and 512 KiB ceilings with LRU eviction. Initial
+   synthesis writes one final WAV buffer; platform `AVAudioPlayer` objects are
+   deliberately rebuilt per attempt and never enter the cache.
+10. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

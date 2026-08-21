@@ -277,6 +277,14 @@ An app with a centralized observer may disable automatic observation and call
 the explicit lifecycle methods. The game surface calls `deactivate()` when it
 relinquishes audio.
 
+Synthesis writes the WAV header and PCM directly into one final-size `Data`
+allocation. The player retains up to eight immutable synthesized batches under
+a separate 512 KiB byte ceiling and updates them with LRU access; repeated game
+cues therefore avoid trigonometric resynthesis. The cache never retains an
+`AVAudioPlayer`: each playback attempt still creates a fresh system object, so
+route and media-service lifecycle remain authoritative. Counter exhaustion
+clears the bounded cache instead of wrapping its ordering identity.
+
 Apple delivers interruption/reset notifications on the main thread but may
 deliver route changes on a secondary thread. The selector boundary therefore
 extracts only the scalar reason off-actor and marshals mutation back to the

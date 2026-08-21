@@ -92,6 +92,9 @@ tinyvm iOS game runtime
 │   │   ├── bounded app metadata hot path [x]
 │   │   ├── scoped immutable frame views [x]
 │   │   └── single-buffer RGBA expansion [x]
+│   ├── bounded native tone playback  [x]
+│   │   ├── interruption / route / reset owner [x]
+│   │   └── single-buffer WAV + bounded wave LRU [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   │   └── current-main consumer gate [x]
@@ -4036,3 +4039,29 @@ smokes remain within the existing budget at 1,683,768 bytes arm64 and 1,767,376
 bytes x86_64. The executable PRD trace now binds 127 completed claims. Physical
 iPhone/TestFlight performance evidence remains open, so the persistent goal
 stays active.
+
+## One-hundred-twenty-eighth executable increment — bounded tone-wave reuse
+
+The native tone owner no longer recomputes sine/envelope samples and rebuilds
+PCM for every repeated gameplay cue. Initial synthesis writes the 44-byte WAV
+header and signed little-endian PCM directly into one final-size `Data` buffer.
+The main-actor player caches only those immutable bytes under independent
+eight-entry and 512 KiB ceilings with LRU eviction. It never caches
+`AVAudioPlayer`, so every attempt still rebuilds the system playback object and
+the existing interruption, route-loss and media-reset lifecycle remains in
+control. LRU identity exhaustion clears the cache rather than wrapping.
+
+Evidence on 2026-08-22: consumer commit `25cf2de`; the real Paddle Guard tone
+produces a structurally consistent non-silent WAV and enters `AVAudioPlayer`.
+Four plays across interruption, background route loss and media-services reset
+synthesize its waveform exactly once. Ten short cues fill the eight-entry
+limit; ten distinct two-second cues then force byte-budget eviction to exactly
+five retained waves. Default and opt-in SIMD device/universal
+simulator artifacts execute the same Swift stress path. The bounded cache and
+single-buffer synthesizer use one explicit 16 KiB linked-product graduation
+step per default architecture; optional SIMD x86_64 requires one further
+simulator-only step. Default linked smokes are 1,691,416 bytes arm64 and
+1,783,168 bytes x86_64; opt-in SIMD smokes are 1,708,632 / 1,787,040 bytes.
+The executable PRD trace now binds 128 completed claims.
+Physical speaker/headphone and TestFlight audio evidence remain open, so the
+persistent goal stays active.

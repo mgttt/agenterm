@@ -17,6 +17,16 @@ if grep -Fq 'bytes.reserveCapacity(pixels.count * 4)' \
   echo "indexed2d RGBA expansion must not allocate an Array before Data" >&2
   exit 1
 fi
+grep -Fq 'static let maximumCachedWaveCount = 8' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'static let maximumCachedWaveBytes = 512 * 1_024' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'var wave = Data(count: 44 + pcmBytes)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+if grep -Fq 'var pcm = Data(' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "tone synthesis must write the final WAV without a full PCM staging buffer" >&2
+  exit 1
+fi
 
 CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"
@@ -191,9 +201,10 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # allocator and late-delivery guards. The native tone owner now also handles
 # interruption, route-loss and media-service-reset notifications without App
 # glue. Indexed2d application metadata then adds strict Rust/Swift decoding and
-# exact host-profile negotiation. Fund these complete boundaries in explicit
-# 16 KiB product steps rather than hiding them in an unbounded ceiling.
-MAX_ARM64_LINKED_BYTES=1687552
+# exact host-profile negotiation. The bounded tone-wave LRU and direct
+# single-buffer WAV synthesis fund one further 16 KiB step. Keep these complete
+# boundaries explicit rather than hiding them in an unbounded ceiling.
+MAX_ARM64_LINKED_BYTES=1703936
 # The optional SIMD profile keeps v128 inline and adds its portable interpreter
 # path only when explicitly requested. Give that opt-in product two separate
 # 16 KiB graduation steps; never weaken the default iOS product ceiling.
@@ -208,10 +219,11 @@ esac
 # arm64 product ceiling.
 # The simulator slice crosses four matching 16 KiB linker buckets; the fourth
 # pays for its main-queue route-change dispatch path. The indexed2d metadata
-# protocol receives the same one-bucket step as the arm64 product.
-MAX_X86_64_LINKED_BYTES=1769472
+# protocol receives the same one-bucket step as the arm64 product. The bounded
+# tone-wave cache receives one matching simulator-only step.
+MAX_X86_64_LINKED_BYTES=1785856
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_X86_64_LINKED_BYTES=1785856 ;;
+  *,simd,*) MAX_X86_64_LINKED_BYTES=1802240 ;;
 esac
 echo "iOS linked sizes: arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"

@@ -909,8 +909,18 @@ struct TinyArcadeSmoke {
         precondition(paddleWave.prefix(4) == Data("RIFF".utf8))
         precondition(paddleWave.subdata(in: 8..<12) == Data("WAVE".utf8))
         precondition(paddleWave.count > 44)
+        let declaredPaddlePCMBytes = UInt32(paddleWave[40])
+            | UInt32(paddleWave[41]) << 8
+            | UInt32(paddleWave[42]) << 16
+            | UInt32(paddleWave[43]) << 24
+        precondition(Int(declaredPaddlePCMBytes) == paddleWave.count - 44)
+        precondition(paddleWave[44...].contains(where: { $0 != 0 }))
         let tonePlayer = TinyArcadeTonePlayer()
+        precondition(tonePlayer.waveSynthesisCount == 0)
         try tonePlayer.play(paddleFrame.tones)
+        precondition(tonePlayer.waveSynthesisCount == 1)
+        precondition(tonePlayer.cachedWaveCount == 1)
+        precondition(tonePlayer.cachedWaveBytes == paddleWave.count)
         precondition(tonePlayer.isAudioSessionActive)
         NotificationCenter.default.post(
             name: AVAudioSession.interruptionNotification,
@@ -947,7 +957,37 @@ struct TinyArcadeSmoke {
         precondition(!tonePlayer.isAudioSessionActive)
         try tonePlayer.play(paddleFrame.tones)
         precondition(tonePlayer.isAudioSessionActive)
+        precondition(
+            tonePlayer.waveSynthesisCount == 1,
+            "identical gameplay cues must reuse bounded synthesized WAV bytes"
+        )
         try tonePlayer.deactivate()
+        for index in 0..<10 {
+            _ = tonePlayer.waveDataForPlayback(for: [
+                TinyArcadeToneEvent(
+                    kind: 1,
+                    frequencyHz: UInt16(200 + index),
+                    durationMilliseconds: 10,
+                    amplitudeMilli: 100
+                ),
+            ])
+        }
+        precondition(tonePlayer.cachedWaveCount == TinyArcadeTonePlayer.maximumCachedWaveCount)
+        precondition(tonePlayer.cachedWaveBytes <= TinyArcadeTonePlayer.maximumCachedWaveBytes)
+        for index in 0..<10 {
+            _ = tonePlayer.waveDataForPlayback(for: [
+                TinyArcadeToneEvent(
+                    kind: 1,
+                    frequencyHz: UInt16(400 + index),
+                    durationMilliseconds: 2_000,
+                    amplitudeMilli: 100
+                ),
+            ])
+        }
+        let longWaveBytes = 44 + Int(TinyArcadeToneSynthesizer.sampleRate) * 2 * 2
+        precondition(tonePlayer.cachedWaveCount == 5)
+        precondition(tonePlayer.cachedWaveBytes == 5 * longWaveBytes)
+        precondition(tonePlayer.waveSynthesisCount == 21)
         let paddleView = TinyArcadeIndexed2DView(
             frame: CGRect(x: 0, y: 0, width: 390, height: 844)
         )

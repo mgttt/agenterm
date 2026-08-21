@@ -528,7 +528,7 @@ public final class TinyArcadeIndexed2DView: UIView {
     }
 }
 
-public struct TinyArcadeToneEvent: Sendable, Equatable {
+public struct TinyArcadeToneEvent: Sendable, Hashable {
     public static let maximumBatchEventCount = 16
     public static let maximumBatchDurationMilliseconds: UInt32 = 4_000
 
@@ -589,55 +589,87 @@ public enum TinyArcadeToneSynthesizer {
             total += Int(sampleRate) * Int(event.durationMilliseconds) / 1_000
         }
         let sampleCount = eventSamples + max(0, events.count - 1) * gapSamples
-        var pcm = Data(capacity: sampleCount * MemoryLayout<Int16>.size)
+        let pcmBytes = sampleCount * MemoryLayout<Int16>.size
+        var wave = Data(count: 44 + pcmBytes)
+        wave.withUnsafeMutableBytes { (output: UnsafeMutableRawBufferPointer) in
+            output[0] = 82
+            output[1] = 73
+            output[2] = 70
+            output[3] = 70
+            writeLittleEndian(UInt32(36 + pcmBytes), to: output, at: 4)
+            output[8] = 87
+            output[9] = 65
+            output[10] = 86
+            output[11] = 69
+            output[12] = 102
+            output[13] = 109
+            output[14] = 116
+            output[15] = 32
+            writeLittleEndian(UInt32(16), to: output, at: 16)
+            writeLittleEndian(UInt16(1), to: output, at: 20)
+            writeLittleEndian(UInt16(1), to: output, at: 22)
+            writeLittleEndian(sampleRate, to: output, at: 24)
+            writeLittleEndian(sampleRate * 2, to: output, at: 28)
+            writeLittleEndian(UInt16(2), to: output, at: 32)
+            writeLittleEndian(UInt16(16), to: output, at: 34)
+            output[36] = 100
+            output[37] = 97
+            output[38] = 116
+            output[39] = 97
+            writeLittleEndian(UInt32(pcmBytes), to: output, at: 40)
 
-        for (eventIndex, event) in events.enumerated() {
-            let count = Int(sampleRate) * Int(event.durationMilliseconds) / 1_000
-            let attack = max(1, min(count / 2, Int(sampleRate) * 3 / 1_000))
-            let release = max(1, min(count / 2, Int(sampleRate) * 8 / 1_000))
-            let amplitude = Double(event.amplitudeMilli) / 1_000.0 * 0.28
-            let radiansPerSample = 2.0 * Double.pi * Double(event.frequencyHz)
-                / Double(sampleRate)
+            var pcmOffset = 44
+            for (eventIndex, event) in events.enumerated() {
+                let count = Int(sampleRate) * Int(event.durationMilliseconds) / 1_000
+                let attack = max(1, min(count / 2, Int(sampleRate) * 3 / 1_000))
+                let release = max(1, min(count / 2, Int(sampleRate) * 8 / 1_000))
+                let amplitude = Double(event.amplitudeMilli) / 1_000.0 * 0.28
+                let radiansPerSample = 2.0 * Double.pi * Double(event.frequencyHz)
+                    / Double(sampleRate)
 
-            for sampleIndex in 0..<count {
-                let attackEnvelope = min(1.0, Double(sampleIndex + 1) / Double(attack))
-                let releaseEnvelope = min(1.0, Double(count - sampleIndex) / Double(release))
-                let envelope = min(attackEnvelope, releaseEnvelope)
-                let sine = sin(Double(sampleIndex) * radiansPerSample)
-                let square = sine >= 0 ? 1.0 : -1.0
-                let shape: Double
-                switch event.kind {
-                case 1: shape = sine * 0.55 + square * 0.45
-                case 2: shape = sine
-                default: shape = sine * 0.8 + square * 0.2
+                for sampleIndex in 0..<count {
+                    let attackEnvelope = min(1.0, Double(sampleIndex + 1) / Double(attack))
+                    let releaseEnvelope = min(1.0, Double(count - sampleIndex) / Double(release))
+                    let envelope = min(attackEnvelope, releaseEnvelope)
+                    let sine = sin(Double(sampleIndex) * radiansPerSample)
+                    let square = sine >= 0 ? 1.0 : -1.0
+                    let shape: Double
+                    switch event.kind {
+                    case 1: shape = sine * 0.55 + square * 0.45
+                    case 2: shape = sine
+                    default: shape = sine * 0.8 + square * 0.2
+                    }
+                    let value = Int16(clamping: Int(shape * envelope * amplitude * 32_767.0))
+                    writeLittleEndian(UInt16(bitPattern: value), to: output, at: pcmOffset)
+                    pcmOffset += 2
                 }
-                let value = Int16(clamping: Int(shape * envelope * amplitude * 32_767.0))
-                appendLittleEndian(value, to: &pcm)
+                if eventIndex + 1 < events.count {
+                    pcmOffset += gapSamples * MemoryLayout<Int16>.size
+                }
             }
-            if eventIndex + 1 < events.count {
-                pcm.append(Data(count: gapSamples * MemoryLayout<Int16>.size))
-            }
+            precondition(pcmOffset == output.count)
         }
-
-        var wave = Data(capacity: 44 + pcm.count)
-        wave.append(contentsOf: "RIFF".utf8)
-        appendLittleEndian(UInt32(36 + pcm.count), to: &wave)
-        wave.append(contentsOf: "WAVEfmt ".utf8)
-        appendLittleEndian(UInt32(16), to: &wave)
-        appendLittleEndian(UInt16(1), to: &wave)
-        appendLittleEndian(UInt16(1), to: &wave)
-        appendLittleEndian(sampleRate, to: &wave)
-        appendLittleEndian(sampleRate * 2, to: &wave)
-        appendLittleEndian(UInt16(2), to: &wave)
-        appendLittleEndian(UInt16(16), to: &wave)
-        wave.append(contentsOf: "data".utf8)
-        appendLittleEndian(UInt32(pcm.count), to: &wave)
-        wave.append(pcm)
         return wave
     }
 
-    private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
-        withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    private static func writeLittleEndian(
+        _ value: UInt16,
+        to output: UnsafeMutableRawBufferPointer,
+        at offset: Int
+    ) {
+        output[offset] = UInt8(truncatingIfNeeded: value)
+        output[offset + 1] = UInt8(truncatingIfNeeded: value >> 8)
+    }
+
+    private static func writeLittleEndian(
+        _ value: UInt32,
+        to output: UnsafeMutableRawBufferPointer,
+        at offset: Int
+    ) {
+        output[offset] = UInt8(truncatingIfNeeded: value)
+        output[offset + 1] = UInt8(truncatingIfNeeded: value >> 8)
+        output[offset + 2] = UInt8(truncatingIfNeeded: value >> 16)
+        output[offset + 3] = UInt8(truncatingIfNeeded: value >> 24)
     }
 }
 
@@ -652,13 +684,26 @@ public enum TinyArcadeTonePlayerError: Error, Equatable {
 /// centralized notification owner.
 @MainActor
 public final class TinyArcadeTonePlayer: NSObject {
+    static let maximumCachedWaveCount = 8
+    static let maximumCachedWaveBytes = 512 * 1_024
+
+    private struct CachedWave {
+        let data: Data
+        var lastAccess: UInt64
+    }
+
     private let managesAudioSession: Bool
     private let observesAudioSessionNotifications: Bool
     private let audioSession = AVAudioSession.sharedInstance()
     private var player: AVAudioPlayer?
+    private var cachedWaves: [[TinyArcadeToneEvent]: CachedWave] = [:]
+    private var cacheAccess: UInt64 = 0
 
     public private(set) var isAudioSessionActive = false
     public var isPlaying: Bool { player?.isPlaying ?? false }
+    private(set) var cachedWaveBytes = 0
+    private(set) var waveSynthesisCount: UInt64 = 0
+    var cachedWaveCount: Int { cachedWaves.count }
 
     public init(
         managesAudioSession: Bool = true,
@@ -707,7 +752,7 @@ public final class TinyArcadeTonePlayer: NSObject {
             activatedForAttempt = true
         }
         do {
-            let next = try AVAudioPlayer(data: TinyArcadeToneSynthesizer.waveData(for: events))
+            let next = try AVAudioPlayer(data: waveDataForPlayback(for: events))
             next.prepareToPlay()
             guard next.play() else { throw TinyArcadeTonePlayerError.playbackUnavailable }
             player = next
@@ -750,6 +795,41 @@ public final class TinyArcadeTonePlayer: NSObject {
             try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
             isAudioSessionActive = false
         }
+    }
+
+    /// Reuses only immutable synthesized bytes. AVAudioPlayer remains
+    /// per-attempt so media-service reset and route lifecycle stay authoritative.
+    func waveDataForPlayback(for events: [TinyArcadeToneEvent]) -> Data {
+        let access = nextCacheAccess()
+        if var cached = cachedWaves[events] {
+            cached.lastAccess = access
+            cachedWaves[events] = cached
+            return cached.data
+        }
+
+        let data = TinyArcadeToneSynthesizer.waveData(for: events)
+        if waveSynthesisCount < .max { waveSynthesisCount += 1 }
+        guard data.count <= Self.maximumCachedWaveBytes else { return data }
+        while cachedWaves.count >= Self.maximumCachedWaveCount
+            || cachedWaveBytes > Self.maximumCachedWaveBytes - data.count {
+            guard let oldest = cachedWaves.min(by: { $0.value.lastAccess < $1.value.lastAccess })
+            else { break }
+            cachedWaveBytes -= oldest.value.data.count
+            cachedWaves.removeValue(forKey: oldest.key)
+        }
+        cachedWaves[events] = CachedWave(data: data, lastAccess: access)
+        cachedWaveBytes += data.count
+        return data
+    }
+
+    private func nextCacheAccess() -> UInt64 {
+        if cacheAccess == .max {
+            cachedWaves.removeAll(keepingCapacity: true)
+            cachedWaveBytes = 0
+            cacheAccess = 0
+        }
+        cacheAccess += 1
+        return cacheAccess
     }
 
     @objc nonisolated private func audioSessionInterrupted(_ notification: Notification) {

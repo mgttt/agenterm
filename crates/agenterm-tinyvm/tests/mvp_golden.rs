@@ -638,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 127] = [
+const LEAF_TESTS: [(&str, &str); 128] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -1066,6 +1066,10 @@ const LEAF_TESTS: [(&str, &str); 127] = [
         "every_reported_standard_feature_has_an_independent_executable_matrix_edge",
     ),
     ("bounded PCM tone synthesis", "ios_xcframework_swift_link"),
+    (
+        "single-buffer WAV + bounded wave LRU",
+        "ios_xcframework_swift_link",
+    ),
     (
         "interruption / route / reset owner",
         "ios_xcframework_swift_link",
