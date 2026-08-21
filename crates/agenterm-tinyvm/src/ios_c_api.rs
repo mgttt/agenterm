@@ -1083,7 +1083,7 @@ pub unsafe extern "C" fn tinyarcade_v1_open_with_native_modules(
         let registry = unsafe { native_registry(functions, function_count)? };
         unsafe {
             open_runtime(wasm, wasm_len, config, output, |bytes, vm, game, seed| {
-                GameRuntime::from_bytes_with_registry(bytes, vm, game, seed, &registry)
+                GameRuntime::from_bytes_with_registry(bytes, vm, game, seed, registry)
                     .map_err(wasm_error)
             })
         }
@@ -1163,7 +1163,7 @@ pub unsafe extern "C" fn tinyarcade_v1_open_reviewed_with_native_modules(
                     vm,
                     game,
                     seed,
-                    &registry,
+                    registry,
                 )
                 .map_err(|error| FfiError::new(STATUS_TRUST, error.message()))
             })

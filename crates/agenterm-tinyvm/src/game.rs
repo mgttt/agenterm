@@ -132,6 +132,12 @@ struct NativeFunction {
     callback: NativeCallback,
 }
 
+struct NativeResourceTable {
+    module: String,
+    domain: crate::ResourceHandleDomain,
+    activity: crate::resource_table::ResourceActivity,
+}
+
 /// Native capabilities explicitly made available by the app host.
 ///
 /// Namespaces must be versioned, such as `studio:physics/v1`, and cannot
@@ -140,7 +146,7 @@ struct NativeFunction {
 #[derive(Default)]
 pub struct NativeModuleRegistry {
     functions: Vec<NativeFunction>,
-    resource_tables: Vec<(String, crate::ResourceHandleDomain)>,
+    resource_tables: Vec<NativeResourceTable>,
 }
 
 impl NativeModuleRegistry {
@@ -171,7 +177,7 @@ impl NativeModuleRegistry {
         if self
             .resource_tables
             .iter()
-            .any(|(registered, _)| registered == module)
+            .any(|registered| registered.module == module)
         {
             return Err(WasmError::Trap("native resource table already assigned"));
         }
@@ -181,9 +187,13 @@ impl NativeModuleRegistry {
         let domain = allocator
             .claim()
             .map_err(|_| WasmError::Trap("native resource domain exhausted"))?;
-        let table = crate::HostResourceTable::new(domain, max_resources)
+        let (table, activity) = crate::HostResourceTable::new_tracked(domain, max_resources)
             .map_err(|_| WasmError::Trap("invalid native resource table"))?;
-        self.resource_tables.push((module.to_string(), domain));
+        self.resource_tables.push(NativeResourceTable {
+            module: module.to_string(),
+            domain,
+            activity,
+        });
         Ok(table)
     }
 
@@ -194,8 +204,8 @@ impl NativeModuleRegistry {
     ) -> Option<crate::ResourceHandleDomain> {
         self.resource_tables
             .iter()
-            .find(|(registered, _)| registered == module)
-            .map(|(_, domain)| *domain)
+            .find(|registered| registered.module == module)
+            .map(|registered| registered.domain)
     }
 
     /// Describe this exact app-compiled registry as a callback-free,
@@ -419,6 +429,7 @@ impl HostState {
 pub struct GameRuntime {
     instance: WasmInstance,
     host: Rc<RefCell<HostState>>,
+    native_resources: Vec<crate::resource_table::ResourceActivity>,
     manifest: CartridgeManifest,
     #[cfg(feature = "replay")]
     cartridge_sha256: [u8; 32],
@@ -471,7 +482,7 @@ impl GameRuntime {
             game_limits,
             rng_seed,
             CartridgeOrigin::Bundled,
-            &NativeModuleRegistry::new(),
+            NativeModuleRegistry::new(),
         )
     }
 
@@ -489,7 +500,7 @@ impl GameRuntime {
             game_limits,
             rng_seed,
             CartridgeOrigin::PrivateUser,
-            &NativeModuleRegistry::new(),
+            NativeModuleRegistry::new(),
         )
     }
 
@@ -510,13 +521,14 @@ impl GameRuntime {
             game_limits,
             rng_seed,
             CartridgeOrigin::OfficialReviewed,
-            &NativeModuleRegistry::new(),
+            NativeModuleRegistry::new(),
         )
     }
 
     /// Load exact reviewed bytes with app-provided, manifest-declared native
     /// capabilities. Trust verification happens before any guest or native
-    /// callback can execute.
+    /// callback can execute. The runtime consumes its registry so resource
+    /// identity and liveness observation cannot be reused by another instance.
     #[cfg(feature = "cartridge-trust")]
     pub fn from_reviewed_bytes_with_registry(
         wasm: &[u8],
@@ -525,7 +537,7 @@ impl GameRuntime {
         vm_limits: Limits,
         game_limits: GameLimits,
         rng_seed: u32,
-        registry: &NativeModuleRegistry,
+        registry: NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
         trust.verify(entry, wasm)?;
         Self::from_bytes_with_origin_and_registry(
@@ -539,12 +551,13 @@ impl GameRuntime {
     }
 
     /// Load a game with an explicit set of app-provided native capabilities.
+    /// The registry is one-shot runtime configuration and is consumed.
     pub fn from_bytes_with_registry(
         wasm: &[u8],
         vm_limits: Limits,
         game_limits: GameLimits,
         rng_seed: u32,
-        registry: &NativeModuleRegistry,
+        registry: NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
         Self::from_bytes_with_origin_and_registry(
             wasm,
@@ -562,7 +575,7 @@ impl GameRuntime {
         game_limits: GameLimits,
         rng_seed: u32,
         origin: CartridgeOrigin,
-        registry: &NativeModuleRegistry,
+        registry: NativeModuleRegistry,
     ) -> Result<Self, WasmError> {
         let (manifest, mut module) = parse_cartridge(wasm, vm_limits)?;
         if module.memory_count() != 1 {
@@ -585,12 +598,22 @@ impl GameRuntime {
                 "game cartridge does not support table imports",
             ));
         }
-        validate_native_availability(&module, registry)?;
+        validate_native_availability(&module, &registry)?;
         let mut native_calls = Vec::new();
         native_calls
             .try_reserve_exact(registry.functions.len())
             .map_err(|_| WasmError::Trap("native capability allocation"))?;
         native_calls.resize(registry.functions.len(), 0);
+        let mut native_resources = Vec::new();
+        native_resources
+            .try_reserve_exact(registry.resource_tables.len())
+            .map_err(|_| WasmError::Trap("native resource allocation"))?;
+        native_resources.extend(
+            registry
+                .resource_tables
+                .iter()
+                .map(|table| table.activity.clone()),
+        );
         let host = Rc::new(RefCell::new(HostState {
             limits: game_limits,
             phase: Phase::Idle,
@@ -606,11 +629,12 @@ impl GameRuntime {
             state_loaded: false,
             native_calls,
         }));
-        bind_imports(&mut module, &host, registry)?;
+        bind_imports(&mut module, &host, &registry)?;
         let instance = module.instantiate()?;
         let mut runtime = Self {
             instance,
             host,
+            native_resources,
             manifest,
             #[cfg(feature = "replay")]
             cartridge_sha256: crate::cartridge_sha256(wasm),
@@ -715,6 +739,15 @@ impl GameRuntime {
         self.leave();
         self.capture_execution_stats(GameLifecycle::Suspend);
         self.accept_lifecycle(suspended, "game_suspend failed")?;
+        if self
+            .native_resources
+            .iter()
+            .any(|activity| !activity.is_quiescent())
+        {
+            self.failed = true;
+            self.host.borrow_mut().saved_state.clear();
+            return Err(WasmError::Trap("native resources not quiescent"));
+        }
         let (guest, rng) = {
             let mut host = self.host.borrow_mut();
             if !host.state_submitted {

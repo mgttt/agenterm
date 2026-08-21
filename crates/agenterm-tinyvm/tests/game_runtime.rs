@@ -7,8 +7,8 @@ use std::rc::Rc;
 use agenterm_tinyvm::GuestResourceHandle;
 use agenterm_tinyvm::{
     CartridgeDescriptor, CartridgeManifest, GameFrame, GameInput, GameLifecycle, GameLimits,
-    GameRuntime, HostProfileV1, Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE,
-    NativeModuleRegistry, RenderFrame, WasmError,
+    GameRuntime, HostProfileV1, HostResourceTable, Limits, MAX_CARTRIDGE_BYTES,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame, WasmError,
 };
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
@@ -1109,7 +1109,7 @@ fn registered_versioned_native_module_is_bound_by_exact_signature() {
             Limits::default(),
             GameLimits::default(),
             1,
-            &registry,
+            registry,
         ),
         "load game with native module",
     );
@@ -1145,7 +1145,7 @@ fn in_place_native_module_receives_exact_bounded_result_slice() {
             Limits::default(),
             GameLimits::default(),
             1,
-            &registry,
+            registry,
         ),
         "load game with in-place native module",
     );
@@ -1285,23 +1285,23 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
 fn replay_preserves_versioned_native_import_registration_boundary() {
     let wasm = native_replay_module();
     let calls = Rc::new(Cell::new(0));
-    let observed = calls.clone();
-    let mut registry = NativeModuleRegistry::new();
-    must_ok(
-        registry.register("fan:physics/v1", "step", 0, 1, move |_, _| {
-            observed.set(observed.get() + 1);
-            Ok(vec![0])
-        }),
-        "register replay native module",
-    );
     let open = || {
+        let observed = calls.clone();
+        let mut registry = NativeModuleRegistry::new();
+        must_ok(
+            registry.register("fan:physics/v1", "step", 0, 1, move |_, _| {
+                observed.set(observed.get() + 1);
+                Ok(vec![0])
+            }),
+            "register replay native module",
+        );
         must_ok(
             GameRuntime::from_bytes_with_registry(
                 &wasm,
                 Limits::default(),
                 GameLimits::default(),
                 7,
-                &registry,
+                registry,
             ),
             "open native replay runtime",
         )
@@ -1340,6 +1340,49 @@ fn replay_preserves_versioned_native_import_registration_boundary() {
     ));
 }
 
+fn register_test_resource_callbacks(
+    registry: &mut NativeModuleRegistry,
+    resources: &Rc<RefCell<HostResourceTable<i32>>>,
+) {
+    let create_resources = resources.clone();
+    let read_resources = resources.clone();
+    let close_resources = resources.clone();
+    must_ok(
+        registry.register("fan:texture/v1", "create", 0, 1, move |_, _| {
+            let handle = create_resources
+                .borrow_mut()
+                .insert(41)
+                .map_err(|_| WasmError::Trap("native resource table full"))?;
+            Ok(vec![handle.as_i32()])
+        }),
+        "register resource create",
+    );
+    must_ok(
+        registry.register("fan:texture/v1", "read", 1, 1, move |args, _| {
+            let handle = GuestResourceHandle::from_i32(args[0])
+                .ok_or(WasmError::Trap("native resource handle"))?;
+            let value = *read_resources
+                .borrow()
+                .get(handle)
+                .map_err(|_| WasmError::Trap("stale native resource handle"))?;
+            Ok(vec![value])
+        }),
+        "register resource read",
+    );
+    must_ok(
+        registry.register("fan:texture/v1", "close", 1, 1, move |args, _| {
+            let handle = GuestResourceHandle::from_i32(args[0])
+                .ok_or(WasmError::Trap("native resource handle"))?;
+            close_resources
+                .borrow_mut()
+                .remove(handle)
+                .map_err(|_| WasmError::Trap("stale native resource handle"))?;
+            Ok(vec![0])
+        }),
+        "register resource close",
+    );
+}
+
 #[test]
 fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
     let bare = wat::parse_str(
@@ -1347,6 +1390,8 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
             (import "fan:texture/v1" "create" (func $create (result i32)))
             (import "fan:texture/v1" "read" (func $read (param i32) (result i32)))
             (import "fan:texture/v1" "close" (func $close (param i32) (result i32)))
+            (import "tinyarcade:core/v1" "save_state"
+              (func $save_state (param i32 i32) (result i32)))
             (memory 1)
             (global $handle (mut i32) (i32.const 0))
             (func (export "game_abi_version") (result i32) (i32.const 1))
@@ -1367,7 +1412,12 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
                 drop
                 i32.const 0
               end)
-            (func (export "game_suspend") (result i32) (i32.const 0))
+            (func (export "game_suspend") (result i32)
+              i32.const 0
+              i32.const 0
+              call $save_state
+              drop
+              i32.const 0)
             (func (export "game_resume") (result i32) (i32.const 0)))"#,
     )
     .expect("compile resource-handle cartridge");
@@ -1459,47 +1509,14 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
         .expect("create replacement runtime token");
     assert_ne!(stale, replacement);
     assert!(replacement_table.get(stale).is_err());
+    replacement_table
+        .remove(replacement)
+        .expect("remove replacement setup resource");
     resources
         .borrow_mut()
         .remove(stale)
         .expect("remove setup resource");
-    let create_resources = resources.clone();
-    let read_resources = resources.clone();
-    let close_resources = resources.clone();
-    must_ok(
-        registry.register("fan:texture/v1", "create", 0, 1, move |_, _| {
-            let handle = create_resources
-                .borrow_mut()
-                .insert(41)
-                .map_err(|_| WasmError::Trap("native resource table full"))?;
-            Ok(vec![handle.as_i32()])
-        }),
-        "register resource create",
-    );
-    must_ok(
-        registry.register("fan:texture/v1", "read", 1, 1, move |args, _| {
-            let handle = GuestResourceHandle::from_i32(args[0])
-                .ok_or(WasmError::Trap("native resource handle"))?;
-            let value = *read_resources
-                .borrow()
-                .get(handle)
-                .map_err(|_| WasmError::Trap("stale native resource handle"))?;
-            Ok(vec![value])
-        }),
-        "register resource read",
-    );
-    must_ok(
-        registry.register("fan:texture/v1", "close", 1, 1, move |args, _| {
-            let handle = GuestResourceHandle::from_i32(args[0])
-                .ok_or(WasmError::Trap("native resource handle"))?;
-            close_resources
-                .borrow_mut()
-                .remove(handle)
-                .map_err(|_| WasmError::Trap("stale native resource handle"))?;
-            Ok(vec![0])
-        }),
-        "register resource close",
-    );
+    register_test_resource_callbacks(&mut registry, &resources);
 
     let mut runtime = must_ok(
         GameRuntime::from_bytes_with_registry(
@@ -1507,13 +1524,35 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
             Limits::default(),
             GameLimits::default(),
             1,
-            &registry,
+            registry,
         ),
         "open resource-handle cartridge",
     );
     assert_eq!(resources.borrow().len(), 1);
     must_ok(runtime.tick(GameInput::default()), "use and close resource");
     assert!(resources.borrow().is_empty());
+    must_ok(runtime.suspend(), "snapshot after resource quiescence");
+
+    let replacement_resources = Rc::new(RefCell::new(replacement_table));
+    register_test_resource_callbacks(&mut replacement_registry, &replacement_resources);
+    let mut nonquiescent = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            replacement_registry,
+        ),
+        "open nonquiescent resource cartridge",
+    );
+    assert_eq!(replacement_resources.borrow().len(), 1);
+    assert!(matches!(
+        nonquiescent.suspend(),
+        Err(WasmError::Trap("native resources not quiescent"))
+    ));
+    assert!(nonquiescent.tick(GameInput::default()).is_err());
+    replacement_resources.borrow_mut().clear();
+    assert!(replacement_resources.borrow().is_empty());
 }
 
 #[test]
@@ -1540,7 +1579,7 @@ fn native_dispatch_quota_is_charged_before_callback_and_resets_per_lifecycle() {
             Limits::default(),
             GameLimits::default(),
             1,
-            &registry,
+            registry,
         ),
         "load one-call native module",
     );
@@ -1575,7 +1614,7 @@ fn native_dispatch_quota_is_charged_before_callback_and_resets_per_lifecycle() {
             Limits::default(),
             GameLimits::default(),
             1,
-            &registry,
+            registry,
         ),
         "load two-call native module",
     );
@@ -1817,7 +1856,7 @@ fn manifest_capabilities_and_lifecycle_signatures_are_exact() {
             Limits::default(),
             GameLimits::default(),
             1,
-            &registry
+            registry
         ),
         Err(WasmError::Trap("manifest capability mismatch"))
     ));

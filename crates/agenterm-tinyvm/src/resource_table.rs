@@ -6,7 +6,9 @@
 //! tables reject each other's handles and closing/reusing a slot cannot make
 //! an old token name a new object.
 
+use alloc::rc::Rc;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
 const SLOT_MASK: u32 = 0x03ff;
 const GENERATION_MASK: u32 = 0x03ff;
@@ -49,6 +51,23 @@ impl ResourceHandleDomain {
 /// later table instance.
 pub struct ResourceDomainAllocator {
     next: u16,
+}
+
+#[derive(Clone)]
+pub(crate) struct ResourceActivity(Rc<Cell<u16>>);
+
+impl ResourceActivity {
+    fn new() -> Self {
+        Self(Rc::new(Cell::new(0)))
+    }
+
+    pub(crate) fn is_quiescent(&self) -> bool {
+        self.0.get() == 0
+    }
+
+    fn set(&self, len: u16) {
+        self.0.set(len);
+    }
 }
 
 impl ResourceDomainAllocator {
@@ -147,6 +166,7 @@ pub struct HostResourceTable<T> {
     slots: Vec<Slot<T>>,
     len: u16,
     max_resources: u16,
+    activity: Option<ResourceActivity>,
 }
 
 impl<T> HostResourceTable<T> {
@@ -162,7 +182,18 @@ impl<T> HostResourceTable<T> {
             slots: Vec::new(),
             len: 0,
             max_resources,
+            activity: None,
         })
+    }
+
+    pub(crate) fn new_tracked(
+        domain: ResourceHandleDomain,
+        max_resources: u16,
+    ) -> Result<(Self, ResourceActivity), ResourceTableError> {
+        let activity = ResourceActivity::new();
+        let mut table = Self::new(domain, max_resources)?;
+        table.activity = Some(activity.clone());
+        Ok((table, activity))
     }
 
     pub const fn domain(&self) -> ResourceHandleDomain {
@@ -200,8 +231,10 @@ impl<T> HostResourceTable<T> {
             .find(|(_, slot)| slot.generation != 0 && slot.value.is_none())
         {
             slot.value = Some(value);
+            let generation = slot.generation;
             self.len += 1;
-            return Ok(make_handle(self.domain, index, slot.generation));
+            self.sync_activity();
+            return Ok(make_handle(self.domain, index, generation));
         }
 
         if self.slots.len() >= self.max_resources as usize {
@@ -216,6 +249,7 @@ impl<T> HostResourceTable<T> {
             value: Some(value),
         });
         self.len += 1;
+        self.sync_activity();
         Ok(make_handle(self.domain, index, 1))
     }
 
@@ -260,6 +294,7 @@ impl<T> HostResourceTable<T> {
         let value = slot.value.take().ok_or(ResourceTableError::StaleHandle)?;
         self.len -= 1;
         advance_generation(slot);
+        self.sync_activity();
         Ok(value)
     }
 
@@ -271,6 +306,21 @@ impl<T> HostResourceTable<T> {
             }
         }
         self.len = 0;
+        self.sync_activity();
+    }
+
+    fn sync_activity(&self) {
+        if let Some(activity) = &self.activity {
+            activity.set(self.len);
+        }
+    }
+}
+
+impl<T> Drop for HostResourceTable<T> {
+    fn drop(&mut self) {
+        if let Some(activity) = &self.activity {
+            activity.set(0);
+        }
     }
 }
 

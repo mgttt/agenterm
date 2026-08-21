@@ -2788,4 +2788,7 @@ not as permission policy, and keep separate versioned native modules in
 separate typed tables rather than exchanging native pointers. Treat guest
 tokens as runtime-local and nonportable: portable snapshots require native
 resources to be quiesced and reconstructed explicitly, never restored by
-replaying an `i32` token.
+replaying an `i32` token. Consume the native registry into exactly one runtime,
+retain a type-erased live counter for each registry-created table, and reject
+suspend after guest cleanup if any counter remains nonzero. Merely documenting
+"close before snapshot" is not a lifecycle guarantee.

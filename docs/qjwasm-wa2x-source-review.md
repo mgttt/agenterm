@@ -150,7 +150,10 @@ Reject for the iOS cartridge runtime:
    supplies non-reused table-instance domains through the native registry's
    atomic table factory. Close, clear, cross-module/cross-runtime use, slot
    reuse and complete generation exhaustion cannot make a token name the wrong
-   object; a real cartridge proves create/read/close through standard imports.
+   object. The registry is consumed by one runtime, and tracked live resources
+   must reach zero after guest suspend cleanup before a portable snapshot is
+   emitted. A real cartridge proves both create/read/close/snapshot success and
+   nonquiescent fail-closed behavior through standard imports.
 7. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

@@ -44,7 +44,9 @@ the table domain from a shared, long-lived `ResourceDomainAllocator`; a
 replacement registry using that allocator therefore cannot recreate the old
 token space. Ordinary function registration does not allocate a table or enter
 one into the converter host profile. Invalid limits and duplicate table
-configuration fail explicitly; allocator exhaustion never wraps a domain.
+configuration fail explicitly; allocator exhaustion never wraps a domain. A
+registry is consumed when constructing `GameRuntime`, so its runtime-local
+tables cannot accidentally be installed into a second instance.
 
 These tokens are runtime-local and nonportable. A guest must close native
 resources before taking a portable state snapshot, and an embedding must not
@@ -52,7 +54,11 @@ interpret an old snapshot's raw token as a restored platform object. The shared
 allocator closes aliases among runtimes in its lifetime; it is not a durable
 cross-process identity store. A product that persists guest memory must pair it
 with an explicit native-resource quiescence/restore protocol rather than
-serializing these `i32` values as resources.
+serializing these `i32` values as resources. Registry-created tables share a
+type-erased live counter with their one `GameRuntime`; `suspend` runs the guest's
+cleanup lifecycle and then fails closed without emitting a snapshot if any
+tracked table remains live. Standalone tables remain reusable primitives, but
+the runtime cannot observe them unless they were created by its registry.
 
 The API is synchronous and contains no executor, queue or hidden thread. It can
 therefore be reused by iOS, macOS, Linux, Windows and other hosts without
@@ -69,5 +75,7 @@ Executable evidence proves:
 - non-reused shared allocation across sibling modules and replacement runtimes;
 - explicit allocator exhaustion after 4,095 table instances;
 - permanent retirement after all 1,023 generations rather than aliasing;
+- one-shot registry consumption and suspend rejection while a tracked table is live;
 - an ordinary TinyArcade cartridge creating, reading and closing a host-owned
-  resource through three versioned native imports.
+  resource through three versioned native imports, then producing a snapshot;
+- the same cartridge latching failure when it attempts to snapshot a live resource.

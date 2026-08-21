@@ -60,7 +60,7 @@ tinyvm iOS game runtime
 │   │   └── atomic resource-table factory [x]
 │   ├── bounded in-place host dispatch [x]
 │   ├── domain + generation native resource handles [x]
-│   ├── native-resource snapshot quiescence [ ]
+│   ├── native-resource snapshot quiescence [x]
 │   └── storage without guest network [x]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
@@ -3559,3 +3559,32 @@ differential. Warnings-denied all-feature and isolated `no_std` Clippy, arm64
 iOS `no_std`, rustfmt and document-redaction gates pass. Default linked sizes
 are 1,602,808 bytes arm64 and 1,681,792 bytes x86_64; the stripped static core
 remains 101,256 bytes with selftest 42.
+
+## One-hundred-tenth executable increment — snapshot resource quiescence
+
+`NativeModuleRegistry` is now consumed when constructing its one
+`GameRuntime`, closing the API path that could bind one runtime-local table and
+domain into multiple instances. Every registry-created `HostResourceTable`
+shares a private, type-erased live counter with that runtime. Insert/remove,
+clear and table drop update the counter without exposing the platform object or
+adding a platform backend to the VM.
+
+`GameRuntime::suspend` first lets the guest execute its normal cleanup and state
+submission, then checks all tracked tables. Any live native resource clears the
+candidate state, latches the runtime failed and returns `native resources not
+quiescent`; no portable snapshot becomes observable. Standalone resource tables
+remain reusable by non-game embeddings, while only registry-created tables
+participate in this game lifecycle contract.
+
+Evidence on 2026-08-22: the real native-resource WAT fixture creates, reads and
+closes a host object, then successfully emits a zero-byte guest snapshot. A
+replacement runtime using a distinct table leaves its init-created object live;
+the same guest suspend path is rejected and every later tick remains latched.
+The executable PRD trace now binds all 103 completed leaves. The complete
+all-feature/all-target package passes all 128 library tests and every
+non-ignored integration test, including both iOS XCFramework gates and the
+three-game tinyvm/JSC/H5 differential. All 115 isolated `no_std` library tests,
+warnings-denied all-feature and isolated `no_std` Clippy, arm64 iOS `no_std`,
+rustfmt and document-redaction gates pass. Default linked sizes are 1,603,208
+bytes arm64 and 1,682,184 bytes x86_64; the stripped static core remains
+101,256 bytes with selftest 42.
