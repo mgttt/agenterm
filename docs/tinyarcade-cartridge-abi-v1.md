@@ -182,6 +182,31 @@ Descriptor success proves structural ABI compatibility only. Runtime-specific
 memory/step/media limits, native registry availability, catalog trust and guest
 initialization remain later independent gates.
 
+## Manifest authoring
+
+An ordinary WebAssembly producer does not need linker-specific custom-section
+syntax. The converter CLI can attach the canonical section after compilation:
+
+```text
+tinyvm cartridge attach-manifest INPUT.wasm OUTPUT.wasm GAME_ID GAME_VERSION ABI_VERSION STATE_VERSION
+```
+
+The command first parses the input as standard WASM, derives the sorted unique
+native capability set from its non-core function-import namespaces, appends one
+standard custom section, and runs the complete static cartridge descriptor
+validator before publishing. The capability list is deliberately not a CLI
+argument: the standard import table is its sole source of truth. Input bytes are
+preserved as the exact prefix of the output; an existing manifest, incompatible
+lifecycle/import contract, output over 2 MiB or existing output path fails
+without publishing or overwriting an artifact. Run this as the final post-link,
+post-optimization step so a producer optimizer cannot strip the manifest.
+
+Library-based converters may use `CartridgeManifest::append_to_wasm` for the
+same deterministic canonical encoding. That low-level method validates the
+manifest and section framing and refuses to rewrite an existing manifest; the
+caller must still run `CartridgeDescriptor::inspect` to prove the complete game
+contract before distribution.
+
 ## Snapshot envelope
 
 The app persists the bytes returned by runtime suspend. The canonical envelope
@@ -205,9 +230,11 @@ are no longer backward compatible.
 
 ## Converter conformance checklist
 
-1. Emit a valid WebAssembly 1.0 module and exactly one canonical manifest.
+1. Emit a valid WebAssembly 1.0 module, then attach exactly one canonical
+   manifest without rewriting its executable sections.
 2. Export all five exact lifecycle functions.
-3. Declare every non-core namespace in the manifest and no unused namespace.
+3. Derive every manifest capability from the standard non-core import table;
+   never maintain a second hand-written capability list.
 4. Use only registered, versioned i32 capability imports.
 5. Treat input/time/RNG as injected deterministic state.
 6. Check host-call results and stay within linear-memory and output budgets.

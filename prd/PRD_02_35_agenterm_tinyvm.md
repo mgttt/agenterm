@@ -90,6 +90,13 @@ Wasm、lifecycle exports、core/native import 签名和 capability 对应关系�
 TAD1 描述。App 可以在安装前明确显示所需 native module；descriptor 只描述兼容需求，
 不会授予 origin、签名信任或原生权限。
 
+转换器也不再需要手拼 manifest bytes。`tinyvm cartridge attach-manifest` 接受任意
+标准 producer 生成、尚无 TinyArcade manifest 的 `.wasm`，保持全部原始 bytes 为输出
+前缀，只追加一个标准 custom section。native capability 不允许作为另一份手填参数，
+而是从非 core function import namespace 自动去重、排序得出；输出前必须通过完整
+descriptor，已有 manifest、ABI/lifecycle/import 不兼容、超过 2 MiB 或目标已存在均不
+发布。Rust `CartridgeManifest::append_to_wasm` 提供同一 canonical encoder 给未来工具复用。
+
 媒体边界不再假设所有游戏都是 Depth Well。`submit_render` 可提交严格有界的
 `tinyarcade:grid3d/v1` 或 `tinyarcade:indexed2d/v1` 标准记录；后者提供完整
 256 色调色板像素平面，默认 64 KiB 预算覆盖 256×240 与 320×200 经典画幅。

@@ -7,15 +7,9 @@
 //! This is intentionally not a REPL framework — the persistent-image REPL is
 //! the library's `Vm::eval` loop; this binary is a thin one-shot front door.
 
-use std::io::Read;
-use std::process::ExitCode;
-
-#[cfg(feature = "catalog-publisher")]
-use std::collections::{BTreeMap, HashSet};
-#[cfg(feature = "replay")]
-use std::io::Write;
-#[cfg(any(feature = "catalog-publisher", feature = "replay"))]
+use std::io::{Read, Write};
 use std::path::Path;
+use std::process::ExitCode;
 
 #[cfg(feature = "catalog-publisher")]
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -23,15 +17,15 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 #[cfg(feature = "catalog-publisher")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "catalog-publisher")]
+use std::collections::{BTreeMap, HashSet};
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, GameInput, GameLimits, GameRuntime, Limits, RenderFrame, ToneBatch, Vm,
-    WasmError,
+    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits,
+    RenderFrame, ToneBatch, Vm, WasmError, WasmModule,
 };
 #[cfg(feature = "catalog-publisher")]
-use agenterm_tinyvm::{
-    CartridgeManifest, CartridgeTrustStore, CatalogEntry, WasmModule, cartridge_sha256,
-};
+use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{MAX_REPLAY_BYTES, ReplayRecorderV1, ReplayTraceV1};
 
@@ -55,9 +49,48 @@ fn main() -> ExitCode {
             };
             run_eval(&src)
         }
-        Some("cartridge") => match (args.next().as_deref(), args.next(), args.next()) {
-            (Some("inspect"), Some(path), None) => run_cartridge(&path, false),
-            (Some("check"), Some(path), None) => run_cartridge(&path, true),
+        Some("cartridge") => match args.next().as_deref() {
+            Some("inspect") => match (args.next(), args.next()) {
+                (Some(path), None) => run_cartridge(&path, false),
+                _ => usage(),
+            },
+            Some("check") => match (args.next(), args.next()) {
+                (Some(path), None) => run_cartridge(&path, true),
+                _ => usage(),
+            },
+            Some("attach-manifest") => {
+                let input = args.next();
+                let output = args.next();
+                let game_id = args.next();
+                let game_version = args.next();
+                let abi_version = args.next();
+                let state_version = args.next();
+                match (
+                    input,
+                    output,
+                    game_id,
+                    game_version,
+                    abi_version,
+                    state_version,
+                ) {
+                    (
+                        Some(input),
+                        Some(output),
+                        Some(game_id),
+                        Some(game_version),
+                        Some(abi_version),
+                        Some(state_version),
+                    ) if args.next().is_none() => run_attach_manifest(
+                        &input,
+                        &output,
+                        game_id,
+                        game_version,
+                        &abi_version,
+                        &state_version,
+                    ),
+                    _ => usage(),
+                }
+            }
             _ => usage(),
         },
         #[cfg(feature = "replay")]
@@ -102,6 +135,9 @@ fn usage() -> ExitCode {
     eprintln!("  tinyvm eval [asm...]");
     eprintln!("  tinyvm cartridge inspect FILE.wasm");
     eprintln!("  tinyvm cartridge check FILE.wasm");
+    eprintln!(
+        "  tinyvm cartridge attach-manifest INPUT.wasm OUTPUT.wasm GAME_ID GAME_VERSION ABI_VERSION STATE_VERSION"
+    );
     #[cfg(feature = "catalog-publisher")]
     eprintln!("  tinyvm catalog build SOURCE.json ED25519-SEED OUTPUT-DIRECTORY");
     #[cfg(feature = "replay")]
@@ -130,7 +166,7 @@ fn run_replay_record(wasm_path: &str, inputs_path: &str, output_path: &str) -> E
         let trace = recorder
             .finish()
             .map_err(|error| error.message().to_string())?;
-        publish_new_file(Path::new(output_path), &trace)?;
+        publish_new_file(Path::new(output_path), &trace, "replay output")?;
         let decoded = ReplayTraceV1::decode(&trace).map_err(|error| error.message().to_string())?;
         Ok((
             decoded.game_id,
@@ -254,10 +290,9 @@ fn parse_u32(value: &str) -> Option<u32> {
     )
 }
 
-#[cfg(feature = "replay")]
-fn publish_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn publish_new_file(path: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
     if path.exists() {
-        return Err("replay output already exists".into());
+        return Err(format!("{label} already exists"));
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let leaf = path
@@ -270,12 +305,12 @@ fn publish_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
             .write(true)
             .create_new(true)
             .open(&stage)
-            .map_err(|_| "cannot create replay staging file")?;
+            .map_err(|_| format!("cannot create {label} staging file"))?;
         file.write_all(bytes)
-            .map_err(|_| "cannot write replay staging file")?;
+            .map_err(|_| format!("cannot write {label} staging file"))?;
         file.sync_all()
-            .map_err(|_| "cannot flush replay staging file")?;
-        std::fs::hard_link(&stage, path).map_err(|_| "cannot promote replay output")?;
+            .map_err(|_| format!("cannot flush {label} staging file"))?;
+        std::fs::hard_link(&stage, path).map_err(|_| format!("cannot promote {label}"))?;
         let _ = std::fs::remove_file(&stage);
         Ok(())
     })();
@@ -661,6 +696,81 @@ fn read_cartridge(path: &str) -> Result<Vec<u8>, &'static str> {
         return Err("cartridge exceeds 2 MiB converter limit");
     }
     std::fs::read(path).map_err(|_| "cannot read cartridge")
+}
+
+fn run_attach_manifest(
+    input_path: &str,
+    output_path: &str,
+    game_id: String,
+    game_version: String,
+    abi_version: &str,
+    state_version: &str,
+) -> ExitCode {
+    let result: Result<(CartridgeManifest, usize), String> = (|| {
+        let wasm = read_cartridge(input_path).map_err(str::to_string)?;
+        let limits = Limits {
+            max_table_elems: 1_024,
+            max_memory_pages: 64,
+            max_steps: 1_000_000,
+        };
+        let module = WasmModule::from_bytes_with(&wasm, limits)
+            .map_err(|error| error.message().to_string())?;
+        let mut capabilities = Vec::new();
+        for import in module.imports() {
+            if import.module != "tinyarcade:core/v1" && !capabilities.contains(&import.module) {
+                if capabilities.len() == 64 {
+                    return Err("more than 64 native capability namespaces".into());
+                }
+                capabilities.push(import.module.clone());
+            }
+        }
+        capabilities.sort();
+        let manifest = CartridgeManifest {
+            game_id,
+            game_version,
+            abi_version: abi_version
+                .parse()
+                .map_err(|_| "ABI version must be a decimal u32")?,
+            state_version: state_version
+                .parse()
+                .map_err(|_| "state version must be a decimal u32")?,
+            capabilities,
+        };
+        let cartridge = manifest
+            .append_to_wasm(&wasm)
+            .map_err(|error| error.message().to_string())?;
+        if cartridge.len() > MAX_CARTRIDGE_BYTES as usize {
+            return Err("manifested cartridge exceeds 2 MiB converter limit".into());
+        }
+        let descriptor = CartridgeDescriptor::inspect(&cartridge, limits)
+            .map_err(|error| error.message().to_string())?;
+        publish_new_file(
+            Path::new(output_path),
+            &cartridge,
+            "manifested cartridge output",
+        )?;
+        Ok((descriptor.manifest, cartridge.len()))
+    })();
+    match result {
+        Ok((manifest, bytes)) => {
+            println!("game_id={}", manifest.game_id);
+            println!("game_version={}", manifest.game_version);
+            println!("abi_version={}", manifest.abi_version);
+            println!("state_version={}", manifest.state_version);
+            println!("wasm_bytes={bytes}");
+            if manifest.capabilities.is_empty() {
+                println!("native_capabilities=(none)");
+            } else {
+                println!("native_capabilities={}", manifest.capabilities.join(","));
+            }
+            println!("OK: attached canonical manifest to standard WASM module");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_cartridge(path: &str, execute: bool) -> ExitCode {

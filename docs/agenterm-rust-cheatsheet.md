@@ -158,6 +158,17 @@ clock; prove a corrected next call still runs. When portable snapshots exclude
 an app-owned clock, successful resume starts a new validation epoch and the app
 persistence envelope must restore that clock alongside the snapshot.
 
+For converter-authored WASM metadata, keep the standard module as the source of
+truth. Derive capability namespaces from its function import table, sort and
+deduplicate them canonically, then append a standard custom section while
+preserving all producer bytes. Do not ask a CLI caller to maintain a duplicate
+capability list. Reject an existing manifest instead of rewriting identity,
+run the complete static descriptor before publication, and create output once
+through an atomic no-overwrite path. Attach after producer optimization so a
+strip pass cannot discard the custom section. Test reproducible bytes, native-import
+derivation, duplicate-manifest refusal and absence of output after preflight
+failure.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

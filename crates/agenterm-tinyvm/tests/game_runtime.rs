@@ -1,11 +1,13 @@
 //! Black-box owner for the standard-WASM game ABI v1 boundary.
 
 use std::cell::Cell;
+use std::process::Command;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, GameInput, GameLimits, GameRuntime, Limits, MAX_CARTRIDGE_BYTES,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame, WasmError,
+    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits,
+    MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
+    WasmError,
 };
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
@@ -51,6 +53,25 @@ fn section(module: &mut Vec<u8>, id: u8, payload: &[u8]) {
     module.push(id);
     leb(module, payload.len());
     module.extend_from_slice(payload);
+}
+
+fn without_leading_manifest(module: &[u8]) -> Vec<u8> {
+    assert_eq!(&module[..8], b"\0asm\x01\0\0\0");
+    assert_eq!(module[8], 0, "test module starts with its manifest");
+    let mut cursor = 9;
+    let mut size = 0usize;
+    for shift in (0..35).step_by(7) {
+        let byte = module[cursor];
+        cursor += 1;
+        size |= usize::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            let end = cursor + size;
+            let mut result = module[..8].to_vec();
+            result.extend_from_slice(&module[end..]);
+            return result;
+        }
+    }
+    panic!("test manifest section has an invalid size");
 }
 
 fn body(code: &[u8]) -> Vec<u8> {
@@ -375,6 +396,155 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
     );
     assert_eq!(frame.render, [1, 2, 3]);
     assert_eq!(frame.audio, [4, 5]);
+}
+
+#[test]
+fn manifest_authoring_preserves_standard_wasm_and_rejects_rewriting() {
+    let mut imports = all_imports().to_vec();
+    imports.push(("fan:physics/v1", "step_world", 1));
+    imports.push(("fan:audio/v2", "mix_bus", 1));
+    let manifested = game_module(&imports, 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
+    let raw_wasm = without_leading_manifest(&manifested);
+    let manifest = CartridgeManifest {
+        game_id: "fan.converter-proof".into(),
+        game_version: "2.1.0".into(),
+        abi_version: 1,
+        state_version: 7,
+        capabilities: vec!["fan:audio/v2".into(), "fan:physics/v1".into()],
+    };
+
+    let cartridge = must_ok(
+        manifest.append_to_wasm(&raw_wasm),
+        "append canonical manifest",
+    );
+    assert!(cartridge.starts_with(&raw_wasm));
+    assert_eq!(
+        must_ok(
+            manifest.append_to_wasm(&raw_wasm),
+            "repeat canonical manifest authoring"
+        ),
+        cartridge,
+        "the same producer bytes and manifest must be reproducible"
+    );
+    let descriptor = must_ok(
+        CartridgeDescriptor::inspect(&cartridge, Limits::default()),
+        "inspect authored cartridge",
+    );
+    assert!(descriptor.manifest == manifest);
+    assert_eq!(descriptor.imports.len(), imports.len());
+    assert!(matches!(
+        manifest.append_to_wasm(&cartridge),
+        Err(WasmError::Decode("game manifest already exists"))
+    ));
+
+    let noncanonical = CartridgeManifest {
+        capabilities: vec!["fan:physics/v2".into(), "fan:physics/v1".into()],
+        ..manifest
+    };
+    assert!(matches!(
+        noncanonical.append_to_wasm(&raw_wasm),
+        Err(WasmError::Decode("invalid game capability"))
+    ));
+}
+
+#[test]
+fn converter_cli_derives_native_capabilities_and_publishes_once() {
+    let mut imports = all_imports().to_vec();
+    imports.push(("fan:physics/v1", "step_world", 1));
+    imports.push(("fan:audio/v2", "mix_bus", 1));
+    let manifested = game_module(&imports, 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
+    let raw_wasm = without_leading_manifest(&manifested);
+    let directory = tempfile::tempdir().expect("temporary converter directory");
+    let input = directory.path().join("producer.wasm");
+    let output = directory.path().join("fan-game-3.0.0.wasm");
+    std::fs::write(&input, &raw_wasm).expect("write producer WASM");
+
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+            .args([
+                "cartridge",
+                "attach-manifest",
+                input.to_str().expect("input path"),
+                output.to_str().expect("output path"),
+                "fan.cli-proof",
+                "3.0.0",
+                "1",
+                "9",
+            ])
+            .output()
+            .expect("run converter CLI")
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "converter failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&first.stdout)
+            .contains("native_capabilities=fan:audio/v2,fan:physics/v1")
+    );
+    let cartridge = std::fs::read(&output).expect("read manifested output");
+    assert!(cartridge.starts_with(&raw_wasm));
+    let descriptor = must_ok(
+        CartridgeDescriptor::inspect(&cartridge, Limits::default()),
+        "inspect CLI cartridge",
+    );
+    assert_eq!(descriptor.manifest.game_id, "fan.cli-proof");
+    assert_eq!(descriptor.manifest.state_version, 9);
+    assert_eq!(
+        descriptor.manifest.capabilities,
+        ["fan:audio/v2", "fan:physics/v1"]
+    );
+
+    let second = run();
+    assert!(
+        !second.status.success(),
+        "converter must not overwrite output"
+    );
+    assert_eq!(
+        std::fs::read(&output).expect("reread output"),
+        cartridge,
+        "failed overwrite must preserve the first artifact"
+    );
+
+    let existing_input = directory.path().join("already-manifested.wasm");
+    let refused_output = directory.path().join("must-not-exist.wasm");
+    std::fs::write(&existing_input, &cartridge).expect("write existing cartridge");
+    let refused = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "attach-manifest",
+            existing_input.to_str().expect("existing input path"),
+            refused_output.to_str().expect("refused output path"),
+            "fan.cli-proof",
+            "3.0.1",
+            "1",
+            "9",
+        ])
+        .output()
+        .expect("run duplicate-manifest refusal");
+    assert!(!refused.status.success());
+    assert!(!refused_output.exists());
+
+    let nongame_input = directory.path().join("ordinary-module.wasm");
+    let nongame_output = directory.path().join("ordinary-module-cartridge.wasm");
+    std::fs::write(&nongame_input, b"\0asm\x01\0\0\0").expect("write ordinary WASM");
+    let nongame = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "attach-manifest",
+            nongame_input.to_str().expect("ordinary input path"),
+            nongame_output.to_str().expect("ordinary output path"),
+            "fan.not-a-game",
+            "1.0.0",
+            "1",
+            "1",
+        ])
+        .output()
+        .expect("run non-game refusal");
+    assert!(!nongame.status.success());
+    assert!(!nongame_output.exists());
 }
 
 #[test]

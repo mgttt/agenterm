@@ -38,6 +38,7 @@ tinyvm iOS game runtime
 │   ├── private user import           [x]
 │   ├── static compatibility descriptor [x]
 │   ├── converter conformance kit     [x]
+│   ├── canonical manifest authoring  [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
@@ -1039,3 +1040,38 @@ Evidence on 2026-08-21:
 - No physical iPhone is attached, so real touch/controller, background
   termination, speaker and frame pacing remain open device evidence. The
   overall goal remains partial.
+
+## Thirtieth executable increment — canonical converter manifest authoring
+
+Converters can now begin with a manifest-free standard WebAssembly module from
+any producer. `CartridgeManifest::append_to_wasm` validates canonical identity,
+versions and sorted versioned capability namespaces, preserves every producer
+byte as the output prefix, appends one ordinary custom section reproducibly and
+refuses to rewrite an existing manifest.
+
+`tinyvm cartridge attach-manifest` makes that encoder safe to use as a build
+step. It parses the input as standard WASM, derives sorted unique native
+capabilities exclusively from non-core function imports, appends the manifest,
+then runs the complete static descriptor before publishing once through an
+atomic no-overwrite path. Authors cannot accidentally maintain a conflicting
+second capability list, and a declaration still grants no native authority.
+
+Evidence on 2026-08-21:
+
+- A public Rust black box removes the manifest from a standard game module with
+  two native namespaces, authors it twice to byte-identical output, proves all
+  original bytes are unchanged, recovers the exact descriptor and rejects both
+  a second manifest and noncanonical capability ordering.
+- A CLI black box derives `fan:audio/v2,fan:physics/v1` despite reverse import
+  order, publishes one inspectable standard `.wasm`, refuses overwrite without
+  changing it, refuses an already manifested input and emits no artifact for an
+  ordinary WASM module missing the game lifecycle.
+- All 187 package tests plus one doctest pass. All-feature/all-target Clippy,
+  no-default compile, replay isolation, document redaction and the exact
+  70,904-byte static-core/self-test gate are clean.
+- A booted iPhone 17 Pro simulator re-proves both real cartridges and every
+  reviewed/private/snapshot/replay/session flow. Generic device and universal
+  simulator packages link; ordinary consumers measure 1,412,840 bytes arm64
+  and 1,469,856 bytes x86_64, with replay/private/session consumers at
+  1,277,784, 1,279,440 and 1,278,512 bytes arm64. Physical-device evidence
+  remains open.
