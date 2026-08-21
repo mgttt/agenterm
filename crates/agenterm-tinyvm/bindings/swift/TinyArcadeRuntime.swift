@@ -341,12 +341,22 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
     public let width: UInt16
     public let height: UInt16
     public let paletteRGBA: [UInt32]
-    public let pixels: Data
+    /// Compatibility copy with zero-based Data indices. Hot paths should use
+    /// `withPixelBytes` to read the validated plane without another copy.
+    public var pixels: Data { storage.subdata(in: pixelRange) }
     /// Optional game-defined, presentation-only bytes negotiated through
     /// `indexed2d_metadata_version`. The schema is cartridge-owned; the SDK
     /// bounds and transports it but does not interpret it.
     public let applicationMetadataSchema: UInt32?
-    public let applicationMetadata: Data
+    /// Compatibility copy with zero-based Data indices. Hot paths should use
+    /// `withApplicationMetadataBytes` instead.
+    public var applicationMetadata: Data {
+        guard let applicationMetadataRange else { return Data() }
+        return storage.subdata(in: applicationMetadataRange)
+    }
+    private let storage: Data
+    private let pixelRange: Range<Int>
+    private let applicationMetadataRange: Range<Int>?
 
     fileprivate init(data: Data) throws {
         guard data.count >= 16,
@@ -377,8 +387,9 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
             decodedPalette.append(TinyArcadeGrid3DFrame.u32(data, 16 + index * 4))
         }
         paletteRGBA = decodedPalette
-        pixels = data.subdata(in: pixelOffset..<pixelEnd)
-        guard !pixels.contains(where: { Int($0) >= paletteCount }) else {
+        storage = data
+        pixelRange = pixelOffset..<pixelEnd
+        guard !data[pixelRange].contains(where: { Int($0) >= paletteCount }) else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d pixel")
         }
         if flags & 1 == 0 {
@@ -386,11 +397,14 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
                 throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d frame size")
             }
             applicationMetadataSchema = nil
-            applicationMetadata = Data()
+            applicationMetadataRange = nil
         } else {
             let headerEnd = pixelEnd + 12
             guard headerEnd <= data.count,
-                  data.subdata(in: pixelEnd..<(pixelEnd + 4)) == Data("TAM1".utf8) else {
+                  data[pixelEnd] == 84,
+                  data[pixelEnd + 1] == 65,
+                  data[pixelEnd + 2] == 77,
+                  data[pixelEnd + 3] == 49 else {
                 throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d metadata header")
             }
             let schema = TinyArcadeGrid3DFrame.u32(data, pixelEnd + 4)
@@ -402,23 +416,49 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
                 throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d metadata size")
             }
             applicationMetadataSchema = schema
-            applicationMetadata = data.subdata(in: headerEnd..<data.count)
+            applicationMetadataRange = headerEnd..<data.count
+        }
+    }
+
+    /// Borrows the validated pixel plane synchronously from the immutable
+    /// Swift-owned render storage. The pointer must not escape `body`.
+    public func withPixelBytes<Result>(
+        _ body: (UnsafeRawBufferPointer) throws -> Result
+    ) rethrows -> Result {
+        try storage.withUnsafeBytes { bytes in
+            try body(UnsafeRawBufferPointer(rebasing: bytes[pixelRange]))
+        }
+    }
+
+    /// Borrows optional game-owned metadata synchronously without copying it.
+    /// The generic runtime does not interpret the bytes or let the pointer escape.
+    public func withApplicationMetadataBytes<Result>(
+        _ body: (UnsafeRawBufferPointer) throws -> Result
+    ) rethrows -> Result {
+        guard let applicationMetadataRange else {
+            let empty = Data()
+            return try empty.withUnsafeBytes(body)
+        }
+        return try storage.withUnsafeBytes { bytes in
+            try body(UnsafeRawBufferPointer(rebasing: bytes[applicationMetadataRange]))
         }
     }
 
     /// Copies the indexed plane into canonical row-major RGBA8 bytes.
     /// The decoded frame bounds this allocation to less than 256 KiB.
     public func rgba8888() -> Data {
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(pixels.count * 4)
-        for index in pixels {
-            let color = paletteRGBA[Int(index)]
-            bytes.append(UInt8(truncatingIfNeeded: color))
-            bytes.append(UInt8(truncatingIfNeeded: color >> 8))
-            bytes.append(UInt8(truncatingIfNeeded: color >> 16))
-            bytes.append(UInt8(truncatingIfNeeded: color >> 24))
+        withPixelBytes { pixels in
+            var bytes = [UInt8]()
+            bytes.reserveCapacity(pixels.count * 4)
+            for index in pixels {
+                let color = paletteRGBA[Int(index)]
+                bytes.append(UInt8(truncatingIfNeeded: color))
+                bytes.append(UInt8(truncatingIfNeeded: color >> 8))
+                bytes.append(UInt8(truncatingIfNeeded: color >> 16))
+                bytes.append(UInt8(truncatingIfNeeded: color >> 24))
+            }
+            return Data(bytes)
         }
-        return Data(bytes)
     }
 
     /// Builds an sRGB, non-premultiplied RGBA image suitable for Core Graphics

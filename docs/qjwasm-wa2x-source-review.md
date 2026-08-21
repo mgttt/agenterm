@@ -154,6 +154,10 @@ Reject for the iOS cartridge runtime:
    must reach zero after guest suspend cleanup before a portable snapshot is
    emitted. A real cartridge proves both create/read/close/snapshot success and
    nonquiescent fail-closed behavior through standard imports.
-7. [ ] If background execution becomes a product requirement, first specify and
+7. [x] The iOS Swift indexed-frame owner keeps the one required ABI copy and
+   lends pixel/metadata regions through synchronous read-only closures. SDK and
+   real-App pointer tests prove the views share that owner; compatibility
+   `Data` snapshots preserve ordinary Swift value semantics for cold callers.
+8. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

@@ -236,6 +236,12 @@ core extension. The generic SDK does not decode a game's schema. Signal Lock's
 App adapter decodes its 64-byte state from the same completed frame, so its
 30 Hz render path remains a `.tick` lifecycle and does not allocate a portable
 snapshot or call `game_suspend` merely to update native UI/accessibility state.
+The C boundary still performs one required copy into Swift-owned immutable
+`Data`. `withPixelBytes` and `withApplicationMetadataBytes` then lend scoped,
+read-only views into that owner for native decoding and RGBA conversion; their
+pointers cannot escape the closure. The zero-indexed `pixels` and
+`applicationMetadata` properties remain source-compatible value snapshots and
+copy only when a caller explicitly asks for them.
 
 Replay recording is state on the same owner-thread runtime handle. Begin
 captures a portable snapshot and clears the previous completed trace; ordinary

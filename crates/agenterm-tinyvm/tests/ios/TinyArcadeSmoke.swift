@@ -691,6 +691,14 @@ struct TinyArcadeSmoke {
         precondition(indexedFrame.width == 2 && indexedFrame.height == 1)
         precondition(indexedFrame.paletteRGBA == [0xff00_00ff, 0x8000_ff00])
         precondition(indexedFrame.pixels == Data([0, 1]))
+        media.render.withUnsafeBytes { renderBytes in
+            indexedFrame.withPixelBytes { pixelBytes in
+                precondition(
+                    pixelBytes.baseAddress == renderBytes.baseAddress?.advanced(by: 24),
+                    "validated pixel planes must share the one Swift-owned render copy"
+                )
+            }
+        }
         let expectedRGBA = Data([255, 0, 0, 255, 0, 255, 0, 128])
         precondition(indexedFrame.rgba8888() == expectedRGBA)
         let image = try indexedFrame.makeCGImage()

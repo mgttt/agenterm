@@ -89,7 +89,8 @@ tinyvm iOS game runtime
 │   ├── frame pacing + scene state    [x]
 │   ├── stable two-pass copy lengths  [x]
 │   ├── indexed 2D presentation       [x]
-│   │   └── bounded app metadata hot path [x]
+│   │   ├── bounded app metadata hot path [x]
+│   │   └── scoped immutable frame views [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   │   └── current-main consumer gate [x]
@@ -3991,3 +3992,25 @@ proves the extension is a toolchain-neutral standard import/media contract,
 not behavior available only to Rust-authored guests. The executable PRD trace
 now binds 125 completed claims. Physical iPhone/TestFlight evidence remains
 open, so the persistent goal stays active.
+
+## One-hundred-twenty-sixth executable increment — borrowed Swift frame views
+
+The Swift indexed2d owner now retains the one immutable `Data` produced by the
+C ABI copy and exposes pixel and application-metadata regions through scoped
+read-only closures. Native RGBA conversion and Signal Lock state decoding use
+those borrowed regions directly, avoiding two further `subdata` allocations on
+every display frame. Compatibility `Data` properties remain zero-indexed value
+snapshots and copy only when explicitly accessed; no pointer can escape its
+owner's closure.
+
+Evidence on 2026-08-22: consumer commit `e2ceae8` and executable Swift tests
+compare borrowed base addresses with the exact offsets inside the completed
+render buffer in both the standalone SDK and the real App target. Signal Lock's
+four focused App tests cover the 600-frame budget, same-tick state,
+suspend/resume and view-model lifecycle; the complete consumer gate passes 11
+unit tests, one two-game UI journey and the unsigned arm64 device Release build.
+The runtime-owned source gate prevents the hot path from returning to the
+copying compatibility property. Default linked smokes remain inside the
+existing budget at 1,683,368 bytes arm64 and 1,762,856 bytes x86_64. The
+executable PRD trace now binds 126 completed claims. Physical iPhone/TestFlight
+evidence remains open, so the persistent goal stays active.
