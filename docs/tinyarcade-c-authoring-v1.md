@@ -31,12 +31,13 @@ tinyvm cartridge attach-manifest \
   raw.wasm game-0.1.0.wasm org.example.game 0.1.0 1 1
 ```
 
-The C source declares host functions with Clang's standard Wasm import
-attributes and lifecycle functions with export attributes. It remains
-freestanding: no libc, JS glue, WASI, browser DOM, tinyvm header or runtime
-library is linked. Its only platform dependency is the documented versioned
-import table. Authors may use another language/toolchain if it emits the same
-standard imports, exports, memory and custom section.
+The optional `tinyarcade_guest_v1.h` header declares all core v1 imports and
+lifecycle export macros using Clang's standard Wasm attributes. It contributes
+no implementation or object code. A cartridge remains freestanding: no libc,
+JS glue, WASI, browser DOM or tinyvm runtime library is linked. Its only
+platform dependency is the documented versioned import table. Authors may use
+another language/toolchain—or write the attributes directly—if it emits the
+same standard imports, exports, memory and custom section.
 
 The checked-in `fan-c-cartridge.c` fixture is deliberately small but complete:
 

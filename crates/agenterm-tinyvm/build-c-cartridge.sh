@@ -6,6 +6,7 @@ if [ "$#" -ne 2 ]; then
   exit 2
 fi
 
+crate_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 source=$1
 output=$2
 if [ ! -f "$source" ]; then
@@ -30,6 +31,7 @@ mkdir -p "$(dirname -- "$output")"
   -ffreestanding \
   -fno-builtin \
   -nostdlib \
+  -I "$crate_dir/include" \
   -Wl,--no-entry \
   -Wl,--export-memory \
   -Wl,--initial-memory=65536 \

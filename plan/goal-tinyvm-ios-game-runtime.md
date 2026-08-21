@@ -75,6 +75,7 @@ tinyvm iOS game runtime
 │   ├── converter conformance kit     [x]
 │   ├── canonical manifest authoring  [x]
 │   ├── freestanding C authoring       [x]
+│   │   └── header-only core v1 declarations [x]
 │   ├── app-build host profile        [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
@@ -3617,3 +3618,21 @@ tests, warnings-denied all-feature and isolated `no_std` Clippy, arm64 iOS
 `no_std`, rustfmt and document-redaction gates pass. Linked runtime sizes remain
 1,603,208 bytes arm64 and 1,682,184 bytes x86_64; the stripped static core
 remains 101,256 bytes with selftest 42.
+
+## One-hundred-twelfth executable increment — header-only C guest SDK
+
+The C authoring path no longer asks each cartridge to duplicate Clang-specific
+import attributes. `tinyarcade_guest_v1.h` defines fixed-width freestanding ABI
+types, compile-time width assertions, every core v1 import declaration and one
+lifecycle export macro. It contains no implementation, allocator, libc, WASI,
+JS or tinyvm runtime dependency; unused declarations do not become imports.
+`build-c-cartridge.sh` supplies only this include directory to the normal wasm32
+compiler.
+
+Evidence on 2026-08-22: the independent fixture now includes the public header
+instead of declaring imports itself and still emits the exact 708-byte
+MVP-only cartridge with only its five referenced functions. Its runtime,
+fresh-instance snapshot restore and four-engine replay differential remain
+green. The executable PRD trace now binds all 105 completed claims; shell
+syntax, rustfmt, document redaction and diff checks pass. Runtime/iOS/static-core
+artifacts are unchanged because the header is guest authoring source only.
