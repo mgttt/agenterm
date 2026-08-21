@@ -27,6 +27,10 @@ tinyvm iOS game runtime
 │   ├── named standard resource exports [x]
 │   ├── standard imported linear memories [x]
 │   ├── standard imported funcref tables [x]
+│   ├── linked exported globals/memories/tables [x]
+│   ├── linked exported functions    [~]
+│   │   ├── numeric value signatures [x]
+│   │   └── store-owned funcref values [ ]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2850,3 +2854,44 @@ The stripped static core remains 101,240 bytes with selftest 42. All iOS linked
 sizes remain unchanged at 1,599,752 arm64, 1,667,864 x86_64, and 1,472,600 /
 1,447,032 / 1,448,704 / 1,447,856 bytes for profile-catalog / replay /
 private-library / session.
+
+## Eighty-fourth executable increment — linked numeric function exports
+
+`Instance::exported_function_handle` now resolves a standard function export,
+including an imported function re-export, into a cloneable store-owned address
+with its exact parameter and result types. `Module::bind_function_import`
+accepts that handle only for an identical standard signature and selects the
+provider's store at consumer instantiation. Multiple linked resources must
+belong to one common store; mismatched stores fail before a runtime record is
+registered.
+
+Linked signatures currently admit the four standard numeric value types.
+Reference-valued direct links fail explicitly until a later increment gives
+standalone funcref values store-owned identity; an instance-local function
+index must never be reinterpreted in a consumer instance.
+
+Direct linked calls use the same explicit store activation trampoline already
+proven for foreign `call_indirect`. Both ordinary `call` and `return_call`
+release the current instance borrow, switch owner without native recursion,
+retain shared fuel/depth/activation accounting, and resume or tail-unwind the
+consumer. Binding-only store handles are cleared before strong store
+registration, preserving acyclic runtime ownership; dropping provider and
+consumer public handles does not invalidate a function retained by a later
+linked instance.
+
+Three checked-in WAT fixtures are independently compiled and validated by WABT.
+TinyVM and public JavaScriptCore link the same provider, consumer and relay
+bytes and both produce `4242424` from a normal call, foreign tail call,
+re-exported function call and mixed i32/i64/f32/f64 arguments/results. TinyVM
+additionally proves exact signature/reference rejection, different-store
+rejection and provider lifetime after public-handle drop.
+
+Evidence on 2026-08-21: all 249 non-ignored all-feature package tests plus the
+doctest pass; every WABT/JavaScriptCore oracle, replay/no-default, Clippy,
+rustfmt and shell gate passes. The stripped static core remains 101,240 bytes
+with selftest 42. iOS links at 1,599,960 bytes arm64 and 1,671,976 bytes x86_64;
+profile-catalog, replay, private-library and session consumers link at
+1,472,808 / 1,447,224 / 1,448,896 / 1,448,048 bytes. The simulator-only x86_64
+ceiling advances by one explicit 16 KiB linker bucket; the arm64 product
+ceiling is unchanged. Nostalgia Arcade consumes current main with 6 unit tests,
+1 UI test and an arm64 device build.

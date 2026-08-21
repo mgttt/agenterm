@@ -100,6 +100,16 @@ result `16`. Table cells carry their originating instance identity; tinyvm and
 JavaScriptCore agree on sibling dispatch result `4`. TinyVM additionally runs a
 4,000-call A/B cycle with shared fuel/depth/activation accounting through the
 store trampoline. TinyArcade v1 rejects table imports.
+`smoke-wabt-imported-functions.sh` covers standard function export/import
+linking without native callback wrappers. WABT compiles and validates separate
+provider, consumer and relay modules; tinyvm and JavaScriptCore execute the
+same bytes to `4242424` through an ordinary call, cross-instance tail call,
+an imported-function re-export and mixed i32/i64/f32/f64 parameters/results.
+TinyVM additionally rejects signature, reference-valued and foreign-store
+mismatches before instantiation. Reference-valued direct links remain excluded
+until funcref values themselves carry store identity. This is general
+multi-module VM conformance and does not change TinyArcade v1's one-cartridge
+product contract.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.

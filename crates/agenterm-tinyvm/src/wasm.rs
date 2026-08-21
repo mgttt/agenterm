@@ -455,6 +455,40 @@ pub struct Table {
     max: Option<usize>,
 }
 
+/// A standard exported WebAssembly function owned by its originating store.
+///
+/// Clones retain the exact function address and signature. A handle can be
+/// bound to another module's matching function import without wrapping the
+/// Wasm function in a native callback.
+#[derive(Clone)]
+pub struct Function {
+    store: Store,
+    address: FunctionAddress,
+    function_type: FuncType,
+}
+
+impl Function {
+    /// Number of parameters in the exact exported function type.
+    pub fn parameter_count(&self) -> usize {
+        self.function_type.params.len()
+    }
+
+    /// Number of results in the exact exported function type.
+    pub fn result_count(&self) -> usize {
+        self.function_type.results.len()
+    }
+
+    /// Exact standard type of one parameter.
+    pub fn parameter_type(&self, index: usize) -> Option<ValueType> {
+        ValueType::from_byte(*self.function_type.params.get(index)?)
+    }
+
+    /// Exact standard type of one result.
+    pub fn result_type(&self, index: usize) -> Option<ValueType> {
+        ValueType::from_byte(*self.function_type.results.get(index)?)
+    }
+}
+
 impl Table {
     /// Convenience constructor for a table in a fresh store. Use
     /// [`Store::create_table`] when one module imports multiple table objects.
@@ -2783,6 +2817,12 @@ const MAX_BOUNDED_HOST_ARITY: usize = 16;
 
 enum HostBinding {
     TypedReturning(Rc<TypedHostImpl>),
+    Wasm {
+        function: FunctionAddress,
+        /// Needed only until instantiation selects a common store. Cleared
+        /// before the store strongly registers the live instance state.
+        store: Option<Store>,
+    },
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
     Bounded(Rc<BoundedHostImpl>),
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
@@ -4128,6 +4168,51 @@ impl Module {
         Ok(())
     }
 
+    /// Bind one exported WebAssembly function to every matching standard
+    /// function import. The import and export must have exactly the same
+    /// parameter and result types.
+    pub fn bind_function_import(
+        &mut self,
+        module: &str,
+        field: &str,
+        function: &Function,
+    ) -> Result<(), WasmError> {
+        if function
+            .function_type
+            .params
+            .iter()
+            .chain(&function.function_type.results)
+            .any(|&value_type| value_type == 0x70)
+        {
+            return Err(WasmError::Trap("linked function reference type"));
+        }
+        let mut bound = 0usize;
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                let signature = self.hosts[position]
+                    .sig
+                    .and_then(|index| self.types.get(index))
+                    .ok_or(WasmError::Trap("function import type"))?;
+                if signature != &function.function_type {
+                    return Err(WasmError::Trap("function binding type"));
+                }
+                bound += 1;
+            }
+        }
+        if bound == 0 {
+            return Err(WasmError::Trap("no imported function named"));
+        }
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.hosts[position].binding = HostBinding::Wasm {
+                    function: function.address.clone(),
+                    store: Some(function.store.clone()),
+                };
+            }
+        }
+        Ok(())
+    }
+
     /// Exact standard type of one imported function parameter.
     pub fn import_parameter_type(
         &self,
@@ -4556,6 +4641,23 @@ impl Module {
                 selected = Some(import.store.clone());
             }
         }
+        for host in &self.hosts {
+            let HostBinding::Wasm {
+                store: Some(store), ..
+            } = &host.binding
+            else {
+                continue;
+            };
+            if let Some(selected) = &selected {
+                if !selected.same(store) {
+                    return Err(WasmError::Trap(
+                        "function imports belong to different stores",
+                    ));
+                }
+            } else {
+                selected = Some(store.clone());
+            }
+        }
         Ok(selected.unwrap_or_default())
     }
 
@@ -4832,6 +4934,9 @@ impl Module {
                 }
                 Ok(CallValues::Owned(results))
             }
+            HostBinding::Wasm { .. } => Err(WasmError::Trap(
+                "linked Wasm function requires store trampoline",
+            )),
             #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
             HostBinding::Bounded(callback) => {
                 if signature.is_some_and(|function_type| {
@@ -4999,7 +5104,6 @@ impl Module {
                     activation_resources,
                 )?
             } else if index < self.hosts.len() {
-                let force_owned = callers.is_empty();
                 if let Some(caller) = callers.last_mut() {
                     let result_count = self.hosts[index].n_results;
                     if total_suspended_slots
@@ -5022,6 +5126,24 @@ impl Module {
                         .try_reserve(result_count)
                         .map_err(|_| WasmError::Trap("call stack"))?;
                 }
+                if let HostBinding::Wasm { function, .. } = &self.hosts[index].binding {
+                    let function_type = self.hosts[index]
+                        .sig
+                        .and_then(|signature| self.types.get(signature))
+                        .ok_or(WasmError::Trap("function import type"))?;
+                    if !values_have_types(&args, &function_type.params) {
+                        return Err(WasmError::Trap("host argument type"));
+                    }
+                    return Ok(CallBoundary::Foreign {
+                        address: function.clone(),
+                        args,
+                        continuation: LocalContinuation {
+                            callers,
+                            suspended_slots,
+                        },
+                    });
+                }
+                let force_owned = callers.is_empty();
                 let values = if let Some(memory) = memories.first_mut() {
                     let mut memory = memory.view_mut()?;
                     self.call_host(index, &args, &mut memory, force_owned)?
@@ -6458,6 +6580,11 @@ impl Instance {
                 table.import = None;
             }
         }
+        for host in &mut module.hosts {
+            if let HostBinding::Wasm { store, .. } = &mut host.binding {
+                *store = None;
+            }
+        }
         let imported_memories = memories
             .iter()
             .map(|memory| match memory {
@@ -6831,6 +6958,27 @@ impl Instance {
         let state = self.state.borrow();
         let index = state.module.global_export_index(name)?;
         state.globals.get(index).map(GlobalSlot::handle)
+    }
+
+    /// Resolve one standard function export into a cloneable store-owned
+    /// handle that can satisfy another module's matching function import.
+    pub fn exported_function_handle(&self, name: &str) -> Result<Option<Function>, WasmError> {
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("instance is already mutably borrowed"))?;
+        let Some(index) = state.module.export_index(name) else {
+            return Ok(None);
+        };
+        let function_type = state.module.function_type(index)?;
+        Ok(Some(Function {
+            store: self.store.clone(),
+            address: FunctionAddress {
+                instance_id: self.instance_id,
+                index,
+            },
+            function_type,
+        }))
     }
 
     /// Set one mutable standard exported global with exact value type.

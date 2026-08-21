@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 68] = [
+const LEAF_TESTS: [(&str, &str); 72] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -729,6 +729,22 @@ const LEAF_TESTS: [(&str, &str); 68] = [
     (
         "store-owned imported funcref tables",
         "wabt_compiled_imported_table_decodes_in_standard_index_space",
+    ),
+    (
+        "linked exported globals",
+        "wabt_compiled_imported_globals_match_tinyvm",
+    ),
+    (
+        "linked exported memories",
+        "wabt_compiled_imported_memory_matches_tinyvm",
+    ),
+    (
+        "linked exported tables",
+        "wabt_compiled_imported_table_decodes_in_standard_index_space",
+    ),
+    (
+        "numeric value signatures",
+        "wabt_compiled_exported_functions_link_across_instances",
     ),
     (
         "tail-call proposal",
