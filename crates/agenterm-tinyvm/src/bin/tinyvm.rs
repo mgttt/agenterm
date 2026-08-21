@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits,
-    RenderFrame, ToneBatch, Vm, WasmError, WasmModule,
+    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, HostProfileV1,
+    Limits, MAX_HOST_PROFILE_BYTES, RenderFrame, ToneBatch, Vm, WasmError, WasmModule,
 };
 #[cfg(feature = "catalog-publisher")]
 use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
@@ -58,6 +58,10 @@ fn main() -> ExitCode {
                 (Some(path), None) => run_cartridge(&path, true),
                 _ => usage(),
             },
+            Some("check-profile") => match (args.next(), args.next(), args.next()) {
+                (Some(path), Some(profile), None) => run_cartridge_profile(&path, &profile),
+                _ => usage(),
+            },
             Some("attach-manifest") => {
                 let input = args.next();
                 let output = args.next();
@@ -91,6 +95,17 @@ fn main() -> ExitCode {
                     _ => usage(),
                 }
             }
+            _ => usage(),
+        },
+        Some("host-profile") => match args.next().as_deref() {
+            Some("default") => match (args.next(), args.next()) {
+                (Some(path), None) => run_host_profile_default(&path),
+                _ => usage(),
+            },
+            Some("inspect") => match (args.next(), args.next()) {
+                (Some(path), None) => run_host_profile_inspect(&path),
+                _ => usage(),
+            },
             _ => usage(),
         },
         #[cfg(feature = "replay")]
@@ -135,9 +150,12 @@ fn usage() -> ExitCode {
     eprintln!("  tinyvm eval [asm...]");
     eprintln!("  tinyvm cartridge inspect FILE.wasm");
     eprintln!("  tinyvm cartridge check FILE.wasm");
+    eprintln!("  tinyvm cartridge check-profile FILE.wasm HOST.tahost");
     eprintln!(
         "  tinyvm cartridge attach-manifest INPUT.wasm OUTPUT.wasm GAME_ID GAME_VERSION ABI_VERSION STATE_VERSION"
     );
+    eprintln!("  tinyvm host-profile default OUTPUT.tahost");
+    eprintln!("  tinyvm host-profile inspect FILE.tahost");
     #[cfg(feature = "catalog-publisher")]
     eprintln!("  tinyvm catalog build SOURCE.json ED25519-SEED OUTPUT-DIRECTORY");
     #[cfg(feature = "replay")]
@@ -764,6 +782,110 @@ fn run_attach_manifest(
                 println!("native_capabilities={}", manifest.capabilities.join(","));
             }
             println!("OK: attached canonical manifest to standard WASM module");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn read_host_profile(path: &str) -> Result<Vec<u8>, String> {
+    read_bounded_regular(
+        Path::new(path),
+        MAX_HOST_PROFILE_BYTES as u64,
+        "host profile",
+    )
+}
+
+fn print_host_profile(profile: &HostProfileV1, bytes: usize) {
+    let vm = profile.vm_limits();
+    let game = profile.game_limits();
+    println!("schema=tinyarcade-host-profile-v1");
+    println!("profile_bytes={bytes}");
+    println!("game_abi_version=1");
+    println!("max_cartridge_bytes={MAX_CARTRIDGE_BYTES}");
+    println!("max_table_elems={}", vm.max_table_elems);
+    println!("max_memory_pages={}", vm.max_memory_pages);
+    println!("max_steps={}", vm.max_steps);
+    println!("max_render_bytes={}", game.max_render_bytes);
+    println!("max_audio_bytes={}", game.max_audio_bytes);
+    println!("max_state_bytes={}", game.max_state_bytes);
+    println!("media=tinyarcade:grid3d/v1,tinyarcade:indexed2d/v1,tinyarcade:tones/v1");
+    println!("native_functions={}", profile.native_functions().len());
+    for function in profile.native_functions() {
+        println!(
+            "native={}.{} params={} results={} max_calls={}",
+            function.module,
+            function.field,
+            function.n_params,
+            function.n_results,
+            function.max_calls_per_lifecycle
+        );
+    }
+}
+
+fn run_host_profile_default(path: &str) -> ExitCode {
+    let result: Result<(HostProfileV1, Vec<u8>), String> = (|| {
+        let profile = HostProfileV1::new(Limits::default(), GameLimits::default())
+            .map_err(|error| error.message().to_string())?;
+        let bytes = profile
+            .encode()
+            .map_err(|error| error.message().to_string())?;
+        publish_new_file(Path::new(path), &bytes, "host profile output")?;
+        Ok((profile, bytes))
+    })();
+    match result {
+        Ok((profile, bytes)) => {
+            print_host_profile(&profile, bytes.len());
+            println!("OK: wrote canonical core-only TinyArcade host profile");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_host_profile_inspect(path: &str) -> ExitCode {
+    let result: Result<(HostProfileV1, usize), String> = (|| {
+        let bytes = read_host_profile(path)?;
+        let profile = HostProfileV1::decode(&bytes).map_err(|error| error.message().to_string())?;
+        Ok((profile, bytes.len()))
+    })();
+    match result {
+        Ok((profile, bytes)) => {
+            print_host_profile(&profile, bytes);
+            println!("OK: canonical TinyArcade host profile");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
+    let result: Result<(CartridgeDescriptor, usize), String> = (|| {
+        let wasm = read_cartridge(cartridge_path).map_err(str::to_string)?;
+        let profile_bytes = read_host_profile(profile_path)?;
+        let profile =
+            HostProfileV1::decode(&profile_bytes).map_err(|error| error.message().to_string())?;
+        let descriptor = profile
+            .inspect_cartridge(&wasm)
+            .map_err(|error| error.message().to_string())?;
+        Ok((descriptor, profile_bytes.len()))
+    })();
+    match result {
+        Ok((descriptor, profile_bytes)) => {
+            println!("game_id={}", descriptor.manifest.game_id);
+            println!("game_version={}", descriptor.manifest.game_version);
+            println!("profile_bytes={profile_bytes}");
+            println!("function_imports={}", descriptor.imports.len());
+            println!("OK: cartridge is statically compatible with exact host profile");
             ExitCode::SUCCESS
         }
         Err(message) => {

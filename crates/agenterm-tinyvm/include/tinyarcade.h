@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 6u
-#define TINYARCADE_ABI_VERSION 0x00010006u
+#define TINYARCADE_ABI_MINOR 7u
+#define TINYARCADE_ABI_VERSION 0x00010007u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -108,6 +108,25 @@ tinyarcade_status_v1 tinyarcade_v1_copy_cartridge_descriptor(
     uint8_t* output,
     size_t capacity,
     size_t* output_len);
+
+/* Export the exact limits and app-compiled native table as a deterministic,
+ * callback-free TAH1 host profile. This artifact can be published for
+ * converters without publishing native code. Uses two-stage copy. */
+tinyarcade_status_v1 tinyarcade_v1_copy_host_profile(
+    const tinyarcade_config_v1* config,
+    const tinyarcade_native_function_v1* functions,
+    size_t function_count,
+    uint8_t* output,
+    size_t capacity,
+    size_t* output_len);
+
+/* Statically checks manifest/import/resource compatibility against exact TAH1
+ * bytes without instantiating or executing the cartridge. */
+tinyarcade_status_v1 tinyarcade_v1_check_cartridge_host_profile(
+    const uint8_t* wasm,
+    size_t wasm_len,
+    const uint8_t* profile,
+    size_t profile_len);
 
 /* Trust stores are mutable, single-thread-owned policy objects. Public keys
  * are exact 32-byte Ed25519 keys; content hashes are exact 32-byte SHA-256. */

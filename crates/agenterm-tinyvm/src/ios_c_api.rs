@@ -11,8 +11,8 @@ use std::thread::{self, ThreadId};
 
 use crate::{
     CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, GameFrame, GameInput,
-    GameLimits, GameRuntime, Limits, MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS,
-    NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1, WasmError,
+    GameLimits, GameRuntime, HostProfileV1, Limits, MAX_NATIVE_CALLS_PER_LIFECYCLE,
+    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -491,7 +491,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 6
+    (1 << 16) | 7
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -585,6 +585,64 @@ pub unsafe extern "C" fn tinyarcade_v1_copy_cartridge_descriptor(
             CartridgeDescriptor::inspect(wasm, Limits::default()).map_err(wasm_error)?;
         let encoded = encode_descriptor(&descriptor, wasm.len())?;
         unsafe { copy_bytes(&encoded, output, capacity, output_len) }
+    })
+}
+
+/// Export the exact runtime limits and app-compiled native registry as the
+/// callback-free canonical TAH1 profile consumed by converters.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_copy_host_profile(
+    config: *const TinyArcadeConfigV1,
+    functions: *const TinyArcadeNativeFunctionV1,
+    function_count: usize,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let config = unsafe { config.as_ref() }
+            .ok_or(FfiError::new(STATUS_INVALID_ARGUMENT, "null config"))?;
+        if config.struct_size < size_of::<TinyArcadeConfigV1>() as u32 {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "invalid runtime configuration",
+            ));
+        }
+        let registry = unsafe { native_registry(functions, function_count)? };
+        let profile = registry
+            .host_profile(
+                Limits {
+                    max_table_elems: config.max_table_elems as usize,
+                    max_memory_pages: config.max_memory_pages as usize,
+                    max_steps: config.max_steps,
+                },
+                GameLimits {
+                    max_render_bytes: config.max_render_bytes as usize,
+                    max_audio_bytes: config.max_audio_bytes as usize,
+                    max_state_bytes: config.max_state_bytes as usize,
+                },
+            )
+            .map_err(wasm_error)?;
+        let encoded = profile.encode().map_err(wasm_error)?;
+        unsafe { copy_bytes(&encoded, output, capacity, output_len) }
+    })
+}
+
+/// Statically check standard cartridge bytes against one exact TAH1 profile.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_check_cartridge_host_profile(
+    wasm: *const u8,
+    wasm_len: usize,
+    profile: *const u8,
+    profile_len: usize,
+) -> i32 {
+    boundary(|| {
+        let wasm = unsafe { input_bytes(wasm, wasm_len, "invalid cartridge input")? };
+        let profile = unsafe { input_bytes(profile, profile_len, "invalid host profile input")? };
+        HostProfileV1::decode(profile)
+            .and_then(|profile| profile.inspect_cartridge(wasm))
+            .map_err(wasm_error)?;
+        Ok(())
     })
 }
 
@@ -1688,7 +1746,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 6);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 7);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1849,6 +1907,121 @@ mod tests {
             STATUS_DECODE
         );
         assert_eq!(required, usize::MAX);
+    }
+
+    #[test]
+    fn c_host_profile_exports_exact_app_registry_and_checks_without_execution() {
+        let wasm = native_cartridge();
+        let config = unsafe { config() };
+        let mut probe = NativeProbe {
+            calls: Cell::new(0),
+            fail: Cell::new(false),
+        };
+        let module = b"fan:physics/v1";
+        let field = b"step_world";
+        let function = TinyArcadeNativeFunctionV1 {
+            struct_size: size_of::<TinyArcadeNativeFunctionV1>() as u32,
+            module: module.as_ptr(),
+            module_len: module.len(),
+            field: field.as_ptr(),
+            field_len: field.len(),
+            n_params: 2,
+            n_results: 1,
+            max_calls_per_lifecycle: 2,
+            callback: Some(native_step),
+            context: (&mut probe as *mut NativeProbe).cast(),
+        };
+        let mut required = 0usize;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile(
+                    &config,
+                    &function,
+                    1,
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        assert!((56..=4096).contains(&required));
+        let mut profile = vec![0; required];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile(
+                    &config,
+                    &function,
+                    1,
+                    profile.as_mut_ptr(),
+                    profile.len(),
+                    &mut required,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(&profile[..4], b"TAH1");
+        assert_eq!(u16::from_le_bytes([profile[50], profile[51]]), 1);
+        assert!(profile.windows(module.len()).any(|value| value == module));
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_check_cartridge_host_profile(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    profile.as_ptr(),
+                    profile.len(),
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(
+            probe.calls.get(),
+            0,
+            "profile operations must not call app code"
+        );
+
+        let mut wrong = function;
+        wrong.n_params = 1;
+        required = 0;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile(
+                    &config,
+                    &wrong,
+                    1,
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        let mut wrong_profile = vec![0; required];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile(
+                    &config,
+                    &wrong,
+                    1,
+                    wrong_profile.as_mut_ptr(),
+                    wrong_profile.len(),
+                    &mut required,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_check_cartridge_host_profile(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    wrong_profile.as_ptr(),
+                    wrong_profile.len(),
+                )
+            },
+            STATUS_TRAP
+        );
+        assert_eq!(probe.calls.get(), 0);
     }
 
     #[test]
@@ -2263,6 +2436,8 @@ mod tests {
             "tinyarcade_v1_abi_version",
             "tinyarcade_v1_default_config",
             "tinyarcade_v1_copy_cartridge_descriptor",
+            "tinyarcade_v1_copy_host_profile",
+            "tinyarcade_v1_check_cartridge_host_profile",
             "tinyarcade_v1_trust_store_create",
             "tinyarcade_v1_trust_store_close",
             "tinyarcade_v1_trust_store_add_key",

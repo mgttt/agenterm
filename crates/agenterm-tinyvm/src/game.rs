@@ -124,6 +124,26 @@ impl NativeModuleRegistry {
         Self::default()
     }
 
+    /// Describe this exact app-compiled registry as a callback-free,
+    /// converter-facing host profile.
+    pub fn host_profile(
+        &self,
+        vm_limits: Limits,
+        game_limits: GameLimits,
+    ) -> Result<crate::HostProfileV1, WasmError> {
+        let mut profile = crate::HostProfileV1::new(vm_limits, game_limits)?;
+        for function in &self.functions {
+            profile.add_native_function(
+                &function.module,
+                &function.field,
+                function.n_params,
+                function.n_results,
+                function.max_calls_per_lifecycle,
+            )?;
+        }
+        Ok(profile)
+    }
+
     /// Register one function in a versioned native module namespace.
     pub fn register<F>(
         &mut self,

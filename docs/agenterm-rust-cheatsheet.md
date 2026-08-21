@@ -175,6 +175,15 @@ change. Map it to a test that actually executes the relevant product boundary;
 documentation presence alone is not evidence. This keeps planning prose from
 silently getting ahead of the suite as new non-Rust SDK behavior is added.
 
+A converter-facing host profile must be callback-free and content-addressable.
+Encode exact ABI/media versions, resource ceilings and versioned native import
+signatures, but never serialize function pointers, native implementations or
+trust authority. Keep static compatibility honest: declared memory/table and
+exact imports can be proven without execution, while fuel, output volume and
+native semantics still require dynamic conformance. Use one strict canonical
+decoder across CLI and FFI so reordered, duplicate or trailing fields cannot
+produce multiple identities for the same claimed app build.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

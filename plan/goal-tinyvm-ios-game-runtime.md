@@ -40,6 +40,7 @@ tinyvm iOS game runtime
 │   ├── static compatibility descriptor [x]
 │   ├── converter conformance kit     [x]
 │   ├── canonical manifest authoring  [x]
+│   ├── app-build host profile        [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
@@ -961,7 +962,7 @@ reuses the same structural validator and performs registry availability as a
 later independent gate; `tinyvm cartridge inspect` also consumes this shared
 descriptor.
 
-C ABI v1.6 exposes the result through a stateless two-stage copy as bounded
+C ABI v1.7 exposes the result through a stateless two-stage copy as bounded
 canonical TAD1 data. The format carries exact inspected byte length, identity,
 ABI/state versions, declared native capability namespaces and every function
 import's module, field, class and i32 arity. TAD1 is host-side metadata, never a
@@ -984,7 +985,7 @@ Evidence on 2026-08-21:
   capability.
 - The C black box proves both stages of TAD1 copying, exact inspected byte
   length, native namespace/field presence and malformed-Wasm failure. The C
-  header compile gate includes the new ABI v1.6 symbol.
+  header compile gate includes the ABI v1.7 symbols.
 - A booted iPhone 17 Pro simulator decodes the same native cartridge through
   Swift, verifies every descriptor field and receives the typed private-import
   rejection before the already-proven native-registered runtime executes it.
@@ -1162,4 +1163,40 @@ Evidence on 2026-08-21:
   simulator packages link; ordinary consumers measure 1,442,584 bytes arm64
   and 1,495,376 bytes x86_64, with replay/private/session consumers at
   1,290,600, 1,292,304 and 1,291,424 bytes arm64. Physical-device and Apple
+  approval evidence remain open.
+
+## Thirty-third executable increment — exact app-build host profile
+
+TAH1 is a deterministic, callback-free compatibility artifact for one exact
+app build. It records game/core/media versions, cartridge and runtime resource
+ceilings, plus every app-compiled native module's canonical namespace, field,
+i32 signature and per-lifecycle call quota. Native implementations, executable
+code, catalog authority and install permission are deliberately absent.
+
+`HostProfileV1`, `NativeModuleRegistry::host_profile`, the converter CLI, C ABI
+v1.7 and `TinyArcadeHostProfileV1` share one encoder and static checker. A fan
+converter can now reject a standard cartridge with an unavailable or
+signature-mismatched native import before upload without instantiating the
+guest or calling app code. TAH1 also advertises fuel/output ceilings while
+honestly leaving those dynamic behaviors to converter and reviewed-game runs.
+The normative bytes and authority boundary are in
+[`docs/tinyarcade-host-profile-v1.md`](../docs/tinyarcade-host-profile-v1.md).
+
+Evidence on 2026-08-21:
+
+- Rust round-trips byte-identical TAH1, accepts an exact native import and
+  rejects missing/wrong signatures and trailing data. CLI black boxes publish
+  a core-only profile without overwrite, inspect it, accept a core cartridge
+  and reject a native cartridge without executing it. Tight declared memory,
+  duplicate/noncanonical functions and trailing data also fail closed.
+- C and Swift export the exact app config/native table, reconsume those bytes
+  for static cartridge inspection and prove the registered callback remains
+  uncalled. A booted iPhone 17 Pro simulator reconsumes the Swift-produced
+  profile before every existing real-game/catalog/storage/replay/session flow.
+- All 190 package tests plus one doctest, all-feature/all-target Clippy,
+  no-default and replay-only checks, document redaction and the exact
+  70,904-byte static-core/self-test gate pass. Device and universal simulator
+  packages link; ordinary consumers measure 1,467,784 bytes arm64 and
+  1,531,648 bytes x86_64, with replay/private/session consumers at 1,315,608,
+  1,317,296 and 1,316,432 bytes arm64. Physical-device, live-hosting and Apple
   approval evidence remain open.

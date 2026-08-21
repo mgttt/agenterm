@@ -357,6 +357,33 @@ struct TinyArcadeSmoke {
                 importClass: .native
             )
         )
+        var profileHandlerCalls = 0
+        let hostProfile = try TinyArcadeHostProfileV1.appBuild(
+            nativeFunctions: [
+                TinyArcadeNativeFunctionV1(
+                    module: "fan:physics/v1",
+                    field: "step_world",
+                    parameterCount: 2,
+                    resultCount: 1,
+                    maxCallsPerLifecycle: 2
+                ) { _, _ in
+                    profileHandlerCalls += 1
+                    return [0]
+                },
+            ]
+        )
+        precondition(hostProfile.encoded.prefix(4) == Data("TAH1".utf8))
+        let profileDescriptor = try hostProfile.inspectCompatibleCartridge(nativeBytes)
+        precondition(profileDescriptor == descriptor)
+        precondition(profileHandlerCalls == 0, "static profile check must not call app code")
+        let coreOnlyProfile = try TinyArcadeHostProfileV1.appBuild()
+        do {
+            _ = try coreOnlyProfile.inspectCompatibleCartridge(nativeBytes)
+            preconditionFailure("core-only profile must reject a native import")
+        } catch let error as TinyArcadeRuntimeError {
+            precondition(error.status == Int32(TINYARCADE_GUEST_TRAP.rawValue))
+        }
+        print("OK: exact iOS app host profile → converter-safe TAH1 → static import check")
         let privateDescriptorDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinyarcade-private-descriptor-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: privateDescriptorDirectory) }

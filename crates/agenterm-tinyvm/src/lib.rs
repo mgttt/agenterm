@@ -53,6 +53,9 @@ pub use game::{
     MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry,
 };
 
+pub mod host_profile;
+pub use host_profile::{HostFunctionV1, HostProfileV1, MAX_HOST_PROFILE_BYTES};
+
 pub mod media;
 pub use media::{Grid3dCell, Grid3dFrame, Indexed2dFrame, RenderFrame, ToneBatch, ToneEvent};
 

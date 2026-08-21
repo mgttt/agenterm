@@ -1,6 +1,6 @@
 #include "tinyarcade.h"
 
-_Static_assert(TINYARCADE_ABI_VERSION == 0x00010006u, "ABI version drift");
+_Static_assert(TINYARCADE_ABI_VERSION == 0x00010007u, "ABI version drift");
 _Static_assert(sizeof(tinyarcade_config_v1) == 40, "config layout drift");
 
 static int32_t native_callback(

@@ -20,6 +20,12 @@ reports identity and required versioned native capabilities. The private
 library uses this same descriptor to return
 `unsupportedNativeCapabilities` before core-only runtime preflight.
 
+Call `TinyArcadeHostProfileV1.appBuild` with the same config and native
+functions as the app runtime to export canonical TAH1 bytes for converters.
+`inspectCompatibleCartridge` checks an exact standard import/resource profile
+without instantiating the guest or calling handlers. Dynamic fuel/output and
+native semantics remain separate reviewed-game gates.
+
 Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
 `tick` convenience.

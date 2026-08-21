@@ -155,7 +155,7 @@ private opcodes. A capability declaration is a compatibility requirement, not
 an entitlement: cartridge origin and host policy still decide whether a module
 is registered.
 
-The C ABI v1.6 two-stage copy function emits the following canonical host-side
+The C ABI v1.7 two-stage copy function emits the following canonical host-side
 descriptor. `TAD1` is inspection output, not a cartridge wrapper and never
 replaces the original standard `.wasm` bytes.
 
@@ -215,6 +215,9 @@ machine-readable descriptor/compatibility report. Its target is an explicit
 TinyArcade host profile: core ABI version, media versions, exact native
 namespace/function signatures and resource ceilings. It must not probe tinyvm
 implementation details or rewrite missing host functions into private opcodes.
+The canonical app-build profile is
+[`tinyarcade-host-profile-v1.md`](tinyarcade-host-profile-v1.md); its static
+check deliberately remains separate from dynamic fuel/output conformance.
 
 Library-based converters may use `CartridgeManifest::append_to_wasm` for the
 same deterministic canonical encoding. That low-level method validates the

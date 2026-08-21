@@ -5,8 +5,8 @@ use std::process::Command;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, Limits,
-    MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
+    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, HostProfileV1,
+    Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
     WasmError,
 };
 #[cfg(feature = "replay")]
@@ -548,6 +548,99 @@ fn converter_cli_derives_native_capabilities_and_publishes_once() {
 }
 
 #[test]
+fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
+    let directory = tempfile::tempdir().expect("temporary host profile directory");
+    let profile = directory.path().join("ios-build.tahost");
+    let cartridge = directory.path().join("core-only.wasm");
+    std::fs::write(&cartridge, game_module(&[], 1, &[0x41, 0x00, 0x0b], &[]))
+        .expect("write core-only cartridge");
+
+    let created = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "host-profile",
+            "default",
+            profile.to_str().expect("profile output path"),
+        ])
+        .output()
+        .expect("create default host profile");
+    assert!(
+        created.status.success(),
+        "profile create failed: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(String::from_utf8_lossy(&created.stdout).contains("schema=tinyarcade-host-profile-v1"));
+    let original = std::fs::read(&profile).expect("read host profile");
+    assert_eq!(&original[..4], b"TAH1");
+
+    let overwrite = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "host-profile",
+            "default",
+            profile.to_str().expect("profile output path"),
+        ])
+        .output()
+        .expect("refuse profile overwrite");
+    assert!(!overwrite.status.success());
+    assert_eq!(std::fs::read(&profile).expect("reread profile"), original);
+
+    let inspected = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "host-profile",
+            "inspect",
+            profile.to_str().expect("profile path"),
+        ])
+        .output()
+        .expect("inspect host profile");
+    assert!(inspected.status.success());
+    assert!(String::from_utf8_lossy(&inspected.stdout).contains("native_functions=0"));
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            cartridge.to_str().expect("cartridge path"),
+            profile.to_str().expect("profile path"),
+        ])
+        .output()
+        .expect("check cartridge host profile");
+    assert!(
+        checked.status.success(),
+        "profile check failed: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&checked.stdout)
+            .contains("OK: cartridge is statically compatible with exact host profile")
+    );
+
+    let native_cartridge = directory.path().join("native.wasm");
+    std::fs::write(
+        &native_cartridge,
+        game_module(
+            &[("fan:physics/v1", "step_world", 1)],
+            1,
+            &[0x41, 0x00, 0x0b],
+            &[],
+        ),
+    )
+    .expect("write native cartridge");
+    let rejected = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            native_cartridge.to_str().expect("native cartridge path"),
+            profile.to_str().expect("profile path"),
+        ])
+        .output()
+        .expect("reject unavailable native import");
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("host profile native import unavailable")
+    );
+}
+
+#[test]
 fn ordinary_ticks_reject_unknown_buttons_and_backwards_time_without_latching() {
     let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
     let mut runtime = must_ok(
@@ -758,6 +851,93 @@ fn registered_versioned_native_module_is_bound_by_exact_signature() {
     );
     must_ok(runtime.tick(GameInput::default()), "tick native module");
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn host_profile_is_canonical_and_checks_exact_standard_imports() {
+    let wasm = game_module(
+        &[("fan:physics/v1", "step_world", 1)],
+        1,
+        &[0x41, 0x00, 0x0b],
+        &[],
+    );
+    let limits = Limits {
+        max_table_elems: 32,
+        max_memory_pages: 4,
+        max_steps: 250_000,
+    };
+    let game_limits = GameLimits {
+        max_render_bytes: 20 * 1024,
+        max_audio_bytes: 4 * 1024,
+        max_state_bytes: 32 * 1024,
+    };
+    let mut profile = must_ok(HostProfileV1::new(limits, game_limits), "new host profile");
+    must_ok(
+        profile.add_native_function("fan:physics/v1", "step_world", 2, 1, 8),
+        "add native profile function",
+    );
+    let encoded = must_ok(profile.encode(), "encode host profile");
+    let decoded = must_ok(HostProfileV1::decode(&encoded), "decode host profile");
+    assert_eq!(must_ok(decoded.encode(), "re-encode host profile"), encoded);
+    assert_eq!(decoded.native_functions().len(), 1);
+    assert_eq!(decoded.native_functions()[0].max_calls_per_lifecycle, 8);
+    must_ok(
+        decoded.inspect_cartridge(&wasm),
+        "profile accepts exact standard import",
+    );
+
+    let missing = must_ok(HostProfileV1::new(limits, game_limits), "empty profile");
+    assert!(matches!(
+        missing.inspect_cartridge(&wasm),
+        Err(WasmError::Trap("host profile native import unavailable"))
+    ));
+    let mut wrong = must_ok(HostProfileV1::new(limits, game_limits), "wrong profile");
+    must_ok(
+        wrong.add_native_function("fan:physics/v1", "step_world", 1, 1, 8),
+        "add wrong signature",
+    );
+    assert!(matches!(
+        wrong.inspect_cartridge(&wasm),
+        Err(WasmError::Trap("host profile native import unavailable"))
+    ));
+
+    let mut two_page_wasm = wasm.clone();
+    let memory = two_page_wasm
+        .windows(5)
+        .position(|bytes| bytes == [5, 3, 1, 0, 1])
+        .expect("test module memory section");
+    two_page_wasm[memory + 4] = 2;
+    let tight_limits = Limits {
+        max_memory_pages: 1,
+        ..limits
+    };
+    let mut tight = must_ok(
+        HostProfileV1::new(tight_limits, game_limits),
+        "tight memory profile",
+    );
+    must_ok(
+        tight.add_native_function("fan:physics/v1", "step_world", 2, 1, 8),
+        "tight profile native function",
+    );
+    assert!(matches!(
+        tight.inspect_cartridge(&two_page_wasm),
+        Err(WasmError::Trap("memory size"))
+    ));
+
+    let mut duplicate = encoded.clone();
+    duplicate[50..52].copy_from_slice(&2u16.to_le_bytes());
+    duplicate.extend_from_slice(&encoded[56..]);
+    assert!(matches!(
+        HostProfileV1::decode(&duplicate),
+        Err(WasmError::Decode("host profile is not canonical"))
+    ));
+
+    let mut trailing = encoded;
+    trailing.push(0);
+    assert!(matches!(
+        HostProfileV1::decode(&trailing),
+        Err(WasmError::Decode("trailing host profile bytes"))
+    ));
 }
 
 #[cfg(feature = "replay")]

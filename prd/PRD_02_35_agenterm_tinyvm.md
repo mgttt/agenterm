@@ -31,7 +31,8 @@ agenterm-tinyvm (35)
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
 │       ├── native module registry    [x]
-│       └── App Store bundled-only gate [x]
+│       ├── App Store bundled-only gate [x]
+│       └── machine host profile      [x]
 ├── real-game proofs               [~]
 │   ├── Depth Well grid3d             [x]
 │   ├── Paddle Guard indexed2d        [x]
@@ -74,7 +75,7 @@ JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是
 
 完整的 iOS 游戏运行底层验收树与依赖路径见 [`plan/goal-tinyvm-ios-game-runtime.md`](../plan/goal-tinyvm-ios-game-runtime.md)。
 
-游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.6 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，并在调用 app callback 前执行每生命周期配额；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
+游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.7 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，并在调用 app callback 前执行每生命周期配额；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
 
 官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。
 
@@ -111,6 +112,12 @@ TAD1 描述。App 可以在安装前明确显示所需 native module；descripto
 descriptor，已有 manifest、ABI/lifecycle/import 不兼容、超过 2 MiB 或目标已存在均不
 发布。Rust `CartridgeManifest::append_to_wasm` 提供同一 canonical encoder 给未来工具复用。
 
+App build 的可用能力也不再靠说明文字猜测。TAH1 host profile 确定性记录 core/media
+版本、WASM 与输出资源上限，以及已经编译进 App 的 native module 精确
+namespace/field/i32 signature/每生命周期调用配额。Rust、CLI、C ABI v1.7 与 Swift
+共用同一 encoder 和非执行兼容检查；转换器可在上传前拒绝缺失或签名不匹配的 import，
+同时仍须另跑 fuel、媒体输出与 native 语义的动态 conformance。
+
 媒体边界不再假设所有游戏都是 Depth Well。`submit_render` 可提交严格有界的
 `tinyarcade:grid3d/v1` 或 `tinyarcade:indexed2d/v1` 标准记录；后者提供完整
 256 色调色板像素平面，默认 64 KiB 预算覆盖 256×240 与 320×200 经典画幅。
@@ -135,7 +142,7 @@ iOS SDK 提供有界 PCM/WAV 合成与 `AVAudioPlayer` owner，默认使用服�
 Paddle Guard 的真实 launch tone 证明合成、播放、中断和释放；物理设备音频仍是
 未完成证据，因此 native I/O surface 保持 partial。
 
-C ABI v1.6 已消除 Rust trust/cache 与 iOS App 之间的断层。独立的单线程 cache
+C ABI v1.7 已消除 Rust trust/cache 与 iOS App 之间的断层。独立的单线程 cache
 handle 和 Swift main-actor owner 接受 app 已完整接收的 bytes，在原子激活前复核
 key/content 撤销、Ed25519、长度、SHA-256 与 embedded manifest；load/rollback
 仍需对应 signed entry 并按当前 trust 再验证。cache 不拥有 URLSession 或 guest

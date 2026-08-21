@@ -1448,6 +1448,83 @@ public struct TinyArcadeNativeFunctionV1 {
     }
 }
 
+/// Deterministic callback-free description of one exact app build's limits and
+/// app-compiled native imports. Publish these bytes for converter preflight.
+public struct TinyArcadeHostProfileV1: Sendable, Equatable {
+    public let encoded: Data
+
+    @MainActor
+    public static func appBuild(
+        nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        configure: (inout tinyarcade_config_v1) -> Void = { _ in }
+    ) throws -> Self {
+        var config = tinyarcade_config_v1()
+        try TinyArcadeRuntimeV1.check(tinyarcade_v1_default_config(&config))
+        configure(&config)
+        return try TinyArcadeRuntimeV1.withNativeFunctionTable(nativeFunctions) {
+            table,
+            count,
+            _ in
+            var required = 0
+            let query = tinyarcade_v1_copy_host_profile(
+                &config,
+                table,
+                count,
+                nil,
+                0,
+                &required
+            )
+            guard query == TINYARCADE_BUFFER_TOO_SMALL,
+                  (56...(64 * 1_024)).contains(required) else {
+                try TinyArcadeRuntimeV1.check(query)
+                throw TinyArcadeRuntimeError(
+                    status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                    message: "invalid host profile length"
+                )
+            }
+            var data = Data(count: required)
+            let status = data.withUnsafeMutableBytes { output in
+                tinyarcade_v1_copy_host_profile(
+                    &config,
+                    table,
+                    count,
+                    output.bindMemory(to: UInt8.self).baseAddress,
+                    output.count,
+                    &required
+                )
+            }
+            try TinyArcadeRuntimeV1.check(status)
+            guard required == data.count, data.prefix(4) == Data("TAH1".utf8) else {
+                throw TinyArcadeRuntimeError(
+                    status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                    message: "host profile length changed"
+                )
+            }
+            return Self(encoded: data)
+        }
+    }
+
+    /// Static compatibility only: this never instantiates the module or calls
+    /// a native handler. Dynamic output/fuel conformance remains a later gate.
+    @MainActor
+    public func inspectCompatibleCartridge(
+        _ cartridge: Data
+    ) throws -> TinyArcadeCartridgeDescriptorV1 {
+        let status = cartridge.withUnsafeBytes { wasm in
+            encoded.withUnsafeBytes { profile in
+                tinyarcade_v1_check_cartridge_host_profile(
+                    wasm.bindMemory(to: UInt8.self).baseAddress,
+                    wasm.count,
+                    profile.bindMemory(to: UInt8.self).baseAddress,
+                    profile.count
+                )
+            }
+        }
+        try TinyArcadeRuntimeV1.check(status)
+        return try TinyArcadeCartridgeDescriptorV1.inspect(cartridge)
+    }
+}
+
 private final class TinyArcadeNativeCallbackBox {
     let modulePointer: UnsafeMutablePointer<UInt8>
     let moduleCount: Int
@@ -2155,7 +2232,7 @@ public final class TinyArcadeRuntimeV1 {
         return (try requireHandle(opened), retainedBoxes)
     }
 
-    private static func withNativeFunctionTable<T>(
+    fileprivate static func withNativeFunctionTable<T>(
         _ functions: [TinyArcadeNativeFunctionV1],
         _ body: (
             UnsafePointer<tinyarcade_native_function_v1>?,

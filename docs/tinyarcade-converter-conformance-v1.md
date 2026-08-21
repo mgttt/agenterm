@@ -44,6 +44,15 @@ Two compiler-produced reference cartridges own both media branches:
 WASM MVP modules built through the shared `build-rust-cartridge.sh` profile and
 accepted by this same converter path; neither receives a fixture-only loader.
 
+Before upload, a converter may additionally consume the exact app-build TAH1
+profile defined in
+[`tinyarcade-host-profile-v1.md`](tinyarcade-host-profile-v1.md).
+`tinyvm cartridge check-profile` compares standard imports and declared
+memory/table requirements without executing the guest or native callbacks.
+This does not replace the dynamic lifecycle/media/determinism checks below:
+step, frame, audio and state ceilings describe failure policy, not statically
+provable guest behavior.
+
 Converters should also retain deterministic replay vectors for representative
 gameplay and every bug they fix. `tinyvm replay record` turns a bounded
 `clock_ms buttons` input plan into a canonical `.tareplay`; `tinyvm replay
