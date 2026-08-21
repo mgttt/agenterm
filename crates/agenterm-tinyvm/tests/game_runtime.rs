@@ -790,6 +790,7 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
         String::from_utf8_lossy(&created.stderr)
     );
     assert!(String::from_utf8_lossy(&created.stdout).contains("schema=tinyarcade-host-profile-v1"));
+    assert!(String::from_utf8_lossy(&created.stdout).contains("indexed2d_metadata_version=1"));
     let original = std::fs::read(&profile).expect("read host profile");
     assert_eq!(&original[..4], b"TAH1");
 

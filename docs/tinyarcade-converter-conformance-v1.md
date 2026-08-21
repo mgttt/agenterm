@@ -37,6 +37,14 @@ table elements, one million interpreted instructions per lifecycle call and
 the ordinary frame/audio/state byte budgets. The table ceiling is the
 aggregate live element count across all internally defined tables.
 
+After the first bounded tick, `check` reports `render_stream`, exact render
+length, `application_metadata_schema` and `application_metadata_bytes` as
+stable key/value rows. A base grid3d/indexed2d frame reports `none` and `0`;
+an indexed2d metadata trailer reports its non-zero schema as eight lowercase
+hex digits and its validated length. Tools may display those values or route a
+known game-owned schema, but must not reinterpret the opaque payload as a
+TinyArcade-global state format.
+
 `check-profile` targets one exact app-build TAH1. It does not execute the
 cartridge. Success reports zero compatibility issues; failure enumerates each
 missing native function or same-name signature mismatch with the exact required
@@ -58,6 +66,7 @@ converter check
 ├── at most 262,144 allocation-amplifying decode records
 ├── exact lifecycle exports and core import signatures
 ├── every media output declares its grid3d/indexed2d/tones version import
+├── indexed2d metadata declares its optional version import and reports schema/length
 ├── no private-import native capability namespace
 ├── bounded init and first tick
 ├── valid grid3d/v1 or indexed2d/v1 render frame

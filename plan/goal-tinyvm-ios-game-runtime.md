@@ -73,6 +73,7 @@ tinyvm iOS game runtime
 │   ├── App Store bundled-only policy [x]
 │   ├── static compatibility descriptor [x]
 │   ├── converter conformance kit     [x]
+│   │   └── metadata schema diagnostics [x]
 │   ├── canonical manifest authoring  [x]
 │   ├── freestanding C authoring       [x]
 │   │   └── header-only core v1 declarations [x]
@@ -3954,3 +3955,20 @@ new, explicit 16 KiB graduation step rather than an unbounded size gate.
 The executable PRD trace now binds 123 completed claims. Physical iPhone and
 TestFlight lifecycle, audio and performance evidence remain open, so the
 persistent goal stays active.
+
+## One-hundred-twenty-fourth executable increment — converter-visible metadata
+
+`tinyvm cartridge check` now reports the initial frame's validated application
+metadata schema and byte length alongside the render stream and total render
+bytes. Frames without the optional indexed2d trailer emit stable `none`/`0`
+rows; Signal Lock emits schema `0x31474c53` and 64 bytes. The converter never
+decodes those opaque game-owned bytes, so the output supports author tooling
+without turning one cartridge's UI state into a platform ABI.
+
+Evidence on 2026-08-22: a black-box test compiles the real Signal Lock guest,
+runs the public CLI on its 6,040-byte artifact and checks the exact stream,
+19,324-byte frame, schema and metadata length rows. The existing host-profile
+CLI test also requires `indexed2d_metadata_version=1`, joining dynamic media
+evidence to the exact TAH1 app-build declaration. The executable PRD trace now
+binds 124 completed claims. Physical iPhone/TestFlight evidence remains open,
+so the persistent goal stays active.

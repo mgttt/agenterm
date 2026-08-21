@@ -130,6 +130,24 @@ fn standard_signal_lock_rotates_channels_and_renders_a_readable_radar() {
 }
 
 #[test]
+fn signal_lock_converter_reports_bounded_application_metadata() {
+    let directory = tempfile::tempdir().expect("temporary converter directory");
+    let cartridge = directory.path().join("signal-lock-0.1.0.wasm");
+    std::fs::write(&cartridge, build_cartridge()).expect("publish Signal Lock test cartridge");
+    let output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&cartridge)
+        .output()
+        .expect("run converter check");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("converter output is UTF-8");
+    assert!(stdout.contains("render_stream=tinyarcade:indexed2d/v1"));
+    assert!(stdout.contains("initial_render_bytes=19324"));
+    assert!(stdout.contains("application_metadata_schema=0x31474c53"));
+    assert!(stdout.contains("application_metadata_bytes=64"));
+}
+
+#[test]
 fn signal_lock_shortest_route_scores_and_advances_the_forecast() {
     let wasm = build_cartridge();
     let mut game = runtime(&wasm);

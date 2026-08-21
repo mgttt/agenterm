@@ -1110,8 +1110,8 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
         Ok(frame) => frame,
         Err(error) => return cartridge_error(error),
     };
-    let initial_render_stream = match validate_media(&initial.render, &initial.audio) {
-        Ok(stream) => stream,
+    let initial_media = match validate_media(&initial.render, &initial.audio) {
+        Ok(media) => media,
         Err(error) => return cartridge_error(error),
     };
     let snapshot = match first.suspend() {
@@ -1147,23 +1147,45 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
         eprintln!("tinyvm: suspend/resume replay is not byte-deterministic");
         return ExitCode::FAILURE;
     }
-    println!("render_stream={initial_render_stream}");
+    println!("render_stream={}", initial_media.render_stream);
     println!("initial_render_bytes={}", initial.render.len());
+    match initial_media.application_metadata_schema {
+        Some(schema) => println!("application_metadata_schema=0x{schema:08x}"),
+        None => println!("application_metadata_schema=none"),
+    }
+    println!(
+        "application_metadata_bytes={}",
+        initial_media.application_metadata_bytes
+    );
     println!("initial_audio_bytes={}", initial.audio.len());
     println!("snapshot_bytes={}", snapshot.len());
     println!("OK: private-import converter conformance v1");
     ExitCode::SUCCESS
 }
 
-fn validate_media(render: &[u8], audio: &[u8]) -> Result<&'static str, WasmError> {
-    let stream = match RenderFrame::decode(render)? {
-        RenderFrame::Grid3d(_) => "tinyarcade:grid3d/v1",
-        RenderFrame::Indexed2d(_) => "tinyarcade:indexed2d/v1",
+struct ValidatedMedia {
+    render_stream: &'static str,
+    application_metadata_schema: Option<u32>,
+    application_metadata_bytes: usize,
+}
+
+fn validate_media(render: &[u8], audio: &[u8]) -> Result<ValidatedMedia, WasmError> {
+    let media = match RenderFrame::decode(render)? {
+        RenderFrame::Grid3d(_) => ValidatedMedia {
+            render_stream: "tinyarcade:grid3d/v1",
+            application_metadata_schema: None,
+            application_metadata_bytes: 0,
+        },
+        RenderFrame::Indexed2d(frame) => ValidatedMedia {
+            render_stream: "tinyarcade:indexed2d/v1",
+            application_metadata_schema: frame.metadata_schema,
+            application_metadata_bytes: frame.metadata().len(),
+        },
     };
     if !audio.is_empty() {
         ToneBatch::decode(audio)?;
     }
-    Ok(stream)
+    Ok(media)
 }
 
 fn cartridge_error(error: WasmError) -> ExitCode {
