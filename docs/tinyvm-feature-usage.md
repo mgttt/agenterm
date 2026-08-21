@@ -4,6 +4,9 @@ Owner: [PRD 02.35](../prd/PRD_02_35_agenterm_tinyvm.md)
 
 Status: implemented static report with real-cartridge evidence
 
+The executable acceptance owner for every reported family is the
+[standard-feature matrix](tinyvm-standard-feature-matrix.md).
+
 `WasmModule::feature_usage` reports standard post-MVP feature families actually
 present in an already decoded module. It does not instantiate the module,
 execute its start function, grant a rejected feature or claim that every

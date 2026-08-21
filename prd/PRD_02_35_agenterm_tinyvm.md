@@ -171,11 +171,11 @@ agenterm-tinyvm (35)                                      [~]
 │   │           ├── capability-directory std backend         [x]
 │   │           ├── iOS Simulator App container wiring        [x]
 │   │           └── physical iPhone container evidence        [ ]
-│   ├── P2 — standard Wasm coverage                      [~]
+│   ├── P2 — accepted standard Wasm coverage             [x]
 │   │   ├── proposal priority by real cartridge workload  [x]
 │   │   ├── optional SIMD signed-PCM mix subset            [x]
-│   │   ├── independent WABT/JSC differential per leaf    [ ]
-│   │   └── size/resource budget retained per leaf        [ ]
+│   │   ├── independent WABT/JSC differential per leaf    [x]
+│   │   └── size/resource budget retained per leaf        [x]
 │   ├── P3 — cartridge authoring ecosystem               [~]
 │   │   ├── converter/conformance ecosystem               [~]
 │   │   ├── fan-authored standard .wasm                   [x]
@@ -373,10 +373,17 @@ to come from portable guest and host code, never dynamic host machine code.
 
 ### P2 — grow standard coverage from workload evidence
 
-SIMD is the leading game-relevant proposal candidate, but it is not marked committed until
-real cartridge/converter workloads identify the required instruction families and the core
-size budget can remain honest. Typed function references, GC, memory64, exception handling
-and threads remain separately gated proposals; none may enter as a decoder-only claim.
+Every feature family reported by `WasmModule::feature_usage` now has an authoritative matrix
+row connecting a standard fixture, executable WABT/tinyvm/JavaScriptCore differential and a
+default or opt-in product-size profile. The signed-PCM SIMD subset additionally runs in H5 as
+a development oracle. JavaScriptCore's lack of multiple-memory support is recorded as an
+explicit capability boundary rather than weakening the WABT/tinyvm semantic check.
+
+This closes the acceptance workflow for the current reported feature set, not every opcode in
+every WebAssembly proposal. Typed function references, GC, memory64, exception handling and
+threads remain separately workload-gated proposals. A future family may be reported only after
+adding its fixture, independent oracle, executable gate and size profile to the standard-feature
+matrix; no decoder-only implementation counts as accepted coverage.
 
 ### P3 — authoring and cartridge ecosystem
 
@@ -420,6 +427,7 @@ Current evidence owners:
 - [QJWasm/WA2X source review](../docs/qjwasm-wa2x-source-review.md)
 - [Cross-boundary benchmark](../docs/tinyvm-boundary-benchmark.md)
 - [Real-cartridge feature usage](../docs/tinyvm-feature-usage.md)
+- [Accepted standard-feature matrix](../docs/tinyvm-standard-feature-matrix.md)
 - `crates/agenterm-tinyvm/tests/` — public Rust black boxes and independent fixtures
 - `crates/agenterm-tinyvm/ios/` — C/Swift package and platform smoke gates
 

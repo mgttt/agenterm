@@ -638,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 115] = [
+const LEAF_TESTS: [(&str, &str); 118] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -1039,6 +1039,18 @@ const LEAF_TESTS: [(&str, &str); 115] = [
     ("WASI as implicit/default game host", "WASI"),
     ("APE", "APE"),
     ("WAT", "WAT"),
+    (
+        "independent WABT/JSC differential per leaf",
+        "accepted_standard_feature_matrix_executes_all_oracles_and_budgets",
+    ),
+    (
+        "size/resource budget retained per leaf",
+        "accepted_standard_feature_matrix_executes_all_oracles_and_budgets",
+    ),
+    (
+        "P2 — accepted standard Wasm coverage",
+        "every_reported_standard_feature_has_an_independent_executable_matrix_edge",
+    ),
 ];
 
 fn suite_test_names() -> BTreeSet<String> {

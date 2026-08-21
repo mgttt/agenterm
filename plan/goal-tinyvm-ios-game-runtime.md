@@ -3821,3 +3821,29 @@ booted iPhone 17 Pro Simulator and renders the expected green pixel. Its
 focused linked consumer is 1,502,664 bytes; the broader arm64 smoke remains
 1,655,704 bytes and x86_64 remains inside its existing default ceiling at
 1,730,864 bytes.
+
+## One-hundred-nineteenth executable increment — accepted feature matrix
+
+Every standard feature family published by `WasmModule::feature_usage` now has
+one machine-readable acceptance row joining its fixture, executable semantic
+gate, independent engine oracle and product-size profile. The matrix covers 10
+families through 11 fixtures and 10 gates; reference types keeps independent
+`funcref` and `externref` edges. A structural Rust test proves that every
+fixture actually reports the named feature and that no reported family can
+silently escape the matrix.
+
+Evidence on 2026-08-22: the complete matrix compiled and validated every
+fixture with WABT, matched tinyvm with JavaScriptCore for every capability JSC
+supports, retained JSC's multiple-memory rejection as an explicit capability
+boundary, and matched the SIMD audio kernel in tinyvm/JSC/headless H5. The
+default and opt-in SIMD static cores remain 101,256 and 117,768 bytes. The
+default arm64/x86_64 iOS consumers remain 1,638,296 / 1,726,992 bytes; the
+SIMD consumers remain 1,655,704 / 1,730,864 bytes, with the focused SIMD Swift
+consumer at 1,502,664 bytes. The executable PRD trace now binds 118 completed
+claims.
+
+This closes P2 for the feature families tinyvm currently accepts and reports;
+it does not claim complete upstream proposal coverage. Any future reported
+family must add its own workload, fixture, independent oracle and size profile
+before it can be accepted. Physical-iPhone/TestFlight lifecycle, audio and
+performance evidence remain open, so the persistent goal stays active.
