@@ -42,6 +42,35 @@ fn game_profile_rejects_multiple_memories_without_limiting_the_vm() {
     ));
 }
 
+#[test]
+fn game_profile_rejects_global_imports_without_limiting_the_vm() {
+    let mut wasm = game_module(&[], 1, &[0x41, 0x00, 0x0b], &[]);
+    let function_section = wasm
+        .windows(8)
+        .position(|bytes| bytes == [0x03, 0x06, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00])
+        .expect("function section");
+    let mut import_payload = vec![0x01];
+    name(&mut import_payload, "host");
+    name(&mut import_payload, "base");
+    import_payload.extend_from_slice(&[0x03, 0x7f, 0x00]);
+    let mut import_section = Vec::new();
+    section(&mut import_section, 2, &import_payload);
+    wasm.splice(function_section..function_section, import_section);
+
+    assert!(matches!(
+        CartridgeDescriptor::inspect(&wasm, Limits::default()),
+        Err(WasmError::Decode(
+            "game cartridge does not support global imports"
+        ))
+    ));
+    assert!(matches!(
+        GameRuntime::from_bytes(&wasm, Limits::default(), GameLimits::default(), 1),
+        Err(WasmError::Decode(
+            "game cartridge does not support global imports"
+        ))
+    ));
+}
+
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
         Ok(value) => value,

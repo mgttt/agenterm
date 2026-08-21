@@ -23,6 +23,7 @@ tinyvm iOS game runtime
 │   ├── multiple defined tables       [x]
 │   ├── multiple internally defined memories [x]
 │   ├── extended constant expressions [x]
+│   ├── standard imported numeric globals [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2395,3 +2396,37 @@ Evidence on 2026-08-21:
   the bundled Depth Well cartridge remains byte-identical at 6,022 bytes.
 - Physical-device lifecycle, sound/input/performance, TestFlight and
   Apple-review evidence remain open; the persistent goal remains active.
+
+## Sixty-seventh executable increment — standard imported numeric globals
+
+tinyvm now accepts standard i32/i64/f32/f64 global imports and exposes an
+explicit host binding object with exact value-type and mutability matching.
+Cloned bindings retain store identity: a guest `global.set`, a host update and
+sibling instances all observe the same mutable global rather than copied
+initial values. An unbound import traps during instantiation.
+
+Constant `global.get` is now accepted where the standard permits it: the target
+must be an imported immutable global. Initializers are validated as typed
+programs at module load, then evaluated against bound store values during
+instantiation. Active data and element offsets use the same deferred evaluator,
+including checked bounds arithmetic.
+
+This is a general-engine capability. TinyArcade v1 inspection and runtime
+loading reject global imports because its versioned game ABI intentionally
+contains function imports only; widening that embedding remains a separate
+profile decision.
+
+Evidence on 2026-08-21:
+
+- WABT 1.0.41 compiles and validates one shared fixture; tinyvm and public
+  JavaScriptCore execute those exact bytes to the same combined result
+  `878897`.
+- Public tests prove exact descriptors, binding type/mutability checks,
+  immutable-host rejection, mutable sharing across sibling instances and
+  rejection of mutable imported globals in constant expressions.
+- TinyArcade descriptor inspection and runtime opening both reject standard
+  global imports without restricting the general VM.
+- The stripped static core is 101,128 bytes and remains below its 100 KiB
+  gate. The arm64 Swift consumer is 1,557,704 bytes under its unchanged
+  product gate; the simulator-only x86_64 consumer is 1,640,216 bytes under a
+  separate one-linker-bucket-adjusted compatibility ceiling.

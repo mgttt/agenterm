@@ -3429,7 +3429,9 @@ impl Module {
                     Val::I32(offset) => offset as u32 as usize,
                     _ => return Err(WasmError::Trap("data offset")),
                 };
-                let end = offset + segment.bytes.len();
+                let end = offset
+                    .checked_add(segment.bytes.len())
+                    .ok_or(WasmError::Trap("data segment runs past memory bounds"))?;
                 let range = (end <= target.len())
                     .then_some(offset..end)
                     .ok_or(WasmError::Trap("data segment runs past memory bounds"))?;

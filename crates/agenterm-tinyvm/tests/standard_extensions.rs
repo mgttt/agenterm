@@ -1,4 +1,4 @@
-use agenterm_tinyvm::{Val, ValueType, WasmError, WasmModule};
+use agenterm_tinyvm::{Val, ValueType, WasmError, WasmGlobal, WasmModule};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -366,6 +366,77 @@ fn module_with_i32_global_initializer(expression: &[u8]) -> Vec<u8> {
     section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
     section(&mut wasm, 10, &[0x01, 0x04, 0x00, 0x23, 0x00, 0x0B]);
     wasm
+}
+
+fn imported_i32_globals_module(initializer: &[u8]) -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x7F]);
+    section(
+        &mut wasm,
+        2,
+        &[
+            0x02, 0x04, b'h', b'o', b's', b't', 0x04, b'b', b'a', b's', b'e', 0x03, 0x7F, 0x00,
+            0x04, b'h', b'o', b's', b't', 0x07, b'c', b'o', b'u', b'n', b't', b'e', b'r', 0x03,
+            0x7F, 0x01,
+        ],
+    );
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    let mut globals = vec![0x01, 0x7F, 0x00];
+    globals.extend_from_slice(initializer);
+    section(&mut wasm, 6, &globals);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
+    section(
+        &mut wasm,
+        10,
+        &[
+            0x01, 0x0B, 0x00, 0x23, 0x01, 0x23, 0x00, 0x6A, 0x24, 0x01, 0x23, 0x02, 0x0B,
+        ],
+    );
+    wasm
+}
+
+#[test]
+fn standard_imported_globals_bind_types_and_share_mutation() {
+    let bytes = imported_i32_globals_module(&[0x23, 0x00, 0x41, 0x02, 0x6A, 0x0B]);
+    let mut module = must_ok(WasmModule::from_bytes(&bytes), "load global imports");
+    assert_eq!(module.global_imports().len(), 2);
+    assert!(module.global_imports()[0].value_type == ValueType::I32);
+    assert!(!module.global_imports()[0].mutable);
+    assert!(module.global_imports()[1].mutable);
+
+    let base = WasmGlobal::new(Val::I32(3), false);
+    let counter = WasmGlobal::new(Val::I32(10), true);
+    must_ok(
+        module.bind_global_import("host", "base", &base),
+        "bind base",
+    );
+    must_ok(
+        module.bind_global_import("host", "counter", &counter),
+        "bind counter",
+    );
+    let mut instance = must_ok(module.instantiate(), "instantiate global imports");
+    assert_eq!(
+        only_i32(must_ok(instance.invoke_by_name("run", &[]), "run")),
+        5
+    );
+    assert!(matches!(counter.value(), Val::I32(13)));
+
+    let wrong_mutability = WasmGlobal::new(Val::I32(0), false);
+    let mut module = must_ok(WasmModule::from_bytes(&bytes), "reload global imports");
+    assert!(matches!(
+        module.bind_global_import("host", "counter", &wrong_mutability),
+        Err(WasmError::Trap("global binding type"))
+    ));
+    assert!(matches!(
+        base.set(Val::I32(4)),
+        Err(WasmError::Trap("global binding type"))
+    ));
+
+    let mutable_const = imported_i32_globals_module(&[0x23, 0x01, 0x0B]);
+    assert!(matches!(
+        WasmModule::from_bytes(&mutable_const),
+        Err(WasmError::Decode("const expr global index"))
+    ));
 }
 
 #[test]

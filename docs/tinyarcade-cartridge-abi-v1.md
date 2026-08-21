@@ -54,9 +54,12 @@ Extended constant expressions may initialize globals and compute active data
 or element offsets with wrapping `i32.add/sub/mul` and `i64.add/sub/mul`.
 Validation executes them as typed stack programs: underflow, mixed operand
 types or any final arity other than one rejects the cartridge. Their
-instructions consume the shared decode complexity budget. Constant
-`global.get` remains unavailable because v1 has no standard imported-global
-binding; it will not be approximated by exposing a defined guest global.
+instructions consume the shared decode complexity budget. The general tinyvm
+engine supports constant `global.get` of an imported immutable numeric global
+and evaluates dependent initializers only after exact host binding. TinyArcade
+v1 rejects all global imports during both inspection and runtime opening, so
+cartridges cannot use that engine capability. A defined guest global is never
+substituted as an approximation.
 
 This single-memory rule belongs to the game embedding, not the general engine.
 tinyvm itself supports multiple internally defined standard memories, including
@@ -65,6 +68,10 @@ copy, and per-memory grow. TinyArcade v1 requires exactly one memory because its
 core host callbacks, snapshot ranges and media submissions deliberately address
 memory zero. Imported memories remain unsupported until the VM has an explicit
 store-level memory binding and identity model.
+
+The same profile boundary applies to imported numeric globals: the general VM
+has shared i32/i64/f32/f64 global bindings with exact type and mutability, while
+TinyArcade v1 remains function-import-only.
 
 `return_call` and `return_call_indirect` have their standard encodings and
 validation rules. The target's complete result vector must equal the current

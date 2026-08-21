@@ -94,6 +94,11 @@ pub struct CartridgeDescriptor {
 impl CartridgeDescriptor {
     pub fn inspect(wasm: &[u8], vm_limits: Limits) -> Result<Self, WasmError> {
         let (manifest, module) = parse_cartridge(wasm, vm_limits)?;
+        if !module.global_imports().is_empty() {
+            return Err(WasmError::Decode(
+                "game cartridge does not support global imports",
+            ));
+        }
         Ok(Self {
             manifest,
             imports: module.imports().to_vec(),

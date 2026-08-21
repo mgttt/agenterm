@@ -69,6 +69,11 @@ saturating conversion instructions; both engines must return 143.
 `smoke-wabt-extended-const.sh` covers typed and nested integer constant
 expressions in global, data and element initializers; all three engines must
 return 199 from the same WABT-produced bytes.
+`smoke-wabt-imported-globals.sh` covers standard immutable and mutable numeric
+global imports, constant `global.get`, active segment offsets and shared store
+identity; WABT validation, tinyvm and JavaScriptCore agree on result `878897`.
+This is a general-engine conformance case: TinyArcade v1 cartridge inspection
+deliberately rejects global imports.
 `smoke-wabt-multi-value.sh` covers multi-result functions, parameterized
 block/loop/if signatures, loop parameters, implicit else identity and
 multi-value `br_if`/`br_table`; all three engines must return 143.
