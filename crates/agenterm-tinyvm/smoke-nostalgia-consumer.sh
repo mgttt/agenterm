@@ -11,6 +11,8 @@ AUDIO_OWNER="$CONSUMER/App/Sources/ArcadeFeedback.swift"
 AUDIO_TEST="$CONSUMER/App/Tests/BundledDepthWellCartridgeRuntimeTests.swift"
 DEPTH_SCREEN="$CONSUMER/App/Sources/TinyArcadeDepthWellScreen.swift"
 SIGNAL_SCREEN="$CONSUMER/App/Sources/TinyArcadeSignalLockScreen.swift"
+DEPTH_RUNTIME="$CONSUMER/App/Sources/BundledDepthWellCartridgeRuntime.swift"
+SIGNAL_RUNTIME="$CONSUMER/App/Sources/BundledSignalLockCartridgeRuntime.swift"
 
 test -x "$GATE"
 test -f "$DEPTH"
@@ -20,11 +22,25 @@ test -f "$AUDIO_OWNER"
 test -f "$AUDIO_TEST"
 test -f "$DEPTH_SCREEN"
 test -f "$SIGNAL_SCREEN"
+test -f "$DEPTH_RUNTIME"
+test -f "$SIGNAL_RUNTIME"
 grep -Fq 'private let cartridgeTonePlayer = TinyArcadeTonePlayer()' "$AUDIO_OWNER"
 grep -Fq 'try? cartridgeTonePlayer.play([tone])' "$AUDIO_OWNER"
 grep -Fq 'testRealCartridgeToneUsesRuntimePlayerAndDeactivates' "$AUDIO_TEST"
 grep -Fq 'perform(tone, hapticCue:' "$DEPTH_SCREEN"
 grep -Fq 'perform(tone, hapticCue:' "$SIGNAL_SCREEN"
+grep -Fq 'private var session: TinyArcadeGameSessionV1' "$DEPTH_RUNTIME"
+grep -Fq 'private var session: TinyArcadeGameSessionV1' "$SIGNAL_RUNTIME"
+grep -Fq 'TinyArcadeFramePacerV1' "$DEPTH_SCREEN"
+grep -Fq 'TinyArcadeFramePacerV1' "$SIGNAL_SCREEN"
+grep -Fq 'tickSession(' "$DEPTH_SCREEN"
+grep -Fq 'tickSession(' "$SIGNAL_SCREEN"
+grep -Fq 'deactivateAndSave(to:' "$DEPTH_SCREEN"
+grep -Fq 'deactivateAndSave(to:' "$SIGNAL_SCREEN"
+if grep -Fq 'gameClockMilliseconds &+=' "$DEPTH_SCREEN" "$SIGNAL_SCREEN"; then
+  echo 'FAIL: real App must not maintain a wrapping game clock beside TinyArcadeGameSessionV1' >&2
+  exit 1
+fi
 
 # This gate is allowed to refresh ignored build products, but a successful run
 # must not silently rewrite any committed consumer input. A runtime/cartridge

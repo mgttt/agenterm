@@ -120,6 +120,14 @@ private struct TinyArcadeGameSessionSmoke {
             elapsedMilliseconds: gameplayPacer.elapsedMilliseconds(at: 2_000)
         )
         precondition(resumed.gameClockMilliseconds == 31)
+        try resumed.setButtons(.primary, forSource: 77)
+        try resumed.deactivate()
+        precondition(!resumed.isActive)
+        precondition(resumed.input.buttons.isEmpty)
+        expectSessionFailure(.inactive, "explicitly deactivated tick") {
+            _ = try resumed.tick(elapsedMilliseconds: 0)
+        }
+        try resumed.activate()
         try resumed.deactivateAndSave(to: store)
         try resumed.close()
 

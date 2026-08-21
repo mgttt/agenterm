@@ -3161,9 +3161,19 @@ public final class TinyArcadeGameSessionV1 {
     public func deactivateAndSave(to store: TinyArcadeSnapshotStoreV1) throws {
         _ = try liveRuntime()
         guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        try deactivate()
+        try save(to: store)
+    }
+
+    /// Release every input source and stop foreground ticking without touching
+    /// persistence. This is the lifecycle primitive for embeddings that save
+    /// through another owner, or that deliberately run without a snapshot
+    /// store. Calling it repeatedly is harmless.
+    public func deactivate() throws {
+        _ = try liveRuntime()
+        guard !isFailed else { throw TinyArcadeGameSessionError.failed }
         releaseAllInputs()
         isActive = false
-        try save(to: store)
     }
 
     /// Resume foreground ticking. Reset the app's frame pacer before supplying

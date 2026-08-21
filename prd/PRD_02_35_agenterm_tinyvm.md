@@ -135,6 +135,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │   └── physical speaker / headphone evidence          [ ]
 │   ├── touch/keyboard/controller input                  [~]
 │   ├── scene lifecycle + persistence                    [~]
+│   │   └── real App shared session + frame pacer          [x]
 │   └── physical-device lifecycle/audio/play             [ ]
 │
 ├── evidence                                             [~]

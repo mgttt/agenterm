@@ -3896,3 +3896,26 @@ WASM cartridges and no web runtime, network/external-cartridge surface or
 archived native game engine. The executable PRD trace now binds 121 completed
 claims. Physical speaker/headphone and TestFlight evidence remain open, so the
 persistent goal stays active.
+
+## One-hundred-twenty-second executable increment — one real-App session owner
+
+The two live Nostalgia Arcade routes no longer duplicate tinyvm's lifecycle
+owner with App-local `systemUptime` arithmetic and wrapping `UInt32` clocks.
+Their bundled runtime adapters now own `TinyArcadeGameSessionV1`; their screens
+feed it only elapsed values produced by `TinyArcadeFramePacerV1`. Pause and scene
+deactivation release every input source and atomically save through the session.
+Timer or control delivery while the scene is inactive is ignored rather than
+advancing time or converting a normal background event into cartridge failure.
+The SDK adds an idempotent `deactivate()` primitive for embeddings whose
+persistence owner is optional or external.
+
+Evidence on 2026-08-22: consumer commit `ee61136` and both real App view-model
+suites exercise exact clock restore, pause, scene deactivation, ignored
+background ticks and controls,
+oversized foreground-gap rejection and successful foreground recovery. The
+runtime-owned source gate requires both adapters to own the shared session,
+both screens to own the shared pacer and neither screen to reintroduce wrapping
+clock arithmetic. The complete consumer gate still passes seven Depth Well
+tests, four Signal Lock tests, the two-game UI journey and the generic arm64
+Release build. The executable PRD trace now binds 122 completed claims.
+Physical iPhone and TestFlight evidence remain open, so the goal stays active.

@@ -416,6 +416,11 @@ or archived native game engine. A counted App-target test now takes a tone from
 the real Depth Well cartridge, plays its exact pitch/duration/amplitude through
 `TinyArcadeTonePlayer`, proves playback started and explicitly deactivates it;
 both WASM screens preserve that tone path while keeping haptics as App policy.
+Those screens now also drive the shared `TinyArcadeGameSessionV1` through
+`TinyArcadeFramePacerV1`: the session is the sole game-clock owner, rejects
+oversized foreground advances, releases all inputs on pause/background, saves
+before scene suspension and ignores background timer/input delivery without
+failing the cartridge. The App no longer maintains a wrapping parallel clock.
 This closes current-main App consumption, not
 the separate physical-iPhone lifecycle and performance requirement.
 
