@@ -18,6 +18,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::{Cell, Ref, RefCell, RefMut};
+use core::num::NonZeroU64;
 use core::ops::{Deref, DerefMut};
 #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -69,8 +70,39 @@ pub struct FunctionReference {
 #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
 static NEXT_FUNCTION_REFERENCE: AtomicU64 = AtomicU64::new(1);
 
+/// An opaque, non-null standard external reference created by the host.
+///
+/// tinyvm never dereferences or assigns platform meaning to this token. A host
+/// callback can associate it with an object in its own bounded registry, pass
+/// it through standard Wasm functions/globals, and compare the returned value
+/// with the original handle. Process-unique identity lets a reference cross
+/// instances without becoming a native pointer or a store allocation address.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExternReference {
+    token: NonZeroU64,
+}
+
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+static NEXT_EXTERN_REFERENCE: AtomicU64 = AtomicU64::new(1);
+
+impl ExternReference {
+    /// Allocate one opaque host identity. The host remains the owner of any
+    /// object associated with it; the VM only preserves the token.
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    pub fn new() -> Result<Self, WasmError> {
+        let token = NEXT_EXTERN_REFERENCE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                next.checked_add(1)
+            })
+            .map_err(|_| WasmError::Trap("externref address space"))?;
+        let token = NonZeroU64::new(token).ok_or(WasmError::Trap("externref address space"))?;
+        Ok(Self { token })
+    }
+}
+
 /// A tagged WebAssembly value. The operand stack, locals, arguments, and
-/// results are all sequences of these so the four numeric types can coexist.
+/// results are all sequences of these so numeric and reference types coexist.
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq)]
 pub enum Val {
@@ -84,6 +116,8 @@ pub enum Val {
     /// A non-null function reference whose owner survives instance crossings.
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
     StoreFuncRef(FunctionReference),
+    /// A nullable opaque value owned and interpreted by the host.
+    ExternRef(Option<ExternReference>),
 }
 
 /// A standard value type accepted by this VM profile.
@@ -95,6 +129,7 @@ pub enum ValueType {
     F32,
     F64,
     FuncRef,
+    ExternRef,
 }
 
 impl ValueType {
@@ -105,6 +140,7 @@ impl ValueType {
             0x7D => Some(Self::F32),
             0x7C => Some(Self::F64),
             0x70 => Some(Self::FuncRef),
+            0x6F => Some(Self::ExternRef),
             _ => None,
         }
     }
@@ -116,6 +152,7 @@ impl ValueType {
             Self::F32 => 0x7D,
             Self::F64 => 0x7C,
             Self::FuncRef => 0x70,
+            Self::ExternRef => 0x6F,
         }
     }
 }
@@ -1323,7 +1360,7 @@ enum Op {
     Select,
     /// Typed `select`: reference types require the explicit value type.
     TypedSelect(u8),
-    RefNull,
+    RefNull(u8),
     RefIsNull,
     RefFunc(u32),
     /// `local.tee` — like `local.set` but leaves the value on the stack.
@@ -1758,7 +1795,7 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                 let ty = *body
                     .get(ni)
                     .ok_or(WasmError::Decode("truncated typed select"))?;
-                if !matches!(ty, 0x70 | 0x7C..=0x7F) {
+                if !matches!(ty, 0x6F | 0x70 | 0x7C..=0x7F) {
                     return Err(WasmError::Decode("unsupported typed select value type"));
                 }
                 i = ni + 1;
@@ -2014,10 +2051,10 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                     .get(i)
                     .ok_or(WasmError::Decode("truncated ref.null type"))?;
                 i += 1;
-                if reftype != 0x70 {
-                    return Err(WasmError::Decode("only funcref ref.null is supported"));
+                if !matches!(reftype, 0x6F | 0x70) {
+                    return Err(WasmError::Decode("unsupported ref.null type"));
                 }
-                ops.push(Op::RefNull);
+                ops.push(Op::RefNull(reftype));
             }
             0xD1 => ops.push(Op::RefIsNull),
             0xD2 => {
@@ -2069,7 +2106,7 @@ fn read_valtypes(
     reserve_exact(&mut values, n)?;
     if p[i..end]
         .iter()
-        .any(|value| !matches!(value, 0x70 | 0x7C..=0x7F))
+        .any(|value| !matches!(value, 0x6F | 0x70 | 0x7C..=0x7F))
     {
         return Err(WasmError::Decode("unsupported value type"));
     }
@@ -2515,10 +2552,11 @@ fn parse_const_expr(
                 let reftype = *p
                     .get(j + 1)
                     .ok_or(WasmError::Decode("truncated ref.null const expr"))?;
-                if reftype != 0x70 {
-                    return Err(WasmError::Decode("only funcref ref.null is supported"));
+                match reftype {
+                    0x70 => (ConstOp::Value(Val::FuncRef(None)), Some(0x70), j + 2),
+                    0x6F => (ConstOp::Value(Val::ExternRef(None)), Some(0x6F), j + 2),
+                    _ => return Err(WasmError::Decode("unsupported ref.null type")),
                 }
-                (ConstOp::Value(Val::FuncRef(None)), Some(0x70), j + 2)
             }
             0xD2 => {
                 let (function, next) = leb_u32(p, j + 1)?;
@@ -2643,7 +2681,7 @@ fn parse_global_section(
     for _ in 0..count {
         // globaltype = valtype byte + mutability byte
         let valtype = *p.get(i).ok_or(WasmError::Decode("truncated global type"))?;
-        if !matches!(valtype, 0x70 | 0x7C..=0x7F) {
+        if !matches!(valtype, 0x6F | 0x70 | 0x7C..=0x7F) {
             return Err(WasmError::Decode("unsupported global value type"));
         }
         let mutability = *p
@@ -2724,7 +2762,7 @@ pub struct ImportDesc {
     pub i32_only: bool,
 }
 
-/// A standard numeric or funcref global import in global-index order.
+/// A standard numeric or supported-reference global import in global-index order.
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
 pub struct GlobalImportDesc {
@@ -2764,7 +2802,7 @@ struct ParsedImports {
     table_imports: Vec<TableImportDesc>,
 }
 
-/// Parse the supported standard function and numeric-global imports while
+/// Parse the supported standard function and global imports while
 /// preserving each independent index space.
 fn parse_import_section(
     p: &[u8],
@@ -2809,7 +2847,7 @@ fn parse_import_section(
                 let value_type = *p
                     .get(i)
                     .ok_or(WasmError::Decode("truncated imported global type"))?;
-                if !matches!(value_type, 0x70 | 0x7C..=0x7F) {
+                if !matches!(value_type, 0x6F | 0x70 | 0x7C..=0x7F) {
                     return Err(WasmError::Decode("unsupported imported global type"));
                 }
                 let mutable = match p.get(i + 1) {
@@ -3010,6 +3048,7 @@ fn valtype_of(v: &Val) -> u8 {
         Val::FuncRef(_) => 0x70,
         #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
         Val::StoreFuncRef(_) => 0x70,
+        Val::ExternRef(_) => 0x6F,
     }
 }
 
@@ -3102,6 +3141,7 @@ fn zero_of_valtype(vt: u8) -> Result<Val, WasmError> {
         0x7D => Ok(Val::F32(0.0)),
         0x7C => Ok(Val::F64(0.0)),
         0x70 => Ok(Val::FuncRef(None)),
+        0x6F => Ok(Val::ExternRef(None)),
         _other => Err(WasmError::Decode("unsupported local value type 0x")),
     }
 }
@@ -3412,7 +3452,7 @@ pub struct Module {
     global_exports: BTreeMap<String, usize>,
     /// Imported functions in index order (the host door).
     import_descs: Vec<ImportDesc>,
-    /// Imported numeric globals in their independent global index space.
+    /// Imported globals in their independent global index space.
     global_import_descs: Vec<GlobalImportDesc>,
     /// Imported linear memories in their independent memory index space.
     memory_import_descs: Vec<MemoryImportDesc>,
@@ -4452,7 +4492,7 @@ impl Module {
     /// Bind a standard typed host callback to every imported `module.field`.
     ///
     /// Unlike the legacy i32 convenience door, this form preserves i32, i64,
-    /// f32, f64 and funcref values. The runtime verifies exact parameter and
+    /// f32, f64, funcref and externref values. The runtime verifies exact parameter and
     /// result types around the callback. The callback-returned vector is an
     /// explicit arbitrary-arity compatibility path; latency-sensitive hosts
     /// should prefer [`Module::bind_import_typed_in_place`].
@@ -6734,17 +6774,27 @@ impl Module {
                     let a = pop_val(&mut stack)?;
                     stack.push(if c != 0 { a } else { b });
                 }
-                Op::RefNull => {
+                Op::RefNull(reference_type) => {
                     push_operand(
                         &mut stack,
-                        Val::FuncRef(None),
+                        match reference_type {
+                            0x70 => Val::FuncRef(None),
+                            0x6F => Val::ExternRef(None),
+                            _ => return Err(WasmError::Trap("reference type")),
+                        },
                         live_slots,
                         resources.available_slots,
                     )?;
                 }
                 Op::RefIsNull => {
-                    let reference = pop_funcref(&mut stack, bulk.store, bulk.instance_id)?;
-                    stack.push(Val::I32(i32::from(reference.is_none())));
+                    let is_null = match pop_val(&mut stack)? {
+                        Val::FuncRef(reference) => reference.is_none(),
+                        #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+                        Val::StoreFuncRef(_) => false,
+                        Val::ExternRef(reference) => reference.is_none(),
+                        _ => return Err(WasmError::Trap("expected reference on stack, got")),
+                    };
+                    stack.push(Val::I32(i32::from(is_null)));
                 }
                 Op::RefFunc(function) => {
                     let function = function as usize;
@@ -7160,7 +7210,7 @@ impl Instance {
         Ok(Some(memory))
     }
 
-    /// Read one standard exported numeric or funcref global.
+    /// Read one standard exported numeric or supported-reference global.
     pub fn exported_global(&self, name: &str) -> Option<Val> {
         let state = self.state.borrow();
         let index = state.module.global_export_index(name)?;

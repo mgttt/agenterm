@@ -217,6 +217,8 @@ fn describe_vals(vals: &[Val]) -> String {
             Val::FuncRef(None) => "funcref:null".to_string(),
             Val::FuncRef(Some(index)) => format!("funcref:{index}"),
             Val::StoreFuncRef(_) => "funcref:store".to_string(),
+            Val::ExternRef(None) => "externref:null".to_string(),
+            Val::ExternRef(Some(_)) => "externref:host".to_string(),
         })
         .collect::<Vec<_>>()
         .join(",")
@@ -634,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 77] = [
+const LEAF_TESTS: [(&str, &str); 78] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -766,6 +768,10 @@ const LEAF_TESTS: [(&str, &str); 77] = [
     (
         "store-owned funcref values",
         "wabt_compiled_exported_functions_link_across_instances",
+    ),
+    (
+        "opaque externref function/global values",
+        "standard_externref_function_and_global_values_preserve_host_identity",
     ),
     (
         "tail-call proposal",

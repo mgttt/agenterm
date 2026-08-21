@@ -30,7 +30,8 @@ tinyvm iOS game runtime
 │   ├── linked exported globals/memories/tables [x]
 │   ├── linked exported functions    [x]
 │   │   ├── numeric value signatures [x]
-│   │   └── store-owned funcref values [x]
+│   │   ├── store-owned funcref values [x]
+│   │   └── opaque externref function/global values [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -3026,3 +3027,27 @@ the deterministic behavior and converter/trust checks remain unchanged.
 Evidence on 2026-08-21: the focused runtime and both real-cartridge suites,
 the WebKit differential, rustfmt, all-target/all-feature Clippy, the PRD leaf
 map, no-default-feature tests and the full all-feature package suite pass.
+
+## Eighty-ninth executable increment — opaque standard externref values
+
+The general VM host door now preserves standard nullable `externref` values in
+function parameters/results, locals, globals, typed select, `ref.null` and
+`ref.is_null`. A non-null `WasmExternReference` is a process-unique monotonic
+token: tinyvm never dereferences it or exposes a native pointer, while the host
+owns any bounded token-to-object registry and its lifetime. The public token is
+opaque but hashable/orderable, so a native module can use it as a safe registry
+key without relying on allocation addresses.
+
+This capability deliberately remains below TinyArcade cartridge ABI v1, whose
+native/core functions stay i32-only. It also does not claim externref tables;
+the loader rejects those until a separately budgeted generic-reference table
+model exists. An ordinary all-feature test proves typed host identity, null,
+mutable exported-global behavior, mismatched-result rejection and the table
+boundary. A separately WABT-compiled fixture passes the same host object through
+function/global/function in tinyvm and JavaScriptCore.
+
+Evidence on 2026-08-21: the focused standard-extension test, independent
+WABT/JavaScriptCore externref differential, full all-feature and no-default
+suites, iOS device/universal-simulator XCFramework link, rustfmt and Clippy all
+pass. `Val` remains at most 16 bytes, the arm64 linked consumer grows only 16
+bytes, and the stripped static core remains 101,240 bytes with selftest 42.

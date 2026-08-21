@@ -134,6 +134,10 @@ Reject for the iOS cartridge runtime:
 3. [x] Memory/global/table/function handle tests retain live resources after
    public instance handles are dropped. Function-reference tests also reject
    wrong-store values and a stale token whose original Store is already gone.
-4. [ ] If background execution becomes a product requirement, first specify and
+4. [x] Standard externref function/global values use opaque monotonic host
+   identities rather than pointer addresses. One independently WABT-compiled
+   module preserves the same object identity through tinyvm and JavaScriptCore;
+   tinyvm never dereferences the token or claims ownership of the host object.
+5. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

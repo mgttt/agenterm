@@ -21,6 +21,7 @@ const I64: u8 = 0x7E;
 const F32: u8 = 0x7D;
 const F64: u8 = 0x7C;
 const FUNCREF: u8 = 0x70;
+const EXTERNREF: u8 = 0x6F;
 /// Empty block type: the block leaves nothing behind.
 const VOID: u8 = 0x40;
 /// The bottom type produced by an unreachable stack: matches anything.
@@ -680,9 +681,12 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
         Nop => {}
 
         // --- funcref / table ---
-        RefNull => v.push(FUNCREF),
+        RefNull(reference_type) => v.push(*reference_type),
         RefIsNull => {
-            v.pop_expect(FUNCREF)?;
+            let reference_type = v.pop()?;
+            if !matches!(reference_type, FUNCREF | EXTERNREF | ANY) {
+                return Err(type_error());
+            }
             v.push(I32);
         }
         RefFunc(function) => {

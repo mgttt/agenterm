@@ -1,5 +1,6 @@
 use agenterm_tinyvm::{
-    Limits, Val, ValueType, WasmError, WasmGlobal, WasmMemory, WasmModule, WasmStore, WasmTable,
+    Limits, Val, ValueType, WasmError, WasmExternReference, WasmGlobal, WasmMemory, WasmModule,
+    WasmStore, WasmTable,
 };
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
@@ -140,6 +141,36 @@ fn funcref_host_module() -> Vec<u8> {
         ],
     );
     section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
+    wasm
+}
+
+fn externref_host_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(
+        &mut wasm,
+        1,
+        &[0x02, 0x60, 0x01, 0x6F, 0x01, 0x6F, 0x60, 0x00, 0x01, 0x7F],
+    );
+    let mut imports = vec![0x01];
+    name(&mut imports, "host");
+    name(&mut imports, "identity");
+    imports.extend_from_slice(&[0x00, 0x00]);
+    section(&mut wasm, 2, &imports);
+    section(&mut wasm, 3, &[0x02, 0x00, 0x01]);
+    section(&mut wasm, 6, &[0x01, 0x6F, 0x01, 0xD0, 0x6F, 0x0B]);
+    let mut exports = vec![0x03];
+    for (field, kind, index) in [("pass", 0, 1), ("null", 0, 2), ("saved", 3, 0)] {
+        name(&mut exports, field);
+        exports.extend_from_slice(&[kind, index]);
+    }
+    section(&mut wasm, 7, &exports);
+    section(
+        &mut wasm,
+        10,
+        &[
+            0x02, 0x06, 0x00, 0x20, 0x00, 0x10, 0x00, 0x0B, 0x05, 0x00, 0xD0, 0x6F, 0xD1, 0x0B,
+        ],
+    );
     wasm
 }
 
@@ -1151,10 +1182,6 @@ fn standard_funcref_table_profile_executes_with_instance_semantics() {
     );
     assert!(WasmModule::from_bytes(&undeclared).is_err());
 
-    let mut externref = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
-    section(&mut externref, 1, &[0x01, 0x60, 0x01, 0x6F, 0x00]);
-    assert!(WasmModule::from_bytes(&externref).is_err());
-
     let explicit = explicit_table_expression_elem_module(0);
     let mut explicit = must_ok(
         must_ok(
@@ -1437,6 +1464,65 @@ fn standard_typed_host_funcref_results_are_instance_bounded() {
         foreign.invoke_by_name("run", &[]),
         Err(WasmError::Trap("host result type"))
     ));
+}
+
+#[test]
+fn standard_externref_function_and_global_values_preserve_host_identity() {
+    assert!(core::mem::size_of::<Val>() <= 16);
+    let bytes = externref_host_module();
+    let mut module = must_ok(WasmModule::from_bytes(&bytes), "load externref host module");
+    assert!(module.import_parameter_type(0, 0) == Some(ValueType::ExternRef));
+    assert!(module.import_result_type(0, 0) == Some(ValueType::ExternRef));
+    must_ok(
+        module.bind_import_typed_in_place("host", "identity", |args, results, _| {
+            results[0] = args[0];
+            Ok(())
+        }),
+        "bind externref identity",
+    );
+    let mut instance = must_ok(module.instantiate(), "instantiate externref host module");
+    let reference = must_ok(WasmExternReference::new(), "allocate host externref");
+    assert!(matches!(
+        must_ok(
+            instance.invoke_by_name("pass", &[Val::ExternRef(Some(reference))]),
+            "pass externref through host"
+        )
+        .as_slice(),
+        [Val::ExternRef(Some(value))] if *value == reference
+    ));
+    assert!(matches!(
+        must_ok(instance.invoke_by_name("null", &[]), "check null externref").as_slice(),
+        [Val::I32(1)]
+    ));
+    let saved = instance
+        .exported_global_handle("saved")
+        .expect("externref global export");
+    assert!(matches!(saved.value(), Val::ExternRef(None)));
+    must_ok(
+        saved.set(Val::ExternRef(Some(reference))),
+        "set exported externref global",
+    );
+    assert!(saved.value() == Val::ExternRef(Some(reference)));
+
+    let mut wrong = must_ok(
+        WasmModule::from_bytes(&bytes),
+        "reload externref host module",
+    );
+    must_ok(
+        wrong.bind_import_typed_in_place("host", "identity", |_, results, _| {
+            results[0] = Val::FuncRef(None);
+            Ok(())
+        }),
+        "bind wrong externref result",
+    );
+    assert!(matches!(
+        wrong.invoke_by_name("pass", &[Val::ExternRef(None)]),
+        Err(WasmError::Trap("host result type"))
+    ));
+
+    let mut externref_table = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut externref_table, 4, &[0x01, 0x6F, 0x00, 0x01]);
+    assert!(WasmModule::from_bytes(&externref_table).is_err());
 }
 
 #[test]

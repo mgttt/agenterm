@@ -32,7 +32,8 @@ agenterm-tinyvm (35)
 │   │   ├── linked exported tables [x]
 │   │   └── linked exported functions [x]
 │   │       ├── numeric value signatures [x]
-│   │       └── store-owned funcref values [x]
+│   │       ├── store-owned funcref values [x]
+│   │       └── opaque externref function/global values [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -148,10 +149,13 @@ WABT validation；这条独立门禁防止测试把 malformed bytes 错误归类
 自身 case 集逐字节一致，WABT 再独立证明相同的 33 reject / 11 accept verdict。
 Multi-value 包含多结果函数、s33 type-index block signature、带参数 block/loop/if 和
 多值 branch；validator 控制帧只引用已经预算的 type section，不按嵌套层次复制签名。
-当前 reference-types 面先完成标准 single-table `funcref` 闭环：reference 值、局部变量、
+当前 reference-types 面已完成标准 single-table `funcref` 闭环：reference 值、局部变量、
 全局变量、typed select、`ref.null`/`ref.is_null`/`ref.func`、table get/set/grow/size/fill，
-以及 expression element segment flags 4..7。`externref`、typed function references 和 GC
-尚未进入接受 profile，会在 load gate 明确拒绝，不以私有编码代替。
+以及 expression element segment flags 4..7。`externref` 的 function/local/global、
+typed select、`ref.null` 和 `ref.is_null` 也以不透明、进程唯一的 host token
+进入通用 VM；VM 不解引 token，对应对象注册表和生命期仍由宿主所有。
+`externref` table、typed function references 和 GC 尚未进入接受 profile，会在
+load gate 明确拒绝，不以私有编码代替。
 在此基础上，模块可定义多张 `funcref` table；所有 table instruction、`call_indirect`、
 active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
 预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。标准 imported table
@@ -186,9 +190,9 @@ operand stack 或顶层结果完整 `try_reserve`。嵌套 core/native dispatch 
 写回已预留的 caller stack；输入、时钟、RNG、媒体提交、状态保存/恢复和 C callback 不再
 为每次 dispatch 建立临时 heap `Vec`。通用 Rust returning-callback API 仅作为兼容层保留。
 VM 的通用 host door 不再被这个游戏 profile 反向限制为 i32：标准 function import 可通过
-typed `Val` callback 保真传递 i32/i64/f32/f64/funcref，运行时在 callback 前后验证完整
+typed `Val` callback 保真传递 i32/i64/f32/f64/funcref/externref，运行时在 callback 前后验证完整
 签名；宿主可用无分配的 `ValueType` position query 静态读取每个 import 参数/结果类型。
-非空 funcref 被限制在当前 instance 的 combined function index。16 值以内可走
+非空 funcref 被限制在 owner store；externref 只保存宿主 identity，不封装指针。16 值以内可走
 固定 staging array 的 in-place API；任意 arity 仍有明确的 allocating compatibility API。
 TinyArcade core/native v1 继续坚持 i32-only，这是版本化 embedding ABI 的选择，不是
 tinyvm 对标准 Wasm host function 的能力上限。

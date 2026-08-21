@@ -2565,6 +2565,15 @@ allocating compatibility path; use fixed typed staging for the bounded hot
 path. Prove the separation with independently compiled standard bytes in a
 second engine, not only with a hand-built unit module.
 
+For an opaque `externref`, preserve identity without smuggling a native pointer
+through the VM. A process-unique monotonic token can be copied through Wasm
+functions, locals and globals while the embedding owns the bounded token-to-
+object registry and its lifetime. Keep the token opaque but hashable/orderable
+for host registries, never recycle it from an allocation address, and verify
+null plus non-null identity against independently compiled Wasm in a second
+engine. Supporting externref values does not imply externref tables; keep an
+unsupported resource form rejected until its storage and budget model exists.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a
