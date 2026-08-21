@@ -177,7 +177,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │   └── size/resource budget retained per leaf        [ ]
 │   ├── P3 — cartridge authoring ecosystem               [~]
 │   │   ├── converter/conformance ecosystem               [~]
-│   │   ├── fan-authored standard .wasm                   [ ]
+│   │   ├── fan-authored standard .wasm                   [x]
 │   │   └── external distribution after Apple approval    [ ]
 │   └── research queue                                   [~]
 │       ├── QJWasm ownership + low-copy lessons           [~]
@@ -365,10 +365,12 @@ and threads remain separately gated proposals; none may enter as a decoder-only 
 
 ### P3 — authoring and cartridge ecosystem
 
-The converter/conformance path continues to target standard `.wasm` plus the versioned host
-profile. Fan-authored cartridges and an external catalog remain product goals, but App Store
-distribution is enabled only after a verifiable Apple-approved route exists. Development-time
-Safari/JSC execution stays useful as an oracle and never becomes the nostalgia-arcade runtime.
+The converter/conformance path targets standard `.wasm` plus the versioned host profile. A
+freestanding C fixture now proves that a non-Rust, non-tinyvm producer can compile, attach the
+canonical manifest, execute, snapshot and match tinyvm/JSC/H5 replay output. A usable creator
+product and external catalog remain product goals; App Store distribution is enabled only after
+a verifiable Apple-approved route exists. Development-time Safari/JSC execution stays useful as
+an oracle and never becomes the nostalgia-arcade runtime.
 
 ## Acceptance and evidence
 
@@ -395,6 +397,7 @@ Current evidence owners:
 - [Host resource table](../docs/tinyvm-host-resource-table.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
+- [C cartridge authoring](../docs/tinyarcade-c-authoring-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)
 - [Catalog publisher](../docs/tinyarcade-catalog-publisher-v1.md)
 - [QJWasm/WA2X source review](../docs/qjwasm-wa2x-source-review.md)

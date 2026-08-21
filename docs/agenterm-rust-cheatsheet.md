@@ -177,6 +177,16 @@ strip pass cannot discard the custom section. Test reproducible bytes, native-im
 derivation, duplicate-manifest refusal and absence of output after preflight
 failure.
 
+Prove that a supposedly standard cartridge ABI has an independent producer,
+not only multiple guests built by the runtime's own language/toolchain. A
+freestanding C fixture is a useful minimum: compile with an ordinary wasm32
+Clang backend and no libc, JS glue, WASI or tinyvm library; attach metadata only
+after linking; then run the exact resulting bytes through static inspection,
+snapshot/restore and tinyvm/JSC/browser replay comparison. Keep the compiler as
+development tooling rather than a runtime dependency. This catches accidental
+Rust ABI assumptions and private executable conventions that WAT fixtures alone
+cannot expose.
+
 When a PRD uses checked tree leaves as executable claims, every new `[x]` leaf
 must be added to the owning integration suite's leaf-to-test map in the same
 change. Map it to a test that actually executes the relevant product boundary;

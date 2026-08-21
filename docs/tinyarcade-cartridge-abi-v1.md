@@ -378,6 +378,10 @@ manifest and section framing and refuses to rewrite an existing manifest; the
 caller must still run `CartridgeDescriptor::inspect` to prove the complete game
 contract before distribution.
 
+The executable [C authoring path](tinyarcade-c-authoring-v1.md) proves this is
+not a Rust- or tinyvm-specific producer contract: a freestanding LLVM C module
+passes the same converter, runtime, JavaScriptCore and browser oracles.
+
 ## Snapshot envelope
 
 The app persists the bytes returned by runtime suspend. The canonical envelope

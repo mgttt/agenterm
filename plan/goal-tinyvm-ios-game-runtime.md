@@ -74,6 +74,7 @@ tinyvm iOS game runtime
 │   ├── static compatibility descriptor [x]
 │   ├── converter conformance kit     [x]
 │   ├── canonical manifest authoring  [x]
+│   ├── freestanding C authoring       [x]
 │   ├── app-build host profile        [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
@@ -3588,3 +3589,31 @@ warnings-denied all-feature and isolated `no_std` Clippy, arm64 iOS `no_std`,
 rustfmt and document-redaction gates pass. Default linked sizes are 1,603,208
 bytes arm64 and 1,682,184 bytes x86_64; the stripped static core remains
 101,256 bytes with selftest 42.
+
+## One-hundred-eleventh executable increment — independent C cartridge authoring
+
+The authoring boundary now has a producer independent of Rust and tinyvm. A
+generic `build-c-cartridge.sh` uses a normal LLVM wasm32 backend, freestanding
+C17 and `wasm-ld` to emit a standard module with no libc, WASI, JavaScript glue
+or runtime library. The existing converter attaches the canonical manifest only
+after linking. The checked-in 32×16 indexed2d fixture imports five ordinary
+`tinyarcade:core/v1` functions, exports the complete lifecycle and persists four
+bytes of guest state.
+
+Evidence on 2026-08-22: LLVM 22.1.8 emits a 708-byte, one-page, MVP-only final
+cartridge. Static validation reports five core function imports, zero resource
+imports, no start function and no native capability. The independent black box
+proves init, bounded rendering, input movement and fresh-instance snapshot
+restore. A four-step replay agrees frame-for-frame in tinyvm, public
+JavaScriptCore WebAssembly and a real headless H5 WebAssembly engine. This is a
+development conformance fixture, not another nostalgia-arcade product game and
+does not change the App Store bundled-only gate.
+
+The executable PRD trace now binds all 104 completed leaves. The complete
+all-feature/all-target package passes all 128 library tests and every
+non-ignored integration test, including both iOS XCFramework gates and the new
+four-cartridge tinyvm/JSC/H5 differential. All 115 isolated `no_std` library
+tests, warnings-denied all-feature and isolated `no_std` Clippy, arm64 iOS
+`no_std`, rustfmt and document-redaction gates pass. Linked runtime sizes remain
+1,603,208 bytes arm64 and 1,682,184 bytes x86_64; the stripped static core
+remains 101,256 bytes with selftest 42.
