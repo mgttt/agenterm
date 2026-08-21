@@ -264,7 +264,7 @@ fn entry() {
     markdown.push_str("|---|---:|---:|\n");
     markdown.push_str(rows);
 
-    if std::env::has("GITHUB_STEP_SUMMARY") != 0 {
+    if std::env::has("GITHUB_STEP_SUMMARY") {
         let summary_value = std::env::get("GITHUB_STEP_SUMMARY");
         if summary_value != "" {
             let summary_path = std::path::absolute(summary_value).display;
