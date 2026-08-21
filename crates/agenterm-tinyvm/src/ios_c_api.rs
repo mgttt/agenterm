@@ -522,18 +522,13 @@ unsafe fn native_registry(
         let max_calls_per_lifecycle = function.max_calls_per_lifecycle;
         let context = function.context;
         registry
-            .register_with_call_limit(
+            .register_in_place_with_call_limit(
                 &module,
                 &field,
                 n_params,
                 n_results,
                 max_calls_per_lifecycle,
-                move |params, memory| {
-                    let mut results = Vec::new();
-                    results
-                        .try_reserve_exact(n_results)
-                        .map_err(|_| WasmError::Trap("native callback result allocation"))?;
-                    results.resize(n_results, 0);
+                move |params, results, memory| {
                     let status = unsafe {
                         callback(
                             context,
@@ -554,7 +549,7 @@ unsafe fn native_registry(
                         )
                     };
                     if status == STATUS_OK {
-                        Ok(results)
+                        Ok(())
                     } else {
                         Err(WasmError::Trap("native capability callback failed"))
                     }

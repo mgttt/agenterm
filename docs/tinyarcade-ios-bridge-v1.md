@@ -159,6 +159,12 @@ borrowed parameter/result buffers plus the complete bounds-checked guest linear
 memory. It must return exactly its declared results, must not retain any pointer
 or memory view, and must not unwind through C. Throwing, returning a wrong result
 count, or returning nonzero from raw C traps and latches only that cartridge.
+The Rust/C bridge stages the bounded parameter and result buffers in fixed
+16-value stack arrays. Before entering app code, the VM fallibly reserves the
+suspended caller's operand stack (or a top-level result vector); nested host
+results then append inline without temporary heap staging. Allocator refusal
+therefore cannot occur only after a callback has already mutated guest memory
+or host state.
 These callbacks are trusted code already compiled into the app; cartridges
 cannot supply native implementations. Private-user opening intentionally has no
 variant that grants native modules.

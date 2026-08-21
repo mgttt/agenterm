@@ -898,6 +898,45 @@ fn registered_versioned_native_module_is_bound_by_exact_signature() {
 }
 
 #[test]
+fn in_place_native_module_receives_exact_bounded_result_slice() {
+    // game_tick returns zero only when the native result is exactly 42.
+    let wasm = game_module(
+        &[("fan:physics/v1", "step", 1)],
+        1,
+        &[0x41, 0x14, 0x41, 0x16, 0x10, 0x00, 0x41, 0x2a, 0x47, 0x0b],
+        &[],
+    );
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let mut registry = NativeModuleRegistry::new();
+    must_ok(
+        registry.register_in_place("fan:physics/v1", "step", 2, 1, move |args, results, _| {
+            assert_eq!(args, [20, 22]);
+            assert_eq!(results.len(), 1);
+            observed.set(observed.get() + 1);
+            results[0] = args[0] + args[1];
+            Ok(())
+        }),
+        "register in-place native module",
+    );
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes_with_registry(
+            &wasm,
+            Limits::default(),
+            GameLimits::default(),
+            1,
+            &registry,
+        ),
+        "load game with in-place native module",
+    );
+    must_ok(
+        runtime.tick(GameInput::default()),
+        "tick in-place native module",
+    );
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
 fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     let wasm = game_module(
         &[("fan:physics/v1", "step_world", 1)],

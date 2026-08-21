@@ -33,6 +33,7 @@ tinyvm iOS game runtime
 │   ├── bounded audio commands        [x]
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
+│   ├── bounded in-place host dispatch [x]
 │   └── storage without guest network [x]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
@@ -1723,5 +1724,52 @@ Evidence on 2026-08-21:
   bytes x86_64; catalog/replay/private/session consumers are 1,425,688 /
   1,400,120 / 1,418,304 / 1,417,456 bytes. The release-linked stripped static
   core is 86,328 bytes and its C selftest returns 42.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Forty-eighth executable increment — bounded in-place host dispatch
+
+The TinyArcade embedding no longer asks core imports or iOS C native callbacks
+to construct a heap `Vec` for every dispatch. Each accepted game/native import
+already has at most 16 i32 parameters and results; the VM now stages both in
+fixed stack arrays and gives the callback its exact writable result slice.
+Input, clock, RNG, indexed2d negotiation, render/audio submission and
+save/load-state all use this in-place door. The C bridge writes directly into
+the same bounded result slice. The original Rust returning-callback API remains
+an explicit compatibility adapter, while new public `register_in_place*`
+methods expose the product behavior to other native embeddings.
+
+For a nested host call, the trampoline checks activation/operand limits and
+fallibly reserves the suspended caller stack before entering app code. Bounded
+results remain in a 16-i32 inline record and append directly into that reserved
+stack, without a temporary heap allocation after the callback has mutated
+memory or host state. A top-level host call fallibly reserves its owned result
+before dispatch. Game import binding now addresses already-validated import
+slots directly, eliminating the former infallible cloned-name collection at
+runtime open.
+
+This is a host-door property of the cross-platform Wasm VM and versioned
+embedding ABI, not a private game opcode. Standard `.wasm` function imports
+remain the cartridge-facing contract.
+
+Evidence on 2026-08-21:
+
+- A VM unit test proves nested bounded host results use the inline variant,
+  while a public game-runtime black box passes exact `[20, 22]` parameters and
+  one writable result slot through `register_in_place`, then consumes result 42
+  in guest Wasm. Existing C callback success/failure/latch tests pass on the
+  migrated iOS path.
+- All 223 non-ignored package tests pass under all features. The two real games
+  retain exact JavaScriptCore replay parity, and the complete booted iPhone 17
+  Pro simulator smoke passes reviewed/private ownership, UIKit/CGImage, audio,
+  snapshot, replay, session and native-callback flows.
+- The final simulator performance pass records Depth Well at 0.119 ms average,
+  0.165 ms p95 and 0.338 ms max over 600 frames; Paddle Guard records 0.203 ms
+  average, 0.253 ms p95 and 1.069 ms max. These remain simulator regression
+  evidence, not physical-device claims.
+- Swift linkage remains below its gates at 1,552,744 bytes arm64 and 1,624,488
+  bytes x86_64; catalog/replay/private/session consumers are 1,425,576 /
+  1,400,008 / 1,418,176 / 1,417,344 bytes. The stripped static interpreter core
+  remains 86,328 bytes and its C selftest returns 42.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

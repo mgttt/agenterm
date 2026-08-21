@@ -2407,6 +2407,15 @@ secondary allocation per table at decode time.
 Prove the live-slot boundary through the public runtime and separately assert
 that branch preservation does not grow the operand vector's capacity.
 
+Apply the same rule across the guest/host door. If a product ABI already caps
+host parameters and results, give callbacks exact borrowed result storage backed
+by fixed stack arrays instead of asking every callback to return `vec![...]`.
+Fallibly reserve the suspended caller's operand stack (or a top-level result
+vector) before entering trusted app code, then append inline results directly;
+a reserve failure after the callback mutates guest memory is not an atomic
+allocation failure. Keep any allocating callback form as an explicit
+compatibility adapter, not the iOS product hot path.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a

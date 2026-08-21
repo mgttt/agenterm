@@ -231,8 +231,11 @@ each to 16 i32 parameters, 16 i32 results and a host-selected 1...64 calls per
 lifecycle. The quota resets for init/tick/suspend/resume and is charged before
 dispatch, so an over-budget call never reaches app code. A callback runs
 synchronously on the runtime owner thread, may read/write guest linear memory
-only during that call, and latches the cartridge on callback failure. This is a compatibility
-door, not an ambient native API: a host should expose the smallest versioned
+only during that call, and latches the cartridge on callback failure. Core
+imports and the iOS C callback path use fixed 16-value parameter/result staging.
+Before app code can mutate memory or host state, the VM fallibly reserves either
+the suspended caller stack or a top-level result destination; nested calls then
+append inline results directly without a temporary heap `Vec`. This is a compatibility door, not an ambient native API: a host should expose the smallest versioned
 module needed by the reviewed game and may decline a manifest capability even
 when the app binary implements it.
 

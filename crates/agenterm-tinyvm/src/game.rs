@@ -20,6 +20,13 @@ pub const KNOWN_BUTTON_MASK: u32 = (1 << 9) - 1;
 const ABI_MODULE: &str = "tinyarcade:core/v1";
 const SNAPSHOT_MAGIC: &[u8; 4] = b"TGS1";
 type NativeImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
+type NativeInPlaceImpl = dyn Fn(&[i32], &mut [i32], &mut [u8]) -> Result<(), WasmError>;
+
+#[derive(Clone)]
+enum NativeCallback {
+    Returning(Rc<NativeImpl>),
+    InPlace(Rc<NativeInPlaceImpl>),
+}
 
 /// Immutable policy surface that admitted a cartridge instance.
 #[repr(u32)]
@@ -106,7 +113,7 @@ struct NativeFunction {
     n_params: usize,
     n_results: usize,
     max_calls_per_lifecycle: u32,
-    callback: Rc<NativeImpl>,
+    callback: NativeCallback,
 }
 
 /// Native capabilities explicitly made available by the app host.
@@ -176,6 +183,65 @@ impl NativeModuleRegistry {
     where
         F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
     {
+        self.register_callback(
+            module,
+            field,
+            n_params,
+            n_results,
+            max_calls_per_lifecycle,
+            NativeCallback::Returning(Rc::new(callback)),
+        )
+    }
+
+    /// Register a native callback without callback-owned heap staging. The
+    /// runtime supplies an exact-size result slice to write in place.
+    pub fn register_in_place<F>(
+        &mut self,
+        module: &str,
+        field: &str,
+        n_params: usize,
+        n_results: usize,
+        callback: F,
+    ) -> Result<(), WasmError>
+    where
+        F: Fn(&[i32], &mut [i32], &mut [u8]) -> Result<(), WasmError> + 'static,
+    {
+        self.register_in_place_with_call_limit(module, field, n_params, n_results, 1, callback)
+    }
+
+    /// Register an in-place native callback with a per-lifecycle dispatch
+    /// ceiling. Parameter and result arities remain capped at 16.
+    pub fn register_in_place_with_call_limit<F>(
+        &mut self,
+        module: &str,
+        field: &str,
+        n_params: usize,
+        n_results: usize,
+        max_calls_per_lifecycle: u32,
+        callback: F,
+    ) -> Result<(), WasmError>
+    where
+        F: Fn(&[i32], &mut [i32], &mut [u8]) -> Result<(), WasmError> + 'static,
+    {
+        self.register_callback(
+            module,
+            field,
+            n_params,
+            n_results,
+            max_calls_per_lifecycle,
+            NativeCallback::InPlace(Rc::new(callback)),
+        )
+    }
+
+    fn register_callback(
+        &mut self,
+        module: &str,
+        field: &str,
+        n_params: usize,
+        n_results: usize,
+        max_calls_per_lifecycle: u32,
+        callback: NativeCallback,
+    ) -> Result<(), WasmError> {
         if module == ABI_MODULE
             || !valid_native_namespace(module)
             || !valid_native_field(field)
@@ -194,7 +260,7 @@ impl NativeModuleRegistry {
             n_params,
             n_results,
             max_calls_per_lifecycle,
-            callback: Rc::new(callback),
+            callback,
         });
         Ok(())
     }
@@ -776,90 +842,150 @@ fn bind_imports(
     host: &Rc<RefCell<HostState>>,
     registry: &NativeModuleRegistry,
 ) -> Result<(), WasmError> {
+    enum ImportPlan {
+        Native {
+            index: usize,
+            max_calls: u32,
+            callback: NativeCallback,
+        },
+        InputBits,
+        ClockMs,
+        RandomU32,
+        SubmitRender,
+        SubmitAudio,
+        Indexed2dVersion,
+        SaveState,
+        LoadState,
+    }
+
     let indexed2d_enabled = module
         .imports()
         .iter()
         .any(|import| import.module == ABI_MODULE && import.field == "indexed2d_version");
-    let fields: Vec<_> = module
-        .imports()
-        .iter()
-        .map(|import| (import.module.clone(), import.field.clone()))
-        .collect();
-    for (namespace, field) in fields {
-        if namespace != ABI_MODULE {
-            let (index, native) = registry
-                .find_with_index(&namespace, &field)
-                .ok_or(WasmError::Trap("game import is not allowed"))?;
-            let callback = native.callback.clone();
-            let max_calls = native.max_calls_per_lifecycle;
-            let lifecycle = host.clone();
-            module.bind_import(&namespace, &field, move |args, memory| {
-                lifecycle.borrow_mut().charge_native(index, max_calls)?;
-                callback(args, memory)
-            })?;
-            continue;
-        }
-        let shared = host.clone();
-        match field.as_str() {
-            "input_bits" => module.bind_import(ABI_MODULE, &field, move |_, _| {
-                let state = shared.borrow();
-                state.frame_active()?;
-                Ok(alloc::vec![state.input.buttons as i32])
-            })?,
-            "clock_ms" => module.bind_import(ABI_MODULE, &field, move |_, _| {
-                let state = shared.borrow();
-                state.frame_active()?;
-                Ok(alloc::vec![state.input.clock_ms as i32])
-            })?,
-            "random_u32" => module.bind_import(ABI_MODULE, &field, move |_, _| {
-                let mut state = shared.borrow_mut();
-                state.frame_active()?;
-                let mut value = state.rng;
-                value ^= value << 13;
-                value ^= value >> 17;
-                value ^= value << 5;
-                state.rng = value;
-                Ok(alloc::vec![value as i32])
-            })?,
-            "submit_render" => bind_submit(module, &field, shared, true, indexed2d_enabled)?,
-            "submit_audio" => bind_submit(module, &field, shared, false, false)?,
-            "indexed2d_version" => {
-                module.bind_import(ABI_MODULE, &field, move |_, _| Ok(alloc::vec![1]))?
+    for position in 0..module.imports().len() {
+        let plan = {
+            let import = &module.imports()[position];
+            if import.module != ABI_MODULE {
+                let (index, native) = registry
+                    .find_with_index(&import.module, &import.field)
+                    .ok_or(WasmError::Trap("game import is not allowed"))?;
+                ImportPlan::Native {
+                    index,
+                    max_calls: native.max_calls_per_lifecycle,
+                    callback: native.callback.clone(),
+                }
+            } else {
+                match import.field.as_str() {
+                    "input_bits" => ImportPlan::InputBits,
+                    "clock_ms" => ImportPlan::ClockMs,
+                    "random_u32" => ImportPlan::RandomU32,
+                    "submit_render" => ImportPlan::SubmitRender,
+                    "submit_audio" => ImportPlan::SubmitAudio,
+                    "indexed2d_version" => ImportPlan::Indexed2dVersion,
+                    "save_state" => ImportPlan::SaveState,
+                    "load_state" => ImportPlan::LoadState,
+                    _ => return Err(WasmError::Trap("game import is not allowed")),
+                }
             }
-            "save_state" => module.bind_import(ABI_MODULE, &field, move |args, memory| {
-                let mut state = shared.borrow_mut();
-                if state.phase != Phase::Suspend {
-                    return Err(WasmError::Trap("game save outside suspend"));
+        };
+        let shared = host.clone();
+        match plan {
+            ImportPlan::Native {
+                index,
+                max_calls,
+                callback,
+            } => module.bind_import_at_bounded(position, move |args, results, memory| {
+                shared.borrow_mut().charge_native(index, max_calls)?;
+                match &callback {
+                    NativeCallback::Returning(callback) => {
+                        let returned = callback(args, memory)?;
+                        if returned.len() != results.len() {
+                            return Err(WasmError::Trap("native capability result arity"));
+                        }
+                        results.copy_from_slice(&returned);
+                        Ok(())
+                    }
+                    NativeCallback::InPlace(callback) => callback(args, results, memory),
                 }
-                let bytes = memory_range(args, memory)?;
-                if state.state_submitted || bytes.len() > state.limits.max_state_bytes {
-                    return Err(WasmError::Trap("game state budget"));
-                }
-                state
-                    .saved_state
-                    .try_reserve_exact(bytes.len())
-                    .map_err(|_| WasmError::Trap("game state allocation"))?;
-                state.saved_state.extend_from_slice(bytes);
-                state.state_submitted = true;
-                Ok(alloc::vec![0])
             })?,
-            "load_state" => module.bind_import(ABI_MODULE, &field, move |args, memory| {
-                let mut state = shared.borrow_mut();
-                if state.phase != Phase::Resume || state.state_loaded {
-                    return Err(WasmError::Trap("game load outside resume"));
-                }
-                let ptr = nonnegative(args[0])?;
-                let capacity = nonnegative(args[1])?;
-                let len = state.restore_state.len();
-                let end = ptr
-                    .checked_add(len)
-                    .filter(|&end| end <= memory.len() && len <= capacity)
-                    .ok_or(WasmError::Trap("game restore capacity"))?;
-                memory[ptr..end].copy_from_slice(&state.restore_state);
-                state.state_loaded = true;
-                Ok(alloc::vec![len as i32])
-            })?,
-            _ => return Err(WasmError::Trap("game import is not allowed")),
+            ImportPlan::InputBits => {
+                module.bind_import_at_bounded(position, move |_, results, _| {
+                    let state = shared.borrow();
+                    state.frame_active()?;
+                    results[0] = state.input.buttons as i32;
+                    Ok(())
+                })?
+            }
+            ImportPlan::ClockMs => {
+                module.bind_import_at_bounded(position, move |_, results, _| {
+                    let state = shared.borrow();
+                    state.frame_active()?;
+                    results[0] = state.input.clock_ms as i32;
+                    Ok(())
+                })?
+            }
+            ImportPlan::RandomU32 => {
+                module.bind_import_at_bounded(position, move |_, results, _| {
+                    let mut state = shared.borrow_mut();
+                    state.frame_active()?;
+                    let mut value = state.rng;
+                    value ^= value << 13;
+                    value ^= value >> 17;
+                    value ^= value << 5;
+                    state.rng = value;
+                    results[0] = value as i32;
+                    Ok(())
+                })?
+            }
+            ImportPlan::SubmitRender => {
+                bind_submit(module, position, shared, true, indexed2d_enabled)?
+            }
+            ImportPlan::SubmitAudio => bind_submit(module, position, shared, false, false)?,
+            ImportPlan::Indexed2dVersion => {
+                module.bind_import_at_bounded(position, move |_, results, _| {
+                    results[0] = 1;
+                    Ok(())
+                })?
+            }
+            ImportPlan::SaveState => {
+                module.bind_import_at_bounded(position, move |args, results, memory| {
+                    let mut state = shared.borrow_mut();
+                    if state.phase != Phase::Suspend {
+                        return Err(WasmError::Trap("game save outside suspend"));
+                    }
+                    let bytes = memory_range(args, memory)?;
+                    if state.state_submitted || bytes.len() > state.limits.max_state_bytes {
+                        return Err(WasmError::Trap("game state budget"));
+                    }
+                    state
+                        .saved_state
+                        .try_reserve_exact(bytes.len())
+                        .map_err(|_| WasmError::Trap("game state allocation"))?;
+                    state.saved_state.extend_from_slice(bytes);
+                    state.state_submitted = true;
+                    results[0] = 0;
+                    Ok(())
+                })?
+            }
+            ImportPlan::LoadState => {
+                module.bind_import_at_bounded(position, move |args, results, memory| {
+                    let mut state = shared.borrow_mut();
+                    if state.phase != Phase::Resume || state.state_loaded {
+                        return Err(WasmError::Trap("game load outside resume"));
+                    }
+                    let ptr = nonnegative(args[0])?;
+                    let capacity = nonnegative(args[1])?;
+                    let len = state.restore_state.len();
+                    let end = ptr
+                        .checked_add(len)
+                        .filter(|&end| end <= memory.len() && len <= capacity)
+                        .ok_or(WasmError::Trap("game restore capacity"))?;
+                    memory[ptr..end].copy_from_slice(&state.restore_state);
+                    state.state_loaded = true;
+                    results[0] = len as i32;
+                    Ok(())
+                })?
+            }
         }
     }
     Ok(())
@@ -867,12 +993,12 @@ fn bind_imports(
 
 fn bind_submit(
     module: &mut WasmModule,
-    field: &str,
+    position: usize,
     host: Rc<RefCell<HostState>>,
     render: bool,
     indexed2d_enabled: bool,
 ) -> Result<(), WasmError> {
-    module.bind_import(ABI_MODULE, field, move |args, memory| {
+    module.bind_import_at_bounded(position, move |args, results, memory| {
         let mut state = host.borrow_mut();
         state.frame_active()?;
         let bytes = memory_range(args, memory)?;
@@ -900,7 +1026,8 @@ fn bind_submit(
             state.audio.extend_from_slice(bytes);
             state.audio_submitted = true;
         }
-        Ok(alloc::vec![0])
+        results[0] = 0;
+        Ok(())
     })
 }
 

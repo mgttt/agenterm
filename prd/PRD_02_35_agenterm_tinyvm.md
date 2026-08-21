@@ -38,6 +38,7 @@ agenterm-tinyvm (35)
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
 │       ├── native module registry    [x]
+│       ├── bounded in-place host dispatch [x]
 │       ├── App Store bundled-only gate [x]
 │       └── machine host profile      [x]
 │           └── catalog profile binding [x]
@@ -108,6 +109,11 @@ trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native
 `br_table` targets 在 decode 时进入每函数的扁平、不可变 arena，执行指令只保存 range 并
 直接借用；branch value 通过原 stack 内 copy 保留，不会在循环热路径 clone guest-sized
 vector、触发二级分配或为每次分支建立临时 `Vec`。
+游戏 embedding 的 core imports 与 iOS C native callbacks 使用同一有界 in-place host
+door：最多 16 个 i32 参数/结果在固定栈数组中传递，VM 在进入 app callback 前为 suspended
+operand stack 或顶层结果完整 `try_reserve`。嵌套 core/native dispatch 直接把 inline 结果
+写回已预留的 caller stack；输入、时钟、RNG、媒体提交、状态保存/恢复和 C callback 不再
+为每次 dispatch 建立临时 heap `Vec`。通用 Rust returning-callback API 仅作为兼容层保留。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。
 核 strip `<100KiB`。
