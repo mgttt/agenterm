@@ -141,6 +141,12 @@ downloaded cartridges remain standard `.wasm` interpreted by tinyvm on iOS.
 The reusable target is ownership, bounded communication and measurement design.
 Paper: [QJWasm, Journal of Systems Architecture 179 (2026)](https://www.sciencedirect.com/science/article/pii/S1383762126002444).
 
+The first pinned-source pass is recorded in
+[`docs/qjwasm-wa2x-source-review.md`](../docs/qjwasm-wa2x-source-review.md).
+It accepts the ownership, no-copy memory, wakeup-coalescing and measurement
+lessons; it rejects the current unbounded/unsafe threading implementation and
+keeps a tinyvm-native boundary benchmark as the next executable item.
+
 The execution kernel and artifact-trust branch can mature independently. The
 iOS bridge must not freeze a game ABI before the native Rust black-box owner
 can drive a persistent instance. A remote catalog must not precede hash,
