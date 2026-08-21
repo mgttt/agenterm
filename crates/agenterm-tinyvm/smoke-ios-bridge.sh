@@ -27,6 +27,16 @@ if grep -Fq 'var pcm = Data(' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; t
   echo "tone synthesis must write the final WAV without a full PCM staging buffer" >&2
   exit 1
 fi
+grep -Fq '@preconcurrency import GameController' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'public final class TinyArcadeAppleInputV1' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'controller.handlerQueue = .main' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'keyboard.handlerQueue = .main' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'sourceHandler(binding.source, [])' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 
 CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"
@@ -202,14 +212,16 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # interruption, route-loss and media-service-reset notifications without App
 # glue. Indexed2d application metadata then adds strict Rust/Swift decoding and
 # exact host-profile negotiation. The bounded tone-wave LRU and direct
-# single-buffer WAV synthesis fund one further 16 KiB step. Keep these complete
-# boundaries explicit rather than hiding them in an unbounded ceiling.
-MAX_ARM64_LINKED_BYTES=1703936
+# single-buffer WAV synthesis fund one further 16 KiB step. The Apple
+# keyboard/gamepad adapter and its two-device executable proof fund three more
+# steps for GameController discovery, mapping and disconnect release. Keep these
+# complete boundaries explicit rather than hiding them in an unbounded ceiling.
+MAX_ARM64_LINKED_BYTES=1753088
 # The optional SIMD profile keeps v128 inline and adds its portable interpreter
 # path only when explicitly requested. Give that opt-in product two separate
 # 16 KiB graduation steps; never weaken the default iOS product ceiling.
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_ARM64_LINKED_BYTES=1720320 ;;
+  *,simd,*) MAX_ARM64_LINKED_BYTES=1769472 ;;
 esac
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
@@ -220,10 +232,12 @@ esac
 # The simulator slice crosses four matching 16 KiB linker buckets; the fourth
 # pays for its main-queue route-change dispatch path. The indexed2d metadata
 # protocol receives the same one-bucket step as the arm64 product. The bounded
-# tone-wave cache receives one matching simulator-only step.
-MAX_X86_64_LINKED_BYTES=1785856
+# tone-wave cache receives one matching simulator-only step. The Apple input
+# adapter receives three matching steps; its synthetic two-controller proof is
+# compiled only into this smoke executable and receives one further step.
+MAX_X86_64_LINKED_BYTES=1851392
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_X86_64_LINKED_BYTES=1802240 ;;
+  *,simd,*) MAX_X86_64_LINKED_BYTES=1867776 ;;
 esac
 echo "iOS linked sizes: arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"

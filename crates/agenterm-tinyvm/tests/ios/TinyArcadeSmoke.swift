@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+@preconcurrency import GameController
 import UIKit
 import TinyArcade
 
@@ -334,6 +335,70 @@ struct TinyArcadeSmoke {
 
     @MainActor
     static func main() async throws {
+        var aggregatedControllerInput = TinyArcadeInputStateV1()
+        let firstController = GCController.withExtendedGamepad()
+        let secondController = GCController.withExtendedGamepad()
+        let appleInput = TinyArcadeAppleInputV1(
+            observesSystemDevices: false,
+            initialControllers: [firstController, secondController],
+            initialKeyboard: nil
+        ) { source, buttons in
+            do {
+                try aggregatedControllerInput.set(buttons, forSource: source)
+            } catch {
+                preconditionFailure("bounded Apple input aggregation failed: \(error)")
+            }
+        }
+        guard let firstGamepad = firstController.extendedGamepad,
+              let secondGamepad = secondController.extendedGamepad else {
+            preconditionFailure("synthetic extended gamepads must expose profiles")
+        }
+        firstGamepad.dpad.setValueForXAxis(-1, yAxis: 1)
+        firstGamepad.buttonA.setValue(1)
+        firstGamepad.buttonMenu.setValue(1)
+        secondGamepad.leftThumbstick.setValueForXAxis(1, yAxis: -1)
+        secondGamepad.buttonB.setValue(1)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        precondition(
+            aggregatedControllerInput.buttons == [
+                .left, .right, .up, .down, .primary, .secondary, .menu,
+            ]
+        )
+        appleInput.detach(firstController)
+        precondition(aggregatedControllerInput.buttons == [.right, .down, .secondary])
+        appleInput.deactivate()
+        precondition(!appleInput.isActive)
+        secondGamepad.leftThumbstick.setValueForXAxis(0, yAxis: 0)
+        secondGamepad.buttonB.setValue(0)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        precondition(aggregatedControllerInput.buttons.isEmpty)
+        appleInput.activate()
+        secondGamepad.dpad.setValueForXAxis(0, yAxis: 1)
+        secondGamepad.buttonX.setValue(1)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        precondition(aggregatedControllerInput.buttons == [.up, .tertiary])
+        appleInput.detach(secondController)
+        precondition(aggregatedControllerInput.buttons.isEmpty)
+        precondition(TinyArcadeAppleInputV1.button(for: .leftArrow) == .left)
+        precondition(TinyArcadeAppleInputV1.button(for: .keyA) == .left)
+        precondition(TinyArcadeAppleInputV1.button(for: .rightArrow) == .right)
+        precondition(TinyArcadeAppleInputV1.button(for: .keyD) == .right)
+        precondition(TinyArcadeAppleInputV1.button(for: .upArrow) == .up)
+        precondition(TinyArcadeAppleInputV1.button(for: .keyW) == .up)
+        precondition(TinyArcadeAppleInputV1.button(for: .downArrow) == .down)
+        precondition(TinyArcadeAppleInputV1.button(for: .keyS) == .down)
+        precondition(TinyArcadeAppleInputV1.button(for: .spacebar) == .primary)
+        precondition(TinyArcadeAppleInputV1.button(for: .keyX) == .secondary)
+        precondition(TinyArcadeAppleInputV1.button(for: .keyC) == .tertiary)
+        precondition(TinyArcadeAppleInputV1.button(for: .returnOrEnter) == .start)
+        precondition(TinyArcadeAppleInputV1.button(for: .escape) == .menu)
+
         precondition(tinyarcade_v1_abi_version() == TINYARCADE_ABI_VERSION)
         var config = tinyarcade_config_v1()
         precondition(tinyarcade_v1_default_config(&config) == TINYARCADE_OK)

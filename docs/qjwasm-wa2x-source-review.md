@@ -165,6 +165,10 @@ Reject for the iOS cartridge runtime:
    independent eight-entry and 512 KiB ceilings with LRU eviction. Initial
    synthesis writes one final WAV buffer; platform `AVAudioPlayer` objects are
    deliberately rebuilt per attempt and never enter the cache.
-10. [ ] If background execution becomes a product requirement, first specify and
+10. [x] Apple keyboard and controller delivery now has one main-actor owner,
+   bounded source identities and explicit disconnect/deactivation release.
+   Device callbacks carry only the stable button value across the boundary;
+   GameController objects and platform discovery never enter the VM contract.
+11. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

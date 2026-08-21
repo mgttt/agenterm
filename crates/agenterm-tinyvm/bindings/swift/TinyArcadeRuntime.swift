@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreGraphics
+@preconcurrency import GameController
 import UIKit
 import TinyArcade
 
@@ -3146,6 +3147,235 @@ public struct TinyArcadeInputStateV1: Sendable {
     public mutating func releaseAll() {
         sources.removeAll(keepingCapacity: true)
         buttons = []
+    }
+}
+
+/// Main-actor adapter from Apple's coalesced keyboard and extended gamepads to
+/// the stable TinyArcade button contract. Every physical device owns a distinct
+/// source, and disconnect/release events always publish an empty state.
+@MainActor
+public final class TinyArcadeAppleInputV1: NSObject {
+    public static let keyboardSource: UInt64 = UInt64.max
+    public typealias SourceHandler = @MainActor (UInt64, TinyArcadeButtonsV1) -> Void
+
+    private struct ControllerBinding {
+        let controller: GCController
+        let source: UInt64
+    }
+
+    private let sourceHandler: SourceHandler
+    private let observesSystemDevices: Bool
+    private var controllers: [ObjectIdentifier: ControllerBinding] = [:]
+    private var keyboard: GCKeyboard?
+    private var keyboardButtons: TinyArcadeButtonsV1 = []
+    private var nextControllerSource: UInt64 = 1
+    public private(set) var isActive = true
+
+    public convenience init(sourceHandler: @escaping SourceHandler) {
+        self.init(
+            observesSystemDevices: true,
+            initialControllers: GCController.controllers(),
+            initialKeyboard: GCKeyboard.coalesced,
+            sourceHandler: sourceHandler
+        )
+    }
+
+    init(
+        observesSystemDevices: Bool,
+        initialControllers: [GCController],
+        initialKeyboard: GCKeyboard?,
+        sourceHandler: @escaping SourceHandler
+    ) {
+        self.sourceHandler = sourceHandler
+        self.observesSystemDevices = observesSystemDevices
+        super.init()
+        if observesSystemDevices {
+            let center = NotificationCenter.default
+            center.addObserver(
+                self,
+                selector: #selector(controllerDidConnect(_:)),
+                name: .GCControllerDidConnect,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(controllerDidDisconnect(_:)),
+                name: .GCControllerDidDisconnect,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(keyboardDidConnect(_:)),
+                name: .GCKeyboardDidConnect,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(keyboardDidDisconnect(_:)),
+                name: .GCKeyboardDidDisconnect,
+                object: nil
+            )
+        }
+        for controller in initialControllers { attach(controller) }
+        if let initialKeyboard { attach(initialKeyboard) }
+    }
+
+    isolated deinit {
+        if observesSystemDevices { NotificationCenter.default.removeObserver(self) }
+        for binding in controllers.values {
+            binding.controller.extendedGamepad?.valueChangedHandler = nil
+        }
+        keyboard?.keyboardInput?.keyChangedHandler = nil
+    }
+
+    /// Clears every currently attached source without detaching devices. Call
+    /// this before scene resignation so a missing hardware-up event cannot
+    /// leave a guest button held.
+    public func releaseAll() {
+        for binding in controllers.values { sourceHandler(binding.source, []) }
+        if keyboard != nil { sourceHandler(Self.keyboardSource, []) }
+        keyboardButtons = []
+    }
+
+    public func deactivate() {
+        isActive = false
+        releaseAll()
+    }
+
+    /// Resumes event delivery from an empty baseline. Buttons that remained
+    /// physically held while inactive are not synthesized as fresh presses.
+    public func activate() {
+        releaseAll()
+        isActive = true
+    }
+
+    static func buttons(for gamepad: GCExtendedGamepad) -> TinyArcadeButtonsV1 {
+        var buttons: TinyArcadeButtonsV1 = []
+        if gamepad.dpad.left.isPressed || gamepad.leftThumbstick.left.isPressed {
+            buttons.insert(.left)
+        }
+        if gamepad.dpad.right.isPressed || gamepad.leftThumbstick.right.isPressed {
+            buttons.insert(.right)
+        }
+        if gamepad.dpad.up.isPressed || gamepad.leftThumbstick.up.isPressed {
+            buttons.insert(.up)
+        }
+        if gamepad.dpad.down.isPressed || gamepad.leftThumbstick.down.isPressed {
+            buttons.insert(.down)
+        }
+        if gamepad.buttonA.isPressed { buttons.insert(.primary) }
+        if gamepad.buttonB.isPressed { buttons.insert(.secondary) }
+        if gamepad.buttonX.isPressed { buttons.insert(.tertiary) }
+        if gamepad.buttonY.isPressed { buttons.insert(.start) }
+        if gamepad.buttonMenu.isPressed { buttons.insert(.menu) }
+        return buttons
+    }
+
+    static func button(for keyCode: GCKeyCode) -> TinyArcadeButtonsV1? {
+        switch keyCode {
+        case .leftArrow, .keyA: .left
+        case .rightArrow, .keyD: .right
+        case .upArrow, .keyW: .up
+        case .downArrow, .keyS: .down
+        case .spacebar, .keyZ: .primary
+        case .keyX: .secondary
+        case .keyC: .tertiary
+        case .returnOrEnter: .start
+        case .escape: .menu
+        default: nil
+        }
+    }
+
+    func attach(_ controller: GCController) {
+        let identity = ObjectIdentifier(controller)
+        guard controllers[identity] == nil,
+              controllers.count + (keyboard == nil ? 0 : 1)
+                < TinyArcadeInputStateV1.maximumSourceCount,
+              let gamepad = controller.extendedGamepad,
+              nextControllerSource < Self.keyboardSource else { return }
+        let source = nextControllerSource
+        nextControllerSource += 1
+        controllers[identity] = ControllerBinding(controller: controller, source: source)
+        controller.handlerQueue = .main
+        gamepad.valueChangedHandler = { [weak self, weak controller] gamepad, _ in
+            guard let self, let controller else { return }
+            let buttons = Self.buttons(for: gamepad)
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self.publish(controller: controller, buttons: buttons) }
+            } else {
+                DispatchQueue.main.async { [weak self, weak controller] in
+                    guard let self, let controller else { return }
+                    self.publish(controller: controller, buttons: buttons)
+                }
+            }
+        }
+        sourceHandler(source, isActive ? Self.buttons(for: gamepad) : [])
+    }
+
+    func detach(_ controller: GCController) {
+        let identity = ObjectIdentifier(controller)
+        guard let binding = controllers.removeValue(forKey: identity) else { return }
+        controller.extendedGamepad?.valueChangedHandler = nil
+        sourceHandler(binding.source, [])
+    }
+
+    private func publish(controller: GCController, buttons: TinyArcadeButtonsV1) {
+        guard isActive,
+              let binding = controllers[ObjectIdentifier(controller)] else { return }
+        sourceHandler(binding.source, buttons)
+    }
+
+    private func attach(_ keyboard: GCKeyboard) {
+        guard self.keyboard == nil,
+              controllers.count < TinyArcadeInputStateV1.maximumSourceCount else { return }
+        self.keyboard = keyboard
+        keyboard.handlerQueue = .main
+        keyboard.keyboardInput?.keyChangedHandler = { [weak self] _, _, keyCode, pressed in
+            guard let self, let button = Self.button(for: keyCode) else { return }
+            let update = {
+                guard self.isActive else { return }
+                if pressed {
+                    self.keyboardButtons.insert(button)
+                } else {
+                    self.keyboardButtons.remove(button)
+                }
+                self.sourceHandler(Self.keyboardSource, self.keyboardButtons)
+            }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated(update)
+            } else {
+                DispatchQueue.main.async { MainActor.assumeIsolated(update) }
+            }
+        }
+        sourceHandler(Self.keyboardSource, keyboardButtons)
+    }
+
+    private func detach(_ keyboard: GCKeyboard) {
+        guard self.keyboard === keyboard else { return }
+        keyboard.keyboardInput?.keyChangedHandler = nil
+        self.keyboard = nil
+        keyboardButtons = []
+        sourceHandler(Self.keyboardSource, [])
+    }
+
+    @objc nonisolated private func controllerDidConnect(_ notification: Notification) {
+        guard let controller = notification.object as? GCController else { return }
+        DispatchQueue.main.async { [weak self] in self?.attach(controller) }
+    }
+
+    @objc nonisolated private func controllerDidDisconnect(_ notification: Notification) {
+        guard let controller = notification.object as? GCController else { return }
+        DispatchQueue.main.async { [weak self] in self?.detach(controller) }
+    }
+
+    @objc nonisolated private func keyboardDidConnect(_ notification: Notification) {
+        guard let keyboard = notification.object as? GCKeyboard else { return }
+        DispatchQueue.main.async { [weak self] in self?.attach(keyboard) }
+    }
+
+    @objc nonisolated private func keyboardDidDisconnect(_ notification: Notification) {
+        guard let keyboard = notification.object as? GCKeyboard else { return }
+        DispatchQueue.main.async { [weak self] in self?.detach(keyboard) }
     }
 }
 

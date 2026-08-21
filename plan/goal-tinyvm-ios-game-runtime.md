@@ -86,6 +86,7 @@ tinyvm iOS game runtime
 │   ├── static library/XCFramework   [x]
 │   ├── Swift ownership/threading     [x]
 │   ├── input + monotonic clock owner [x]
+│   │   └── Apple keyboard/gamepad adapter [x]
 │   ├── frame pacing + scene state    [x]
 │   ├── stable two-pass copy lengths  [x]
 │   ├── indexed 2D presentation       [x]
@@ -4065,3 +4066,35 @@ simulator-only step. Default linked smokes are 1,691,416 bytes arm64 and
 The executable PRD trace now binds 128 completed claims.
 Physical speaker/headphone and TestFlight audio evidence remain open, so the
 persistent goal stays active.
+
+## One-hundred-twenty-ninth executable increment — bounded Apple hardware input
+
+The iOS SDK now owns one main-actor adapter from Apple's public GameController
+surface to TinyArcade's stable nine-button contract. Every extended gamepad has
+a non-reused source id, the coalesced hardware keyboard has a reserved source,
+and at most 32 attached sources can enter the existing overlap-safe aggregator.
+D-pad and left stick share directions; A/B/X/Y/Menu and
+arrows/WASD/Space/Z/X/C/Return/Escape have an explicit portable mapping.
+Platform objects remain entirely in the host: the VM and cartridge import table
+still receive only the versioned `i32` button bits.
+
+Disconnect, pause, scene resignation and deactivation publish empty sets for
+all attached devices. Events received while inactive are ignored, and
+reactivation begins from an empty baseline so a missed key-up cannot stick or a
+held background key become a fabricated new press. Nostalgia Arcade consumer
+commit `d5c6690` wires the same owner into both live WASM routes, derives only
+per-source rising edges for their edge-triggered controls and reserves Menu for
+native pause.
+
+Evidence on 2026-08-22: the Swift executable drives two synthetic extended
+gamepads through simultaneous D-pad/thumbstick/action input, disconnects one
+without clearing the other, rejects inactive changes, reactivates cleanly and
+checks every keyboard mapping. The complete real-App gate passes seven Depth
+Well tests, four Signal Lock tests, one two-game UI journey and an unsigned
+arm64 device Release build against the exact current-main tinyvm archive.
+Default linked smokes are 1,745,688 bytes arm64 and 1,840,184 bytes x86_64;
+the opt-in SIMD profile is 1,762,936 / 1,844,056 bytes. Only the simulator test
+executable needed a fourth explicit 16 KiB graduation step. The executable PRD
+trace now binds 130 completed claims. Physical
+keyboard/gamepad latency and feel, physical iPhone lifecycle and TestFlight
+evidence remain open, so the persistent goal stays active.

@@ -81,6 +81,25 @@ backwards or oversized samples without changing its baseline. It never accepts
 `Date` directly; callers remain responsible for supplying the documented
 monotonic source rather than converting wall-clock time to seconds.
 
+`TinyArcadeAppleInputV1` is the main-actor adapter for Apple's public
+GameController surface. It discovers connected extended gamepads and the
+coalesced hardware keyboard, assigns each controller a non-reused source id,
+and sends complete source-local pressed sets to the stable nine-button
+contract. D-pad or left stick map to directions; A/B/X/Y map to
+primary/secondary/tertiary/start; Menu maps to menu. Arrow keys or WASD map to
+directions, Space/Z/X/C to the three actions, Return to start and Escape to
+menu. Controller and keyboard handler queues are explicitly main-queue owned.
+Unknown keys and controllers without an extended-gamepad profile are ignored.
+
+Disconnect, pause, scene resignation and owner deactivation publish an empty
+set for every attached source. Reactivation also starts empty: a key held while
+the app was inactive is not invented as a new press. The executable SDK smoke
+uses two synthetic `GCExtendedGamepad` controllers to prove simultaneous
+direction/action union, source-isolated disconnect, inactive-event rejection,
+clean reactivation and the exact keyboard map. This is deterministic adapter
+evidence, not a claim that Bluetooth latency, physical button feel or a real
+keyboard/controller has been tested on hardware.
+
 On scene deactivation the app calls `deactivateAndSave(to:)`. The session clears
 all inputs, becomes inactive before persistence, and rejects further input or
 ticks even if storage fails. A runtime/suspend error marks the session failed;
