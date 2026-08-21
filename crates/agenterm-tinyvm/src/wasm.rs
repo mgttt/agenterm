@@ -46,6 +46,13 @@ pub const WASM_MAX_ALLOC_PAGES: usize = 256;
 pub const WASM_STACK_LIMIT: usize = 65_536;
 /// Maximum declared locals per function (a decode-time sanity bound).
 pub const WASM_MAX_LOCALS: usize = 1 << 20;
+/// Maximum allocation-amplifying logical records decoded from one module.
+///
+/// Raw data/name bytes are already bounded by their containing input. This
+/// budget covers types, imports, functions, locals, instructions, branch-table
+/// targets and other records whose in-memory representation is much larger
+/// than their shortest wire encoding.
+pub const WASM_MAX_DECODE_ITEMS: usize = 262_144;
 
 /// A tagged WebAssembly value. The operand stack, locals, arguments, and
 /// results are all sequences of these so the four numeric types can coexist.
@@ -67,6 +74,32 @@ pub enum WasmError {
     Decode(&'static str),
     /// The program trapped at run time.
     Trap(&'static str),
+}
+
+struct DecodeBudget {
+    remaining: usize,
+}
+
+impl DecodeBudget {
+    fn new() -> Self {
+        Self {
+            remaining: WASM_MAX_DECODE_ITEMS,
+        }
+    }
+
+    fn charge(&mut self, count: usize) -> Result<(), WasmError> {
+        self.remaining = self
+            .remaining
+            .checked_sub(count)
+            .ok_or(WasmError::Decode("module decode budget"))?;
+        Ok(())
+    }
+}
+
+fn reserve_exact<T>(values: &mut Vec<T>, count: usize) -> Result<(), WasmError> {
+    values
+        .try_reserve_exact(count)
+        .map_err(|_| WasmError::Decode("module allocation"))
 }
 
 impl WasmError {
@@ -463,11 +496,12 @@ fn block_arity(bytes: &[u8], i: usize) -> Result<(u8, u32, usize), WasmError> {
     }
 }
 
-fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
+fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> {
     let mut ops: Vec<Op> = Vec::new();
     let mut open: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < body.len() {
+        budget.charge(1)?;
         let opcode = body[i];
         i += 1;
         match opcode {
@@ -615,7 +649,10 @@ fn decode(body: &[u8]) -> Result<Vec<Op>, WasmError> {
             0x0E => {
                 let (count, n1) = leb_u32(body, i)?;
                 let mut cur = n1;
-                let mut targets = Vec::with_capacity(count as usize);
+                let count = count as usize;
+                budget.charge(count)?;
+                let mut targets = Vec::new();
+                reserve_exact(&mut targets, count)?;
                 for _ in 0..count {
                     let (t, ni) = leb_u32(body, cur)?;
                     cur = ni;
@@ -904,12 +941,22 @@ fn le8(s: &[u8]) -> [u8; 8] {
 
 /// Read `n` value-type bytes, bounds-checked, returning them and the next
 /// offset. `call_indirect` compares these, so the bytes are kept, not skipped.
-fn read_valtypes(p: &[u8], i: usize, n: u32) -> Result<(Vec<u8>, usize), WasmError> {
+fn read_valtypes(
+    p: &[u8],
+    i: usize,
+    n: u32,
+    budget: &mut DecodeBudget,
+) -> Result<(Vec<u8>, usize), WasmError> {
+    let n = n as usize;
+    budget.charge(n)?;
     let end = i
-        .checked_add(n as usize)
+        .checked_add(n)
         .filter(|&e| e <= p.len())
         .ok_or(WasmError::Decode("value-type list runs past section"))?;
-    Ok((p[i..end].to_vec(), end))
+    let mut values = Vec::new();
+    reserve_exact(&mut values, n)?;
+    values.extend_from_slice(&p[i..end]);
+    Ok((values, end))
 }
 
 /// Read a UTF-8 name (LEB length + bytes), returning it and the next offset.
@@ -919,9 +966,12 @@ fn read_name(p: &[u8], i: usize) -> Result<(String, usize), WasmError> {
         .checked_add(len as usize)
         .filter(|&e| e <= p.len())
         .ok_or(WasmError::Decode("name runs past section"))?;
-    let s = core::str::from_utf8(&p[ni..end])
-        .map_err(|_| WasmError::Decode("name is not valid UTF-8"))?
-        .to_owned();
+    let decoded = core::str::from_utf8(&p[ni..end])
+        .map_err(|_| WasmError::Decode("name is not valid UTF-8"))?;
+    let mut s = String::new();
+    s.try_reserve_exact(decoded.len())
+        .map_err(|_| WasmError::Decode("module allocation"))?;
+    s.push_str(decoded);
     Ok((s, end))
 }
 
@@ -945,11 +995,15 @@ fn parse_table_section(p: &[u8]) -> Result<usize, WasmError> {
     match flag {
         0x00 => {}
         0x01 => {
-            let (_max, _ni) = leb_u32(p, i)?;
+            let (_max, ni) = leb_u32(p, i)?;
+            i = ni;
         }
         _other => {
             return Err(WasmError::Decode("unsupported table limits flag 0x"));
         }
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing table section bytes"));
     }
     Ok(min as usize)
 }
@@ -971,7 +1025,8 @@ fn parse_memory_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
     let max = match flag {
         0x00 => None,
         0x01 => {
-            let (m, _ni) = leb_u32(p, i)?;
+            let (m, ni) = leb_u32(p, i)?;
+            i = ni;
             Some(m as usize)
         }
         _other => return Err(WasmError::Decode("unsupported memory limits flag 0x")),
@@ -980,13 +1035,21 @@ fn parse_memory_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
     if min > WASM_MAX_PAGES || max.is_some_and(|m| m > WASM_MAX_PAGES || m < min) {
         return Err(WasmError::Decode("memory limits out of range"));
     }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing memory section bytes"));
+    }
     Ok((min, max))
 }
 
 /// Parse the data section (id 11) into `(offset, bytes)` segments.
-fn parse_data_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
+fn parse_data_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let flag = *p
             .get(i)
@@ -1007,15 +1070,26 @@ fn parse_data_section(p: &[u8]) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
             .checked_add(len as usize)
             .filter(|&e| e <= p.len())
             .ok_or(WasmError::Decode("data segment runs past section"))?;
-        out.push((offset, p[i..end].to_vec()));
+        let mut bytes = Vec::new();
+        reserve_exact(&mut bytes, len as usize)?;
+        bytes.extend_from_slice(&p[i..end]);
+        out.push((offset, bytes));
         i = end;
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing data section bytes"));
     }
     Ok(out)
 }
 
-fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
+fn parse_elem_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let flag = *p
             .get(i)
@@ -1034,13 +1108,19 @@ fn parse_elem_section(p: &[u8]) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
         };
         let (n_funcs, ni) = leb_u32(p, i)?;
         i = ni;
-        let mut idxs = Vec::with_capacity(n_funcs as usize);
+        let n_funcs = n_funcs as usize;
+        budget.charge(n_funcs)?;
+        let mut idxs = Vec::new();
+        reserve_exact(&mut idxs, n_funcs)?;
         for _ in 0..n_funcs {
             let (fidx, nj) = leb_u32(p, i)?;
             i = nj;
             idxs.push(fidx as usize);
         }
         out.push((offset, idxs));
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing element section bytes"));
     }
     Ok(out)
 }
@@ -1088,9 +1168,14 @@ fn parse_const_expr(p: &[u8], i: usize) -> Result<(Val, usize), WasmError> {
 }
 
 /// Parse the global section into `(init_value, mutable)` per global.
-fn parse_global_section(p: &[u8]) -> Result<Vec<(Val, bool)>, WasmError> {
+fn parse_global_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+) -> Result<Vec<(Val, bool)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         // globaltype = valtype byte + mutability byte
         let _valtype = p.get(i).ok_or(WasmError::Decode("truncated global type"))?;
@@ -1103,14 +1188,22 @@ fn parse_global_section(p: &[u8]) -> Result<Vec<(Val, bool)>, WasmError> {
         i = ni;
         out.push((val, mutable));
     }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing global section bytes"));
+    }
     Ok(out)
 }
 
 /// Parse the export section into `(name, kind, index)` triples, keeping only
 /// function exports (`kind == 0x00`).
-fn parse_export_section(p: &[u8]) -> Result<Vec<(String, usize)>, WasmError> {
+fn parse_export_section(
+    p: &[u8],
+    budget: &mut DecodeBudget,
+) -> Result<Vec<(String, usize)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let (name, ni) = read_name(p, i)?;
         let kind = *p.get(ni).ok_or(WasmError::Decode("truncated export"))?;
@@ -1119,6 +1212,9 @@ fn parse_export_section(p: &[u8]) -> Result<Vec<(String, usize)>, WasmError> {
         if kind == 0x00 {
             out.push((name, index as usize));
         }
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing export section bytes"));
     }
     Ok(out)
 }
@@ -1143,9 +1239,12 @@ pub struct ImportDesc {
 fn parse_import_section(
     p: &[u8],
     types: &[FuncType],
+    budget: &mut DecodeBudget,
 ) -> Result<Vec<(ImportDesc, usize)>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let (module, ni) = read_name(p, i)?;
         let (field, ni) = read_name(p, ni)?;
@@ -1175,13 +1274,18 @@ fn parse_import_section(
             }
         }
     }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing import section bytes"));
+    }
     Ok(out)
 }
 
 /// Parse the type section into `(n_params, n_results)` per function type.
-fn parse_type_section(p: &[u8]) -> Result<Vec<FuncType>, WasmError> {
+fn parse_type_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<FuncType>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let form = *p.get(i).ok_or(WasmError::Decode("truncated func type"))?;
         i += 1;
@@ -1189,23 +1293,31 @@ fn parse_type_section(p: &[u8]) -> Result<Vec<FuncType>, WasmError> {
             return Err(WasmError::Decode("unsupported type form 0x"));
         }
         let (n_params, ni) = leb_u32(p, i)?;
-        let (params, ni) = read_valtypes(p, ni, n_params)?;
+        let (params, ni) = read_valtypes(p, ni, n_params, budget)?;
         let (n_results, ni) = leb_u32(p, ni)?;
-        let (results, ni) = read_valtypes(p, ni, n_results)?;
+        let (results, ni) = read_valtypes(p, ni, n_results, budget)?;
         i = ni;
         out.push(FuncType { params, results });
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing type section bytes"));
     }
     Ok(out)
 }
 
 /// Parse the function section into a type index per function.
-fn parse_func_section(p: &[u8]) -> Result<Vec<usize>, WasmError> {
+fn parse_func_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<usize>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let (tidx, ni) = leb_u32(p, i)?;
         i = ni;
         out.push(tidx as usize);
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing function section bytes"));
     }
     Ok(out)
 }
@@ -1240,9 +1352,11 @@ fn zero_of_valtype(vt: u8) -> Result<Val, WasmError> {
 }
 
 /// Parse the code section into `(local_zero_values, expr_bytes)` per function.
-fn parse_code_section(p: &[u8]) -> Result<Vec<CodeEntry>, WasmError> {
+fn parse_code_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<CodeEntry>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
+    let count = count as usize;
+    budget.charge(count)?;
     for _ in 0..count {
         let (body_size, ni) = leb_u32(p, i)?;
         let bstart = ni;
@@ -1264,15 +1378,23 @@ fn parse_code_section(p: &[u8]) -> Result<Vec<CodeEntry>, WasmError> {
                 .ok_or(WasmError::Decode("truncated local declaration"))?;
             j += 1;
             let zero = zero_of_valtype(vt)?;
+            budget.charge(n as usize)?;
             let total = locals
                 .len()
                 .checked_add(n as usize)
                 .filter(|&t| t <= WASM_MAX_LOCALS)
                 .ok_or(WasmError::Decode("local count overflow"))?;
+            reserve_exact(&mut locals, n as usize)?;
             locals.resize(total, zero);
         }
-        out.push((locals, body[j..].to_vec()));
+        let mut expression = Vec::new();
+        reserve_exact(&mut expression, body.len() - j)?;
+        expression.extend_from_slice(&body[j..]);
+        out.push((locals, expression));
         i = bend;
+    }
+    if i != p.len() {
+        return Err(WasmError::Decode("trailing code section bytes"));
     }
     Ok(out)
 }
@@ -1410,7 +1532,7 @@ impl Module {
         result_arity: usize,
         body: &[u8],
     ) -> Result<usize, WasmError> {
-        let code = decode(body)?;
+        let code = decode(body, &mut DecodeBudget::new())?;
         let combined = self.hosts.len() + self.funcs.len();
         self.funcs.push(Func {
             n_params,
@@ -1483,6 +1605,8 @@ impl Module {
         let mut elems: Vec<(usize, Vec<usize>)> = Vec::new();
         let mut mem_limits: Option<(usize, Option<usize>)> = None;
         let mut data: Vec<(usize, Vec<u8>)> = Vec::new();
+        let mut budget = DecodeBudget::new();
+        let mut last_standard_section = 0u8;
 
         let mut i = 8;
         while i < wasm.len() {
@@ -1496,19 +1620,35 @@ impl Module {
                 .filter(|&e| e <= wasm.len())
                 .ok_or(WasmError::Decode("section runs past end of module"))?;
             let payload = &wasm[start..end];
+            if id != 0 {
+                if id > 11 {
+                    return Err(WasmError::Decode("unsupported section id"));
+                }
+                if id <= last_standard_section {
+                    return Err(WasmError::Decode("duplicate or out-of-order section"));
+                }
+                last_standard_section = id;
+            }
             match id {
-                1 => types = parse_type_section(payload)?,
-                2 => imports = parse_import_section(payload, &types)?,
-                3 => func_types = parse_func_section(payload)?,
+                0 => {}
+                1 => types = parse_type_section(payload, &mut budget)?,
+                2 => imports = parse_import_section(payload, &types, &mut budget)?,
+                3 => func_types = parse_func_section(payload, &mut budget)?,
                 4 => table_size = parse_table_section(payload)?,
                 5 => mem_limits = Some(parse_memory_section(payload)?),
-                6 => globals = parse_global_section(payload)?,
-                7 => exports = parse_export_section(payload)?,
-                8 => start_fn = Some(leb_u32(payload, 0)?.0 as usize),
-                9 => elems = parse_elem_section(payload)?,
-                10 => codes = parse_code_section(payload)?,
-                11 => data = parse_data_section(payload)?,
-                _ => {} // custom / name / … : skipped
+                6 => globals = parse_global_section(payload, &mut budget)?,
+                7 => exports = parse_export_section(payload, &mut budget)?,
+                8 => {
+                    let (function, consumed) = leb_u32(payload, 0)?;
+                    if consumed != payload.len() {
+                        return Err(WasmError::Decode("trailing start section bytes"));
+                    }
+                    start_fn = Some(function as usize);
+                }
+                9 => elems = parse_elem_section(payload, &mut budget)?,
+                10 => codes = parse_code_section(payload, &mut budget)?,
+                11 => data = parse_data_section(payload, &mut budget)?,
+                _ => unreachable!("standard section id checked above"),
             }
             i = end;
         }
@@ -1520,21 +1660,20 @@ impl Module {
         let mut module = Module::new_with_limits(limits);
         // Imported functions occupy the low indices; without a bound host
         // implementation they trap loudly if actually called.
-        for (desc, tidx) in &imports {
+        for (desc, tidx) in imports {
             let h = module.add_host_function(desc.n_params, desc.n_results, |_args, _mem| {
                 Err(WasmError::Trap("call to unbound imported function"))
             });
-            module.hosts[h].sig = Some(*tidx);
+            module.hosts[h].sig = Some(tidx);
+            module.import_descs.push(desc);
         }
-        module.import_descs = imports.into_iter().map(|(d, _)| d).collect();
-        for (fi, &tidx) in func_types.iter().enumerate() {
+        for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
             let ft = types.get(tidx).ok_or(WasmError::Decode("function"))?;
             let (n_params, n_results) = (ft.params.len(), ft.results.len());
-            let (locals, expr) = &codes[fi];
-            let code = decode(expr)?;
+            let code = decode(&expr, &mut budget)?;
             module.funcs.push(Func {
                 n_params,
-                locals: locals.clone(),
+                locals,
                 arity: n_results,
                 code,
                 sig: Some(tidx),
@@ -1579,8 +1718,8 @@ impl Module {
             for f in &module.funcs {
                 func_sigs.push(f.sig.unwrap_or(0));
             }
-            let global_types: Vec<u8> =
-                module.globals.iter().map(|g| valtype_of(&g.init)).collect();
+            let mut global_types = Vec::new();
+            global_types.extend(module.globals.iter().map(|g| valtype_of(&g.init)));
             let ctx = validate::ModuleCtx {
                 types: &module.types,
                 func_sigs: &func_sigs,
@@ -1591,7 +1730,8 @@ impl Module {
                     .sig
                     .and_then(|s| module.types.get(s))
                     .ok_or(WasmError::Decode("function has no declared type"))?;
-                let mut locals: Vec<u8> = ft.params.clone();
+                let mut locals = Vec::new();
+                locals.extend_from_slice(&ft.params);
                 locals.extend(f.locals.iter().map(valtype_of));
                 validate::validate_body(&ctx, &locals, &ft.results, &f.code)?;
             }

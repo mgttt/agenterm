@@ -2341,3 +2341,19 @@ Close the candidate, discard the bad save, and invoke the runtime factory a
 second time for the fresh fallback. Test a corrupted persisted byte and assert
 both the `discardedInvalid` outcome and successful gameplay on the replacement
 instance; merely asserting that decode threw does not prove recovery.
+
+## Guest counts must be charged before allocation
+
+An outer byte ceiling does not make a binary decoder allocation-safe. A tiny
+payload can declare `u32::MAX` branch-table targets, element indices or locals;
+`Vec::with_capacity(guest_count)` may abort the process before the first
+truncated entry is read. Bound each vector count before reserving, charge a
+single module-wide complexity budget for every allocation-amplifying logical
+record, and use `try_reserve_exact` before copies/resizes. Keep raw payload
+bytes under the outer artifact/section bounds rather than double-counting them.
+
+For sectioned formats, allocation containment and canonical validation should
+share the same pass: reject duplicate or out-of-order singleton sections,
+unknown standard ids and unconsumed section payload. Run each count-bomb case
+inside a child-process black box as well as asserting the typed error; only the
+child exit proves a hidden allocator abort did not escape the API.

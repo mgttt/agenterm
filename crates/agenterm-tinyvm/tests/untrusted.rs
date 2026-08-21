@@ -5,7 +5,7 @@
 
 use std::process::Command;
 
-use agenterm_tinyvm::{WasmError, eval};
+use agenterm_tinyvm::{WasmError, eval, wasm::WASM_MAX_DECODE_ITEMS};
 
 /// 44-byte module: `(memory 65536)` plus an exported empty `main`.
 ///
@@ -69,6 +69,47 @@ fn err_msg(bytes: &[u8]) -> &'static str {
     }
 }
 
+fn module_with_sections(sections: &[&[u8]]) -> Vec<u8> {
+    let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+    for section in sections {
+        wasm.extend_from_slice(section);
+    }
+    wasm
+}
+
+fn br_table_count_bomb() -> Vec<u8> {
+    module_with_sections(&[
+        &[0x01, 0x04, 0x01, 0x60, 0x00, 0x00],
+        &[0x03, 0x02, 0x01, 0x00],
+        &[
+            0x0a, 0x09, 0x01, 0x07, 0x00, 0x0e, 0xff, 0xff, 0xff, 0xff, 0x0f,
+        ],
+    ])
+}
+
+fn element_count_bomb() -> Vec<u8> {
+    module_with_sections(&[&[
+        0x09, 0x0a, 0x01, 0x00, 0x41, 0x00, 0x0b, 0xff, 0xff, 0xff, 0xff, 0x0f,
+    ]])
+}
+
+fn local_count_bomb() -> Vec<u8> {
+    let mut body = vec![0x01];
+    leb_u32(&mut body, (WASM_MAX_DECODE_ITEMS + 1) as u32);
+    body.extend_from_slice(&[0x7f, 0x0b]);
+    let mut code = vec![0x01];
+    leb_u32(&mut code, body.len() as u32);
+    code.extend_from_slice(&body);
+    let mut code_section = vec![0x0a];
+    leb_u32(&mut code_section, code.len() as u32);
+    code_section.extend_from_slice(&code);
+    module_with_sections(&[
+        &[0x01, 0x04, 0x01, 0x60, 0x00, 0x00],
+        &[0x03, 0x02, 0x01, 0x00],
+        &code_section,
+    ])
+}
+
 fn exit_rc(status: &std::process::ExitStatus) -> i32 {
     if let Some(code) = status.code() {
         return code;
@@ -114,6 +155,67 @@ fn huge_memory_min_child_rc_is_not_134() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn tiny_declared_count_bombs_fail_before_allocation() {
+    for wasm in [
+        br_table_count_bomb(),
+        element_count_bomb(),
+        local_count_bomb(),
+    ] {
+        assert!(wasm.len() < 40);
+        assert_eq!(err_msg(&wasm), "module decode budget");
+    }
+}
+
+#[test]
+fn declared_count_bomb_child_does_not_abort() {
+    let exe = std::env::current_exe().expect("test executable");
+    let output = Command::new(exe)
+        .arg("tiny_declared_count_bombs_fail_before_allocation")
+        .arg("--exact")
+        .output()
+        .expect("spawn count-bomb child");
+    let rc = exit_rc(&output.status);
+    assert_ne!(
+        rc,
+        134,
+        "count bomb aborted. stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.status.success(),
+        "child rc={rc} stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn standard_sections_are_unique_ordered_and_fully_consumed() {
+    let duplicate_type = module_with_sections(&[&[0x01, 0x01, 0x00], &[0x01, 0x01, 0x00]]);
+    assert_eq!(
+        err_msg(&duplicate_type),
+        "duplicate or out-of-order section"
+    );
+
+    let out_of_order = module_with_sections(&[&[0x03, 0x01, 0x00], &[0x01, 0x01, 0x00]]);
+    assert_eq!(err_msg(&out_of_order), "duplicate or out-of-order section");
+
+    let trailing_type_byte = module_with_sections(&[&[0x01, 0x02, 0x00, 0x00]]);
+    assert_eq!(err_msg(&trailing_type_byte), "trailing type section bytes");
+
+    let unknown_standard_section = module_with_sections(&[&[0x0c, 0x00]]);
+    assert_eq!(err_msg(&unknown_standard_section), "unsupported section id");
+
+    let custom_around_type = module_with_sections(&[
+        &[0x00, 0x01, 0x00],
+        &[0x01, 0x01, 0x00],
+        &[0x00, 0x01, 0x00],
+    ]);
+    assert!(eval(&custom_around_type).is_ok());
 }
 
 #[test]

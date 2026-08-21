@@ -17,6 +17,7 @@ tinyvm iOS game runtime
 │   ├── start exactly once            [x]
 │   ├── per-call instruction budget   [x]
 │   ├── host memory/table budgets     [x]
+│   ├── decode complexity budget      [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
 │   ├── standard WASM cartridge       [x]
@@ -1232,3 +1233,31 @@ Evidence on 2026-08-21:
 - All 190 package tests plus one doctest, all-feature/all-target Clippy,
   default-command, no-default and replay-only checks, document redaction and
   the exact 70,904-byte static-core/self-test gate are clean.
+
+## Thirty-fifth executable increment — bounded untrusted module decoding
+
+The standard WASM loader now owns one 262,144-record complexity budget across
+section entries, function types, locals, decoded instructions, element indices
+and branch-table targets. Guest counts are charged before reservation,
+allocation-amplifying vectors use fallible allocation, and parsed
+function/local buffers move into the runtime instead of being cloned. This closes the gap
+where a sub-40-byte module could request a multi-billion-entry allocation
+before its missing first entry was noticed.
+
+The same load gate now enforces the WebAssembly 1.0 section envelope: standard
+sections are unique and ordered, unknown standard ids fail, and every supported
+section consumes its exact payload. Custom sections remain freely interleaved,
+so the canonical TinyArcade manifest and producer metadata stay ordinary WASM.
+No private opcode or wrapper format was introduced.
+
+Evidence on 2026-08-21:
+
+- Public untrusted-byte tests send `u32::MAX` `br_table` and element counts plus
+  an over-budget local count through the shipped `eval` API. Each tiny input
+  returns `module decode budget`; the same cases pass in a child process rather
+  than exiting through allocator `SIGABRT`.
+- The public envelope black box rejects duplicate/out-of-order sections,
+  trailing section payload and an unknown standard id while accepting custom
+  sections before and after an ordinary type section.
+- Both compiler-produced Depth Well and Paddle Guard still pass converter and
+  gameplay/suspend-resume black boxes under the same strict loader.

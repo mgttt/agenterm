@@ -8,6 +8,25 @@ The v1 runtime rejects an empty cartridge or any whole module above 2 MiB
 before manifest/WASM parsing; transports should enforce the same ceiling while
 downloading rather than use the runtime as a network buffer.
 
+## Standard module and decode complexity
+
+Standard non-custom sections must appear at most once, in ascending WebAssembly
+1.0 order, and each parser must consume its complete declared payload. Unknown
+non-custom section ids, duplicate/out-of-order sections and trailing bytes fail
+before a `Module` exists. Custom sections may appear between standard sections;
+they do not change ordering.
+
+One module may materialize at most 262,144 allocation-amplifying decode records
+in total. The shared count covers section entries, function parameter/result
+types, local values, decoded instructions, element indices and `br_table`
+targets. Raw custom/name/data bytes remain covered by the 2 MiB cartridge limit
+and their section bounds. Allocation-amplifying guest-declared vectors are
+budgeted before fallible reservation, so a tiny module declaring billions of
+targets or locals returns a decode error before asking iOS to reserve that
+guest-selected memory. This is a fixed TinyArcade ABI v1 compiler profile, not
+a private bytecode extension: accepted files remain ordinary standards-valid
+`.wasm`, and converter/runtime checks use the same gate.
+
 ## Required manifest custom section
 
 Exactly one standard custom section named `tinyarcade.manifest.v1` is required.

@@ -14,6 +14,7 @@ agenterm-tinyvm (35)
 │   └── dyn native loading  [x]
 ├── native wasm platform [~]
 │   ├── tinyvm engine       [x]
+│   │   └── decode complexity budget [x]
 │   ├── owned host ABI      [~]
 │   ├── native I/O surface  [~]
 │   └── H5/JS/WKWebView     [x]
@@ -65,6 +66,13 @@ agenterm-tinyvm (35)
 宿主门是 import 表。未绑定即 trap。
 槽 A = WASM 1.0 MVP 172 操作码。双绿。
 核 strip `<100KiB`。
+
+不可信卡带的 2 MiB 文件上限之外还有统一 decode complexity budget：section entry、
+type value、local、decoded instruction、element index 与 `br_table` target 合计最多
+262,144 条放大分配记录。所有 guest count 在 reserve 前扣减并使用 fallible allocation；
+标准 section 必须唯一、按序且完整消费 payload。极小文件谎报数十亿条目只能得到
+decode error，不能触发 iOS 进程 OOM abort。该限制是 TinyArcade 的标准 WASM compiler
+profile，不改变 `.wasm` 格式或增加私有 opcode。
 
 解释器路线是 iOS 发行边界驱动的架构选择，不是 PRD 为了缩小产品面而任意排除更快的执行方式。在目标 App Store 分发模型下，下载的 `.wasm` 只由 tinyvm 解释执行；不在设备上生成可执行原生代码，也不把下载模块编译或装载为原生动态代码。
 
