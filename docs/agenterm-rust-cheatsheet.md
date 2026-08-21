@@ -2446,6 +2446,14 @@ and report the case id. This catches missing negative evidence, accidental
 fixture drift and a decoder/reference disagreement without making Cargo tests
 depend on a separately installed validator.
 
+Treat a C ABI's query-then-copy sequence as one consistency transaction. Save
+the queried length, allocate exactly that amount, and after a successful copy
+require the callee's returned length to be identical. A smaller value otherwise
+turns unwritten zero-filled tail bytes into media, snapshots, replay data or
+cartridge bytes; a larger value must already have failed the capacity check.
+Centralize this guard across every Swift owner and exercise its mismatch branch
+in the native-link smoke, not only the ordinary stable C implementation.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

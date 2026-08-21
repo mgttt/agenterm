@@ -67,6 +67,7 @@ tinyvm iOS game runtime
 │   ├── Swift ownership/threading     [x]
 │   ├── input + monotonic clock owner [x]
 │   ├── frame pacing + scene state    [x]
+│   ├── stable two-pass copy lengths  [x]
 │   ├── indexed 2D presentation       [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
@@ -2153,5 +2154,33 @@ Evidence on 2026-08-21:
   below their gates at 1,553,848 bytes arm64 and 1,625,560 bytes x86_64;
   catalog/replay/private/session consumers are 1,426,696 / 1,417,640 /
   1,419,312 / 1,418,448 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Sixtieth executable increment — stable two-pass copy lengths
+
+Every Swift query-then-copy consumer now treats the two C ABI calls as one
+consistency transaction. Runtime render/audio/snapshot/replay output and cached
+cartridge bytes retain the queried length and reject a successful copy whose
+returned length differs, so an ABI drift cannot turn an unwritten zero-filled
+tail into valid host data.
+
+Evidence on 2026-08-21:
+
+- The native Swift smoke directly exercises the mismatch branch and requires a
+  typed decode failure with the responsible copy context; all ordinary runtime
+  and cartridge-cache paths continue to pass through the same centralized
+  guard.
+- All 235 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, both whole-corpus WABT gates, all seven
+  WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
+  all-target Clippy, formatting, relevant ShellCheck and document redaction
+  pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,553,832 bytes arm64 and 1,629,664 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,680 / 1,417,624 /
+  1,419,296 / 1,418,432 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

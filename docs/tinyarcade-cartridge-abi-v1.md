@@ -385,3 +385,6 @@ are no longer backward compatible.
 7. Save all game-owned deterministic state; never save native pointers.
 8. Pass the runtime black-box suite before a cartridge is eligible for either
    private import or the reviewed catalog.
+
+All host query-then-copy consumers must require the successful copy length to
+equal the preceding query length; length drift is an ABI decode failure.

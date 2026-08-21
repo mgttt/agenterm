@@ -1939,6 +1939,11 @@ public final class TinyArcadeCartridgeCacheV1 {
             )
         }
         try TinyArcadeRuntimeV1.check(status)
+        try TinyArcadeRuntimeV1.requireStableCopyLength(
+            count,
+            expected: data.count,
+            context: "cartridge cache output"
+        )
         return data
     }
 }
@@ -2331,6 +2336,11 @@ public final class TinyArcadeRuntimeV1 {
             )
         }
         try Self.check(status)
+        try Self.requireStableCopyLength(
+            count,
+            expected: data.count,
+            context: "runtime output"
+        )
         return data
     }
 
@@ -2434,6 +2444,19 @@ public final class TinyArcadeRuntimeV1 {
             throw TinyArcadeRuntimeError(
                 status: Int32(status.rawValue),
                 message: lastError()
+            )
+        }
+    }
+
+    static func requireStableCopyLength(
+        _ actual: Int,
+        expected: Int,
+        context: String
+    ) throws {
+        guard actual == expected else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                message: "\(context) length changed during copy"
             )
         }
     }

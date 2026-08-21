@@ -46,7 +46,8 @@ agenterm-tinyvm (35)
 │       ├── init/tick/suspend/resume  [x]
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
-│       │   └── recyclable host buffers [x]
+│       │   ├── recyclable host buffers [x]
+│       │   └── stable two-pass copy lengths [x]
 │       ├── native module registry    [x]
 │       ├── bounded in-place host dispatch [x]
 │       ├── App Store bundled-only gate [x]
@@ -357,6 +358,9 @@ GameRuntime 再绑定 lifecycle、native dispatch、render/audio/state bytes。C
 Release 运行中，Depth Well 峰值 13,150 steps/17 pages，Paddle Guard 峰值 37,864
 steps/17 pages；逐帧统计与输出长度和配置上限一致。wall time/thermal/process memory
 仍属于设备证据，不伪装成跨平台确定性数据。
+Swift 对 runtime render/audio/snapshot/replay 与 cache cartridge 的两阶段 C copy 都会
+保存 query length，并在成功 copy 后要求 returned length 完全一致；ABI 漂移不能把未
+写满的 Data 尾部当成有效媒体、存档或 `.wasm`。
 
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`

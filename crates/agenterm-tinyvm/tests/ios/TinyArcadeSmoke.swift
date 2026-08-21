@@ -339,6 +339,18 @@ struct TinyArcadeSmoke {
         precondition(config.struct_size == MemoryLayout<tinyarcade_config_v1>.size)
         _ = TinyArcadeRuntimeV1.self
 
+        do {
+            try TinyArcadeRuntimeV1.requireStableCopyLength(
+                1,
+                expected: 2,
+                context: "smoke output"
+            )
+            preconditionFailure("changed two-pass copy length must fail")
+        } catch let error as TinyArcadeRuntimeError {
+            precondition(error.status == Int32(TINYARCADE_DECODE_ERROR.rawValue))
+            precondition(error.message == "smoke output length changed during copy")
+        }
+
         let nativeBytes = nativeCartridge()
         let descriptor = try TinyArcadeCartridgeDescriptorV1.inspect(nativeBytes)
         precondition(descriptor.gameID == "c.native")
