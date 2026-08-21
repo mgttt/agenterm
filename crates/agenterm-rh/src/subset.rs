@@ -3,10 +3,51 @@ use std::cell::RefCell;
 use rhai::{AST, ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr, OpAssignment, Stmt, Token};
 
 use crate::RhError;
-use crate::expr_print::{is_pure_int_expr, uses_host_surface};
-use crate::fleet::{expr_uses_fleet, parse_fleet_call, validate_fleet_call};
+use crate::expr_print::{is_pure_int_expr, uses_host_surface, uses_host_surface_lang};
 
-pub fn validate_ast(ast: &AST) -> Result<(), RhError> {
+/// A root-expression hook the caller installs to reject shapes this module
+/// knows nothing about. AgenTerm passes the fleet-shape validator
+/// (`fleet_subset::fleet_root_expr`); the product passes nothing.
+pub type RootExprHook = fn(&Expr) -> Option<RhError>;
+
+/// Which flavour of the subset to enforce.
+///
+/// `SubsetPolicy::LANGUAGE` is Language 1: no `fleet` host root, no
+/// `RH_SUBSET_FLEET_SHAPE`. `SubsetPolicy::agenterm(..)` is the workbench
+/// flavour that keeps both. This is the seam that stops `fleet.rs` from
+/// following `subset.rs` into the product crate.
+#[derive(Clone, Copy)]
+pub struct SubsetPolicy {
+    host_surface: fn(&Expr) -> bool,
+    root_expr_hook: Option<RootExprHook>,
+}
+
+impl SubsetPolicy {
+    /// Language 1: `std` / `rh` / `rhai` only, no fleet shape checking.
+    pub const LANGUAGE: Self = Self {
+        host_surface: uses_host_surface_lang,
+        root_expr_hook: None,
+    };
+
+    /// AgenTerm workbench: language roots plus `fleet`, plus a fleet-shape hook.
+    pub const fn agenterm(hook: RootExprHook) -> Self {
+        Self {
+            host_surface: uses_host_surface,
+            root_expr_hook: Some(hook),
+        }
+    }
+
+    fn uses_host_surface(self, expr: &Expr) -> bool {
+        (self.host_surface)(expr)
+    }
+}
+
+/// Language-1 subset validation: no `compat_validate`, no fleet.
+pub fn validate_ast_lang(ast: &AST) -> Result<(), RhError> {
+    validate_ast_with(ast, SubsetPolicy::LANGUAGE)
+}
+
+pub fn validate_ast_with(ast: &AST, policy: SubsetPolicy) -> Result<(), RhError> {
     let error = RefCell::new(None);
     ast.walk(&mut |path| {
         let Some(node) = path.last() else {
@@ -33,7 +74,7 @@ pub fn validate_ast(ast: &AST) -> Result<(), RhError> {
         Some(err) => Err(err),
         None => {
             for def in ast.iter_fn_def() {
-                if let Some(err) = validate_stmt_block(&def.body) {
+                if let Some(err) = validate_stmt_block(&def.body, policy) {
                     return Err(err);
                 }
             }
@@ -68,18 +109,21 @@ fn reject_expr(expr: &Expr) -> Option<RhError> {
     }
 }
 
-fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
+fn validate_assignment(
+    assign: &(OpAssignment, BinaryExpr),
+    policy: SubsetPolicy,
+) -> Option<RhError> {
     if let Expr::Index(boxed, ..) = &assign.1.lhs {
         if matches!(&boxed.lhs, Expr::Dot(inner, ..) if is_json_access_path(&inner.lhs))
             && !matches!(&boxed.lhs, Expr::Variable(..))
         {
-            return validate_json_assignment(assign);
+            return validate_json_assignment(assign, policy);
         }
         if matches!(&boxed.lhs, Expr::Variable(..))
             && assign.0.get_op_assignment_info().is_none()
             && !matches!(assign.1.rhs, Expr::BoolConstant(true, ..))
         {
-            return validate_json_assignment(assign);
+            return validate_json_assignment(assign, policy);
         }
         if assign.0.get_op_assignment_info().is_some() {
             return Some(subset_error(
@@ -93,13 +137,13 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
                 "set index assignment rhs must be `true` in rh-3",
             ));
         }
-        if let Some(err) = validate_root_expr(&boxed.lhs) {
+        if let Some(err) = validate_root_expr(&boxed.lhs, policy) {
             return Some(err);
         }
-        return validate_root_expr(&boxed.rhs);
+        return validate_root_expr(&boxed.rhs, policy);
     }
     if is_json_assign_lhs(&assign.1.lhs) {
-        return validate_json_assignment(assign);
+        return validate_json_assignment(assign, policy);
     }
     if !matches!(assign.1.lhs, Expr::Variable(..)) {
         return Some(subset_error(
@@ -108,8 +152,8 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
         ));
     }
     if is_pure_int_expr(&assign.1.rhs)
-        || uses_host_surface(&assign.1.rhs)
-        || is_string_concat_assign_rhs(&assign.1.rhs)
+        || policy.uses_host_surface(&assign.1.rhs)
+        || is_string_concat_assign_rhs(&assign.1.rhs, policy)
         || is_string_method_assign_rhs(&assign.1.rhs)
         || is_int_method_assign_rhs(&assign.1.rhs)
         || matches!(
@@ -139,7 +183,10 @@ fn validate_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
     ))
 }
 
-fn validate_json_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhError> {
+fn validate_json_assignment(
+    assign: &(OpAssignment, BinaryExpr),
+    policy: SubsetPolicy,
+) -> Option<RhError> {
     if let Some((_, _, _, syntax, _, _)) = assign.0.get_op_assignment_info() {
         if syntax == "+=" {
             if !is_json_assign_lhs(&assign.1.lhs) {
@@ -167,7 +214,7 @@ fn validate_json_assignment(assign: &(OpAssignment, BinaryExpr)) -> Option<RhErr
             "json assignment lhs must be a JSON path or index",
         ));
     }
-    if is_json_assign_rhs(&assign.1.rhs) {
+    if is_json_assign_rhs(&assign.1.rhs, policy) {
         return None;
     }
     Some(subset_error(
@@ -198,8 +245,8 @@ fn is_json_access_path(expr: &Expr) -> bool {
     }
 }
 
-fn is_json_assign_rhs(expr: &Expr) -> bool {
-    if validate_root_expr(expr).is_none() {
+fn is_json_assign_rhs(expr: &Expr, policy: SubsetPolicy) -> bool {
+    if validate_root_expr(expr, policy).is_none() {
         return true;
     }
     matches!(expr, Expr::Variable(..))
@@ -207,25 +254,25 @@ fn is_json_assign_rhs(expr: &Expr) -> bool {
         || matches!(expr, Expr::Index(boxed, ..) if is_json_access_path(&boxed.lhs))
 }
 
-fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
+fn validate_stmt(stmt: &Stmt, policy: SubsetPolicy) -> Option<RhError> {
     match stmt {
-        Stmt::Expr(expr) => validate_root_expr(expr.as_ref()),
-        Stmt::Return(Some(expr), ..) => validate_root_expr(expr.as_ref()),
+        Stmt::Expr(expr) => validate_root_expr(expr.as_ref(), policy),
+        Stmt::Return(Some(expr), ..) => validate_root_expr(expr.as_ref(), policy),
         Stmt::Var(boxed, ..) => {
             let (_, expr, _) = boxed.as_ref();
-            validate_root_expr(expr)
+            validate_root_expr(expr, policy)
         }
         Stmt::If(boxed, ..) => {
             let flow = boxed.as_ref();
-            if let Some(err) = validate_root_expr(&flow.expr) {
+            if let Some(err) = validate_root_expr(&flow.expr, policy) {
                 return Some(err);
             }
-            if let Some(err) = validate_stmt_block(&flow.body) {
+            if let Some(err) = validate_stmt_block(&flow.body, policy) {
                 return Some(err);
             }
             if !flow.branch.is_empty() {
                 for stmt in flow.branch.iter() {
-                    if let Some(err) = validate_stmt(stmt) {
+                    if let Some(err) = validate_stmt(stmt, policy) {
                         return Some(err);
                     }
                 }
@@ -234,10 +281,10 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
         }
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
-            if let Some(err) = validate_root_expr(&flow.expr) {
+            if let Some(err) = validate_root_expr(&flow.expr, policy) {
                 return Some(err);
             }
-            validate_stmt_block(&flow.body)
+            validate_stmt_block(&flow.body, policy)
         }
         Stmt::While(boxed, ..) => {
             let flow = boxed.as_ref();
@@ -252,7 +299,7 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
                     ),
                 ));
             }
-            validate_stmt_block(&flow.body)
+            validate_stmt_block(&flow.body, policy)
         }
         Stmt::TryCatch(boxed, ..) => {
             let flow = boxed.as_ref();
@@ -268,17 +315,17 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
                     "break/continue is not allowed inside try/catch in rh-3",
                 ));
             }
-            if let Some(err) = validate_stmt_block(&flow.body) {
+            if let Some(err) = validate_stmt_block(&flow.body, policy) {
                 return Some(err);
             }
-            validate_stmt_block(&flow.branch)
+            validate_stmt_block(&flow.branch, policy)
         }
         Stmt::BreakLoop(expr, ..) if expr.is_some() => Some(subset_error(
             "RH_SUBSET_BREAK_VALUE",
             "break/continue with value is not in rh-3",
         )),
-        Stmt::Block(block) => validate_stmt_block(block),
-        Stmt::Assignment(boxed, ..) => validate_assignment(boxed),
+        Stmt::Block(block) => validate_stmt_block(block, policy),
+        Stmt::Assignment(boxed, ..) => validate_assignment(boxed, policy),
         Stmt::FnCall(call, ..) => {
             if call.name == "throw" {
                 if call.args.len() != 1 {
@@ -287,7 +334,7 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
                         "throw expects one argument",
                     ));
                 }
-                validate_root_expr(&call.args[0])
+                validate_root_expr(&call.args[0], policy)
             } else {
                 None
             }
@@ -296,9 +343,9 @@ fn validate_stmt(stmt: &Stmt) -> Option<RhError> {
     }
 }
 
-fn validate_stmt_block(block: &rhai::StmtBlock) -> Option<RhError> {
+fn validate_stmt_block(block: &rhai::StmtBlock, policy: SubsetPolicy) -> Option<RhError> {
     for stmt in block.iter() {
-        if let Some(err) = validate_stmt(stmt) {
+        if let Some(err) = validate_stmt(stmt, policy) {
             return Some(err);
         }
     }
@@ -316,18 +363,14 @@ fn block_has_break_continue(block: &rhai::StmtBlock) -> bool {
     block.iter().any(|stmt| matches!(stmt, Stmt::BreakLoop(..)))
 }
 
-fn validate_root_expr(expr: &Expr) -> Option<RhError> {
-    if let Some(call) = parse_fleet_call(expr) {
-        return validate_fleet_call(&call).err();
-    }
-    if expr_uses_fleet(expr) && parse_fleet_call(expr).is_none() {
-        return Some(subset_error(
-            "RH_SUBSET_FLEET_SHAPE",
-            "fleet expression must be a supported fleet.* call",
-        ));
+fn validate_root_expr(expr: &Expr, policy: SubsetPolicy) -> Option<RhError> {
+    if let Some(hook) = policy.root_expr_hook
+        && let Some(err) = hook(expr)
+    {
+        return Some(err);
     }
     if is_pure_int_expr(expr)
-        || uses_host_surface(expr)
+        || policy.uses_host_surface(expr)
         || matches!(
             expr,
             Expr::StringConstant(..)
@@ -410,15 +453,17 @@ fn is_string_method_assign_rhs(expr: &Expr) -> bool {
     }
 }
 
-fn is_string_concat_assign_rhs(expr: &Expr) -> bool {
+fn is_string_concat_assign_rhs(expr: &Expr, policy: SubsetPolicy) -> bool {
     match expr {
         Expr::StringConstant(..) | Expr::Variable(..) => true,
         Expr::FnCall(call, ..)
             if matches!(call.op_token.as_ref(), Some(Token::Plus)) && call.args.len() == 2 =>
         {
-            call.args.iter().all(is_string_concat_assign_rhs)
+            call.args
+                .iter()
+                .all(|arg| is_string_concat_assign_rhs(arg, policy))
         }
-        other => uses_host_surface(other) || args_index_like(other),
+        other => policy.uses_host_surface(other) || args_index_like(other),
     }
 }
 
@@ -437,20 +482,12 @@ fn subset_error(code: &'static str, detail: &str) -> RhError {
 mod tests {
     use rhai::Engine;
 
-    use super::validate_ast;
+    use super::validate_ast_lang as validate_ast;
 
     #[test]
     fn accepts_simple_fn() {
         let ast = Engine::new()
             .compile("fn add(a, b) { a + b }")
-            .expect("compile");
-        validate_ast(&ast).expect("subset");
-    }
-
-    #[test]
-    fn accepts_fleet_protocol_info() {
-        let ast = Engine::new()
-            .compile("fn entry() { fleet.protocol.info(); 1 }")
             .expect("compile");
         validate_ast(&ast).expect("subset");
     }

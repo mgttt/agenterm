@@ -4,8 +4,9 @@ use rhai::{AST, Engine, OptimizationLevel};
 
 use crate::RhError;
 use crate::api_validate::validate_available_apis;
+use crate::fleet_subset::validate_ast;
 use crate::project_import::validate_project_imports;
-use crate::subset::{compat_validate, validate_ast};
+use crate::subset::compat_validate;
 
 /// Match the ordinary Script worker expression budget so large task scripts parse.
 pub const RH_MAX_EXPR_DEPTH: usize = 512;

@@ -11,8 +11,8 @@ use crate::{
         uses_host_surface, var_len_name,
     },
     fleet::{fleet_params_json, parse_fleet_call, validate_fleet_call},
+    fleet_subset::validate_ast,
     host_api::{emit_host_runtime, host_api_module},
-    subset::validate_ast,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13766,7 +13766,7 @@ fn entry() { stage_copy(args[0], args[1]) }
             .expect("entry");
         let bundled = crate::bundle_project_source(&root, &source).expect("bundle");
         let ast = super::parse(&bundled).expect("parse");
-        crate::subset::validate_ast(&ast).expect("validate");
+        crate::fleet_subset::validate_ast(&ast).expect("validate");
         let output = transpile_cdylib_with_project(&root, &source).expect("transpile");
         assert_eq!(
             output.execution_mode,

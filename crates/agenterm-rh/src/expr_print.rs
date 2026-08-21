@@ -342,56 +342,93 @@ fn range_inner(out: &mut String, op: &str, start: &Expr, end: &Expr) -> Result<(
     Ok(())
 }
 
+/// AgenTerm host surfaces: the language roots (`std` / `rh` / `rhai`) **plus**
+/// `fleet`. Used by the AgenTerm subset and by transpile.
 pub fn uses_host_surface(expr: &Expr) -> bool {
+    uses_host_surface_with(expr, HostRoots::AGENTERM)
+}
+
+/// Language-1 host surfaces: `std` / `rh` / `rhai` only, **never** `fleet`.
+/// The product `Engine::check` uses this so a `fleet.*` identifier is an
+/// unknown name rather than a host expression.
+pub fn uses_host_surface_lang(expr: &Expr) -> bool {
+    uses_host_surface_with(expr, HostRoots::LANGUAGE)
+}
+
+/// Which root identifiers count as "host" for a given caller.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct HostRoots {
+    fleet: bool,
+}
+
+impl HostRoots {
+    pub const LANGUAGE: Self = Self { fleet: false };
+    pub const AGENTERM: Self = Self { fleet: true };
+
+    fn is_root(self, ident: &str) -> bool {
+        matches!(ident, "std" | "rh" | "rhai") || (self.fleet && ident == "fleet")
+    }
+}
+
+fn uses_host_surface_with(expr: &Expr, roots: HostRoots) -> bool {
     match expr {
-        Expr::Variable(ident, ..) => {
-            matches!(ident.1.as_str(), "std" | "rh" | "rhai" | "fleet")
+        Expr::Variable(ident, ..) => roots.is_root(ident.1.as_str()),
+        Expr::Dot(boxed, ..) => {
+            uses_host_surface_with(&boxed.lhs, roots) || uses_host_surface_with(&boxed.rhs, roots)
         }
-        Expr::Dot(boxed, ..) => uses_host_surface(&boxed.lhs) || uses_host_surface(&boxed.rhs),
         Expr::FnCall(call, ..) | Expr::MethodCall(call, ..) => {
             !call.namespace.is_empty()
                 || call.name == "throw"
-                || call.args.iter().any(uses_host_surface)
+                || call
+                    .args
+                    .iter()
+                    .any(|arg| uses_host_surface_with(arg, roots))
         }
         Expr::Property(..) | Expr::Index(..) => true,
-        Expr::Array(items, ..) => items.iter().any(uses_host_surface),
-        Expr::Map(map, ..) => map.0.iter().any(|(_, value)| uses_host_surface(value)),
-        Expr::Stmt(block) => block.iter().any(stmt_uses_host),
+        Expr::Array(items, ..) => items.iter().any(|item| uses_host_surface_with(item, roots)),
+        Expr::Map(map, ..) => map
+            .0
+            .iter()
+            .any(|(_, value)| uses_host_surface_with(value, roots)),
+        Expr::Stmt(block) => block.iter().any(|stmt| stmt_uses_host(stmt, roots)),
         _ => false,
     }
 }
 
-fn stmt_uses_host(stmt: &Stmt) -> bool {
+fn stmt_uses_host(stmt: &Stmt, roots: HostRoots) -> bool {
     match stmt {
-        Stmt::Expr(expr) => uses_host_surface(expr.as_ref()),
+        Stmt::Expr(expr) => uses_host_surface_with(expr.as_ref(), roots),
         Stmt::Var(boxed, ..) => {
             let (_, expr, _) = boxed.as_ref();
-            uses_host_surface(expr)
+            uses_host_surface_with(expr, roots)
         }
-        Stmt::Return(Some(expr), ..) => uses_host_surface(expr.as_ref()),
+        Stmt::Return(Some(expr), ..) => uses_host_surface_with(expr.as_ref(), roots),
         Stmt::If(boxed, ..) => {
             let flow = boxed.as_ref();
-            uses_host_surface(&flow.expr)
-                || flow.body.iter().any(stmt_uses_host)
-                || flow.branch.iter().any(stmt_uses_host)
+            uses_host_surface_with(&flow.expr, roots)
+                || flow.body.iter().any(|stmt| stmt_uses_host(stmt, roots))
+                || flow.branch.iter().any(|stmt| stmt_uses_host(stmt, roots))
         }
         Stmt::For(boxed, ..) => {
             let (_, _, flow) = boxed.as_ref();
-            uses_host_surface(&flow.expr) || flow.body.iter().any(stmt_uses_host)
+            uses_host_surface_with(&flow.expr, roots)
+                || flow.body.iter().any(|stmt| stmt_uses_host(stmt, roots))
         }
         Stmt::While(boxed, ..) => {
             let flow = boxed.as_ref();
-            uses_host_surface(&flow.expr) || flow.body.iter().any(stmt_uses_host)
+            uses_host_surface_with(&flow.expr, roots)
+                || flow.body.iter().any(|stmt| stmt_uses_host(stmt, roots))
         }
         Stmt::TryCatch(boxed, ..) => {
             let flow = boxed.as_ref();
-            flow.body.iter().any(stmt_uses_host) || flow.branch.iter().any(stmt_uses_host)
+            flow.body.iter().any(|stmt| stmt_uses_host(stmt, roots))
+                || flow.branch.iter().any(|stmt| stmt_uses_host(stmt, roots))
         }
         Stmt::Assignment(boxed, ..) => {
             let (_, bin) = boxed.as_ref();
             !is_pure_int_expr(&bin.lhs) || !is_pure_int_expr(&bin.rhs)
         }
-        Stmt::Block(block) => block.iter().any(stmt_uses_host),
+        Stmt::Block(block) => block.iter().any(|stmt| stmt_uses_host(stmt, roots)),
         Stmt::FnCall(call, ..) => call.args.iter().any(uses_host_surface),
         _ => false,
     }
