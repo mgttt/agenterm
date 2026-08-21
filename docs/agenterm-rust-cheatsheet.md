@@ -2416,6 +2416,15 @@ a reserve failure after the callback mutates guest memory is not an atomic
 allocation failure. Keep any allocating callback form as an explicit
 compatibility adapter, not the iOS product hot path.
 
+Apply ownership reuse to the return door too. When a bounded interpreter frame
+must outlive the call for a later C/Swift copy, let the embedding return its
+cleared `Vec` storage to the next tick and swap the completed bytes back out.
+Clear before validating input so failures cannot expose a stale frame; on a
+guest trap, recover and clear the partially written buffers before returning.
+Keep the ownership-returning convenience API as a wrapper around this reusable
+form. This preserves standard Wasm and the copy-based FFI lifetime while
+removing steady-state allocator churn from render/audio submission.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a

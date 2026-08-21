@@ -37,6 +37,7 @@ agenterm-tinyvm (35)
 │       ├── init/tick/suspend/resume  [x]
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
+│       │   └── recyclable host buffers [x]
 │       ├── native module registry    [x]
 │       ├── bounded in-place host dispatch [x]
 │       ├── App Store bundled-only gate [x]

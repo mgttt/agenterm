@@ -74,6 +74,21 @@ impl ReplayRecorderV1 {
         runtime: &mut GameRuntime,
         input: GameInput,
     ) -> Result<GameFrame, WasmError> {
+        let mut frame = GameFrame::default();
+        self.record_tick_into(runtime, input, &mut frame)?;
+        Ok(frame)
+    }
+
+    /// Record one deterministic tick while recycling caller-owned frame
+    /// storage through the runtime.
+    pub fn record_tick_into(
+        &mut self,
+        runtime: &mut GameRuntime,
+        input: GameInput,
+        frame: &mut GameFrame,
+    ) -> Result<(), WasmError> {
+        frame.render.clear();
+        frame.audio.clear();
         validate_input(input, self.last_clock)?;
         if self.trace.steps.len() >= MAX_REPLAY_STEPS {
             return Err(WasmError::Trap("replay step limit"));
@@ -82,8 +97,8 @@ impl ReplayRecorderV1 {
             .steps
             .try_reserve(1)
             .map_err(|_| WasmError::Trap("replay step allocation"))?;
-        let frame = runtime.tick(input)?;
-        validate_frame(&frame)?;
+        runtime.tick_into(input, frame)?;
+        validate_frame(frame)?;
         let render_length =
             u32::try_from(frame.render.len()).map_err(|_| WasmError::Trap("replay frame size"))?;
         let audio_length =
@@ -96,7 +111,7 @@ impl ReplayRecorderV1 {
             audio_sha256: cartridge_sha256(&frame.audio),
         });
         self.last_clock = Some(input.clock_ms);
-        Ok(frame)
+        Ok(())
     }
 
     pub fn finish(&self) -> Result<Vec<u8>, WasmError> {
@@ -288,8 +303,9 @@ impl ReplayTraceV1 {
             return Err(WasmError::Trap("replay runtime identity mismatch"));
         }
         runtime.resume(&self.initial_snapshot)?;
+        let mut frame = GameFrame::default();
         for (index, step) in self.steps.iter().enumerate() {
-            let frame = runtime.tick(step.input)?;
+            runtime.tick_into(step.input, &mut frame)?;
             validate_frame(&frame)?;
             if usize::try_from(step.render_length).ok() != Some(frame.render.len())
                 || usize::try_from(step.audio_length).ok() != Some(frame.audio.len())

@@ -156,6 +156,12 @@ violation. A failed instance cannot run another frame and must be discarded by
 the app. Bad external snapshot bytes are rejected before guest execution and do
 not poison a healthy instance.
 
+The Rust embedding offers both an ownership-returning `tick` and `tick_into`.
+The latter clears and recycles caller-owned render/audio buffers, including
+their bounded capacity, while preserving the same guest-visible lifecycle and
+trap semantics. This is a host allocation policy around ordinary standard Wasm
+imports; it does not add a game opcode or change cartridge bytes.
+
 ## Core import namespace
 
 Core services are optional standard function imports from

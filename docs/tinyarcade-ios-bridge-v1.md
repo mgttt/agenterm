@@ -218,6 +218,11 @@ values. The Swift frame owner validates `grid3d/v1`, `indexed2d/v1` and
 events to native rendering/audio code. `tickMedia` returns a discriminated
 render frame for either supported visual protocol; the original `tick` remains
 a source-compatible `grid3d/v1` convenience for existing Depth Well consumers.
+The C runtime handle recycles its prior completed render/audio storage through
+the next tick and replay-recording tick. It still exposes only the two-stage
+copy contract, clears the completed-frame state on error, and never lends Rust
+storage across the ABI; steady frames therefore avoid rebuilding the bounded
+host buffers without weakening pointer ownership.
 
 Replay recording is state on the same owner-thread runtime handle. Begin
 captures a portable snapshot and clears the previous completed trace; ordinary

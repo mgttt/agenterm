@@ -102,6 +102,7 @@ impl CartridgeDescriptor {
 }
 
 /// Bounded command streams emitted by one successful game tick.
+#[derive(Default)]
 pub struct GameFrame {
     pub render: Vec<u8>,
     pub audio: Vec<u8>,
@@ -565,6 +566,20 @@ impl GameRuntime {
 
     /// Drive one deterministic frame and take ownership of its command bytes.
     pub fn tick(&mut self, input: GameInput) -> Result<GameFrame, WasmError> {
+        let mut frame = GameFrame::default();
+        self.tick_into(input, &mut frame)?;
+        Ok(frame)
+    }
+
+    /// Drive one deterministic frame, reusing the output storage owned by
+    /// `frame` when its capacity is sufficient.
+    ///
+    /// The prior contents are cleared before input validation, so an error
+    /// never leaves a stale completed frame visible to the embedding. Buffer
+    /// capacity remains available for a later runtime or successful tick.
+    pub fn tick_into(&mut self, input: GameInput, frame: &mut GameFrame) -> Result<(), WasmError> {
+        frame.render.clear();
+        frame.audio.clear();
         self.ensure_live()?;
         if input.buttons & !KNOWN_BUTTON_MASK != 0
             || self
@@ -574,16 +589,31 @@ impl GameRuntime {
             return Err(WasmError::Trap("invalid game input"));
         }
         self.enter(Phase::Tick, input);
+        {
+            let mut host = self.host.borrow_mut();
+            if frame.render.capacity() > host.render.capacity() {
+                mem::swap(&mut frame.render, &mut host.render);
+            }
+            if frame.audio.capacity() > host.audio.capacity() {
+                mem::swap(&mut frame.audio, &mut host.audio);
+            }
+        }
         let tick = self.instance.invoke_by_name("game_tick", &[]);
         self.leave();
         self.capture_execution_stats(GameLifecycle::Tick);
-        self.accept_lifecycle(tick, "game_tick failed")?;
+        let accepted = self.accept_lifecycle(tick, "game_tick failed");
+        {
+            let mut host = self.host.borrow_mut();
+            mem::swap(&mut frame.render, &mut host.render);
+            mem::swap(&mut frame.audio, &mut host.audio);
+        }
+        if let Err(error) = accepted {
+            frame.render.clear();
+            frame.audio.clear();
+            return Err(error);
+        }
         self.last_clock_ms = Some(input.clock_ms);
-        let mut host = self.host.borrow_mut();
-        Ok(GameFrame {
-            render: mem::take(&mut host.render),
-            audio: mem::take(&mut host.audio),
-        })
+        Ok(())
     }
 
     /// Suspend the guest and return a portable, cartridge-bound snapshot.

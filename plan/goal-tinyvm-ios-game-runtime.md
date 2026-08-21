@@ -31,6 +31,7 @@ tinyvm iOS game runtime
 │   ├── input snapshot                [x]
 │   ├── bounded render commands       [x]
 │   ├── bounded audio commands        [x]
+│   ├── recyclable frame buffers      [x]
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
 │   ├── bounded in-place host dispatch [x]
@@ -1771,5 +1772,32 @@ Evidence on 2026-08-21:
   bytes x86_64; catalog/replay/private/session consumers are 1,425,576 /
   1,400,008 / 1,418,176 / 1,417,344 bytes. The stripped static interpreter core
   remains 86,328 bytes and its C selftest returns 42.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Forty-ninth executable increment — recyclable frame ownership
+
+The cross-platform embedding now has a reusable return path for bounded Wasm
+output. Public `GameRuntime::tick_into` clears caller-owned render/audio
+vectors, lends whichever buffer has the greater retained capacity to the host,
+and swaps completed bytes back after execution. It also recovers and clears
+partially written buffers on a guest failure, while invalid host input clears
+stale contents without latching the instance. The original `tick` remains a
+source-compatible ownership-returning wrapper.
+
+Replay recording and replay verification use the same reusable path. The iOS C
+handle now takes its prior completed frame, passes that storage through the next
+ordinary or recorded tick, then restores the completed owner for the existing
+two-stage C/Swift copy. No Rust allocation pointer crosses the ABI and no guest
+format changes: this is a general host-ownership improvement around standard
+Wasm imports, not a game-specific VM instruction.
+
+Evidence on 2026-08-21:
+
+- A public runtime black box proves two equal frames retain the exact render and
+  audio allocation pointers/capacities, then proves rejected input empties the
+  frame, preserves those capacities and leaves the runtime healthy.
+- The migrated C handle lifecycle and replay decoder tests pass, and the full
+  all-feature validation is required below before this increment is published.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

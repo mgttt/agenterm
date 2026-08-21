@@ -5,8 +5,8 @@ use std::process::Command;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameInput, GameLifecycle, GameLimits, GameRuntime,
-    HostProfileV1, Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE,
+    CartridgeDescriptor, CartridgeManifest, GameFrame, GameInput, GameLifecycle, GameLimits,
+    GameRuntime, HostProfileV1, Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE,
     NativeModuleRegistry, RenderFrame, WasmError,
 };
 #[cfg(feature = "replay")]
@@ -408,6 +408,58 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
     assert_eq!(stats.native_calls, 0);
     assert_eq!((stats.render_bytes, stats.audio_bytes), (3, 2));
     assert_eq!(stats.state_bytes, 0);
+}
+
+#[test]
+fn tick_into_recycles_bounded_frame_storage() {
+    let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
+    let mut runtime = must_ok(
+        GameRuntime::from_bytes(&wasm, Limits::default(), GameLimits::default(), 0x1234_5678),
+        "load reusable-frame cartridge",
+    );
+    let mut frame = GameFrame::default();
+    must_ok(
+        runtime.tick_into(
+            GameInput {
+                buttons: 0,
+                clock_ms: 16,
+            },
+            &mut frame,
+        ),
+        "first reusable tick",
+    );
+    assert_eq!(frame.render, [1, 2, 3]);
+    assert_eq!(frame.audio, [4, 5]);
+    let render = (frame.render.as_ptr(), frame.render.capacity());
+    let audio = (frame.audio.as_ptr(), frame.audio.capacity());
+
+    must_ok(
+        runtime.tick_into(
+            GameInput {
+                buttons: 0,
+                clock_ms: 32,
+            },
+            &mut frame,
+        ),
+        "second reusable tick",
+    );
+    assert_eq!((frame.render.as_ptr(), frame.render.capacity()), render);
+    assert_eq!((frame.audio.as_ptr(), frame.audio.capacity()), audio);
+
+    assert!(matches!(
+        runtime.tick_into(
+            GameInput {
+                buttons: 1 << 31,
+                clock_ms: 48,
+            },
+            &mut frame,
+        ),
+        Err(WasmError::Trap("invalid game input"))
+    ));
+    assert!(frame.render.is_empty() && frame.audio.is_empty());
+    assert_eq!((frame.render.as_ptr(), frame.render.capacity()), render);
+    assert_eq!((frame.audio.as_ptr(), frame.audio.capacity()), audio);
+    assert!(!runtime.is_failed());
 }
 
 #[test]

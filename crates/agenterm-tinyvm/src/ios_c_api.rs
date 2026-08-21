@@ -1143,15 +1143,18 @@ pub unsafe extern "C" fn tinyarcade_v1_tick(
     clock_ms: u32,
 ) -> i32 {
     runtime_boundary(runtime, |runtime| {
-        runtime.frame = None;
+        let mut frame = runtime.frame.take().unwrap_or_default();
         let input = GameInput { buttons, clock_ms };
-        let frame = if let Some(recorder) = runtime.replay_recorder.as_mut() {
+        if let Some(recorder) = runtime.replay_recorder.as_mut() {
             recorder
-                .record_tick(&mut runtime.runtime, input)
-                .map_err(wasm_error)?
+                .record_tick_into(&mut runtime.runtime, input, &mut frame)
+                .map_err(wasm_error)?;
         } else {
-            runtime.runtime.tick(input).map_err(wasm_error)?
-        };
+            runtime
+                .runtime
+                .tick_into(input, &mut frame)
+                .map_err(wasm_error)?;
+        }
         runtime.frame = Some(frame);
         Ok(())
     })
