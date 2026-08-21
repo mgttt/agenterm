@@ -2708,3 +2708,10 @@ table, every referenced range and the result pointer before the first backend
 call. Reject a backend count larger than its supplied slice, accumulate totals
 with checked arithmetic, and stop on a short transfer. These rules keep a
 portable adapter bounded even when the platform backend is buggy or adversarial.
+
+When adapting a broad standard open call to a deliberately smaller host trait,
+map only rights and flags whose semantics the common layer can preserve. Reject
+unknown or unsupported lookup, open, descriptor and inheriting-right bits
+explicitly; silently dropping one can grant broader access or make cross-host
+behavior diverge. Validate the result slot, UTF-8 and relative preopen path
+before opening a native handle, then publish only the allocated guest fd.

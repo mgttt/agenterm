@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 86] = [
+const LEAF_TESTS: [(&str, &str); 87] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -912,6 +912,10 @@ const LEAF_TESTS: [(&str, &str); 86] = [
     (
         "fd read/write/seek/stat",
         "wasi_p1_fd_io_seek_and_stat_use_guest_descriptors_and_standard_layouts",
+    ),
+    (
+        "path open/unlink",
+        "wasi_p1_path_open_and_unlink_stay_relative_to_a_virtual_preopen",
     ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
     ("#78", "issue78_runtimes_stay_out_of_the_crate"),

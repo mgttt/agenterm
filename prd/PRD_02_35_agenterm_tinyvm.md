@@ -160,7 +160,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │       │   ├── clock + random                           [x]
 │   │       │   ├── preopen discovery + fd_close             [x]
 │   │       │   ├── fd read/write/seek/stat                   [x]
-│   │       │   ├── path open/unlink                          [ ]
+│   │       │   ├── path open/unlink                          [x]
 │   │       │   └── proc_exit                                 [ ]
 │   │       └── Unix / Windows / iOS backends outside VM    [ ]
 │   ├── P2 — standard Wasm coverage                      [ ]
@@ -270,7 +270,7 @@ as “almost approved” or “safe to ship externally.”
 | Values | i32/i64/f32/f64, funcref and opaque externref through supported standard locations | Exact type mismatch rejection |
 | Resources | Defined/imported/exported globals, memories and funcref/externref tables | Binding/type/limit rejection or borrow-conflict trap |
 | Host ABI | Typed arbitrary-arity compatibility callback and fixed 16-value in-place hot path | Callback error propagated without partial result acceptance |
-| Optional WASI P1 | Thirteen exact process/clock/random/preopen/descriptor imports over the neutral host contract | Unknown/wrong imports fail binding; bad memory, rights or backend absence returns explicit errno |
+| Optional WASI P1 | Fifteen exact process/clock/random/preopen/descriptor/path imports over the neutral host contract | Unknown/wrong imports fail binding; bad memory, path, rights or backend absence returns explicit errno |
 | TinyArcade | Manifest, core v1, native registry, lifecycle, deterministic RNG/clock, render/audio/state bounds | Cartridge fails closed; App owner remains alive |
 | iOS | C ABI, XCFramework, Swift package, input/frame pacing, persistence, replay and native 2D/3D/audio owners | Main-actor owner latches bad runtime and clears stale output |
 | Tooling | Validate, attach-manifest, descriptor, host profile, replay and deterministic catalog publisher | No output publication after failed preflight |

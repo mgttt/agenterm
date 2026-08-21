@@ -3252,3 +3252,28 @@ non-ignored integration test, including the real iOS XCFramework/Swift link and
 the three-game tinyvm/JSC/H5 differential. Linked sizes remain 1,602,104 bytes
 arm64 and 1,677,136 bytes x86_64; the stripped static core remains 101,256 bytes
 with selftest 42.
+
+## Ninety-ninth executable increment — preopen-relative WASI paths
+
+The optional adapter now implements the exact Preview 1 `path_open` and
+`path_unlink_file` signatures. It validates the output slot, guest UTF-8,
+relative path, open flags and requested rights before dispatch. `HostContext`
+then enforces that the directory is a virtual preopen with both path authority
+and every delegated descriptor right; the backend receives only its opaque
+directory handle and relative path. The resulting native handle is published
+as a bounded guest fd, preserving cleanup if publication fails.
+
+The initial subset supports create/directory/truncate plus read/write/seek/stat
+rights. Lookup flags, exclusive open, descriptor flags, inheriting rights and
+unrepresented Preview 1 rights fail explicitly instead of being discarded.
+
+Evidence on 2026-08-22: a standards-shaped binary opens `save.bin`, receives
+guest fd 1 and unlinks through virtual root `/save`; the fixture backend sees
+only opaque handle 77 and the relative path. A second binary attempts `../x`,
+receives `NOTCAPABLE`, and proves neither backend operation ran. The owning
+focused no-default-feature tests, warnings-denied Clippy and arm64 iOS `no_std`
+feature check pass. The complete all-feature/all-target suite passes all 127
+library tests and every non-ignored integration test, including the real iOS
+XCFramework/Swift link and three-game tinyvm/JSC/H5 differential. Linked sizes
+remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the stripped static core
+remains 101,256 bytes with selftest 42.

@@ -10,7 +10,8 @@ use alloc::vec::Vec;
 use core::cell::{Ref, RefCell, RefMut};
 
 use crate::{
-    GuestFd, HostBackend, HostClock, HostContext, HostError, Val, ValueType, WasmError, WasmModule,
+    DescriptorRights, GuestFd, HostBackend, HostClock, HostContext, HostError, OpenOptions, Val,
+    ValueType, WasmError, WasmModule,
 };
 
 pub const WASI_SNAPSHOT_PREVIEW1: &str = "wasi_snapshot_preview1";
@@ -124,10 +125,12 @@ enum Function {
     FdWrite,
     FdSeek,
     FdFilestatGet,
+    PathOpen,
+    PathUnlinkFile,
 }
 
 impl Function {
-    const COUNT: usize = 13;
+    const COUNT: usize = 15;
     const ALL: [Self; Self::COUNT] = [
         Self::ArgsGet,
         Self::ArgsSizesGet,
@@ -142,6 +145,8 @@ impl Function {
         Self::FdWrite,
         Self::FdSeek,
         Self::FdFilestatGet,
+        Self::PathOpen,
+        Self::PathUnlinkFile,
     ];
 
     fn from_name(name: &str) -> Option<Self> {
@@ -159,6 +164,8 @@ impl Function {
             "fd_write" => Self::FdWrite,
             "fd_seek" => Self::FdSeek,
             "fd_filestat_get" => Self::FdFilestatGet,
+            "path_open" => Self::PathOpen,
+            "path_unlink_file" => Self::PathUnlinkFile,
             _ => return None,
         })
     }
@@ -178,6 +185,8 @@ impl Function {
             Self::FdWrite => "fd_write",
             Self::FdSeek => "fd_seek",
             Self::FdFilestatGet => "fd_filestat_get",
+            Self::PathOpen => "path_open",
+            Self::PathUnlinkFile => "path_unlink_file",
         }
     }
 
@@ -197,6 +206,17 @@ impl Function {
             ValueType::I32,
             ValueType::I32,
         ];
+        const PATH_OPEN: &[ValueType] = &[
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I32,
+            ValueType::I64,
+            ValueType::I64,
+            ValueType::I32,
+            ValueType::I32,
+        ];
         const I32: &[ValueType] = &[ValueType::I32];
         match self {
             Self::ArgsGet
@@ -211,6 +231,8 @@ impl Function {
             Self::FdRead | Self::FdWrite => (FOUR_I32, I32),
             Self::FdSeek => (SEEK, I32),
             Self::FdFilestatGet => (I32_I32, I32),
+            Self::PathOpen => (PATH_OPEN, I32),
+            Self::PathUnlinkFile => (I32_I32_I32, I32),
         }
     }
 
@@ -254,6 +276,8 @@ fn dispatch<B: HostBackend>(
         Function::FdWrite => fd_write(context, args, memory),
         Function::FdSeek => fd_seek(context, args, memory),
         Function::FdFilestatGet => fd_filestat_get(context, args, memory),
+        Function::PathOpen => path_open(context, args, memory),
+        Function::PathUnlinkFile => path_unlink_file(context, args, memory),
     }
 }
 
@@ -644,6 +668,122 @@ fn fd_filestat_get<B: HostBackend>(
     };
     output[32..40].copy_from_slice(&stat.size.to_le_bytes());
     WasiErrno::SUCCESS
+}
+
+const WASI_RIGHT_FD_READ: u64 = 1 << 1;
+const WASI_RIGHT_FD_SEEK: u64 = 1 << 2;
+const WASI_RIGHT_FD_WRITE: u64 = 1 << 6;
+const WASI_RIGHT_FD_FILESTAT_GET: u64 = 1 << 21;
+const WASI_SUPPORTED_FILE_RIGHTS: u64 =
+    WASI_RIGHT_FD_READ | WASI_RIGHT_FD_SEEK | WASI_RIGHT_FD_WRITE | WASI_RIGHT_FD_FILESTAT_GET;
+const WASI_OFLAG_CREATE: u32 = 1;
+const WASI_OFLAG_DIRECTORY: u32 = 2;
+const WASI_OFLAG_EXCLUSIVE: u32 = 4;
+const WASI_OFLAG_TRUNCATE: u32 = 8;
+const WASI_KNOWN_OFLAGS: u32 =
+    WASI_OFLAG_CREATE | WASI_OFLAG_DIRECTORY | WASI_OFLAG_EXCLUSIVE | WASI_OFLAG_TRUNCATE;
+
+fn path_open<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    args: &[Val],
+    memory: &mut [u8],
+) -> WasiErrno {
+    let [
+        Val::I32(fd),
+        Val::I32(dirflags),
+        Val::I32(path_pointer),
+        Val::I32(path_length),
+        Val::I32(oflags),
+        Val::I64(rights_base),
+        Val::I64(rights_inheriting),
+        Val::I32(fdflags),
+        Val::I32(result),
+    ] = args
+    else {
+        return WasiErrno::INVAL;
+    };
+    if memory_range(memory, *result as u32, 4).is_none() {
+        return WasiErrno::FAULT;
+    }
+    if *dirflags != 0 || *fdflags != 0 || *rights_inheriting != 0 {
+        return WasiErrno::NOSYS;
+    }
+    let oflags = *oflags as u32;
+    if oflags & !WASI_KNOWN_OFLAGS != 0 {
+        return WasiErrno::INVAL;
+    }
+    if oflags & WASI_OFLAG_EXCLUSIVE != 0 {
+        return WasiErrno::NOSYS;
+    }
+    let rights_base = *rights_base as u64;
+    let Some(rights) = descriptor_rights(rights_base) else {
+        return WasiErrno::NOSYS;
+    };
+    let Some(path_bytes) = memory_range(memory, *path_pointer as u32, *path_length as u32) else {
+        return WasiErrno::FAULT;
+    };
+    let Ok(path) = core::str::from_utf8(path_bytes) else {
+        return WasiErrno::INVAL;
+    };
+    let options = OpenOptions {
+        create: oflags & WASI_OFLAG_CREATE != 0,
+        directory: oflags & WASI_OFLAG_DIRECTORY != 0,
+        read: rights.contains(DescriptorRights::READ),
+        truncate: oflags & WASI_OFLAG_TRUNCATE != 0,
+        write: rights.contains(DescriptorRights::WRITE),
+    };
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return WasiErrno::IO;
+    };
+    let opened = match context.path_open(GuestFd::new(*fd as u32), path, options, rights) {
+        Ok(opened) => opened,
+        Err(error) => return error.into(),
+    };
+    let _ = write_u32(memory, *result as u32, opened.raw());
+    WasiErrno::SUCCESS
+}
+
+fn path_unlink_file<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    args: &[Val],
+    memory: &[u8],
+) -> WasiErrno {
+    let [Val::I32(fd), Val::I32(path_pointer), Val::I32(path_length)] = args else {
+        return WasiErrno::INVAL;
+    };
+    let Some(path_bytes) = memory_range(memory, *path_pointer as u32, *path_length as u32) else {
+        return WasiErrno::FAULT;
+    };
+    let Ok(path) = core::str::from_utf8(path_bytes) else {
+        return WasiErrno::INVAL;
+    };
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return WasiErrno::IO;
+    };
+    match context.path_unlink(GuestFd::new(*fd as u32), path) {
+        Ok(()) => WasiErrno::SUCCESS,
+        Err(error) => error.into(),
+    }
+}
+
+fn descriptor_rights(raw: u64) -> Option<DescriptorRights> {
+    if raw & !WASI_SUPPORTED_FILE_RIGHTS != 0 {
+        return None;
+    }
+    let mut rights = DescriptorRights::NONE;
+    if raw & WASI_RIGHT_FD_READ != 0 {
+        rights = rights.union(DescriptorRights::READ);
+    }
+    if raw & WASI_RIGHT_FD_WRITE != 0 {
+        rights = rights.union(DescriptorRights::WRITE);
+    }
+    if raw & WASI_RIGHT_FD_SEEK != 0 {
+        rights = rights.union(DescriptorRights::SEEK);
+    }
+    if raw & WASI_RIGHT_FD_FILESTAT_GET != 0 {
+        rights = rights.union(DescriptorRights::STAT);
+    }
+    Some(rights)
 }
 
 fn snapshot_iovecs(memory: &[u8], table: u32, count: u32) -> Result<Vec<(u32, u32)>, WasiErrno> {

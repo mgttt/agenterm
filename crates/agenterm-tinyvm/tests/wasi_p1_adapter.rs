@@ -9,6 +9,8 @@ use agenterm_tinyvm::{
 struct FixtureBackend {
     closed: Vec<u32>,
     written: Vec<u8>,
+    opened: Vec<String>,
+    unlinked: Vec<String>,
 }
 
 impl HostBackend for FixtureBackend {
@@ -74,15 +76,29 @@ impl HostBackend for FixtureBackend {
 
     fn path_open(
         &mut self,
-        _directory: HostHandle,
-        _path: &str,
-        _options: OpenOptions,
+        directory: HostHandle,
+        path: &str,
+        options: OpenOptions,
     ) -> HostResult<HostHandle> {
-        Err(HostError::NotSupported)
+        if directory.raw() != 77
+            || !options.create
+            || options.directory
+            || !options.read
+            || options.truncate
+            || !options.write
+        {
+            return Err(HostError::Invalid);
+        }
+        self.opened.push(path.to_owned());
+        Ok(HostHandle::new(99))
     }
 
-    fn path_unlink(&mut self, _directory: HostHandle, _path: &str) -> HostResult<()> {
-        Err(HostError::NotSupported)
+    fn path_unlink(&mut self, directory: HostHandle, path: &str) -> HostResult<()> {
+        if directory.raw() != 77 {
+            return Err(HostError::Invalid);
+        }
+        self.unlinked.push(path.to_owned());
+        Ok(())
     }
 
     fn exit(&mut self, _code: u32) -> HostResult<()> {
@@ -261,6 +277,68 @@ fn wasi_p1_snapshots_iovecs_before_guest_output_can_overlap_the_table() {
     assert_eq!(u32_at(&memory, 32), 8);
 }
 
+#[test]
+fn wasi_p1_path_open_and_unlink_stay_relative_to_a_virtual_preopen() {
+    let mut context = HostContext::new(FixtureBackend::default(), HostLimits::default());
+    let rights = DescriptorRights::PATH_OPEN
+        .union(DescriptorRights::PATH_UNLINK)
+        .union(DescriptorRights::READ)
+        .union(DescriptorRights::WRITE)
+        .union(DescriptorRights::SEEK)
+        .union(DescriptorRights::STAT);
+    must(
+        context.register_preopen(HostHandle::new(77), "/save".to_owned(), rights),
+        "register path preopen",
+    );
+    let wasi = WasiPreview1::new(context);
+    let mut module = must(
+        WasmModule::from_bytes(&path_fixture_module(b"save.bin")),
+        "decode path fixture",
+    );
+    must(wasi.bind(&mut module), "bind path imports");
+    let mut instance = must(module.instantiate(), "instantiate path fixture");
+    let results = must(instance.invoke_by_name("main", &[]), "invoke path fixture");
+    assert!(matches!(results.as_slice(), [Val::I32(0)]));
+    let memory = must(instance.memory(), "memory");
+    assert_eq!(u32_at(&memory, 32), 1);
+    drop(memory);
+    let context = wasi.try_context().expect("borrow context after paths");
+    assert_eq!(context.backend().opened, ["save.bin"]);
+    assert_eq!(context.backend().unlinked, ["save.bin"]);
+}
+
+#[test]
+fn wasi_p1_path_escape_fails_before_the_backend() {
+    let mut context = HostContext::new(FixtureBackend::default(), HostLimits::default());
+    let rights = DescriptorRights::PATH_OPEN
+        .union(DescriptorRights::PATH_UNLINK)
+        .union(DescriptorRights::READ)
+        .union(DescriptorRights::WRITE)
+        .union(DescriptorRights::SEEK)
+        .union(DescriptorRights::STAT);
+    must(
+        context.register_preopen(HostHandle::new(77), "/save".to_owned(), rights),
+        "register path preopen",
+    );
+    let wasi = WasiPreview1::new(context);
+    let mut module = must(
+        WasmModule::from_bytes(&path_fixture_module(b"../x")),
+        "decode path-escape fixture",
+    );
+    must(wasi.bind(&mut module), "bind path imports");
+    let mut instance = must(module.instantiate(), "instantiate path-escape fixture");
+    let results = must(
+        instance.invoke_by_name("main", &[]),
+        "invoke path-escape fixture",
+    );
+    assert!(matches!(results.as_slice(), [Val::I32(76)]));
+    let context = wasi
+        .try_context()
+        .expect("borrow context after path escape");
+    assert!(context.backend().opened.is_empty());
+    assert!(context.backend().unlinked.is_empty());
+}
+
 fn fixture_module() -> Vec<u8> {
     let types = vec![
         function_type(&[0x7f, 0x7f], &[0x7f]),
@@ -368,6 +446,35 @@ fn overlapping_iovec_module() -> Vec<u8> {
     body.push(0x0b);
     let iovecs = [8, 0, 0, 0, 4, 0, 0, 0, 64, 0, 0, 0, 4, 0, 0, 0];
     module(types, &[("fd_read", 0)], 1, Some(body), &[(0, &iovecs)])
+}
+
+fn path_fixture_module(path: &[u8]) -> Vec<u8> {
+    let types = vec![
+        function_type(
+            &[0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7e, 0x7f, 0x7f],
+            &[0x7f],
+        ),
+        function_type(&[0x7f, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[], &[0x7f]),
+    ];
+    let imports = [("path_open", 0), ("path_unlink_file", 1)];
+    let mut body = vec![0];
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 64);
+    i32_const(&mut body, path.len() as i32);
+    i32_const(&mut body, 1);
+    i64_const(&mut body, (1 << 1) | (1 << 2) | (1 << 6) | (1 << 21));
+    i64_const(&mut body, 0);
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 32);
+    call_drop(&mut body, 0);
+    i32_const(&mut body, 0);
+    i32_const(&mut body, 64);
+    i32_const(&mut body, path.len() as i32);
+    call(&mut body, 1);
+    body.push(0x0b);
+    module(types, &imports, 2, Some(body), &[(64, path)])
 }
 
 fn single_import_module(field: &str, type_index: u32) -> Vec<u8> {
@@ -478,6 +585,20 @@ fn call(body: &mut Vec<u8>, function: u32) {
 
 fn i32_const(body: &mut Vec<u8>, value: i32) {
     body.push(0x41);
+    let mut value = value;
+    loop {
+        let byte = value as u8 & 0x7f;
+        value >>= 7;
+        let done = (value == 0 && byte & 0x40 == 0) || (value == -1 && byte & 0x40 != 0);
+        body.push(if done { byte } else { byte | 0x80 });
+        if done {
+            break;
+        }
+    }
+}
+
+fn i64_const(body: &mut Vec<u8>, value: i64) {
+    body.push(0x42);
     let mut value = value;
     loop {
         let byte = value as u8 & 0x7f;
