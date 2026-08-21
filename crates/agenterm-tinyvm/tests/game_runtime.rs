@@ -1383,7 +1383,13 @@ fn native_module_can_own_a_resource_behind_a_generation_checked_guest_handle() {
         "attach resource-handle manifest",
     );
 
-    let resources = Rc::new(RefCell::new(HostResourceTable::new(1)));
+    let resource_domain =
+        agenterm_tinyvm::ResourceHandleDomain::new(1).expect("non-zero resource domain");
+    let resources = Rc::new(RefCell::new(must_ok(
+        HostResourceTable::new(resource_domain, 1)
+            .map_err(|_| WasmError::Trap("native resource table config")),
+        "create native resource table",
+    )));
     let create_resources = resources.clone();
     let read_resources = resources.clone();
     let close_resources = resources.clone();

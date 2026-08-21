@@ -2,12 +2,37 @@
 //!
 //! Native modules can keep platform objects in this table and pass only the
 //! returned 32-bit token through a standard Wasm function import. Tokens carry
-//! a slot generation, so closing and reusing a slot does not make an old token
-//! name the new object.
+//! a module domain and slot generation, so sibling tables reject each other's
+//! handles and closing/reusing a slot cannot make an old token name a new object.
 
 use alloc::vec::Vec;
 
-/// A non-zero, generation-checked token suitable for an `i32` Wasm ABI.
+const SLOT_MASK: u32 = 0x0fff;
+const GENERATION_MASK: u32 = 0x0fff;
+const GENERATION_SHIFT: u32 = 12;
+const DOMAIN_SHIFT: u32 = 24;
+
+pub const MAX_RESOURCE_SLOTS: u16 = SLOT_MASK as u16;
+pub const MAX_RESOURCE_GENERATION: u16 = GENERATION_MASK as u16;
+
+/// One native module's non-zero handle domain.
+///
+/// The registry or embedding assigns different domains to native modules whose
+/// handles must not be interchangeable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ResourceHandleDomain(u8);
+
+impl ResourceHandleDomain {
+    pub const fn new(raw: u8) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
+    }
+
+    pub const fn raw(self) -> u8 {
+        self.0
+    }
+}
+
+/// A non-zero, domain- and generation-checked token for an `i32` Wasm ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GuestResourceHandle(u32);
 
@@ -16,7 +41,10 @@ impl GuestResourceHandle {
     ///
     /// Zero and encodings with a zero slot or generation are never valid.
     pub const fn from_raw(raw: u32) -> Option<Self> {
-        if raw & 0xffff == 0 || raw >> 16 == 0 {
+        if raw & SLOT_MASK == 0
+            || (raw >> GENERATION_SHIFT) & GENERATION_MASK == 0
+            || raw >> DOMAIN_SHIFT == 0
+        {
             None
         } else {
             Some(Self(raw))
@@ -36,15 +64,21 @@ impl GuestResourceHandle {
         self.0 as i32
     }
 
-    fn parts(self) -> (usize, u16) {
-        let slot = ((self.0 & 0xffff) - 1) as usize;
-        let generation = (self.0 >> 16) as u16;
-        (slot, generation)
+    pub const fn domain(self) -> ResourceHandleDomain {
+        // `from_raw` and the private constructor both reject zero.
+        ResourceHandleDomain((self.0 >> DOMAIN_SHIFT) as u8)
+    }
+
+    fn parts(self) -> (ResourceHandleDomain, usize, u16) {
+        let slot = ((self.0 & SLOT_MASK) - 1) as usize;
+        let generation = ((self.0 >> GENERATION_SHIFT) & GENERATION_MASK) as u16;
+        (self.domain(), slot, generation)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceTableError {
+    InvalidLimit,
     Full,
     AllocationFailed,
     StaleHandle,
@@ -58,22 +92,34 @@ struct Slot<T> {
 
 /// One native module's bounded owner for host resources exposed to a guest.
 ///
-/// A table supports at most 65,535 slots. Removing a value invalidates its
+/// A table supports at most 4,095 slots. Removing a value invalidates its
 /// handle before the slot can be reused. A slot is permanently retired rather
 /// than allowing its generation to wrap and alias a very old handle.
 pub struct HostResourceTable<T> {
+    domain: ResourceHandleDomain,
     slots: Vec<Slot<T>>,
     len: u16,
     max_resources: u16,
 }
 
 impl<T> HostResourceTable<T> {
-    pub const fn new(max_resources: u16) -> Self {
-        Self {
+    pub fn new(
+        domain: ResourceHandleDomain,
+        max_resources: u16,
+    ) -> Result<Self, ResourceTableError> {
+        if max_resources > MAX_RESOURCE_SLOTS {
+            return Err(ResourceTableError::InvalidLimit);
+        }
+        Ok(Self {
+            domain,
             slots: Vec::new(),
             len: 0,
             max_resources,
-        }
+        })
+    }
+
+    pub const fn domain(&self) -> ResourceHandleDomain {
+        self.domain
     }
 
     pub const fn len(&self) -> u16 {
@@ -108,7 +154,7 @@ impl<T> HostResourceTable<T> {
         {
             slot.value = Some(value);
             self.len += 1;
-            return Ok(make_handle(index, slot.generation));
+            return Ok(make_handle(self.domain, index, slot.generation));
         }
 
         if self.slots.len() >= self.max_resources as usize {
@@ -123,11 +169,14 @@ impl<T> HostResourceTable<T> {
             value: Some(value),
         });
         self.len += 1;
-        Ok(make_handle(index, 1))
+        Ok(make_handle(self.domain, index, 1))
     }
 
     pub fn get(&self, handle: GuestResourceHandle) -> Result<&T, ResourceTableError> {
-        let (index, generation) = handle.parts();
+        let (domain, index, generation) = handle.parts();
+        if domain != self.domain {
+            return Err(ResourceTableError::StaleHandle);
+        }
         let slot = self
             .slots
             .get(index)
@@ -137,7 +186,10 @@ impl<T> HostResourceTable<T> {
     }
 
     pub fn get_mut(&mut self, handle: GuestResourceHandle) -> Result<&mut T, ResourceTableError> {
-        let (index, generation) = handle.parts();
+        let (domain, index, generation) = handle.parts();
+        if domain != self.domain {
+            return Err(ResourceTableError::StaleHandle);
+        }
         let slot = self
             .slots
             .get_mut(index)
@@ -149,7 +201,10 @@ impl<T> HostResourceTable<T> {
     /// Removes and returns the owned resource. The handle is invalid before
     /// another value can occupy the slot.
     pub fn remove(&mut self, handle: GuestResourceHandle) -> Result<T, ResourceTableError> {
-        let (index, generation) = handle.parts();
+        let (domain, index, generation) = handle.parts();
+        if domain != self.domain {
+            return Err(ResourceTableError::StaleHandle);
+        }
         let slot = self
             .slots
             .get_mut(index)
@@ -172,14 +227,19 @@ impl<T> HostResourceTable<T> {
     }
 }
 
-fn make_handle(index: usize, generation: u16) -> GuestResourceHandle {
-    debug_assert!(index < u16::MAX as usize);
+fn make_handle(domain: ResourceHandleDomain, index: usize, generation: u16) -> GuestResourceHandle {
+    debug_assert!(index < MAX_RESOURCE_SLOTS as usize);
     debug_assert_ne!(generation, 0);
-    GuestResourceHandle((u32::from(generation) << 16) | (index as u32 + 1))
+    debug_assert!(generation <= MAX_RESOURCE_GENERATION);
+    GuestResourceHandle(
+        (u32::from(domain.raw()) << DOMAIN_SHIFT)
+            | (u32::from(generation) << GENERATION_SHIFT)
+            | (index as u32 + 1),
+    )
 }
 
 fn advance_generation<T>(slot: &mut Slot<T>) {
-    slot.generation = if slot.generation == u16::MAX {
+    slot.generation = if slot.generation == MAX_RESOURCE_GENERATION {
         0
     } else {
         slot.generation + 1

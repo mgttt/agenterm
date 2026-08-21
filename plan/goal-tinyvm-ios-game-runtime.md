@@ -58,7 +58,7 @@ tinyvm iOS game runtime
 │   ├── clock/RNG determinism         [x]
 │   ├── native capability registry    [x]
 │   ├── bounded in-place host dispatch [x]
-│   ├── generation-checked native resource handles [x]
+│   ├── domain + generation native resource handles [x]
 │   └── storage without guest network [x]
 ├── artifact trust                    [x]
 │   ├── manifest + compatibility      [x]
@@ -3474,15 +3474,17 @@ remains 101,256 bytes with selftest 42.
 
 The unified crate now exposes `HostResourceTable<T>` for native modules that
 must name host-owned objects through a standard Wasm `i32`. Its nonzero token
-encodes one bounded slot and generation; close advances the generation before
+encodes a module domain, bounded slot and generation; distinct domains reject
+cross-module collisions, while close advances the generation before
 reuse, while final-generation exhaustion permanently retires the slot instead
 of wrapping an ancient token onto a new object. Insert failure drops its owned
 input, and clear/table drop own deterministic cleanup. This is a lifecycle
 primitive for any host, not a platform backend, executor or permission layer.
 
-Evidence on 2026-08-22: five public black boxes prove exact i32 bit round trips,
-bounded capacity, mutable access, close, clear, deterministic drop, stale-token
-rejection and all 65,535 generations of one slot. A sixth black box drives an
+Evidence on 2026-08-22: six public black boxes prove exact i32 bit round trips,
+bounded capacity, mutable access, close, clear, deterministic drop, cross-domain
+and stale-token rejection, and all 4,095 generations of one slot. A seventh
+black box drives an
 ordinary TinyArcade cartridge through versioned create/read/close imports and
 leaves no live host resource. The complete all-feature/all-target package
 passes all 128 library tests and every non-ignored integration test, including

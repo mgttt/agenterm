@@ -66,7 +66,10 @@ pub use host::{
 };
 
 pub mod resource_table;
-pub use resource_table::{GuestResourceHandle, HostResourceTable, ResourceTableError};
+pub use resource_table::{
+    GuestResourceHandle, HostResourceTable, MAX_RESOURCE_GENERATION, MAX_RESOURCE_SLOTS,
+    ResourceHandleDomain, ResourceTableError,
+};
 
 #[cfg(feature = "std-host")]
 pub mod std_host;

@@ -938,7 +938,7 @@ const LEAF_TESTS: [(&str, &str); 100] = [
         "typed_host_can_borrow_selected_defined_memories_by_standard_index",
     ),
     (
-        "generation-checked guest resource handles",
+        "domain + generation guest resource handles",
         "native_module_can_own_a_resource_behind_a_generation_checked_guest_handle",
     ),
     (
