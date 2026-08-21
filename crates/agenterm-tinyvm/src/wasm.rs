@@ -248,6 +248,7 @@ impl Store {
         Ok(function_type)
     }
 
+    #[inline(never)]
     fn invoke_registered(
         &self,
         address: &FunctionAddress,
@@ -256,47 +257,160 @@ impl Store {
         base_depth: usize,
         stats: &mut CallResourceStats,
     ) -> Result<Vec<Val>, WasmError> {
-        let instance = {
-            self.inner
-                .try_borrow()
-                .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
-                .instances
-                .get(address.instance_id)
-                .and_then(Option::as_ref)
-                .cloned()
-                .ok_or(WasmError::Trap("unknown function instance"))?
-        };
-        let mut state = instance
-            .try_borrow_mut()
-            .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
-        let InstanceState {
-            module,
-            memories,
-            globals,
-            data_live,
-            tables,
-            elem_live,
-            ..
-        } = &mut *state;
-        let mut bulk = BulkState {
-            data_live,
-            tables,
-            elem_live,
-            store: self,
-            instance_id: address.instance_id,
-        };
-        let mut context = CallContext { base_depth, stats };
-        module.call_any(
-            WasmCall {
-                index: address.index,
-                args,
+        enum StoreEntry {
+            Call {
+                address: FunctionAddress,
+                args: Vec<Val>,
+                base_depth: usize,
+                base_slots: usize,
             },
-            steps,
-            memories,
-            globals,
-            &mut bulk,
-            &mut context,
-        )
+            Resume {
+                instance_id: usize,
+                continuation: LocalContinuation,
+                values: Vec<Val>,
+                base_depth: usize,
+                base_slots: usize,
+            },
+        }
+
+        let mut initial_args = Vec::new();
+        initial_args
+            .try_reserve_exact(args.len())
+            .map_err(|_| WasmError::Trap("call arguments"))?;
+        initial_args.extend_from_slice(args);
+        let mut entry = StoreEntry::Call {
+            address: address.clone(),
+            args: initial_args,
+            base_depth,
+            base_slots: 0,
+        };
+        let mut suspended = Vec::new();
+
+        loop {
+            let (instance_id, call_base_depth, call_base_slots) = match &entry {
+                StoreEntry::Call {
+                    address,
+                    base_depth,
+                    base_slots,
+                    ..
+                } => (address.instance_id, *base_depth, *base_slots),
+                StoreEntry::Resume {
+                    instance_id,
+                    base_depth,
+                    base_slots,
+                    ..
+                } => (*instance_id, *base_depth, *base_slots),
+            };
+            let instance = {
+                self.inner
+                    .try_borrow()
+                    .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+                    .instances
+                    .get(instance_id)
+                    .and_then(Option::as_ref)
+                    .cloned()
+                    .ok_or(WasmError::Trap("unknown function instance"))?
+            };
+            let mut state = instance
+                .try_borrow_mut()
+                .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
+            let InstanceState {
+                module,
+                memories,
+                globals,
+                data_live,
+                tables,
+                elem_live,
+                ..
+            } = &mut *state;
+            let mut bulk = BulkState {
+                data_live,
+                tables,
+                elem_live,
+                store: self,
+                instance_id,
+            };
+            let mut context = CallContext {
+                base_depth: call_base_depth,
+                base_slots: call_base_slots,
+                stats,
+            };
+            let boundary = match &mut entry {
+                StoreEntry::Call { address, args, .. } => module.call_any_until_boundary(
+                    CallEntry::Call(WasmCall {
+                        index: address.index,
+                        args,
+                    }),
+                    steps,
+                    memories,
+                    globals,
+                    &mut bulk,
+                    &mut context,
+                )?,
+                StoreEntry::Resume {
+                    continuation,
+                    values,
+                    ..
+                } => module.call_any_until_boundary(
+                    CallEntry::Resume {
+                        continuation: core::mem::replace(
+                            continuation,
+                            LocalContinuation {
+                                callers: Vec::new(),
+                                suspended_slots: 0,
+                            },
+                        ),
+                        values: core::mem::take(values),
+                    },
+                    steps,
+                    memories,
+                    globals,
+                    &mut bulk,
+                    &mut context,
+                )?,
+            };
+            drop(state);
+
+            match boundary {
+                CallBoundary::Values(values) => {
+                    if let Some((instance_id, continuation, base_depth, base_slots)) =
+                        suspended.pop()
+                    {
+                        entry = StoreEntry::Resume {
+                            instance_id,
+                            continuation,
+                            values,
+                            base_depth,
+                            base_slots,
+                        };
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                CallBoundary::Foreign {
+                    address,
+                    args,
+                    continuation,
+                } => {
+                    let foreign_base_depth = call_base_depth
+                        .checked_add(continuation.callers.len())
+                        .ok_or(WasmError::Trap("call depth"))?;
+                    let foreign_base_slots = call_base_slots
+                        .checked_add(continuation.suspended_slots)
+                        .ok_or(WasmError::Trap("call stack"))?;
+                    suspended
+                        .try_reserve(1)
+                        .map_err(|_| WasmError::Trap("call stack"))?;
+                    suspended.push((instance_id, continuation, call_base_depth, call_base_slots));
+                    entry = StoreEntry::Call {
+                        address,
+                        args,
+                        base_depth: foreign_base_depth,
+                        base_slots: foreign_base_slots,
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -3106,6 +3220,7 @@ struct CallResourceStats {
 
 struct CallContext<'a> {
     base_depth: usize,
+    base_slots: usize,
     stats: &'a mut CallResourceStats,
 }
 
@@ -3142,6 +3257,28 @@ enum DefinedOutcome {
     ForeignTailCall {
         address: FunctionAddress,
         args: Vec<Val>,
+    },
+}
+
+struct LocalContinuation {
+    callers: Vec<DefinedActivation>,
+    suspended_slots: usize,
+}
+
+enum CallBoundary {
+    Values(Vec<Val>),
+    Foreign {
+        address: FunctionAddress,
+        args: Vec<Val>,
+        continuation: LocalContinuation,
+    },
+}
+
+enum CallEntry<'a> {
+    Call(WasmCall<'a>),
+    Resume {
+        continuation: LocalContinuation,
+        values: Vec<Val>,
     },
 }
 
@@ -4153,6 +4290,7 @@ impl Module {
         if let Some(start) = self.start {
             let mut call_context = CallContext {
                 base_depth: 0,
+                base_slots: 0,
                 stats: &mut resources,
             };
             self.call_any(
@@ -4177,6 +4315,7 @@ impl Module {
         };
         let mut call_context = CallContext {
             base_depth: 0,
+            base_slots: 0,
             stats: &mut resources,
         };
         self.call_any(
@@ -4256,6 +4395,7 @@ impl Module {
         let mut resources = CallResourceStats::default();
         let mut call_context = CallContext {
             base_depth: 0,
+            base_slots: 0,
             stats: &mut resources,
         };
         self.call_any(
@@ -4726,7 +4866,7 @@ impl Module {
         }
     }
 
-    /// Dispatch a call by combined index to a host function or a defined one.
+    /// Dispatch one call that cannot leave its instance.
     fn call_any(
         &self,
         call: WasmCall<'_>,
@@ -4736,21 +4876,66 @@ impl Module {
         bulk: &mut BulkState<'_>,
         context: &mut CallContext<'_>,
     ) -> Result<Vec<Val>, WasmError> {
-        let mut index = call.index;
-        let mut args = Vec::new();
-        args.try_reserve_exact(call.args.len())
-            .map_err(|_| WasmError::Trap("call arguments"))?;
-        args.extend_from_slice(call.args);
+        match self.call_any_until_boundary(
+            CallEntry::Call(call),
+            steps,
+            memories,
+            globals,
+            bulk,
+            context,
+        )? {
+            CallBoundary::Values(values) => Ok(values),
+            CallBoundary::Foreign { .. } => {
+                Err(WasmError::Trap("foreign call requires store trampoline"))
+            }
+        }
+    }
+
+    /// Dispatch a call by combined index until it returns or selects a foreign owner.
+    #[inline(never)]
+    fn call_any_until_boundary(
+        &self,
+        entry: CallEntry<'_>,
+        steps: &mut u64,
+        memories: &mut [MemorySlot],
+        globals: &mut [GlobalSlot],
+        bulk: &mut BulkState<'_>,
+        context: &mut CallContext<'_>,
+    ) -> Result<CallBoundary, WasmError> {
+        let (mut index, mut args, mut callers, mut suspended_slots, mut pending_values) =
+            match entry {
+                CallEntry::Call(call) => {
+                    let mut args = Vec::new();
+                    args.try_reserve_exact(call.args.len())
+                        .map_err(|_| WasmError::Trap("call arguments"))?;
+                    args.extend_from_slice(call.args);
+                    (call.index, args, Vec::new(), 0, None)
+                }
+                CallEntry::Resume {
+                    continuation,
+                    values,
+                } => (
+                    0,
+                    Vec::new(),
+                    continuation.callers,
+                    continuation.suspended_slots,
+                    Some(CallValues::Owned(values)),
+                ),
+            };
         let mut activation: Option<DefinedActivation> = None;
-        let mut callers: Vec<DefinedActivation> = Vec::new();
-        let mut suspended_slots = 0usize;
         loop {
+            let total_suspended_slots = context
+                .base_slots
+                .checked_add(suspended_slots)
+                .ok_or(WasmError::Trap("call stack"))?;
             let available_slots = self
                 .limits
                 .max_activation_slots
-                .checked_sub(suspended_slots)
+                .checked_sub(total_suspended_slots)
                 .ok_or(WasmError::Trap("call stack"))?;
-            let outcome = if let Some(current) = activation.take() {
+            let outcome = if let Some(values) = pending_values.take() {
+                DefinedOutcome::Values(values)
+            } else if let Some(current) = activation.take() {
                 let current_depth = context
                     .base_depth
                     .checked_add(callers.len())
@@ -4758,7 +4943,7 @@ impl Module {
                     .ok_or(WasmError::Trap("call depth"))?;
                 let activation_resources = ActivationResources {
                     available_slots,
-                    suspended_slots,
+                    suspended_slots: total_suspended_slots,
                     call_depth: current_depth,
                     stats: context.stats,
                 };
@@ -4774,7 +4959,7 @@ impl Module {
                 let force_owned = callers.is_empty();
                 if let Some(caller) = callers.last_mut() {
                     let result_count = self.hosts[index].n_results;
-                    if suspended_slots
+                    if total_suspended_slots
                         .checked_add(result_count)
                         .filter(|&slots| slots <= self.limits.max_activation_slots)
                         .is_none()
@@ -4818,7 +5003,7 @@ impl Module {
                 )?;
                 let activation_resources = ActivationResources {
                     available_slots,
-                    suspended_slots,
+                    suspended_slots: total_suspended_slots,
                     call_depth: current_depth,
                     stats: context.stats,
                 };
@@ -4844,7 +5029,12 @@ impl Module {
                         let available_slots = self
                             .limits
                             .max_activation_slots
-                            .checked_sub(suspended_slots)
+                            .checked_sub(
+                                context
+                                    .base_slots
+                                    .checked_add(suspended_slots)
+                                    .ok_or(WasmError::Trap("call stack"))?,
+                            )
                             .ok_or(WasmError::Trap("call stack"))?;
                         if resumed_slots > available_slots {
                             return Err(WasmError::Trap("call stack"));
@@ -4856,7 +5046,7 @@ impl Module {
                         values.append_to(&mut caller.stack);
                         activation = Some(caller);
                     } else {
-                        return values.into_vec();
+                        return values.into_vec().map(CallBoundary::Values);
                     }
                 }
                 DefinedOutcome::Call {
@@ -4880,8 +5070,15 @@ impl Module {
                     let caller_slots = caller.live_slots()?;
                     suspended_slots = suspended_slots
                         .checked_add(caller_slots)
-                        .filter(|&slots| slots <= self.limits.max_activation_slots)
                         .ok_or(WasmError::Trap("call stack"))?;
+                    if context
+                        .base_slots
+                        .checked_add(suspended_slots)
+                        .filter(|&slots| slots <= self.limits.max_activation_slots)
+                        .is_none()
+                    {
+                        return Err(WasmError::Trap("call stack"));
+                    }
                     callers.push(caller);
                     index = next;
                     args = next_args;
@@ -4896,81 +5093,53 @@ impl Module {
                 DefinedOutcome::ForeignCall {
                     address,
                     args: foreign_args,
-                    mut caller,
+                    caller,
                 } => {
-                    let base_depth = context
+                    let next_depth = context
                         .base_depth
                         .checked_add(callers.len())
-                        .and_then(|depth| depth.checked_add(1))
+                        .and_then(|depth| depth.checked_add(2))
                         .ok_or(WasmError::Trap("call depth"))?;
-                    let values = bulk.store.invoke_registered(
-                        &address,
-                        &foreign_args,
-                        steps,
-                        base_depth,
-                        context.stats,
-                    )?;
-                    let resumed_slots = caller
-                        .live_slots()?
-                        .checked_add(values.len())
+                    if next_depth > self.limits.max_call_depth {
+                        return Err(WasmError::Trap("call depth"));
+                    }
+                    callers
+                        .try_reserve(1)
+                        .map_err(|_| WasmError::Trap("call stack"))?;
+                    let caller_slots = caller.live_slots()?;
+                    suspended_slots = suspended_slots
+                        .checked_add(caller_slots)
                         .ok_or(WasmError::Trap("call stack"))?;
-                    if resumed_slots > available_slots
-                        || caller
-                            .stack
-                            .len()
-                            .checked_add(values.len())
-                            .filter(|&len| len <= WASM_STACK_LIMIT)
-                            .is_none()
+                    if context
+                        .base_slots
+                        .checked_add(suspended_slots)
+                        .filter(|&slots| slots <= self.limits.max_activation_slots)
+                        .is_none()
                     {
                         return Err(WasmError::Trap("call stack"));
                     }
-                    caller
-                        .stack
-                        .try_reserve(values.len())
-                        .map_err(|_| WasmError::Trap("call stack"))?;
-                    caller.stack.extend(values);
-                    activation = Some(caller);
+                    callers.push(caller);
+                    return Ok(CallBoundary::Foreign {
+                        address,
+                        args: foreign_args,
+                        continuation: LocalContinuation {
+                            callers,
+                            suspended_slots,
+                        },
+                    });
                 }
                 DefinedOutcome::ForeignTailCall {
                     address,
                     args: foreign_args,
                 } => {
-                    let base_depth = context
-                        .base_depth
-                        .checked_add(callers.len())
-                        .ok_or(WasmError::Trap("call depth"))?;
-                    let values = bulk.store.invoke_registered(
-                        &address,
-                        &foreign_args,
-                        steps,
-                        base_depth,
-                        context.stats,
-                    )?;
-                    if let Some(mut caller) = callers.pop() {
-                        let caller_slots = caller.live_slots()?;
-                        suspended_slots = suspended_slots
-                            .checked_sub(caller_slots)
-                            .ok_or(WasmError::Trap("call stack"))?;
-                        let resumed_slots = caller_slots
-                            .checked_add(values.len())
-                            .ok_or(WasmError::Trap("call stack"))?;
-                        let available_slots = self
-                            .limits
-                            .max_activation_slots
-                            .checked_sub(suspended_slots)
-                            .ok_or(WasmError::Trap("call stack"))?;
-                        if resumed_slots > available_slots {
-                            return Err(WasmError::Trap("call stack"));
-                        }
-                        caller
-                            .stack
-                            .try_reserve(values.len())
-                            .map_err(|_| WasmError::Trap("call stack"))?;
-                        caller.stack.extend(values);
-                        activation = Some(caller);
-                    } else {
-                        return Ok(values);
-                    }
+                    return Ok(CallBoundary::Foreign {
+                        address,
+                        args: foreign_args,
+                        continuation: LocalContinuation {
+                            callers,
+                            suspended_slots,
+                        },
+                    });
                 }
             }
         }
@@ -6273,45 +6442,22 @@ impl Instance {
         };
         let start = instance.state.borrow().module.start;
         if let Some(start) = start {
-            let mut state = instance.state.borrow_mut();
-            let InstanceState {
-                module,
-                memories,
-                globals,
-                data_live,
-                tables,
-                elem_live,
-                last_steps,
-                last_peak_call_depth,
-                last_peak_activation_slots,
-            } = &mut *state;
             let mut steps = 0;
-            let mut bulk = BulkState {
-                data_live,
-                tables,
-                elem_live,
-                store: &instance.store,
-                instance_id: instance.instance_id,
-            };
             let mut resources = CallResourceStats::default();
-            let mut call_context = CallContext {
-                base_depth: 0,
-                stats: &mut resources,
-            };
-            let result = module.call_any(
-                WasmCall {
+            let result = instance.store.invoke_registered(
+                &FunctionAddress {
+                    instance_id,
                     index: start,
-                    args: &[],
                 },
+                &[],
                 &mut steps,
-                memories,
-                globals,
-                &mut bulk,
-                &mut call_context,
+                0,
+                &mut resources,
             );
-            *last_steps = steps;
-            *last_peak_call_depth = resources.peak_call_depth;
-            *last_peak_activation_slots = resources.peak_activation_slots;
+            let mut state = instance.state.borrow_mut();
+            state.last_steps = steps;
+            state.last_peak_call_depth = resources.peak_call_depth;
+            state.last_peak_activation_slots = resources.peak_activation_slots;
             if let Err(error) = result {
                 drop(state);
                 instance.store.unregister_instance(instance_id);
@@ -6350,45 +6496,22 @@ impl Instance {
     /// Invoke a function with typed values. The instruction counter starts at
     /// zero for this top-level call; memory and globals remain live.
     pub fn invoke_val(&mut self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
-        let mut state = self
-            .state
-            .try_borrow_mut()
-            .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
-        let InstanceState {
-            module,
-            memories,
-            globals,
-            data_live,
-            tables,
-            elem_live,
-            last_steps,
-            last_peak_call_depth,
-            last_peak_activation_slots,
-        } = &mut *state;
         let mut steps = 0;
-        let mut bulk = BulkState {
-            data_live,
-            tables,
-            elem_live,
-            store: &self.store,
-            instance_id: self.instance_id,
-        };
         let mut resources = CallResourceStats::default();
-        let mut call_context = CallContext {
-            base_depth: 0,
-            stats: &mut resources,
-        };
-        let result = module.call_any(
-            WasmCall { index: idx, args },
+        let result = self.store.invoke_registered(
+            &FunctionAddress {
+                instance_id: self.instance_id,
+                index: idx,
+            },
+            args,
             &mut steps,
-            memories,
-            globals,
-            &mut bulk,
-            &mut call_context,
+            0,
+            &mut resources,
         );
-        *last_steps = steps;
-        *last_peak_call_depth = resources.peak_call_depth;
-        *last_peak_activation_slots = resources.peak_activation_slots;
+        let mut state = self.state.borrow_mut();
+        state.last_steps = steps;
+        state.last_peak_call_depth = resources.peak_call_depth;
+        state.last_peak_activation_slots = resources.peak_activation_slots;
         result
     }
 

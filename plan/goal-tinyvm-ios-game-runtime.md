@@ -2707,3 +2707,33 @@ the owner switch an explicit interpreter transition. The next step can move
 those owned outcomes into a store-level continuation stack without trying to
 serialize borrowed locals, operand stacks or control frames out of an opcode
 arm.
+
+## Seventy-eighth executable increment — unified store activation trampoline
+
+Persistent invocation and start execution now enter one `WasmStore` driver.
+Each module runner executes until values return or a foreign owner is selected;
+at that boundary it yields an owned local continuation. The store releases the
+current runtime borrow, pushes the continuation, selects the target instance,
+and later resumes the original owner with returned values. Normal and tail
+indirect calls share this loop, so no cross-instance transition consumes native
+stack.
+
+Call depth and activation-slot bases travel with every store continuation.
+Module-local callers are checked together with all suspended callers in other
+instances, and one instruction counter remains shared across the complete
+top-level call. A new independently WABT-compiled fixture installs sibling
+functions into two slots and alternates A → B → A for 4,000 calls after the B
+handle is dropped. It returns 4,000 with exact peak guest depth 4,001 and exact
+aggregate activation usage 12,004, proving cyclic owner re-entry, store-owned
+lifetime and non-native recursion in one executable gate.
+
+Evidence on 2026-08-21: all 246 non-ignored all-feature tests plus the doctest,
+Clippy, rustfmt, replay/no-default, shell checks and WABT/JavaScriptCore gates
+pass. The static core remains 101,208 bytes with selftest 42. iOS links at
+1,599,464 bytes arm64 and 1,667,616 bytes x86_64; profile-catalog, replay,
+private-library and session consumers link at 1,472,312, 1,446,744, 1,448,416
+and 1,447,568 bytes. The arm64 full-runtime ceiling advances by one fixed
+16 KiB step to 1,605,632 bytes for the store continuation machinery; the
+strict 100 KiB static-core gate and common ceiling for all arm64 consumers
+remain enforced. Nostalgia Arcade consumes the unified trampoline build with
+5 unit tests, 1 UI test and an arm64 device build.

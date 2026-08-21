@@ -2650,6 +2650,14 @@ suspended guest activation. Do not switch instances inside an opcode arm while
 it holds borrowed memories/globals. Returning the boundary to the trampoline
 lets it release the owner borrow before selecting another store record.
 
+The store trampoline should carry two aggregate bases across an owner switch:
+guest call depth and suspended activation slots. A module runner still owns its
+fast local caller vector, but its checks and peak statistics must include the
+store bases. On a foreign boundary, add the yielded continuation's local caller
+count/slots to those bases; on return, restore the parent bases and resume with
+the owned result vector. A deep A↔B cycle is the useful regression test because
+a one-way sibling call cannot expose native recursion or reborrow failures.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode

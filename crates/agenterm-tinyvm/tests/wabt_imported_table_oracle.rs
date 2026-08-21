@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use agenterm_tinyvm::{Limits, Val, WasmError, WasmModule, WasmStore, WasmTable};
+use agenterm_tinyvm::{Limits, Val, WasmError, WasmGlobal, WasmModule, WasmStore, WasmTable};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -184,4 +184,51 @@ fn aliased_import_indices_keep_one_table_identity() {
         "instantiate same-store tables",
     );
     assert_eq!(same_store_instance.table_elements(), 12);
+}
+
+#[test]
+#[ignore = "run through smoke-wabt-imported-table.sh with an independently compiled fixture"]
+fn cross_instance_cycles_use_the_store_trampoline() {
+    let path = PathBuf::from(
+        std::env::var_os("TINYVM_WABT_IMPORTED_TABLE_CYCLE_WASM")
+            .expect("TINYVM_WABT_IMPORTED_TABLE_CYCLE_WASM is set by the smoke script"),
+    );
+    let bytes = std::fs::read(path).expect("read WABT-produced cycle wasm");
+    let store = WasmStore::new();
+    let table = must_ok(store.create_table(2, Some(2)), "create cycle table");
+    let limits = Limits {
+        max_steps: 100_000,
+        max_call_depth: 5_000,
+        max_activation_slots: 100_000,
+        ..Limits::default()
+    };
+    let open = |slot: i32| {
+        let mut module = must_ok(
+            WasmModule::from_bytes_with(&bytes, limits),
+            "load cycle module",
+        );
+        must_ok(
+            module.bind_table_import("host", "dispatch", &table),
+            "bind cycle table",
+        );
+        let slot = WasmGlobal::new(Val::I32(slot), false);
+        must_ok(
+            module.bind_global_import("host", "slot", &slot),
+            "bind cycle slot",
+        );
+        must_ok(module.instantiate(), "instantiate cycle module")
+    };
+    let mut first = open(0);
+    let second = open(1);
+    drop(second);
+    assert!(matches!(
+        must_ok(
+            first.invoke_by_name("run", &[Val::I32(4_000)]),
+            "deep cross-instance cycle"
+        )
+        .as_slice(),
+        [Val::I32(4_000)]
+    ));
+    assert_eq!(first.last_peak_call_depth(), 4_001);
+    assert_eq!(first.last_peak_activation_slots(), 12_004);
 }

@@ -127,7 +127,9 @@ GAME_SESSION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeGameSessionSmoke-arm64")
 # Imported-memory store identity adds the guarded shared path while defined
 # memories retain their direct fast path. Keep one explicit 16 KiB product step
 # for that standard capability; later increments stay within this ceiling.
-MAX_ARM64_LINKED_BYTES=1589248
+# One fixed 16 KiB graduation step funds store-owned cross-instance funcref
+# continuations; keep every arm64 consumer under the same explicit ceiling.
+MAX_ARM64_LINKED_BYTES=1605632
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
 # Imported-global store identity crosses the next x86_64 linker size bucket;
