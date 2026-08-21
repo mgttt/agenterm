@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 82] = [
+const LEAF_TESTS: [(&str, &str); 85] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -897,6 +897,18 @@ const LEAF_TESTS: [(&str, &str); 82] = [
         "internal handles + preopen-only paths",
         "preopens_keep_physical_paths_out_of_guest_space",
     ),
+    (
+        "args + environ",
+        "wasi_p1_process_clock_random_preopen_and_close_execute_through_standard_imports",
+    ),
+    (
+        "clock + random",
+        "wasi_p1_process_clock_random_preopen_and_close_execute_through_standard_imports",
+    ),
+    (
+        "preopen discovery + fd_close",
+        "wasi_p1_process_clock_random_preopen_and_close_execute_through_standard_imports",
+    ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
     ("#78", "issue78_runtimes_stay_out_of_the_crate"),
     ("cu", "cu"),
@@ -1082,7 +1094,7 @@ fn chassis() {
 fn WASI() {
     assert!(
         !cargo_deps_section().to_ascii_lowercase().contains("wasi"),
-        "WASI is a non-goal: not a crate dependency"
+        "an external WASI runtime must not replace tinyvm's optional owned adapter"
     );
 }
 

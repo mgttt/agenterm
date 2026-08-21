@@ -62,6 +62,11 @@ pub use host::{
     HostHandle, HostLimits, HostResult, OpenOptions, SeekWhence,
 };
 
+#[cfg(feature = "wasi-p1")]
+pub mod wasi_p1;
+#[cfg(feature = "wasi-p1")]
+pub use wasi_p1::{WASI_SNAPSHOT_PREVIEW1, WasiErrno, WasiPreview1};
+
 pub mod media;
 pub use media::{Grid3dCell, Grid3dFrame, Indexed2dFrame, RenderFrame, ToneBatch, ToneEvent};
 

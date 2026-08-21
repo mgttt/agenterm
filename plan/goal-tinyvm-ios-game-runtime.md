@@ -3206,3 +3206,25 @@ library check, all-target Clippy with warnings denied, PRD leaf map and complete
 all-feature/all-target suite pass. The real iOS XCFramework/Swift link remains
 green, the three-game tinyvm/JSC/H5 replay differential agrees exactly, and the
 stripped static core remains 101,256 bytes with selftest 42.
+
+## Ninety-seventh executable increment — optional WASI P1 adapter
+
+The `wasi-p1` feature now binds a deliberately small standard
+`wasi_snapshot_preview1` subset over the neutral host contract. The implemented
+surface is args/environ sizes and copies, clock time, random fill, preopen
+metadata/name and descriptor close. Every present field and complete value type
+signature is checked before instantiation; unknown fields fail binding, while a
+missing platform mechanism behind an implemented field returns canonical errno.
+
+The adapter validates guest memory before host mutation and exposes only virtual
+preopen names. It does not enter the default feature graph or TinyArcade ABI.
+File I/O, path operations and a non-returning `proc_exit` outcome remain open
+leaves rather than simulated success.
+
+Evidence on 2026-08-22: a standards-shaped binary module executes all nine
+imports through one persistent tinyvm instance and proves exact guest-memory
+layouts plus backend close. A second black box rejects an unknown field and a
+wrong standard signature before instantiation. The isolated no-default-feature
+WASI test/Clippy gate and the complete all-feature/all-target suite pass;
+the isolated `no_std` arm64 iOS feature build, generic-device/universal-simulator
+Swift linkage and the three-engine game differential remain green.

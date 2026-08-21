@@ -2695,3 +2695,10 @@ possible; if publication still fails, close the newly opened backend handle and
 return the original typed failure. Keep unsupported platform operations
 explicit (`NotSupported` / `NotCapable`) rather than inventing results or
 embedding OS policy in the VM engine.
+
+A standard import adapter must validate the complete parameter/result value
+types before binding, not only field names and arity. Reject unknown fields at
+that boundary. Preflight every guest output range before a backend call or the
+first write, so an invalid later pointer cannot leave partial metadata or cause
+an unnecessary platform side effect; translate supported-call failures to the
+standard errno without turning an optional host profile into VM opcodes.
