@@ -271,6 +271,17 @@ platform measurements that the iOS app/test owns. This split lets converters
 and replay tests compare guest resource high-water marks across machines without
 pretending that elapsed milliseconds are portable.
 
+ABI v1.9 appends `max_call_depth` and `max_activation_slots` to the runtime
+configuration. The bridge reads the original 40-byte prefix first, so a v1.8
+caller receives the stable defaults (512 and 1,048,576) without an out-of-bounds
+read; a full 48-byte configuration owns both ceilings. TAH1 schema 2 publishes
+the same values as app-build compatibility metadata. The original 40-byte
+execution-stats output remains unchanged. The separate
+`tinyarcade_v1_last_execution_stats_v2`/`lastExecutionStatsV2()` record adds the
+accepted peak defined-call depth and aggregate live activation slots without
+risking overwrite of an older caller's buffer. A limit trap records the highest
+admitted usage, never a transient rejected activation.
+
 ## Current evidence boundary
 
 The smoke gate builds a real arm64 iOS-device archive and a universal

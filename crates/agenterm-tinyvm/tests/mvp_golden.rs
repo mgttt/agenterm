@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 45] = [
+const LEAF_TESTS: [(&str, &str); 48] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -686,6 +686,14 @@ const LEAF_TESTS: [(&str, &str); 45] = [
         "explicit guest call stack",
         "guest_call_stack_is_explicit_bounded_and_native_stack_independent",
     ),
+    (
+        "host-owned call-depth ceiling",
+        "call_stack_limits_are_host_owned_and_fail_at_exact_boundaries",
+    ),
+    (
+        "host-owned activation-slot ceiling",
+        "call_stack_limits_are_host_owned_and_fail_at_exact_boundaries",
+    ),
     ("start once", "instance_runs_start_exactly_once"),
     (
         "per-call fuel",
@@ -701,6 +709,10 @@ const LEAF_TESTS: [(&str, &str); 45] = [
     ),
     (
         "deterministic execution stats",
+        "execution_stats_are_deterministic_and_cover_guest_host_resources",
+    ),
+    (
+        "call/activation peak telemetry",
         "execution_stats_are_deterministic_and_cover_guest_host_resources",
     ),
     (

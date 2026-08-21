@@ -314,6 +314,8 @@ pub enum GameLifecycle {
 pub struct ExecutionStats {
     pub lifecycle: GameLifecycle,
     pub wasm_steps: u64,
+    pub peak_call_depth: usize,
+    pub peak_activation_slots: usize,
     pub memory_pages: usize,
     pub table_elements: usize,
     pub native_calls: u32,
@@ -465,6 +467,8 @@ impl GameRuntime {
             last_execution_stats: ExecutionStats {
                 lifecycle: GameLifecycle::Init,
                 wasm_steps: 0,
+                peak_call_depth: 0,
+                peak_activation_slots: 0,
                 memory_pages: 0,
                 table_elements: 0,
                 native_calls: 0,
@@ -634,6 +638,8 @@ impl GameRuntime {
         self.last_execution_stats = ExecutionStats {
             lifecycle,
             wasm_steps: self.instance.last_steps(),
+            peak_call_depth: self.instance.last_peak_call_depth(),
+            peak_activation_slots: self.instance.last_peak_activation_slots(),
             memory_pages: self.instance.memory_pages(),
             table_elements: self.instance.table_elements(),
             native_calls: host.native_calls.iter().copied().sum(),

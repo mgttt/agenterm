@@ -41,6 +41,27 @@ pub struct TinyArcadeConfigV1 {
     pub max_audio_bytes: u32,
     pub max_state_bytes: u32,
     pub rng_seed: u32,
+    pub max_call_depth: u32,
+    pub max_activation_slots: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TinyArcadeConfigV1Prefix {
+    struct_size: u32,
+    max_table_elems: u32,
+    max_memory_pages: u32,
+    max_steps: u64,
+    max_render_bytes: u32,
+    max_audio_bytes: u32,
+    max_state_bytes: u32,
+    rng_seed: u32,
+}
+
+struct RuntimeConfig {
+    vm_limits: Limits,
+    game_limits: GameLimits,
+    rng_seed: u32,
 }
 
 #[repr(C)]
@@ -48,6 +69,21 @@ pub struct TinyArcadeExecutionStatsV1 {
     pub struct_size: u32,
     pub lifecycle: u32,
     pub wasm_steps: u64,
+    pub memory_pages: u32,
+    pub table_elements: u32,
+    pub native_calls: u32,
+    pub render_bytes: u32,
+    pub audio_bytes: u32,
+    pub state_bytes: u32,
+}
+
+#[repr(C)]
+pub struct TinyArcadeExecutionStatsV2 {
+    pub struct_size: u32,
+    pub lifecycle: u32,
+    pub wasm_steps: u64,
+    pub peak_call_depth: u32,
+    pub peak_activation_slots: u32,
     pub memory_pages: u32,
     pub table_elements: u32,
     pub native_calls: u32,
@@ -128,6 +164,59 @@ impl FfiError {
     const fn new(status: i32, message: &'static str) -> Self {
         Self { status, message }
     }
+}
+
+unsafe fn read_runtime_config(
+    config: *const TinyArcadeConfigV1,
+) -> Result<RuntimeConfig, FfiError> {
+    if config.is_null() {
+        return Err(FfiError::new(STATUS_INVALID_ARGUMENT, "null config"));
+    }
+    // Read only the original 40-byte prefix first. This keeps an already-built
+    // ABI v1.8 caller valid after v1.9 appends call-stack limits to the struct.
+    let prefix = unsafe { config.cast::<TinyArcadeConfigV1Prefix>().read() };
+    if prefix.struct_size < size_of::<TinyArcadeConfigV1Prefix>() as u32
+        || prefix.max_table_elems == 0
+        || prefix.max_memory_pages == 0
+        || prefix.max_steps == 0
+    {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid runtime configuration",
+        ));
+    }
+    let defaults = Limits::default();
+    let (max_call_depth, max_activation_slots) =
+        if prefix.struct_size >= size_of::<TinyArcadeConfigV1>() as u32 {
+            let config = unsafe { config.read() };
+            (
+                config.max_call_depth as usize,
+                config.max_activation_slots as usize,
+            )
+        } else {
+            (defaults.max_call_depth, defaults.max_activation_slots)
+        };
+    if max_call_depth == 0 || max_activation_slots == 0 {
+        return Err(FfiError::new(
+            STATUS_INVALID_ARGUMENT,
+            "invalid runtime configuration",
+        ));
+    }
+    Ok(RuntimeConfig {
+        vm_limits: Limits {
+            max_table_elems: prefix.max_table_elems as usize,
+            max_memory_pages: prefix.max_memory_pages as usize,
+            max_steps: prefix.max_steps,
+            max_call_depth,
+            max_activation_slots,
+        },
+        game_limits: GameLimits {
+            max_render_bytes: prefix.max_render_bytes as usize,
+            max_audio_bytes: prefix.max_audio_bytes as usize,
+            max_state_bytes: prefix.max_state_bytes as usize,
+        },
+        rng_seed: prefix.rng_seed,
+    })
 }
 
 fn set_error(message: &'static str) {
@@ -505,7 +594,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 8
+    (1 << 16) | 9
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -614,28 +703,10 @@ pub unsafe extern "C" fn tinyarcade_v1_copy_host_profile(
     output_len: *mut usize,
 ) -> i32 {
     boundary(|| {
-        let config = unsafe { config.as_ref() }
-            .ok_or(FfiError::new(STATUS_INVALID_ARGUMENT, "null config"))?;
-        if config.struct_size < size_of::<TinyArcadeConfigV1>() as u32 {
-            return Err(FfiError::new(
-                STATUS_INVALID_ARGUMENT,
-                "invalid runtime configuration",
-            ));
-        }
+        let config = unsafe { read_runtime_config(config)? };
         let registry = unsafe { native_registry(functions, function_count)? };
         let profile = registry
-            .host_profile(
-                Limits {
-                    max_table_elems: config.max_table_elems as usize,
-                    max_memory_pages: config.max_memory_pages as usize,
-                    max_steps: config.max_steps,
-                },
-                GameLimits {
-                    max_render_bytes: config.max_render_bytes as usize,
-                    max_audio_bytes: config.max_audio_bytes as usize,
-                    max_state_bytes: config.max_state_bytes as usize,
-                },
-            )
+            .host_profile(config.vm_limits, config.game_limits)
             .map_err(wasm_error)?;
         let encoded = profile.encode().map_err(wasm_error)?;
         unsafe { copy_bytes(&encoded, output, capacity, output_len) }
@@ -677,6 +748,8 @@ pub unsafe extern "C" fn tinyarcade_v1_default_config(config: *mut TinyArcadeCon
             max_audio_bytes: game.max_audio_bytes as u32,
             max_state_bytes: game.max_state_bytes as u32,
             rng_seed: 1,
+            max_call_depth: defaults.max_call_depth as u32,
+            max_activation_slots: defaults.max_activation_slots as u32,
         };
         unsafe { config.write(value) };
         Ok(())
@@ -916,35 +989,15 @@ unsafe fn open_runtime(
         ));
     }
     unsafe { output.write(ptr::null_mut()) };
-    let config =
-        unsafe { config.as_ref() }.ok_or(FfiError::new(STATUS_INVALID_ARGUMENT, "null config"))?;
-    if config.struct_size < size_of::<TinyArcadeConfigV1>() as u32
-        || wasm.is_null()
-        || wasm_len == 0
-        || config.max_table_elems == 0
-        || config.max_memory_pages == 0
-        || config.max_steps == 0
-    {
+    let config = unsafe { read_runtime_config(config)? };
+    if wasm.is_null() || wasm_len == 0 {
         return Err(FfiError::new(
             STATUS_INVALID_ARGUMENT,
             "invalid runtime configuration",
         ));
     }
     let bytes = unsafe { slice::from_raw_parts(wasm, wasm_len) };
-    let runtime = create(
-        bytes,
-        Limits {
-            max_table_elems: config.max_table_elems as usize,
-            max_memory_pages: config.max_memory_pages as usize,
-            max_steps: config.max_steps,
-        },
-        GameLimits {
-            max_render_bytes: config.max_render_bytes as usize,
-            max_audio_bytes: config.max_audio_bytes as usize,
-            max_state_bytes: config.max_state_bytes as usize,
-        },
-        config.rng_seed,
-    )?;
+    let runtime = create(bytes, config.vm_limits, config.game_limits, config.rng_seed)?;
     let handle = Box::new(TinyArcadeRuntimeV1 {
         owner: thread::current().id(),
         runtime,
@@ -1403,6 +1456,8 @@ pub unsafe extern "C" fn tinyarcade_v1_last_execution_stats(
         let ExecutionStats {
             lifecycle,
             wasm_steps,
+            peak_call_depth: _,
+            peak_activation_slots: _,
             memory_pages,
             table_elements,
             native_calls,
@@ -1425,6 +1480,45 @@ pub unsafe extern "C" fn tinyarcade_v1_last_execution_stats(
                 render_bytes: count(render_bytes)?,
                 audio_bytes: count(audio_bytes)?,
                 state_bytes: count(state_bytes)?,
+            })
+        };
+        Ok(())
+    })
+}
+
+/// Extended deterministic stats added in ABI v1.9. This is a separate output
+/// type/function so an older 40-byte v1 caller can never be overwritten.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_last_execution_stats_v2(
+    runtime: *mut TinyArcadeRuntimeV1,
+    output: *mut TinyArcadeExecutionStatsV2,
+) -> i32 {
+    boundary(|| {
+        let runtime = unsafe { runtime_mut(runtime)? };
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null execution-stats output",
+            ));
+        }
+        let stats = runtime.runtime.last_execution_stats();
+        let count = |value: usize| {
+            u32::try_from(value)
+                .map_err(|_| FfiError::new(STATUS_DECODE, "execution stats overflow"))
+        };
+        unsafe {
+            output.write(TinyArcadeExecutionStatsV2 {
+                struct_size: size_of::<TinyArcadeExecutionStatsV2>() as u32,
+                lifecycle: stats.lifecycle as u32,
+                wasm_steps: stats.wasm_steps,
+                peak_call_depth: count(stats.peak_call_depth)?,
+                peak_activation_slots: count(stats.peak_activation_slots)?,
+                memory_pages: count(stats.memory_pages)?,
+                table_elements: count(stats.table_elements)?,
+                native_calls: stats.native_calls,
+                render_bytes: count(stats.render_bytes)?,
+                audio_bytes: count(stats.audio_bytes)?,
+                state_bytes: count(stats.state_bytes)?,
             })
         };
         Ok(())
@@ -1804,7 +1898,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 8);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 9);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1829,6 +1923,22 @@ mod tests {
         assert_eq!(stats.native_calls, 0);
         assert_eq!((stats.render_bytes, stats.audio_bytes), (1, 0));
         assert_eq!(stats.state_bytes, 0);
+        let mut stats_v2 = MaybeUninit::<TinyArcadeExecutionStatsV2>::uninit();
+        assert_eq!(
+            unsafe { tinyarcade_v1_last_execution_stats_v2(runtime, stats_v2.as_mut_ptr()) },
+            STATUS_OK
+        );
+        let stats_v2 = unsafe { stats_v2.assume_init() };
+        assert_eq!(
+            stats_v2.struct_size,
+            size_of::<TinyArcadeExecutionStatsV2>() as u32
+        );
+        assert_eq!(stats_v2.lifecycle, crate::GameLifecycle::Tick as u32);
+        assert_eq!(stats_v2.wasm_steps, stats.wasm_steps);
+        assert!(stats_v2.peak_call_depth > 0);
+        assert!(stats_v2.peak_activation_slots > 0);
+        assert_eq!(stats_v2.memory_pages, stats.memory_pages);
+        assert_eq!(stats_v2.render_bytes, stats.render_bytes);
         assert_eq!(
             unsafe { tinyarcade_v1_tick(runtime, 1 << 31, 17) },
             STATUS_INVALID_ARGUMENT
@@ -1995,7 +2105,9 @@ mod tests {
     #[test]
     fn c_host_profile_exports_exact_app_registry_and_checks_without_execution() {
         let wasm = native_cartridge();
-        let config = unsafe { config() };
+        let mut config = unsafe { config() };
+        config.max_call_depth = 37;
+        config.max_activation_slots = 4096;
         let mut probe = NativeProbe {
             calls: Cell::new(0),
             fail: Cell::new(false),
@@ -2028,7 +2140,7 @@ mod tests {
             },
             STATUS_BUFFER_TOO_SMALL
         );
-        assert!((56..=4096).contains(&required));
+        assert!((64..=4096).contains(&required));
         let mut profile = vec![0; required];
         assert_eq!(
             unsafe {
@@ -2044,7 +2156,12 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(&profile[..4], b"TAH1");
+        assert_eq!(u16::from_le_bytes([profile[4], profile[5]]), 2);
+        assert_eq!(u16::from_le_bytes([profile[6], profile[7]]), 64);
         assert_eq!(u16::from_le_bytes([profile[50], profile[51]]), 1);
+        let decoded = HostProfileV1::decode(&profile).expect("decode exported host profile");
+        assert_eq!(decoded.vm_limits().max_call_depth, 37);
+        assert_eq!(decoded.vm_limits().max_activation_slots, 4096);
         assert!(profile.windows(module.len()).any(|value| value == module));
         assert_eq!(
             unsafe {
@@ -2105,6 +2222,62 @@ mod tests {
             STATUS_TRAP
         );
         assert_eq!(probe.calls.get(), 0);
+    }
+
+    #[test]
+    fn c_old_40_byte_config_prefix_remains_accepted() {
+        assert_eq!(size_of::<TinyArcadeConfigV1Prefix>(), 40);
+        assert_eq!(size_of::<TinyArcadeConfigV1>(), 48);
+        assert_eq!(size_of::<TinyArcadeExecutionStatsV1>(), 40);
+        assert_eq!(size_of::<TinyArcadeExecutionStatsV2>(), 48);
+
+        let defaults = Limits::default();
+        let game = GameLimits::default();
+        let old = TinyArcadeConfigV1Prefix {
+            struct_size: size_of::<TinyArcadeConfigV1Prefix>() as u32,
+            max_table_elems: defaults.max_table_elems as u32,
+            max_memory_pages: defaults.max_memory_pages as u32,
+            max_steps: defaults.max_steps,
+            max_render_bytes: game.max_render_bytes as u32,
+            max_audio_bytes: game.max_audio_bytes as u32,
+            max_state_bytes: game.max_state_bytes as u32,
+            rng_seed: 7,
+        };
+        let config = (&old as *const TinyArcadeConfigV1Prefix).cast::<TinyArcadeConfigV1>();
+        let mut required = 0;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile(
+                    config,
+                    ptr::null(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        let mut encoded = vec![0; required];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_profile(
+                    config,
+                    ptr::null(),
+                    0,
+                    encoded.as_mut_ptr(),
+                    encoded.len(),
+                    &mut required,
+                )
+            },
+            STATUS_OK
+        );
+        let profile = HostProfileV1::decode(&encoded).expect("decode old-config profile");
+        assert_eq!(profile.vm_limits().max_call_depth, defaults.max_call_depth);
+        assert_eq!(
+            profile.vm_limits().max_activation_slots,
+            defaults.max_activation_slots
+        );
     }
 
     #[test]
@@ -2554,6 +2727,7 @@ mod tests {
             "tinyarcade_v1_is_failed",
             "tinyarcade_v1_origin",
             "tinyarcade_v1_last_execution_stats",
+            "tinyarcade_v1_last_execution_stats_v2",
             "tinyarcade_v1_last_error",
         ] {
             assert!(

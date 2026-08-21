@@ -54,6 +54,7 @@ fn runtime(wasm: &[u8]) -> GameRuntime {
                 max_table_elems: 64,
                 max_memory_pages: 17,
                 max_steps: 100_000,
+                ..Limits::default()
             },
             GameLimits {
                 max_render_bytes: 4 * 1024,
@@ -417,6 +418,7 @@ fn reviewed_depth_well_requires_exact_signed_bytes_and_honours_revocation() {
                 max_table_elems: 64,
                 max_memory_pages: 17,
                 max_steps: 100_000,
+                ..Limits::default()
             },
             GameLimits::default(),
             7,

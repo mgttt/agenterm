@@ -2,30 +2,33 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
-Legend: `[x]` shipped · `[~]` partial · `[ ]` planned
+Legend: `[x]` shipped · `[~]` partial · `[ ]` planned · `[–]` intentionally excluded
 
 ```
 agenterm-tinyvm (35)
 ├── eval(bytes)          [x]
 ├── iOS runtime boundary [x]
 │   ├── interpret wasm      [x]
-│   ├── JIT native code     [x]
-│   ├── device-side AOT     [x]
-│   └── dyn native loading  [x]
+│   ├── JIT native code     [–]
+│   ├── device-side AOT     [–]
+│   └── dyn native loading  [–]
 ├── native wasm platform [~]
 │   ├── tinyvm engine       [x]
 │   │   └── decode complexity budget [x]
 │   ├── owned host ABI      [~]
 │   ├── native I/O surface  [~]
-│   └── H5/JS/WKWebView     [x]
+│   └── H5/JS/WKWebView     [–]
 ├── game runtime         [~]
 │   ├── persistent instance [x]
 │   ├── start once          [x]
 │   ├── per-call fuel       [x]
 │   ├── explicit guest call stack [x]
+│   │   ├── host-owned call-depth ceiling [x]
+│   │   └── host-owned activation-slot ceiling [x]
 │   ├── memory budget       [x]
 │   ├── table budget        [x]
 │   ├── deterministic execution stats [x]
+│   │   └── call/activation peak telemetry [x]
 │   └── game ABI            [~]
 │       ├── standard .wasm cartridge [x]
 │       ├── manifest compatibility    [x]
@@ -76,6 +79,9 @@ agenterm-tinyvm (35)
 
 `eval(bytes)` → 值或错。程序是标准 `.wasm`。
 宿主门是 import 表。未绑定即 trap。
+tinyvm 的产品定位是事实上的、标准优先的跨平台 WebAssembly VM；TinyArcade
+只是第一个 embedding 和持续验收负载，不是引擎能力的边界。任何游戏便利能力都必须
+通过标准 Wasm 或显式、版本化的 host import 表达，不能演化为游戏专用私有字节码。
 槽 A 以标准 WebAssembly 为持续兼容目标，而不是停在自定义 VM 或永久冻结为 MVP。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与

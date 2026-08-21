@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 8u
-#define TINYARCADE_ABI_VERSION 0x00010008u
+#define TINYARCADE_ABI_MINOR 9u
+#define TINYARCADE_ABI_VERSION 0x00010009u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -44,6 +44,10 @@ typedef struct tinyarcade_config_v1 {
     uint32_t max_audio_bytes;
     uint32_t max_state_bytes;
     uint32_t rng_seed;
+    /* Added in ABI v1.9. A v1.8 40-byte prefix remains accepted and receives
+     * the runtime defaults for both values. */
+    uint32_t max_call_depth;
+    uint32_t max_activation_slots;
 } tinyarcade_config_v1;
 
 /* Deterministic resource use for the last completed lifecycle attempt. Wall
@@ -60,6 +64,22 @@ typedef struct tinyarcade_execution_stats_v1 {
     uint32_t audio_bytes;
     uint32_t state_bytes;
 } tinyarcade_execution_stats_v1;
+
+/* ABI v1.9 extension. Kept separate so the v1 stats writer retains its exact
+ * 40-byte output contract for already-built callers. */
+typedef struct tinyarcade_execution_stats_v2 {
+    uint32_t struct_size;
+    uint32_t lifecycle;
+    uint64_t wasm_steps;
+    uint32_t peak_call_depth;
+    uint32_t peak_activation_slots;
+    uint32_t memory_pages;
+    uint32_t table_elements;
+    uint32_t native_calls;
+    uint32_t render_bytes;
+    uint32_t audio_bytes;
+    uint32_t state_bytes;
+} tinyarcade_execution_stats_v2;
 
 /* Pointer fields are borrowed only for the duration of open_reviewed. The
  * signature is the canonical detached Ed25519 signature described by the
@@ -325,6 +345,9 @@ tinyarcade_status_v1 tinyarcade_v1_origin(
 tinyarcade_status_v1 tinyarcade_v1_last_execution_stats(
     tinyarcade_runtime_v1* runtime,
     tinyarcade_execution_stats_v1* output);
+tinyarcade_status_v1 tinyarcade_v1_last_execution_stats_v2(
+    tinyarcade_runtime_v1* runtime,
+    tinyarcade_execution_stats_v2* output);
 
 /* Per-thread diagnostic for the preceding tinyarcade call. This accessor does
  * not clear the stored message and uses the same two-stage byte protocol. */

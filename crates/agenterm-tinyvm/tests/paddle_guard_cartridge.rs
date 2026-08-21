@@ -67,6 +67,7 @@ fn runtime(wasm: &[u8]) -> GameRuntime {
                 max_table_elems: 64,
                 max_memory_pages: 17,
                 max_steps: 500_000,
+                ..Limits::default()
             },
             GameLimits {
                 max_render_bytes: 20 * 1024,

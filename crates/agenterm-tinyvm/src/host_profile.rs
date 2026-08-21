@@ -4,14 +4,17 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::cartridge::{valid_native_field, valid_native_namespace};
+use crate::wasm::{WASM_MAX_ACTIVATION_SLOTS, WASM_MAX_DEPTH};
 use crate::{
     CartridgeDescriptor, GAME_ABI_VERSION, GameLimits, Limits, MAX_CARTRIDGE_BYTES,
     MAX_NATIVE_ARITY, MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, WasmError,
 };
 
 const MAGIC: &[u8; 4] = b"TAH1";
-const SCHEMA_VERSION: u16 = 1;
-const HEADER_LENGTH: usize = 56;
+const LEGACY_SCHEMA_VERSION: u16 = 1;
+const LEGACY_HEADER_LENGTH: usize = 56;
+const SCHEMA_VERSION: u16 = 2;
+const HEADER_LENGTH: usize = 64;
 const FUNCTION_HEADER_LENGTH: usize = 12;
 pub const MAX_HOST_PROFILE_BYTES: usize = 64 * 1024;
 
@@ -134,6 +137,8 @@ impl HostProfileV1 {
         output.extend_from_slice(&1u16.to_le_bytes()); // indexed2d v1
         output.extend_from_slice(&1u16.to_le_bytes()); // tones v1
         output.extend_from_slice(&(self.functions.len() as u16).to_le_bytes());
+        output.extend_from_slice(&(self.vm_limits.max_call_depth as u32).to_le_bytes());
+        output.extend_from_slice(&(self.vm_limits.max_activation_slots as u32).to_le_bytes());
         output.extend_from_slice(&0u32.to_le_bytes());
         for function in &self.functions {
             output.extend_from_slice(&(function.module.len() as u16).to_le_bytes());
@@ -152,24 +157,34 @@ impl HostProfileV1 {
     /// Decode a canonical TAH1 artifact. Noncanonical order and trailing bytes
     /// are rejected so hashes remain stable across tools.
     pub fn decode(bytes: &[u8]) -> Result<Self, WasmError> {
-        if bytes.len() < HEADER_LENGTH
+        if bytes.len() < LEGACY_HEADER_LENGTH
             || bytes.len() > MAX_HOST_PROFILE_BYTES
             || &bytes[..4] != MAGIC
-            || read_u16(bytes, 4)? != SCHEMA_VERSION
-            || read_u16(bytes, 6)? as usize != HEADER_LENGTH
             || read_u32(bytes, 8)? != GAME_ABI_VERSION as u32
             || read_u32(bytes, 12)? as usize != MAX_CARTRIDGE_BYTES
             || read_u16(bytes, 44)? != 1
             || read_u16(bytes, 46)? != 1
             || read_u16(bytes, 48)? != 1
-            || read_u32(bytes, 52)? != 0
         {
             return Err(WasmError::Decode("invalid host profile header"));
         }
+        let schema = read_u16(bytes, 4)?;
+        let header_length = read_u16(bytes, 6)? as usize;
+        let (max_call_depth, max_activation_slots) = match (schema, header_length) {
+            (LEGACY_SCHEMA_VERSION, LEGACY_HEADER_LENGTH) if read_u32(bytes, 52)? == 0 => {
+                (WASM_MAX_DEPTH, WASM_MAX_ACTIVATION_SLOTS)
+            }
+            (SCHEMA_VERSION, HEADER_LENGTH) if read_u32(bytes, 60)? == 0 => {
+                (read_u32(bytes, 52)? as usize, read_u32(bytes, 56)? as usize)
+            }
+            _ => return Err(WasmError::Decode("invalid host profile header")),
+        };
         let vm_limits = Limits {
             max_table_elems: read_u32(bytes, 16)? as usize,
             max_memory_pages: read_u32(bytes, 20)? as usize,
             max_steps: read_u64(bytes, 24)?,
+            max_call_depth,
+            max_activation_slots,
         };
         let game_limits = GameLimits {
             max_render_bytes: read_u32(bytes, 32)? as usize,
@@ -182,7 +197,7 @@ impl HostProfileV1 {
         }
         let mut profile = Self::new(vm_limits, game_limits)
             .map_err(|_| WasmError::Decode("invalid host profile limits"))?;
-        let mut cursor = HEADER_LENGTH;
+        let mut cursor = header_length;
         let mut previous: Option<(String, String)> = None;
         for _ in 0..count {
             if bytes.len().saturating_sub(cursor) < FUNCTION_HEADER_LENGTH {
@@ -247,6 +262,10 @@ fn validate_limits(vm: Limits, game: GameLimits) -> Result<(), WasmError> {
         || vm.max_memory_pages == 0
         || vm.max_memory_pages > u32::MAX as usize
         || vm.max_steps == 0
+        || vm.max_call_depth == 0
+        || vm.max_call_depth > u32::MAX as usize
+        || vm.max_activation_slots == 0
+        || vm.max_activation_slots > u32::MAX as usize
         || game.max_render_bytes == 0
         || game.max_render_bytes > u32::MAX as usize
         || game.max_audio_bytes == 0

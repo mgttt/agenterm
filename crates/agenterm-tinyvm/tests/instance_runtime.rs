@@ -204,13 +204,13 @@ fn guest_call_stack_is_explicit_bounded_and_native_stack_independent() {
     let mut instance = must_ok(module.instantiate(), "instantiate recursive countdown");
     assert_eq!(
         only_i32(&must_ok(
-            instance.invoke_val(countdown, &[Val::I32(WASM_MAX_DEPTH as i32)]),
+            instance.invoke_val(countdown, &[Val::I32(WASM_MAX_DEPTH as i32 - 1)]),
             "run at exact call-depth boundary",
         )),
         42
     );
     assert!(matches!(
-        instance.invoke_val(countdown, &[Val::I32(WASM_MAX_DEPTH as i32 + 1)]),
+        instance.invoke_val(countdown, &[Val::I32(WASM_MAX_DEPTH as i32)]),
         Err(WasmError::Trap("call depth"))
     ));
 
@@ -254,7 +254,8 @@ fn guest_call_stack_is_explicit_bounded_and_native_stack_independent() {
     );
     assert_eq!(
         only_i32(&must_ok(
-            indirect_instance.invoke_val(indirect_countdown, &[Val::I32(WASM_MAX_DEPTH as i32)],),
+            indirect_instance
+                .invoke_val(indirect_countdown, &[Val::I32(WASM_MAX_DEPTH as i32 - 1)],),
             "run indirect recursion at exact call-depth boundary",
         )),
         42
@@ -304,4 +305,55 @@ fn guest_call_stack_aggregate_slots_trap_before_next_activation_allocation() {
         instance.invoke_val(0, &[Val::I32(5)]),
         Err(WasmError::Trap("call stack"))
     ));
+}
+
+#[test]
+fn call_stack_limits_are_host_owned_and_fail_at_exact_boundaries() {
+    fn countdown_module(limits: Limits) -> (WasmModule, usize) {
+        let mut module = WasmModule::new_with_limits(limits);
+        let function = must_ok(
+            module.add_function(
+                1,
+                0,
+                1,
+                &[
+                    0x20, 0x00, 0x45, 0x04, 0x7F, 0x41, 0x2A, 0x05, 0x20, 0x00, 0x41, 0x01, 0x6B,
+                    0x10, 0x00, 0x0B, 0x0B,
+                ],
+            ),
+            "add host-bounded countdown",
+        );
+        (module, function)
+    }
+
+    let (module, countdown) = countdown_module(Limits {
+        max_call_depth: 3,
+        ..Limits::default()
+    });
+    let mut instance = must_ok(module.instantiate(), "instantiate depth-bounded countdown");
+    assert_eq!(
+        only_i32(&must_ok(
+            instance.invoke_val(countdown, &[Val::I32(2)]),
+            "run at exact host call-depth limit",
+        )),
+        42
+    );
+    assert_eq!(instance.last_peak_call_depth(), 3);
+    assert!(matches!(
+        instance.invoke_val(countdown, &[Val::I32(3)]),
+        Err(WasmError::Trap("call depth"))
+    ));
+    assert_eq!(instance.last_peak_call_depth(), 3);
+
+    let (module, countdown) = countdown_module(Limits {
+        max_call_depth: 8,
+        max_activation_slots: 5,
+        ..Limits::default()
+    });
+    let mut instance = must_ok(module.instantiate(), "instantiate slot-bounded countdown");
+    assert!(matches!(
+        instance.invoke_val(countdown, &[Val::I32(2)]),
+        Err(WasmError::Trap("call stack"))
+    ));
+    assert_eq!(instance.last_peak_activation_slots(), 5);
 }

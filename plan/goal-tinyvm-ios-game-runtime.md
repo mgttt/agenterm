@@ -1646,3 +1646,43 @@ Evidence on 2026-08-21:
   x86_64. The stripped static core remains 87,720 bytes, below 100 KiB, and its
   C self-test returns 42. Owning tests are rerun after the mandatory main pull
   before push.
+
+## Forty-sixth executable increment — host-owned call resources and ABI evidence
+
+Call containment is now an embedding policy rather than a pair of interpreter
+constants. `Limits` owns the maximum simultaneously live guest-defined
+activations and aggregate live locals/operand/control slots. The explicit
+activation machine enforces both at exact boundaries for direct and indirect
+standard calls, while tail calls continue to replace the current activation.
+Every persistent instance records the highest admitted call depth and aggregate
+slot use for its last top-level invocation, including one that traps.
+
+TAH1 schema 2 publishes both ceilings in its canonical 64-byte header. The
+decoder still accepts a canonical schema-1/56-byte artifact and maps its absent
+fields to the historical 512/1,048,576 defaults. C ABI v1.9 appends the same
+fields to the runtime configuration, but reads the original 40-byte v1.8 prefix
+before considering the extension. A separately sized 48-byte execution-stats
+V2 record exposes both peaks; the original 40-byte V1 output and function remain
+unchanged. Swift owns both configuration fields and the typed V2 query.
+
+This makes the architectural direction explicit: tinyvm is a standards-first,
+cross-platform WebAssembly VM whose first embedding is TinyArcade, not a game
+script format. App/game facilities remain standard `.wasm` plus explicit,
+versioned host imports; no game-specific private bytecode enters the engine.
+
+Evidence on 2026-08-21:
+
+- Public black boxes set smaller host call limits and prove success at the exact
+  boundary, deterministic `call depth`/`call stack` traps on the next admitted
+  work, and peak telemetry that never reports a rejected transient activation.
+- TAH1 schema 2 round-trips custom limits; a hand-built legacy schema-1 profile
+  and a real 40-byte C configuration prefix both retain historical defaults.
+  Header smoke fixes configuration/V1/V2 layouts at 48/40/48 bytes and Swift 6
+  reads V2 stats for every measured Depth Well and Paddle Guard frame.
+- All 219 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all-target Clippy, package formatting,
+  ShellCheck, all six explicit WABT/JavaScriptCore proposal oracles and the
+  four-frame real-game WebKit differential pass. Device/simulator Swift linkage
+  remains below its gates at 1,553,000 bytes arm64 and 1,624,568 bytes x86_64.
+  The stripped static core remains 87,720 bytes and its C self-test returns 42.
+  Physical-device and Apple-review evidence remain open.

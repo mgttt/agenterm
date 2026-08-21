@@ -399,6 +399,10 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
     let stats = runtime.last_execution_stats();
     assert_eq!(stats.lifecycle, GameLifecycle::Tick);
     assert!(stats.wasm_steps > 0 && stats.wasm_steps < Limits::default().max_steps);
+    assert!(stats.peak_call_depth > 0);
+    assert!(stats.peak_call_depth <= Limits::default().max_call_depth);
+    assert!(stats.peak_activation_slots > 0);
+    assert!(stats.peak_activation_slots <= Limits::default().max_activation_slots);
     assert_eq!(stats.memory_pages, 1);
     assert_eq!(stats.table_elements, 0);
     assert_eq!(stats.native_calls, 0);
@@ -905,6 +909,7 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
         max_table_elems: 32,
         max_memory_pages: 4,
         max_steps: 250_000,
+        ..Limits::default()
     };
     let game_limits = GameLimits {
         max_render_bytes: 20 * 1024,
@@ -917,10 +922,17 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
         "add native profile function",
     );
     let encoded = must_ok(profile.encode(), "encode host profile");
+    assert_eq!(u16::from_le_bytes([encoded[4], encoded[5]]), 2);
+    assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 64);
     let decoded = must_ok(HostProfileV1::decode(&encoded), "decode host profile");
     assert_eq!(must_ok(decoded.encode(), "re-encode host profile"), encoded);
     assert_eq!(decoded.native_functions().len(), 1);
     assert_eq!(decoded.native_functions()[0].max_calls_per_lifecycle, 8);
+    assert_eq!(decoded.vm_limits().max_call_depth, limits.max_call_depth);
+    assert_eq!(
+        decoded.vm_limits().max_activation_slots,
+        limits.max_activation_slots
+    );
     must_ok(
         decoded.inspect_cartridge(&wasm),
         "profile accepts exact standard import",
@@ -966,11 +978,20 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
 
     let mut duplicate = encoded.clone();
     duplicate[50..52].copy_from_slice(&2u16.to_le_bytes());
-    duplicate.extend_from_slice(&encoded[56..]);
+    duplicate.extend_from_slice(&encoded[64..]);
     assert!(matches!(
         HostProfileV1::decode(&duplicate),
         Err(WasmError::Decode("host profile is not canonical"))
     ));
+
+    let mut legacy = encoded[..52].to_vec();
+    legacy[4..6].copy_from_slice(&1u16.to_le_bytes());
+    legacy[6..8].copy_from_slice(&56u16.to_le_bytes());
+    legacy.extend_from_slice(&0u32.to_le_bytes());
+    legacy.extend_from_slice(&encoded[64..]);
+    let legacy = must_ok(HostProfileV1::decode(&legacy), "decode schema-1 profile");
+    assert_eq!(legacy.vm_limits().max_call_depth, 512);
+    assert_eq!(legacy.vm_limits().max_activation_slots, 1 << 20);
 
     let mut trailing = encoded;
     trailing.push(0);

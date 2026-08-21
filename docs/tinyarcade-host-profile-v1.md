@@ -13,8 +13,8 @@ All integers are little-endian. The complete artifact is at most 64 KiB.
 
 ```text
 "TAH1"                       4 bytes
-schema_version                u16; exactly 1
-header_length                 u16; exactly 56
+schema_version                u16; exactly 2
+header_length                 u16; exactly 64
 game_abi_version              u32; exactly 1
 max_cartridge_bytes           u32; exactly 2 MiB
 max_table_elems               u32; non-zero aggregate across all tables
@@ -27,6 +27,8 @@ grid3d_version                u16; exactly 1
 indexed2d_version             u16; exactly 1
 tones_version                 u16; exactly 1
 native_function_count         u16; at most 64
+max_call_depth                u32; non-zero defined activations
+max_activation_slots          u32; non-zero aggregate live VM slots
 reserved                      u32; zero
 repeated native function, sorted by module then field bytes:
   module_length               u16
@@ -38,6 +40,12 @@ repeated native function, sorted by module then field bytes:
   module                      canonical authority:module/vN UTF-8
   field                       canonical snake_case UTF-8
 ```
+
+Decoders also accept the original schema-1, 56-byte header. Because that
+artifact predates configurable call resources, it maps deterministically to
+512 live defined activations and 1,048,576 aggregate activation slots. Encoders
+always emit schema 2. This preserves already published profiles without making
+the new limits implicit in future app-build identity.
 
 Duplicate, unordered, malformed, unknown-version and trailing data fail closed.
 Changing any limit, media version, namespace, signature or quota changes the
@@ -54,9 +62,9 @@ standard cartridge
   → dynamic fuel/output/native-semantic conformance still required
 ```
 
-The profile cannot prove the amount of fuel or output a guest will consume;
-those values are runtime ceilings and must still be exercised by converter
-goldens and reviewed game testing. `max_calls_per_lifecycle` describes host
+The profile cannot prove the amount of fuel, output or call resources a guest
+will consume; those values are runtime ceilings and must still be exercised by
+converter goldens and reviewed game testing. `max_calls_per_lifecycle` describes host
 containment but is not a promise that an arbitrary native callback has the
 semantics expected by a game. Catalog signature, origin, revocation and the
 App Store external-code release gate remain independent later decisions.

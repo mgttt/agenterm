@@ -700,6 +700,20 @@ public struct TinyArcadeExecutionStatsV1: Sendable, Equatable {
     public let stateBytes: UInt32
 }
 
+/// ABI v1.9 deterministic stats, including VM-owned guest call-stack peaks.
+public struct TinyArcadeExecutionStatsV2: Sendable, Equatable {
+    public let lifecycle: TinyArcadeGameLifecycleV1
+    public let wasmSteps: UInt64
+    public let peakCallDepth: UInt32
+    public let peakActivationSlots: UInt32
+    public let memoryPages: UInt32
+    public let tableElements: UInt32
+    public let nativeCalls: UInt32
+    public let renderBytes: UInt32
+    public let audioBytes: UInt32
+    public let stateBytes: UInt32
+}
+
 public struct TinyArcadeReviewedCatalogEntry: Sendable {
     public let gameID: String
     public let gameVersion: String
@@ -2246,6 +2260,32 @@ public final class TinyArcadeRuntimeV1 {
         return TinyArcadeExecutionStatsV1(
             lifecycle: lifecycle,
             wasmSteps: raw.wasm_steps,
+            memoryPages: raw.memory_pages,
+            tableElements: raw.table_elements,
+            nativeCalls: raw.native_calls,
+            renderBytes: raw.render_bytes,
+            audioBytes: raw.audio_bytes,
+            stateBytes: raw.state_bytes
+        )
+    }
+
+    /// Extended ABI v1.9 stats. The original method remains byte-for-byte
+    /// compatible with v1.8 callers and intentionally omits these new fields.
+    public func lastExecutionStatsV2() throws -> TinyArcadeExecutionStatsV2 {
+        var raw = tinyarcade_execution_stats_v2()
+        try Self.check(tinyarcade_v1_last_execution_stats_v2(try liveHandle(), &raw))
+        guard raw.struct_size == UInt32(MemoryLayout<tinyarcade_execution_stats_v2>.size),
+              let lifecycle = TinyArcadeGameLifecycleV1(rawValue: raw.lifecycle) else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                message: "runtime returned invalid extended execution stats"
+            )
+        }
+        return TinyArcadeExecutionStatsV2(
+            lifecycle: lifecycle,
+            wasmSteps: raw.wasm_steps,
+            peakCallDepth: raw.peak_call_depth,
+            peakActivationSlots: raw.peak_activation_slots,
             memoryPages: raw.memory_pages,
             tableElements: raw.table_elements,
             nativeCalls: raw.native_calls,

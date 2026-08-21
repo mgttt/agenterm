@@ -255,6 +255,7 @@ fn replay_runtime(wasm: &[u8]) -> Result<GameRuntime, String> {
             max_table_elems: 1_024,
             max_memory_pages: 64,
             max_steps: 1_000_000,
+            ..Limits::default()
         },
         GameLimits::default(),
         0x5441_5231,
@@ -618,6 +619,7 @@ fn validate_publishable_cartridge(wasm: &[u8]) -> Result<CartridgeManifest, Stri
             max_table_elems: 1_024,
             max_memory_pages: 64,
             max_steps: 1_000_000,
+            ..Limits::default()
         },
     )
     .map_err(|error| error.message())?;
@@ -625,6 +627,7 @@ fn validate_publishable_cartridge(wasm: &[u8]) -> Result<CartridgeManifest, Stri
         max_table_elems: 1_024,
         max_memory_pages: 64,
         max_steps: 1_000_000,
+        ..Limits::default()
     };
     let game_limits = GameLimits {
         max_render_bytes: 64 * 1024,
@@ -757,6 +760,7 @@ fn run_attach_manifest(
             max_table_elems: 1_024,
             max_memory_pages: 64,
             max_steps: 1_000_000,
+            ..Limits::default()
         };
         let module = WasmModule::from_bytes_with(&wasm, limits)
             .map_err(|error| error.message().to_string())?;
@@ -836,6 +840,8 @@ fn print_host_profile(profile: &HostProfileV1, bytes: usize) {
     println!("max_table_elems={}", vm.max_table_elems);
     println!("max_memory_pages={}", vm.max_memory_pages);
     println!("max_steps={}", vm.max_steps);
+    println!("max_call_depth={}", vm.max_call_depth);
+    println!("max_activation_slots={}", vm.max_activation_slots);
     println!("max_render_bytes={}", game.max_render_bytes);
     println!("max_audio_bytes={}", game.max_audio_bytes);
     println!("max_state_bytes={}", game.max_state_bytes);
@@ -936,6 +942,7 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
             max_table_elems: 1_024,
             max_memory_pages: 64,
             max_steps: 1_000_000,
+            ..Limits::default()
         },
     ) {
         Ok(descriptor) => descriptor,
@@ -973,6 +980,7 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
         max_table_elems: 1_024,
         max_memory_pages: 64,
         max_steps: 1_000_000,
+        ..Limits::default()
     };
     let game_limits = GameLimits {
         max_render_bytes: 64 * 1024,

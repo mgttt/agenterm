@@ -130,6 +130,12 @@ pub struct Limits {
     /// Maximum instructions executed by one top-level call. Nested calls share
     /// that call's counter; the next top-level call receives a fresh budget.
     pub max_steps: u64,
+    /// Maximum simultaneously live guest-defined activations. Guest calls use
+    /// VM heap storage rather than the native stack.
+    pub max_call_depth: usize,
+    /// Maximum aggregate locals, operand values and control frames across the
+    /// current activation and every suspended caller.
+    pub max_activation_slots: usize,
 }
 
 impl Default for Limits {
@@ -138,6 +144,8 @@ impl Default for Limits {
             max_table_elems: 65_536,
             max_memory_pages: WASM_MAX_ALLOC_PAGES,
             max_steps: WASM_MAX_STEPS,
+            max_call_depth: WASM_MAX_DEPTH,
+            max_activation_slots: WASM_MAX_ACTIVATION_SLOTS,
         }
     }
 }
@@ -1951,6 +1959,8 @@ pub struct Instance {
     tables: Vec<Vec<Option<usize>>>,
     elem_live: Vec<bool>,
     last_steps: u64,
+    last_peak_call_depth: usize,
+    last_peak_activation_slots: usize,
 }
 
 /// Mutable store owned by one evaluation or persistent instance. Keeping the
@@ -1965,6 +1975,31 @@ struct BulkState<'a> {
 struct WasmCall<'a> {
     index: usize,
     args: &'a [Val],
+}
+
+#[derive(Default)]
+struct CallResourceStats {
+    peak_call_depth: usize,
+    peak_activation_slots: usize,
+}
+
+struct CallContext<'a> {
+    base_depth: usize,
+    stats: &'a mut CallResourceStats,
+}
+
+struct ActivationResources<'a> {
+    available_slots: usize,
+    suspended_slots: usize,
+    call_depth: usize,
+    stats: &'a mut CallResourceStats,
+}
+
+impl CallResourceStats {
+    fn observe(&mut self, depth: usize, slots: usize) {
+        self.peak_call_depth = self.peak_call_depth.max(depth);
+        self.peak_activation_slots = self.peak_activation_slots.max(slots);
+    }
 }
 
 enum DefinedOutcome {
@@ -2530,17 +2565,22 @@ impl Module {
             tables: &mut tables,
             elem_live: &mut elem_live,
         };
+        let mut resources = CallResourceStats::default();
         if let Some(start) = self.start {
+            let mut call_context = CallContext {
+                base_depth: 0,
+                stats: &mut resources,
+            };
             self.call_any(
                 WasmCall {
                     index: start,
                     args: &[],
                 },
-                0,
                 &mut steps,
                 &mut mem,
                 &mut globals,
                 &mut bulk,
+                &mut call_context,
             )?;
         }
         let entry = match self.export_list.first() {
@@ -2551,13 +2591,17 @@ impl Module {
             None if !self.funcs.is_empty() => self.hosts.len(),
             None => return Ok(Vec::new()),
         };
+        let mut call_context = CallContext {
+            base_depth: 0,
+            stats: &mut resources,
+        };
         self.call_any(
             WasmCall { index: entry, args },
-            0,
             &mut steps,
             &mut mem,
             &mut globals,
             &mut bulk,
+            &mut call_context,
         )
     }
 
@@ -2627,13 +2671,18 @@ impl Module {
             tables: &mut tables,
             elem_live: &mut elem_live,
         };
+        let mut resources = CallResourceStats::default();
+        let mut call_context = CallContext {
+            base_depth: 0,
+            stats: &mut resources,
+        };
         self.call_any(
             WasmCall { index: idx, args },
-            0,
             &mut steps,
             &mut mem,
             &mut globals,
             &mut bulk,
+            &mut call_context,
         )
     }
 
@@ -2865,11 +2914,11 @@ impl Module {
     fn call_any(
         &self,
         call: WasmCall<'_>,
-        depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
         globals: &mut [Val],
         bulk: &mut BulkState<'_>,
+        context: &mut CallContext<'_>,
     ) -> Result<Vec<Val>, WasmError> {
         let mut index = call.index;
         let mut args = Vec::new();
@@ -2880,18 +2929,33 @@ impl Module {
         let mut callers: Vec<DefinedActivation> = Vec::new();
         let mut suspended_slots = 0usize;
         loop {
-            let available_slots = WASM_MAX_ACTIVATION_SLOTS
+            let available_slots = self
+                .limits
+                .max_activation_slots
                 .checked_sub(suspended_slots)
                 .ok_or(WasmError::Trap("call stack"))?;
             let outcome = if let Some(current) = activation.take() {
-                self.run_defined(current, available_slots, steps, mem, globals, bulk)?
+                let current_depth = context
+                    .base_depth
+                    .checked_add(callers.len())
+                    .and_then(|value| value.checked_add(1))
+                    .ok_or(WasmError::Trap("call depth"))?;
+                let activation_resources = ActivationResources {
+                    available_slots,
+                    suspended_slots,
+                    call_depth: current_depth,
+                    stats: context.stats,
+                };
+                self.run_defined(current, steps, mem, globals, bulk, activation_resources)?
             } else if index < self.hosts.len() {
                 DefinedOutcome::Values(self.call_host(index, &args, mem)?)
             } else {
-                let current_depth = depth
+                let current_depth = context
+                    .base_depth
                     .checked_add(callers.len())
+                    .and_then(|value| value.checked_add(1))
                     .ok_or(WasmError::Trap("call depth"))?;
-                if current_depth > WASM_MAX_DEPTH {
+                if current_depth > self.limits.max_call_depth {
                     return Err(WasmError::Trap("call depth"));
                 }
                 let current = self.new_defined_activation(
@@ -2899,7 +2963,13 @@ impl Module {
                     core::mem::take(&mut args),
                     available_slots,
                 )?;
-                self.run_defined(current, available_slots, steps, mem, globals, bulk)?
+                let activation_resources = ActivationResources {
+                    available_slots,
+                    suspended_slots,
+                    call_depth: current_depth,
+                    stats: context.stats,
+                };
+                self.run_defined(current, steps, mem, globals, bulk, activation_resources)?
             };
             match outcome {
                 DefinedOutcome::Values(values) => {
@@ -2911,7 +2981,9 @@ impl Module {
                         let resumed_slots = caller_slots
                             .checked_add(values.len())
                             .ok_or(WasmError::Trap("call stack"))?;
-                        let available_slots = WASM_MAX_ACTIVATION_SLOTS
+                        let available_slots = self
+                            .limits
+                            .max_activation_slots
                             .checked_sub(suspended_slots)
                             .ok_or(WasmError::Trap("call stack"))?;
                         if resumed_slots > available_slots {
@@ -2933,11 +3005,12 @@ impl Module {
                     caller,
                 } => {
                     if next >= self.hosts.len() {
-                        let next_depth = depth
+                        let next_depth = context
+                            .base_depth
                             .checked_add(callers.len())
-                            .and_then(|value| value.checked_add(1))
+                            .and_then(|value| value.checked_add(2))
                             .ok_or(WasmError::Trap("call depth"))?;
-                        if next_depth > WASM_MAX_DEPTH {
+                        if next_depth > self.limits.max_call_depth {
                             return Err(WasmError::Trap("call depth"));
                         }
                     }
@@ -2947,7 +3020,7 @@ impl Module {
                     let caller_slots = caller.live_slots()?;
                     suspended_slots = suspended_slots
                         .checked_add(caller_slots)
-                        .filter(|&slots| slots <= WASM_MAX_ACTIVATION_SLOTS)
+                        .filter(|&slots| slots <= self.limits.max_activation_slots)
                         .ok_or(WasmError::Trap("call stack"))?;
                     callers.push(caller);
                     index = next;
@@ -2967,11 +3040,11 @@ impl Module {
     fn run_defined(
         &self,
         activation: DefinedActivation,
-        available_slots: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
         globals: &mut [Val],
         bulk: &mut BulkState<'_>,
+        resources: ActivationResources<'_>,
     ) -> Result<DefinedOutcome, WasmError> {
         let DefinedActivation {
             def_idx,
@@ -2986,6 +3059,11 @@ impl Module {
             .ok_or(WasmError::Trap("call to unknown function"))?;
 
         loop {
+            let live_slots = locals
+                .len()
+                .checked_add(stack.len())
+                .and_then(|slots| slots.checked_add(control.len()))
+                .ok_or(WasmError::Trap("call stack"))?;
             *steps += 1;
             if *steps > self.limits.max_steps {
                 return Err(WasmError::Trap("step budget"));
@@ -2993,15 +3071,16 @@ impl Module {
             if stack.len() > WASM_STACK_LIMIT {
                 return Err(WasmError::Trap("operand stack"));
             }
-            if locals
-                .len()
-                .checked_add(stack.len())
-                .and_then(|slots| slots.checked_add(control.len()))
-                .filter(|&slots| slots <= available_slots)
-                .is_none()
-            {
+            if live_slots > resources.available_slots {
                 return Err(WasmError::Trap("call stack"));
             }
+            resources.stats.observe(
+                resources.call_depth,
+                resources
+                    .suspended_slots
+                    .checked_add(live_slots)
+                    .ok_or(WasmError::Trap("call stack"))?,
+            );
             if pc >= func.code.len() {
                 return finish_defined(&mut stack, func.arity);
             }
@@ -3981,6 +4060,8 @@ impl Instance {
             tables,
             elem_live,
             last_steps: 0,
+            last_peak_call_depth: 0,
+            last_peak_activation_slots: 0,
         };
         if let Some(start) = instance.module.start {
             let mut steps = 0;
@@ -3989,18 +4070,25 @@ impl Instance {
                 tables: &mut instance.tables,
                 elem_live: &mut instance.elem_live,
             };
+            let mut resources = CallResourceStats::default();
+            let mut call_context = CallContext {
+                base_depth: 0,
+                stats: &mut resources,
+            };
             let result = instance.module.call_any(
                 WasmCall {
                     index: start,
                     args: &[],
                 },
-                0,
                 &mut steps,
                 &mut instance.memory,
                 &mut instance.globals,
                 &mut bulk,
+                &mut call_context,
             );
             instance.last_steps = steps;
+            instance.last_peak_call_depth = resources.peak_call_depth;
+            instance.last_peak_activation_slots = resources.peak_activation_slots;
             result?;
         }
         Ok(instance)
@@ -4039,15 +4127,22 @@ impl Instance {
             tables: &mut self.tables,
             elem_live: &mut self.elem_live,
         };
+        let mut resources = CallResourceStats::default();
+        let mut call_context = CallContext {
+            base_depth: 0,
+            stats: &mut resources,
+        };
         let result = self.module.call_any(
             WasmCall { index: idx, args },
-            0,
             &mut steps,
             &mut self.memory,
             &mut self.globals,
             &mut bulk,
+            &mut call_context,
         );
         self.last_steps = steps;
+        self.last_peak_call_depth = resources.peak_call_depth;
+        self.last_peak_activation_slots = resources.peak_activation_slots;
         result
     }
 
@@ -4055,6 +4150,18 @@ impl Instance {
     /// including a call that returned a guest trap.
     pub fn last_steps(&self) -> u64 {
         self.last_steps
+    }
+
+    /// Peak number of simultaneously live guest-defined activations during
+    /// the last top-level invocation, including an invocation that trapped.
+    pub fn last_peak_call_depth(&self) -> usize {
+        self.last_peak_call_depth
+    }
+
+    /// Peak aggregate locals, operand values and control frames across the
+    /// active function and all suspended callers in the last invocation.
+    pub fn last_peak_activation_slots(&self) -> usize {
+        self.last_peak_activation_slots
     }
 
     /// Current live linear-memory size in WebAssembly 64 KiB pages.
