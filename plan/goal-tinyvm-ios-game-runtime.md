@@ -46,6 +46,7 @@ tinyvm iOS game runtime
 │   ├── static library/XCFramework   [x]
 │   ├── Swift ownership/threading     [x]
 │   ├── input + monotonic clock owner [x]
+│   ├── frame pacing + scene state    [x]
 │   ├── indexed 2D presentation       [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
@@ -1075,3 +1076,40 @@ Evidence on 2026-08-21:
   and 1,469,856 bytes x86_64, with replay/private/session consumers at
   1,277,784, 1,279,440 and 1,278,512 bytes arm64. Physical-device evidence
   remains open.
+
+## Thirty-first executable increment — foreground pacing and scene state
+
+`TinyArcadeFramePacerV1` turns an app-supplied monotonic seconds timestamp into
+bounded integer frame deltas while retaining fractional milliseconds across
+samples. Its first sample and first sample after reset emit zero. NaN/infinity,
+backwards time and more than the configured 1...1000 ms ceiling fail without
+changing the accepted baseline. The adapter gives app integrations one reviewed
+path for monotonic display timestamps and makes background discontinuities fail
+loudly; the app remains responsible for never deriving samples from wall clock.
+
+`TinyArcadeGameSessionV1` now owns explicit active/inactive state.
+`deactivateAndSave(to:)` releases all input and becomes inactive before asking
+the guest and store to persist; later input/tick calls fail even if storage
+fails. Runtime/suspend errors latch the session as failed, while storage-only
+errors leave the runtime healthy. `activate()` clears input again and permits
+ticks only after the app resets its frame pacer. The SDK deliberately does not
+observe scene notifications: the app remains the lifecycle authority.
+
+Evidence on 2026-08-21:
+
+- The real Paddle Guard Swift black box accumulates exact 15/16/15 ms deltas
+  from binary-exact fractional timestamps, rejects non-finite, backwards and
+  background-sized samples without baseline mutation, and resets to a zero
+  first foreground delta.
+- The same booted iPhone 17 Pro simulator run deactivates with overlapping held
+  inputs, proves inactive input/tick refusal, restores clock 15, advances to 31,
+  reactivates at zero delta and restores 31 again. An unsafe snapshot target
+  produces a storage error without failing gameplay; a closed runtime during
+  save marks the session failed.
+- Device and universal simulator packages link. Consumers measure 1,417,768
+  bytes arm64, 1,478,928 bytes x86_64, 1,282,712 replay, 1,284,400 private and
+  1,283,536 session bytes arm64, all below the 1.5 MiB SDK gate. Physical-device
+  pacing/background evidence remains open.
+- All 187 package tests plus one doctest, all-feature/all-target Clippy,
+  no-default compile, replay isolation, document redaction and the exact
+  70,904-byte static-core/self-test gate remain clean.

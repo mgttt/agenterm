@@ -177,9 +177,12 @@ symlink fail-closed；物理设备后台终止恢复仍未验证。
 Swift `TinyArcadeGameSessionV1` 把最多 32 个 touch/keyboard/controller source 的完整
 pressed set 合并，避免一个 source 松开时误清另一个仍按住的键；每帧只推进最多
 250 ms（可配置上限 1...1000 ms）的 foreground game time，成功帧后才提交 clock，
-并与 snapshot store 保存/恢复同一个 clock。app 必须在 scene 退后台时 release
-inputs、save、停止 tick，后台墙钟不会偷偷推进游戏。snapshot 的 live/dangling
-symlink 均 fail closed。
+并与 snapshot store 保存/恢复同一个 clock。`TinyArcadeFramePacerV1` 从
+`CADisplayLink.timestamp` 等单调秒数保留亚毫秒余数地生成 delta，NaN、倒退和后台
+大间隔均不改变 pacing baseline。app 在 scene 退后台时调用 `deactivateAndSave`，
+session 会先清 inputs、进入 inactive 再保存，此后 input/tick 必然拒绝；回前台先
+reset pacer 再 `activate`，第一帧为 0 delta。storage failure 不误判为 runtime failed，
+suspend/runtime failure 则 latch session。snapshot 的 live/dangling symlink 均 fail closed。
 
 标准化回放不另造游戏执行格式。`tinyarcade-replay-v1` 只保存精确卡带 SHA-256、
 manifest identity、初始 portable snapshot、单调的 input/clock，以及每帧 render/audio

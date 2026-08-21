@@ -32,9 +32,11 @@ gameplay tones or choose haptics for the app.
 Use `TinyArcadeGameSessionV1` as the foreground gameplay owner. It combines at
 most 32 touch/keyboard/controller sources without premature button releases,
 advances only a bounded monotonic game clock, rejects background-sized frame
-deltas and persists that exact clock through `TinyArcadeSnapshotStoreV1`.
-Release all inputs when the scene resigns active, save, and stop ticking until
-foreground presentation resumes.
+deltas and persists that exact clock through `TinyArcadeSnapshotStoreV1`. Feed
+it deltas from `TinyArcadeFramePacerV1` using `CADisplayLink.timestamp` or an
+equivalent monotonic source—not `Date`. On scene resignation call
+`deactivateAndSave(to:)`; it clears controls and makes further input/ticks fail.
+Before foreground presentation resumes, reset the pacer and call `activate()`.
 
 Reviewed downloads should be handed to `TinyArcadeCartridgeCacheV1.activate`
 only after the app has received the complete response. The cache verifies the

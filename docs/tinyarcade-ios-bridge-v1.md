@@ -73,12 +73,24 @@ turn into a cartridge launch failure.
 pressed sets for at most 32 stable input-source ids, so one touch/controller
 release cannot clear a button held by another source. Each tick advances the
 stored game clock by at most a configurable 1...1000 ms ceiling (250 ms by
-default), commits the new clock only after a successful decoded frame, and
-fails explicitly before `UInt32` exhaustion. On scene deactivation the app must
-call `releaseAllInputs()`, save and stop ticks; `save(to:)` persists runtime
-state with the exact last successful clock. Rust independently rejects unknown
-button bits and backwards clock values before guest execution, without latching
-an otherwise healthy runtime.
+default), commits the new clock only after a successful decoded frame, and fails
+explicitly before `UInt32` exhaustion. `TinyArcadeFramePacerV1` converts
+`CADisplayLink.timestamp` or another monotonic-seconds source to integer deltas,
+retains fractional milliseconds to prevent drift, and rejects non-finite,
+backwards or oversized samples without changing its baseline. It never accepts
+`Date` directly; callers remain responsible for supplying the documented
+monotonic source rather than converting wall-clock time to seconds.
+
+On scene deactivation the app calls `deactivateAndSave(to:)`. The session clears
+all inputs, becomes inactive before persistence, and rejects further input or
+ticks even if storage fails. A runtime/suspend error marks the session failed;
+a storage-only error leaves the healthy runtime distinguishable. On foreground
+return the app resets its pacer, calls `activate()`, and the first new timestamp
+emits a zero delta so background time never enters game time. `save(to:)`
+persists runtime state with the exact last successful clock. Rust independently
+rejects unknown button bits and backwards clock values before guest execution,
+without latching an otherwise healthy runtime. The SDK does not subscribe to
+scene notifications itself; lifecycle authority stays with the app.
 
 ## Ownership
 
@@ -267,9 +279,11 @@ atomically exchanges the resulting `.tareplay` through a file, verifies all
 steps on a fresh runtime, reproduces byte-identical trace bytes, and rejects a
 changed output digest plus different WASM bytes carrying the same manifest.
 The session black box combines overlapping input sources, launches and moves
-the real Paddle Guard cartridge, rejects unknown input, source overflow, a
-background-sized delta, backwards time and clock overflow, restores the exact
-snapshot clock and proves rejected host input leaves the runtime playable.
+the real Paddle Guard cartridge, converts fractional monotonic timestamps,
+rejects invalid/backwards/background samples without baseline mutation,
+deactivates/saves/restores/reactivates the exact clock, rejects inactive input
+and ticks, distinguishes storage failure from runtime failure, and proves
+rejected direct host input leaves the runtime playable.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,

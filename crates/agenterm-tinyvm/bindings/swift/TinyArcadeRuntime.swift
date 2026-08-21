@@ -2458,10 +2458,70 @@ public struct TinyArcadeInputStateV1: Sendable {
     }
 }
 
+public enum TinyArcadeFramePacerError: Error, Sendable, Equatable {
+    case invalidMaximumFrameAdvance
+    case invalidTimestamp
+    case timestampWentBackwards
+    case frameAdvanceTooLarge
+}
+
+/// Converts a monotonic foreground timestamp into bounded integer game-time
+/// deltas without losing sub-millisecond remainder. Use CADisplayLink.timestamp
+/// or another monotonic source, never Date/wall-clock time. Reset after a pause.
+public struct TinyArcadeFramePacerV1: Sendable {
+    public let maximumFrameAdvanceMilliseconds: UInt32
+    private var previousTimestampSeconds: TimeInterval?
+    private var fractionalMilliseconds = 0.0
+
+    public init(
+        maximumFrameAdvanceMilliseconds: UInt32 =
+            TinyArcadeGameSessionV1.defaultMaximumFrameAdvanceMilliseconds
+    ) throws {
+        guard (1...1_000).contains(maximumFrameAdvanceMilliseconds) else {
+            throw TinyArcadeFramePacerError.invalidMaximumFrameAdvance
+        }
+        self.maximumFrameAdvanceMilliseconds = maximumFrameAdvanceMilliseconds
+    }
+
+    /// The first timestamp after initialization or reset emits zero elapsed
+    /// time. Rejected samples do not mutate the pacing baseline.
+    public mutating func elapsedMilliseconds(
+        at timestampSeconds: TimeInterval
+    ) throws -> UInt32 {
+        guard timestampSeconds.isFinite, timestampSeconds >= 0 else {
+            throw TinyArcadeFramePacerError.invalidTimestamp
+        }
+        guard let previousTimestampSeconds else {
+            self.previousTimestampSeconds = timestampSeconds
+            fractionalMilliseconds = 0
+            return 0
+        }
+        guard timestampSeconds >= previousTimestampSeconds else {
+            throw TinyArcadeFramePacerError.timestampWentBackwards
+        }
+        let elapsed = (timestampSeconds - previousTimestampSeconds) * 1_000
+            + fractionalMilliseconds
+        guard elapsed.isFinite else { throw TinyArcadeFramePacerError.invalidTimestamp }
+        guard elapsed <= Double(maximumFrameAdvanceMilliseconds) else {
+            throw TinyArcadeFramePacerError.frameAdvanceTooLarge
+        }
+        let wholeMilliseconds = elapsed.rounded(.down)
+        self.previousTimestampSeconds = timestampSeconds
+        fractionalMilliseconds = elapsed - wholeMilliseconds
+        return UInt32(wholeMilliseconds)
+    }
+
+    public mutating func reset() {
+        previousTimestampSeconds = nil
+        fractionalMilliseconds = 0
+    }
+}
+
 public enum TinyArcadeGameSessionError: Error, Equatable {
     case invalidMaximumFrameAdvance
     case frameAdvanceTooLarge
     case clockExhausted
+    case inactive
     case failed
     case closed
 }
@@ -2475,6 +2535,7 @@ public final class TinyArcadeGameSessionV1 {
 
     public private(set) var gameClockMilliseconds: UInt32
     public private(set) var input = TinyArcadeInputStateV1()
+    public private(set) var isActive = true
     public private(set) var isFailed = false
     public let maximumFrameAdvanceMilliseconds: UInt32
     private var runtime: TinyArcadeRuntimeV1?
@@ -2509,6 +2570,7 @@ public final class TinyArcadeGameSessionV1 {
     ) throws {
         _ = try liveRuntime()
         guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        guard isActive else { throw TinyArcadeGameSessionError.inactive }
         try input.set(pressed, forSource: source)
     }
 
@@ -2519,6 +2581,7 @@ public final class TinyArcadeGameSessionV1 {
     public func tick(elapsedMilliseconds: UInt32) throws -> TinyArcadeMediaFrame {
         let runtime = try liveRuntime()
         guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        guard isActive else { throw TinyArcadeGameSessionError.inactive }
         guard elapsedMilliseconds <= maximumFrameAdvanceMilliseconds else {
             throw TinyArcadeGameSessionError.frameAdvanceTooLarge
         }
@@ -2542,15 +2605,40 @@ public final class TinyArcadeGameSessionV1 {
     public func save(to store: TinyArcadeSnapshotStoreV1) throws {
         let runtime = try liveRuntime()
         guard !isFailed else { throw TinyArcadeGameSessionError.failed }
-        try store.save(
-            runtime: runtime,
-            gameClockMilliseconds: gameClockMilliseconds
-        )
+        do {
+            try store.save(
+                runtime: runtime,
+                gameClockMilliseconds: gameClockMilliseconds
+            )
+        } catch let error as TinyArcadeRuntimeError {
+            isFailed = true
+            throw error
+        }
+    }
+
+    /// Release held controls, make ticks impossible, then persist the exact
+    /// last successful game clock. The session stays inactive if saving fails.
+    public func deactivateAndSave(to store: TinyArcadeSnapshotStoreV1) throws {
+        _ = try liveRuntime()
+        guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        releaseAllInputs()
+        isActive = false
+        try save(to: store)
+    }
+
+    /// Resume foreground ticking. Reset the app's frame pacer before supplying
+    /// the first new timestamp so background elapsed time is not included.
+    public func activate() throws {
+        _ = try liveRuntime()
+        guard !isFailed else { throw TinyArcadeGameSessionError.failed }
+        releaseAllInputs()
+        isActive = true
     }
 
     public func close() throws {
         guard let runtime else { return }
         releaseAllInputs()
+        isActive = false
         try runtime.close()
         self.runtime = nil
     }
