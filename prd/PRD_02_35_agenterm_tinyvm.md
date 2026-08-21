@@ -30,7 +30,8 @@ agenterm-tinyvm (35)
 │       ├── init/tick/suspend/resume  [x]
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
-│       └── native module registry    [x]
+│       ├── native module registry    [x]
+│       └── App Store bundled-only gate [x]
 ├── real-game proofs               [~]
 │   ├── Depth Well grid3d             [x]
 │   ├── Paddle Guard indexed2d        [x]
@@ -77,12 +78,25 @@ JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是
 
 官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。
 
+2026-06-08 版 Apple Guidelines 只明确列出 HTML5/JavaScript mini games 等类别，
+自定义 WASM 语言没有自动取得 4.7 例外，4.7.2 对 native API 暴露还要求事先批准。
+因此 Swift App 面默认 `appStoreBundledOnly`：private/reviewed runtime 和 library 在
+任何 I/O/guest work 前拒绝。只有显式 `appleApprovedExternalCartridges` policy 与有界
+approval reference 才能解锁；reference 是 release audit 声明，不是假装获得许可。
+SDK 测试 policy 不公开，首版可保持固定 bundled games 且不暴露下载/导入 UI。
+
 卡带兼容性以“标准 Wasm 文件 + 版本化平台契约”为准，而不是以某一版 tinyvm
 内部实现为准。manifest 放在标准 custom section；core/native 能力都只表现为标准
 function import，namespace、函数名、值签名和版本必须精确匹配。未来转换器可以只读
 manifest/import table 就生成兼容性报告；未知 native module 默认拒绝，绝不把声明
 本身视为装载原生代码的授权。`tinyarcade:core/v1` 的语义冻结，新增 native 能力使用
 独立 `authority:module/vN`，不得暗改旧版本。
+
+未来 native module 是随审核版 App 编译进去的宿主实现，不是卡带携带的 dylib、AOT
+产物或私有 opcode。粉丝转换器以显式 host profile 为目标，输出仍是标准 `.wasm`，并
+根据标准 import table 生成所需 core/media/native 版本与资源上限的机器可读兼容报告。
+粉丝“上传给自己玩”只进入个人 private-user 安装链，即使以后经个人账号或私有云传输，
+也不会因此获得公开目录或 official-reviewed 身份；对外部代码的 Apple 许可门仍然生效。
 
 上述兼容性现在不是只写在文档里：Rust、CLI、C ABI 与 Swift 共用同一个静态
 descriptor validator。它不实例化 module、不运行 start/init，就验证 manifest、标准

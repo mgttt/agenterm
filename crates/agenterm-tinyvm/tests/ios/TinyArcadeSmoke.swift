@@ -360,8 +360,33 @@ struct TinyArcadeSmoke {
         let privateDescriptorDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinyarcade-private-descriptor-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: privateDescriptorDirectory) }
+        precondition(
+            TinyArcadeDistributionPolicyV1.appStoreBundledOnly.externalApprovalReference == nil
+        )
+        do {
+            _ = try TinyArcadeDistributionPolicyV1.appleApprovedExternalCartridges(
+                approvalReference: "bad ref"
+            )
+            preconditionFailure("invalid Apple approval reference must fail")
+        } catch let error as TinyArcadeDistributionPolicyError {
+            precondition(error == .invalidAppleApprovalReference)
+        }
+        let recordedApproval = try TinyArcadeDistributionPolicyV1
+            .appleApprovedExternalCartridges(approvalReference: "app-review-case-123")
+        precondition(recordedApproval.externalApprovalReference == "app-review-case-123")
+        do {
+            _ = try TinyArcadePrivateLibraryV1(directoryURL: privateDescriptorDirectory)
+            preconditionFailure("App Store baseline must disable private libraries")
+        } catch let error as TinyArcadeDistributionPolicyError {
+            precondition(error == .externalCartridgesDisabled)
+        }
+        precondition(
+            !FileManager.default.fileExists(atPath: privateDescriptorDirectory.path),
+            "bundled-only refusal must precede private directory creation"
+        )
         let privateDescriptorLibrary = try TinyArcadePrivateLibraryV1(
-            directoryURL: privateDescriptorDirectory
+            directoryURL: privateDescriptorDirectory,
+            distributionPolicy: .sdkTestExternalCartridges
         )
         do {
             _ = try privateDescriptorLibrary.importCartridge(nativeBytes)
@@ -371,6 +396,7 @@ struct TinyArcadeSmoke {
                 error == .unsupportedNativeCapabilities(["fan:physics/v1"])
             )
         }
+        print("OK: App Store bundled-only default → explicit approval record → external SDK test policy")
 
         let cacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinyarcade-ios-cache-\(UUID().uuidString)")
@@ -715,7 +741,16 @@ struct TinyArcadeSmoke {
 
         guard CommandLine.arguments.count >= 2 else { return }
         let cartridge = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
-        let runtime = try TinyArcadeRuntimeV1(privateCartridge: cartridge) { config in
+        do {
+            _ = try TinyArcadeRuntimeV1(privateCartridge: cartridge)
+            preconditionFailure("App Store baseline must disable external runtime open")
+        } catch let error as TinyArcadeDistributionPolicyError {
+            precondition(error == .externalCartridgesDisabled)
+        }
+        let runtime = try TinyArcadeRuntimeV1(
+            privateCartridge: cartridge,
+            distributionPolicy: .sdkTestExternalCartridges
+        ) { config in
             config.max_memory_pages = 17
             config.max_steps = 100_000
             config.max_render_bytes = 4 * 1_024
@@ -731,7 +766,10 @@ struct TinyArcadeSmoke {
         precondition(frame.grid3D.cells.count == 8)
         precondition(frame.tones.isEmpty)
         let snapshot = try runtime.suspend()
-        let restored = try TinyArcadeRuntimeV1(privateCartridge: cartridge) { config in
+        let restored = try TinyArcadeRuntimeV1(
+            privateCartridge: cartridge,
+            distributionPolicy: .sdkTestExternalCartridges
+        ) { config in
             config.max_memory_pages = 17
             config.max_steps = 100_000
             config.max_render_bytes = 4 * 1_024
@@ -743,7 +781,10 @@ struct TinyArcadeSmoke {
         precondition(dropped.grid3D.score >= 10)
         precondition(dropped.tones.count == 1)
 
-        let measured = try TinyArcadeRuntimeV1(privateCartridge: cartridge) { config in
+        let measured = try TinyArcadeRuntimeV1(
+            privateCartridge: cartridge,
+            distributionPolicy: .sdkTestExternalCartridges
+        ) { config in
             config.max_memory_pages = 17
             config.max_steps = 100_000
             config.max_render_bytes = 4 * 1_024
@@ -775,7 +816,10 @@ struct TinyArcadeSmoke {
             contentsOf: URL(fileURLWithPath: CommandLine.arguments[2])
         )
         let makePaddleRuntime: () throws -> TinyArcadeRuntimeV1 = {
-            try TinyArcadeRuntimeV1(privateCartridge: paddleCartridge) { config in
+            try TinyArcadeRuntimeV1(
+                privateCartridge: paddleCartridge,
+                distributionPolicy: .sdkTestExternalCartridges
+            ) { config in
                 config.max_memory_pages = 17
                 config.max_steps = 500_000
                 config.max_render_bytes = 20 * 1_024

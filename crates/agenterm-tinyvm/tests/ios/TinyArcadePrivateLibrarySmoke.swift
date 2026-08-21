@@ -15,7 +15,8 @@ private struct TinyArcadePrivateLibrarySmoke {
         defer { try? FileManager.default.removeItem(at: directory) }
         let library = try TinyArcadePrivateLibraryV1(
             directoryURL: directory,
-            maximumCartridgeBytes: 32 * 1_024
+            maximumCartridgeBytes: 32 * 1_024,
+            distributionPolicy: .sdkTestExternalCartridges
         )
 
         let paddleItem = try library.importCartridge(paddle) { config in

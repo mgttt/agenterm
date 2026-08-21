@@ -169,6 +169,12 @@ strip pass cannot discard the custom section. Test reproducible bytes, native-im
 derivation, duplicate-manifest refusal and absence of output after preflight
 failure.
 
+When a PRD uses checked tree leaves as executable claims, every new `[x]` leaf
+must be added to the owning integration suite's leaf-to-test map in the same
+change. Map it to a test that actually executes the relevant product boundary;
+documentation presence alone is not evidence. This keeps planning prose from
+silently getting ahead of the suite as new non-Rust SDK behavior is added.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

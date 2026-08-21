@@ -10,7 +10,10 @@ private struct TinyArcadeReplaySmoke {
         }
         let cartridge = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         let makeRuntime: (Data) throws -> TinyArcadeRuntimeV1 = { bytes in
-            try TinyArcadeRuntimeV1(privateCartridge: bytes) { config in
+            try TinyArcadeRuntimeV1(
+                privateCartridge: bytes,
+                distributionPolicy: .sdkTestExternalCartridges
+            ) { config in
                 config.max_memory_pages = 17
                 config.max_steps = 500_000
                 config.max_render_bytes = 20 * 1_024

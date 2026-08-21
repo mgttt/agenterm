@@ -146,10 +146,21 @@ private struct TinyArcadeReviewedFlowSmoke {
         )
         let trust = try TinyArcadeTrustStoreV1()
         try trust.addKey(id: keyID, ed25519PublicKey: privateKey.publicKey.rawRepresentation)
-        let library = TinyArcadeReviewedLibraryV1(
+        do {
+            _ = try TinyArcadeReviewedLibraryV1(
+                transport: transport,
+                cache: cache,
+                trustStore: trust
+            )
+            preconditionFailure("App Store baseline must disable reviewed library")
+        } catch let error as TinyArcadeDistributionPolicyError {
+            precondition(error == .externalCartridgesDisabled)
+        }
+        let library = try TinyArcadeReviewedLibraryV1(
             transport: transport,
             cache: cache,
-            trustStore: trust
+            trustStore: trust,
+            distributionPolicy: .sdkTestExternalCartridges
         )
         let root = URL(string: "https://reviewed.test/")!
         let base = root.appendingPathComponent("wasm", isDirectory: true)

@@ -37,6 +37,17 @@ has explicitly clarified or permitted this custom language/use case. TestFlight
 is not an exemption: guideline 2.2 says TestFlight apps intended for public
 distribution should comply with the review guidelines.
 
+This boundary is now executable in the Swift API. Private/reviewed runtime and
+library initializers default to
+`TinyArcadeDistributionPolicyV1.appStoreBundledOnly` and reject before file,
+network, trust or guest work. External execution requires a policy created with
+`appleApprovedExternalCartridges(approvalReference:)`; its bounded reference is
+an auditable release assertion, not a cryptographic proof or substitute for
+Apple permission. The SDK's external-path black boxes use an internal policy
+that is not public API, so there is no public “development mode” switch to leak
+into an App Store build. The lower C/Rust embedding APIs remain platform
+mechanisms; product release audit must use the policy-bearing Swift composition.
+
 If Apple permits the external-cartridge mode, release still requires the full
 4.7 surface rather than only a signature:
 

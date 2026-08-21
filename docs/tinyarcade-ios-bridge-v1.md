@@ -101,6 +101,15 @@ UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
 private opening has no native capability registry and cannot acquire official
 provenance.
 
+Swift adds a separate release-policy gate above those provenance checks.
+`TinyArcadeDistributionPolicyV1.appStoreBundledOnly` is the default for every
+private/reviewed runtime and library initializer, which fails before I/O or
+guest execution. Enabling an external path requires a policy constructed with a
+bounded Apple approval reference. This records an auditable product decision;
+it does not manufacture Apple permission. SDK smokes use an internal test-only
+policy unavailable to package consumers. Bundled runtime construction remains
+unchanged and fully playable offline.
+
 Before any origin opens, `TinyArcadeCartridgeDescriptorV1.inspect` can call the
 stateless C descriptor gate. It validates the manifest, standard module,
 lifecycle export signatures, core import signatures, native naming/arity and

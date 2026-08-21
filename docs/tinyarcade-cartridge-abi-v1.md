@@ -118,6 +118,15 @@ Native capability callbacks are app code, not downloaded machine code. A
 cartridge never carries dylibs, JIT output, device-side AOT output, JavaScript,
 WASI or direct network access.
 
+This deliberately leaves room for future app-native modules without coupling a
+cartridge to tinyvm. A native module is compiled into a reviewed app build and
+publishes a documented, versioned standard function-import namespace; the
+`.wasm` cartridge contains only calls to that interface. Creator tools and
+converters can therefore target a declared host profile, inspect compatibility
+without running the game, and keep emitting the same standards-valid module for
+another conforming interpreter. A new native implementation, optional function,
+or breaking behavior must not reinterpret an existing namespace/version.
+
 The public iOS ABI registers at most 64 exact functions per runtime and limits
 each to 16 i32 parameters, 16 i32 results and a host-selected 1...64 calls per
 lifecycle. The quota resets for init/tick/suspend/resume and is charged before
@@ -200,6 +209,12 @@ preserved as the exact prefix of the output; an existing manifest, incompatible
 lifecycle/import contract, output over 2 MiB or existing output path fails
 without publishing or overwriting an artifact. Run this as the final post-link,
 post-optimization step so a producer optimizer cannot strip the manifest.
+
+A fan-facing converter should publish both the resulting `.wasm` and its
+machine-readable descriptor/compatibility report. Its target is an explicit
+TinyArcade host profile: core ABI version, media versions, exact native
+namespace/function signatures and resource ceilings. It must not probe tinyvm
+implementation details or rewrite missing host functions into private opcodes.
 
 Library-based converters may use `CartridgeManifest::append_to_wasm` for the
 same deterministic canonical encoding. That low-level method validates the

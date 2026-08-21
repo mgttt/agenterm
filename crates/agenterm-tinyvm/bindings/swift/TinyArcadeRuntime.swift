@@ -9,6 +9,51 @@ public struct TinyArcadeRuntimeError: Error, Sendable {
     public let message: String
 }
 
+public enum TinyArcadeDistributionPolicyError: Error, Sendable, Equatable {
+    case externalCartridgesDisabled
+    case invalidAppleApprovalReference
+}
+
+/// App-release policy for code outside the submitted app bundle. The default
+/// is the App Store baseline: bundled cartridges only. Enabling external WASM
+/// requires an explicit, bounded Apple approval reference for release audit.
+public struct TinyArcadeDistributionPolicyV1: Sendable, Equatable {
+    public static let appStoreBundledOnly = Self(
+        externalApprovalReference: nil
+    )
+
+    public let externalApprovalReference: String?
+
+    private init(externalApprovalReference: String?) {
+        self.externalApprovalReference = externalApprovalReference
+    }
+
+    public static func appleApprovedExternalCartridges(
+        approvalReference: String
+    ) throws -> Self {
+        guard (8...256).contains(approvalReference.utf8.count),
+              approvalReference.utf8.allSatisfy({
+                  (48...57).contains($0) || (65...90).contains($0)
+                      || (97...122).contains($0) || [45, 46, 47, 58, 95].contains($0)
+              }) else {
+            throw TinyArcadeDistributionPolicyError.invalidAppleApprovalReference
+        }
+        return Self(externalApprovalReference: approvalReference)
+    }
+
+    fileprivate func requireExternalCartridges() throws {
+        guard externalApprovalReference != nil else {
+            throw TinyArcadeDistributionPolicyError.externalCartridgesDisabled
+        }
+    }
+
+    /// Not public API: SDK black boxes exercise external paths without creating
+    /// a product-facing development switch that could leak into App Store code.
+    static let sdkTestExternalCartridges = Self(
+        externalApprovalReference: "sdk-test-only"
+    )
+}
+
 public enum TinyArcadeImportClassV1: UInt8, Sendable, Equatable {
     case core = 0
     case native = 1
@@ -1721,16 +1766,20 @@ public final class TinyArcadeReviewedLibraryV1 {
     private let transport: TinyArcadeHTTPSClientV1
     private let cache: TinyArcadeCartridgeCacheV1
     private let trustStore: TinyArcadeTrustStoreV1
+    private let distributionPolicy: TinyArcadeDistributionPolicyV1
     private var installing = false
 
     public init(
         transport: TinyArcadeHTTPSClientV1,
         cache: TinyArcadeCartridgeCacheV1,
-        trustStore: TinyArcadeTrustStoreV1
-    ) {
+        trustStore: TinyArcadeTrustStoreV1,
+        distributionPolicy: TinyArcadeDistributionPolicyV1 = .appStoreBundledOnly
+    ) throws {
+        try distributionPolicy.requireExternalCartridges()
         self.transport = transport
         self.cache = cache
         self.trustStore = trustStore
+        self.distributionPolicy = distributionPolicy
     }
 
     public func fetchCatalog(
@@ -1761,6 +1810,7 @@ public final class TinyArcadeReviewedLibraryV1 {
             entry: game.entry,
             trustStore: trustStore,
             nativeFunctions: nativeFunctions,
+            distributionPolicy: distributionPolicy,
             configure: configure
         )
         do {
@@ -1788,6 +1838,7 @@ public final class TinyArcadeReviewedLibraryV1 {
             entry: game.entry,
             trustStore: trustStore,
             nativeFunctions: nativeFunctions,
+            distributionPolicy: distributionPolicy,
             configure: configure
         )
     }
@@ -1823,8 +1874,10 @@ public final class TinyArcadeRuntimeV1 {
 
     public init(
         privateCartridge cartridge: Data,
+        distributionPolicy: TinyArcadeDistributionPolicyV1 = .appStoreBundledOnly,
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws {
+        try distributionPolicy.requireExternalCartridges()
         handle = try Self.open(
             cartridge: cartridge,
             configure: configure,
@@ -1837,8 +1890,10 @@ public final class TinyArcadeRuntimeV1 {
         entry: TinyArcadeReviewedCatalogEntry,
         trustStore: TinyArcadeTrustStoreV1,
         nativeFunctions: [TinyArcadeNativeFunctionV1] = [],
+        distributionPolicy: TinyArcadeDistributionPolicyV1 = .appStoreBundledOnly,
         configure: (inout tinyarcade_config_v1) -> Void = { _ in }
     ) throws {
+        try distributionPolicy.requireExternalCartridges()
         guard entry.wasmSHA256.count == 32, entry.signature.count == 64 else {
             throw TinyArcadeRuntimeError(
                 status: Int32(TINYARCADE_INVALID_ARGUMENT.rawValue),
@@ -2683,11 +2738,14 @@ public final class TinyArcadePrivateLibraryV1 {
 
     public let directoryURL: URL
     public let maximumCartridgeBytes: Int
+    private let distributionPolicy: TinyArcadeDistributionPolicyV1
 
     public init(
         directoryURL: URL,
-        maximumCartridgeBytes: Int = runtimeMaximumCartridgeBytes
+        maximumCartridgeBytes: Int = runtimeMaximumCartridgeBytes,
+        distributionPolicy: TinyArcadeDistributionPolicyV1 = .appStoreBundledOnly
     ) throws {
+        try distributionPolicy.requireExternalCartridges()
         guard directoryURL.isFileURL else {
             throw TinyArcadePrivateLibraryError.invalidDirectory
         }
@@ -2716,6 +2774,7 @@ public final class TinyArcadePrivateLibraryV1 {
         }
         self.directoryURL = directoryURL
         self.maximumCartridgeBytes = maximumCartridgeBytes
+        self.distributionPolicy = distributionPolicy
     }
 
     /// Preflights exact bytes under the private core-only policy, then atomically
@@ -2735,6 +2794,7 @@ public final class TinyArcadePrivateLibraryV1 {
         }
         let runtime = try TinyArcadeRuntimeV1(
             privateCartridge: cartridge,
+            distributionPolicy: distributionPolicy,
             configure: configure
         )
         do {
@@ -2820,7 +2880,11 @@ public final class TinyArcadePrivateLibraryV1 {
             throw TinyArcadePrivateLibraryError.invalidIdentity
         }
         let bytes = try load(expected)
-        let runtime = try TinyArcadeRuntimeV1(privateCartridge: bytes, configure: configure)
+        let runtime = try TinyArcadeRuntimeV1(
+            privateCartridge: bytes,
+            distributionPolicy: distributionPolicy,
+            configure: configure
+        )
         do {
             guard try runtime.gameID() == item.gameID,
                   try runtime.gameVersion() == item.gameVersion else {

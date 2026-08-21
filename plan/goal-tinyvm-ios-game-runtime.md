@@ -36,6 +36,7 @@ tinyvm iOS game runtime
 ├── cartridge ownership              [~]
 │   ├── official reviewed catalog     [~]
 │   ├── private user import           [x]
+│   ├── App Store bundled-only policy [x]
 │   ├── static compatibility descriptor [x]
 │   ├── converter conformance kit     [x]
 │   ├── canonical manifest authoring  [x]
@@ -945,7 +946,7 @@ Evidence on 2026-08-21:
   all below the 1.375 MiB linked-consumer ceiling.
 - Signing has a valid Apple Development identity, but no physical iPhone is
   attached. The proposed `/wasm/` catalog, catalog JSON and AASA URLs currently
-  return 404 and no repository-owned deployment source for that host was found.
+  return 404 and no deployment source was present in the local workspace.
   Physical-device evidence and live hosted distribution therefore remain open.
 
 ## Twenty-eighth executable increment — static cartridge compatibility descriptor
@@ -1113,3 +1114,52 @@ Evidence on 2026-08-21:
 - All 187 package tests plus one doctest, all-feature/all-target Clippy,
   no-default compile, replay isolation, document redaction and the exact
   70,904-byte static-core/self-test gate remain clean.
+
+## Thirty-second executable increment — App Store external-code release gate
+
+Apple's App Review Guidelines dated 2026-06-08 still make self-contained apps
+the 2.5.2 baseline and expressly name HTML5/JavaScript mini games, streaming,
+chatbots, plug-ins and downloadable games for retro console/PC emulators under
+4.7. A custom TinyArcade WASM language is not expressly allowed; the Mini Apps
+Partner Program says another language requires Apple approval, and 4.7.2 also
+requires prior permission before exposing native platform APIs.
+
+`TinyArcadeDistributionPolicyV1.appStoreBundledOnly` is therefore the default
+for every Swift private/reviewed runtime and library initializer. It rejects
+before directory creation, network composition, trust checks or guest
+execution. An external path requires
+`appleApprovedExternalCartridges(approvalReference:)`; the bounded reference is
+an auditable release assertion, not technical proof of permission. SDK smokes
+use an internal test-only policy that package consumers cannot select. Bundled
+runtime construction stays unchanged.
+
+The future creator contract remains deliberately independent of that release
+switch. Cartridges are standard `.wasm`; app-native modules are reviewed,
+app-compiled host implementations reached only through exact versioned standard
+imports. A converter targets a machine-readable host profile rather than tinyvm
+internals. A fan upload intended only for the same user's app remains a
+private-user transport/install and cannot become a public or official-reviewed
+listing by URL or metadata; it stays disabled until the external-code approval
+gate is legitimately opened.
+
+Evidence on 2026-08-21:
+
+- The generic-device/universal-simulator Swift warnings-as-errors gate proves
+  the new default across direct private opens, private libraries and reviewed
+  libraries. A booted iPhone 17 Pro simulator rejects all three bundled-only
+  attempts before external work, rejects a malformed approval reference,
+  records a bounded approval reference and exercises the existing external
+  trust/private flows only through the internal SDK test policy.
+- Read-only inspection found the private `mgttt/PartnerNET.Software` GitHub
+  Pages source, correcting the earlier local-workspace search. The production
+  homepage returns HTTP 200 while `/wasm/`, `catalog-v1.json` and AASA remain
+  HTTP 404. No unsigned placeholder catalog was published: choosing and backing
+  up the offline catalog trust root plus obtaining Apple permission are release
+  authority gates, not defaults for an engineering agent.
+- All 187 package tests plus one doctest, all-feature/all-target Clippy,
+  no-default and replay-only feature checks, document redaction and the exact
+  70,904-byte static-core/self-test gate pass. Generic device and universal
+  simulator packages link; ordinary consumers measure 1,442,584 bytes arm64
+  and 1,495,376 bytes x86_64, with replay/private/session consumers at
+  1,290,600, 1,292,304 and 1,291,424 bytes arm64. Physical-device and Apple
+  approval evidence remain open.

@@ -5,6 +5,14 @@ device/simulator `TinyArcade.xcframework` and the main-actor Swift ownership,
 media-decoding and signed-catalog wrapper as one `TinyArcadeRuntime` library
 product.
 
+The Swift execution default is `TinyArcadeDistributionPolicyV1.appStoreBundledOnly`.
+Private and reviewed external runtime/library initializers fail before I/O or
+execution unless the app supplies a policy created with
+`appleApprovedExternalCartridges(approvalReference:)`. The reference is an
+auditable release assertion, not technical proof of permission; keep external
+paths absent from App Store UI/builds until Apple has approved this exact custom
+WASM use case. SDK black boxes use a non-public test-only policy.
+
 Call `TinyArcadeCartridgeDescriptorV1.inspect(_:)` before presenting an import.
 It statically validates the standard WASM manifest, lifecycle exports and exact
 function import table without instantiating or executing the cartridge, then
@@ -63,6 +71,7 @@ preflights downloaded bytes as a reviewed runtime before cache activation,
 serializes installs across `await`, and reopens an active generation only after
 live trust/revocation verification. This preserves the last playable cache
 state when a signed cartridge needs native capabilities absent from the app.
+Construction requires the explicit external-cartridge distribution policy.
 
 Use `TinyArcadeSnapshotStoreV1` for scene/background persistence. It atomically
 replaces one bounded file per canonical game id, stores the host-owned game
@@ -84,7 +93,8 @@ for personal play. It preflights the exact bytes with the core-only private
 runtime before an atomic `game-id@version.wasm` install, excludes the bounded
 library from backup, and revalidates canonical identity, size and regular-file
 ownership whenever an item is enumerated or opened. It never downloads,
-publishes, signs, or grants a native module.
+publishes, signs, or grants a native module. Construction requires the same
+explicit external-cartridge distribution policy.
 
 Generate a self-contained directory from the repository root:
 
