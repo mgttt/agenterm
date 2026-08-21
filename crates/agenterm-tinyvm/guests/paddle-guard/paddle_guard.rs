@@ -36,6 +36,7 @@ unsafe extern "C" {
     fn clock_ms() -> i32;
     fn random_u32() -> i32;
     fn indexed2d_version() -> i32;
+    fn tones_version() -> i32;
     fn submit_render(pointer: *const u8, length: u32) -> i32;
     fn submit_audio(pointer: *const u8, length: u32) -> i32;
     fn save_state(pointer: *const u8, length: u32) -> i32;
@@ -98,7 +99,7 @@ pub extern "C" fn game_abi_version() -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn game_init() -> i32 {
-    if unsafe { indexed2d_version() } != 1 {
+    if unsafe { indexed2d_version() } != 1 || unsafe { tones_version() } != 1 {
         return 1;
     }
     let game = game_mut();

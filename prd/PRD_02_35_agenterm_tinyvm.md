@@ -37,7 +37,7 @@ agenterm-tinyvm (35)
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
 │   └── H5/JS/WKWebView     [–]
-├── game runtime         [~]
+├── game runtime         [x]
 │   ├── persistent instance [x]
 │   ├── start once          [x]
 │   ├── per-call fuel       [x]
@@ -49,10 +49,10 @@ agenterm-tinyvm (35)
 │   ├── table budget        [x]
 │   ├── deterministic execution stats [x]
 │   │   └── call/activation peak telemetry [x]
-│   └── game ABI            [~]
+│   └── game ABI            [x]
 │       ├── standard .wasm cartridge [x]
 │       ├── manifest compatibility    [x]
-│       ├── core v1 imports           [~]
+│       ├── core v1 imports           [x]
 │       ├── init/tick/suspend/resume  [x]
 │       ├── portable state snapshot   [x]
 │       ├── bounded frame output      [x]
@@ -287,9 +287,11 @@ namespace/field/i32 signature/每生命周期调用配额。Rust、CLI、C ABI v
 Swift `tickMedia` 先完整验证判别协议再向原生渲染层暴露数据，旧的 3D-only
 `tick` 保持兼容。具体 Metal/Core Graphics 呈现仍属于 app host，因此 native
 I/O surface 仍为 partial，而 bounded frame output 已具备通用 2D/3D 黑盒契约。
-2D 卡带必须导入标准 core function `indexed2d_version() -> i32`；旧 runtime
-会在实例化前拒绝未知 import，新 runtime 也拒绝未声明该 import 的 `TAI2`
-输出，因此兼容性失败发生在装载/首个违规提交处而不是原生渲染崩溃。
+卡带必须为它会产生的每种媒体导入并检查标准 core version function：
+`grid3d_version()`、`indexed2d_version()` 和/或 `tones_version()`，当前均返回 1。
+旧 runtime 会在实例化前拒绝未知 import，新 runtime 也拒绝未声明对应
+import 的 `TAG3`/`TAI2`/`TAT1` 输出，因此兼容性失败发生在装载/首个违规
+提交处而不是原生渲染或音频调度崩溃。
 
 iOS SDK 已把 2D 数据边界接到可直接复用的原生呈现面：严格验证后的索引帧可
 展开为有界的 sRGB RGBA8 `CGImage`，或交给保持宽高比并使用 nearest filter

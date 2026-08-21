@@ -45,7 +45,7 @@ tinyvm iOS game runtime
 │   ├── static module validation CLI    [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
-├── game host ABI                    [~]
+├── game host ABI                    [x]
 │   ├── standard WASM cartridge       [x]
 │   ├── version negotiation           [x]
 │   ├── lifecycle init/tick/suspend   [x]
@@ -145,7 +145,16 @@ The first pinned-source pass is recorded in
 [`docs/qjwasm-wa2x-source-review.md`](../docs/qjwasm-wa2x-source-review.md).
 It accepts the ownership, no-copy memory, wakeup-coalescing and measurement
 lessons; it rejects the current unbounded/unsafe threading implementation and
-keeps a tinyvm-native boundary benchmark as the next executable item.
+introduced a decomposed tinyvm/JavaScriptCore boundary benchmark rather than
+repeating the paper's aggregate headline.
+
+The pinned-source review and decomposed boundary benchmark are complete. A
+later experimental queue remains for mechanisms that need an actual tinyvm
+prototype before adoption: a bounded callback/result channel, coalesced host
+wakeups, and shared-memory views whose owner and invalidation rules are proven
+across the C/Swift boundary. Each experiment must compare against the existing
+direct call path and must not introduce QuickJS, AOT/JIT, unbounded queues or
+QJWasm code whose repository licensing is not yet explicit.
 
 The execution kernel and artifact-trust branch can mature independently. The
 iOS bridge must not freeze a game ABI before the native Rust black-box owner
@@ -2998,3 +3007,22 @@ this makes the process-unique token invariant executable.
 Evidence on 2026-08-21: the focused memory lifetime test, independently
 compiled WABT/JavaScriptCore global and function-linking oracles, rustfmt and
 all-target/all-feature Clippy with warnings denied pass.
+
+## Eighty-eighth executable increment — explicit media-version imports
+
+The core v1 import surface now negotiates every media schema instead of only
+indexed 2D. A cartridge that submits `TAG3`, `TAI2` or `TAT1` must import the
+matching `grid3d_version`, `indexed2d_version` or `tones_version` function.
+Older hosts reject a new version import during loading; the current host traps
+an undeclared media submission before native rendering or audio scheduling.
+
+Depth Well checks grid3d and tones version 1 during initialization, while
+Paddle Guard checks indexed2d and tones. The development JavaScriptCore oracle
+exposes the same declarations, and one black-box test proves that undeclared
+grid/audio formats trap while correctly declared formats run. Exact replay
+hashes advance because the standard guest Wasm bytes now include these imports;
+the deterministic behavior and converter/trust checks remain unchanged.
+
+Evidence on 2026-08-21: the focused runtime and both real-cartridge suites,
+the WebKit differential, rustfmt, all-target/all-feature Clippy, the PRD leaf
+map, no-default-feature tests and the full all-feature package suite pass.

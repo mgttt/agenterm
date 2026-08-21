@@ -79,6 +79,12 @@
       indexed2d_version: function () {
         return 1;
       },
+      grid3d_version: function () {
+        return 1;
+      },
+      tones_version: function () {
+        return 1;
+      },
       submit_render: function (pointer, length) {
         frameActive();
         requireCondition(!state.renderSubmitted, "duplicate render submission");

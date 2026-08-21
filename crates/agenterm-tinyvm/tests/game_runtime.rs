@@ -310,12 +310,13 @@ fn native_replay_module() -> Vec<u8> {
             0x02, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
         ],
     );
-    let mut imports = vec![0x04];
+    let mut imports = vec![0x05];
     for (namespace, field, type_index) in [
         (capability, "step", 0u8),
         (CORE, "submit_render", 1),
         (CORE, "save_state", 1),
         (CORE, "load_state", 1),
+        (CORE, "grid3d_version", 0),
     ] {
         name(&mut imports, namespace);
         name(&mut imports, field);
@@ -326,11 +327,11 @@ fn native_replay_module() -> Vec<u8> {
     section(&mut module, 5, &[0x01, 0x00, 0x01]);
     let mut exports = vec![0x05];
     for (field, index) in [
-        ("game_abi_version", 4usize),
-        ("game_init", 5),
-        ("game_tick", 6),
-        ("game_suspend", 7),
-        ("game_resume", 8),
+        ("game_abi_version", 5usize),
+        ("game_init", 6),
+        ("game_tick", 7),
+        ("game_suspend", 8),
+        ("game_resume", 9),
     ] {
         name(&mut exports, field);
         exports.push(0);
@@ -987,6 +988,53 @@ fn standard_core_only_cartridge_drives_an_indexed2d_frame() {
             assert_eq!(frame.pixels(), &[0, 1]);
         }
         RenderFrame::Grid3d(_) => panic!("indexed2d cartridge decoded as grid3d"),
+    }
+}
+
+#[test]
+fn core_v1_media_versions_are_explicit_and_format_matched() {
+    for (magic, submit, version, undeclared_trap, render) in [
+        (
+            b"TAG3".as_slice(),
+            "submit_render",
+            "grid3d_version",
+            "grid3d capability not declared",
+            true,
+        ),
+        (
+            b"TAT1".as_slice(),
+            "submit_audio",
+            "tones_version",
+            "tones capability not declared",
+            false,
+        ),
+    ] {
+        let tick = [0x41, 0x00, 0x41, 0x04, 0x10, 0x00, 0x1a, 0x41, 0x00, 0x0b];
+        let undeclared = game_module(&[(CORE, submit, 1)], 1, &tick, magic);
+        let mut runtime = must_ok(
+            GameRuntime::from_private_bytes(
+                &undeclared,
+                Limits::default(),
+                GameLimits::default(),
+                1,
+            ),
+            "load undeclared media cartridge",
+        );
+        assert!(matches!(
+            runtime.tick(GameInput::default()),
+            Err(WasmError::Trap(message)) if message == undeclared_trap
+        ));
+
+        let tick = [
+            0x10, 0x00, 0x1a, 0x41, 0x00, 0x41, 0x04, 0x10, 0x01, 0x1a, 0x41, 0x00, 0x0b,
+        ];
+        let declared = game_module(&[(CORE, version, 0), (CORE, submit, 1)], 1, &tick, magic);
+        let mut runtime = must_ok(
+            GameRuntime::from_private_bytes(&declared, Limits::default(), GameLimits::default(), 1),
+            "load declared media cartridge",
+        );
+        let frame = must_ok(runtime.tick(GameInput::default()), "submit declared media");
+        assert_eq!(if render { &frame.render } else { &frame.audio }, magic);
     }
 }
 

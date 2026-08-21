@@ -634,7 +634,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 74] = [
+const LEAF_TESTS: [(&str, &str); 77] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -642,6 +642,18 @@ const LEAF_TESTS: [(&str, &str); 74] = [
     ("device-side AOT", "native_interpreter_boundary"),
     ("dyn native loading", "native_interpreter_boundary"),
     ("tinyvm engine", "eval_bytes"),
+    (
+        "game runtime",
+        "standard_wasm_cartridge_drives_one_bounded_frame",
+    ),
+    (
+        "game ABI",
+        "manifest_capabilities_and_lifecycle_signatures_are_exact",
+    ),
+    (
+        "core v1 imports",
+        "core_v1_media_versions_are_explicit_and_format_matched",
+    ),
     (
         "strict declared-memory semantics",
         "standard_bytes_require_declared_memory",

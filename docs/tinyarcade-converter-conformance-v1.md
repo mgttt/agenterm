@@ -41,7 +41,7 @@ converter check
 ├── unique ordered standard sections with no unconsumed payload
 ├── at most 262,144 allocation-amplifying decode records
 ├── exact lifecycle exports and core import signatures
-├── indexed2d/v1 output declares indexed2d_version()
+├── every media output declares its grid3d/indexed2d/tones version import
 ├── no private-import native capability namespace
 ├── bounded init and first tick
 ├── valid grid3d/v1 or indexed2d/v1 render frame

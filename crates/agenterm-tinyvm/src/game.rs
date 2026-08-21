@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use core::mem;
 
 use crate::cartridge::{valid_native_field, valid_native_namespace};
-use crate::media::INDEXED2D_MAGIC;
+use crate::media::{GRID3D_MAGIC, INDEXED2D_MAGIC, TONES_MAGIC};
 use crate::{CartridgeManifest, Limits, Val, WasmError, WasmInstance, WasmModule};
 
 /// Guest/host contract implemented by this module.
@@ -824,7 +824,7 @@ fn validate_import_contract(
     module: &WasmModule,
     manifest: &CartridgeManifest,
 ) -> Result<(), WasmError> {
-    let mut seen = [false; 8];
+    let mut seen = [false; 10];
     let mut native_function_count = 0usize;
     let mut actual_capabilities: Vec<&str> = Vec::new();
     actual_capabilities
@@ -864,6 +864,8 @@ fn validate_import_contract(
             "save_state" => (5, 2),
             "load_state" => (6, 2),
             "indexed2d_version" => (7, 0),
+            "grid3d_version" => (8, 0),
+            "tones_version" => (9, 0),
             _ => return Err(WasmError::Trap("game import is not allowed")),
         };
         if seen[slot] || import.n_params != params || import.n_results != 1 {
@@ -919,14 +921,26 @@ fn bind_imports(
         SubmitRender,
         SubmitAudio,
         Indexed2dVersion,
+        Grid3dVersion,
+        TonesVersion,
         SaveState,
         LoadState,
     }
 
-    let indexed2d_enabled = module
-        .imports()
-        .iter()
-        .any(|import| import.module == ABI_MODULE && import.field == "indexed2d_version");
+    let media = MediaDeclarations {
+        grid3d: module
+            .imports()
+            .iter()
+            .any(|import| import.module == ABI_MODULE && import.field == "grid3d_version"),
+        indexed2d: module
+            .imports()
+            .iter()
+            .any(|import| import.module == ABI_MODULE && import.field == "indexed2d_version"),
+        tones: module
+            .imports()
+            .iter()
+            .any(|import| import.module == ABI_MODULE && import.field == "tones_version"),
+    };
     for position in 0..module.imports().len() {
         let plan = {
             let import = &module.imports()[position];
@@ -947,6 +961,8 @@ fn bind_imports(
                     "submit_render" => ImportPlan::SubmitRender,
                     "submit_audio" => ImportPlan::SubmitAudio,
                     "indexed2d_version" => ImportPlan::Indexed2dVersion,
+                    "grid3d_version" => ImportPlan::Grid3dVersion,
+                    "tones_version" => ImportPlan::TonesVersion,
                     "save_state" => ImportPlan::SaveState,
                     "load_state" => ImportPlan::LoadState,
                     _ => return Err(WasmError::Trap("game import is not allowed")),
@@ -1002,11 +1018,9 @@ fn bind_imports(
                     Ok(())
                 })?
             }
-            ImportPlan::SubmitRender => {
-                bind_submit(module, position, shared, true, indexed2d_enabled)?
-            }
-            ImportPlan::SubmitAudio => bind_submit(module, position, shared, false, false)?,
-            ImportPlan::Indexed2dVersion => {
+            ImportPlan::SubmitRender => bind_submit(module, position, shared, true, media)?,
+            ImportPlan::SubmitAudio => bind_submit(module, position, shared, false, media)?,
+            ImportPlan::Indexed2dVersion | ImportPlan::Grid3dVersion | ImportPlan::TonesVersion => {
                 module.bind_import_at_bounded(position, move |_, results, _| {
                     results[0] = 1;
                     Ok(())
@@ -1056,19 +1070,29 @@ fn bind_imports(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct MediaDeclarations {
+    grid3d: bool,
+    indexed2d: bool,
+    tones: bool,
+}
+
 fn bind_submit(
     module: &mut WasmModule,
     position: usize,
     host: Rc<RefCell<HostState>>,
     render: bool,
-    indexed2d_enabled: bool,
+    media: MediaDeclarations,
 ) -> Result<(), WasmError> {
     module.bind_import_at_bounded(position, move |args, results, memory| {
         let mut state = host.borrow_mut();
         state.frame_active()?;
         let bytes = memory_range(args, memory)?;
         if render {
-            if bytes.starts_with(INDEXED2D_MAGIC) && !indexed2d_enabled {
+            if bytes.starts_with(GRID3D_MAGIC) && !media.grid3d {
+                return Err(WasmError::Trap("grid3d capability not declared"));
+            }
+            if bytes.starts_with(INDEXED2D_MAGIC) && !media.indexed2d {
                 return Err(WasmError::Trap("indexed2d capability not declared"));
             }
             if state.render_submitted || bytes.len() > state.limits.max_render_bytes {
@@ -1081,6 +1105,9 @@ fn bind_submit(
             state.render.extend_from_slice(bytes);
             state.render_submitted = true;
         } else {
+            if bytes.starts_with(TONES_MAGIC) && !media.tones {
+                return Err(WasmError::Trap("tones capability not declared"));
+            }
             if state.audio_submitted || bytes.len() > state.limits.max_audio_bytes {
                 return Err(WasmError::Trap("game output budget"));
             }

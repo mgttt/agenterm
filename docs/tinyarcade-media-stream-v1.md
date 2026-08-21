@@ -72,10 +72,11 @@ nearest-neighbour presentation. This does not change the cartridge protocol:
 custom Metal renderers may consume the same palette and indices directly, and
 no Apple framework type crosses the WASM boundary.
 
-An indexed cartridge must import `tinyarcade:core/v1.indexed2d_version` with
-signature `() -> i32` and check for version 1 during init. This ordinary WASM
-import makes compatibility fail at load on runtimes that predate indexed 2D;
-emitting `TAI2` without declaring the import traps the current cartridge.
+Each cartridge must import and check the `() -> i32` version function for every
+media schema it emits: `grid3d_version`, `indexed2d_version` and/or
+`tones_version` in `tinyarcade:core/v1`. These ordinary WASM imports make
+compatibility fail at load on runtimes that predate a format; emitting `TAG3`,
+`TAI2` or `TAT1` without its declaration traps the current cartridge.
 
 ## `tinyarcade:tones/v1`
 
