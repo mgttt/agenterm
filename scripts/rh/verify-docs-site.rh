@@ -80,7 +80,7 @@ fn entry() {
     let assets = std::path::join(docs, "assets").display;
     let image = std::path::join(assets, "agenterm-workspace.png").display;
     let image_exists = std::fs::exists_case_exact(image);
-    if image_exists == 0 {
+    if !image_exists {
         return rh::fail("docs assets must contain the case-exact workspace image");
     }
     0
