@@ -22,7 +22,8 @@ agenterm-tinyvm (35)
 │   │   ├── valid custom-section names [x]
 │   │   ├── empty memory-section vector [x]
 │   │   ├── mutable global.set target [x]
-│   │   └── WABT load-gate oracle [x]
+│   │   ├── WABT load-gate oracle [x]
+│   │   └── static module validation CLI [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -95,6 +96,9 @@ agenterm-tinyvm (35)
 tinyvm 的产品定位是事实上的、标准优先的跨平台 WebAssembly VM；TinyArcade
 只是第一个 embedding 和持续验收负载，不是引擎能力的边界。任何游戏便利能力都必须
 通过标准 Wasm 或显式、版本化的 host import 表达，不能演化为游戏专用私有字节码。
+`tinyvm module validate FILE.wasm` 因此直接面向普通标准 module，不要求 TinyArcade
+manifest，也不实例化 module 或执行 start function；转换器和差分测试可以先证明
+Wasm load gate，再独立进入卡带 ABI、动态媒体与 lifecycle conformance。
 槽 A 以标准 WebAssembly 为持续兼容目标，而不是停在自定义 VM 或永久冻结为 MVP。
 标准 binary 入口不会再把 builder 的测试便利当成 Wasm 语义：没有 memory section 的
 module 实例化为零页，任何 load/store、memory.size/grow、bulk-memory instruction 或

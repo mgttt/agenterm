@@ -1,4 +1,5 @@
-//! Minimal VM evaluator and TinyArcade cartridge conformance front door.
+//! Minimal VM evaluator, standard module validator and TinyArcade cartridge
+//! conformance front door.
 //!
 //! Assembles one-instruction-per-line text and runs it on a fresh [`Vm`],
 //! printing the resulting stack top. Assembly comes from the arguments after
@@ -49,6 +50,13 @@ fn main() -> ExitCode {
             };
             run_eval(&src)
         }
+        Some("module") => match args.next().as_deref() {
+            Some("validate") => match (args.next(), args.next()) {
+                (Some(path), None) => run_module_validate(&path),
+                _ => usage(),
+            },
+            _ => usage(),
+        },
         Some("cartridge") => match args.next().as_deref() {
             Some("inspect") => match (args.next(), args.next()) {
                 (Some(path), None) => run_cartridge(&path, false),
@@ -148,6 +156,7 @@ fn main() -> ExitCode {
 fn usage() -> ExitCode {
     eprintln!("usage:");
     eprintln!("  tinyvm eval [asm...]");
+    eprintln!("  tinyvm module validate FILE.wasm");
     eprintln!("  tinyvm cartridge inspect FILE.wasm");
     eprintln!("  tinyvm cartridge check FILE.wasm");
     eprintln!("  tinyvm cartridge check-profile FILE.wasm HOST.tahost");
@@ -164,6 +173,34 @@ fn usage() -> ExitCode {
         eprintln!("  tinyvm replay check FILE.wasm TRACE.tareplay");
     }
     ExitCode::FAILURE
+}
+
+fn run_module_validate(path: &str) -> ExitCode {
+    let result: Result<(usize, usize, bool), String> = (|| {
+        let wasm = read_bounded_regular(Path::new(path), MAX_CARTRIDGE_BYTES, "Wasm module")?;
+        let module = WasmModule::from_bytes(&wasm).map_err(|error| error.message().to_string())?;
+        Ok((
+            wasm.len(),
+            module.imports().len(),
+            module.start_index().is_some(),
+        ))
+    })();
+    match result {
+        Ok((wasm_bytes, function_imports, has_start)) => {
+            println!("wasm_bytes={wasm_bytes}");
+            println!("function_imports={function_imports}");
+            println!(
+                "start_function={}",
+                if has_start { "present" } else { "absent" }
+            );
+            println!("OK: standard Wasm module validated without instantiation");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(feature = "replay")]

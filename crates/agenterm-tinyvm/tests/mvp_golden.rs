@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 61] = [
+const LEAF_TESTS: [(&str, &str); 62] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -674,6 +674,10 @@ const LEAF_TESTS: [(&str, &str); 61] = [
         "wabt_oracle_fixture_exactly_matches_the_rust_load_gate",
     ),
     ("stable two-pass copy lengths", "ios_xcframework_swift_link"),
+    (
+        "static module validation CLI",
+        "module_validate_cli_is_static_and_rejects_invalid_bytes",
+    ),
     (
         "bulk memory copy/fill",
         "standard_bulk_memory_copy_fill_execute_with_wasm_semantics",

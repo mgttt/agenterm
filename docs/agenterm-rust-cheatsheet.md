@@ -2454,6 +2454,14 @@ cartridge bytes; a larger value must already have failed the capacity check.
 Centralize this guard across every Swift owner and exercise its mismatch branch
 in the native-link smoke, not only the ordinary stable C implementation.
 
+Keep standard module validation distinct from instantiation and product-ABI
+conformance. A validator command should decode and prove ordinary `.wasm`
+without requiring an embedding manifest, binding imports, allocating an
+instance or running the start function. Prove that boundary with a legal module
+whose start function traps: static validation must accept it, while malformed
+bytes must still fail loudly. Cartridge lifecycle and media checks remain a
+later, explicitly dynamic gate.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

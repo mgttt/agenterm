@@ -32,6 +32,7 @@ tinyvm iOS game runtime
 │   ├── mutable global.set target      [x]
 │   ├── WABT-valid golden corpus       [x]
 │   ├── WABT load-gate oracle          [x]
+│   ├── static module validation CLI    [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -2172,6 +2173,37 @@ Evidence on 2026-08-21:
   and cartridge-cache paths continue to pass through the same centralized
   guard.
 - All 235 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, both whole-corpus WABT gates, all seven
+  WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
+  all-target Clippy, formatting, relevant ShellCheck and document redaction
+  pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,553,832 bytes arm64 and 1,629,664 bytes x86_64;
+  catalog/replay/private/session consumers are 1,426,680 / 1,417,624 /
+  1,419,296 / 1,418,432 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Sixty-first executable increment — static standard module validation
+
+The command-line front door now validates an ordinary standard `.wasm` module
+without requiring a TinyArcade manifest. It runs the same bounded load gate as
+the embedding, reports function-import and start-function metadata, and never
+instantiates the module, binds imports or executes guest code. Cartridge ABI,
+media and lifecycle conformance remain separate later gates.
+
+Evidence on 2026-08-21:
+
+- `tinyvm module validate` accepts a structurally valid module whose start
+  function contains `unreachable`, proving validation does not execute start;
+  the paired malformed module fails with a non-empty diagnostic and nonzero
+  status.
+- The real Depth Well and Paddle Guard artifacts independently pass the plain
+  module command with seven and eight standard function imports respectively,
+  without consulting their TinyArcade manifests.
+- All 236 non-ignored package tests plus one doctest pass under all features.
   No-default/replay-only checks, both whole-corpus WABT gates, all seven
   WABT/JavaScriptCore proposal/host oracles, the two-game WebKit differential,
   all-target Clippy, formatting, relevant ShellCheck and document redaction

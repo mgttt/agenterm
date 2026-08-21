@@ -11,6 +11,7 @@
 //! - nothing here aborts the process.
 
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
+use std::process::Command;
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
 const REJECTED: [(&str, &str); 33] = [
@@ -423,4 +424,45 @@ fn rejection_leaves_nothing_invokable() {
             "{name}: rejected bytes must not yield a Module"
         );
     }
+}
+
+#[test]
+fn module_validate_cli_is_static_and_rejects_invalid_bytes() {
+    let directory = tempfile::tempdir().expect("temporary module validation directory");
+    let valid = directory.path().join("valid-with-trapping-start.wasm");
+    let invalid = directory.path().join("invalid.wasm");
+
+    // Structurally valid `(module (func unreachable) (start 0))`. Validation
+    // must succeed because this command never instantiates or runs the start
+    // function; an execution-based checker would trap.
+    std::fs::write(
+        &valid,
+        bytes("0061736d01000000010401600000030201000801000a05010300000b"),
+    )
+    .expect("write valid module");
+    std::fs::write(&invalid, bytes(REJECTED[0].1)).expect("write invalid module");
+
+    let accepted = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["module", "validate", valid.to_str().expect("valid path")])
+        .output()
+        .expect("validate legal module");
+    assert!(
+        accepted.status.success(),
+        "static validation failed: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&accepted.stdout);
+    assert!(stdout.contains("start_function=present"));
+    assert!(stdout.contains("OK: standard Wasm module validated without instantiation"));
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "module",
+            "validate",
+            invalid.to_str().expect("invalid path"),
+        ])
+        .output()
+        .expect("reject invalid module");
+    assert!(!rejected.status.success());
+    assert!(!String::from_utf8_lossy(&rejected.stderr).trim().is_empty());
 }
