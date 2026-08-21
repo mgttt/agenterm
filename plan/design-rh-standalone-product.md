@@ -5,7 +5,7 @@
 | **Document** | Product / architecture design for `partnernetsoftware/rh` |
 | **Author** | AgenTerm systems architecture (draft for owner review) |
 | **Date** | 2026-08-21 |
-| **Status** | Draft (rev 5, D38 iOS = signed interpreter; native door does not invent executable pages) |
+| **Status** | Draft (rev 6, D39: the product is the interpreter; JIT/AOT are later desktop under-the-hood) |
 | **Audience** | Senior engineers who know `crates/agenterm-rh`, the root host, and Chassis-L1 |
 | **Related** | `prd/PRD_02_10_rhai_scripting.md`, `plan/design-rh-aot.md`, `plan/ARCHITECTURE.md`, `plan/reference-cross-target-execution.md` §5 / §6.2 / §6.3, `plan/plan-v0.1.18.md` (APE parked for *workbench*), `plan/plan-ape-thin-shell-dynamic-packages.md` (name collision) |
 
@@ -69,8 +69,8 @@ The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh`
 3. **Default execution is an interpreter** of **Language 1** (closed spec below): strict `validate_ast` **without** `compat_validate`, plus the Language-1 name allowlist. Not “whatever `check()` accepts today.”
 4. **`rh.com` is a loader only.** Per-cell slices are real rustc-native PE/ELF/Mach-O. `.com` on slices is a **filename brand**. v1 delivery is **thin same-dir** (per-cell loader + sibling slice). Unified polyglot `rh.com` is **not** v1.
 5. Default host is **`std` only**. No `agenterm-platform` on the default `rh.com` / embedder path.
-6. One language, two backends later (interp now, optional AOT **in AgenTerm**). No second Rhai semantics.
-7. Reserved **public** seam for future AOT/JIT: `Engine::compile` → `Error::Unsupported { feature: "compile" }` on default builds. The `Backend` trait is **crate-private**.
+6. One language. Default execution is the interpreter. Optional AOT stays **in AgenTerm** for pack/qualify. No second Rhai semantics.
+7. Reserved **public** seam for a future desktop JIT/AOT under the same language: `Engine::compile` → `Error::Unsupported { feature: "compile" }` on default builds. The `Backend` trait is **crate-private**. **Do not** treat shipping Cranelift/rustc as a product goal (D39).
 8. AgenTerm becomes an **embedder** that injects Fleet/PTY/GUI via `Host::call`. `agenterm rh eval`/`run` switch to interp after extractability. Task qualification gates and codegen 107 stay AgenTerm's *compile* path until a later opt-in.
 9. Private GitHub repo first for **product CLI/releases**. `publish = false` until public. **Public AgenTerm does not git-pin a private rh repo.**
 
@@ -83,7 +83,7 @@ The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh`
 - Copying `check_many.rs` / `corpus.rs` / `fleet.rs` into the product crate.
 - Merging `agenterm-dyn` (`dlcall` / S-expr) into the rh kernel.
 - Making qjs the user-facing rh language.
-- Shipping AOT/JIT/Cranelift in v1, or a `RustcPackBackend` type in `rh-lang`.
+- Shipping AOT/JIT/Cranelift as a **product goal** (D39). v1 does not ship them. Desktop may grow them later under the same language; that work is not “making rh powerful.”
 - `no_std`.
 - Default FFI / `dlcall` / arbitrary `dlopen` of user code.
 - Fleet, PTY, GUI, clipboard, image, HTTP, TCP, `rh::task`, `--worker` / `--framed-worker` in Language 1.
@@ -106,7 +106,7 @@ The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh`
 | D5 | **Thin layout is v1 delivery**: per-cell `rh.com` + sibling `rh-osx64arm.com` (etc.) in the same directory. Fat zip-overlay and polyglot header are **later**, not a gate for AgenTerm interp migration. Optional network fetch is **not** v1. | Unblocks shebang without solving §6.3 hostile launchers. |
 | D6 | Default host uses **`std` only**. `agenterm-platform` is never required for `rh.com` / default embedder. | rh is a language, not a platform crate. |
 | D7 | Language 1 = **strict `validate_ast` (no `compat_validate`) + Language-1 allowlist**. Parser may keep the `rhai` crate internally. At `check` time, lower to a crate-owned **`Send` IR**. **Public API does not name `rhai::*`.** | `rhai::AST` is `!Send`. Replacing the parser later must not break embedders. `agenterm_rh::check`’s compat bypass stays **AgenTerm-only**. |
-| D8 | Default engine = **tree-walk of that IR**. Today's rustc-pack pipeline stays in the **AgenTerm adapter**, not in `rh-lang` default (no `feature = "compile"` rustc backend in the product crate for v1). | Product loop. AOT stays available to AgenTerm task gates. |
+| D8 | Default engine = **tree-walk of that IR**. Today's rustc-pack pipeline stays in the **AgenTerm adapter**, not in `rh-lang` default (no `feature = "compile"` rustc backend in the product crate for v1). | The product is the interpreter (D39). AOT stays available to AgenTerm task gates as a compile path, not as rh's identity. |
 | D9 | Embed API is a **first-class product surface**: `Engine`, `Scope`, `Value`, `Host` trait, `CancelHandle`, fuel/timeout. Equal to CLI. | Without this, the split only moves a compiler. |
 | D10 | **Public freeze:** Language 1 (syntax + value model + name allowlist), `Host` trait as specified, `Engine::{new, new_with_host, check, eval, eval_with_scope, eval_file, compile, set_fuel, set_timeout, cancel_handle}`, `Compiled` opaque, slice header `rh-slice-abi/1` fields **abi_version + cell** and **named-section placement**. **Do not freeze:** crate-private IR shape, `Backend` trait, codegen IR, Cranelift, rustc pack format, `rh_entry(): i64`, `RH_CODEGEN_REVISION`, `libloading`, machine code, product semver in the slice header. | Embedders must not depend on rustc/Cranelift/dlopen. `Backend` is crate-private so Cranelift can land in-tree without an embedder break. |
 | D11 | crates.io **package name `rh-lang`**, **lib name `rh`**. Binary *file* is `rh.com` (loader) / `rh-*.com` (slices). Cargo bin target name is `rh`. Unix PATH install name is `rh`. | `rh` on crates.io is taken. |
@@ -137,6 +137,7 @@ The crate is **not** git-split today. Sequence is locked: (a) make `agenterm-rh`
 | D36 | Nested arrays/maps have a **construction depth cap** (default **32**, embedder-tunable). Inserting a container that would exceed it is a runtime error, not a bomb. Cache depth on each container so the check is O(1), not a walk. Independently, `Drop` (and recursive `Clone` / `==` / display) of `Array`/`Map` must be **iterative**: `Engine::sandboxed()` must not `abort` the embedder process. Do not document “don't nest unbounded structures.” Fuel/timeout still do not catch stack loss. Default 32 is for debug threads (~2 MiB stack); 64 sat on the abort cliff. | Owner 2026-08-21. A sandboxed pure-value program must not SIGABRT the host. |
 | D37 | Collection methods (interpreter builtins, variable receiver for mutating ones): **`Array.sort()`** in-place; strings lexicographic, ints numeric; mixed incomparable types **error**, do not coerce. **`Array.pop()`** errors if empty. **`Array.remove(i)`** errors on OOB (same as `[]`). **`Map.remove(k)`** updates both the hash index and the insertion-order list; missing key is a no-op (ask, like `.get`). Skip `String.lines` / `trim_start` / `trim_end` / `Array.index_of` / `Array.reverse` this beat. Do not buffer `print`. | Owner 2026-08-21 after real-script use. Sort is the one everyone would rewrite badly. |
 | D38 | **App Store iOS runs rh the way it runs CPython in Pyto / Pythonista: a signed interpreter in the app, user programs as data.** `.rh` (and any future “pip” of pure Language-1 libraries) is files. Native extensions, `libtcc`, generated `.dylib`, and `enter_i64` are the same wall: the kernel will not execute unsigned pages, and third-party App Store apps do not get `dynamic-codesigning`. Existence proof: Pyto’s pip is complete **except C extensions**; those packages work only when **precompiled into signed Frameworks**. Pyto’s “C compiler” is Clang → LLVM bitcode → **interpret bitcode**, not `mprotect(RX)`. rh does **not** take a bitcode-interpreter backend in v1. **No iOS cell** in the D4 six-row table; iOS is `rh-lang` embedded and signed with the host app, not `rh.com` + sibling slice staging ISA bytes. | Owner 2026-08-21 after Pyto/libtcc discussion: iOS is not “no dynamic language”; it is “no runtime native codegen”. |
+| D39 | **The product is a powerful interpreter, not a JIT/AOT story.** “Powerful” means Language 1 can do real work: `Host` (fs/process/env/json), honest errors, `check` that does not lie, sandbox that cannot abort the embedder, in-place containers, TDD corpus. It does **not** mean beating V8/bun on throughput, shipping Cranelift, or making rustc the shebang path again. JIT/AOT, if they ever land, are a **desktop under-the-hood** optimisation of this same language (`Engine::compile` stays the reserved seam; `Backend` stays crate-private). Desktop may use them; iOS (D38) does not. Do not spend the next miles on codegen. Spend them on scripts that the interpreter cannot yet say yes to. | Owner 2026-08-21: not attached to JIT/AOT; those are later bottom-layer opts on desktop. |
 
 ### Distribution filename bijection (D4)
 
@@ -872,7 +873,7 @@ Polyglot (old C3) is **not** on this graph.
 
 ## Open Questions
 
-None. Owner locked 2026-08-21 (D24): crates.io **0.1.0**; populate via **squash/copy + NOTICE**; collaborators = **org members only**. rh loader has **no** chassis-style `native_cell: null` (D4). D38 (same day): App Store iOS = signed interpreter, not runtime native codegen.
+None. Owner locked 2026-08-21 (D24): crates.io **0.1.0**; populate via **squash/copy + NOTICE**; collaborators = **org members only**. rh loader has **no** chassis-style `native_cell: null` (D4). D38: App Store iOS = signed interpreter. D39: the product is the interpreter; JIT/AOT are later desktop under-the-hood, not a goal.
 
 ---
 
@@ -998,7 +999,7 @@ Each PR is independently reviewable. **No GitHub repo until PR-A4 and PR-A5 are 
 
 - Fat zip-overlay (apelink layout)
 - Polyglot `rh.com` (old C3): Thompson-shell/MZ prefix **without** self-rewrite — only if an owner explicitly wants it knowing §6.3
-- `rh.com compile` / Cranelift / copy-and-patch (`Backend` stays private)
+- `rh.com compile` / Cranelift / copy-and-patch (`Backend` stays private). Desktop under-the-hood only (D39); not a milepost.
 - REPL
 - HTTP / `agenterm-platform` optional host
 - Task corpus opt-in to interp
