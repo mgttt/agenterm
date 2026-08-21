@@ -65,6 +65,11 @@ funcref profile, including expression element segments and table operations;
 execution over two internally defined tables. `smoke-wabt-tail-call.sh` covers
 deep direct and indirect standard tail calls and proves exact result parity
 without depending on the game host ABI.
+`smoke-wabt-typed-host.sh` checks the VM boundary below that ABI: a WABT-built
+standard import carries `(i64, f32, f64)` and returns `(f64, i64, f32)`, while
+tinyvm's typed in-place callback and JavaScriptCore's WebAssembly host function
+must produce the same tuple. This development oracle does not broaden
+TinyArcade core/native v1 beyond its frozen i32 profile.
 
 ## Interpreting a mismatch
 

@@ -1,4 +1,4 @@
-use agenterm_tinyvm::{Val, WasmError, WasmModule};
+use agenterm_tinyvm::{Val, ValueType, WasmError, WasmModule};
 
 fn must_ok<T>(result: Result<T, WasmError>, context: &str) -> T {
     match result {
@@ -84,6 +84,54 @@ fn multi_result_module() -> Vec<u8> {
         10,
         &[0x01, 0x06, 0x00, 0x41, 0x2A, 0x42, 0x07, 0x0B],
     );
+    wasm
+}
+
+fn typed_host_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(
+        &mut wasm,
+        1,
+        &[
+            0x02, // two types
+            0x60, 0x03, 0x7E, 0x7D, 0x7C, 0x03, 0x7C, 0x7E, 0x7D, 0x60, 0x00, 0x03, 0x7C, 0x7E,
+            0x7D,
+        ],
+    );
+    section(
+        &mut wasm,
+        2,
+        &[
+            0x01, 0x04, b'h', b'o', b's', b't', 0x03, b'm', b'i', b'x', 0x00, 0x00,
+        ],
+    );
+    section(&mut wasm, 3, &[0x01, 0x01]);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x01]);
+    section(
+        &mut wasm,
+        10,
+        &[
+            0x01, 0x14, 0x00, // one body, 20 bytes, no locals
+            0x42, 0x28, // i64.const 40
+            0x43, 0x00, 0x00, 0xC0, 0x3F, // f32.const 1.5
+            0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x40, // f64.const 2.5
+            0x10, 0x00, 0x0B, // call imported host.mix; end
+        ],
+    );
+    wasm
+}
+
+fn funcref_host_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x01, 0x70]);
+    section(
+        &mut wasm,
+        2,
+        &[
+            0x01, 0x04, b'h', b'o', b's', b't', 0x03, b'r', b'e', b'f', 0x00, 0x00,
+        ],
+    );
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
     wasm
 }
 
@@ -754,6 +802,113 @@ fn standard_multiple_funcref_tables_execute_and_share_one_host_budget() {
         WasmModule::from_bytes(&duplicate_export).is_err(),
         "export names are unique across function and table kinds"
     );
+}
+
+#[test]
+fn standard_typed_host_imports_preserve_all_value_kinds() {
+    let bytes = typed_host_module();
+    let mut module = must_ok(WasmModule::from_bytes(&bytes), "load typed host module");
+    assert!(
+        (0..3)
+            .map(|position| module.import_parameter_type(0, position))
+            .eq([
+                Some(ValueType::I64),
+                Some(ValueType::F32),
+                Some(ValueType::F64),
+            ])
+    );
+    assert!(
+        (0..3)
+            .map(|position| module.import_result_type(0, position))
+            .eq([
+                Some(ValueType::F64),
+                Some(ValueType::I64),
+                Some(ValueType::F32),
+            ])
+    );
+    assert!(
+        module
+            .bind_import("host", "mix", |_, _| Ok(vec![0, 0, 0]))
+            .is_err(),
+        "the legacy i32 door must reject a mixed standard signature at bind time"
+    );
+    must_ok(
+        module.bind_import_typed_in_place("host", "mix", |args, results, _memory| {
+            assert!(matches!(args, [Val::I64(40), Val::F32(1.5), Val::F64(2.5)]));
+            assert_eq!(results.len(), 3);
+            results[0] = Val::F64(4.5);
+            results[1] = Val::I64(42);
+            results[2] = Val::F32(3.5);
+            Ok(())
+        }),
+        "bind typed host module in place",
+    );
+    let expected = [Val::F64(4.5), Val::I64(42), Val::F32(3.5)];
+    assert!(must_ok(module.invoke_by_name("run", &[]), "nested typed host call") == expected);
+    assert!(
+        must_ok(
+            module.invoke_val(0, &[Val::I64(40), Val::F32(1.5), Val::F64(2.5)]),
+            "top-level typed host call",
+        ) == expected
+    );
+
+    let mut returning = must_ok(WasmModule::from_bytes(&bytes), "reload typed host module");
+    must_ok(
+        returning.bind_import_typed("host", "mix", |args, _memory| {
+            assert_eq!(args.len(), 3);
+            Ok(vec![Val::F64(4.5), Val::I64(42), Val::F32(3.5)])
+        }),
+        "bind arbitrary-arity typed compatibility callback",
+    );
+    assert!(
+        must_ok(
+            returning.invoke_by_name("run", &[]),
+            "typed compatibility call"
+        ) == expected
+    );
+
+    let mut wrong = must_ok(
+        WasmModule::from_bytes(&bytes),
+        "reload typed mismatch module",
+    );
+    must_ok(
+        wrong.bind_import_typed_in_place("host", "mix", |_, results, _| {
+            results[0] = Val::I32(4);
+            Ok(())
+        }),
+        "bind typed mismatch callback",
+    );
+    assert!(matches!(
+        wrong.invoke_by_name("run", &[]),
+        Err(WasmError::Trap("host result type"))
+    ));
+}
+
+#[test]
+fn standard_typed_host_funcref_results_are_instance_bounded() {
+    let bytes = funcref_host_module();
+    let mut null = must_ok(WasmModule::from_bytes(&bytes), "load funcref host module");
+    must_ok(
+        null.bind_import_typed_in_place("host", "ref", |_, results, _| {
+            results[0] = Val::FuncRef(None);
+            Ok(())
+        }),
+        "bind null funcref host result",
+    );
+    assert!(matches!(
+        must_ok(null.invoke_by_name("run", &[]), "return null funcref").as_slice(),
+        [Val::FuncRef(None)]
+    ));
+
+    let mut foreign = must_ok(WasmModule::from_bytes(&bytes), "reload funcref host module");
+    must_ok(
+        foreign.bind_import_typed("host", "ref", |_, _| Ok(vec![Val::FuncRef(Some(99))])),
+        "bind invalid funcref host result",
+    );
+    assert!(matches!(
+        foreign.invoke_by_name("run", &[]),
+        Err(WasmError::Trap("host result type"))
+    ));
 }
 
 #[test]

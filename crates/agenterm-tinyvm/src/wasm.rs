@@ -2,8 +2,10 @@
 //!
 //! The public face is [`eval`]: standard `.wasm` bytes in, a [`Val`] sequence
 //! or a loud [`WasmError`] out. WAT is not an input. Host functions enter
-//! through the module import table ([`Module::bind_import`]), not a general
-//! FFI. No JIT/AOT — that is parked slot B.
+//! through the module import table ([`Module::bind_import_typed_in_place`]),
+//! not a general FFI. [`Module::bind_import`] remains the narrower i32
+//! compatibility door used by simple embeddings. No JIT/AOT — that is parked
+//! slot B.
 //!
 //! Every fault is loud: a malformed body fails to decode, and a run-time trap
 //! (stack underflow, out-of-range local/label/func, unbound import, budget
@@ -65,6 +67,30 @@ pub enum Val {
     /// A nullable reference into this module instance's combined function
     /// index space. `None` is the standard null `funcref` value.
     FuncRef(Option<usize>),
+}
+
+/// A standard value type accepted by this VM profile.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ValueType {
+    I32,
+    I64,
+    F32,
+    F64,
+    FuncRef,
+}
+
+impl ValueType {
+    fn from_byte(value: u8) -> Option<Self> {
+        match value {
+            0x7F => Some(Self::I32),
+            0x7E => Some(Self::I64),
+            0x7D => Some(Self::F32),
+            0x7C => Some(Self::F64),
+            0x70 => Some(Self::FuncRef),
+            _ => None,
+        }
+    }
 }
 
 /// A decode-time or run-time WebAssembly fault. Messages are `&'static str`
@@ -1674,8 +1700,10 @@ fn parse_export_section(
 
 /// A function import: `(module, field)` name and its type arity.
 ///
-/// This is the host door. Bind a callback with [`Module::bind_import`]; an
-/// unbound import traps if the guest calls it.
+/// This is the host door. Bind an i32-profile callback with
+/// [`Module::bind_import`] or a standard typed callback with
+/// [`Module::bind_import_typed_in_place`]; an unbound import traps if the guest
+/// calls it.
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
 pub struct ImportDesc {
@@ -1781,16 +1809,23 @@ type CodeEntry = (Vec<Val>, Vec<u8>);
 
 /// A native host implementation behind an import.
 type HostImpl = dyn Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError>;
+/// Typed compatibility host implementation for standard numeric/reference
+/// function imports of arbitrary arity.
+type TypedHostImpl = dyn Fn(&[Val], usize, &mut [u8]) -> Result<Vec<Val>, WasmError>;
 /// Allocation-free bounded host implementation used by product embeddings.
 /// The result slice has the function's exact declared result arity.
 #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
 type BoundedHostImpl = dyn Fn(&[i32], &mut [i32], &mut [u8]) -> Result<(), WasmError>;
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+type TypedBoundedHostImpl = dyn Fn(&[Val], &mut [Val], &mut [u8]) -> Result<(), WasmError>;
 const MAX_BOUNDED_HOST_ARITY: usize = 16;
 
 enum HostBinding {
-    Returning(Rc<HostImpl>),
+    TypedReturning(Rc<TypedHostImpl>),
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
     Bounded(Rc<BoundedHostImpl>),
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    TypedBounded(Rc<TypedBoundedHostImpl>),
 }
 
 /// The value type byte of a runtime value.
@@ -1802,6 +1837,59 @@ fn valtype_of(v: &Val) -> u8 {
         Val::F64(_) => 0x7C,
         Val::FuncRef(_) => 0x70,
     }
+}
+
+fn values_have_types(values: &[Val], types: &[u8]) -> bool {
+    if values.len() != types.len() {
+        return false;
+    }
+    for (value, &value_type) in values.iter().zip(types) {
+        if valtype_of(value) != value_type {
+            return false;
+        }
+    }
+    true
+}
+
+fn host_results_are_valid(values: &[Val], types: &[u8], function_count: usize) -> bool {
+    values_have_types(values, types) && host_refs_are_valid(values, function_count)
+}
+
+fn host_refs_are_valid(values: &[Val], function_count: usize) -> bool {
+    for value in values {
+        if let Val::FuncRef(Some(index)) = value
+            && *index >= function_count
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn adapt_i32_host(callback: Rc<HostImpl>) -> Rc<TypedHostImpl> {
+    Rc::new(move |args, n_results, memory| {
+        let mut i32_args = Vec::new();
+        i32_args
+            .try_reserve_exact(args.len())
+            .map_err(|_| WasmError::Trap("host arguments"))?;
+        for value in args {
+            if let Val::I32(number) = value {
+                i32_args.push(*number);
+            } else {
+                return Err(WasmError::Trap("host function"));
+            }
+        }
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(n_results)
+            .map_err(|_| WasmError::Trap("host results"))?;
+        let results = callback(&i32_args, memory)?;
+        if results.len() != n_results {
+            return Err(WasmError::Trap("host function"));
+        }
+        values.extend(results.into_iter().map(Val::I32));
+        Ok(values)
+    })
 }
 
 /// The zero value of a value type byte (spec 4.5.3: locals start at zero of
@@ -2046,8 +2134,13 @@ enum DefinedOutcome {
 enum CallValues {
     Owned(Vec<Val>),
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
-    Bounded {
+    BoundedI32 {
         values: [i32; MAX_BOUNDED_HOST_ARITY],
+        len: usize,
+    },
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    BoundedTyped {
+        values: [Val; MAX_BOUNDED_HOST_ARITY],
         len: usize,
     },
 }
@@ -2057,7 +2150,7 @@ impl CallValues {
         match self {
             Self::Owned(values) => values.len(),
             #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
-            Self::Bounded { len, .. } => *len,
+            Self::BoundedI32 { len, .. } | Self::BoundedTyped { len, .. } => *len,
         }
     }
 
@@ -2065,8 +2158,12 @@ impl CallValues {
         match self {
             Self::Owned(values) => destination.extend(values),
             #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
-            Self::Bounded { values, len } => {
+            Self::BoundedI32 { values, len } => {
                 destination.extend(values[..len].iter().copied().map(Val::I32));
+            }
+            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+            Self::BoundedTyped { values, len } => {
+                destination.extend_from_slice(&values[..len]);
             }
         }
     }
@@ -2075,12 +2172,21 @@ impl CallValues {
         match self {
             Self::Owned(values) => Ok(values),
             #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
-            Self::Bounded { values, len } => {
+            Self::BoundedI32 { values, len } => {
                 let mut owned = Vec::new();
                 owned
                     .try_reserve_exact(len)
                     .map_err(|_| WasmError::Trap("host results"))?;
                 owned.extend(values[..len].iter().copied().map(Val::I32));
+                Ok(owned)
+            }
+            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+            Self::BoundedTyped { values, len } => {
+                let mut owned = Vec::new();
+                owned
+                    .try_reserve_exact(len)
+                    .map_err(|_| WasmError::Trap("host results"))?;
+                owned.extend_from_slice(&values[..len]);
                 Ok(owned)
             }
         }
@@ -2162,11 +2268,12 @@ impl Module {
         F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
     {
         let idx = self.hosts.len();
+        let callback: Rc<HostImpl> = Rc::new(f);
         self.hosts.push(HostFunc {
             n_params,
             n_results,
             sig: None,
-            binding: HostBinding::Returning(Rc::new(f)),
+            binding: HostBinding::TypedReturning(adapt_i32_host(callback)),
         });
         idx
     }
@@ -2285,10 +2392,15 @@ impl Module {
         // Imported functions occupy the low indices; without a bound host
         // implementation they trap loudly if actually called.
         for (desc, tidx) in imports {
-            let h = module.add_host_function(desc.n_params, desc.n_results, |_args, _mem| {
+            let callback: Rc<TypedHostImpl> = Rc::new(|_args, _n_results, _memory| {
                 Err(WasmError::Trap("call to unbound imported function"))
             });
-            module.hosts[h].sig = Some(tidx);
+            module.hosts.push(HostFunc {
+                n_params: desc.n_params,
+                n_results: desc.n_results,
+                sig: Some(tidx),
+                binding: HostBinding::TypedReturning(callback),
+            });
             module.import_descs.push(desc);
         }
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
@@ -2606,25 +2718,121 @@ impl Module {
         &self.import_descs
     }
 
+    /// Exact standard type of one imported function parameter.
+    pub fn import_parameter_type(
+        &self,
+        import_position: usize,
+        parameter_position: usize,
+    ) -> Option<ValueType> {
+        let signature = self.hosts.get(import_position)?.sig?;
+        let value = *self.types.get(signature)?.params.get(parameter_position)?;
+        ValueType::from_byte(value)
+    }
+
+    /// Exact standard type of one imported function result.
+    pub fn import_result_type(
+        &self,
+        import_position: usize,
+        result_position: usize,
+    ) -> Option<ValueType> {
+        let signature = self.hosts.get(import_position)?.sig?;
+        let value = *self.types.get(signature)?.results.get(result_position)?;
+        ValueType::from_byte(value)
+    }
+
     /// Bind a host callback to imported `module.field`. Replaces the unbound
     /// stub installed by [`Module::from_bytes`].
     pub fn bind_import<F>(&mut self, module: &str, field: &str, f: F) -> Result<(), WasmError>
     where
         F: Fn(&[i32], &mut [u8]) -> Result<Vec<i32>, WasmError> + 'static,
     {
+        let mut found = false;
+        for desc in &self.import_descs {
+            if desc.module == module && desc.field == field {
+                found = true;
+                if !desc.i32_only {
+                    return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+                }
+            }
+        }
+        if !found {
+            return Err(WasmError::Trap("no imported function named"));
+        }
         // A module may import the same (module, field) pair more than once;
         // every matching slot binds to the same implementation, so a bind that
         // reports success never leaves a sibling slot silently unbound.
-        let shared: Rc<HostImpl> = Rc::new(f);
+        let shared = adapt_i32_host(Rc::new(f));
         let mut bound = 0usize;
         for (pos, desc) in self.import_descs.iter().enumerate() {
             if desc.module == module && desc.field == field {
-                self.hosts[pos].binding = HostBinding::Returning(shared.clone());
+                self.hosts[pos].binding = HostBinding::TypedReturning(shared.clone());
+                bound += 1;
+            }
+        }
+        debug_assert!(bound != 0);
+        Ok(())
+    }
+
+    /// Bind a standard typed host callback to every imported `module.field`.
+    ///
+    /// Unlike the legacy i32 convenience door, this form preserves i32, i64,
+    /// f32, f64 and funcref values. The runtime verifies exact parameter and
+    /// result types around the callback. The callback-returned vector is an
+    /// explicit arbitrary-arity compatibility path; latency-sensitive hosts
+    /// should prefer [`Module::bind_import_typed_in_place`].
+    pub fn bind_import_typed<F>(&mut self, module: &str, field: &str, f: F) -> Result<(), WasmError>
+    where
+        F: Fn(&[Val], &mut [u8]) -> Result<Vec<Val>, WasmError> + 'static,
+    {
+        let shared: Rc<TypedHostImpl> = Rc::new(move |args, _n_results, memory| f(args, memory));
+        let mut bound = 0usize;
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.hosts[position].binding = HostBinding::TypedReturning(shared.clone());
                 bound += 1;
             }
         }
         if bound == 0 {
             return Err(WasmError::Trap("no imported function named"));
+        }
+        Ok(())
+    }
+
+    /// Bind a typed host callback using exact borrowed parameter/result
+    /// slices backed by the VM's fixed 16-value staging storage.
+    ///
+    /// The complete result destination is available before app code runs and
+    /// its types are checked afterwards. Imports above the bounded arity remain
+    /// valid standard Wasm and can use [`Module::bind_import_typed`] instead.
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    pub fn bind_import_typed_in_place<F>(
+        &mut self,
+        module: &str,
+        field: &str,
+        f: F,
+    ) -> Result<(), WasmError>
+    where
+        F: Fn(&[Val], &mut [Val], &mut [u8]) -> Result<(), WasmError> + 'static,
+    {
+        let mut found = false;
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                found = true;
+                let host = &self.hosts[position];
+                if host.n_params > MAX_BOUNDED_HOST_ARITY || host.n_results > MAX_BOUNDED_HOST_ARITY
+                {
+                    return Err(WasmError::Trap("bounded host arity"));
+                }
+            }
+        }
+        if !found {
+            return Err(WasmError::Trap("no imported function named"));
+        }
+        let shared: Rc<TypedBoundedHostImpl> = Rc::new(f);
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.hosts[position].binding = HostBinding::TypedBounded(shared.clone());
+            }
         }
         Ok(())
     }
@@ -2675,7 +2883,7 @@ impl Module {
             return Err(WasmError::Trap("bounded host arity"));
         }
         let n_results = host.n_results;
-        host.binding = HostBinding::Returning(Rc::new(move |args, memory| {
+        let callback: Rc<HostImpl> = Rc::new(move |args, memory| {
             let mut results = Vec::new();
             results
                 .try_reserve_exact(n_results)
@@ -2683,7 +2891,8 @@ impl Module {
             results.resize(n_results, 0);
             f(args, &mut results, memory)?;
             Ok(results)
-        }));
+        });
+        host.binding = HostBinding::TypedReturning(adapt_i32_host(callback));
         Ok(())
     }
 
@@ -3038,39 +3247,34 @@ impl Module {
         if args.len() != host.n_params {
             return Err(WasmError::Trap("host function"));
         }
-        if let Some(function_type) = host.sig.and_then(|signature| self.types.get(signature))
-            && (function_type.params.iter().any(|&ty| ty != 0x7F)
-                || function_type.results.iter().any(|&ty| ty != 0x7F))
+        let signature = host.sig.and_then(|index| self.types.get(index));
+        if let Some(function_type) = signature
+            && !values_have_types(args, &function_type.params)
         {
-            return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+            return Err(WasmError::Trap("host argument type"));
         }
         match &host.binding {
-            HostBinding::Returning(callback) => {
-                // Reserve the VM result destination before trusted host code
-                // can mutate memory or embedding state.
-                let mut values = Vec::new();
-                values
-                    .try_reserve_exact(host.n_results)
-                    .map_err(|_| WasmError::Trap("host results"))?;
-                let mut i32_args = Vec::new();
-                i32_args
-                    .try_reserve_exact(args.len())
-                    .map_err(|_| WasmError::Trap("host arguments"))?;
-                for value in args {
-                    match value {
-                        Val::I32(number) => i32_args.push(*number),
-                        _other => return Err(WasmError::Trap("host function")),
-                    }
+            HostBinding::TypedReturning(callback) => {
+                let results = callback(args, host.n_results, mem)?;
+                let function_count = self.hosts.len() + self.funcs.len();
+                let valid = if let Some(function_type) = signature {
+                    host_results_are_valid(&results, &function_type.results, function_count)
+                } else {
+                    results.len() == host.n_results && host_refs_are_valid(&results, function_count)
+                };
+                if !valid {
+                    return Err(WasmError::Trap("host result type"));
                 }
-                let results = callback(&i32_args, mem)?;
-                if results.len() != host.n_results {
-                    return Err(WasmError::Trap("host function"));
-                }
-                values.extend(results.into_iter().map(Val::I32));
-                Ok(CallValues::Owned(values))
+                Ok(CallValues::Owned(results))
             }
             #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
             HostBinding::Bounded(callback) => {
+                if signature.is_some_and(|function_type| {
+                    function_type.params.iter().any(|&ty| ty != 0x7F)
+                        || function_type.results.iter().any(|&ty| ty != 0x7F)
+                }) {
+                    return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+                }
                 let owned = if force_owned {
                     let mut values = Vec::new();
                     values
@@ -3097,8 +3301,42 @@ impl Module {
                     values.extend(i32_results[..host.n_results].iter().copied().map(Val::I32));
                     Ok(CallValues::Owned(values))
                 } else {
-                    Ok(CallValues::Bounded {
+                    Ok(CallValues::BoundedI32 {
                         values: i32_results,
+                        len: host.n_results,
+                    })
+                }
+            }
+            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+            HostBinding::TypedBounded(callback) => {
+                let function_type = signature.ok_or(WasmError::Trap("host function type"))?;
+                let owned = if force_owned {
+                    let mut values = Vec::new();
+                    values
+                        .try_reserve_exact(host.n_results)
+                        .map_err(|_| WasmError::Trap("host results"))?;
+                    Some(values)
+                } else {
+                    None
+                };
+                let mut values = [Val::I32(0); MAX_BOUNDED_HOST_ARITY];
+                for (slot, &value_type) in values.iter_mut().zip(&function_type.results) {
+                    *slot = zero_of_valtype(value_type)?;
+                }
+                callback(args, &mut values[..host.n_results], mem)?;
+                if !host_results_are_valid(
+                    &values[..host.n_results],
+                    &function_type.results,
+                    self.hosts.len() + self.funcs.len(),
+                ) {
+                    return Err(WasmError::Trap("host result type"));
+                }
+                if let Some(mut owned) = owned {
+                    owned.extend_from_slice(&values[..host.n_results]);
+                    Ok(CallValues::Owned(owned))
+                } else {
+                    Ok(CallValues::BoundedTyped {
+                        values,
                         len: host.n_results,
                     })
                 }
@@ -5848,7 +6086,7 @@ mod tests {
 
         assert!(matches!(
             module.call_host(0, &[], &mut memory, false),
-            Ok(CallValues::Bounded { len: 1, .. })
+            Ok(CallValues::BoundedI32 { len: 1, .. })
         ));
         assert_eq!(
             module
@@ -5857,6 +6095,40 @@ mod tests {
                 .into_vec()
                 .unwrap(),
             [Val::I32(42)]
+        );
+    }
+
+    #[test]
+    fn typed_host_results_stay_inline_for_suspended_callers() {
+        // (module (import "env" "h" (func (result i64)))
+        //         (func (result i64) call 0))
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+            0x7E, 0x02, 0x09, 0x01, 0x03, 0x65, 0x6E, 0x76, 0x01, 0x68, 0x00, 0x00, 0x03, 0x02,
+            0x01, 0x00, 0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        ];
+        let mut module = Module::from_bytes(&wasm).unwrap();
+        module
+            .bind_import_typed_in_place("env", "h", |args, results, _| {
+                assert!(args.is_empty());
+                assert_eq!(results.len(), 1);
+                results[0] = Val::I64(42);
+                Ok(())
+            })
+            .unwrap();
+        let mut memory = [0; 1];
+
+        assert!(matches!(
+            module.call_host(0, &[], &mut memory, false),
+            Ok(CallValues::BoundedTyped { len: 1, .. })
+        ));
+        assert_eq!(
+            module
+                .call_host(0, &[], &mut memory, true)
+                .unwrap()
+                .into_vec()
+                .unwrap(),
+            [Val::I64(42)]
         );
     }
 
@@ -6615,9 +6887,10 @@ mod tests {
     }
 
     #[test]
-    fn a_host_result_the_i32_abi_cannot_express_is_loud() {
-        // The import declares (result i64); the host ABI is i32-only, so the
-        // call traps rather than handing the guest a mistyped value.
+    fn legacy_i32_host_binding_rejects_a_typed_import() {
+        // The import declares (result i64); the legacy host ABI is i32-only,
+        // so binding fails atomically rather than installing a callback that
+        // can only trap when called.
         let wasm: &[u8] = &[
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x02, 0x60, 0x00, 0x01,
             0x7E, 0x60, 0x00, 0x01, 0x7E, 0x02, 0x0C, 0x01, 0x04, 0x68, 0x6F, 0x73, 0x74, 0x03,
@@ -6625,8 +6898,10 @@ mod tests {
             0x61, 0x69, 0x6E, 0x00, 0x01, 0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
         ];
         let mut m = Module::from_bytes(wasm).unwrap();
-        m.bind_import("host", "get", |_args, _mem| Ok(alloc::vec![7]))
-            .unwrap();
+        assert!(matches!(
+            m.bind_import("host", "get", |_args, _mem| Ok(alloc::vec![7])),
+            Err(WasmError::Trap("host ABI is i32-only; import declares"))
+        ));
         assert!(matches!(m.eval(&[]), Err(WasmError::Trap(_))));
     }
 

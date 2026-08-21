@@ -16,6 +16,7 @@ agenterm-tinyvm (35)
 │   ├── tinyvm engine       [x]
 │   │   └── decode complexity budget [x]
 │   ├── owned host ABI      [~]
+│   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
 │   └── H5/JS/WKWebView     [–]
 ├── game runtime         [~]
@@ -115,6 +116,13 @@ door：最多 16 个 i32 参数/结果在固定栈数组中传递，VM 在进入
 operand stack 或顶层结果完整 `try_reserve`。嵌套 core/native dispatch 直接把 inline 结果
 写回已预留的 caller stack；输入、时钟、RNG、媒体提交、状态保存/恢复和 C callback 不再
 为每次 dispatch 建立临时 heap `Vec`。通用 Rust returning-callback API 仅作为兼容层保留。
+VM 的通用 host door 不再被这个游戏 profile 反向限制为 i32：标准 function import 可通过
+typed `Val` callback 保真传递 i32/i64/f32/f64/funcref，运行时在 callback 前后验证完整
+签名；宿主可用无分配的 `ValueType` position query 静态读取每个 import 参数/结果类型。
+非空 funcref 被限制在当前 instance 的 combined function index。16 值以内可走
+固定 staging array 的 in-place API；任意 arity 仍有明确的 allocating compatibility API。
+TinyArcade core/native v1 继续坚持 i32-only，这是版本化 embedding ABI 的选择，不是
+tinyvm 对标准 Wasm host function 的能力上限。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。
 核 strip `<100KiB`。

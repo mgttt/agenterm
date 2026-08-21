@@ -2425,6 +2425,17 @@ Keep the ownership-returning convenience API as a wrapper around this reusable
 form. This preserves standard Wasm and the copy-based FFI lifetime while
 removing steady-state allocator churn from render/audio submission.
 
+Do not let a narrow product ABI become the VM's accidental type system. A
+game-facing i32 import profile may be correct for converters and C bridges,
+while the underlying standard Wasm host door must preserve i32, i64, f32, f64
+and supported references exactly. Verify argument types before app code,
+initialize an exact typed result slice before an in-place callback, verify it
+again afterwards, and reject function references outside the current instance
+identity space. Keep an arbitrary-arity returning callback as an explicit
+allocating compatibility path; use fixed typed staging for the bounded hot
+path. Prove the separation with independently compiled standard bytes in a
+second engine, not only with a hand-built unit module.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a

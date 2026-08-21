@@ -82,8 +82,8 @@ mod ios_c_api;
 
 pub mod wasm;
 pub use wasm::{
-    ImportDesc, Instance as WasmInstance, Limits, Module as WasmModule, Val, WasmError, eval,
-    eval_with,
+    ImportDesc, Instance as WasmInstance, Limits, Module as WasmModule, Val, ValueType, WasmError,
+    eval, eval_with,
 };
 
 /// One bytecode instruction.

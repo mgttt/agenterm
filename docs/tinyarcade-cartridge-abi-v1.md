@@ -166,6 +166,9 @@ imports; it does not add a game opcode or change cartridge bytes.
 
 Core services are optional standard function imports from
 `tinyarcade:core/v1`. All values use the portable i32 ABI.
+This i32-only rule belongs to TinyArcade core/native v1, not to tinyvm's
+general WebAssembly host door: other embeddings may bind exact typed standard
+imports carrying i64, f32, f64 and funcref through the public `Val` API.
 
 ```text
 input_bits() -> i32

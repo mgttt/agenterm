@@ -22,6 +22,7 @@ tinyvm iOS game runtime
 │   ├── single-table funcref profile  [x]
 │   ├── multiple defined tables       [x]
 │   ├── standard tail calls            [x]
+│   ├── typed standard host imports     [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1810,5 +1811,48 @@ Evidence on 2026-08-21:
   bytes x86_64; catalog/replay/private/session consumers are 1,425,512 /
   1,399,944 / 1,418,112 / 1,417,280 bytes. The stripped static interpreter core
   remains 86,328 bytes and its C selftest returns 42.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fiftieth executable increment — typed standard host imports
+
+The generic VM host door now preserves the standard value signature instead of
+silently inheriting TinyArcade's narrower i32 profile. Public
+`bind_import_typed_in_place` exposes exact borrowed `Val` parameter/result
+slices for imports with at most 16 values; `bind_import_typed` remains an
+explicit arbitrary-arity allocating compatibility form. Both accept i32, i64,
+f32, f64 and funcref, validate arguments before app code and validate results
+afterwards. `ValueType` position queries expose the exact signature without
+duplicating guest-sized type vectors. Non-null function references must name
+this module instance's combined function index space. The old `bind_import` now rejects a non-i32
+signature at bind time rather than installing a callback that can only trap.
+
+Bounded typed results use their own inline `[Val; 16]` record, while the
+existing TinyArcade i32 path retains its smaller `[i32; 16]` record. Nested
+callers reserve their destination before callback dispatch; a top-level typed
+call reserves its owned return vector first. This advances tinyvm as a
+standards-first cross-platform Wasm VM without changing the frozen i32-only
+game cartridge/native ABI.
+
+Evidence on 2026-08-21:
+
+- Public black boxes drive mixed i64/f32/f64 parameters and multi-value results
+  through both typed APIs, reject wrong result types, and bound funcref output
+  to the current instance. A VM unit test proves nested typed results select
+  the inline record and top-level results preserve exact types.
+- WABT independently compiles and validates the mixed typed-import fixture;
+  tinyvm and JavaScriptCore both return the exact `(4.5, 42, 3.5)` tuple.
+- All 227 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all six proposal oracles plus the new typed
+  host oracle, the two-game WebKit differential, all-target Clippy, formatting,
+  ShellCheck and document redaction pass. The stripped static core remains
+  86,328 bytes and its C selftest returns 42.
+- The complete booted iPhone 17 Pro simulator path remains green. Its 600-frame
+  runs measure Depth Well at 0.111 ms average / 0.121 ms p95 / 0.129 ms max and
+  Paddle Guard at 0.203 / 0.256 / 1.005 ms; this is simulator regression
+  evidence, not a physical-device claim.
+- Swift linkage remains below its gates at 1,553,848 bytes arm64 and 1,625,560
+  bytes x86_64; catalog/replay/private/session consumers are 1,426,696 /
+  1,401,112 / 1,419,312 / 1,418,448 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.
