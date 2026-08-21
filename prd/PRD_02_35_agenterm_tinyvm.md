@@ -53,7 +53,8 @@ agenterm-tinyvm (35)
 │   ├── f64              [x]
 │   ├── conv             [x]
 │   └── standard proposal profile [~]
-│       └── bulk memory copy/fill [x]
+│       ├── bulk memory copy/fill [x]
+│       └── bulk memory passive lifecycle [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
 ├── slot-B               [ ]
@@ -69,9 +70,10 @@ agenterm-tinyvm (35)
 `eval(bytes)` → 值或错。程序是标准 `.wasm`。
 宿主门是 import 表。未绑定即 trap。
 槽 A 以标准 WebAssembly 为持续兼容目标，而不是停在自定义 VM 或永久冻结为 MVP。
-当前 scalar MVP 面双绿，并已原生接受标准 bulk-memory `memory.copy`/`memory.fill`
-与 DataCount；其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立
-引擎差分证据后进入 compiler profile。
+当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
+bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
+DataCount。其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎
+差分证据后进入 compiler profile。
 核 strip `<100KiB`。
 
 不可信卡带的 2 MiB 文件上限之外还有统一 decode complexity budget：section entry、

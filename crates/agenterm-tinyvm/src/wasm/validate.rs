@@ -7,7 +7,7 @@
 //! trap conditions (division by zero, out-of-bounds access, unreachable) stay
 //! where they belong, at run time.
 //!
-//! This is the WASM 1.0 validation algorithm over the already-decoded
+//! This is the standard WASM validation algorithm over the already-decoded
 //! instruction list: an abstract operand stack of value types, a control stack
 //! of blocks, and the polymorphic-stack rule for code after `br`/`return`/
 //! `unreachable`.
@@ -33,6 +33,12 @@ pub(super) struct ModuleCtx<'a> {
     pub func_sigs: &'a [usize],
     /// Value type per global.
     pub globals: &'a [u8],
+    /// DataCount section value. Bulk data instructions require it even when
+    /// the final data section is available to this non-streaming decoder.
+    pub data_count: Option<usize>,
+    /// Number of element segments and whether table index zero exists.
+    pub elem_count: usize,
+    pub has_table: bool,
 }
 
 /// A control frame: a block, loop, `if`, or the function body itself.
@@ -404,6 +410,53 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_expect(I32)?;
             v.pop_expect(I32)?;
         }
+        MemoryInit { data_index } => {
+            let count = v.m.data_count.ok_or(WasmError::Decode(
+                "validation: memory.init requires data count",
+            ))?;
+            if *data_index as usize >= count {
+                return Err(WasmError::Decode(
+                    "validation: memory.init data segment index",
+                ));
+            }
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+        }
+        DataDrop { data_index } => {
+            let count = v.m.data_count.ok_or(WasmError::Decode(
+                "validation: data.drop requires data count",
+            ))?;
+            if *data_index as usize >= count {
+                return Err(WasmError::Decode("validation: data.drop segment index"));
+            }
+        }
+        TableInit { elem_index } => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.init requires table"));
+            }
+            if *elem_index as usize >= v.m.elem_count {
+                return Err(WasmError::Decode(
+                    "validation: table.init element segment index",
+                ));
+            }
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+        }
+        ElemDrop { elem_index } => {
+            if *elem_index as usize >= v.m.elem_count {
+                return Err(WasmError::Decode("validation: elem.drop segment index"));
+            }
+        }
+        TableCopy => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode("validation: table.copy requires table"));
+            }
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+            v.pop_expect(I32)?;
+        }
 
         // --- locals and globals ---
         LocalGet(i) => {
@@ -450,6 +503,11 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.apply_type(&params, &results)?;
         }
         CallIndirect { type_index } => {
+            if !v.m.has_table {
+                return Err(WasmError::Decode(
+                    "validation: call_indirect requires table",
+                ));
+            }
             let ft =
                 v.m.types
                     .get(*type_index as usize)

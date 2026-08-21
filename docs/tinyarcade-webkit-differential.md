@@ -51,6 +51,12 @@ the harness preserves this contract. DOM timing, `requestAnimationFrame`,
 keyboard events and canvas rendering must stay outside the comparison core;
 normalize them into the recorded input/clock stream first.
 
+Standard VM proposal work has a smaller independent gate alongside the game
+replays. `smoke-wabt-bulk-memory.sh` asks WABT—not tinyvm—to compile and validate
+`tests/fixtures/bulk-memory-v1.wat`, then feeds the exact module to tinyvm and
+JavaScriptCore. This isolates Wasm instruction/segment semantics from the game
+ABI and catches a decoder that only accepts its own hand-built fixtures.
+
 ## Interpreting a mismatch
 
 A mismatch does not automatically mean tinyvm is wrong: the WebAssembly spec,

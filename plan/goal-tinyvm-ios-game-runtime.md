@@ -1377,3 +1377,43 @@ Evidence on 2026-08-21:
 - Device/simulator Swift linkage remains below its gates at 1,506,552 bytes
   arm64 and 1,581,976 bytes x86_64. The isolated stripped static core is 87,640
   bytes, below 100 KiB, and its C self-test returns 42.
+
+## Thirty-ninth executable increment — complete bulk-memory segment lifecycle
+
+tinyvm now implements the remainder of the standard bulk-memory proposal that
+fits its single-memory, MVP-funcref profile: passive data and element segments,
+`memory.init`, `data.drop`, `table.init`, `elem.drop` and `table.copy`. Data and
+element definitions remain immutable module data; live/dropped flags, memory
+and the funcref table are independent per instance. Consequently a drop or
+table mutation in one game instance cannot leak into another instance created
+from the same cartridge.
+
+The load gate parses data flags 0/1/2 and index-encoded funcref element flags
+0/1/2/3, requires DataCount for data-segment instructions, checks all segment
+and function indices, and rejects reference-typed element encodings until the
+reference-types proposal is owned. Active/declarative segments are empty after
+instantiation. A dropped passive segment permits only the standard zero-length
+read at source offset zero.
+
+All init/copy operations preflight source and destination ranges and fuel before
+mutation. Memory work costs one deterministic step per 16 bytes; table work
+costs one per funcref. Segment-state and table copies use fallible reservation,
+so guest-selected segment/table counts cannot turn instantiation into an
+allocator abort.
+
+Evidence on 2026-08-21:
+
+- A checked-in standards WAT fixture is compiled by WABT and accepted by
+  `wasm-validate`; the exact output runs in both tinyvm and system
+  JavaScriptCore and returns 143. It covers passive data and funcref elements,
+  all five newly added instructions and `call_indirect`.
+- Public black-box tests prove instance isolation, drop semantics, overlap-safe
+  table copy and both memory/table fuel atomicity. Invalid DataCount, missing
+  segment indices, unsupported memory/table indices and reference-typed segment
+  encodings fail loudly.
+- The all-feature matrix passes 207 executed package tests plus one doctest;
+  the independent WABT/JSC oracle also passes explicitly. Existing Depth Well
+  and Paddle Guard JSC replay differentials remain byte-exact.
+- Device/simulator Swift linkage remains below its gates at 1,525,160 bytes
+  arm64 and 1,591,448 bytes x86_64. The isolated stripped static core is 87,656
+  bytes, below 100 KiB, and its C self-test returns 42.

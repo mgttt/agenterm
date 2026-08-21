@@ -231,6 +231,24 @@ enum Op {
     MemoryCopy,
     /// Bulk-memory `memory.fill` (0xfc 11). The low byte of the value is used.
     MemoryFill,
+    /// Bulk-memory `memory.init`: copy from a module data segment.
+    MemoryInit {
+        data_index: u32,
+    },
+    /// Bulk-memory `data.drop`: make one instance's segment empty.
+    DataDrop {
+        data_index: u32,
+    },
+    /// Bulk-memory `table.init`: copy a passive funcref element segment.
+    TableInit {
+        elem_index: u32,
+    },
+    /// Bulk-memory `elem.drop`: make one instance's segment empty.
+    ElemDrop {
+        elem_index: u32,
+    },
+    /// Bulk-memory `table.copy` within the single supported funcref table.
+    TableCopy,
     /// `i64.load`/`i64.store` — 8 little-endian bytes at `addr + offset`.
     I64Load {
         offset: u32,
@@ -611,6 +629,20 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 let (subopcode, ni) = leb_u32(body, i)?;
                 i = ni;
                 match subopcode {
+                    8 => {
+                        let (data_index, n1) = leb_u32(body, i)?;
+                        let (memory, n2) = leb_u32(body, n1)?;
+                        i = n2;
+                        if memory != 0 {
+                            return Err(WasmError::Decode("memory.init memory index must be 0"));
+                        }
+                        ops.push(Op::MemoryInit { data_index });
+                    }
+                    9 => {
+                        let (data_index, ni) = leb_u32(body, i)?;
+                        i = ni;
+                        ops.push(Op::DataDrop { data_index });
+                    }
                     10 => {
                         let (destination_memory, n1) = leb_u32(body, i)?;
                         let (source_memory, n2) = leb_u32(body, n1)?;
@@ -627,6 +659,29 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                             return Err(WasmError::Decode("memory.fill memory index must be 0"));
                         }
                         ops.push(Op::MemoryFill);
+                    }
+                    12 => {
+                        let (elem_index, n1) = leb_u32(body, i)?;
+                        let (table, n2) = leb_u32(body, n1)?;
+                        i = n2;
+                        if table != 0 {
+                            return Err(WasmError::Decode("table.init table index must be 0"));
+                        }
+                        ops.push(Op::TableInit { elem_index });
+                    }
+                    13 => {
+                        let (elem_index, ni) = leb_u32(body, i)?;
+                        i = ni;
+                        ops.push(Op::ElemDrop { elem_index });
+                    }
+                    14 => {
+                        let (destination_table, n1) = leb_u32(body, i)?;
+                        let (source_table, n2) = leb_u32(body, n1)?;
+                        i = n2;
+                        if destination_table != 0 || source_table != 0 {
+                            return Err(WasmError::Decode("table.copy table indices must be 0"));
+                        }
+                        ops.push(Op::TableCopy);
                     }
                     _ => return Err(WasmError::Decode("unsupported 0xfc opcode")),
                 }
@@ -1069,28 +1124,50 @@ fn parse_memory_section(p: &[u8]) -> Result<(usize, Option<usize>), WasmError> {
     Ok((min, max))
 }
 
-/// Parse the data section (id 11) into `(offset, bytes)` segments.
-fn parse_data_section(
-    p: &[u8],
-    budget: &mut DecodeBudget,
-) -> Result<Vec<(usize, Vec<u8>)>, WasmError> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DataMode {
+    Active(usize),
+    Passive,
+}
+
+struct DataSegment {
+    mode: DataMode,
+    bytes: Vec<u8>,
+}
+
+/// Parse active and passive data segments from section id 11.
+fn parse_data_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<DataSegment>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     let count = count as usize;
     budget.charge(count)?;
     for _ in 0..count {
-        let flag = *p
-            .get(i)
-            .ok_or(WasmError::Decode("truncated data segment"))?;
-        i += 1;
-        if flag != 0x00 {
-            return Err(WasmError::Decode("unsupported data segment flag 0x"));
-        }
-        let (offset_val, ni) = parse_const_expr(p, i)?;
+        let (flag, ni) = leb_u32(p, i)?;
         i = ni;
-        let offset = match offset_val {
-            Val::I32(v) => v as u32 as usize,
-            _other => return Err(WasmError::Decode("data offset must be i32, got")),
+        let mode = match flag {
+            0 => {
+                let (offset_val, ni) = parse_const_expr(p, i)?;
+                i = ni;
+                match offset_val {
+                    Val::I32(v) => DataMode::Active(v as u32 as usize),
+                    _other => return Err(WasmError::Decode("data offset must be i32, got")),
+                }
+            }
+            1 => DataMode::Passive,
+            2 => {
+                let (memory, ni) = leb_u32(p, i)?;
+                i = ni;
+                if memory != 0 {
+                    return Err(WasmError::Decode("data segment memory index must be 0"));
+                }
+                let (offset_val, ni) = parse_const_expr(p, i)?;
+                i = ni;
+                match offset_val {
+                    Val::I32(v) => DataMode::Active(v as u32 as usize),
+                    _other => return Err(WasmError::Decode("data offset must be i32, got")),
+                }
+            }
+            _ => return Err(WasmError::Decode("unsupported data segment flag")),
         };
         let (len, ni) = leb_u32(p, i)?;
         i = ni;
@@ -1101,7 +1178,7 @@ fn parse_data_section(
         let mut bytes = Vec::new();
         reserve_exact(&mut bytes, len as usize)?;
         bytes.extend_from_slice(&p[i..end]);
-        out.push((offset, bytes));
+        out.push(DataSegment { mode, bytes });
         i = end;
     }
     if i != p.len() {
@@ -1110,28 +1187,74 @@ fn parse_data_section(
     Ok(out)
 }
 
-fn parse_elem_section(
-    p: &[u8],
-    budget: &mut DecodeBudget,
-) -> Result<Vec<(usize, Vec<usize>)>, WasmError> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ElemMode {
+    Active(usize),
+    Passive,
+    Declarative,
+}
+
+struct ElemSegment {
+    mode: ElemMode,
+    funcs: Vec<usize>,
+}
+
+fn parse_elem_section(p: &[u8], budget: &mut DecodeBudget) -> Result<Vec<ElemSegment>, WasmError> {
     let (count, mut i) = leb_u32(p, 0)?;
     let mut out = Vec::new();
     let count = count as usize;
     budget.charge(count)?;
     for _ in 0..count {
-        let flag = *p
-            .get(i)
-            .ok_or(WasmError::Decode("truncated elem segment"))?;
-        i += 1;
-        if flag != 0x00 {
-            return Err(WasmError::Decode("unsupported elem segment flag 0x"));
-        }
-        let (offset_val, ni) = parse_const_expr(p, i)?;
+        let (flag, ni) = leb_u32(p, i)?;
         i = ni;
-        let offset = match offset_val {
-            Val::I32(v) => v as u32 as usize,
-            _other => {
-                return Err(WasmError::Decode("elem offset must be i32, got"));
+        let mode = match flag {
+            0 => {
+                let (offset_val, ni) = parse_const_expr(p, i)?;
+                i = ni;
+                match offset_val {
+                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                }
+            }
+            1 => {
+                let kind = *p.get(i).ok_or(WasmError::Decode("truncated elem kind"))?;
+                i += 1;
+                if kind != 0 {
+                    return Err(WasmError::Decode("element kind must be funcref"));
+                }
+                ElemMode::Passive
+            }
+            2 => {
+                let (table, ni) = leb_u32(p, i)?;
+                i = ni;
+                if table != 0 {
+                    return Err(WasmError::Decode("elem segment table index must be 0"));
+                }
+                let (offset_val, ni) = parse_const_expr(p, i)?;
+                i = ni;
+                let mode = match offset_val {
+                    Val::I32(v) => ElemMode::Active(v as u32 as usize),
+                    _other => return Err(WasmError::Decode("elem offset must be i32, got")),
+                };
+                let kind = *p.get(i).ok_or(WasmError::Decode("truncated elem kind"))?;
+                i += 1;
+                if kind != 0 {
+                    return Err(WasmError::Decode("element kind must be funcref"));
+                }
+                mode
+            }
+            3 => {
+                let kind = *p.get(i).ok_or(WasmError::Decode("truncated elem kind"))?;
+                i += 1;
+                if kind != 0 {
+                    return Err(WasmError::Decode("element kind must be funcref"));
+                }
+                ElemMode::Declarative
+            }
+            _ => {
+                return Err(WasmError::Decode(
+                    "unsupported reference-typed elem segment flag",
+                ));
             }
         };
         let (n_funcs, ni) = leb_u32(p, i)?;
@@ -1145,7 +1268,7 @@ fn parse_elem_section(
             i = nj;
             idxs.push(fidx as usize);
         }
-        out.push((offset, idxs));
+        out.push(ElemSegment { mode, funcs: idxs });
     }
     if i != p.len() {
         return Err(WasmError::Decode("trailing element section bytes"));
@@ -1506,8 +1629,10 @@ pub struct Module {
     /// Optional start function (run by [`Module::run_start`]).
     start: Option<usize>,
     /// The funcref table: each slot holds a combined function index or `None`.
-    /// Indexed by `call_indirect`.
+    /// This is the instance template; live instances own an independent copy.
     table: Vec<Option<usize>>,
+    /// Standard active/passive/declarative funcref element segments.
+    elems: Vec<ElemSegment>,
     /// The module's function types as `(n_params, n_results)`, so
     /// `call_indirect` can type-check the callee against a declared type.
     types: Vec<FuncType>,
@@ -1516,9 +1641,9 @@ pub struct Module {
     /// and `None` max means "up to [`WASM_MAX_PAGES`]".
     mem_min_pages: Option<usize>,
     mem_max_pages: Option<usize>,
-    /// Data segments `(offset, bytes)`, applied when fresh convenience memory
-    /// or a persistent [`Instance`] is created.
-    data: Vec<(usize, Vec<u8>)>,
+    /// Standard active/passive data segments. Their bytes belong to the module;
+    /// dropped/live state belongs to each instance.
+    data: Vec<DataSegment>,
     /// Host budget retained for instantiation and every top-level call.
     limits: Limits,
 }
@@ -1532,7 +1657,24 @@ pub struct Instance {
     module: Module,
     memory: Vec<u8>,
     globals: Vec<Val>,
+    data_live: Vec<bool>,
+    table: Vec<Option<usize>>,
+    elem_live: Vec<bool>,
     last_steps: u64,
+}
+
+/// Mutable store owned by one evaluation or persistent instance. Keeping the
+/// store explicit prevents module definitions and sibling instances from being
+/// mutated by segment/table instructions.
+struct BulkState<'a> {
+    data_live: &'a mut [bool],
+    table: &'a mut Vec<Option<usize>>,
+    elem_live: &'a mut [bool],
+}
+
+struct WasmCall<'a> {
+    index: usize,
+    args: &'a [Val],
 }
 
 impl Module {
@@ -1630,10 +1772,10 @@ impl Module {
         let mut exports: Vec<(String, usize)> = Vec::new();
         let mut globals: Vec<(Val, bool)> = Vec::new();
         let mut start_fn: Option<usize> = None;
-        let mut table_size: usize = 0;
-        let mut elems: Vec<(usize, Vec<usize>)> = Vec::new();
+        let mut table_size: Option<usize> = None;
+        let mut elems: Vec<ElemSegment> = Vec::new();
         let mut mem_limits: Option<(usize, Option<usize>)> = None;
-        let mut data: Vec<(usize, Vec<u8>)> = Vec::new();
+        let mut data: Vec<DataSegment> = Vec::new();
         let mut budget = DecodeBudget::new();
         let mut last_standard_section_rank = 0u8;
         let mut data_count: Option<usize> = None;
@@ -1670,7 +1812,7 @@ impl Module {
                 1 => types = parse_type_section(payload, &mut budget)?,
                 2 => imports = parse_import_section(payload, &types, &mut budget)?,
                 3 => func_types = parse_func_section(payload, &mut budget)?,
-                4 => table_size = parse_table_section(payload)?,
+                4 => table_size = Some(parse_table_section(payload)?),
                 5 => mem_limits = Some(parse_memory_section(payload)?),
                 6 => globals = parse_global_section(payload, &mut budget)?,
                 7 => exports = parse_export_section(payload, &mut budget)?,
@@ -1702,6 +1844,7 @@ impl Module {
         if data_count.is_some_and(|count| count != data.len()) {
             return Err(WasmError::Decode("data count does not match data section"));
         }
+        let has_table = table_size.is_some();
 
         let mut module = Module::new_with_limits(limits);
         // Imported functions occupy the low indices; without a bound host
@@ -1745,11 +1888,13 @@ impl Module {
             return Err(WasmError::Trap("memory size"));
         }
         let mem_bytes = module.initial_mem_pages() * WASM_PAGE_SIZE;
-        for (offset, bytes) in &data {
-            offset
-                .checked_add(bytes.len())
-                .filter(|&e| e <= mem_bytes)
-                .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
+        for segment in &data {
+            if let DataMode::Active(offset) = segment.mode {
+                offset
+                    .checked_add(segment.bytes.len())
+                    .filter(|&e| e <= mem_bytes)
+                    .ok_or(WasmError::Decode("data segment runs past memory bounds"))?;
+            }
         }
         module.data = data;
         // --- load gate: prove every body before this Module is handed out ---
@@ -1770,6 +1915,9 @@ impl Module {
                 types: &module.types,
                 func_sigs: &func_sigs,
                 globals: &global_types,
+                data_count,
+                elem_count: elems.len(),
+                has_table,
             };
             for f in &module.funcs {
                 let ft = f
@@ -1786,6 +1934,7 @@ impl Module {
         // Allocate the table, then apply active element segments into it.
         // Host budget first: never `vec![None; guest_min]` a multi-gigabyte
         // table and hope the allocator fails loudly instead of aborting.
+        let table_size = table_size.unwrap_or(0);
         if table_size > limits.max_table_elems {
             return Err(WasmError::Trap("table size"));
         }
@@ -1797,15 +1946,28 @@ impl Module {
             table.resize(table_size, None);
         }
         module.table = table;
-        for (offset, idxs) in &elems {
-            for (k, &fidx) in idxs.iter().enumerate() {
-                let slot = offset
-                    .checked_add(k)
-                    .filter(|&s| s < module.table.len())
+        let function_count = module.hosts.len() + module.funcs.len();
+        for segment in &elems {
+            if segment.funcs.iter().any(|&index| index >= function_count) {
+                return Err(WasmError::Decode("element function index out of bounds"));
+            }
+            if let ElemMode::Active(offset) = segment.mode {
+                if !has_table {
+                    return Err(WasmError::Decode("active element segment requires table"));
+                }
+                let end = offset
+                    .checked_add(segment.funcs.len())
+                    .filter(|&end| end <= module.table.len())
                     .ok_or(WasmError::Decode("elem segment runs past table bounds"))?;
-                module.table[slot] = Some(fidx);
+                for (slot, &function) in module.table[offset..end]
+                    .iter_mut()
+                    .zip(segment.funcs.iter())
+                {
+                    *slot = Some(function);
+                }
             }
         }
+        module.elems = elems;
         Ok(module)
     }
 
@@ -1914,8 +2076,25 @@ impl Module {
         let mut steps: u64 = 0;
         let mut mem = self.new_memory()?;
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
+        let mut data_live = self.new_data_state()?;
+        let (mut table, mut elem_live) = self.new_table_state()?;
+        let mut bulk = BulkState {
+            data_live: &mut data_live,
+            table: &mut table,
+            elem_live: &mut elem_live,
+        };
         if let Some(start) = self.start {
-            self.call_any(start, &[], 0, &mut steps, &mut mem, &mut globals)?;
+            self.call_any(
+                WasmCall {
+                    index: start,
+                    args: &[],
+                },
+                0,
+                &mut steps,
+                &mut mem,
+                &mut globals,
+                &mut bulk,
+            )?;
         }
         let entry = match self.export_list.first() {
             Some((_, idx)) => *idx,
@@ -1925,7 +2104,14 @@ impl Module {
             None if !self.funcs.is_empty() => self.hosts.len(),
             None => return Ok(Vec::new()),
         };
-        self.call_any(entry, args, 0, &mut steps, &mut mem, &mut globals)
+        self.call_any(
+            WasmCall { index: entry, args },
+            0,
+            &mut steps,
+            &mut mem,
+            &mut globals,
+            &mut bulk,
+        )
     }
 
     /// Resolve an exported function name to its index, if present.
@@ -1987,7 +2173,21 @@ impl Module {
         let mut steps: u64 = 0;
         let mut mem = self.new_memory()?;
         let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
-        self.call_any(idx, args, 0, &mut steps, &mut mem, &mut globals)
+        let mut data_live = self.new_data_state()?;
+        let (mut table, mut elem_live) = self.new_table_state()?;
+        let mut bulk = BulkState {
+            data_live: &mut data_live,
+            table: &mut table,
+            elem_live: &mut elem_live,
+        };
+        self.call_any(
+            WasmCall { index: idx, args },
+            0,
+            &mut steps,
+            &mut mem,
+            &mut globals,
+            &mut bulk,
+        )
     }
 
     /// Pages the module's linear memory starts at: its declared minimum, or
@@ -2012,13 +2212,51 @@ impl Module {
         mem.try_reserve(nbytes)
             .map_err(|_| WasmError::Trap("memory size"))?;
         mem.resize(nbytes, 0);
-        for (offset, bytes) in &self.data {
-            let end = offset + bytes.len();
-            if end <= mem.len() {
-                mem[*offset..end].copy_from_slice(bytes);
+        for segment in &self.data {
+            if let DataMode::Active(offset) = segment.mode {
+                let end = offset + segment.bytes.len();
+                if end <= mem.len() {
+                    mem[offset..end].copy_from_slice(&segment.bytes);
+                }
             }
         }
         Ok(mem)
+    }
+
+    /// Passive data starts live. Active data is implicitly dropped after its
+    /// instantiation-time initialization, as required by bulk memory.
+    fn new_data_state(&self) -> Result<Vec<bool>, WasmError> {
+        let mut state = Vec::new();
+        state
+            .try_reserve(self.data.len())
+            .map_err(|_| WasmError::Trap("data segment state"))?;
+        state.extend(
+            self.data
+                .iter()
+                .map(|segment| segment.mode == DataMode::Passive),
+        );
+        Ok(state)
+    }
+
+    /// Create one instance's table and passive-element liveness without any
+    /// infallible guest-sized allocation.
+    fn new_table_state(&self) -> Result<(Vec<Option<usize>>, Vec<bool>), WasmError> {
+        let mut table = Vec::new();
+        table
+            .try_reserve(self.table.len())
+            .map_err(|_| WasmError::Trap("table size"))?;
+        table.extend_from_slice(&self.table);
+
+        let mut elem_live = Vec::new();
+        elem_live
+            .try_reserve(self.elems.len())
+            .map_err(|_| WasmError::Trap("element segment state"))?;
+        elem_live.extend(
+            self.elems
+                .iter()
+                .map(|segment| segment.mode == ElemMode::Passive),
+        );
+        Ok((table, elem_live))
     }
 
     /// Number of parameters a function index (host or defined) expects.
@@ -2036,13 +2274,14 @@ impl Module {
     /// Dispatch a call by combined index to a host function or a defined one.
     fn call_any(
         &self,
-        idx: usize,
-        args: &[Val],
+        call: WasmCall<'_>,
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
         globals: &mut Vec<Val>,
+        bulk: &mut BulkState<'_>,
     ) -> Result<Vec<Val>, WasmError> {
+        let WasmCall { index: idx, args } = call;
         if idx < self.hosts.len() {
             let host = &self.hosts[idx];
             if args.len() != host.n_params {
@@ -2070,18 +2309,32 @@ impl Module {
             }
             return Ok(res.into_iter().map(Val::I32).collect());
         }
-        self.run_defined(idx - self.hosts.len(), args, depth, steps, mem, globals)
+        self.run_defined(
+            WasmCall {
+                index: idx - self.hosts.len(),
+                args,
+            },
+            depth,
+            steps,
+            mem,
+            globals,
+            bulk,
+        )
     }
 
     fn run_defined(
         &self,
-        def_idx: usize,
-        args: &[Val],
+        call: WasmCall<'_>,
         depth: usize,
         steps: &mut u64,
         mem: &mut Vec<u8>,
         globals: &mut Vec<Val>,
+        bulk: &mut BulkState<'_>,
     ) -> Result<Vec<Val>, WasmError> {
+        let WasmCall {
+            index: def_idx,
+            args,
+        } = call;
         if depth > WASM_MAX_DEPTH {
             return Err(WasmError::Trap("call depth"));
         }
@@ -2505,6 +2758,72 @@ impl Module {
                         stack.push(Val::I32(-1));
                     }
                 }
+                Op::MemoryInit { data_index } => {
+                    let len = pop(&mut stack)? as u32 as usize;
+                    let source = pop(&mut stack)? as u32 as usize;
+                    let destination = pop(&mut stack)? as u32 as usize;
+                    let index = data_index as usize;
+                    let segment = self
+                        .data
+                        .get(index)
+                        .ok_or(WasmError::Trap("memory.init data segment index"))?;
+                    let live = *bulk
+                        .data_live
+                        .get(index)
+                        .ok_or(WasmError::Trap("memory.init data segment state"))?;
+                    let bytes = if live { segment.bytes.as_slice() } else { &[] };
+                    let source_range = bulk_memory_range(bytes.len(), source, len)?;
+                    let destination_range = bulk_memory_range(mem.len(), destination, len)?;
+                    charge_bulk_steps(steps, len, self.limits.max_steps)?;
+                    mem[destination_range].copy_from_slice(&bytes[source_range]);
+                }
+                Op::DataDrop { data_index } => {
+                    let live = bulk
+                        .data_live
+                        .get_mut(data_index as usize)
+                        .ok_or(WasmError::Trap("data.drop segment index"))?;
+                    *live = false;
+                }
+                Op::TableInit { elem_index } => {
+                    let len = pop(&mut stack)? as u32 as usize;
+                    let source = pop(&mut stack)? as u32 as usize;
+                    let destination = pop(&mut stack)? as u32 as usize;
+                    let index = elem_index as usize;
+                    let segment = self
+                        .elems
+                        .get(index)
+                        .ok_or(WasmError::Trap("table.init element segment index"))?;
+                    let live = *bulk
+                        .elem_live
+                        .get(index)
+                        .ok_or(WasmError::Trap("table.init element segment state"))?;
+                    let funcs = if live { segment.funcs.as_slice() } else { &[] };
+                    let source_range = bulk_memory_range(funcs.len(), source, len)?;
+                    let destination_range = bulk_memory_range(bulk.table.len(), destination, len)?;
+                    charge_bulk_elements(steps, len, self.limits.max_steps)?;
+                    for (slot, &function) in bulk.table[destination_range]
+                        .iter_mut()
+                        .zip(funcs[source_range].iter())
+                    {
+                        *slot = Some(function);
+                    }
+                }
+                Op::ElemDrop { elem_index } => {
+                    let live = bulk
+                        .elem_live
+                        .get_mut(elem_index as usize)
+                        .ok_or(WasmError::Trap("elem.drop segment index"))?;
+                    *live = false;
+                }
+                Op::TableCopy => {
+                    let len = pop(&mut stack)? as u32 as usize;
+                    let source = pop(&mut stack)? as u32 as usize;
+                    let destination = pop(&mut stack)? as u32 as usize;
+                    let source_range = bulk_memory_range(bulk.table.len(), source, len)?;
+                    bulk_memory_range(bulk.table.len(), destination, len)?;
+                    charge_bulk_elements(steps, len, self.limits.max_steps)?;
+                    bulk.table.copy_within(source_range, destination);
+                }
                 Op::MemoryCopy => {
                     let len = pop(&mut stack)? as u32 as usize;
                     let source = pop(&mut stack)? as u32 as usize;
@@ -2657,16 +2976,26 @@ impl Module {
                         return Err(WasmError::Trap("call"));
                     }
                     let cargs = stack.split_off(stack.len() - n);
-                    let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
+                    let res = self.call_any(
+                        WasmCall {
+                            index: combined,
+                            args: &cargs,
+                        },
+                        depth + 1,
+                        steps,
+                        mem,
+                        globals,
+                        bulk,
+                    )?;
                     stack.extend(res);
                 }
                 Op::CallIndirect { type_index } => {
                     let ti = pop(&mut stack)? as u32 as usize;
-                    if ti >= self.table.len() {
+                    if ti >= bulk.table.len() {
                         return Err(WasmError::Trap("call_indirect: table index"));
                     }
                     let combined =
-                        self.table.get(ti).copied().flatten().ok_or({
+                        bulk.table.get(ti).copied().flatten().ok_or({
                             WasmError::Trap("call_indirect: uninitialised table element")
                         })?;
                     // Type check (spec 4.4.8): the callee's declared type must
@@ -2703,7 +3032,17 @@ impl Module {
                         return Err(WasmError::Trap("call_indirect: stack has"));
                     }
                     let cargs = stack.split_off(stack.len() - n);
-                    let res = self.call_any(combined, &cargs, depth + 1, steps, mem, globals)?;
+                    let res = self.call_any(
+                        WasmCall {
+                            index: combined,
+                            args: &cargs,
+                        },
+                        depth + 1,
+                        steps,
+                        mem,
+                        globals,
+                        bulk,
+                    )?;
                     stack.extend(res);
                 }
                 Op::Block { arity, end, .. } => control.push(Frame {
@@ -2806,21 +3145,34 @@ impl Instance {
     fn new(module: Module) -> Result<Self, WasmError> {
         let memory = module.new_memory()?;
         let globals = module.globals.iter().map(|global| global.init).collect();
+        let data_live = module.new_data_state()?;
+        let (table, elem_live) = module.new_table_state()?;
         let mut instance = Self {
             module,
             memory,
             globals,
+            data_live,
+            table,
+            elem_live,
             last_steps: 0,
         };
         if let Some(start) = instance.module.start {
             let mut steps = 0;
+            let mut bulk = BulkState {
+                data_live: &mut instance.data_live,
+                table: &mut instance.table,
+                elem_live: &mut instance.elem_live,
+            };
             let result = instance.module.call_any(
-                start,
-                &[],
+                WasmCall {
+                    index: start,
+                    args: &[],
+                },
                 0,
                 &mut steps,
                 &mut instance.memory,
                 &mut instance.globals,
+                &mut bulk,
             );
             instance.last_steps = steps;
             result?;
@@ -2856,13 +3208,18 @@ impl Instance {
     /// zero for this top-level call; memory and globals remain live.
     pub fn invoke_val(&mut self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps = 0;
+        let mut bulk = BulkState {
+            data_live: &mut self.data_live,
+            table: &mut self.table,
+            elem_live: &mut self.elem_live,
+        };
         let result = self.module.call_any(
-            idx,
-            args,
+            WasmCall { index: idx, args },
             0,
             &mut steps,
             &mut self.memory,
             &mut self.globals,
+            &mut bulk,
         );
         self.last_steps = steps;
         result
@@ -2881,7 +3238,7 @@ impl Instance {
 
     /// Current funcref-table length. MVP tables cannot grow in slot A.
     pub fn table_elements(&self) -> usize {
-        self.module.table.len()
+        self.table.len()
     }
 
     /// Read-only access to the live linear memory, for bounded native host I/O.
@@ -2939,6 +3296,17 @@ fn bulk_memory_range(
 /// ordinary unit, and always charge before mutation so a fuel trap is atomic.
 fn charge_bulk_steps(steps: &mut u64, len: usize, max_steps: u64) -> Result<(), WasmError> {
     let units = u64::try_from(len.div_ceil(16)).unwrap_or(u64::MAX);
+    *steps = steps.saturating_add(units);
+    if *steps > max_steps {
+        return Err(WasmError::Trap("step budget"));
+    }
+    Ok(())
+}
+
+/// Table elements are pointer-sized work rather than bytes; charge one fuel
+/// unit per copied element before modifying the live table.
+fn charge_bulk_elements(steps: &mut u64, len: usize, max_steps: u64) -> Result<(), WasmError> {
+    let units = u64::try_from(len).unwrap_or(u64::MAX);
     *steps = steps.saturating_add(units);
     if *steps > max_steps {
         return Err(WasmError::Trap("step budget"));
@@ -3774,8 +4142,216 @@ mod tests {
             Err(WasmError::Decode("memory.copy memory indices must be 0"))
         ));
         assert!(matches!(
-            module.add_function(0, 0, 0, &[0xFC, 0x0C, 0x0B]),
+            module.add_function(0, 0, 0, &[0xFC, 0x0F, 0x0B]),
             Err(WasmError::Decode("unsupported 0xfc opcode"))
+        ));
+        assert!(matches!(
+            module.add_function(0, 0, 0, &[0xFC, 0x0C, 0x00, 0x01, 0x0B]),
+            Err(WasmError::Decode("table.init table index must be 0"))
+        ));
+    }
+
+    fn passive_data_module(data: &[u8], body: &[u8], include_data_count: bool) -> Vec<u8> {
+        fn section(module: &mut Vec<u8>, id: u8, payload: &[u8]) {
+            assert!(payload.len() < 128);
+            module.extend_from_slice(&[id, payload.len() as u8]);
+            module.extend_from_slice(payload);
+        }
+
+        assert!(data.len() < 128 && body.len() < 126);
+        let mut wasm = alloc::vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+        // (func (param i32 i32 i32))
+        section(&mut wasm, 1, &[0x01, 0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x00]);
+        section(&mut wasm, 3, &[0x01, 0x00]);
+        section(&mut wasm, 5, &[0x01, 0x00, 0x01]);
+        if include_data_count {
+            section(&mut wasm, 12, &[0x01]);
+        }
+        let mut code = alloc::vec![0x01, (body.len() + 1) as u8, 0x00];
+        code.extend_from_slice(body);
+        section(&mut wasm, 10, &code);
+        let mut data_section = alloc::vec![0x01, 0x01, data.len() as u8];
+        data_section.extend_from_slice(data);
+        section(&mut wasm, 11, &data_section);
+        wasm
+    }
+
+    #[test]
+    fn passive_data_init_drop_is_instance_local_and_spec_exact() {
+        let body = [
+            0x20, 0x00, 0x20, 0x01, 0x20, 0x02, // dst, src, len
+            0xFC, 0x08, 0x00, 0x00, // memory.init data 0 memory 0
+            0xFC, 0x09, 0x00, // data.drop 0
+            0x0B,
+        ];
+        let wasm = passive_data_module(b"hello", &body, true);
+        let mut first = Module::from_bytes(&wasm).unwrap().instantiate().unwrap();
+        let mut second = Module::from_bytes(&wasm).unwrap().instantiate().unwrap();
+
+        first.invoke(0, &[10, 1, 3]).unwrap();
+        assert_eq!(&first.memory()[10..13], b"ell");
+        assert!(matches!(
+            first.invoke(0, &[20, 0, 1]),
+            Err(WasmError::Trap(_))
+        ));
+        // A dropped segment is empty: exactly offset=0,length=0 remains valid.
+        first.invoke(0, &[65_536, 0, 0]).unwrap();
+
+        // Dropping in one instance must not mutate the module definition or a
+        // sibling instance's segment state.
+        second.invoke(0, &[4, 0, 5]).unwrap();
+        assert_eq!(&second.memory()[4..9], b"hello");
+    }
+
+    #[test]
+    fn bulk_data_validation_requires_data_count_and_checks_indices() {
+        let init_zero = [
+            0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x08, 0x00, 0x00, 0x0B,
+        ];
+        assert!(matches!(
+            Module::from_bytes(&passive_data_module(b"x", &init_zero, false)),
+            Err(WasmError::Decode(
+                "validation: memory.init requires data count"
+            ))
+        ));
+
+        let bad_index = [
+            0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x08, 0x01, 0x00, 0x0B,
+        ];
+        assert!(matches!(
+            Module::from_bytes(&passive_data_module(b"x", &bad_index, true)),
+            Err(WasmError::Decode(
+                "validation: memory.init data segment index"
+            ))
+        ));
+    }
+
+    #[test]
+    fn memory_init_fuel_trap_is_atomic() {
+        let body = [
+            0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x08, 0x00, 0x00, 0x0B,
+        ];
+        let wasm = passive_data_module(&[0xA5; 64], &body, true);
+        let module = Module::from_bytes_with(
+            &wasm,
+            Limits {
+                max_steps: 6,
+                ..Limits::default()
+            },
+        )
+        .unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert!(matches!(
+            instance.invoke(0, &[0, 0, 64]),
+            Err(WasmError::Trap("step budget"))
+        ));
+        assert_eq!(&instance.memory()[..8], &[0; 8]);
+    }
+
+    fn passive_elem_module() -> Vec<u8> {
+        fn section(module: &mut Vec<u8>, id: u8, payload: &[u8]) {
+            assert!(payload.len() < 128);
+            module.extend_from_slice(&[id, payload.len() as u8]);
+            module.extend_from_slice(payload);
+        }
+        fn body(code: &mut Vec<u8>, instructions: &[u8]) {
+            assert!(instructions.len() < 126);
+            code.push((instructions.len() + 1) as u8);
+            code.push(0); // no declared locals
+            code.extend_from_slice(instructions);
+        }
+
+        let mut wasm = alloc::vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+        // type0 (i32,i32,i32)->(), type1 ()->i32, type2 (i32)->i32
+        section(
+            &mut wasm,
+            1,
+            &[
+                0x03, 0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x00, 0x60, 0x00, 0x01, 0x7F, 0x60, 0x01, 0x7F,
+                0x01, 0x7F,
+            ],
+        );
+        // init/drop, return42, return7, indirect(index), table.copy
+        section(&mut wasm, 3, &[0x05, 0x00, 0x01, 0x01, 0x02, 0x00]);
+        section(&mut wasm, 4, &[0x01, 0x70, 0x00, 0x04]);
+        // Passive legacy funcref segment containing functions 1 and 2.
+        section(&mut wasm, 9, &[0x01, 0x01, 0x00, 0x02, 0x01, 0x02]);
+
+        let mut code = alloc::vec![0x05];
+        body(
+            &mut code,
+            &[
+                0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x0C, 0x00, 0x00, 0xFC, 0x0D, 0x00, 0x0B,
+            ],
+        );
+        body(&mut code, &[0x41, 0x2A, 0x0B]);
+        body(&mut code, &[0x41, 0x07, 0x0B]);
+        body(&mut code, &[0x20, 0x00, 0x11, 0x01, 0x00, 0x0B]);
+        body(
+            &mut code,
+            &[
+                0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFC, 0x0E, 0x00, 0x00, 0x0B,
+            ],
+        );
+        section(&mut wasm, 10, &code);
+        wasm
+    }
+
+    #[test]
+    fn passive_elem_init_drop_copy_is_instance_local_and_overlap_safe() {
+        let wasm = passive_elem_module();
+        let mut first = Module::from_bytes(&wasm).unwrap().instantiate().unwrap();
+        let mut second = Module::from_bytes(&wasm).unwrap().instantiate().unwrap();
+
+        first.invoke(0, &[1, 0, 2]).unwrap();
+        assert_eq!(first.invoke(3, &[1]).unwrap(), vec![42]);
+        assert_eq!(first.invoke(3, &[2]).unwrap(), vec![7]);
+        assert!(matches!(
+            first.invoke(0, &[0, 0, 1]),
+            Err(WasmError::Trap(_))
+        ));
+        first.invoke(0, &[4, 0, 0]).unwrap();
+
+        // Overlap-safe table.copy moves [func1,func2] from 1..3 to 0..2.
+        first.invoke(4, &[0, 1, 2]).unwrap();
+        assert_eq!(first.invoke(3, &[0]).unwrap(), vec![42]);
+        assert_eq!(first.invoke(3, &[1]).unwrap(), vec![7]);
+
+        // A sibling instance still owns a live copy of the passive segment.
+        second.invoke(0, &[0, 0, 2]).unwrap();
+        assert_eq!(second.invoke(3, &[0]).unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn table_init_fuel_trap_is_atomic() {
+        let module = Module::from_bytes_with(
+            &passive_elem_module(),
+            Limits {
+                max_steps: 5,
+                ..Limits::default()
+            },
+        )
+        .unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert!(matches!(
+            instance.invoke(0, &[0, 0, 2]),
+            Err(WasmError::Trap("step budget"))
+        ));
+        assert!(matches!(instance.invoke(3, &[0]), Err(WasmError::Trap(_))));
+    }
+
+    #[test]
+    fn active_element_segment_requires_a_declared_table() {
+        let wasm = [
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // header
+            0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // () -> ()
+            0x03, 0x02, 0x01, 0x00, // one function
+            0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00, // active elem
+            0x0A, 0x04, 0x01, 0x02, 0x00, 0x0B, // function body
+        ];
+        assert!(matches!(
+            Module::from_bytes(&wasm),
+            Err(WasmError::Decode("active element segment requires table"))
         ));
     }
 

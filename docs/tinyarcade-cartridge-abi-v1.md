@@ -19,19 +19,31 @@ before a `Module` exists. Custom sections may appear between standard sections;
 they do not change ordering.
 
 The v1 executable profile is MVP scalar instructions plus mutable globals,
-tables/`call_indirect`, and the standard bulk-memory `memory.copy` and
-`memory.fill` operations. DataCount is accepted and checked against the data
-section. Passive data, `memory.init`/`data.drop`, bulk table operations,
-reference types, multivalue, SIMD, exceptions, threads and multiple memories
-remain outside v1 and fail loudly at load time. This is feature negotiation by
-converter profile: future runtimes may add standard proposals without changing
-the `.wasm` container or inventing tinyvm-only opcodes.
+tables/`call_indirect`, and the standard bulk-memory proposal over the single
+memory and MVP funcref table. It accepts active/passive data and index-encoded
+funcref element segments, `memory.init`, `data.drop`, `memory.copy`,
+`memory.fill`, `table.init`, `elem.drop` and `table.copy`. DataCount is checked
+against the data section and is mandatory when code uses a data-segment
+instruction. Reference-typed element expressions, reference types, multivalue,
+SIMD, exceptions, threads and multiple memories remain outside v1 and fail
+loudly at load time. This is feature negotiation by converter profile: future
+runtimes may add standard proposals without changing the `.wasm` container or
+inventing tinyvm-only opcodes.
+
+The segment flags, DataCount ordering, instruction immediates and drop
+semantics follow the WebAssembly specification's
+[bulk-memory proposal](https://github.com/WebAssembly/spec/blob/main/proposals/bulk-memory-operations/Overview.md).
 
 Bulk copy/fill first bounds-check every range, then charge deterministic fuel
 proportional to length (one unit per 16 bytes, in addition to the instruction
 unit), then mutate memory. An out-of-bounds or fuel trap therefore cannot leave
 a partial copy/fill behind. `memory.copy` has the standard overlap-safe memmove
 semantics; `memory.fill` uses the low byte of its i32 value.
+Table initialization/copy similarly checks both ranges and charges one fuel
+unit per funcref before mutation. Passive data and element liveness is owned by
+each instance: dropping a segment in one game cannot affect a sibling instance.
+Active and declarative segments are unavailable to init after instantiation,
+while a dropped segment still permits only source offset zero with length zero.
 
 One module may materialize at most 262,144 allocation-amplifying decode records
 in total. The shared count covers section entries, function parameter/result

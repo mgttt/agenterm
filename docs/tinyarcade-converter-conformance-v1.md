@@ -3,9 +3,10 @@
 Fan tools should emit an ordinary standards-valid WebAssembly `.wasm`, not a
 TinyArcade bytecode wrapper. The app-specific contract consists only of
 standard imports, exports, a standard custom manifest section and versioned
-media/state records. The accepted v1 compiler profile includes the MVP plus
-standard bulk-memory `memory.copy` and `memory.fill`; it is intentionally a
-bounded subset of WebAssembly, not a different VM instruction set.
+media/state records. The accepted v1 compiler profile includes the scalar MVP
+plus the standard bulk-memory proposal for one memory and one MVP funcref table:
+copy/fill, passive data/element segments, init/drop and table.copy. It is a
+bounded standards profile, not a different VM instruction set.
 
 Run the same black-box gate used by the runtime repository:
 
@@ -49,6 +50,12 @@ Two compiler-produced reference cartridges own both media branches:
 WASM modules built through the shared `build-rust-cartridge.sh` profile. Their
 real Rust output retains `memory.copy`/`memory.fill` and DataCount instead of
 lowering bulk work into MVP loops; neither receives a fixture-only loader.
+
+The independent bulk-memory development gate compiles checked-in WAT with
+WABT, validates the generated module with `wasm-validate`, then executes those
+same bytes in tinyvm and system JavaScriptCore. Run
+`crates/agenterm-tinyvm/smoke-wabt-bulk-memory.sh`; both engines must return 143
+from a module that exercises passive data and funcref element lifetimes.
 
 Before upload, a converter may additionally consume the exact app-build TAH1
 profile defined in
