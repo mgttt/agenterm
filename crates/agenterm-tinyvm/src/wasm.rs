@@ -243,10 +243,6 @@ impl Table {
                     .map(Option::is_none)
             })
     }
-
-    fn same_object(&self, other: &Self) -> bool {
-        self.store.same(&other.store) && self.index == other.index
-    }
 }
 
 struct MemoryState {
@@ -2789,45 +2785,54 @@ enum TableSlot {
         elements: Vec<Option<FunctionAddress>>,
         max: Option<usize>,
     },
-    Imported(Table),
+    Imported {
+        index: usize,
+        len: Rc<Cell<usize>>,
+        max: Option<usize>,
+    },
 }
 
 impl TableSlot {
     fn len(&self) -> usize {
         match self {
             Self::Defined { elements, .. } => elements.len(),
-            Self::Imported(table) => table.len(),
+            Self::Imported { len, .. } => len.get(),
         }
     }
 
     fn max_elements(&self) -> Option<usize> {
         match self {
             Self::Defined { max, .. } => *max,
-            Self::Imported(table) => table.max_elements(),
+            Self::Imported { max, .. } => *max,
         }
     }
 
     fn aliases(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Imported(left), Self::Imported(right)) => left.same_object(right),
+            (Self::Imported { index: left, .. }, Self::Imported { index: right, .. }) => {
+                left == right
+            }
             _ => false,
         }
     }
 
-    fn address(&self, index: usize) -> Result<Option<FunctionAddress>, WasmError> {
+    fn address(
+        &self,
+        store: &Store,
+        element_index: usize,
+    ) -> Result<Option<FunctionAddress>, WasmError> {
         match self {
             Self::Defined { elements, .. } => elements
-                .get(index)
+                .get(element_index)
                 .cloned()
                 .ok_or(WasmError::Trap("table element out of bounds")),
-            Self::Imported(table) => table
-                .store
+            Self::Imported { index, .. } => store
                 .inner
                 .try_borrow()
                 .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
                 .tables
-                .get(table.index)
-                .and_then(|shared| shared.elements.get(index))
+                .get(*index)
+                .and_then(|shared| shared.elements.get(element_index))
                 .cloned()
                 .ok_or(WasmError::Trap("table element out of bounds")),
         }
@@ -2835,24 +2840,24 @@ impl TableSlot {
 
     fn set_address(
         &mut self,
-        index: usize,
+        store: &Store,
+        element_index: usize,
         address: Option<FunctionAddress>,
     ) -> Result<(), WasmError> {
         match self {
             Self::Defined { elements, .. } => {
                 *elements
-                    .get_mut(index)
+                    .get_mut(element_index)
                     .ok_or(WasmError::Trap("table element out of bounds"))? = address;
             }
-            Self::Imported(table) => {
-                *table
-                    .store
+            Self::Imported { index, .. } => {
+                *store
                     .inner
                     .try_borrow_mut()
                     .map_err(|_| WasmError::Trap("store is already borrowed"))?
                     .tables
-                    .get_mut(table.index)
-                    .and_then(|shared| shared.elements.get_mut(index))
+                    .get_mut(*index)
+                    .and_then(|shared| shared.elements.get_mut(element_index))
                     .ok_or(WasmError::Trap("table element out of bounds"))? = address;
             }
         }
@@ -2861,6 +2866,7 @@ impl TableSlot {
 
     fn grow_to(
         &mut self,
+        store: &Store,
         new_size: usize,
         fill: Option<FunctionAddress>,
     ) -> Result<bool, WasmError> {
@@ -2872,15 +2878,14 @@ impl TableSlot {
                 }
                 elements.resize(new_size, fill);
             }
-            Self::Imported(table) => {
-                let mut store = table
-                    .store
+            Self::Imported { index, len, .. } => {
+                let mut state = store
                     .inner
                     .try_borrow_mut()
                     .map_err(|_| WasmError::Trap("store is already borrowed"))?;
-                let elements = &mut store
+                let elements = &mut state
                     .tables
-                    .get_mut(table.index)
+                    .get_mut(*index)
                     .ok_or(WasmError::Trap("table index"))?
                     .elements;
                 let delta = new_size.saturating_sub(elements.len());
@@ -2888,7 +2893,7 @@ impl TableSlot {
                     return Ok(false);
                 }
                 elements.resize(new_size, fill);
-                table.len.set(new_size);
+                len.set(new_size);
             }
         }
         Ok(true)
@@ -2969,6 +2974,7 @@ struct BulkState<'a> {
     data_live: &'a mut [bool],
     tables: &'a mut [TableSlot],
     elem_live: &'a mut [bool],
+    store: &'a Store,
     instance_id: usize,
 }
 
@@ -4011,11 +4017,12 @@ impl Module {
         let mut data_live = self.new_data_state()?;
         let store = self.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
-        let (mut tables, mut elem_live) = self.new_table_state(&globals, instance_id)?;
+        let (mut tables, mut elem_live) = self.new_table_state(&globals, &store, instance_id)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
             tables: &mut tables,
             elem_live: &mut elem_live,
+            store: &store,
             instance_id,
         };
         let mut resources = CallResourceStats::default();
@@ -4114,11 +4121,12 @@ impl Module {
         let mut data_live = self.new_data_state()?;
         let store = self.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
-        let (mut tables, mut elem_live) = self.new_table_state(&globals, instance_id)?;
+        let (mut tables, mut elem_live) = self.new_table_state(&globals, &store, instance_id)?;
         let mut bulk = BulkState {
             data_live: &mut data_live,
             tables: &mut tables,
             elem_live: &mut elem_live,
+            store: &store,
             instance_id,
         };
         let mut resources = CallResourceStats::default();
@@ -4249,6 +4257,7 @@ impl Module {
     fn new_table_state(
         &self,
         globals: &[GlobalSlot],
+        store: &Store,
         instance_id: usize,
     ) -> Result<TableState, WasmError> {
         let mut tables = Vec::new();
@@ -4259,9 +4268,16 @@ impl Module {
             if template.imported {
                 let table = template
                     .import
-                    .clone()
+                    .as_ref()
                     .ok_or(WasmError::Trap("unbound imported table"))?;
-                tables.push(TableSlot::Imported(table));
+                if !store.same(&table.store) {
+                    return Err(WasmError::Trap("table imports belong to different stores"));
+                }
+                tables.push(TableSlot::Imported {
+                    index: table.index,
+                    len: table.len.clone(),
+                    max: table.max,
+                });
                 continue;
             }
             let mut elements = Vec::new();
@@ -4314,6 +4330,7 @@ impl Module {
                     .ok_or(WasmError::Trap("elem segment runs past table bounds"))?;
                 for (relative, &function) in segment.refs.iter().enumerate() {
                     table.set_address(
+                        store,
                         offset + relative,
                         function.map(|index| FunctionAddress { instance_id, index }),
                     )?;
@@ -4356,7 +4373,7 @@ impl Module {
             .tables
             .get(table_index as usize)
             .ok_or(WasmError::Trap("call_indirect: table immediate"))?;
-        let address = table.address(element_index)?;
+        let address = table.address(bulk.store, element_index)?;
         let combined = address
             .as_ref()
             .ok_or(WasmError::Trap(
@@ -5343,6 +5360,7 @@ impl Module {
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
                     for (relative, &function) in refs[source_range].iter().enumerate() {
                         table.set_address(
+                            bulk.store,
                             destination + relative,
                             function.map(|index| FunctionAddress {
                                 instance_id: bulk.instance_id,
@@ -5389,24 +5407,34 @@ impl Module {
                     if same_table {
                         if destination > source && destination < source + len {
                             for relative in (0..len).rev() {
-                                let function =
-                                    bulk.tables[source_index].address(source + relative)?;
-                                bulk.tables[source_index]
-                                    .set_address(destination + relative, function)?;
+                                let function = bulk.tables[source_index]
+                                    .address(bulk.store, source + relative)?;
+                                bulk.tables[source_index].set_address(
+                                    bulk.store,
+                                    destination + relative,
+                                    function,
+                                )?;
                             }
                         } else {
                             for relative in 0..len {
-                                let function =
-                                    bulk.tables[source_index].address(source + relative)?;
-                                bulk.tables[source_index]
-                                    .set_address(destination + relative, function)?;
+                                let function = bulk.tables[source_index]
+                                    .address(bulk.store, source + relative)?;
+                                bulk.tables[source_index].set_address(
+                                    bulk.store,
+                                    destination + relative,
+                                    function,
+                                )?;
                             }
                         }
                     } else {
                         for relative in 0..len {
-                            let function = bulk.tables[source_index].address(source + relative)?;
-                            bulk.tables[destination_index]
-                                .set_address(destination + relative, function)?;
+                            let function =
+                                bulk.tables[source_index].address(bulk.store, source + relative)?;
+                            bulk.tables[destination_index].set_address(
+                                bulk.store,
+                                destination + relative,
+                                function,
+                            )?;
                         }
                     }
                 }
@@ -5416,7 +5444,7 @@ impl Module {
                         .tables
                         .get(table_index as usize)
                         .ok_or(WasmError::Trap("table.get table index"))?
-                        .address(index)?
+                        .address(bulk.store, index)?
                         .as_ref()
                         .map(|address| address.local_index(bulk.instance_id))
                         .transpose()?;
@@ -5432,7 +5460,7 @@ impl Module {
                     bulk.tables
                         .get_mut(table_index as usize)
                         .ok_or(WasmError::Trap("table.set table index"))?
-                        .set_address(index, function)?;
+                        .set_address(bulk.store, index, function)?;
                 }
                 Op::TableGrow(table_index) => {
                     let delta = pop(&mut stack)? as u32 as usize;
@@ -5478,7 +5506,7 @@ impl Module {
                     if let Some(new_size) = new_size {
                         charge_bulk_elements(steps, delta, self.limits.max_steps)?;
                         let table = &mut bulk.tables[table_index];
-                        if table.grow_to(new_size, function)? {
+                        if table.grow_to(bulk.store, new_size, function)? {
                             stack.push(Val::I32(old_size as i32));
                         } else {
                             stack.push(Val::I32(-1));
@@ -5514,7 +5542,7 @@ impl Module {
                     let range = bulk_memory_range(table.len(), destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
                     for index in range {
-                        table.set_address(index, function.clone())?;
+                        table.set_address(bulk.store, index, function.clone())?;
                     }
                 }
                 Op::MemoryCopy {
@@ -5957,7 +5985,7 @@ impl Instance {
         let data_live = module.new_data_state()?;
         let store = module.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
-        let (tables, elem_live) = module.new_table_state(&globals, instance_id)?;
+        let (tables, elem_live) = module.new_table_state(&globals, &store, instance_id)?;
         let mut instance = Self {
             module,
             store,
@@ -5977,6 +6005,7 @@ impl Instance {
                 data_live: &mut instance.data_live,
                 tables: &mut instance.tables,
                 elem_live: &mut instance.elem_live,
+                store: &instance.store,
                 instance_id: instance.instance_id,
             };
             let mut resources = CallResourceStats::default();
@@ -6034,6 +6063,7 @@ impl Instance {
             data_live: &mut self.data_live,
             tables: &mut self.tables,
             elem_live: &mut self.elem_live,
+            store: &self.store,
             instance_id: self.instance_id,
         };
         let mut resources = CallResourceStats::default();

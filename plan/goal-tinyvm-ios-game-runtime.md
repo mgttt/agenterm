@@ -2602,3 +2602,26 @@ Evidence on 2026-08-21:
   101,192 bytes. iOS links at 1,579,272 bytes arm64 and 1,656,384 bytes x86_64;
   profile-catalog, replay, private-library and session consumers link at
   1,452,120, 1,443,064, 1,444,720 and 1,443,888 bytes.
+
+## Seventy-third executable increment — cycle-free live table slots
+
+Live instances no longer retain full `WasmTable` handles inside imported table
+slots. Each slot carries only its store table id, shared length cell and maximum;
+reads, writes, growth, active elements and bulk operations receive the current
+store explicitly. This removes the future ownership cycle `Store → Instance →
+Table → Store`, allowing the store to own registered instance state without
+leaking it.
+
+Defined tables retain their direct vector fast path. Imported alias detection
+uses equal table ids inside the already-enforced common store, so aggregate
+budgets and overlap order remain unchanged. The existing WABT alias, distinct
+same-store, foreign-store rejection, multi-table and JavaScriptCore gates all
+exercise the new representation.
+
+Evidence on 2026-08-21: all-feature tests, doctests, no-default/replay checks,
+Clippy, rustfmt and shell checks pass; WABT and JavaScriptCore imported-table
+and multi-table differentials remain exact. The static core measures 101,192
+bytes. iOS links at 1,579,160 bytes arm64 and 1,656,280 bytes x86_64;
+profile-catalog, replay, private-library and session consumers link at
+1,452,008, 1,442,952, 1,444,624 and 1,443,776 bytes. Nostalgia Arcade consumes
+the result with 5 unit tests, 1 UI test and an arm64 device build.

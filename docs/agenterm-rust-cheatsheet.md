@@ -2619,6 +2619,13 @@ and keep function addresses numeric `(instance, function)` records. This avoids
 global registries and raw-pointer identity, and creates the lookup key for a
 later store-owned activation trampoline.
 
+Do not then put a strong store handle back inside every live imported-table
+slot: once the store owns instance records that creates `Store → Instance →
+Table → Store`. Resolve bindings into store-local table ids plus independently
+shared scalar metadata, and pass the current store explicitly to table
+operations. The decoded module may own temporary host handles before
+instantiation; the live record should not.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode
