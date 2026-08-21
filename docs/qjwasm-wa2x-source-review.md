@@ -158,6 +158,9 @@ Reject for the iOS cartridge runtime:
    lends pixel/metadata regions through synchronous read-only closures. SDK and
    real-App pointer tests prove the views share that owner; compatibility
    `Data` snapshots preserve ordinary Swift value semantics for cold callers.
-8. [ ] If background execution becomes a product requirement, first specify and
+8. [x] Indexed2d presentation expands borrowed palette indices directly into
+   one final-size Swift `Data` allocation. The iOS gate rejects a return to an
+   intermediate growable byte array and executes the 320 × 200 CGImage path.
+9. [ ] If background execution becomes a product requirement, first specify and
    test bounded mailbox saturation, cancellation, callback re-entrancy,
    shutdown and Promise-equivalent completion semantics without adding JS.

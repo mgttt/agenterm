@@ -444,20 +444,22 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         }
     }
 
-    /// Copies the indexed plane into canonical row-major RGBA8 bytes.
-    /// The decoded frame bounds this allocation to less than 256 KiB.
+    /// Expands the indexed plane into canonical row-major RGBA8 bytes with one
+    /// fully initialized allocation. The decoded frame bounds it below 256 KiB.
     public func rgba8888() -> Data {
         withPixelBytes { pixels in
-            var bytes = [UInt8]()
-            bytes.reserveCapacity(pixels.count * 4)
-            for index in pixels {
-                let color = paletteRGBA[Int(index)]
-                bytes.append(UInt8(truncatingIfNeeded: color))
-                bytes.append(UInt8(truncatingIfNeeded: color >> 8))
-                bytes.append(UInt8(truncatingIfNeeded: color >> 16))
-                bytes.append(UInt8(truncatingIfNeeded: color >> 24))
+            var rgba = Data(count: pixels.count * 4)
+            rgba.withUnsafeMutableBytes { (output: UnsafeMutableRawBufferPointer) in
+                for (pixelOffset, index) in pixels.enumerated() {
+                    let color = paletteRGBA[Int(index)]
+                    let outputOffset = pixelOffset * 4
+                    output[outputOffset] = UInt8(truncatingIfNeeded: color)
+                    output[outputOffset + 1] = UInt8(truncatingIfNeeded: color >> 8)
+                    output[outputOffset + 2] = UInt8(truncatingIfNeeded: color >> 16)
+                    output[outputOffset + 3] = UInt8(truncatingIfNeeded: color >> 24)
+                }
             }
-            return Data(bytes)
+            return rgba
         }
     }
 

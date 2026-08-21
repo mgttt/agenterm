@@ -90,7 +90,8 @@ tinyvm iOS game runtime
 │   ├── stable two-pass copy lengths  [x]
 │   ├── indexed 2D presentation       [x]
 │   │   ├── bounded app metadata hot path [x]
-│   │   └── scoped immutable frame views [x]
+│   │   ├── scoped immutable frame views [x]
+│   │   └── single-buffer RGBA expansion [x]
 │   ├── device + simulator build      [x]
 │   ├── real app target/package link  [x]
 │   │   └── current-main consumer gate [x]
@@ -4014,3 +4015,24 @@ copying compatibility property. Default linked smokes remain inside the
 existing budget at 1,683,368 bytes arm64 and 1,762,856 bytes x86_64. The
 executable PRD trace now binds 126 completed claims. Physical iPhone/TestFlight
 evidence remains open, so the persistent goal stays active.
+
+## One-hundred-twenty-seventh executable increment — single-buffer RGBA expansion
+
+The Swift indexed2d presenter now expands borrowed palette indices directly
+into one final-size `Data` buffer. It no longer grows a temporary `[UInt8]` and
+then copies the complete RGBA image into a second allocation on every display
+frame. Every destination byte is overwritten in place, palette alpha remains
+unchanged, and Core Graphics continues to own the completed immutable value for
+the image lifetime.
+
+Evidence on 2026-08-22: consumer commit `2995fd6` and the standalone Swift smoke
+verify exact RGBA bytes, including a half-alpha palette entry, construct a
+CGImage and drive the real UIKit view. Its 320 × 200 presentation loop executes
+120 frames under the existing 16 ms average Simulator budget. The source gate
+rejects reintroducing the intermediate growable array. Device and
+universal-simulator XCFrameworks and Swift packages pass; the real App passes
+11 unit tests, one two-game UI journey and its arm64 Release build. Linked
+smokes remain within the existing budget at 1,683,768 bytes arm64 and 1,767,376
+bytes x86_64. The executable PRD trace now binds 127 completed claims. Physical
+iPhone/TestFlight performance evidence remains open, so the persistent goal
+stays active.

@@ -10,6 +10,14 @@ TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT/target/tinyarcade-ios-smoke"}
 CARGO=${CARGO:-cargo}
 RUST_FEATURES=${TINYVM_XCFRAMEWORK_FEATURES:-ios-c-api}
 
+grep -Fq 'var rgba = Data(count: pixels.count * 4)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+if grep -Fq 'bytes.reserveCapacity(pixels.count * 4)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "indexed2d RGBA expansion must not allocate an Array before Data" >&2
+  exit 1
+fi
+
 CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"
 

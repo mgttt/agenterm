@@ -242,6 +242,11 @@ read-only views into that owner for native decoding and RGBA conversion; their
 pointers cannot escape the closure. The zero-indexed `pixels` and
 `applicationMetadata` properties remain source-compatible value snapshots and
 copy only when a caller explicitly asks for them.
+Indexed presentation expands the validated palette plane directly into one
+final-size `Data` buffer. It no longer grows a separate `[UInt8]` and then
+copies the complete RGBA frame into `Data`; the existing 320 × 200 Simulator
+presentation loop exercises the resulting CGImage path under its 16 ms average
+budget, including non-opaque palette alpha.
 
 Replay recording is state on the same owner-thread runtime handle. Begin
 captures a portable snapshot and clears the previous completed trace; ordinary
