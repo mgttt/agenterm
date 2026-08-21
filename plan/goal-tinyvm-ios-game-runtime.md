@@ -1240,9 +1240,9 @@ The standard WASM loader now owns one 262,144-record complexity budget across
 section entries, function types, locals, decoded instructions, element indices
 and branch-table targets. Guest counts are charged before reservation,
 allocation-amplifying vectors use fallible allocation, and parsed
-function/local buffers move into the runtime instead of being cloned. This closes the gap
-where a sub-40-byte module could request a multi-billion-entry allocation
-before its missing first entry was noticed.
+function/local buffers move into the runtime instead of being cloned. This
+closes the gap where a sub-40-byte module could request a multi-billion-entry
+allocation before its missing first entry was noticed.
 
 The same load gate now enforces the WebAssembly 1.0 section envelope: standard
 sections are unique and ordered, unknown standard ids fail, and every supported
@@ -1261,3 +1261,9 @@ Evidence on 2026-08-21:
   sections before and after an ordinary type section.
 - Both compiler-produced Depth Well and Paddle Guard still pass converter and
   gameplay/suspend-resume black boxes under the same strict loader.
+- All 193 package tests plus one doctest and all-feature/all-target Clippy pass.
+  Device and universal simulator packages link; ordinary consumers measure
+  1,500,184 bytes arm64 and 1,567,736 bytes x86_64, while profile-catalog,
+  replay, private and session consumers remain below 1.38 MiB. The stripped
+  static core is 71,064 bytes with self-test 42, below its unchanged 100 KiB
+  hard gate.
