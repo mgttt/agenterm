@@ -62,6 +62,7 @@ this Apple Silicon host. It is discovery evidence, not a compatibility promise:
 | table/call_indirect | pass | pass |
 | extended constant expressions | pass | not claimed |
 | imported numeric globals + const `global.get` | pass | not claimed |
+| named table/memory/global exports | pass | not claimed |
 | SIMD | pass | pass |
 | Wasm exceptions | pass | pass |
 | shared memory/atomics | reject | pass |

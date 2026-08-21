@@ -440,6 +440,66 @@ fn standard_imported_globals_bind_types_and_share_mutation() {
 }
 
 #[test]
+fn standard_resource_exports_are_resolved_by_name() {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 4, &[0x01, 0x70, 0x00, 0x02]);
+    section(&mut wasm, 5, &[0x01, 0x00, 0x01]);
+    section(
+        &mut wasm,
+        6,
+        &[
+            0x02, 0x7F, 0x01, 0x41, 0x07, 0x0B, 0x7E, 0x00, 0x42, 0x09, 0x0B,
+        ],
+    );
+    section(
+        &mut wasm,
+        7,
+        &[
+            0x04, 0x01, b't', 0x01, 0x00, 0x03, b'm', b'e', b'm', 0x02, 0x00, 0x07, b'c', b'o',
+            b'u', b'n', b't', b'e', b'r', 0x03, 0x00, 0x05, b'f', b'i', b'x', b'e', b'd', 0x03,
+            0x01,
+        ],
+    );
+    section(&mut wasm, 11, &[0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, b'A']);
+
+    let module = must_ok(WasmModule::from_bytes(&wasm), "load resource exports");
+    assert_eq!(module.table_export_index("t"), Some(0));
+    assert_eq!(module.memory_export_index("mem"), Some(0));
+    assert_eq!(module.global_export_index("counter"), Some(0));
+    assert_eq!(module.global_export_index("fixed"), Some(1));
+    let mut instance = must_ok(module.instantiate(), "instantiate resource exports");
+    assert_eq!(instance.exported_table_elements("t"), Some(2));
+    assert_eq!(
+        instance.exported_memory("mem").map(|memory| memory[0]),
+        Some(b'A')
+    );
+    instance
+        .exported_memory_mut("mem")
+        .expect("exported memory")[1] = b'B';
+    assert_eq!(
+        &instance.exported_memory("mem").expect("memory")[..2],
+        b"AB"
+    );
+    assert!(matches!(
+        instance.exported_global("counter"),
+        Some(Val::I32(7))
+    ));
+    must_ok(
+        instance.set_exported_global("counter", Val::I32(11)),
+        "set mutable exported global",
+    );
+    assert!(matches!(
+        instance.exported_global("counter"),
+        Some(Val::I32(11))
+    ));
+    assert!(matches!(
+        instance.set_exported_global("fixed", Val::I64(10)),
+        Err(WasmError::Trap("global binding type"))
+    ));
+    assert!(instance.exported_memory("missing").is_none());
+}
+
+#[test]
 fn standard_extended_const_executes_and_rejects_invalid_expression_stacks() {
     let wasm = module_with_i32_global_initializer(&[
         0x41, 40, 0x41, 5, 0x6A, 0x41, 3, 0x6B, 0x41, 1, 0x6C, 0x0B,

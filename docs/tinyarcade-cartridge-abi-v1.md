@@ -73,6 +73,10 @@ The same profile boundary applies to imported numeric globals: the general VM
 has shared i32/i64/f32/f64 global bindings with exact type and mutability, while
 TinyArcade v1 remains function-import-only.
 
+The general embedding also resolves standard table, memory and global exports
+by name. These are ordinary Wasm exports, not TinyArcade manifest aliases.
+TinyArcade v1's callbacks continue to address its required memory zero.
+
 `return_call` and `return_call_indirect` have their standard encodings and
 validation rules. The target's complete result vector must equal the current
 function's result vector. tinyvm executes defined tail chains with a trampoline,

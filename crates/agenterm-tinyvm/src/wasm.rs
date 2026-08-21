@@ -1884,8 +1884,7 @@ struct ExportEntry {
     index: usize,
 }
 
-/// Parse every standard export kind. The embedding currently exposes function
-/// lookup only, but validation must still own table/memory/global exports.
+/// Parse every standard export kind for validation and embedding lookup.
 fn parse_export_section(
     p: &[u8],
     budget: &mut DecodeBudget,
@@ -2336,6 +2335,10 @@ pub struct Module {
     /// Function exports in declaration order (first one is [`Module::eval`]'s
     /// preferred entry).
     export_list: Vec<(String, usize)>,
+    /// Standard table, memory and global exports resolved by field name.
+    table_exports: BTreeMap<String, usize>,
+    memory_exports: BTreeMap<String, usize>,
+    global_exports: BTreeMap<String, usize>,
     /// Imported functions in index order (the host door).
     import_descs: Vec<ImportDesc>,
     /// Imported numeric globals in their independent global index space.
@@ -2761,9 +2764,21 @@ impl Module {
             if export.index >= bound {
                 return Err(WasmError::Decode("export index out of bounds"));
             }
-            if export.kind == 0x00 {
-                module.exports.insert(export.name.clone(), export.index);
-                module.export_list.push((export.name, export.index));
+            match export.kind {
+                0x00 => {
+                    module.exports.insert(export.name.clone(), export.index);
+                    module.export_list.push((export.name, export.index));
+                }
+                0x01 => {
+                    module.table_exports.insert(export.name, export.index);
+                }
+                0x02 => {
+                    module.memory_exports.insert(export.name, export.index);
+                }
+                0x03 => {
+                    module.global_exports.insert(export.name, export.index);
+                }
+                _ => unreachable!("export kind checked while parsing"),
             }
         }
         if let Some(start) = start_fn {
@@ -3058,6 +3073,21 @@ impl Module {
     /// Numeric global imports in their independent standard index order.
     pub fn global_imports(&self) -> &[GlobalImportDesc] {
         &self.global_import_descs
+    }
+
+    /// Resolve one standard table export to its table index.
+    pub fn table_export_index(&self, name: &str) -> Option<usize> {
+        self.table_exports.get(name).copied()
+    }
+
+    /// Resolve one standard memory export to its memory index.
+    pub fn memory_export_index(&self, name: &str) -> Option<usize> {
+        self.memory_exports.get(name).copied()
+    }
+
+    /// Resolve one standard global export to its global index.
+    pub fn global_export_index(&self, name: &str) -> Option<usize> {
+        self.global_exports.get(name).copied()
     }
 
     /// Bind one shared host global to every matching standard import.
@@ -5249,6 +5279,13 @@ impl Instance {
         self.tables.get(table_index).map(Vec::len)
     }
 
+    /// Current length of a standard exported table.
+    pub fn exported_table_elements(&self, name: &str) -> Option<usize> {
+        self.module
+            .table_export_index(name)
+            .and_then(|index| self.table_elements_at(index))
+    }
+
     /// Read-only access to memory zero, for bounded native host I/O.
     pub fn memory(&self) -> &[u8] {
         self.memory_at(0).unwrap_or(&[])
@@ -5271,6 +5308,45 @@ impl Instance {
     /// Mutable access to one selected live linear memory.
     pub fn memory_at_mut(&mut self, memory_index: usize) -> Option<&mut [u8]> {
         self.memories.get_mut(memory_index).map(Vec::as_mut_slice)
+    }
+
+    /// Read-only access to one standard exported memory.
+    pub fn exported_memory(&self, name: &str) -> Option<&[u8]> {
+        self.module
+            .memory_export_index(name)
+            .and_then(|index| self.memory_at(index))
+    }
+
+    /// Mutable host access to one standard exported memory.
+    pub fn exported_memory_mut(&mut self, name: &str) -> Option<&mut [u8]> {
+        let index = self.module.memory_export_index(name)?;
+        self.memory_at_mut(index)
+    }
+
+    /// Read one standard exported numeric or funcref global.
+    pub fn exported_global(&self, name: &str) -> Option<Val> {
+        let index = self.module.global_export_index(name)?;
+        self.globals.get(index).map(GlobalSlot::get)
+    }
+
+    /// Set one mutable standard exported global with exact value type.
+    pub fn set_exported_global(&mut self, name: &str, value: Val) -> Result<(), WasmError> {
+        let index = self
+            .module
+            .global_export_index(name)
+            .ok_or(WasmError::Trap("no exported global named"))?;
+        let descriptor = self
+            .module
+            .globals
+            .get(index)
+            .ok_or(WasmError::Trap("global index"))?;
+        if !descriptor.mutable || valtype_of(&value) != descriptor.value_type {
+            return Err(WasmError::Trap("global binding type"));
+        }
+        self.globals
+            .get_mut(index)
+            .ok_or(WasmError::Trap("global index"))?
+            .set(value)
     }
 }
 

@@ -24,6 +24,7 @@ tinyvm iOS game runtime
 │   ├── multiple internally defined memories [x]
 │   ├── extended constant expressions [x]
 │   ├── standard imported numeric globals [x]
+│   ├── named standard resource exports [x]
 │   ├── standard tail calls            [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
@@ -2430,3 +2431,28 @@ Evidence on 2026-08-21:
   gate. The arm64 Swift consumer is 1,557,704 bytes under its unchanged
   product gate; the simulator-only x86_64 consumer is 1,640,216 bytes under a
   separate one-linker-bucket-adjusted compatibility ceiling.
+
+## Sixty-eighth executable increment — named standard resource exports
+
+tinyvm now retains validated table, memory and global exports instead of
+discarding every non-function export after structural validation. The general
+embedding can resolve each resource by its standard export name, inspect table
+length, read or mutate exported memory and read or type-safely update a mutable
+exported global. Immutable and wrong-typed global writes trap.
+
+This completes the export-side vocabulary needed before imported memory/table
+store linking: converters and hosts can use ordinary Wasm resource names, with
+no tinyvm-only manifest alias or opcode. TinyArcade v1 remains free to use its
+existing memory-zero ABI while the general VM grows independently.
+
+Evidence on 2026-08-21:
+
+- WABT compiles and validates a shared module exporting a funcref table,
+  memory, mutable i32 global and immutable i64 global.
+- tinyvm and public JavaScriptCore both resolve and mutate those exports and
+  execute the same bytes to result `76`.
+- Public tests cover missing names, active-data visibility, host memory writes,
+  table length, mutable global updates and immutable-global rejection.
+- All 241 non-ignored package tests plus one doctest pass with all features;
+  the full iOS bridge links at 1,557,656 bytes arm64 and 1,640,400 bytes
+  x86_64, and the stripped static core remains 101,128 bytes.
