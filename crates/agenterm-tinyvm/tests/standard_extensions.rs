@@ -194,6 +194,75 @@ fn multi_table_module() -> Vec<u8> {
     wasm
 }
 
+fn tail_call_module() -> Vec<u8> {
+    // WABT-equivalent standard bytes for tests/fixtures/tail-call-v1.wat. The
+    // deep self-tail-call is deliberately far beyond the ordinary call-depth
+    // ceiling; return_call must replace the activation instead of growing the
+    // native Rust stack.
+    vec![
+        0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x02, 0x60, 0x01, 0x7F, 0x01,
+        0x7F, 0x60, 0x00, 0x01, 0x7F, 0x03, 0x05, 0x04, 0x00, 0x00, 0x00, 0x01, 0x04, 0x04, 0x01,
+        0x70, 0x00, 0x01, 0x07, 0x07, 0x01, 0x03, b'r', b'u', b'n', 0x00, 0x03, 0x09, 0x07, 0x01,
+        0x00, 0x41, 0x00, 0x0B, 0x01, 0x01, 0x0A, 0x35, 0x04, 0x13, 0x00, 0x20, 0x00, 0x45, 0x04,
+        0x7F, 0x41, 0xE4, 0x00, 0x05, 0x20, 0x00, 0x41, 0x01, 0x6B, 0x12, 0x00, 0x0B, 0x0B, 0x07,
+        0x00, 0x20, 0x00, 0x41, 0x2B, 0x6A, 0x0B, 0x09, 0x00, 0x20, 0x00, 0x41, 0x00, 0x13, 0x00,
+        0x00, 0x0B, 0x0D, 0x00, 0x41, 0xA0, 0x8D, 0x06, 0x10, 0x00, 0x41, 0x00, 0x10, 0x02, 0x6A,
+        0x0B,
+    ]
+}
+
+fn host_tail_call_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(
+        &mut wasm,
+        1,
+        &[0x02, 0x60, 0x01, 0x7F, 0x01, 0x7F, 0x60, 0x00, 0x01, 0x7F],
+    );
+    section(
+        &mut wasm,
+        2,
+        &[
+            0x01, 0x04, b'h', b'o', b's', b't', 0x08, b'p', b'l', b'u', b's', b'_', b'o', b'n',
+            b'e', 0x00, 0x00,
+        ],
+    );
+    section(&mut wasm, 3, &[0x02, 0x00, 0x01]);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x02]);
+    section(
+        &mut wasm,
+        10,
+        &[
+            0x02, 0x06, 0x00, 0x20, 0x00, 0x12, 0x00, 0x0B, 0x06, 0x00, 0x41, 0x29, 0x10, 0x01,
+            0x0B,
+        ],
+    );
+    wasm
+}
+
+fn mismatched_tail_result_module(indirect: bool, table_index: u8) -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(
+        &mut wasm,
+        1,
+        &[0x02, 0x60, 0x00, 0x01, 0x7E, 0x60, 0x00, 0x01, 0x7F],
+    );
+    section(&mut wasm, 3, &[0x02, 0x00, 0x01]);
+    if indirect {
+        section(&mut wasm, 4, &[0x01, 0x70, 0x00, 0x01]);
+        section(&mut wasm, 9, &[0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00]);
+    }
+    let caller = if indirect {
+        vec![0x00, 0x41, 0x00, 0x13, 0x00, table_index, 0x0B]
+    } else {
+        vec![0x00, 0x12, 0x00, 0x0B]
+    };
+    let mut code = vec![0x02, 0x04, 0x00, 0x42, 0x00, 0x0B];
+    code.push(caller.len() as u8);
+    code.extend_from_slice(&caller);
+    section(&mut wasm, 10, &code);
+    wasm
+}
+
 fn assert_copy_fill_semantics() {
     let mut module = WasmModule::new();
     let copy = must_ok(
@@ -684,6 +753,59 @@ fn standard_multiple_funcref_tables_execute_and_share_one_host_budget() {
     assert!(
         WasmModule::from_bytes(&duplicate_export).is_err(),
         "export names are unique across function and table kinds"
+    );
+}
+
+#[test]
+fn standard_tail_calls_trampoline_across_direct_indirect_and_host_targets() {
+    let mut deep = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&tail_call_module()),
+            "load tail-call module",
+        )
+        .instantiate(),
+        "instantiate tail-call module",
+    );
+    let result = must_ok(
+        deep.invoke_by_name("run", &[]),
+        "run deep direct and indirect tail calls",
+    );
+    assert!(matches!(result.as_slice(), [Val::I32(143)]));
+
+    let mut host_module = must_ok(
+        WasmModule::from_bytes(&host_tail_call_module()),
+        "load host tail-call module",
+    );
+    must_ok(
+        host_module.bind_import("host", "plus_one", |args, _memory| Ok(vec![args[0] + 1])),
+        "bind host tail target",
+    );
+    let result = must_ok(
+        host_module.invoke_by_name("run", &[]),
+        "tail-call host import",
+    );
+    assert!(matches!(result.as_slice(), [Val::I32(42)]));
+
+    assert!(
+        WasmModule::from_bytes(&mismatched_tail_result_module(false, 0)).is_err(),
+        "return_call requires the callee and current function results to match exactly"
+    );
+    assert!(
+        WasmModule::from_bytes(&mismatched_tail_result_module(true, 0)).is_err(),
+        "return_call_indirect requires the selected type and current results to match exactly"
+    );
+
+    let mut bad_table = mismatched_tail_result_module(true, 1);
+    // Make both functions return i64 so the table immediate is the only invalid
+    // part of the tail instruction.
+    let caller_result = bad_table
+        .windows(5)
+        .position(|window| window == [0x60, 0x00, 0x01, 0x7F, 0x03])
+        .expect("caller type bytes");
+    bad_table[caller_result + 3] = 0x7E;
+    assert!(
+        WasmModule::from_bytes(&bad_table).is_err(),
+        "return_call_indirect rejects an unknown table index at load"
     );
 }
 

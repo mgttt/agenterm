@@ -22,7 +22,8 @@ The v1 executable profile is MVP scalar instructions plus mutable globals,
 tables/`call_indirect`, an internally defined multi-table `funcref` subset of
 reference types,
 the standard sign-extension and non-trapping
-float-to-integer conversion proposals, the standard multi-value proposal, and
+float-to-integer conversion proposals, the standard multi-value and tail-call
+proposals, and
 the standard bulk-memory proposal over the single memory and MVP funcref table.
 It accepts multi-result functions and type-indexed parameter/result signatures
 on blocks, loops and ifs, all five integer
@@ -42,6 +43,14 @@ threads and multiple memories remain outside v1 and fail
 loudly at load time. This is feature negotiation by converter profile: future
 runtimes may add standard proposals without changing the `.wasm` container or
 inventing tinyvm-only opcodes.
+
+`return_call` and `return_call_indirect` have their standard encodings and
+validation rules. The target's complete result vector must equal the current
+function's result vector. tinyvm executes defined tail chains with a trampoline,
+so they consume deterministic instruction fuel but do not grow the native
+Rust/iOS stack; an imported function may be the final tail target through the
+same versioned host registry. Ordinary non-tail calls retain the host call-depth
+ceiling.
 
 Scalar instruction encodings and semantics follow the current
 [WebAssembly core instruction specification](https://webassembly.github.io/spec/core/binary/instructions.html).

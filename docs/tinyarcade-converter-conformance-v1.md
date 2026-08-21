@@ -7,7 +7,8 @@ media/state records. The accepted v1 compiler profile includes the scalar MVP,
 the standard sign-extension and non-trapping float-to-integer conversion
 proposals, the standard multi-value proposal, the internally defined
 multiple-table `funcref`
-reference profile, plus the standard bulk-memory proposal for one memory and
+reference profile, the standard tail-call proposal, plus the standard
+bulk-memory proposal for one memory and
 funcref tables: copy/fill, passive
 data/element segments, init/drop and table.copy. It is a bounded standards
 profile, not a different VM instruction set.
@@ -74,6 +75,11 @@ operations and indirect calls; WABT, tinyvm and JavaScriptCore must return 143.
 segments, cross-table get/set/copy/init, indirect calls, growth/fill/size and a
 table export; all three engines must return 143. The runtime's table-element
 limit is the aggregate across those tables.
+`smoke-wabt-tail-call.sh` executes 100,000 direct self tail calls followed by an
+indirect tail call; WABT, tinyvm and JavaScriptCore must return 143 from the
+same module. This also proves that the tinyvm execution path is a trampoline,
+not native-stack recursion. Converter output may target these standard
+instructions without a tinyvm-specific lowering.
 
 Before upload, a converter may additionally consume the exact app-build TAH1
 profile defined in

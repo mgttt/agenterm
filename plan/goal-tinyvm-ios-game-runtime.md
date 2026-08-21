@@ -20,6 +20,7 @@ tinyvm iOS game runtime
 │   ├── decode complexity budget      [x]
 │   ├── single-table funcref profile  [x]
 │   ├── multiple defined tables       [x]
+│   ├── standard tail calls            [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1566,3 +1567,41 @@ Evidence on 2026-08-21:
   Swift linkage remains below its gates at 1,530,600 bytes arm64 and 1,607,792
   bytes x86_64. The isolated stripped static core is 87,704 bytes, below
   100 KiB, and its C self-test returns 42.
+
+## Forty-fourth executable increment — standard tail calls and trampoline
+
+tinyvm now decodes, validates and executes the standard tail-call proposal's
+`return_call` and `return_call_indirect` instructions. Validation requires the
+target result vector to match the current function result vector exactly and
+checks the indirect type/table index before a module can instantiate.
+
+Execution returns a typed tail-call outcome to one `call_any` trampoline. A
+defined target replaces the current activation rather than recursively entering
+Rust, while a host target dispatches through the same versioned import registry
+and returns directly. Ordinary `call` and `call_indirect` remain bounded by the
+existing call-depth limit; tail chains remain charged to the same deterministic
+instruction budget without consuming additional native stack.
+
+This is a general VM capability, not a Depth Well optimization. It moves the
+runtime toward a standards-first cross-platform WebAssembly VM usable by future
+extensible hosts, while TinyArcade remains the first embedding and conformance
+workload. Imported tables are still deferred: sharing their module-local
+function indices would be observably wrong until the runtime has store-level
+function identity and cross-instance state ownership.
+
+Evidence on 2026-08-21:
+
+- A checked-in standard WAT fixture performs 100,000 direct self tail calls and
+  an indexed indirect tail call, returning 143 in WABT's interpreter, tinyvm
+  and system JavaScriptCore from the exact same WABT-produced bytes.
+- A public black-box test independently executes the deep direct and indirect
+  paths, tail-calls an imported host function, and rejects direct/indirect
+  result mismatches plus an unknown indirect table index at load time.
+- All 215 non-ignored package tests plus one doctest pass under all features;
+  no-default and replay-only matrices, all six explicit WABT/JavaScriptCore
+  proposal oracles, both real-game replay differentials, all-target Clippy,
+  package formatting, ShellCheck and document redaction pass. Device/simulator
+  Swift linkage remains below its gates at 1,531,448 bytes arm64 and 1,612,248
+  bytes x86_64. The isolated stripped static core is 87,720 bytes, below
+  100 KiB, and its C self-test returns 42. The owning tests are rerun after the
+  mandatory main pull before push.

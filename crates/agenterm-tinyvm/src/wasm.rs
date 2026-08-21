@@ -429,6 +429,13 @@ enum Op {
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
+    /// Tail-call variants replace the current activation instead of consuming
+    /// another native-stack frame.
+    ReturnCall(u32),
+    ReturnCallIndirect {
+        type_index: u32,
+        table_index: u32,
+    },
     /// `ty` is an inline empty/single-result type or a function-type index;
     /// `end` indexes its `End`.
     Block {
@@ -797,6 +804,20 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 let (table_index, n2) = leb_u32(body, n1)?;
                 i = n2;
                 ops.push(Op::CallIndirect {
+                    type_index,
+                    table_index,
+                });
+            }
+            0x12 => {
+                let (function, ni) = leb_u32(body, i)?;
+                i = ni;
+                ops.push(Op::ReturnCall(function));
+            }
+            0x13 => {
+                let (type_index, n1) = leb_u32(body, i)?;
+                let (table_index, n2) = leb_u32(body, n1)?;
+                i = n2;
+                ops.push(Op::ReturnCallIndirect {
                     type_index,
                     table_index,
                 });
@@ -1947,6 +1968,11 @@ struct WasmCall<'a> {
     args: &'a [Val],
 }
 
+enum DefinedOutcome {
+    Values(Vec<Val>),
+    TailCall { index: usize, args: Vec<Val> },
+}
+
 impl Module {
     /// An empty module.
     pub fn new() -> Self {
@@ -2671,6 +2697,50 @@ impl Module {
         }
     }
 
+    fn indirect_target(
+        &self,
+        table_index: u32,
+        type_index: u32,
+        element_index: usize,
+        bulk: &BulkState<'_>,
+    ) -> Result<usize, WasmError> {
+        let table = bulk
+            .tables
+            .get(table_index as usize)
+            .ok_or(WasmError::Trap("call_indirect: table immediate"))?;
+        let combined = table
+            .get(element_index)
+            .copied()
+            .flatten()
+            .ok_or(WasmError::Trap(
+                "call_indirect: uninitialised table element",
+            ))?;
+        let expected = self
+            .types
+            .get(type_index as usize)
+            .ok_or(WasmError::Trap("call_indirect: bad type index"))?;
+        let (actual_params, actual_results, actual_sig) = if combined < self.hosts.len() {
+            let host = &self.hosts[combined];
+            (host.n_params, host.n_results, host.sig)
+        } else {
+            let function = self
+                .funcs
+                .get(combined - self.hosts.len())
+                .ok_or(WasmError::Trap("call_indirect: bad table entry"))?;
+            (function.n_params, function.arity, function.sig)
+        };
+        let matches = match actual_sig.and_then(|signature| self.types.get(signature)) {
+            Some(actual) => actual == expected,
+            None => {
+                expected.params.len() == actual_params && expected.results.len() == actual_results
+            }
+        };
+        if !matches {
+            return Err(WasmError::Trap("call_indirect: signature mismatch"));
+        }
+        Ok(combined)
+    }
+
     fn block_counts(&self, ty: BlockType) -> Result<(usize, usize), WasmError> {
         match ty {
             BlockType::Empty => Ok((0, 0)),
@@ -2693,45 +2763,56 @@ impl Module {
         globals: &mut Vec<Val>,
         bulk: &mut BulkState<'_>,
     ) -> Result<Vec<Val>, WasmError> {
-        let WasmCall { index: idx, args } = call;
-        if idx < self.hosts.len() {
-            let host = &self.hosts[idx];
-            if args.len() != host.n_params {
-                return Err(WasmError::Trap("host function"));
+        let mut index = call.index;
+        let mut tail_args: Option<Vec<Val>> = None;
+        loop {
+            let args = tail_args.as_deref().unwrap_or(call.args);
+            if index < self.hosts.len() {
+                let host = &self.hosts[index];
+                if args.len() != host.n_params {
+                    return Err(WasmError::Trap("host function"));
+                }
+                // Host functions use an i32 ABI: every arg/result must be i32.
+                let i32_args: Vec<i32> = args
+                    .iter()
+                    .map(|v| match v {
+                        Val::I32(n) => Ok(*n),
+                        _other => Err(WasmError::Trap("host function")),
+                    })
+                    .collect::<Result<_, _>>()?;
+                // The host ABI is i32-only. If the module declares any other value
+                // type for this import, say so instead of handing the guest an i32
+                // where it declared an i64/f32/f64.
+                if let Some(ft) = host.sig.and_then(|s| self.types.get(s))
+                    && (ft.params.iter().any(|&t| t != 0x7F)
+                        || ft.results.iter().any(|&t| t != 0x7F))
+                {
+                    return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+                }
+                let res = (host.f)(&i32_args, mem)?;
+                if res.len() != host.n_results {
+                    return Err(WasmError::Trap("host function"));
+                }
+                return Ok(res.into_iter().map(Val::I32).collect());
             }
-            // Host functions use an i32 ABI: every arg/result must be i32.
-            let i32_args: Vec<i32> = args
-                .iter()
-                .map(|v| match v {
-                    Val::I32(n) => Ok(*n),
-                    _other => Err(WasmError::Trap("host function")),
-                })
-                .collect::<Result<_, _>>()?;
-            // The host ABI is i32-only. If the module declares any other value
-            // type for this import, say so instead of handing the guest an i32
-            // where it declared an i64/f32/f64.
-            if let Some(ft) = host.sig.and_then(|s| self.types.get(s))
-                && (ft.params.iter().any(|&t| t != 0x7F) || ft.results.iter().any(|&t| t != 0x7F))
-            {
-                return Err(WasmError::Trap("host ABI is i32-only; import declares"));
+            match self.run_defined(
+                WasmCall {
+                    index: index - self.hosts.len(),
+                    args,
+                },
+                depth,
+                steps,
+                mem,
+                globals,
+                bulk,
+            )? {
+                DefinedOutcome::Values(values) => return Ok(values),
+                DefinedOutcome::TailCall { index: next, args } => {
+                    index = next;
+                    tail_args = Some(args);
+                }
             }
-            let res = (host.f)(&i32_args, mem)?;
-            if res.len() != host.n_results {
-                return Err(WasmError::Trap("host function"));
-            }
-            return Ok(res.into_iter().map(Val::I32).collect());
         }
-        self.run_defined(
-            WasmCall {
-                index: idx - self.hosts.len(),
-                args,
-            },
-            depth,
-            steps,
-            mem,
-            globals,
-            bulk,
-        )
     }
 
     fn run_defined(
@@ -2742,7 +2823,7 @@ impl Module {
         mem: &mut Vec<u8>,
         globals: &mut Vec<Val>,
         bulk: &mut BulkState<'_>,
-    ) -> Result<Vec<Val>, WasmError> {
+    ) -> Result<DefinedOutcome, WasmError> {
         let WasmCall {
             index: def_idx,
             args,
@@ -2780,7 +2861,7 @@ impl Module {
                 return Err(WasmError::Trap("operand stack"));
             }
             if pc >= func.code.len() {
-                return take_results(&mut stack, func.arity);
+                return finish_defined(&mut stack, func.arity);
             }
             let op = func.code[pc].clone();
             pc += 1;
@@ -3571,43 +3652,7 @@ impl Module {
                     table_index,
                 } => {
                     let ti = pop(&mut stack)? as u32 as usize;
-                    let table = bulk
-                        .tables
-                        .get(table_index as usize)
-                        .ok_or(WasmError::Trap("call_indirect: table immediate"))?;
-                    let combined =
-                        table.get(ti).copied().flatten().ok_or({
-                            WasmError::Trap("call_indirect: uninitialised table element")
-                        })?;
-                    // Type check (spec 4.4.8): the callee's declared type must
-                    // be *identical* to the declared one — value types, not
-                    // just arities. Functions registered without a type
-                    // section (add_function) fall back to the arity check.
-                    let expected = self
-                        .types
-                        .get(type_index as usize)
-                        .ok_or(WasmError::Trap("call_indirect: bad type index"))?;
-                    let (actual_params, actual_results, actual_sig) = if combined < self.hosts.len()
-                    {
-                        let h = &self.hosts[combined];
-                        (h.n_params, h.n_results, h.sig)
-                    } else {
-                        let f = self
-                            .funcs
-                            .get(combined - self.hosts.len())
-                            .ok_or(WasmError::Trap("call_indirect: bad table entry"))?;
-                        (f.n_params, f.arity, f.sig)
-                    };
-                    let matches = match actual_sig.and_then(|s| self.types.get(s)) {
-                        Some(actual) => actual == expected,
-                        None => {
-                            expected.params.len() == actual_params
-                                && expected.results.len() == actual_results
-                        }
-                    };
-                    if !matches {
-                        return Err(WasmError::Trap("call_indirect: signature mismatch"));
-                    }
+                    let combined = self.indirect_target(table_index, type_index, ti, bulk)?;
                     let n = self.param_count(combined)?;
                     if stack.len() < n {
                         return Err(WasmError::Trap("call_indirect: stack has"));
@@ -3625,6 +3670,34 @@ impl Module {
                         bulk,
                     )?;
                     stack.extend(res);
+                }
+                Op::ReturnCall(function) => {
+                    let combined = function as usize;
+                    let n = self.param_count(combined)?;
+                    if stack.len() < n {
+                        return Err(WasmError::Trap("return_call"));
+                    }
+                    let args = stack.split_off(stack.len() - n);
+                    return Ok(DefinedOutcome::TailCall {
+                        index: combined,
+                        args,
+                    });
+                }
+                Op::ReturnCallIndirect {
+                    type_index,
+                    table_index,
+                } => {
+                    let element = pop(&mut stack)? as u32 as usize;
+                    let combined = self.indirect_target(table_index, type_index, element, bulk)?;
+                    let n = self.param_count(combined)?;
+                    if stack.len() < n {
+                        return Err(WasmError::Trap("return_call_indirect"));
+                    }
+                    let args = stack.split_off(stack.len() - n);
+                    return Ok(DefinedOutcome::TailCall {
+                        index: combined,
+                        args,
+                    });
                 }
                 Op::Block { ty, end } => {
                     let (params, results) = self.block_counts(ty)?;
@@ -3655,7 +3728,7 @@ impl Module {
                 Op::Br(l) => {
                     pc = do_branch(&mut stack, &mut control, l)?;
                     if control.is_empty() {
-                        return take_results(&mut stack, func.arity);
+                        return finish_defined(&mut stack, func.arity);
                     }
                 }
                 Op::BrIf(l) => {
@@ -3663,7 +3736,7 @@ impl Module {
                     if cond != 0 {
                         pc = do_branch(&mut stack, &mut control, l)?;
                         if control.is_empty() {
-                            return take_results(&mut stack, func.arity);
+                            return finish_defined(&mut stack, func.arity);
                         }
                     }
                 }
@@ -3672,7 +3745,7 @@ impl Module {
                     let label = targets.get(idx).copied().unwrap_or(default);
                     pc = do_branch(&mut stack, &mut control, label)?;
                     if control.is_empty() {
-                        return take_results(&mut stack, func.arity);
+                        return finish_defined(&mut stack, func.arity);
                     }
                 }
                 Op::If { ty, else_pc, end } => {
@@ -3742,11 +3815,11 @@ impl Module {
                         .ok_or(WasmError::Trap("local.tee"))?;
                     *cell = v;
                 }
-                Op::Return => return take_results(&mut stack, func.arity),
+                Op::Return => return finish_defined(&mut stack, func.arity),
                 Op::End => {
                     control.pop();
                     if control.is_empty() {
-                        return take_results(&mut stack, func.arity);
+                        return finish_defined(&mut stack, func.arity);
                     }
                 }
             }
@@ -4303,6 +4376,10 @@ fn take_results(stack: &mut Vec<Val>, arity: usize) -> Result<Vec<Val>, WasmErro
         return Err(WasmError::Trap("result arity"));
     }
     Ok(stack.split_off(stack.len() - arity))
+}
+
+fn finish_defined(stack: &mut Vec<Val>, arity: usize) -> Result<DefinedOutcome, WasmError> {
+    take_results(stack, arity).map(DefinedOutcome::Values)
 }
 
 /// Branch to label depth `l`: preserve the label's `branch_arity` top values,

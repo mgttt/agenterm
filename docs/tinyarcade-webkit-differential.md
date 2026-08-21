@@ -62,7 +62,9 @@ multi-result functions, type-indexed parameter/result block signatures and
 multi-value branches. `smoke-wabt-funcref.sh` covers the standard single-table
 funcref profile, including expression element segments and table operations;
 `smoke-wabt-multi-table.sh` extends the same oracle to indexed and cross-table
-execution over two internally defined tables.
+execution over two internally defined tables. `smoke-wabt-tail-call.sh` covers
+deep direct and indirect standard tail calls and proves exact result parity
+without depending on the game host ABI.
 
 ## Interpreting a mismatch
 

@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 43] = [
+const LEAF_TESTS: [(&str, &str); 44] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -668,6 +668,10 @@ const LEAF_TESTS: [(&str, &str); 43] = [
     (
         "multiple defined funcref tables",
         "standard_multiple_funcref_tables_execute_and_share_one_host_budget",
+    ),
+    (
+        "tail-call proposal",
+        "standard_tail_calls_trampoline_across_direct_indirect_and_host_targets",
     ),
     (
         "decode complexity budget",

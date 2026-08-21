@@ -2373,6 +2373,16 @@ not a second product authority. When engines disagree, reduce the case and use
 the language/ABI specifications to adjudicate it rather than blindly copying
 the reference behavior.
 
+For standard WASM tail calls, do not implement `return_call` as an ordinary
+recursive `call` followed by `return`. Return a typed tail-target/argument
+outcome to one dispatch trampoline so a defined target replaces the current
+activation and an imported target exits through the same host door. Keep
+ordinary calls under the native call-depth guard, charge every tail instruction
+to deterministic fuel, and validate that the target's complete result vector
+exactly matches the current function's results. Prove the boundary with a tail
+chain far beyond the ordinary depth limit, an indirect target, a host-import
+target and independently compiled standard bytes in reference engines.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a

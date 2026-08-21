@@ -212,6 +212,26 @@ impl<'a> V<'a> {
         Ok(())
     }
 
+    /// Validate a tail call against the current function's complete result
+    /// vector, consume its arguments, then make the continuation polymorphic.
+    fn apply_tail_type_index(&mut self, type_index: usize) -> Result<(), WasmError> {
+        let function_type = self
+            .m
+            .types
+            .get(type_index)
+            .ok_or(WasmError::Decode("validation: type index out of range"))?;
+        if !Types::Slice(&function_type.results).same(self.results) {
+            return Err(WasmError::Decode(
+                "validation: tail call result type mismatch",
+            ));
+        }
+        for index in (0..function_type.params.len()).rev() {
+            self.pop_expect(self.m.types[type_index].params[index])?;
+        }
+        self.mark_unreachable();
+        Ok(())
+    }
+
     fn pop_types(&mut self, types: Types<'a>) -> Result<(), WasmError> {
         match types {
             Types::Empty => {}
@@ -681,6 +701,10 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             let type_index = v.func_type_index(*f)?;
             v.apply_type_index(type_index)?;
         }
+        ReturnCall(function) => {
+            let type_index = v.func_type_index(*function)?;
+            v.apply_tail_type_index(type_index)?;
+        }
         CallIndirect {
             type_index,
             table_index,
@@ -691,6 +715,19 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             let type_index = *type_index as usize;
             v.pop_expect(I32)?; // the table index
             v.apply_type_index(type_index)?;
+        }
+        ReturnCallIndirect {
+            type_index,
+            table_index,
+        } => {
+            if *table_index as usize >= v.m.table_count {
+                return Err(WasmError::Decode(
+                    "validation: return_call_indirect table index",
+                ));
+            }
+            let type_index = *type_index as usize;
+            v.pop_expect(I32)?;
+            v.apply_tail_type_index(type_index)?;
         }
 
         // --- structured control ---

@@ -59,7 +59,8 @@ agenterm-tinyvm (35)
 │       ├── nontrapping float-to-int [x]
 │       ├── multi-value proposal [x]
 │       ├── single-table funcref profile [x]
-│       └── multiple defined funcref tables [x]
+│       ├── multiple defined funcref tables [x]
+│       └── tail-call proposal [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
 ├── slot-B               [ ]
@@ -88,6 +89,10 @@ references 和 GC 尚未进入接受 profile，会在 load gate 明确拒绝，�
 active element segment 和跨表 `table.copy` 均使用标准 table index。初始与动态 table
 预算按实例中所有表的元素总数计算，不能用多张小表绕过宿主上限。当前仍不接受 imported
 tables；定义表的 export 会完整验证，但产品 embedding 暂只公开 function lookup。
+标准 tail-call proposal 的 `return_call` 与 `return_call_indirect` 已进入 profile；执行器以
+trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native stack。普通非尾调用
+仍受独立 call-depth 上限约束。尾调用也能落到版本化 native import，但 imported table
+仍需跨 instance 的 store-level function identity 后才能合规共享。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。
 核 strip `<100KiB`。
