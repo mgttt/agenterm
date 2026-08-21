@@ -53,7 +53,7 @@ destination tail unchanged. The optional profile stores v128 inline and keeps
 `Val` at 24 bytes; there is no heap allocation or native handle per vector.
 The default stripped static core remains 101,256 bytes under its unchanged
 100 KiB gate. The optional profile is 117,768 bytes under its separate 120 KiB
-gate. The iOS arm64 linked smoke is 1,655,704 bytes under a separate 1,671,168
+gate. The iOS arm64 linked smoke is 1,681,224 bytes under a separate 1,703,936
 byte opt-in ceiling; those explicit budgets do not weaken the default product
 boundaries.
 
@@ -61,4 +61,4 @@ A separate 500-byte manifest-bearing TinyArcade cartridge performs the same
 mix during `game_init`, checks both saturation extremes, renders one indexed
 frame, and round-trips its 16-byte state. With an `ios-c-api,simd` XCFramework,
 the Swift/C ABI opens and executes that cartridge on the booted iPhone 17 Pro
-Simulator. The focused linked consumer is 1,502,664 bytes.
+Simulator. The focused linked consumer is 1,510,904 bytes.

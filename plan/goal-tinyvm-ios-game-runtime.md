@@ -3847,3 +3847,30 @@ it does not claim complete upstream proposal coverage. Any future reported
 family must add its own workload, fixture, independent oracle and size profile
 before it can be accepted. Physical-iPhone/TestFlight lifecycle, audio and
 performance evidence remain open, so the persistent goal stays active.
+
+## One-hundred-twentieth executable increment — native audio lifecycle owner
+
+The Swift package's short-tone owner no longer relies on every App screen to
+remember one interruption callback. It observes the shared `AVAudioSession` by
+default and stops the current gameplay cue on interruption begin, loss of the
+old output route or media-services reset. It never resumes or reroutes a stale
+cue; after reset, the next non-empty tone batch rebuilds `AVAudioPlayer` and
+reactivates the owned mixing `.ambient` session. Apps with a centralized audio
+coordinator can disable observation and call the same explicit lifecycle
+methods without giving the cartridge any platform API.
+
+Evidence on 2026-08-22: the booted iPhone 17 Pro Simulator played a real Paddle
+Guard tone, delivered interruption/reset on the main actor and a route-loss
+notification from a background queue, proved the marshalled stop/session-state
+transitions, then played again after media reset. Both default and
+`ios-c-api,simd` device/universal-simulator XCFrameworks, Swift packages and
+complete Simulator journeys pass. Default linked sizes are 1,663,848 bytes
+arm64 and 1,751,992 bytes x86_64; opt-in SIMD sizes are 1,681,224 / 1,755,864
+bytes, with its focused consumer at 1,510,904 bytes. The required lifecycle
+code is funded through explicit 16 KiB budget steps rather than hidden by an
+unbounded threshold. The executable PRD trace now binds 120 completed claims.
+
+No physical iPhone is connected, and the available Codex browser runtime has
+no attached browser session with which to inspect App Store Connect build 33.
+Physical speaker/headphone behavior and Apple-side TestFlight processing remain
+open external evidence, so the persistent goal stays active.

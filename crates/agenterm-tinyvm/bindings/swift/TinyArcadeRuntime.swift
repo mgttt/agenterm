@@ -575,18 +575,54 @@ public enum TinyArcadeTonePlayerError: Error, Equatable {
 }
 
 /// Main-actor owner for short native tone batches. A new batch replaces the
-/// current one; interruption never resumes stale gameplay feedback.
+/// current one; interruptions, media-service resets and loss of an old audio
+/// route stop stale gameplay feedback. System notifications are observed by
+/// default, while explicit lifecycle methods remain available to apps with a
+/// centralized notification owner.
 @MainActor
-public final class TinyArcadeTonePlayer {
+public final class TinyArcadeTonePlayer: NSObject {
     private let managesAudioSession: Bool
+    private let observesAudioSessionNotifications: Bool
     private let audioSession = AVAudioSession.sharedInstance()
     private var player: AVAudioPlayer?
 
     public private(set) var isAudioSessionActive = false
     public var isPlaying: Bool { player?.isPlaying ?? false }
 
-    public init(managesAudioSession: Bool = true) {
+    public init(
+        managesAudioSession: Bool = true,
+        observesAudioSessionNotifications: Bool = true
+    ) {
         self.managesAudioSession = managesAudioSession
+        self.observesAudioSessionNotifications = observesAudioSessionNotifications
+        super.init()
+        if observesAudioSessionNotifications {
+            let center = NotificationCenter.default
+            center.addObserver(
+                self,
+                selector: #selector(audioSessionInterrupted(_:)),
+                name: AVAudioSession.interruptionNotification,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(audioRouteChanged(_:)),
+                name: AVAudioSession.routeChangeNotification,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(audioMediaServicesWereReset(_:)),
+                name: AVAudioSession.mediaServicesWereResetNotification,
+                object: nil
+            )
+        }
+    }
+
+    deinit {
+        if observesAudioSessionNotifications {
+            NotificationCenter.default.removeObserver(self)
+        }
     }
 
     public func play(_ events: [TinyArcadeToneEvent]) throws {
@@ -624,11 +660,54 @@ public final class TinyArcadeTonePlayer {
         if managesAudioSession { isAudioSessionActive = false }
     }
 
+    /// Stop feedback prepared against invalidated media services. The next
+    /// non-empty `play` call rebuilds playback and reactivates an owned session.
+    public func mediaServicesWereReset() {
+        stop()
+        if managesAudioSession { isAudioSessionActive = false }
+    }
+
+    /// Avoid moving a short private gameplay cue from a removed route, such as
+    /// headphones, onto another output after the event has already begun.
+    public func oldAudioRouteBecameUnavailable() {
+        stop()
+    }
+
     public func deactivate() throws {
         stop()
         if managesAudioSession && isAudioSessionActive {
             try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
             isAudioSessionActive = false
+        }
+    }
+
+    @objc nonisolated private func audioSessionInterrupted(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw),
+              type == .began else { return }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { interruptionBegan() }
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.interruptionBegan() }
+        }
+    }
+
+    @objc nonisolated private func audioRouteChanged(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+              reason == .oldDeviceUnavailable else { return }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { oldAudioRouteBecameUnavailable() }
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.oldAudioRouteBecameUnavailable() }
+        }
+    }
+
+    @objc nonisolated private func audioMediaServicesWereReset(_ notification: Notification) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { mediaServicesWereReset() }
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.mediaServicesWereReset() }
         }
     }
 }

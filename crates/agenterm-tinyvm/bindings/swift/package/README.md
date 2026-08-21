@@ -49,8 +49,12 @@ renderer can instead consume the validated palette and pixel plane directly.
 For audio feedback, pass `TinyArcadeMediaFrame.tones` to
 `TinyArcadeTonePlayer.play(_:)`. The default player uses a mixing `.ambient`
 audio session; use `TinyArcadeTonePlayer(managesAudioSession: false)` when the
-app already owns session policy. Forward interruption-began events, call
-`stop()` when feedback should be cut immediately, and call `deactivate()` when
+app already owns session policy. The player observes audio interruptions,
+media-services resets and loss of an old route by default: it stops rather than
+replaying or rerouting a stale gameplay cue, then lazily rebuilds on the next
+event. Pass `observesAudioSessionNotifications: false` only when the app owns
+notification routing and forwards the matching explicit lifecycle methods.
+Call `stop()` when feedback should be cut immediately and `deactivate()` when
 leaving the game surface. The SDK deliberately does not resume interrupted
 gameplay tones or choose haptics for the app.
 

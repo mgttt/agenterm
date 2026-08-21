@@ -252,10 +252,20 @@ directly; UIKit and Core Graphics never enter the guest ABI.
 `TinyArcadeToneSynthesizer.waveData(for:)` converts a validated tone batch into
 a bounded 22,050 Hz mono PCM WAV using the event order, pitch, duration and
 relative amplitude. `TinyArcadeTonePlayer` is the matching short-feedback
-owner. A new batch replaces the old batch, `stop()` clears current feedback,
-and `interruptionBegan()` stops without replaying stale game events. The app
-forwards its `AVAudioSession.interruptionNotification` began transition and
-calls `deactivate()` when the game surface relinquishes audio.
+owner. A new batch replaces the old batch, while automatic interruption,
+old-route-loss and media-services-reset handling stops without replaying or
+rerouting stale game events. The next non-empty batch lazily rebuilds playback.
+An app with a centralized observer may disable automatic observation and call
+the explicit lifecycle methods. The game surface calls `deactivate()` when it
+relinquishes audio.
+
+Apple delivers interruption/reset notifications on the main thread but may
+deliver route changes on a secondary thread. The selector boundary therefore
+extracts only the scalar reason off-actor and marshals mutation back to the
+main actor; a real background-posted route-change black box guards that rule.
+After media-services reset, the next `play` call recreates the player and
+reapplies category/mode/options before activation, without automatically
+restarting the invalidated cue.
 
 By default the player owns `AVAudioSession` activation with the `.ambient`
 category and `.mixWithOthers`, so it follows the silent switch and does not
@@ -317,16 +327,17 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked arm64 smoke executable must remain at or below 1.5625 MiB;
-the simulator-only x86_64 compatibility slice has a separate 1.65625 MiB gate.
+The optimized linked arm64 smoke executable must remain at or below 1.59375 MiB;
+the simulator-only x86_64 compatibility slice has a separate 1.671875 MiB gate.
 This measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
 the exercised Swift consumer added the bounded official-catalog JSON decoder;
 the later 1.375 MiB gate accounted for the recoverable snapshot-store owner;
-the current arm64 1.5625 MiB gate additionally includes the app-owned completion
-channel, process-lifetime ticket domains and safe late-delivery boundary.
-Current linked evidence is 1,637,144 bytes arm64, 1,725,840 bytes x86_64 and
-1,160,048 bytes for the focused completion consumer.
+the arm64 gate additionally includes the app-owned completion channel,
+process-lifetime ticket domains, safe late-delivery boundary and automatic
+audio interruption/route/reset ownership.
+Current linked evidence is 1,663,848 bytes arm64, 1,751,992 bytes x86_64 and
+1,168,880 bytes for the focused completion consumer.
 Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 

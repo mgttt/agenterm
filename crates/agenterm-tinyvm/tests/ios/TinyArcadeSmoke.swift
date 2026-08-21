@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import UIKit
 import TinyArcade
@@ -903,8 +904,41 @@ struct TinyArcadeSmoke {
         let tonePlayer = TinyArcadeTonePlayer()
         try tonePlayer.play(paddleFrame.tones)
         precondition(tonePlayer.isAudioSessionActive)
-        tonePlayer.interruptionBegan()
+        NotificationCenter.default.post(
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            userInfo: [
+                AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue
+            ]
+        )
         precondition(!tonePlayer.isPlaying)
+        precondition(!tonePlayer.isAudioSessionActive)
+        try tonePlayer.play(paddleFrame.tones)
+        precondition(tonePlayer.isPlaying)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                NotificationCenter.default.post(
+                    name: AVAudioSession.routeChangeNotification,
+                    object: nil,
+                    userInfo: [
+                        AVAudioSessionRouteChangeReasonKey:
+                            AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
+                    ]
+                )
+                continuation.resume()
+            }
+        }
+        await Task.yield()
+        precondition(!tonePlayer.isPlaying)
+        try tonePlayer.play(paddleFrame.tones)
+        NotificationCenter.default.post(
+            name: AVAudioSession.mediaServicesWereResetNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+        precondition(!tonePlayer.isPlaying)
+        precondition(!tonePlayer.isAudioSessionActive)
+        try tonePlayer.play(paddleFrame.tones)
+        precondition(tonePlayer.isAudioSessionActive)
         try tonePlayer.deactivate()
         let paddleView = TinyArcadeIndexed2DView(
             frame: CGRect(x: 0, y: 0, width: 390, height: 844)
