@@ -3116,3 +3116,20 @@ the complete iOS bridge gate passes with arm64/x86_64 consumers at 1,601,272 and
 remain inside their release budgets. A replacement app archive must now prove
 the final executable has no `URLSession`, catalog/private-import markers,
 WebKit or JavaScriptCore before superseding TestFlight build 31.
+
+## Ninety-third executable increment — bundled-only TestFlight replacement
+
+Nostalgia Arcade 0.16.4 build 32 now supersedes build 31. The exact signed
+archive passes the new reusable archive gate: one byte-identical bundled Wasm,
+arm64 iOS, strict code signature, no WebKit/JavaScriptCore dependency, no
+`NSURLSession` import and no external catalog/reviewed/private Swift marker.
+The real-App gate also keeps those checks on every generic-device Release build.
+
+Xcode completed App Store Connect package and SPI analysis and reported
+`Upload succeeded`; Apple accepted the upload for processing at
+2026-08-21T16:03:33Z with event
+`fabc2496-8c84-49dd-9d9b-1e01ed01a386`, no warnings or errors. The consumer
+repository records source/artifact hashes, dSYM UUID and the supersession reason
+in `docs/releases/0.16.4-32-testflight.md`; build 31 is explicitly barred from
+selection. Apple-side processing/installability and physical-iPhone lifecycle,
+performance and owner-feel evidence remain open external gates.
