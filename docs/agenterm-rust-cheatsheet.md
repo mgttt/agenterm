@@ -2391,6 +2391,15 @@ accidentally accept instructions after the function expression or reopen the
 same arm twice. Keep malformed raw-byte cases in the public load gate and
 compare them with an independent standard validator.
 
+Fixed-width signed LEB decoding must validate the unused payload bits in its
+last permitted byte. Native shifting into the destination integer can silently
+discard an out-of-range positive or negative bit pattern and turn malformed
+standard bytes into an apparently valid value. Test both overflow signs plus
+the exact minimum and maximum encodings, and make an independent standard
+validator agree on all four boundaries. For a 64-bit decoder, validating the
+tenth byte before shifting can also replace a later length branch, preserving
+the same strictness without growing a size-gated interpreter core.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

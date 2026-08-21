@@ -26,6 +26,7 @@ tinyvm iOS game runtime
 │   ├── strict declared-memory semantics [x]
 │   ├── strict scalar memarg alignment [x]
 │   ├── canonical function expressions [x]
+│   ├── strict i64 signed-LEB range    [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1965,6 +1966,34 @@ Evidence on 2026-08-21:
 - The complete iOS device/universal-simulator bridge and Swift consumers link
   below their gates at 1,554,168 bytes arm64 and 1,625,560 bytes x86_64;
   catalog/replay/private/session consumers are 1,427,016 / 1,417,944 /
+  1,419,632 / 1,418,768 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-fourth executable increment — strict i64 signed-LEB range
+
+The standard byte loader now validates the unused payload bits in the tenth
+byte of every signed 64-bit LEB immediate. Positive and negative encodings
+outside the `i64` range fail before a module or instance exists; the exact
+minimum and maximum encodings remain legal. The compact check occurs before
+the final native shift, so host integer truncation can no longer turn malformed
+WebAssembly into an apparently valid `i64.const`.
+
+Evidence on 2026-08-21:
+
+- Public raw-byte black boxes reject both overflow signs with the same typed
+  decoder failure and accept/run the exact `i64::MIN/MAX` boundary modules.
+- WABT independently rejects both overflowing binaries and accepts both legal
+  boundaries.
+- All 232 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
+  oracles, the two-game WebKit differential, all-target Clippy, formatting,
+  relevant ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,554,168 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,427,016 / 1,417,960 /
   1,419,632 / 1,418,768 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

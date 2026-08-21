@@ -368,6 +368,8 @@ are no longer backward compatible.
 1. Emit a standards-valid WebAssembly module within the v1 executable profile,
    then attach exactly one canonical
    manifest without rewriting its executable sections.
+   Numeric immediates must fit their standard signed or unsigned LEB widths;
+   host integer truncation is never cartridge validation.
 2. Export all five exact lifecycle functions.
 3. Derive every manifest capability from the standard non-core import table;
    never maintain a second hand-written capability list.

@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 26] = [
+const REJECTED: [(&str, &str); 28] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -118,10 +118,18 @@ const REJECTED: [(&str, &str); 26] = [
         "duplicate_else",
         "0061736d0100000001040160000003020100070801046d61696e00000a0b0109004101044005050b0b",
     ),
+    (
+        "positive_i64_leb_overflow",
+        "0061736d010000000105016000017e03020100070801046d61696e00000a0f010d0042808080808080808080010b",
+    ),
+    (
+        "negative_i64_leb_overflow",
+        "0061736d010000000105016000017e03020100070801046d61696e00000a0f010d0042ffffffffffffffffff7e0b",
+    ),
 ];
 
 /// Legal counterparts that must keep loading and running.
-const ACCEPTED: [(&str, &str); 6] = [
+const ACCEPTED: [(&str, &str); 8] = [
     (
         "add_two_consts",
         "0061736d010000000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
@@ -145,6 +153,14 @@ const ACCEPTED: [(&str, &str); 6] = [
     (
         "call_arg_type_ok",
         "0061736d01000000010a026000017f60017f017f0303020001070801046d61696e00000a10020600412910010b0700200041016a0b",
+    ),
+    (
+        "i64_min_leb_boundary",
+        "0061736d010000000105016000017e03020100070801046d61696e00000a0f010d00428080808080808080807f0b",
+    ),
+    (
+        "i64_max_leb_boundary",
+        "0061736d010000000105016000017e03020100070801046d61696e00000a0f010d0042ffffffffffffffffff000b",
     ),
 ];
 
@@ -256,6 +272,20 @@ fn standard_function_expression_structure_is_canonical() {
             matches!(WasmModule::from_bytes(&bytes(hex)), Err(WasmError::Decode(message)) if message == expected),
             "{name}: malformed function structure must fail at load"
         );
+    }
+}
+
+#[test]
+fn standard_i64_leb_rejects_invalid_unused_high_bits() {
+    for name in ["positive_i64_leb_overflow", "negative_i64_leb_overflow"] {
+        let (_, hex) = REJECTED
+            .into_iter()
+            .find(|(candidate, _)| *candidate == name)
+            .expect("named overflowing fixture");
+        assert!(matches!(
+            WasmModule::from_bytes(&bytes(hex)),
+            Err(WasmError::Decode("signed LEB128 too long"))
+        ));
     }
 }
 

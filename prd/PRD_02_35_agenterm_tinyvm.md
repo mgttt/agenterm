@@ -17,7 +17,8 @@ agenterm-tinyvm (35)
 │   │   ├── decode complexity budget [x]
 │   │   ├── strict declared-memory semantics [x]
 │   │   ├── strict memarg alignment [x]
-│   │   └── canonical function expression structure [x]
+│   │   ├── canonical function expression structure [x]
+│   │   └── strict i64 signed-LEB range [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -100,6 +101,9 @@ active data segment 都在 load gate 拒绝；passive data 和纯计算 module �
 Function expression 的外层 `end` 必须恰好终止 code body，之后不允许残留 opcode；
 每个 `if` 也最多只有一个 `else`。这些结构错误在 decoder 中直接失败，不留给执行器
 猜测或依靠偶然的 control-stack 形状拒绝。
+`i64.const` 的 signed-LEB 也会验证第十字节未使用的高位：超出 `i64` 范围的正、负
+编码在 load gate 拒绝，精确的 `i64::MIN/MAX` 仍可执行；不能依赖宿主整数移位截断来
+替代 WebAssembly binary validation。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。

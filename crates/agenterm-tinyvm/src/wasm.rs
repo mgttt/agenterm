@@ -5048,16 +5048,17 @@ fn leb_s64(bytes: &[u8], mut i: usize) -> Result<(i64, usize), WasmError> {
             .get(i)
             .ok_or(WasmError::Decode("truncated signed LEB128"))?;
         i += 1;
-        result |= i64::from(byte & 0x7f) << shift;
+        if shift == 63 && byte != 0 && byte != 0x7f {
+            return Err(WasmError::Decode("signed LEB128 too long"));
+        }
+        let payload = byte & 0x7f;
+        result |= i64::from(payload) << shift;
         shift += 7;
         if byte & 0x80 == 0 {
             if shift < 64 && (byte & 0x40) != 0 {
                 result |= (-1i64) << shift;
             }
             break;
-        }
-        if shift >= 70 {
-            return Err(WasmError::Decode("signed LEB128 too long"));
         }
     }
     Ok((result, i))
