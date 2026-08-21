@@ -492,6 +492,17 @@ impl Memory {
         })
     }
 
+    fn from_defined(bytes: Vec<u8>, max: Option<usize>) -> Self {
+        let pages = bytes.len() / WASM_PAGE_SIZE;
+        Self {
+            state: Rc::new(MemoryState {
+                bytes: RefCell::new(bytes),
+                pages: Cell::new(pages),
+            }),
+            max,
+        }
+    }
+
     pub fn pages(&self) -> usize {
         self.state.pages.get()
     }
@@ -6682,6 +6693,56 @@ impl Instance {
             Some(index) => self.memory_at_mut(index),
             None => Ok(None),
         }
+    }
+
+    /// Resolve one standard memory export as the same live store object.
+    ///
+    /// A defined memory stays on the instance's direct fast path until this
+    /// method is called. Resolution moves its existing allocation, without
+    /// copying bytes, into a cloneable [`Memory`] that can be bound through
+    /// [`Module::bind_memory_import`].
+    pub fn exported_memory_handle(&mut self, name: &str) -> Result<Option<Memory>, WasmError> {
+        let index = self
+            .state
+            .try_borrow()
+            .map_err(|_| WasmError::Trap("instance is already mutably borrowed"))?
+            .module
+            .memory_export_index(name);
+        let Some(index) = index else {
+            return Ok(None);
+        };
+        if let Some(memory) = self
+            .imported_memories
+            .get(index)
+            .and_then(|memory| memory.clone())
+        {
+            return Ok(Some(memory));
+        }
+
+        let memory = {
+            let mut state = self
+                .state
+                .try_borrow_mut()
+                .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
+            let slot = state
+                .memories
+                .get_mut(index)
+                .ok_or(WasmError::Trap("memory index"))?;
+            match slot {
+                MemorySlot::Imported(memory) => memory.clone(),
+                MemorySlot::Defined { bytes, max } => {
+                    let memory = Memory::from_defined(core::mem::take(bytes), *max);
+                    *slot = MemorySlot::Imported(memory.clone());
+                    memory
+                }
+            }
+        };
+        let imported = self
+            .imported_memories
+            .get_mut(index)
+            .ok_or(WasmError::Trap("memory index"))?;
+        *imported = Some(memory.clone());
+        Ok(Some(memory))
     }
 
     /// Read one standard exported numeric or funcref global.

@@ -2800,3 +2800,28 @@ checks, Clippy, rustfmt and all shell checks pass. The stripped static core is
 101,240 bytes with selftest 42. iOS links at 1,599,752 bytes arm64 and
 1,667,864 bytes x86_64; profile-catalog, replay, private-library and session
 consumers link at 1,472,600, 1,447,032, 1,448,704 and 1,447,856 bytes.
+
+## Eighty-second executable increment — lazy linked memory exports
+
+`Instance::exported_memory_handle` now resolves a standard defined-memory
+export as the exact object another module can bind through
+`Module::bind_memory_import`. Resolution moves the existing allocation into a
+cloneable `WasmMemory` without copying its bytes; active data, host writes,
+guest writes and growth are thereafter visible through provider, consumer and
+handle. Imported memory re-exports return their existing object.
+
+Promotion is deliberately lazy. A module that never requests a linkable export
+keeps the direct `Vec` memory slot and its existing instruction hot path. This
+includes current TinyArcade games even though Rust emits a standard memory
+export, so general multi-module support does not impose per-load `RefCell`
+dispatch on the game runtime.
+
+The imported-memory differential now WABT-compiles a provider module and links
+its exported memory into two consumer instances. TinyVM and JavaScriptCore run
+the same two `.wasm` files to result `516`, including active initialization,
+sibling writes, host mutation and shared growth. Evidence on 2026-08-21: 248
+non-ignored all-feature package tests plus the doctest pass; WABT/JSC,
+no-default/replay, Clippy, rustfmt and shell gates pass. The stripped static
+core remains 101,240 bytes with selftest 42. All iOS linked sizes are unchanged:
+1,599,752 arm64, 1,667,864 x86_64, and 1,472,600 / 1,447,032 / 1,448,704 /
+1,447,856 bytes for profile-catalog / replay / private-library / session.

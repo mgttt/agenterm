@@ -531,6 +531,13 @@ fn imported_memory_module() -> Vec<u8> {
     wasm
 }
 
+fn exported_memory_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 5, &[0x01, 0x01, 0x01, 0x03]);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'a', b'm', 0x02, 0x00]);
+    wasm
+}
+
 #[test]
 fn standard_imported_memory_binds_limits_and_shares_store_identity() {
     let bytes = imported_memory_module();
@@ -571,6 +578,54 @@ fn standard_imported_memory_binds_limits_and_shares_store_identity() {
         module.bind_memory_import("host", "ram", &unbounded),
         Err(WasmError::Trap("memory binding limits"))
     ));
+}
+
+#[test]
+fn standard_exported_memory_handle_links_without_copying_bytes() {
+    let mut provider = must_ok(
+        must_ok(
+            WasmModule::from_bytes(&exported_memory_module()),
+            "load memory provider",
+        )
+        .instantiate(),
+        "instantiate memory provider",
+    );
+    must_ok(provider.exported_memory_mut("ram"), "provider memory").expect("ram export")[0] = 80;
+    let memory = must_ok(
+        provider.exported_memory_handle("ram"),
+        "resolve memory export",
+    )
+    .expect("ram handle");
+    assert_eq!(must_ok(memory.view(), "handle view")[0], 80);
+
+    let mut consumer = must_ok(
+        WasmModule::from_bytes(&imported_memory_module()),
+        "load memory consumer",
+    );
+    must_ok(
+        consumer.bind_memory_import("host", "ram", &memory),
+        "link memory export",
+    );
+    let mut consumer = must_ok(consumer.instantiate(), "instantiate memory consumer");
+    assert_eq!(
+        only_i32(must_ok(
+            consumer.invoke_by_name("run", &[]),
+            "read linked active data",
+        )),
+        65
+    );
+    assert_eq!(
+        must_ok(provider.exported_memory("ram"), "provider memory").expect("ram export")[0],
+        65
+    );
+    must_ok(memory.view_mut(), "host write")[0] = 66;
+    assert_eq!(
+        only_i32(must_ok(
+            consumer.invoke_by_name("run", &[]),
+            "read linked host write",
+        )),
+        66
+    );
 }
 
 #[test]

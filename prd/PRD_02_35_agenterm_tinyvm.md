@@ -156,8 +156,10 @@ TinyArcade v1 仍拒绝 table import，因为单卡带 ABI 尚未定义多 modul
 memory：scalar memarg、size/grow、active data、init/fill 与同内存或跨内存 copy 都按
 标准 memory index 执行。宿主 `max_memory_pages` 是实例内所有 memory 的聚合上限，
 每张 memory 仍服从自身 declared maximum。标准 imported memory 绑定显式 host object，
-clone、别名 import、跨 sibling mutation/grow 和 named re-export 保持同一 identity；借用冲突
-返回确定性 trap。TinyArcade v1 继续要求恰好一张 defined memory，这是其 core callback、
+clone、别名 import、跨 sibling mutation/grow 和 named re-export 保持同一 identity；defined
+memory 的 export 可按需零拷贝提升为同一 cloneable handle 后绑定另一个 module，未请求链接
+的 memory 保留 direct `Vec` 热路径。借用冲突返回确定性 trap。TinyArcade v1 继续要求恰好
+一张 defined memory，这是其 core callback、
 snapshot 和媒体 ABI 固定使用 memory zero 的 embedding 约束，不是 tinyvm 的能力上限。
 标准 tail-call proposal 的 `return_call` 与 `return_call_indirect` 已进入 profile；执行器以
 trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native stack。普通非尾调用

@@ -82,8 +82,12 @@ global exports plus host mutation; WABT validates the bytes and tinyvm and
 JavaScriptCore both return `76`.
 `smoke-wabt-imported-memory.sh` covers the general VM's standard imported
 memory binding, active data, shared sibling writes/growth, exact limits and
-alias identity. WABT validates both fixtures; tinyvm and JavaScriptCore agree
-on the single-import result `516`, while a multi-index alias test proves
+alias identity. WABT validates all fixtures; tinyvm and JavaScriptCore agree
+after obtaining the shared memory from a separately compiled provider
+module's standard export, not a host-created stand-in. TinyVM promotes the
+defined allocation into a cloneable handle only when the embedding requests
+it, preserving the direct-memory execution path otherwise.
+They agree on the single-import result `516`, while a multi-index alias test proves
 overlap-safe copy result `593`. TinyArcade v1 deliberately rejects this general
 engine capability.
 `smoke-wabt-imported-table.sh` covers the general VM's imported-table work:

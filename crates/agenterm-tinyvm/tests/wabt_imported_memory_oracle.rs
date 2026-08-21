@@ -24,6 +24,11 @@ fn wabt_compiled_imported_memory_matches_tinyvm() {
             .expect("TINYVM_WABT_IMPORTED_MEMORY_WASM is set by the smoke script"),
     );
     let bytes = std::fs::read(path).expect("read WABT-produced wasm");
+    let provider_path = PathBuf::from(
+        std::env::var_os("TINYVM_WABT_EXPORTED_MEMORY_WASM")
+            .expect("TINYVM_WABT_EXPORTED_MEMORY_WASM is set by the smoke script"),
+    );
+    let provider_bytes = std::fs::read(provider_path).expect("read WABT-produced provider wasm");
 
     let unbound = must_ok(WasmModule::from_bytes(&bytes), "load unbound module");
     assert!(matches!(
@@ -31,7 +36,22 @@ fn wabt_compiled_imported_memory_matches_tinyvm() {
         Err(WasmError::Trap("unbound imported memory"))
     ));
 
-    let memory = must_ok(WasmMemory::new(1, Some(3)), "allocate shared memory");
+    let provider_module = must_ok(
+        WasmModule::from_bytes_with(
+            &provider_bytes,
+            Limits {
+                max_memory_pages: 3,
+                ..Limits::default()
+            },
+        ),
+        "load memory provider",
+    );
+    let mut provider = must_ok(provider_module.instantiate(), "instantiate memory provider");
+    let memory = must_ok(
+        provider.exported_memory_handle("ram"),
+        "resolve exported memory",
+    )
+    .expect("ram memory export");
     let open = || {
         let mut module = must_ok(
             WasmModule::from_bytes_with(
@@ -89,6 +109,12 @@ fn wabt_compiled_imported_memory_matches_tinyvm() {
         2
     );
     assert_eq!(memory.pages(), 2);
+    assert_eq!(
+        must_ok(provider.exported_memory("ram"), "provider memory")
+            .expect("provider memory")
+            .len(),
+        2 * 65_536
+    );
 
     let wrong_min = must_ok(WasmMemory::new(0, Some(3)), "small memory");
     let mut module = must_ok(WasmModule::from_bytes(&bytes), "reload for wrong minimum");
