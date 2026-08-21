@@ -1,12 +1,12 @@
-//! agenterm-tinyvm — a tiny stack-based bytecode VM.
+//! agenterm-tinyvm — an owned, bounded WebAssembly virtual machine.
 //!
-//! A **new, independent path**: a small VM that interprets a compact bytecode,
-//! so it runs anywhere — including platforms that forbid or lack JIT (iOS,
-//! `wasm32`). It is its own crate and its own product line; it is *not* a layer
-//! of `agenterm-dyn`. dyn remains desktop live-assembly (host-ISA bytes on the
-//! real CPU), which iOS walls off — and no interpreter is being pushed into
-//! dyn. (Swapping this VM's interpreter engine for an AOT/JIT-accelerated
-//! backend on desktop is a possible later step, deliberately not done here.)
+//! The product execution face loads ordinary standard `.wasm`, validates and
+//! interprets it without JIT, and gives the host deterministic fuel, memory and
+//! table control on platforms including iOS and `wasm32`. It is its own crate
+//! and product line; it is *not* a layer of `agenterm-dyn`. dyn remains desktop
+//! live assembly over host-ISA bytes. The early compact [`Vm`]/[`Instr`] face
+//! remains for compatibility and tests, but it does not define the cartridge
+//! format or the platform architecture.
 //!
 //! Properties, on purpose:
 //! - **`no_std`, no `fmt`, no `unsafe`, no `mmap`.** The crate is `no_std`
@@ -48,9 +48,9 @@ pub use cartridge::CartridgeManifest;
 
 pub mod game;
 pub use game::{
-    CartridgeDescriptor, CartridgeOrigin, GAME_ABI_VERSION, GameFrame, GameInput, GameLimits,
-    GameRuntime, KNOWN_BUTTON_MASK, MAX_CARTRIDGE_BYTES, MAX_NATIVE_ARITY,
-    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry,
+    CartridgeDescriptor, CartridgeOrigin, ExecutionStats, GAME_ABI_VERSION, GameFrame, GameInput,
+    GameLifecycle, GameLimits, GameRuntime, KNOWN_BUTTON_MASK, MAX_CARTRIDGE_BYTES,
+    MAX_NATIVE_ARITY, MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry,
 };
 
 pub mod host_profile;

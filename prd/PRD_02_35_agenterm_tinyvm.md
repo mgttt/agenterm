@@ -24,6 +24,7 @@ agenterm-tinyvm (35)
 │   ├── per-call fuel       [x]
 │   ├── memory budget       [x]
 │   ├── table budget        [x]
+│   ├── deterministic execution stats [x]
 │   └── game ABI            [~]
 │       ├── standard .wasm cartridge [x]
 │       ├── manifest compatibility    [x]
@@ -79,7 +80,12 @@ profile，不改变 `.wasm` 格式或增加私有 opcode。
 
 这里排除的 AOT 特指“设备端把下载模块预编译成可执行原生代码”。开发或发布阶段把源码编译为标准 `.wasm`，以及应用本身的构建期 AOT，都不在此排除范围。`agenterm-dyn` 的本地原生动态调用面也不是 iOS tinyvm 执行路径。槽 B 暂停，直到目标分发模型与平台权限发生可验证的变化。
 
-tinyvm 是自有 native WASM 平台的执行核，不是 H5 小游戏、JavaScript miniApp 或 WKWebView 容器。上层平台通过自有 host ABI 向 `.wasm` 提供经预算的原生渲染、输入、音频、时钟与存储面；不依赖 DOM、JavaScript 或 Web 容器语义。App Store 可接受性是该平台上层的独立发布门，不反向改写 tinyvm 的运行时架构。
+tinyvm 的产品身份是自有、跨平台、可预算的标准 WebAssembly VM，不是 H5 小游戏、
+JavaScript miniApp、WKWebView 容器，也不再由早期 compact bytecode 实验定义。TinyArcade
+是该 VM 之上的第一个版本化 host platform；其它可扩展应用同样可以使用标准 `.wasm`
+和自己的窄 host ABI。上层通过经预算的 native imports 提供渲染、输入、音频、时钟
+与存储面，不依赖 DOM、JavaScript 或 Web 容器语义。App Store 可接受性是 TinyArcade
+分发层的独立发布门，不反向改写 tinyvm 的通用运行时架构。
 
 JavaScriptCore 内部存在 WebAssembly 实现，但 Apple 公开的嵌入面是 `JSContext` 中的 JavaScript 执行，不是独立的原生 WASM module/instance API。JSC 可以作为后续对照基准或实验后端，但 tinyvm 是权威、可移植、可预算的 baseline；任何游戏都不得依赖 JSC 才能运行。
 
@@ -88,10 +94,12 @@ portable snapshot 与 host RNG，分别交给 tinyvm 和系统 JavaScriptCore We
 执行，并逐帧比较 render/audio 的精确长度与 SHA-256。Depth Well 与 Paddle Guard
 同时覆盖 grid3d、indexed2d 和 tones。该 adapter/runner 只位于 macOS 测试目录，
 不链接 iOS package、不进入 nostalgia-arcade，也不构成 H5 小游戏平台。
+公开 API、WebKit 内部能力、实验矩阵和 App Review 风险分层见
+[`tinyarcade-javascriptcore-boundary.md`](../docs/tinyarcade-javascriptcore-boundary.md)。
 
 完整的 iOS 游戏运行底层验收树与依赖路径见 [`plan/goal-tinyvm-ios-game-runtime.md`](../plan/goal-tinyvm-ios-game-runtime.md)。
 
-游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.7 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，并在调用 app callback 前执行每生命周期配额；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
+游戏卡带坚持使用标准 `.wasm` module；不增加 tinyvm 私有 opcode，也不把执行体改成私有二进制格式。核心能力由版本化的标准 function import namespace `tinyarcade:core/v1` 提供。Native 模块同样使用独立版本化 namespace，并且只有宿主 capability registry 明确注册的精确签名才能绑定；未知能力默认拒绝。C ABI v1.8 与 Swift package 已能为 bundled/reviewed 卡带注册这些能力，在调用 app callback 前执行每生命周期配额，并读取上一生命周期的确定性 execution stats；private-user 卡带保持 core-only。这样编译器、转换器与粉丝自制工具只需遵循卡带 ABI，而不依赖 tinyvm 内部实现。
 
 官方远端目录和用户私有导入是两条不同的产品/审核路径：私有导入只进入用户自己的 app library，不自动公开或分发给其他用户；官方目录才走签名、复核、撤销与兼容性门。两条路径共同执行 WASM 验证、资源预算和 capability negotiation。
 
@@ -130,7 +138,7 @@ descriptor，已有 manifest、ABI/lifecycle/import 不兼容、超过 2 MiB 或
 
 App build 的可用能力也不再靠说明文字猜测。TAH1 host profile 确定性记录 core/media
 版本、WASM 与输出资源上限，以及已经编译进 App 的 native module 精确
-namespace/field/i32 signature/每生命周期调用配额。Rust、CLI、C ABI v1.7 与 Swift
+namespace/field/i32 signature/每生命周期调用配额。Rust、CLI、C ABI v1.8 与 Swift
 共用同一 encoder 和非执行兼容检查；转换器可在上传前拒绝缺失或签名不匹配的 import，
 同时仍须另跑 fuel、媒体输出与 native 语义的动态 conformance。
 
@@ -164,7 +172,7 @@ iOS SDK 提供有界 PCM/WAV 合成与 `AVAudioPlayer` owner，默认使用服�
 Paddle Guard 的真实 launch tone 证明合成、播放、中断和释放；物理设备音频仍是
 未完成证据，因此 native I/O surface 保持 partial。
 
-C ABI v1.7 已消除 Rust trust/cache 与 iOS App 之间的断层。独立的单线程 cache
+C ABI v1.8 保留并验证 Rust trust/cache 与 iOS App 之间的完整边界。独立的单线程 cache
 handle 和 Swift main-actor owner 接受 app 已完整接收的 bytes，在原子激活前复核
 key/content 撤销、Ed25519、长度、SHA-256 与 embedded manifest；load/rollback
 仍需对应 signed entry 并按当前 trust 再验证。cache 不拥有 URLSession 或 guest
@@ -242,6 +250,15 @@ finish 返回标准 `.tareplay` Data；fresh runtime 可验证所有步骤。模
 Paddle Guard 的录制、原子文件交换、逐字节复现、篡改拒绝和“相同 manifest、不同
 WASM 字节”拒绝。验证会消费候选 runtime 状态，故产品 API 明确要求需要保留现场时
 使用 disposable fresh runtime。
+
+运行预算现在也不是只靠配置上限和 wall-clock 日志猜测。persistent Wasm instance
+记录上一 top-level invocation 的实际指令数、当前 memory pages 与 table elements；
+GameRuntime 再绑定 lifecycle、native dispatch、render/audio/state bytes。C ABI v1.8
+和 Swift 可在成功或 guest trap 后读取同一 allocation-free record，host input 在执行前
+被拒绝则不会篡改它。两个真实卡带在 booted iPhone 17 Pro simulator 的 600 帧
+Release 运行中，Depth Well 峰值 13,150 steps/17 pages，Paddle Guard 峰值 37,864
+steps/17 pages；逐帧统计与输出长度和配置上限一致。wall time/thermal/process memory
+仍属于设备证据，不伪装成跨平台确定性数据。
 
 第二枚生产证明卡带 Paddle Guard 已消除“运行时只是为 Depth Well 特制”的可能：
 它是 5,280-byte 严格 WASM MVP module，只导入八个 `tinyarcade:core/v1`

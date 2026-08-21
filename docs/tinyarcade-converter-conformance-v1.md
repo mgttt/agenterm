@@ -90,3 +90,4 @@ The normative wire details remain in:
 - `docs/tinyarcade-catalog-transport-v1.md`
 - `docs/tinyarcade-replay-v1.md`
 - `docs/tinyarcade-webkit-differential.md`
+- `docs/tinyarcade-javascriptcore-boundary.md`

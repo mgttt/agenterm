@@ -292,6 +292,34 @@ pub struct GameRuntime {
     origin: CartridgeOrigin,
     failed: bool,
     last_clock_ms: Option<u32>,
+    last_execution_stats: ExecutionStats,
+}
+
+/// Lifecycle associated with one deterministic execution measurement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum GameLifecycle {
+    Init = 1,
+    Tick = 2,
+    Suspend = 3,
+    Resume = 4,
+}
+
+/// Host-observable resource use of the last completed lifecycle attempt.
+///
+/// These values are deterministic properties of the guest and host ABI. Wall
+/// time and process memory remain platform measurements and are deliberately
+/// not mixed into this record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExecutionStats {
+    pub lifecycle: GameLifecycle,
+    pub wasm_steps: u64,
+    pub memory_pages: usize,
+    pub table_elements: usize,
+    pub native_calls: u32,
+    pub render_bytes: usize,
+    pub audio_bytes: usize,
+    pub state_bytes: usize,
 }
 
 impl GameRuntime {
@@ -434,6 +462,16 @@ impl GameRuntime {
             origin,
             failed: false,
             last_clock_ms: None,
+            last_execution_stats: ExecutionStats {
+                lifecycle: GameLifecycle::Init,
+                wasm_steps: 0,
+                memory_pages: 0,
+                table_elements: 0,
+                native_calls: 0,
+                render_bytes: 0,
+                audio_bytes: 0,
+                state_bytes: 0,
+            },
         };
 
         let version = runtime.instance.invoke_by_name("game_abi_version", &[])?;
@@ -444,6 +482,7 @@ impl GameRuntime {
         runtime.enter(Phase::Init, GameInput::default());
         let init = runtime.instance.invoke_by_name("game_init", &[]);
         runtime.leave();
+        runtime.capture_execution_stats(GameLifecycle::Init);
         require_success(init?, "game_init failed")?;
         runtime.host.borrow_mut().reset_output();
         Ok(runtime)
@@ -467,6 +506,7 @@ impl GameRuntime {
         self.enter(Phase::Tick, input);
         let tick = self.instance.invoke_by_name("game_tick", &[]);
         self.leave();
+        self.capture_execution_stats(GameLifecycle::Tick);
         self.accept_lifecycle(tick, "game_tick failed")?;
         self.last_clock_ms = Some(input.clock_ms);
         let mut host = self.host.borrow_mut();
@@ -487,6 +527,7 @@ impl GameRuntime {
         self.enter(Phase::Suspend, GameInput::default());
         let suspended = self.instance.invoke_by_name("game_suspend", &[]);
         self.leave();
+        self.capture_execution_stats(GameLifecycle::Suspend);
         self.accept_lifecycle(suspended, "game_suspend failed")?;
         let (guest, rng) = {
             let mut host = self.host.borrow_mut();
@@ -520,6 +561,7 @@ impl GameRuntime {
         self.enter(Phase::Resume, GameInput::default());
         let resumed = self.instance.invoke_by_name("game_resume", &[]);
         self.leave();
+        self.capture_execution_stats(GameLifecycle::Resume);
         self.accept_lifecycle(resumed, "game_resume failed")?;
         if !self.host.borrow().state_loaded {
             self.failed = true;
@@ -536,6 +578,11 @@ impl GameRuntime {
 
     pub fn origin(&self) -> CartridgeOrigin {
         self.origin
+    }
+
+    /// Resource use of the last completed init/tick/suspend/resume attempt.
+    pub fn last_execution_stats(&self) -> ExecutionStats {
+        self.last_execution_stats
     }
 
     pub fn is_failed(&self) -> bool {
@@ -580,6 +627,24 @@ impl GameRuntime {
 
     fn leave(&mut self) {
         self.host.borrow_mut().phase = Phase::Idle;
+    }
+
+    fn capture_execution_stats(&mut self, lifecycle: GameLifecycle) {
+        let host = self.host.borrow();
+        self.last_execution_stats = ExecutionStats {
+            lifecycle,
+            wasm_steps: self.instance.last_steps(),
+            memory_pages: self.instance.memory_pages(),
+            table_elements: self.instance.table_elements(),
+            native_calls: host.native_calls.iter().copied().sum(),
+            render_bytes: host.render.len(),
+            audio_bytes: host.audio.len(),
+            state_bytes: match lifecycle {
+                GameLifecycle::Suspend => host.saved_state.len(),
+                GameLifecycle::Resume => host.restore_state.len(),
+                GameLifecycle::Init | GameLifecycle::Tick => 0,
+            },
+        };
     }
 }
 

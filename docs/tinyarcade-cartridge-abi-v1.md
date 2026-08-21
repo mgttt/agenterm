@@ -174,7 +174,7 @@ private opcodes. A capability declaration is a compatibility requirement, not
 an entitlement: cartridge origin and host policy still decide whether a module
 is registered.
 
-The C ABI v1.7 two-stage copy function emits the following canonical host-side
+The C ABI v1.8 two-stage copy function emits the following canonical host-side
 descriptor. `TAD1` is inspection output, not a cartridge wrapper and never
 replaces the original standard `.wasm` bytes.
 

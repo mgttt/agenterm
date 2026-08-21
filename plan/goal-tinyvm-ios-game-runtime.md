@@ -18,6 +18,7 @@ tinyvm iOS game runtime
 │   ├── per-call instruction budget   [x]
 │   ├── host memory/table budgets     [x]
 │   ├── decode complexity budget      [x]
+│   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
 │   ├── standard WASM cartridge       [x]
@@ -106,6 +107,8 @@ require it. tinyvm remains the portable, deterministic baseline.
 H5, DOM, JavaScript mini-app and WKWebView semantics are excluded. Runtime JIT,
 device-side native AOT of downloaded modules, dynamic native-code loading,
 WASI, guest network access and arbitrary third-party uploads are excluded.
+The tested public/private JavaScriptCore boundary and capability matrix live in
+[`docs/tinyarcade-javascriptcore-boundary.md`](../docs/tinyarcade-javascriptcore-boundary.md).
 
 The cartridge remains an ordinary standards-valid WebAssembly module. The
 runtime does not add private opcodes or wrap executable bytes in a proprietary
@@ -1297,3 +1300,43 @@ Evidence on 2026-08-21:
   no-default and replay-only checks, full-repository formatting and document
   redaction pass. The production static core is unchanged at 71,064 bytes with
   self-test 42.
+
+## Thirty-seventh executable increment — deterministic execution telemetry
+
+tinyvm now treats deterministic resource consumption as a first-class Wasm VM
+result rather than a simulator log. Every persistent instance retains the
+instruction count of its last completed top-level invocation plus current
+memory pages and table elements. `GameRuntime` binds that engine evidence to
+the completed init/tick/suspend/resume attempt and adds native dispatches and
+render/audio/state byte counts. Successful calls and guest traps update the
+record; invalid host input rejected before execution does not rewrite it.
+
+C ABI v1.8 exposes one fixed-layout, allocation-free stats record that remains
+queryable after a guest latches failed. The Swift main-actor owner validates
+the record and returns a typed lifecycle value. Wall time, resident memory,
+thermal state and scheduling remain separate device-owned measurements, so a
+deterministic replay/converter can compare fuel high-water marks without
+claiming milliseconds are portable.
+
+The crate's public identity is also corrected to match the architecture that
+now exists: tinyvm is an owned, bounded, cross-platform standard WebAssembly
+VM. The early compact `Vm`/`Instr` face remains a compatibility/test API; it
+does not define cartridges or the application platform.
+
+Evidence on 2026-08-21:
+
+- Public Rust black boxes prove two identical standard modules report identical
+  init/tick stats and bind exact instruction, memory/table and media evidence.
+  Suspend/resume state bytes and a quota-trapped native lifecycle are covered.
+- C header layout is fixed at 40 bytes; the C owner proves query after tick and
+  suspend. Swift 6 device/simulator builds consume the same v1.8 record.
+- On the booted iPhone 17 Pro simulator, 600 release frames peak at 13,150
+  steps/17 pages for Depth Well and 37,864 steps/17 pages for Paddle Guard.
+  Their p95 values are 0.105 ms and 0.257 ms. Every frame's stats agree with
+  copied render/audio lengths and configured fuel/page ceilings.
+- The complete bridge flow passes with linked consumers of 1,506,184 bytes
+  arm64 and 1,581,856 bytes x86_64. The shipping arm64 gate remains 1.5 MiB;
+  the simulator-only x86_64 slice has a separate 1.5625 MiB ceiling.
+- All 195 package tests plus one doctest, default/all-feature/no-default/replay
+  gates, all-target Clippy, formatting, ShellCheck and document redaction pass.
+  The stripped static core remains 71,064 bytes with self-test 42.

@@ -2372,3 +2372,18 @@ dependency graph. It is an oracle for finding decoder, execution and ABI bugs,
 not a second product authority. When engines disagree, reduce the case and use
 the language/ABI specifications to adjudicate it rather than blindly copying
 the reference behavior.
+
+## Separate deterministic fuel telemetry from device timing
+
+An instruction ceiling proves containment, but it does not reveal how close a
+real workload comes to that ceiling. Retain the consumed counter after each
+top-level interpreter call and combine it with current memory/table size plus
+bounded host-I/O counts. Update the record on a typed guest trap as well as
+success, and leave it unchanged when host input is rejected before execution.
+This makes a failed frame diagnosable without rerunning mutated guest state.
+
+Do not put elapsed time, resident memory, thermal state or scheduler data into
+the deterministic record. Those are device/run measurements; instruction,
+page, dispatch and output-byte counts are replayable VM/ABI facts. Gate both
+layers independently, and require a platform smoke to verify that copied output
+lengths agree with the interpreter record on every measured frame.

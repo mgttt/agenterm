@@ -821,10 +821,20 @@ struct TinyArcadeSmoke {
         }
         var milliseconds: [Double] = []
         milliseconds.reserveCapacity(600)
+        var depthMaxSteps: UInt64 = 0
+        var depthMaxPages: UInt32 = 0
         for index in 0..<600 {
             let started = ProcessInfo.processInfo.systemUptime
-            _ = try measured.tick(buttons: 0, clockMilliseconds: UInt32(index * 16))
+            let output = try measured.tick(buttons: 0, clockMilliseconds: UInt32(index * 16))
             milliseconds.append((ProcessInfo.processInfo.systemUptime - started) * 1_000)
+            let stats = try measured.lastExecutionStats()
+            precondition(stats.lifecycle == .tick)
+            precondition(stats.renderBytes == UInt32(output.render.count))
+            precondition(stats.audioBytes == UInt32(output.audio.count))
+            precondition(stats.wasmSteps > 0 && stats.wasmSteps <= 100_000)
+            precondition(stats.memoryPages <= 17)
+            depthMaxSteps = max(depthMaxSteps, stats.wasmSteps)
+            depthMaxPages = max(depthMaxPages, stats.memoryPages)
         }
         milliseconds.sort()
         let average = milliseconds.reduce(0, +) / Double(milliseconds.count)
@@ -833,7 +843,10 @@ struct TinyArcadeSmoke {
         precondition(p95 < 8, "Depth Well simulator p95 exceeded 8 ms")
         print(
             "OK: Depth Well in iOS Simulator; "
-                + String(format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms", average, p95, maximum)
+                + String(
+                    format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms fuel=%llu pages=%u",
+                    average, p95, maximum, depthMaxSteps, depthMaxPages
+                )
         )
         try runtime.close()
         try restored.close()
@@ -883,6 +896,8 @@ struct TinyArcadeSmoke {
         var paddleMilliseconds: [Double] = []
         paddleMilliseconds.reserveCapacity(600)
         var sawPaddleTone = !paddleFrame.tones.isEmpty
+        var paddleMaxSteps: UInt64 = 0
+        var paddleMaxPages: UInt32 = 0
         for index in 1...600 {
             if index == 300 {
                 let saved = try paddleRuntime.suspend()
@@ -902,6 +917,14 @@ struct TinyArcadeSmoke {
             }
             try paddleView.display(decoded)
             paddleMilliseconds.append((ProcessInfo.processInfo.systemUptime - started) * 1_000)
+            let stats = try paddleRuntime.lastExecutionStats()
+            precondition(stats.lifecycle == .tick)
+            precondition(stats.renderBytes == UInt32(paddleFrame.render.count))
+            precondition(stats.audioBytes == UInt32(paddleFrame.audio.count))
+            precondition(stats.wasmSteps > 0 && stats.wasmSteps <= 500_000)
+            precondition(stats.memoryPages <= 17)
+            paddleMaxSteps = max(paddleMaxSteps, stats.wasmSteps)
+            paddleMaxPages = max(paddleMaxPages, stats.memoryPages)
             sawPaddleTone = sawPaddleTone || !paddleFrame.tones.isEmpty
         }
         paddleMilliseconds.sort()
@@ -913,10 +936,8 @@ struct TinyArcadeSmoke {
         print(
             "OK: Paddle Guard in iOS Simulator; "
                 + String(
-                    format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms",
-                    paddleAverage,
-                    paddleP95,
-                    paddleMaximum
+                    format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms fuel=%llu pages=%u",
+                    paddleAverage, paddleP95, paddleMaximum, paddleMaxSteps, paddleMaxPages
                 )
         )
         try paddleRuntime.close()

@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 7u
-#define TINYARCADE_ABI_VERSION 0x00010007u
+#define TINYARCADE_ABI_MINOR 8u
+#define TINYARCADE_ABI_VERSION 0x00010008u
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -45,6 +45,21 @@ typedef struct tinyarcade_config_v1 {
     uint32_t max_state_bytes;
     uint32_t rng_seed;
 } tinyarcade_config_v1;
+
+/* Deterministic resource use for the last completed lifecycle attempt. Wall
+ * time and process memory remain platform-owned measurements. */
+typedef struct tinyarcade_execution_stats_v1 {
+    uint32_t struct_size;
+    /* 1 init, 2 tick, 3 suspend, 4 resume. */
+    uint32_t lifecycle;
+    uint64_t wasm_steps;
+    uint32_t memory_pages;
+    uint32_t table_elements;
+    uint32_t native_calls;
+    uint32_t render_bytes;
+    uint32_t audio_bytes;
+    uint32_t state_bytes;
+} tinyarcade_execution_stats_v1;
 
 /* Pointer fields are borrowed only for the duration of open_reviewed. The
  * signature is the canonical detached Ed25519 signature described by the
@@ -304,6 +319,12 @@ tinyarcade_status_v1 tinyarcade_v1_is_failed(
 tinyarcade_status_v1 tinyarcade_v1_origin(
     tinyarcade_runtime_v1* runtime,
     uint32_t* output);
+/* Available after open (init stats) and updated after every completed
+ * tick/suspend/resume attempt, including a guest trap. It remains queryable
+ * after the runtime latches failed. */
+tinyarcade_status_v1 tinyarcade_v1_last_execution_stats(
+    tinyarcade_runtime_v1* runtime,
+    tinyarcade_execution_stats_v1* output);
 
 /* Per-thread diagnostic for the preceding tinyarcade call. This accessor does
  * not clear the stored message and uses the same two-stage byte protocol. */

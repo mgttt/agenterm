@@ -37,6 +37,11 @@ Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
 `tick` convenience.
 
+After init or any tick/suspend/resume attempt, call `lastExecutionStats()` for
+deterministic Wasm instruction, memory/table, native-dispatch and output-byte
+evidence. Guest traps update the record; host input rejected before execution
+does not. Measure device wall time and process memory separately.
+
 For indexed cartridges, `TinyArcadeIndexed2DFrame.makeCGImage()` provides an
 exact sRGB RGBA image and `TinyArcadeIndexed2DView` is a ready-to-layout UIKit
 surface with aspect-fit, nearest-neighbour presentation. Apps that own a Metal

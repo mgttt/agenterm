@@ -10,9 +10,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::thread::{self, ThreadId};
 
 use crate::{
-    CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, GameFrame, GameInput,
-    GameLimits, GameRuntime, HostProfileV1, Limits, MAX_NATIVE_CALLS_PER_LIFECYCLE,
-    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1, WasmError,
+    CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, ExecutionStats,
+    GameFrame, GameInput, GameLimits, GameRuntime, HostProfileV1, Limits,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1,
+    ReplayTraceV1, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -40,6 +41,19 @@ pub struct TinyArcadeConfigV1 {
     pub max_audio_bytes: u32,
     pub max_state_bytes: u32,
     pub rng_seed: u32,
+}
+
+#[repr(C)]
+pub struct TinyArcadeExecutionStatsV1 {
+    pub struct_size: u32,
+    pub lifecycle: u32,
+    pub wasm_steps: u64,
+    pub memory_pages: u32,
+    pub table_elements: u32,
+    pub native_calls: u32,
+    pub render_bytes: u32,
+    pub audio_bytes: u32,
+    pub state_bytes: u32,
 }
 
 #[repr(C)]
@@ -491,7 +505,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 7
+    (1 << 16) | 8
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -1373,6 +1387,50 @@ pub unsafe extern "C" fn tinyarcade_v1_origin(
     })
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_last_execution_stats(
+    runtime: *mut TinyArcadeRuntimeV1,
+    output: *mut TinyArcadeExecutionStatsV1,
+) -> i32 {
+    boundary(|| {
+        let runtime = unsafe { runtime_mut(runtime)? };
+        if output.is_null() {
+            return Err(FfiError::new(
+                STATUS_INVALID_ARGUMENT,
+                "null execution-stats output",
+            ));
+        }
+        let ExecutionStats {
+            lifecycle,
+            wasm_steps,
+            memory_pages,
+            table_elements,
+            native_calls,
+            render_bytes,
+            audio_bytes,
+            state_bytes,
+        } = runtime.runtime.last_execution_stats();
+        let count = |value: usize| {
+            u32::try_from(value)
+                .map_err(|_| FfiError::new(STATUS_DECODE, "execution stats overflow"))
+        };
+        unsafe {
+            output.write(TinyArcadeExecutionStatsV1 {
+                struct_size: size_of::<TinyArcadeExecutionStatsV1>() as u32,
+                lifecycle: lifecycle as u32,
+                wasm_steps,
+                memory_pages: count(memory_pages)?,
+                table_elements: count(table_elements)?,
+                native_calls,
+                render_bytes: count(render_bytes)?,
+                audio_bytes: count(audio_bytes)?,
+                state_bytes: count(state_bytes)?,
+            })
+        };
+        Ok(())
+    })
+}
+
 /// Copy the last error for the calling thread. This call intentionally does
 /// not clear the error before reading it.
 #[unsafe(no_mangle)]
@@ -1746,7 +1804,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 7);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 8);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -1754,6 +1812,23 @@ mod tests {
         );
         assert_eq!(origin, CartridgeOrigin::Bundled as u32);
         assert_eq!(unsafe { tinyarcade_v1_tick(runtime, 0, 16) }, STATUS_OK);
+        let mut stats = MaybeUninit::<TinyArcadeExecutionStatsV1>::uninit();
+        assert_eq!(
+            unsafe { tinyarcade_v1_last_execution_stats(runtime, stats.as_mut_ptr()) },
+            STATUS_OK
+        );
+        let stats = unsafe { stats.assume_init() };
+        assert_eq!(
+            stats.struct_size,
+            size_of::<TinyArcadeExecutionStatsV1>() as u32
+        );
+        assert_eq!(stats.lifecycle, crate::GameLifecycle::Tick as u32);
+        assert!(stats.wasm_steps > 0);
+        assert_eq!(stats.memory_pages, 1);
+        assert_eq!(stats.table_elements, 0);
+        assert_eq!(stats.native_calls, 0);
+        assert_eq!((stats.render_bytes, stats.audio_bytes), (1, 0));
+        assert_eq!(stats.state_bytes, 0);
         assert_eq!(
             unsafe { tinyarcade_v1_tick(runtime, 1 << 31, 17) },
             STATUS_INVALID_ARGUMENT
@@ -1799,6 +1874,14 @@ mod tests {
         assert_eq!(render, [9]);
 
         assert_eq!(unsafe { tinyarcade_v1_suspend(runtime) }, STATUS_OK);
+        let mut stats = MaybeUninit::<TinyArcadeExecutionStatsV1>::uninit();
+        assert_eq!(
+            unsafe { tinyarcade_v1_last_execution_stats(runtime, stats.as_mut_ptr()) },
+            STATUS_OK
+        );
+        let stats = unsafe { stats.assume_init() };
+        assert_eq!(stats.lifecycle, crate::GameLifecycle::Suspend as u32);
+        assert!(stats.state_bytes > 0);
         let mut snapshot_len = 0usize;
         assert_eq!(
             unsafe { tinyarcade_v1_copy_snapshot(runtime, ptr::null_mut(), 0, &mut snapshot_len) },
@@ -2470,6 +2553,7 @@ mod tests {
             "tinyarcade_v1_copy_game_version",
             "tinyarcade_v1_is_failed",
             "tinyarcade_v1_origin",
+            "tinyarcade_v1_last_execution_stats",
             "tinyarcade_v1_last_error",
         ] {
             assert!(

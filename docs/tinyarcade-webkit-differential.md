@@ -8,6 +8,9 @@ It is a development oracle, not an alternate product runtime. Nothing in this
 directory authorizes a cartridge, replaces the iOS interpreter, adds browser
 semantics to the ABI or ships JavaScript/H5 inside nostalgia-arcade.
 
+The API, capability and App Review reasons for this boundary are recorded in
+[`tinyarcade-javascriptcore-boundary.md`](tinyarcade-javascriptcore-boundary.md).
+
 ## Contract
 
 ```text

@@ -1504,6 +1504,7 @@ pub struct Instance {
     module: Module,
     memory: Vec<u8>,
     globals: Vec<Val>,
+    last_steps: u64,
 }
 
 impl Module {
@@ -2747,17 +2748,20 @@ impl Instance {
             module,
             memory,
             globals,
+            last_steps: 0,
         };
         if let Some(start) = instance.module.start {
             let mut steps = 0;
-            instance.module.call_any(
+            let result = instance.module.call_any(
                 start,
                 &[],
                 0,
                 &mut steps,
                 &mut instance.memory,
                 &mut instance.globals,
-            )?;
+            );
+            instance.last_steps = steps;
+            result?;
         }
         Ok(instance)
     }
@@ -2790,14 +2794,32 @@ impl Instance {
     /// zero for this top-level call; memory and globals remain live.
     pub fn invoke_val(&mut self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps = 0;
-        self.module.call_any(
+        let result = self.module.call_any(
             idx,
             args,
             0,
             &mut steps,
             &mut self.memory,
             &mut self.globals,
-        )
+        );
+        self.last_steps = steps;
+        result
+    }
+
+    /// Instructions consumed by the last completed top-level invocation,
+    /// including a call that returned a guest trap.
+    pub fn last_steps(&self) -> u64 {
+        self.last_steps
+    }
+
+    /// Current live linear-memory size in WebAssembly 64 KiB pages.
+    pub fn memory_pages(&self) -> usize {
+        self.memory.len() / WASM_PAGE_SIZE
+    }
+
+    /// Current funcref-table length. MVP tables cannot grow in slot A.
+    pub fn table_elements(&self) -> usize {
+        self.module.table.len()
     }
 
     /// Read-only access to the live linear memory, for bounded native host I/O.

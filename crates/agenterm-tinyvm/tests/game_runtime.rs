@@ -5,9 +5,9 @@ use std::process::Command;
 use std::rc::Rc;
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, HostProfileV1,
-    Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
-    WasmError,
+    CartridgeDescriptor, CartridgeManifest, GameInput, GameLifecycle, GameLimits, GameRuntime,
+    HostProfileV1, Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE,
+    NativeModuleRegistry, RenderFrame, WasmError,
 };
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{ReplayRecorderV1, ReplayTraceV1};
@@ -396,6 +396,46 @@ fn standard_wasm_cartridge_drives_one_bounded_frame() {
     );
     assert_eq!(frame.render, [1, 2, 3]);
     assert_eq!(frame.audio, [4, 5]);
+    let stats = runtime.last_execution_stats();
+    assert_eq!(stats.lifecycle, GameLifecycle::Tick);
+    assert!(stats.wasm_steps > 0 && stats.wasm_steps < Limits::default().max_steps);
+    assert_eq!(stats.memory_pages, 1);
+    assert_eq!(stats.table_elements, 0);
+    assert_eq!(stats.native_calls, 0);
+    assert_eq!((stats.render_bytes, stats.audio_bytes), (3, 2));
+    assert_eq!(stats.state_bytes, 0);
+}
+
+#[test]
+fn execution_stats_are_deterministic_and_cover_guest_host_resources() {
+    let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
+    let open = || {
+        must_ok(
+            GameRuntime::from_bytes(&wasm, Limits::default(), GameLimits::default(), 0x1234_5678),
+            "open measured game",
+        )
+    };
+    let mut first = open();
+    let mut second = open();
+    assert_eq!(first.last_execution_stats(), second.last_execution_stats());
+    assert_eq!(first.last_execution_stats().lifecycle, GameLifecycle::Init);
+
+    let input = GameInput {
+        buttons: 0b101,
+        clock_ms: 16,
+    };
+    let first_frame = must_ok(first.tick(input), "first measured tick");
+    let second_frame = must_ok(second.tick(input), "second measured tick");
+    assert_eq!(first_frame.render, second_frame.render);
+    assert_eq!(first_frame.audio, second_frame.audio);
+    let stats = first.last_execution_stats();
+    assert_eq!(stats, second.last_execution_stats());
+    assert_eq!(stats.lifecycle, GameLifecycle::Tick);
+    assert!(stats.wasm_steps > 0 && stats.wasm_steps < Limits::default().max_steps);
+    assert_eq!((stats.memory_pages, stats.table_elements), (1, 0));
+    assert_eq!(stats.native_calls, 0);
+    assert_eq!((stats.render_bytes, stats.audio_bytes), (3, 2));
+    assert_eq!(stats.state_bytes, 0);
 }
 
 #[test]
@@ -1038,6 +1078,10 @@ fn native_dispatch_quota_is_charged_before_callback_and_resets_per_lifecycle() {
         "over-budget dispatch must not call app code"
     );
     assert!(runtime.is_failed());
+    let trapped = runtime.last_execution_stats();
+    assert_eq!(trapped.lifecycle, GameLifecycle::Tick);
+    assert!(trapped.wasm_steps > 0);
+    assert_eq!(trapped.native_calls, 1);
 
     let calls = Rc::new(Cell::new(0));
     let observed = calls.clone();
@@ -1171,12 +1215,21 @@ fn suspend_resume_restores_guest_state_and_host_rng() {
     assert_eq!(&first_frame.render[0..4], &0u32.to_le_bytes());
     assert_eq!(&first_frame.render[4..8], &rng_one.to_le_bytes());
     let snapshot = must_ok(first.suspend(), "suspend stateful game");
+    let suspended = first.last_execution_stats();
+    assert_eq!(suspended.lifecycle, GameLifecycle::Suspend);
+    assert!(suspended.wasm_steps > 0);
+    assert!(suspended.state_bytes > 0);
+    assert_eq!((suspended.render_bytes, suspended.audio_bytes), (0, 0));
 
     let mut restored = must_ok(
         GameRuntime::from_bytes(&wasm, Limits::default(), GameLimits::default(), 999),
         "load restored game",
     );
     must_ok(restored.resume(&snapshot), "resume stateful game");
+    let resumed = restored.last_execution_stats();
+    assert_eq!(resumed.lifecycle, GameLifecycle::Resume);
+    assert!(resumed.wasm_steps > 0);
+    assert_eq!(resumed.state_bytes, suspended.state_bytes);
     let restored_frame = must_ok(
         restored.tick(GameInput {
             buttons: 7,

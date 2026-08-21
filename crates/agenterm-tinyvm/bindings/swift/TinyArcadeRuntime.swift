@@ -680,6 +680,26 @@ public enum TinyArcadeCartridgeOrigin: UInt32, Sendable {
     case privateUser = 2
 }
 
+public enum TinyArcadeGameLifecycleV1: UInt32, Sendable {
+    case initialize = 1
+    case tick = 2
+    case suspend = 3
+    case resume = 4
+}
+
+/// Deterministic guest/ABI resource use for one completed lifecycle attempt.
+/// Device wall time and process memory are intentionally measured separately.
+public struct TinyArcadeExecutionStatsV1: Sendable, Equatable {
+    public let lifecycle: TinyArcadeGameLifecycleV1
+    public let wasmSteps: UInt64
+    public let memoryPages: UInt32
+    public let tableElements: UInt32
+    public let nativeCalls: UInt32
+    public let renderBytes: UInt32
+    public let audioBytes: UInt32
+    public let stateBytes: UInt32
+}
+
 public struct TinyArcadeReviewedCatalogEntry: Sendable {
     public let gameID: String
     public let gameVersion: String
@@ -2209,6 +2229,30 @@ public final class TinyArcadeRuntimeV1 {
             )
         }
         return value
+    }
+
+    /// Returns init stats immediately after open, then the most recent
+    /// tick/suspend/resume attempt. A guest trap still updates this record.
+    public func lastExecutionStats() throws -> TinyArcadeExecutionStatsV1 {
+        var raw = tinyarcade_execution_stats_v1()
+        try Self.check(tinyarcade_v1_last_execution_stats(try liveHandle(), &raw))
+        guard raw.struct_size == UInt32(MemoryLayout<tinyarcade_execution_stats_v1>.size),
+              let lifecycle = TinyArcadeGameLifecycleV1(rawValue: raw.lifecycle) else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                message: "runtime returned invalid execution stats"
+            )
+        }
+        return TinyArcadeExecutionStatsV1(
+            lifecycle: lifecycle,
+            wasmSteps: raw.wasm_steps,
+            memoryPages: raw.memory_pages,
+            tableElements: raw.table_elements,
+            nativeCalls: raw.native_calls,
+            renderBytes: raw.render_bytes,
+            audioBytes: raw.audio_bytes,
+            stateBytes: raw.state_bytes
+        )
     }
 
     private func liveHandle() throws -> OpaquePointer {

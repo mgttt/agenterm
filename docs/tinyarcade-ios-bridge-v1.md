@@ -94,7 +94,7 @@ scene notifications itself; lifecycle authority stays with the app.
 
 ## Ownership
 
-ABI v1.7 exposes three non-interchangeable origins: bundled
+ABI v1.8 exposes three non-interchangeable origins: bundled
 `tinyarcade_v1_open`, signed `tinyarcade_v1_open_reviewed`, and local
 `tinyarcade_v1_open_private`. Every instance retains its immutable origin for
 UI/audit queries. Reviewed opening consumes a single-thread-owned trust store;
@@ -118,7 +118,7 @@ TAD1 result exposes identity, ABI/state version and every exact import to app UI
 or creator tooling. Descriptor success grants no origin, trust or native
 capability; actual open remains authoritative.
 
-ABI v1.7 also exports the app side of compatibility negotiation. The
+ABI v1.8 also exports the app side of compatibility negotiation. The
 two-stage `tinyarcade_v1_copy_host_profile` converts one exact runtime config
 and native function table into callback-free canonical TAH1 bytes;
 `tinyarcade_v1_check_cartridge_host_profile` reuses the Rust static validator
@@ -181,7 +181,7 @@ contract at compile time.
 Close is explicit and idempotent at the Swift layer. Its `deinit` is a final
 safety release. A raw C consumer must close exactly once on the owner thread.
 
-ABI v1.7 also exposes the existing verified object cache through a distinct
+ABI v1.8 also exposes the existing verified object cache through a distinct
 single-thread-owned C handle and `TinyArcadeCartridgeCacheV1` Swift owner. The
 app supplies a file URL and a positive per-object WASM byte ceiling. Network
 transfer is deliberately absent: only a complete `Data` value may enter
@@ -254,6 +254,23 @@ returns its phase to idle and discards any cached frame/snapshot/replay before r
 again. A generic `catch_unwind` status without that state transition is not
 containment because partially mutated guest state could otherwise be reused.
 
+## Deterministic execution telemetry
+
+C ABI v1.8 adds `tinyarcade_v1_last_execution_stats`; Swift exposes the same
+record as `lastExecutionStats()`. It reports the last completed lifecycle
+attempt (init/tick/suspend/resume), interpreted Wasm instruction count, current
+memory pages and table elements, native dispatches, and render/audio/state byte
+counts. A guest trap updates the record before the runtime latches failed, so
+diagnostics can distinguish a fuel or host-output problem without executing the
+guest again. A host-input rejection that occurs before execution leaves the
+previous record unchanged.
+
+The record is deterministic and allocation-free. It deliberately excludes wall
+time, process resident memory, thermal state and device scheduling; those remain
+platform measurements that the iOS app/test owns. This split lets converters
+and replay tests compare guest resource high-water marks across machines without
+pretending that elapsed milliseconds are portable.
+
 ## Current evidence boundary
 
 The smoke gate builds a real arm64 iOS-device archive and a universal
@@ -261,12 +278,14 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked smoke executable must remain at or below 1.5 MiB; this
-measures the dead-stripped consumer result rather than the multi-object static
+The optimized linked arm64 smoke executable must remain at or below 1.5 MiB;
+the simulator-only x86_64 compatibility slice has a separate 1.5625 MiB gate.
+This measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
 the exercised Swift consumer added the bounded official-catalog JSON decoder;
 the later 1.375 MiB gate accounted for the recoverable snapshot-store owner;
-the current 1.5 MiB gate includes the bounded input/clock/session owner.
+the current arm64 1.5 MiB gate includes the bounded input/clock/session owner
+and deterministic execution telemetry.
 Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 
@@ -285,7 +304,7 @@ decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 suspend into a fresh instance during the measured run. Its real launch event is
 also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
 explicitly deactivated on the booted simulator.
-The same simulator smoke creates a real cache directory through the Swift v1.7
+The same simulator smoke creates a real cache directory through the Swift v1.8
 owner and proves that a cartridge naming an absent trust key cannot activate.
 Rust's public C black box separately installs a valid signed cartridge, reloads
 its exact bytes, rejects cross-thread access, then proves live revocation clears
@@ -304,6 +323,14 @@ rejects invalid/backwards/background samples without baseline mutation,
 deactivates/saves/restores/reactivates the exact clock, rejects inactive input
 and ticks, distinguishes storage failure from runtime failure, and proves
 rejected direct host input leaves the runtime playable.
+
+The performance pass reads telemetry after every measured frame and requires it
+to agree with the copied media lengths and configured fuel/page ceilings. In
+the current release build, Depth Well's 600-frame run peaks at 13,150 Wasm
+steps and 17 pages; Paddle Guard peaks at 37,864 steps and 17 pages. Their p95
+values are 0.105 ms and 0.257 ms respectively on the iPhone 17 Pro simulator.
+These numbers are regression evidence for this build and host, not a claim
+about physical-device latency.
 
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,
