@@ -134,6 +134,7 @@ agenterm-tinyvm (35)                                      [~]
 ├── evidence                                             [~]
 │   ├── Depth Well grid3d                                 [x]
 │   ├── Paddle Guard indexed2d                            [x]
+│   ├── Signal Lock Swift-to-Wasm migration               [x]
 │   ├── deterministic replay vectors                      [x]
 │   ├── development JSC + H5 differential                [x]
 │   ├── real iOS app consumer                            [~]
@@ -150,7 +151,12 @@ agenterm-tinyvm (35)                                      [~]
 │   │   ├── generalize memory-zero call-scoped borrowing   [ ]
 │   │   ├── explicit selected-memory callback context      [ ]
 │   │   ├── versioned native import conventions           [ ]
-│   │   └── converter-visible compatibility reports       [ ]
+│   │   ├── converter-visible compatibility reports       [ ]
+│   │   └── platform-neutral host architecture            [ ]
+│   │       ├── contract / abstraction / backend split     [ ]
+│   │       ├── internal handles + preopen-only paths       [ ]
+│   │       ├── optional WASI Preview 1 adapter             [ ]
+│   │       └── Unix / Windows / iOS backends outside VM    [ ]
 │   ├── P2 — standard Wasm coverage                      [ ]
 │   │   ├── proposal priority by real cartridge workload  [ ]
 │   │   ├── independent WABT/JSC differential per leaf    [ ]
@@ -315,6 +321,21 @@ integration that does not hard-code QuickJS, and benchmarks that expose boundary
 dispatch cost. tinyvm will translate those lessons into bounded native-module ABI work; it
 will not make JavaScript, QuickJS or a second runtime part of the iOS product dependency.
 
+The host implementation follows three boundaries. The contract is a versioned Wasm import
+namespace: TinyArcade remains the game profile, while a separately enabled
+`wasi_snapshot_preview1` subset may serve non-game embeddings. A `no_std` abstraction owns
+opaque handles, clocks, random filling, byte I/O, exit state and a virtual preopen table; the
+guest never sees OS descriptors or physical paths. Platform backends live outside the VM:
+Unix may share an implementation with cfg-gated macOS sandbox handling, while Windows and
+iOS require separate path/handle/storage policy. Unsupported operations return explicit
+`NOSYS`/`NOTCAPABLE`-equivalent errors.
+
+`host/` itself is not a standard. Normative inputs are WebAssembly Core imports/exports and
+linear memory, WASI Preview 1 when that optional adapter is selected, and—only for a future
+component profile—WIT, Canonical ABI and the Component Model. Wasmtime/Wasmi/WAMR/wasm3 and
+the Wasm C API are implementation references, not the contract. ISA portability continues
+to come from portable guest and host code, never dynamic host machine code.
+
 ### P2 — grow standard coverage from workload evidence
 
 SIMD is the leading game-relevant proposal candidate, but it is not marked committed until
@@ -359,8 +380,8 @@ Current evidence owners:
 
 - H5 mini games, DOM APIs, a WKWebView game shell or JavaScript as the cartridge platform.
 - JIT, downloaded native code, cartridge-provided dylibs or device-side AOT on the iOS path.
-- WASI as an implicit host surface. Files, network, rendering and storage require explicit,
-  versioned embedding imports.
+- WASI as an implicit/default game host surface. An optional, versioned Preview 1 profile may
+  be implemented separately; files, network, rendering and storage are never ambient powers.
 - WAT parsing in the runtime. Producer tooling may compile WAT to standard `.wasm`.
 - Claiming App Review approval from technical validation, TestFlight upload or a release note.
 - Replacing `agenterm-dyn`, `agenterm-cu` or `agenterm-chassis`; their product boundaries stay

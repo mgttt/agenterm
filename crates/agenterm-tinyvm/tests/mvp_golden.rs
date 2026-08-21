@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 79] = [
+const LEAF_TESTS: [(&str, &str); 80] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -876,6 +876,10 @@ const LEAF_TESTS: [(&str, &str); 79] = [
     (
         "Paddle Guard indexed2d",
         "standard_paddle_guard_launches_moves_and_emits_indexed_frames",
+    ),
+    (
+        "Signal Lock Swift-to-Wasm migration",
+        "standard_signal_lock_rotates_channels_and_renders_a_readable_radar",
     ),
     (
         "deterministic replay vectors",

@@ -97,5 +97,9 @@ run_game \
   paddle-guard-0.1.0 \
   "$CRATE/build-paddle-guard-cartridge.sh" \
   "$CRATE/tests/fixtures/paddle-guard-replay-v1.inputs"
+run_game \
+  signal-lock-0.1.0 \
+  "$CRATE/build-signal-lock-cartridge.sh" \
+  "$CRATE/tests/fixtures/signal-lock-replay-v1.inputs"
 
 echo "OK: development-only JSC + H5 differential; no web runtime enters the iOS app"
