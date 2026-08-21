@@ -82,7 +82,11 @@ two-stage `tinyarcade_v1_copy_host_profile`; Swift uses
 `inspect_cartridge`, `tinyarcade_v1_check_cartridge_host_profile` and
 `inspectCompatibleCartridge` share the same non-executing compatibility gate.
 
-An app owner may publish the exact TAH1 artifact beside a catalog or converter
-SDK. A creator upload must bind the selected profile bytes or digest so a later
-app build cannot be confused with the one the converter targeted. Passing TAH1
-does not promote a private-user upload into the official reviewed catalog.
+An app owner publishes the exact artifact as `host-profile-v1.tahost` beside
+`catalog-v1.json`; the catalog records its bounded length and SHA-256 so a site
+or converter can select an exact target. The iOS client treats those fields as
+discovery only and accepts downloaded bytes only when they exactly equal TAH1
+generated from the local App build. A creator upload must bind those selected
+bytes or digest so a later app build cannot be confused with the one the
+converter targeted. Passing TAH1 does not promote a private-user upload into
+the official reviewed catalog.

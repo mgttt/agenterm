@@ -1200,3 +1200,35 @@ Evidence on 2026-08-21:
   1,531,648 bytes x86_64, with replay/private/session consumers at 1,315,608,
   1,317,296 and 1,316,432 bytes arm64. Physical-device, live-hosting and Apple
   approval evidence remain open.
+
+## Thirty-fourth executable increment — catalog-bound host profile discovery
+
+The offline catalog source now requires one canonical TAH1 artifact. The
+publisher statically checks every standard cartridge against that exact App
+profile before signing, stages the bytes as `host-profile-v1.tahost`, and emits
+their bounded length and lowercase SHA-256 at the catalog root. A failed
+profile decode or incompatible cartridge leaves no publication directory.
+
+Catalog profile metadata deliberately has discovery authority only. Swift
+accepts old catalogs without it, strictly resolves the fixed same-origin
+filename when present, downloads under exact length/MIME limits, and then
+requires the remote bytes to equal the canonical profile generated from the
+local App build. Changing both a catalog profile and its self-reported digest
+cannot grant an unavailable native module or larger runtime budget.
+
+Evidence on 2026-08-21:
+
+- The publisher black box proves reproducible profile bytes/length/hash and
+  atomic refusal when a cartridge exceeds the supplied profile.
+- A dedicated booted iPhone 17 Pro simulator consumer proves traversal
+  rejection, bounded HTTPS profile fetch, exact local-profile acceptance and
+  same-length mismatch rejection. The existing consumer also proves an older
+  catalog without `host_profile` remains readable.
+- Generic device and universal simulator packages link. Ordinary consumers
+  measure 1,499,384 bytes arm64 and 1,567,128 bytes x86_64; the dedicated
+  profile-catalog consumer is 1,372,360 bytes arm64. All remain below the
+  unchanged 1.5 MiB SDK gate. Physical-device, live-hosting and Apple approval
+  evidence remain open.
+- All 190 package tests plus one doctest, all-feature/all-target Clippy,
+  default-command, no-default and replay-only checks, document redaction and
+  the exact 70,904-byte static-core/self-test gate are clean.

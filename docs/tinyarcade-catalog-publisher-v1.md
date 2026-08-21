@@ -7,6 +7,8 @@ upload, or modify a live site.
 ```text
 author source + standard .wasm + offline Ed25519 seed
     → strict metadata bounds
+    → decode one canonical app-build TAH1 profile
+    → static profile check for every cartridge
     → manifest/import/module validation
     → init/tick/media/suspend/resume deterministic replay
     → length + SHA-256 + canonical signed entry
@@ -14,6 +16,7 @@ author source + standard .wasm + offline Ed25519 seed
     → private staging directory
     → one directory rename
         ├── catalog-v1.json
+        ├── host-profile-v1.tahost
         └── {game-id}-{game-version}.wasm
 ```
 
@@ -32,8 +35,9 @@ printed. It is a TinyArcade catalog key, not an Apple APNs `.p8` key. Keep it
 outside the repository and offline. The matching public key and key id are
 separately bundled in reviewed app releases so keys can rotate or be revoked.
 
-The source is strict JSON; unknown fields fail. WASM paths are resolved relative
-to the source file. Identity and compatibility fields are intentionally absent:
+The source is strict JSON; unknown fields fail. WASM and host-profile paths are
+resolved relative to the source file. Identity and compatibility fields are
+intentionally absent:
 they are derived from each cartridge's canonical embedded manifest so a site
 operator cannot relabel executable bytes.
 
@@ -42,6 +46,7 @@ operator cannot relabel executable bytes.
   "schema_version": 1,
   "catalog_id": "com.partnernet.tinyarcade",
   "signing_key_id": "catalog-2026-01",
+  "host_profile": "ios-build.tahost",
   "games": [
     {
       "wasm": "cartridges/depth-well.wasm",
@@ -63,6 +68,14 @@ canonical base64 signatures and pretty JSON are deterministic. An existing
 output is never overwritten. Any validation, signing, verification, encoding,
 or write failure removes the private staging directory and leaves no visible
 publication directory.
+
+The source profile must decode as canonical TAH1. Before any game is signed,
+the publisher checks its standard module, declared memory/table and exact
+function imports against that profile without executing it. Publication copies
+the exact bytes to `host-profile-v1.tahost` and emits their length and lowercase
+SHA-256 at the catalog root. That digest makes the converter/site artifact
+content-addressable; it does not let catalog JSON define what a particular App
+build supports.
 
 The published JSON has discovery authority only. An app must still download
 the exact same-origin object under byte limits and pass its signed entry plus

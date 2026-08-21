@@ -184,6 +184,19 @@ native semantics still require dynamic conformance. Use one strict canonical
 decoder across CLI and FFI so reordered, duplicate or trailing fields cannot
 produce multiple identities for the same claimed app build.
 
+A catalog's self-reported profile digest is useful for discovery and converter
+content addressing, but it cannot define an App build's authority: an attacker
+can replace both bytes and digest. Generate the expected canonical profile from
+the app-compiled configuration/native registry and require exact byte equality
+after a bounded same-origin download. Keep older catalogs readable by making
+discovery metadata optional; never make compatibility optional once it is
+present.
+
+Do not place a filesystem helper behind optional-feature `cfg` when an
+unconditionally compiled CLI subcommand calls it. An all-features suite hides
+that mistake. In addition to feature-rich tests, compile the default binary and
+execute at least one real default-feature command that crosses the helper.
+
 Windows checklist:
 
 - Convert paths/text to bounded NUL-terminated UTF-16 at the adapter edge.

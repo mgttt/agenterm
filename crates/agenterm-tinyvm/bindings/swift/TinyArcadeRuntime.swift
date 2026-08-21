@@ -751,6 +751,18 @@ public struct TinyArcadeCatalogLocalizationV1: Sendable, Equatable {
     public let summary: String
 }
 
+public struct TinyArcadeCatalogHostProfileV1: Sendable, Equatable {
+    public let fileURL: URL
+    public let length: UInt64
+    public let sha256: Data
+
+    public init(fileURL: URL, length: UInt64, sha256: Data) {
+        self.fileURL = fileURL
+        self.length = length
+        self.sha256 = sha256
+    }
+}
+
 public struct TinyArcadeCatalogGameV1: Sendable {
     public let entry: TinyArcadeReviewedCatalogEntry
     public let title: String
@@ -795,6 +807,7 @@ public struct TinyArcadeCatalogV1: Sendable {
     public static let maximumGameCount = 256
 
     public let catalogID: String
+    public let hostProfile: TinyArcadeCatalogHostProfileV1?
     public let games: [TinyArcadeCatalogGameV1]
 
     public static func decode(
@@ -820,6 +833,26 @@ public struct TinyArcadeCatalogV1: Sendable {
               !wire.games.isEmpty,
               wire.games.count <= maximumGameCount else {
             throw TinyArcadeCatalogDecodeError.invalidDocument
+        }
+        let hostProfile: TinyArcadeCatalogHostProfileV1?
+        if let profile = wire.hostProfile {
+            guard profile.file == "host-profile-v1.tahost",
+                  (56...UInt64(64 * 1_024)).contains(profile.length),
+                  let hash = Self.hexData(profile.sha256), hash.count == 32,
+                  let fileURL = URL(
+                      string: profile.file,
+                      relativeTo: cartridgeBaseURL
+                  )?.absoluteURL,
+                  Self.sameOrigin(fileURL, cartridgeBaseURL) else {
+                throw TinyArcadeCatalogDecodeError.invalidDocument
+            }
+            hostProfile = TinyArcadeCatalogHostProfileV1(
+                fileURL: fileURL,
+                length: profile.length,
+                sha256: hash
+            )
+        } else {
+            hostProfile = nil
         }
 
         var seenGameIDs = Set<String>()
@@ -884,7 +917,11 @@ public struct TinyArcadeCatalogV1: Sendable {
                 )
             )
         }
-        return TinyArcadeCatalogV1(catalogID: wire.catalogID, games: games)
+        return TinyArcadeCatalogV1(
+            catalogID: wire.catalogID,
+            hostProfile: hostProfile,
+            games: games
+        )
     }
 
     /// Resolves an exact `tinyarcade://game/<game-id>` selection. It performs
@@ -904,8 +941,13 @@ public struct TinyArcadeCatalogV1: Sendable {
         return games.first { $0.entry.gameID == gameID }
     }
 
-    private init(catalogID: String, games: [TinyArcadeCatalogGameV1]) {
+    private init(
+        catalogID: String,
+        hostProfile: TinyArcadeCatalogHostProfileV1?,
+        games: [TinyArcadeCatalogGameV1]
+    ) {
         self.catalogID = catalogID
+        self.hostProfile = hostProfile
         self.games = games
     }
 
@@ -992,13 +1034,21 @@ public struct TinyArcadeCatalogV1: Sendable {
     private struct WireCatalog: Decodable {
         let schemaVersion: UInt32
         let catalogID: String
+        let hostProfile: WireHostProfile?
         let games: [WireGame]
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
             case catalogID = "catalog_id"
+            case hostProfile = "host_profile"
             case games
         }
+    }
+
+    private struct WireHostProfile: Decodable {
+        let file: String
+        let length: UInt64
+        let sha256: String
     }
 
     private struct WireGame: Decodable {
@@ -1042,6 +1092,7 @@ public enum TinyArcadeHTTPError: Error, Equatable {
     case unsupportedContentType
     case responseTooLarge
     case lengthMismatch
+    case hostProfileMismatch
     case requestQueueFull
     case cancelled
     case transportFailure
@@ -1125,6 +1176,33 @@ public final class TinyArcadeHTTPSClientV1: @unchecked Sendable {
             exactBytes: Int(game.entry.wasmLength),
             contentTypes: ["application/wasm", "application/octet-stream"]
         )
+    }
+
+    public func fetchHostProfile(
+        _ profile: TinyArcadeCatalogHostProfileV1,
+        matching expected: TinyArcadeHostProfileV1
+    ) async throws -> Data {
+        guard profile.length <= UInt64(Int.max),
+              (56...UInt64(64 * 1_024)).contains(profile.length),
+              profile.sha256.count == 32 else {
+            throw TinyArcadeHTTPError.responseTooLarge
+        }
+        guard profile.length == UInt64(expected.encoded.count) else {
+            throw TinyArcadeHTTPError.hostProfileMismatch
+        }
+        let data = try await fetch(
+            profile.fileURL,
+            maximumBytes: Int(profile.length),
+            exactBytes: Int(profile.length),
+            contentTypes: [
+                "application/octet-stream",
+                "application/vnd.tinyarcade.host-profile",
+            ]
+        )
+        guard expected.matchesPublishedBytes(data) else {
+            throw TinyArcadeHTTPError.hostProfileMismatch
+        }
+        return data
     }
 
     private func fetch(
@@ -1452,6 +1530,10 @@ public struct TinyArcadeNativeFunctionV1 {
 /// app-compiled native imports. Publish these bytes for converter preflight.
 public struct TinyArcadeHostProfileV1: Sendable, Equatable {
     public let encoded: Data
+
+    public func matchesPublishedBytes(_ data: Data) -> Bool {
+        encoded == data
+    }
 
     @MainActor
     public static func appBuild(

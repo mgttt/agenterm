@@ -33,6 +33,7 @@ agenterm-tinyvm (35)
 │       ├── native module registry    [x]
 │       ├── App Store bundled-only gate [x]
 │       └── machine host profile      [x]
+│           └── catalog profile binding [x]
 ├── real-game proofs               [~]
 │   ├── Depth Well grid3d             [x]
 │   ├── Paddle Guard indexed2d        [x]
@@ -117,6 +118,12 @@ App build 的可用能力也不再靠说明文字猜测。TAH1 host profile 确�
 namespace/field/i32 signature/每生命周期调用配额。Rust、CLI、C ABI v1.7 与 Swift
 共用同一 encoder 和非执行兼容检查；转换器可在上传前拒绝缺失或签名不匹配的 import，
 同时仍须另跑 fuel、媒体输出与 native 语义的动态 conformance。
+
+离线 publisher 现在必须接收该 TAH1，并在签名前用它静态检查每枚卡带；输出目录固定
+携带 `host-profile-v1.tahost` 及 catalog 根级 length/SHA-256。网站和转换器可据此选择
+精确 App build，但 App 不信任 catalog 自报的 profile 权限：Swift 只在受限同源下载
+结果与本地编译配置生成的 TAH1 逐字节相等时接受，因此目录无法自行扩大 native import
+或资源上限。旧 catalog 可不带该发现字段，仍保持只读兼容。
 
 媒体边界不再假设所有游戏都是 Depth Well。`submit_render` 可提交严格有界的
 `tinyarcade:grid3d/v1` 或 `tinyarcade:indexed2d/v1` 标准记录；后者提供完整

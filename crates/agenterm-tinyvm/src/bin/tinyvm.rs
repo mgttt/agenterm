@@ -345,6 +345,7 @@ struct CatalogSource {
     schema_version: u32,
     catalog_id: String,
     signing_key_id: String,
+    host_profile: String,
     games: Vec<SourceGame>,
 }
 
@@ -372,7 +373,16 @@ struct Localization {
 struct PublishedCatalog {
     schema_version: u32,
     catalog_id: String,
+    host_profile: PublishedHostProfile,
     games: Vec<PublishedGame>,
+}
+
+#[cfg(feature = "catalog-publisher")]
+#[derive(Serialize)]
+struct PublishedHostProfile {
+    file: String,
+    length: u64,
+    sha256: String,
 }
 
 #[cfg(feature = "catalog-publisher")]
@@ -431,6 +441,14 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
     let key_pair =
         Ed25519KeyPair::from_seed_unchecked(&seed).map_err(|_| "invalid Ed25519 signing seed")?;
     let source_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
+    let host_profile_bytes = read_bounded_regular(
+        &source_dir.join(&source.host_profile),
+        MAX_HOST_PROFILE_BYTES as u64,
+        "host profile",
+    )?;
+    let host_profile =
+        HostProfileV1::decode(&host_profile_bytes).map_err(|error| error.message().to_string())?;
+    let host_profile_hash = cartridge_sha256(&host_profile_bytes);
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
     let leaf = output
         .file_name()
@@ -457,6 +475,9 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
             validate_display_metadata(&game)?;
             let wasm_path = source_dir.join(&game.wasm);
             let wasm = read_bounded_regular(&wasm_path, MAX_CARTRIDGE_BYTES, "cartridge")?;
+            host_profile
+                .inspect_cartridge(&wasm)
+                .map_err(|error| error.message().to_string())?;
             let manifest = validate_publishable_cartridge(&wasm)?;
             if !valid_identifier(&manifest.game_id, 128) || !valid_version(&manifest.game_version) {
                 return Err("cartridge identity is incompatible with catalog v1".into());
@@ -508,9 +529,16 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
             });
         }
         games.sort_by(|left, right| left.game_id.cmp(&right.game_id));
+        std::fs::write(stage.join("host-profile-v1.tahost"), &host_profile_bytes)
+            .map_err(|_| "cannot write staged host profile")?;
         let published = PublishedCatalog {
             schema_version: 1,
             catalog_id: source.catalog_id,
+            host_profile: PublishedHostProfile {
+                file: "host-profile-v1.tahost".into(),
+                length: host_profile_bytes.len() as u64,
+                sha256: lower_hex(&host_profile_hash),
+            },
             games,
         };
         let mut json =
@@ -530,7 +558,6 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
     result
 }
 
-#[cfg(any(feature = "catalog-publisher", feature = "replay"))]
 fn read_bounded_regular(path: &Path, maximum: u64, label: &str) -> Result<Vec<u8>, String> {
     let metadata = std::fs::symlink_metadata(path).map_err(|_| format!("cannot stat {label}"))?;
     if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > maximum {
@@ -1070,12 +1097,19 @@ mod publisher_tests {
                 .expect("restrict seed");
         }
         let source = temp.path().join("source.json");
+        let profile_path = temp.path().join("ios-build.tahost");
+        let profile = HostProfileV1::new(Limits::default(), GameLimits::default())
+            .unwrap_or_else(|error| panic!("default host profile: {}", error.message()))
+            .encode()
+            .unwrap_or_else(|error| panic!("encode host profile: {}", error.message()));
+        std::fs::write(&profile_path, &profile).expect("write host profile");
         std::fs::write(
             &source,
             r#"{
               "schema_version": 1,
               "catalog_id": "tinyarcade.test",
               "signing_key_id": "test-2026",
+              "host_profile": "ios-build.tahost",
               "games": [{
                 "wasm": "game.wasm",
                 "title": "Paddle Guard",
@@ -1100,6 +1134,18 @@ mod publisher_tests {
                 .any(|bytes| bytes == secret)
         );
         let wire: serde_json::Value = serde_json::from_slice(&first_json).expect("decode catalog");
+        assert_eq!(wire["host_profile"]["file"], "host-profile-v1.tahost");
+        assert_eq!(wire["host_profile"]["length"], profile.len());
+        assert_eq!(
+            wire["host_profile"]["sha256"]
+                .as_str()
+                .expect("profile hash"),
+            lower_hex(&cartridge_sha256(&profile))
+        );
+        assert_eq!(
+            std::fs::read(first.join("host-profile-v1.tahost")).expect("read staged profile"),
+            profile
+        );
         let game = &wire["games"][0];
         assert_eq!(game["game_id"], "com.partnernet.paddle-guard");
         assert_eq!(game["game_version"], "0.1.0");
@@ -1117,6 +1163,21 @@ mod publisher_tests {
                 .expect("read staged wasm"),
             std::fs::read(&wasm).expect("read source wasm")
         );
+
+        let tight_profile = HostProfileV1::new(
+            Limits {
+                max_memory_pages: 1,
+                ..Limits::default()
+            },
+            GameLimits::default(),
+        )
+        .unwrap_or_else(|error| panic!("tight host profile: {}", error.message()))
+        .encode()
+        .unwrap_or_else(|error| panic!("encode tight profile: {}", error.message()));
+        std::fs::write(&profile_path, tight_profile).expect("replace with incompatible profile");
+        let incompatible = temp.path().join("incompatible-publish");
+        assert!(build_catalog(&source, &seed, &incompatible).is_err());
+        assert!(!incompatible.exists());
 
         let failed = temp.path().join("failed-publish");
         std::fs::write(&source, b"{}").expect("replace with invalid source");

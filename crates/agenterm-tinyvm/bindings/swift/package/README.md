@@ -26,6 +26,13 @@ functions as the app runtime to export canonical TAH1 bytes for converters.
 without instantiating the guest or calling handlers. Dynamic fuel/output and
 native semantics remain separate reviewed-game gates.
 
+When an official catalog includes `host_profile`, call
+`TinyArcadeHTTPSClientV1.fetchHostProfile(_:matching:)` with the locally
+generated App-build profile. The request is same-origin and exactly bounded;
+success requires byte-for-byte equality with the local profile. Catalog
+length/hash fields support discovery and converter content addressing, but do
+not authorize a different native module or resource limit in the App.
+
 Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
 `tick` convenience.

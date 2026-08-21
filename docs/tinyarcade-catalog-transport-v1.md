@@ -9,6 +9,7 @@ cache before a reviewed runtime can open them.
 ```text
 catalog JSON
 ├── shows bounded title/summary/localizations
+├── discovers one bounded app-build TAH1 artifact
 ├── resolves one same-origin cartridge filename
 ├── carries the detached signed-entry fields
 └── never activates code
@@ -29,6 +30,11 @@ ranges.
 {
   "schema_version": 1,
   "catalog_id": "com.example.tinyarcade",
+  "host_profile": {
+    "file": "host-profile-v1.tahost",
+    "length": 56,
+    "sha256": "<64-lowercase-hex-characters>"
+  },
   "games": [
     {
       "game_id": "com.example.paddle-guard",
@@ -67,6 +73,15 @@ and transport location do not gain signature authority merely by sharing the
 same JSON object. Unknown JSON members are transport extensions and cannot
 change the fields passed to the trust gate.
 
+`host_profile` is optional so an older catalog remains readable. When present,
+its file is exactly `host-profile-v1.tahost`, its length is 56...65,536 bytes,
+its digest is lowercase SHA-256 and its URL resolves on the same origin as the
+cartridges. The metadata is discovery/content-addressing data, not execution
+authority. The App downloads it under the declared exact-length ceiling, then
+compares the bytes with the canonical TAH1 generated from its own compiled
+runtime configuration and native registry. A catalog cannot grant itself an
+extra native import or resource limit by changing both its profile and hash.
+
 ## Cartridge URL
 
 The app supplies an HTTPS directory URL, such as
@@ -82,6 +97,7 @@ The conventional publication layout is therefore:
 ```text
 https://partnernetsoftware.com/wasm/
 ├── catalog-v1.json
+├── host-profile-v1.tahost
 ├── depth-well-0.1.0.wasm
 └── paddle-guard-0.1.0.wasm
 ```
@@ -94,6 +110,9 @@ seconds, rejects every redirect and requires HTTP 200. Catalog responses require
 body acceptance, every received delegate chunk rechecks the remaining budget,
 and a cartridge's final received length must exactly match its signed entry.
 Task cancellation cancels the URLSession task and resumes the caller once.
+Host-profile responses require `application/octet-stream` or
+`application/vnd.tinyarcade.host-profile`, have an exact declared/final length,
+and must equal the App-local TAH1 bytes before being accepted.
 
 One client allows 1...4 active requests (default 2) and 0...64 queued requests
 (default 16). The same active limit is applied to URLSession's per-host

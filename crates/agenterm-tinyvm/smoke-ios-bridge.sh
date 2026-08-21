@@ -49,6 +49,18 @@ xcrun --sdk iphonesimulator swiftc \
   -I "$SLICE/Headers" \
   -L "$SLICE" \
   -lagenterm_tinyvm \
+  -Xlinker -fatal_warnings \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
+  "$CRATE/tests/ios/TinyArcadeHostProfileCatalogSmoke.swift" \
+  -o "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64"
+xcrun --sdk iphonesimulator swiftc \
+  -parse-as-library \
+  -warnings-as-errors \
+  -O \
+  -target arm64-apple-ios14.0-simulator \
+  -I "$SLICE/Headers" \
+  -L "$SLICE" \
+  -lagenterm_tinyvm \
   -framework CryptoKit \
   -Xlinker -fatal_warnings \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift" \
@@ -107,12 +119,14 @@ xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-arm64" | grep -q 'platform IOSSIM
 xcrun vtool -show-build "$TEMP/TinyArcadeSmoke-x86_64" | grep -q 'platform IOSSIMULATOR'
 ARM64_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSmoke-arm64")
 X86_64_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeSmoke-x86_64")
+HOST_PROFILE_CATALOG_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64")
 REPLAY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeReplaySmoke-arm64")
 PRIVATE_LIBRARY_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadePrivateLibrarySmoke-arm64")
 GAME_SESSION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeGameSessionSmoke-arm64")
 MAX_LINKED_BYTES=1572864
 test "$ARM64_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test "$X86_64_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
+test "$HOST_PROFILE_CATALOG_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test "$REPLAY_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test "$PRIVATE_LIBRARY_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
 test "$GAME_SESSION_LINKED_BYTES" -le "$MAX_LINKED_BYTES"
@@ -144,6 +158,7 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
   "$CRATE/build-paddle-guard-cartridge.sh" "$PADDLE_CARTRIDGE" >/dev/null
   xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
     "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
+  xcrun simctl spawn booted "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64"
   xcrun simctl spawn booted "$TEMP/TinyArcadeReviewedFlowSmoke-arm64" \
     "$PADDLE_CARTRIDGE"
   xcrun simctl spawn booted "$TEMP/TinyArcadeSnapshotStoreSmoke-arm64" \
@@ -156,4 +171,4 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
     "$PADDLE_CARTRIDGE"
 fi
 
-echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} bytes"
+echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} bytes"

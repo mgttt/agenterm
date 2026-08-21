@@ -470,6 +470,7 @@ struct TinyArcadeSmoke {
             cartridgeBaseURL: catalogBaseURL
         )
         precondition(catalog.games.count == 1)
+        precondition(catalog.hostProfile == nil)
         let catalogGame = catalog.games[0]
         precondition(catalogGame.cartridgeURL.absoluteString == "https://partnernetsoftware.com/wasm/paddle-guard-0.1.0.wasm")
         precondition(catalogGame.localized(for: "zh-Hans").title == "护盾弹球")
