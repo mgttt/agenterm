@@ -162,7 +162,9 @@ agenterm-tinyvm (35)                                      [~]
 │   │       │   ├── fd read/write/seek/stat                   [x]
 │   │       │   ├── path open/unlink                          [x]
 │   │       │   └── proc_exit                                 [x]
-│   │       └── Unix / Windows / iOS backends outside VM    [ ]
+│   │       └── platform backends outside VM                [~]
+│   │           ├── capability-directory std backend         [x]
+│   │           └── iOS App container wiring                  [ ]
 │   ├── P2 — standard Wasm coverage                      [ ]
 │   │   ├── proposal priority by real cartridge workload  [ ]
 │   │   ├── independent WABT/JSC differential per leaf    [ ]
@@ -269,7 +271,7 @@ as “almost approved” or “safe to ship externally.”
 | Execution | Persistent instance, explicit activation trampoline, fuel and resource telemetry | Deterministic trap local to the instance |
 | Values | i32/i64/f32/f64, funcref and opaque externref through supported standard locations | Exact type mismatch rejection |
 | Resources | Defined/imported/exported globals, memories and funcref/externref tables | Binding/type/limit rejection or borrow-conflict trap |
-| Host ABI | Typed arbitrary-arity compatibility callback and fixed 16-value in-place hot path | Callback error propagated without partial result acceptance |
+| Host ABI | Typed arbitrary-arity compatibility callback, fixed 16-value hot path and optional capability-directory std backend | Callback/platform error propagated without ambient-path reconstruction |
 | Optional WASI P1 | Sixteen exact process/clock/random/preopen/descriptor/path/exit imports over the neutral host contract | Unknown/wrong imports fail binding; bad memory, path, rights or backend absence returns explicit errno/interruption |
 | TinyArcade | Manifest, core v1, native registry, lifecycle, deterministic RNG/clock, render/audio/state bounds | Cartridge fails closed; App owner remains alive |
 | iOS | C ABI, XCFramework, Swift package, input/frame pacing, persistence, replay and native 2D/3D/audio owners | Main-actor owner latches bad runtime and clears stale output |
@@ -381,6 +383,7 @@ Current evidence owners:
 
 - [Executable goal and incremental evidence](../plan/goal-tinyvm-ios-game-runtime.md)
 - [Optional WASI Preview 1 profile](../docs/tinyvm-wasi-preview1.md)
+- [Capability-based std host](../docs/tinyvm-std-host.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)

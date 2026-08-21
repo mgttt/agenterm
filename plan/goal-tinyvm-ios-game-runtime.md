@@ -3301,3 +3301,33 @@ passes all 127 library tests and every non-ignored integration test, including
 the iOS XCFramework/Swift link and three-game tinyvm/JSC/H5 differential.
 Linked sizes remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the
 stripped static core remains 101,256 bytes with selftest 42.
+
+## One-hundred-first executable increment — capability-based std host
+
+The unified crate now has an optional `std-host` backend rather than separate
+Unix, Windows and iOS VM forks. `StdHostBackend` owns a bounded table of
+`cap-std` directories/files, realtime and monotonic clocks, system random,
+sleep and recorded exit outcomes. An embedding performs one explicit ambient
+open for each chosen preopen; all guest file operations thereafter stay
+relative to that directory capability. Real paths never enter `HostContext`,
+WASI or guest memory. Specific native failures now survive the neutral layer as
+not-found, exists, directory-kind or access errors and map to canonical WASI
+errno values.
+
+The backend is separately enabled and does not change the default
+`no_std + alloc` core. On iOS it requires the App to pass an owned
+Documents/Caches directory; it does not discover ambient storage or expose the
+container root.
+
+Evidence on 2026-08-22: macOS black boxes execute real preopen/create/write/
+seek/read/stat/close/unlink behavior, backend handle exhaustion, clocks, random
+and exit outcome. A sibling-directory escape attempt preserves an external
+sentinel. An independently WAT-compiled standard module drives the same real
+file lifecycle end to end through tinyvm, the 16-import WASI adapter,
+`HostContext` and `StdHostBackend`, with exact guest-memory and host-filesystem
+assertions. The `std-host,wasi-p1` library graph compiles for arm64 Linux musl,
+Windows GNU/LLVM and arm64 iOS, while the default no-feature library remains
+`no_std`. The complete all-feature/all-target suite, warnings-denied Clippy,
+real iOS XCFramework/Swift link and three-game tinyvm/JSC/H5 differential pass.
+Linked sizes remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the
+stripped default static core remains 101,256 bytes with selftest 42.

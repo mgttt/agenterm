@@ -13,14 +13,18 @@ ring = { version = "0.17", optional = true }
 base64 = { version = "0.22", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+cap-std = { version = "4", optional = true }
+getrandom = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tempfile = "3.25"
+wat = "1"
 
 [features]
 staticcore = []
 std = []
 wasi-p1 = []
+std-host = ["std", "dep:cap-std", "dep:getrandom"]
 ios-c-api = ["cartridge-trust", "replay"]
 cartridge-trust = ["std", "dep:ring"]
 catalog-publisher = ["cartridge-trust", "dep:base64", "dep:serde", "dep:serde_json"]

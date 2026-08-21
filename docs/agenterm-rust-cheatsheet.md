@@ -2721,3 +2721,13 @@ and let the guest continue. First let the backend accept the typed outcome, then
 interrupt the VM through a stable adapter-owned marker and retain the structured
 value for the embedder to inspect or consume. Clear stale outcomes before each
 attempt, and keep backend rejection distinct from an accepted guest exit.
+
+For a reusable `std` filesystem backend, an already-validated relative string
+is still not enough: joining it onto a host path reintroduces symlink races and
+platform-specific traversal behavior. Open ambient authority once at an
+embedding-chosen preopen boundary, retain a capability-directory object, and do
+all later open/stat/unlink calls relative to that object. Keep backend native
+resource limits separate from guest-fd limits, preserve specific I/O failures
+through the neutral error enum, and cross-compile the exact optional feature
+graph for Linux, Windows and iOS even when behavior runs only on the current
+host.

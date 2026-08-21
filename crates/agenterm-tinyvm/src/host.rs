@@ -14,13 +14,18 @@ pub type HostResult<T> = Result<T, HostError>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostError {
     AllocationFailed,
+    AlreadyExists,
     BadHandle,
     Invalid,
     InvalidPath,
+    IsDirectory,
     Io,
+    NotDirectory,
+    NotFound,
     NotCapable,
     NotSupported,
     Overflow,
+    PermissionDenied,
     ProcessTooLarge,
     TooManyDescriptors,
     TooManyPreopens,

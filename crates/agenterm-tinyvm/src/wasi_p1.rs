@@ -23,13 +23,18 @@ pub struct WasiErrno(pub u16);
 impl WasiErrno {
     pub const SUCCESS: Self = Self(0);
     pub const TOO_BIG: Self = Self(1);
+    pub const ACCES: Self = Self(2);
     pub const BADF: Self = Self(8);
+    pub const EXIST: Self = Self(20);
     pub const FAULT: Self = Self(21);
     pub const INVAL: Self = Self(28);
     pub const IO: Self = Self(29);
+    pub const ISDIR: Self = Self(31);
     pub const MFILE: Self = Self(33);
     pub const NAMETOOLONG: Self = Self(37);
+    pub const NOENT: Self = Self(44);
     pub const NOMEM: Self = Self(48);
+    pub const NOTDIR: Self = Self(54);
     pub const NOSYS: Self = Self(52);
     pub const OVERFLOW: Self = Self(61);
     pub const NOTCAPABLE: Self = Self(76);
@@ -39,12 +44,17 @@ impl From<HostError> for WasiErrno {
     fn from(error: HostError) -> Self {
         match error {
             HostError::AllocationFailed => Self::NOMEM,
+            HostError::AlreadyExists => Self::EXIST,
             HostError::BadHandle => Self::BADF,
             HostError::Invalid => Self::INVAL,
             HostError::InvalidPath | HostError::NotCapable => Self::NOTCAPABLE,
+            HostError::IsDirectory => Self::ISDIR,
             HostError::Io => Self::IO,
+            HostError::NotDirectory => Self::NOTDIR,
+            HostError::NotFound => Self::NOENT,
             HostError::NotSupported => Self::NOSYS,
             HostError::Overflow => Self::OVERFLOW,
+            HostError::PermissionDenied => Self::ACCES,
             HostError::ProcessTooLarge => Self::TOO_BIG,
             HostError::TooManyDescriptors | HostError::TooManyPreopens => Self::MFILE,
         }

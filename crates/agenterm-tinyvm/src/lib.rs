@@ -62,6 +62,11 @@ pub use host::{
     HostHandle, HostLimits, HostResult, OpenOptions, SeekWhence,
 };
 
+#[cfg(feature = "std-host")]
+pub mod std_host;
+#[cfg(feature = "std-host")]
+pub use std_host::{StdHostBackend, StdHostLimits};
+
 #[cfg(feature = "wasi-p1")]
 pub mod wasi_p1;
 #[cfg(feature = "wasi-p1")]
