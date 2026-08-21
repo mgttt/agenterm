@@ -74,6 +74,19 @@ fn passive_elem_module() -> Vec<u8> {
     wasm
 }
 
+fn multi_result_module() -> Vec<u8> {
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut wasm, 1, &[0x01, 0x60, 0x00, 0x02, 0x7F, 0x7E]);
+    section(&mut wasm, 3, &[0x01, 0x00]);
+    section(&mut wasm, 7, &[0x01, 0x03, b'r', b'u', b'n', 0x00, 0x00]);
+    section(
+        &mut wasm,
+        10,
+        &[0x01, 0x06, 0x00, 0x41, 0x2A, 0x42, 0x07, 0x0B],
+    );
+    wasm
+}
+
 fn assert_copy_fill_semantics() {
     let mut module = WasmModule::new();
     let copy = must_ok(
@@ -249,6 +262,102 @@ fn standard_nontrapping_conversion_proposal_saturates() {
             "+infinity to unsigned i64"
         )),
         -1
+    );
+}
+
+#[test]
+fn standard_multi_value_proposal_executes() {
+    let bytes = multi_result_module();
+    let mut instance = must_ok(
+        must_ok(WasmModule::from_bytes(&bytes), "load multi-result module").instantiate(),
+        "instantiate multi-result module",
+    );
+    let results = must_ok(
+        instance.invoke_by_name("run", &[]),
+        "invoke multi-result export",
+    );
+    assert!(matches!(results.as_slice(), [Val::I32(42), Val::I64(7)]));
+
+    let mut invalid = bytes;
+    let i64_const = invalid
+        .windows(2)
+        .position(|window| window == [0x42, 0x07])
+        .expect("i64.const 7 in fixture");
+    invalid.splice(i64_const..i64_const + 2, []);
+    let shortened_len = invalid.len();
+    invalid[shortened_len - 7] -= 2; // code-section payload length
+    invalid[shortened_len - 5] -= 2; // function-body length
+    assert!(WasmModule::from_bytes(&invalid).is_err());
+
+    let mut invalid_start = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    section(&mut invalid_start, 1, &[0x01, 0x60, 0x00, 0x02, 0x7F, 0x7E]);
+    section(&mut invalid_start, 3, &[0x01, 0x00]);
+    section(&mut invalid_start, 8, &[0x00]);
+    section(
+        &mut invalid_start,
+        10,
+        &[0x01, 0x06, 0x00, 0x41, 0x2A, 0x42, 0x07, 0x0B],
+    );
+    assert!(
+        WasmModule::from_bytes(&invalid_start).is_err(),
+        "a standard start function must have no parameters and no results"
+    );
+}
+
+#[test]
+fn standard_multi_value_s33_block_type_index_64_executes() {
+    let mut module = WasmModule::new();
+    for _ in 0..64 {
+        module.add_type(0, 0);
+    }
+    assert_eq!(module.add_type(1, 1), 64);
+    let function = must_ok(
+        module.add_function(
+            0,
+            0,
+            1,
+            &[
+                0x41, 0x2A, // i32.const 42
+                0x02, 0xC0, 0x00, // block type[64], encoded as positive s33
+                0x0B, 0x0B,
+            ],
+        ),
+        "decode block type index 64",
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(function, &[]),
+            "run block type index 64"
+        )),
+        42
+    );
+
+    let noncanonical_i32 = must_ok(
+        module.add_function(
+            0,
+            0,
+            1,
+            &[
+                0x41, 0x2A, // i32.const 42
+                0x02, 0xFF, 0x7F, // block i32 with valid sign-extended s33
+                0x0B, 0x0B,
+            ],
+        ),
+        "decode sign-extended inline block type",
+    );
+    assert_eq!(
+        only_i32(must_ok(
+            module.invoke_val(noncanonical_i32, &[]),
+            "run sign-extended inline block type"
+        )),
+        42
+    );
+
+    assert!(
+        module
+            .add_function(0, 0, 0, &[0x02, 0x80, 0x80, 0x80, 0x80, 0x10, 0x0B, 0x0B])
+            .is_err(),
+        "an s33 block type must sign-extend its unused high payload bits"
     );
 }
 

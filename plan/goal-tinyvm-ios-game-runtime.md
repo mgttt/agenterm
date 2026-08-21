@@ -1452,3 +1452,41 @@ Evidence on 2026-08-21:
 - Device/simulator Swift linkage remains below its gates at 1,525,560 bytes
   arm64 and 1,591,760 bytes x86_64. The isolated stripped static core remains
   87,656 bytes, below 100 KiB, and its C self-test returns 42.
+
+## Forty-first executable increment — standard multi-value control flow
+
+tinyvm now implements the standard WebAssembly multi-value proposal end to
+end. Function bodies and calls validate and return complete heterogeneous
+result vectors. Structured `block`, `loop` and `if` decode their standard s33
+block type, including non-negative function type indices, parameters and
+multiple results. Blocks/ifs branch with results; loop back-edges branch with
+parameters; `br`, `br_if`, `br_table`, `return`, explicit else and the implicit
+identity else all use the full value-type vector.
+
+The s33 decoder accepts valid sign-extended encodings and distinguishes inline
+negative value types from positive type indices; type index 64 therefore uses
+`c0 00`. It rejects overlong and incorrectly sign-extended values. Validation
+control frames store constant-size views into the already decode-budgeted type
+section rather than clone a signature per nesting level, so a large signature
+combined with deep control nesting cannot amplify validation memory
+quadratically.
+
+Evidence on 2026-08-21:
+
+- WABT compiles and `wasm-validate` accepts a checked-in fixture containing a
+  multi-result function, parameterized block/loop/if, loop back-edge values,
+  implicit else identity and multi-value `br_if`/`br_table`. The exact bytes
+  return 143 in WABT's interpreter, tinyvm and system JavaScriptCore.
+- Public black-box tests load a standard heterogeneous two-result export,
+  reject a body missing its second declared result and a result-bearing start
+  function, execute type index 64 and a valid non-canonical negative s33
+  encoding, and reject invalid high bits.
+- The shared Rust/Binaryen cartridge profile enables multi-value. Both real
+  games rebuild and pass converter, lifecycle, replay and snapshot gates; the
+  JavaScriptCore differential still matches all four frames of each game.
+- 211 package tests plus one doctest pass under all features; all three explicit
+  WABT/JavaScriptCore proposal oracles, no-default/replay checks, all-target
+  Clippy, formatting, ShellCheck and diff hygiene pass.
+- Device/simulator Swift linkage remains below its gates at 1,526,376 bytes
+  arm64 and 1,596,720 bytes x86_64. The isolated stripped static core is 87,672
+  bytes, below 100 KiB, and its C self-test returns 42.

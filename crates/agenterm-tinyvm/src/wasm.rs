@@ -416,18 +416,15 @@ enum Op {
     LocalGet(u32),
     LocalSet(u32),
     Call(u32),
-    /// `vt` is the block type byte (`0x40` = empty), `arity` its result count
-    /// (0 or 1); `end` indexes its `End`.
+    /// `ty` is an inline empty/single-result type or a function-type index;
+    /// `end` indexes its `End`.
     Block {
-        vt: u8,
-        arity: u32,
+        ty: BlockType,
         end: usize,
     },
-    /// `arity` is the loop's result count; the back-edge arity is always 0
-    /// (MVP loops take no inputs). `end` indexes its `End`.
+    /// A loop branch carries the block type's parameters back to its start.
     Loop {
-        vt: u8,
-        arity: u32,
+        ty: BlockType,
         end: usize,
     },
     Br(u32),
@@ -447,8 +444,7 @@ enum Op {
     /// else-body. `else_pc` indexes the [`Op::Else`] (if any); `end` indexes the
     /// matching `End`.
     If {
-        vt: u8,
-        arity: u32,
+        ty: BlockType,
         else_pc: Option<usize>,
         end: usize,
     },
@@ -468,6 +464,16 @@ enum Op {
     LocalTee(u32),
     Return,
     End,
+}
+
+/// Standard structured-control block type. A non-negative s33 value indexes a
+/// function type and therefore supplies both parameter and result vectors.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BlockType {
+    Empty,
+    Value(u8),
+    TypeIndex(u32),
 }
 
 fn leb_u32(bytes: &[u8], mut i: usize) -> Result<(u32, usize), WasmError> {
@@ -517,17 +523,48 @@ fn leb_s32(bytes: &[u8], mut i: usize) -> Result<(i32, usize), WasmError> {
         .map_err(|_| WasmError::Decode("signed LEB128 exceeds i32"))
 }
 
-/// Decode a block type byte into `(valtype, arity)`: empty (`0x40`) -> arity 0;
-/// a single value type (i32/i64/f32/f64) -> arity 1. The value type itself is
-/// kept so load-time validation can type-check the block, not just count it.
-fn block_arity(bytes: &[u8], i: usize) -> Result<(u8, u32, usize), WasmError> {
-    let byte = *bytes
-        .get(i)
-        .ok_or(WasmError::Decode("truncated block type"))?;
-    match byte {
-        0x40 => Ok((0x40, 0, i + 1)),
-        0x7C..=0x7F => Ok((byte, 1, i + 1)),
-        _other => Err(WasmError::Decode("unsupported block type 0x")),
+fn leb_s33(bytes: &[u8], mut i: usize) -> Result<(i64, usize), WasmError> {
+    let mut result = 0i64;
+    for byte_index in 0..5 {
+        let byte = *bytes
+            .get(i)
+            .ok_or(WasmError::Decode("truncated block type"))?;
+        i += 1;
+        let shift = byte_index * 7;
+        result |= i64::from(byte & 0x7F) << shift;
+        if byte & 0x80 == 0 {
+            if byte_index == 4 {
+                let unused = byte & 0x60;
+                let negative = byte & 0x10 != 0;
+                if (!negative && unused != 0) || (negative && unused != 0x60) {
+                    return Err(WasmError::Decode("block type s33 overflow"));
+                }
+                if negative {
+                    result |= !((1i64 << 33) - 1);
+                }
+            } else if byte & 0x40 != 0 {
+                result |= !((1i64 << (shift + 7)) - 1);
+            }
+            return Ok((result, i));
+        }
+    }
+    Err(WasmError::Decode("block type s33 too long"))
+}
+
+/// Decode the standard s33 block type. Inline numeric result types are the
+/// small negative encodings; every non-negative value is a function type
+/// index. Type index 64 consequently uses `c0 00`, not the reserved inline
+/// empty byte `40`.
+fn block_type(bytes: &[u8], i: usize) -> Result<(BlockType, usize), WasmError> {
+    let (encoded, next) = leb_s33(bytes, i)?;
+    match encoded {
+        -64 => Ok((BlockType::Empty, next)),
+        -1 => Ok((BlockType::Value(0x7F), next)),
+        -2 => Ok((BlockType::Value(0x7E), next)),
+        -3 => Ok((BlockType::Value(0x7D), next)),
+        -4 => Ok((BlockType::Value(0x7C), next)),
+        0..=4_294_967_295 => Ok((BlockType::TypeIndex(encoded as u32), next)),
+        _other => Err(WasmError::Decode("unsupported block type")),
     }
 }
 
@@ -729,16 +766,16 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 ops.push(Op::CallIndirect { type_index });
             }
             0x02 => {
-                let (vt, arity, ni) = block_arity(body, i)?;
+                let (ty, ni) = block_type(body, i)?;
                 i = ni;
                 open.push(ops.len());
-                ops.push(Op::Block { vt, arity, end: 0 });
+                ops.push(Op::Block { ty, end: 0 });
             }
             0x03 => {
-                let (vt, arity, ni) = block_arity(body, i)?;
+                let (ty, ni) = block_type(body, i)?;
                 i = ni;
                 open.push(ops.len());
-                ops.push(Op::Loop { vt, arity, end: 0 });
+                ops.push(Op::Loop { ty, end: 0 });
             }
             0x0C => {
                 let (x, ni) = leb_u32(body, i)?;
@@ -767,12 +804,11 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 ops.push(Op::BrTable { targets, default });
             }
             0x04 => {
-                let (vt, arity, ni) = block_arity(body, i)?;
+                let (ty, ni) = block_type(body, i)?;
                 i = ni;
                 open.push(ops.len());
                 ops.push(Op::If {
-                    vt,
-                    arity,
+                    ty,
                     else_pc: None,
                     end: 0,
                 });
@@ -1897,13 +1933,33 @@ impl Module {
         for (init, mutable) in globals {
             module.globals.push(GlobalDesc { init, mutable });
         }
+        // Record declared function types before validating indices/signatures
+        // used by the export and start sections.
+        module.types = types;
+        let function_count = module.hosts.len() + module.funcs.len();
         for (name, index) in exports {
+            if index >= function_count {
+                return Err(WasmError::Decode("export function index out of bounds"));
+            }
             module.exports.insert(name.clone(), index);
             module.export_list.push((name, index));
         }
+        if let Some(start) = start_fn {
+            let signature = if start < module.hosts.len() {
+                module.hosts[start].sig
+            } else {
+                module
+                    .funcs
+                    .get(start - module.hosts.len())
+                    .and_then(|function| function.sig)
+            }
+            .and_then(|index| module.types.get(index))
+            .ok_or(WasmError::Decode("start function index out of bounds"))?;
+            if !signature.params.is_empty() || !signature.results.is_empty() {
+                return Err(WasmError::Decode("start function must have type [] -> []"));
+            }
+        }
         module.start = start_fn;
-        // Record the declared function types so `call_indirect` can type-check.
-        module.types = types;
         // Memory limits and data segments (both were previously skipped, which
         // left every module on a hardcoded single zeroed page).
         if let Some((min, max)) = mem_limits {
@@ -2294,6 +2350,18 @@ impl Module {
                 .get(idx - self.hosts.len())
                 .map(|f| f.n_params)
                 .ok_or(WasmError::Trap("call to unknown function"))
+        }
+    }
+
+    fn block_counts(&self, ty: BlockType) -> Result<(usize, usize), WasmError> {
+        match ty {
+            BlockType::Empty => Ok((0, 0)),
+            BlockType::Value(_) => Ok((0, 1)),
+            BlockType::TypeIndex(index) => self
+                .types
+                .get(index as usize)
+                .map(|ft| (ft.params.len(), ft.results.len()))
+                .ok_or(WasmError::Trap("block type index")),
         }
     }
 
@@ -3123,18 +3191,32 @@ impl Module {
                     )?;
                     stack.extend(res);
                 }
-                Op::Block { arity, end, .. } => control.push(Frame {
-                    base: stack.len(),
-                    branch_arity: arity as usize,
-                    cont: end + 1,
-                    is_loop: false,
-                }),
-                Op::Loop { .. } => control.push(Frame {
-                    base: stack.len(),
-                    branch_arity: 0, // MVP loop back-edge takes no operands
-                    cont: pc,        // branch re-enters at the loop body start
-                    is_loop: true,
-                }),
+                Op::Block { ty, end } => {
+                    let (params, results) = self.block_counts(ty)?;
+                    let base = stack
+                        .len()
+                        .checked_sub(params)
+                        .ok_or(WasmError::Trap("block parameter stack underflow"))?;
+                    control.push(Frame {
+                        base,
+                        branch_arity: results,
+                        cont: end + 1,
+                        is_loop: false,
+                    });
+                }
+                Op::Loop { ty, .. } => {
+                    let (params, _results) = self.block_counts(ty)?;
+                    let base = stack
+                        .len()
+                        .checked_sub(params)
+                        .ok_or(WasmError::Trap("loop parameter stack underflow"))?;
+                    control.push(Frame {
+                        base,
+                        branch_arity: params,
+                        cont: pc, // branch re-enters at the loop body start
+                        is_loop: true,
+                    });
+                }
                 Op::Br(l) => {
                     pc = do_branch(&mut stack, &mut control, l)?;
                     if control.is_empty() {
@@ -3158,16 +3240,16 @@ impl Module {
                         return take_results(&mut stack, func.arity);
                     }
                 }
-                Op::If {
-                    arity,
-                    else_pc,
-                    end,
-                    ..
-                } => {
+                Op::If { ty, else_pc, end } => {
                     let cond = pop(&mut stack)?;
+                    let (params, results) = self.block_counts(ty)?;
+                    let base = stack
+                        .len()
+                        .checked_sub(params)
+                        .ok_or(WasmError::Trap("if parameter stack underflow"))?;
                     control.push(Frame {
-                        base: stack.len(),
-                        branch_arity: arity as usize,
+                        base,
+                        branch_arity: results,
                         cont: end + 1,
                         is_loop: false,
                     });

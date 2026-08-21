@@ -20,15 +20,17 @@ they do not change ordering.
 
 The v1 executable profile is MVP scalar instructions plus mutable globals,
 tables/`call_indirect`, the standard sign-extension and non-trapping
-float-to-integer conversion proposals, and the standard bulk-memory proposal
-over the single memory and MVP funcref table. It accepts all five integer
+float-to-integer conversion proposals, the standard multi-value proposal, and
+the standard bulk-memory proposal over the single memory and MVP funcref table.
+It accepts multi-result functions and type-indexed parameter/result signatures
+on blocks, loops and ifs, all five integer
 sign-extension instructions and all eight saturating float-to-integer
 conversions, as well as active/passive data and index-encoded
 funcref element segments, `memory.init`, `data.drop`, `memory.copy`,
 `memory.fill`, `table.init`, `elem.drop` and `table.copy`. DataCount is checked
 against the data section and is mandatory when code uses a data-segment
-instruction. Reference-typed element expressions, reference types, multivalue,
-SIMD, exceptions, threads and multiple memories remain outside v1 and fail
+instruction. Reference-typed element expressions, reference types, SIMD,
+exceptions, threads and multiple memories remain outside v1 and fail
 loudly at load time. This is feature negotiation by converter profile: future
 runtimes may add standard proposals without changing the `.wasm` container or
 inventing tinyvm-only opcodes.
@@ -60,6 +62,10 @@ targets or locals returns a decode error before asking iOS to reserve that
 guest-selected memory. This is a fixed TinyArcade ABI v1 compiler profile, not
 a private bytecode extension: accepted files remain ordinary standards-valid
 `.wasm`, and converter/runtime checks use the same gate.
+Multi-value validation does not clone a type signature per nested control
+frame: each frame stores constant-size views into the already-budgeted type
+section. A large signature combined with deep nesting therefore cannot amplify
+validation memory quadratically.
 
 ## Required manifest custom section
 

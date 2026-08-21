@@ -56,6 +56,10 @@ replays. `smoke-wabt-bulk-memory.sh` asks WABT—not tinyvm—to compile and val
 `tests/fixtures/bulk-memory-v1.wat`, then feeds the exact module to tinyvm and
 JavaScriptCore. This isolates Wasm instruction/segment semantics from the game
 ABI and catches a decoder that only accepts its own hand-built fixtures.
+`smoke-wabt-scalar-proposals.sh` applies the same exact-byte gate to sign
+extension and saturating conversions; `smoke-wabt-multi-value.sh` covers
+multi-result functions, type-indexed parameter/result block signatures and
+multi-value branches.
 
 ## Interpreting a mismatch
 

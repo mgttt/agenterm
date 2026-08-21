@@ -14,7 +14,7 @@
 
 use alloc::vec::Vec;
 
-use super::{FuncType, Op, WasmError};
+use super::{BlockType, FuncType, Op, WasmError};
 
 const I32: u8 = 0x7F;
 const I64: u8 = 0x7E;
@@ -41,35 +41,70 @@ pub(super) struct ModuleCtx<'a> {
     pub has_table: bool,
 }
 
+/// A non-owning value-type vector. Control frames point into the already
+/// decode-budgeted type section instead of cloning a potentially huge
+/// signature once per nested block.
+#[derive(Clone, Copy)]
+enum Types<'a> {
+    Empty,
+    One(u8),
+    Slice(&'a [u8]),
+}
+
+impl Types<'_> {
+    fn len(self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::One(_) => 1,
+            Self::Slice(types) => types.len(),
+        }
+    }
+
+    fn get(self, index: usize) -> Option<u8> {
+        match self {
+            Self::Empty => None,
+            Self::One(ty) => (index == 0).then_some(ty),
+            Self::Slice(types) => types.get(index).copied(),
+        }
+    }
+
+    fn same(self, other: Self) -> bool {
+        self.len() == other.len()
+            && (0..self.len()).all(|index| self.get(index) == other.get(index))
+    }
+}
+
 /// A control frame: a block, loop, `if`, or the function body itself.
-struct Ctrl {
-    /// Type a branch to this label carries (`VOID` for none, and always
-    /// `VOID` for a loop, whose label is its start).
-    label: u8,
-    /// Type the frame leaves behind when it ends normally.
-    result: u8,
+struct Ctrl<'a> {
+    /// Types a branch to this label carries. Blocks/ifs use results; loops use
+    /// parameters because their label is the start of the body.
+    label: Types<'a>,
+    /// Values available at the beginning of each arm/body.
+    params: Types<'a>,
+    /// Types the frame leaves behind when it ends normally.
+    results: Types<'a>,
     /// Operand-stack height when the frame was entered.
     height: usize,
     /// Set after `br`/`br_table`/`return`/`unreachable`: the rest of the frame
     /// is dead code, validated against a polymorphic stack.
     unreachable: bool,
-    /// `if` frames without an `else` may not produce a result.
+    /// `if` frames without an `else` use their parameters as the implicit arm.
     if_without_else: bool,
 }
 
 struct V<'a> {
     m: &'a ModuleCtx<'a>,
     locals: &'a [u8],
-    result: u8,
+    results: Types<'a>,
     stack: Vec<u8>,
-    ctrl: Vec<Ctrl>,
+    ctrl: Vec<Ctrl<'a>>,
 }
 
 fn type_error() -> WasmError {
     WasmError::Decode("validation: type mismatch")
 }
 
-impl V<'_> {
+impl<'a> V<'a> {
     fn frame_height(&self) -> usize {
         self.ctrl.last().map_or(0, |c| c.height)
     }
@@ -119,8 +154,8 @@ impl V<'_> {
         }
     }
 
-    /// The type carried by a branch to label depth `l`.
-    fn label_type(&self, l: u32) -> Result<u8, WasmError> {
+    /// Types carried by a branch to label depth `l`.
+    fn label_types(&self, l: u32) -> Result<Types<'a>, WasmError> {
         let idx = self
             .ctrl
             .len()
@@ -144,83 +179,146 @@ impl V<'_> {
             .ok_or(WasmError::Decode("validation: global index out of range"))
     }
 
-    fn func_type(&self, f: u32) -> Result<&FuncType, WasmError> {
-        let tidx = self
-            .m
+    fn func_type_index(&self, f: u32) -> Result<usize, WasmError> {
+        self.m
             .func_sigs
             .get(f as usize)
             .copied()
-            .ok_or(WasmError::Decode("validation: function index out of range"))?;
-        self.m
-            .types
-            .get(tidx)
-            .ok_or(WasmError::Decode("validation: type index out of range"))
+            .ok_or(WasmError::Decode("validation: function index out of range"))
     }
 
-    /// Pop a call's parameters (deepest first on the stack) and push results.
-    fn apply_type(&mut self, ft_params: &[u8], ft_results: &[u8]) -> Result<(), WasmError> {
-        for want in ft_params.iter().rev() {
-            self.pop_expect(*want)?;
+    /// Apply one declared function type without cloning its vectors. Looking up
+    /// one copied byte at a time keeps the immutable module borrow disjoint
+    /// from mutations of the abstract operand stack.
+    fn apply_type_index(&mut self, type_index: usize) -> Result<(), WasmError> {
+        let (param_len, result_len) = self
+            .m
+            .types
+            .get(type_index)
+            .map(|ft| (ft.params.len(), ft.results.len()))
+            .ok_or(WasmError::Decode("validation: type index out of range"))?;
+        for index in (0..param_len).rev() {
+            let want = self.m.types[type_index].params[index];
+            self.pop_expect(want)?;
         }
-        for r in ft_results {
-            self.push(*r);
+        for index in 0..result_len {
+            let result = self.m.types[type_index].results[index];
+            self.push(result);
         }
         Ok(())
     }
 
-    fn enter(&mut self, label: u8, result: u8, if_without_else: bool) {
+    fn pop_types(&mut self, types: Types<'a>) -> Result<(), WasmError> {
+        match types {
+            Types::Empty => {}
+            Types::One(want) => self.pop_expect(want)?,
+            Types::Slice(types) => {
+                for want in types.iter().rev() {
+                    self.pop_expect(*want)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn push_types(&mut self, types: Types<'a>) {
+        match types {
+            Types::Empty => {}
+            Types::One(ty) => self.push(ty),
+            Types::Slice(types) => {
+                for ty in types {
+                    self.push(*ty);
+                }
+            }
+        }
+    }
+
+    fn block_signature(&self, ty: BlockType) -> Result<(Types<'a>, Types<'a>), WasmError> {
+        match ty {
+            BlockType::Empty => Ok((Types::Empty, Types::Empty)),
+            BlockType::Value(result) => Ok((Types::Empty, Types::One(result))),
+            BlockType::TypeIndex(index) => {
+                let ft = self.m.types.get(index as usize).ok_or(WasmError::Decode(
+                    "validation: block type index out of range",
+                ))?;
+                Ok((Types::Slice(&ft.params), Types::Slice(&ft.results)))
+            }
+        }
+    }
+
+    fn enter(
+        &mut self,
+        params: Types<'a>,
+        results: Types<'a>,
+        label: Types<'a>,
+        if_without_else: bool,
+    ) -> Result<(), WasmError> {
+        self.pop_types(params)?;
+        let height = self.stack.len();
+        self.push_types(params);
         self.ctrl.push(Ctrl {
             label,
-            result,
-            height: self.stack.len(),
+            params,
+            results,
+            height,
             unreachable: false,
             if_without_else,
         });
+        Ok(())
     }
 
     /// Close the innermost frame: its result must be on the stack, and nothing
     /// else may be left above the height it was entered at.
-    fn leave(&mut self) -> Result<u8, WasmError> {
+    fn leave(&mut self) -> Result<Types<'a>, WasmError> {
         let frame = self
             .ctrl
             .last()
             .ok_or(WasmError::Decode("validation: end without a block"))?;
-        let (result, height, if_without_else) = (frame.result, frame.height, frame.if_without_else);
-        if if_without_else && result != VOID {
+        let (params, results, height, if_without_else) = (
+            frame.params,
+            frame.results,
+            frame.height,
+            frame.if_without_else,
+        );
+        if if_without_else && !params.same(results) {
             return Err(WasmError::Decode(
-                "validation: if without else cannot leave a result",
+                "validation: if without else has incompatible parameters/results",
             ));
         }
-        self.pop_expect(result)?;
+        self.pop_types(results)?;
         if self.stack.len() != height {
             return Err(WasmError::Decode(
                 "validation: block leaves the operand stack unbalanced",
             ));
         }
         self.ctrl.pop();
-        Ok(result)
+        Ok(results)
     }
 }
 
 /// Validate one function body. `locals` is params-then-declared-locals, and
-/// `result` is the function's result type (`VOID` when it returns nothing).
+/// `results` is the complete function result vector.
 pub(super) fn validate_body(
     m: &ModuleCtx<'_>,
     locals: &[u8],
     results: &[u8],
     code: &[Op],
 ) -> Result<(), WasmError> {
-    let result = results.first().copied().unwrap_or(VOID);
     let mut v = V {
         m,
         locals,
-        result,
+        results: Types::Slice(results),
         stack: Vec::new(),
         ctrl: Vec::new(),
     };
     // The function body is itself a block: `br 0` targets it, and its `end`
     // has to leave exactly the declared result behind.
-    v.enter(result, result, false);
+    v.enter(
+        Types::Empty,
+        Types::Slice(results),
+        Types::Slice(results),
+        false,
+    )?;
 
     for op in code {
         step(&mut v, op)?;
@@ -506,9 +604,8 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
 
         // --- calls ---
         Call(f) => {
-            let ft = v.func_type(*f)?;
-            let (params, results) = (ft.params.clone(), ft.results.clone());
-            v.apply_type(&params, &results)?;
+            let type_index = v.func_type_index(*f)?;
+            v.apply_type_index(type_index)?;
         }
         CallIndirect { type_index } => {
             if !v.m.has_table {
@@ -516,22 +613,25 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
                     "validation: call_indirect requires table",
                 ));
             }
-            let ft =
-                v.m.types
-                    .get(*type_index as usize)
-                    .ok_or(WasmError::Decode("validation: type index out of range"))?;
-            let (params, results) = (ft.params.clone(), ft.results.clone());
+            let type_index = *type_index as usize;
             v.pop_expect(I32)?; // the table index
-            v.apply_type(&params, &results)?;
+            v.apply_type_index(type_index)?;
         }
 
         // --- structured control ---
-        Block { vt, .. } => v.enter(*vt, *vt, false),
-        // A loop's label is its start, so a branch to it carries nothing.
-        Loop { vt, .. } => v.enter(VOID, *vt, false),
-        If { vt, else_pc, .. } => {
+        Block { ty, .. } => {
+            let (params, results) = v.block_signature(*ty)?;
+            v.enter(params, results, results, false)?;
+        }
+        // A loop's label is its start, so a branch to it carries parameters.
+        Loop { ty, .. } => {
+            let (params, results) = v.block_signature(*ty)?;
+            v.enter(params, results, params, false)?;
+        }
+        If { ty, else_pc, .. } => {
             v.pop_expect(I32)?;
-            v.enter(*vt, *vt, else_pc.is_none());
+            let (params, results) = v.block_signature(*ty)?;
+            v.enter(params, results, results, else_pc.is_none())?;
         }
         Else { .. } => {
             // Close the then-arm, then re-open the frame for the else-arm.
@@ -539,50 +639,51 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
                 .ctrl
                 .last()
                 .ok_or(WasmError::Decode("validation: else without if"))?;
-            let (result, height) = (frame.result, frame.height);
-            v.pop_expect(result)?;
+            let (params, results, height) = (frame.params, frame.results, frame.height);
+            v.pop_types(results)?;
             if v.stack.len() != height {
                 return Err(WasmError::Decode(
                     "validation: if arm leaves the operand stack unbalanced",
                 ));
             }
+            v.push_types(params);
             if let Some(frame) = v.ctrl.last_mut() {
                 frame.unreachable = false;
             }
         }
         End => {
-            let result = v.leave()?;
-            v.push(result);
+            let results = v.leave()?;
+            v.push_types(results);
         }
 
         // --- branches ---
         Br(l) => {
-            let t = v.label_type(*l)?;
-            v.pop_expect(t)?;
+            let types = v.label_types(*l)?;
+            v.pop_types(types)?;
             v.mark_unreachable();
         }
         BrIf(l) => {
-            let t = v.label_type(*l)?;
+            let types = v.label_types(*l)?;
             v.pop_expect(I32)?;
-            v.pop_expect(t)?;
-            v.push(t);
+            v.pop_types(types)?;
+            v.push_types(types);
         }
         BrTable { targets, default } => {
-            let want = v.label_type(*default)?;
+            let want = v.label_types(*default)?;
             for t in targets {
-                if v.label_type(*t)? != want {
+                if !v.label_types(*t)?.same(want) {
                     return Err(WasmError::Decode(
                         "validation: br_table targets disagree on type",
                     ));
                 }
             }
             v.pop_expect(I32)?;
-            v.pop_expect(want)?;
+            v.pop_types(want)?;
             v.mark_unreachable();
         }
         Return => {
-            let result = v.result;
-            v.pop_expect(result)?;
+            let results = v.results;
+            v.pop_types(results)?;
             v.mark_unreachable();
         }
         Unreachable => v.mark_unreachable(),

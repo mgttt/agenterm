@@ -56,7 +56,8 @@ agenterm-tinyvm (35)
 │       ├── bulk memory copy/fill [x]
 │       ├── bulk memory passive lifecycle [x]
 │       ├── sign extension proposal [x]
-│       └── nontrapping float-to-int [x]
+│       ├── nontrapping float-to-int [x]
+│       └── multi-value proposal [x]
 ├── host                 [x]
 ├── <100KiB>             [x]
 ├── slot-B               [ ]
@@ -74,8 +75,11 @@ agenterm-tinyvm (35)
 槽 A 以标准 WebAssembly 为持续兼容目标，而不是停在自定义 VM 或永久冻结为 MVP。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
-DataCount。其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎
-差分证据后进入 compiler profile。
+DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。
+Multi-value 包含多结果函数、s33 type-index block signature、带参数 block/loop/if 和
+多值 branch；validator 控制帧只引用已经预算的 type section，不按嵌套层次复制签名。
+其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
+compiler profile。
 核 strip `<100KiB`。
 
 不可信卡带的 2 MiB 文件上限之外还有统一 decode complexity budget：section entry、

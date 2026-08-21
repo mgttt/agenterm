@@ -43,20 +43,20 @@ trap 'rm -f "$raw"' EXIT HUP INT TERM
   -C lto=fat \
   -C codegen-units=1 \
   -C panic=abort \
-  -C target-feature=-bulk-memory,-reference-types,-multivalue,+sign-ext,+nontrapping-fptoint,-simd128 \
+  -C target-feature=-bulk-memory,-reference-types,+multivalue,+sign-ext,+nontrapping-fptoint,-simd128 \
   -C link-arg=--export-memory \
   "$source" \
   -o "$raw"
 
 # Keep Rust's standard bulk memory.copy/fill instructions. The cartridge
 # profile enables standard scalar sign-extension/saturating conversions while
-# still disabling reference types, multivalue and SIMD; tinyvm meters
+# still disabling reference types and SIMD; tinyvm meters
 # copied/filled bytes as fuel.
 "$wasm_opt" "$raw" \
   --enable-bulk-memory \
   --enable-mutable-globals \
   --disable-reference-types \
-  --disable-multivalue \
+  --enable-multivalue \
   --enable-sign-ext \
   --enable-nontrapping-float-to-int \
   --disable-simd \
