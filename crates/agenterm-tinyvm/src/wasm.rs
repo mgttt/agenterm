@@ -930,7 +930,11 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                     .last()
                     .ok_or(WasmError::Decode("else without matching if"))?;
                 match &mut ops[open_idx] {
-                    Op::If { else_pc, .. } => *else_pc = Some(else_idx),
+                    Op::If { else_pc, .. } => {
+                        if else_pc.replace(else_idx).is_some() {
+                            return Err(WasmError::Decode("duplicate else in if"));
+                        }
+                    }
                     _ => return Err(WasmError::Decode("else not inside an if")),
                 }
                 ops.push(Op::Else { end: 0 });
@@ -989,6 +993,8 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                     {
                         *end = end_idx;
                     }
+                } else if i != body.len() {
+                    return Err(WasmError::Decode("instructions follow function end"));
                 }
             }
             0x29 => {

@@ -25,6 +25,7 @@ tinyvm iOS game runtime
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
 │   ├── strict scalar memarg alignment [x]
+│   ├── canonical function expressions [x]
 │   ├── deterministic execution stats [x]
 │   └── trap isolation                [x]
 ├── game host ABI                    [~]
@@ -1934,6 +1935,36 @@ Evidence on 2026-08-21:
 - The complete iOS device/universal-simulator bridge and Swift consumers link
   below their gates at 1,554,168 bytes arm64 and 1,625,560 bytes x86_64;
   catalog/replay/private/session consumers are 1,427,016 / 1,401,432 /
+  1,419,632 / 1,418,768 bytes.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
+
+## Fifty-third executable increment — canonical function expressions
+
+The decoder now owns the outer grammar boundary of every standard function
+expression. A function-level `end` must consume the final code-body byte; any
+following instruction is rejected instead of being treated as code outside the
+function's expression. An `if` may install exactly one `else`; a second one is
+rejected rather than overwriting the first branch target and accidentally
+passing balanced-stack validation. Both failures occur at the byte load gate,
+before a `Module` or invokable instance exists.
+
+Evidence on 2026-08-21:
+
+- Public raw-byte black boxes reject a sized code body containing `end; nop`
+  and a balanced `if` containing two `else` opcodes with exact decoder errors.
+- The common rejection suite proves the same bytes cannot fall through to a
+  run-time trap or produce an invokable module.
+- WABT independently rejects both malformed binaries at its expression parser.
+- All 231 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all seven WABT/JavaScriptCore proposal/host
+  oracles, the two-game WebKit differential, all-target Clippy, formatting,
+  relevant ShellCheck and document redaction pass.
+- The stripped static core remains below its unchanged 100 KiB gate at 86,344
+  bytes and its C selftest returns 42.
+- The complete iOS device/universal-simulator bridge and Swift consumers link
+  below their gates at 1,554,168 bytes arm64 and 1,625,560 bytes x86_64;
+  catalog/replay/private/session consumers are 1,427,016 / 1,417,944 /
   1,419,632 / 1,418,768 bytes.
 - Physical-device play, TestFlight and Apple-review evidence remain open; the
   persistent goal therefore remains active.

@@ -16,7 +16,8 @@ agenterm-tinyvm (35)
 │   ├── tinyvm engine       [x]
 │   │   ├── decode complexity budget [x]
 │   │   ├── strict declared-memory semantics [x]
-│   │   └── strict memarg alignment [x]
+│   │   ├── strict memarg alignment [x]
+│   │   └── canonical function expression structure [x]
 │   ├── owned host ABI      [~]
 │   │   └── typed standard function imports [x]
 │   ├── native I/O surface  [~]
@@ -96,6 +97,9 @@ active data segment 都在 load gate 拒绝；passive data 和纯计算 module �
 所有 scalar load/store 的 memarg alignment exponent 也按指令自然宽度在 decode
 阶段验证：低对齐合法且不改变执行结果，高于自然对齐则 load gate 拒绝，不能把
 运行时忽略 alignment 的实现选择误当成允许无效 module 的理由。
+Function expression 的外层 `end` 必须恰好终止 code body，之后不允许残留 opcode；
+每个 `if` 也最多只有一个 `else`。这些结构错误在 decoder 中直接失败，不留给执行器
+猜测或依靠偶然的 control-stack 形状拒绝。
 当前 scalar MVP 面双绿，并已原生接受完整的 single-memory / MVP-funcref
 bulk-memory proposal：copy/fill、passive data/element、init/drop、table.copy 与
 DataCount，以及 sign-extension、non-trapping conversion 和 multi-value proposal。

@@ -2384,6 +2384,13 @@ larger than the instruction's natural width. Under-alignment is legal. Cover
 every load/store width so one shared decoder helper cannot be called with the
 wrong natural exponent unnoticed.
 
+Structured expressions need a decoder-owned outer boundary as well as a later
+type/control validator. The function-level `end` must consume the final body
+byte, and an `if` may record only one `else`. Otherwise a balanced validator can
+accidentally accept instructions after the function expression or reopen the
+same arm twice. Keep malformed raw-byte cases in the public load gate and
+compare them with an independent standard validator.
+
 ## Differential engines need identical host facts, not similar screens
 
 When comparing an interpreter with a reference WebAssembly engine, run the

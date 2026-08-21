@@ -13,7 +13,7 @@
 use agenterm_tinyvm::{WasmError, WasmModule, eval};
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 24] = [
+const REJECTED: [(&str, &str); 26] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -109,6 +109,14 @@ const REJECTED: [(&str, &str); 24] = [
     (
         "i64_store_overaligned",
         "0061736d01000000010401600000030201000503010001070801046d61696e00000a0b010900410042003704000b",
+    ),
+    (
+        "instruction_after_function_end",
+        "0061736d0100000001040160000003020100070801046d61696e00000a050103000b01",
+    ),
+    (
+        "duplicate_else",
+        "0061736d0100000001040160000003020100070801046d61696e00000a0b0109004101044005050b0b",
     ),
 ];
 
@@ -227,6 +235,26 @@ fn standard_memarg_alignment_is_validated_at_load() {
                 ))
             ),
             "{name}: over-aligned memarg must fail at load"
+        );
+    }
+}
+
+#[test]
+fn standard_function_expression_structure_is_canonical() {
+    for (name, expected) in [
+        (
+            "instruction_after_function_end",
+            "instructions follow function end",
+        ),
+        ("duplicate_else", "duplicate else in if"),
+    ] {
+        let (_, hex) = REJECTED
+            .into_iter()
+            .find(|(candidate, _)| *candidate == name)
+            .expect("named malformed fixture");
+        assert!(
+            matches!(WasmModule::from_bytes(&bytes(hex)), Err(WasmError::Decode(message)) if message == expected),
+            "{name}: malformed function structure must fail at load"
         );
     }
 }
