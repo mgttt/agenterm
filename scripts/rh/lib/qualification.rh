@@ -3,7 +3,7 @@
 import "scripts/rh/lib/bootstrap_timing" as bootstrap_timing;
 
 fn q_require(condition, code) {
-    if condition == 0 {
+    if !condition {
         throw code;
     } else {
         0;

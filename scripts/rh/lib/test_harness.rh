@@ -1,7 +1,7 @@
 // Shared fail-closed foundations for repository-owned smoke journeys (INT-only).
 
 fn require(condition, message) {
-    if condition == 0 {
+    if !condition {
         throw message;
     } else {
         0;

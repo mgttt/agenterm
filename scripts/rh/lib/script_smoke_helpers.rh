@@ -3,7 +3,7 @@
 import "scripts/rh/lib/test_harness" as test_harness;
 
 fn require(condition, message) {
-    if condition == 0 {
+    if !condition {
         throw message;
     } else {
         0;
