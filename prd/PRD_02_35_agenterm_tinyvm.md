@@ -135,7 +135,7 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── Depth Well grid3d                                 [x]
 │   ├── Paddle Guard indexed2d                            [x]
 │   ├── deterministic replay vectors                      [x]
-│   ├── development WebKit differential                  [x]
+│   ├── development JSC + H5 differential                [x]
 │   ├── real iOS app consumer                            [~]
 │   ├── TestFlight bundled-only candidate                [~]
 │   └── physical-device play                             [ ]
@@ -161,7 +161,10 @@ agenterm-tinyvm (35)                                      [~]
 │   │   └── external distribution after Apple approval    [ ]
 │   └── research queue                                   [~]
 │       ├── QJWasm ownership + low-copy lessons           [~]
-│       ├── bounded async call/callback/completion model   [ ]
+│       ├── unified host/guest handle lifetimes            [ ]
+│       ├── bounded call/callback/completion channels      [ ]
+│       ├── event-loop-neutral async completion ABI        [ ]
+│       ├── cross-boundary copy/call benchmarks            [ ]
 │       └── JavaScriptCore remains development oracle     [~]
 │
 ├── slot-B                                               [ ]
@@ -305,6 +308,12 @@ multi-memory modules: specify memory selection, immutable/mutable access, re-ent
 growth exclusion, result reservation before callback, C/Swift pointer lifetime and
 deterministic failure. QJWasm is useful here for ownership and low-copy lessons; QuickJS, its
 unsafe threading model and its JavaScript product dependency are not adopted.
+
+QJWasm also supplies research targets beyond raw memory access: one lifetime model for host
+objects and guest handles, explicit call/callback/async-completion channels, event-loop
+integration that does not hard-code QuickJS, and benchmarks that expose boundary copies and
+dispatch cost. tinyvm will translate those lessons into bounded native-module ABI work; it
+will not make JavaScript, QuickJS or a second runtime part of the iOS product dependency.
 
 ### P2 — grow standard coverage from workload evidence
 

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TinyArcade H5 development oracle</title>
+  <script src="TinyArcadeWebKitOracle.js"></script>
+</head>
+<body data-status="running">RUNNING</body>
+<script>
+(async function () {
+  "use strict";
+
+  const body = document.body;
+
+  function fail(message) {
+    body.dataset.status = "fail";
+    body.textContent = "FAIL: " + message;
+  }
+
+  function requireCondition(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+
+  function base64url(value) {
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/")
+      + "=".repeat((4 - value.length % 4) % 4);
+    const binary = atob(padded);
+    return Uint8Array.from(binary, character => character.charCodeAt(0));
+  }
+
+  function equalBytes(left, right) {
+    return left.length === right.length
+      && left.every((value, index) => value === right[index]);
+  }
+
+  function magic(bytes) {
+    return String.fromCharCode.apply(null, bytes);
+  }
+
+  class Cursor {
+    constructor(bytes) {
+      this.bytes = bytes;
+      this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      this.offset = 0;
+    }
+
+    take(length) {
+      requireCondition(length >= 0 && length <= this.bytes.length - this.offset,
+        "truncated replay");
+      const value = this.bytes.slice(this.offset, this.offset + length);
+      this.offset += length;
+      return value;
+    }
+
+    u16() {
+      const value = this.view.getUint16(this.offset, true);
+      this.offset += 2;
+      return value;
+    }
+
+    u32() {
+      const value = this.view.getUint32(this.offset, true);
+      this.offset += 4;
+      return value;
+    }
+  }
+
+  function parseSnapshot(bytes) {
+    const cursor = new Cursor(bytes);
+    requireCondition(magic(cursor.take(4)) === "TGS1", "snapshot magic");
+    cursor.u32();
+    cursor.u32();
+    cursor.take(cursor.u16());
+    const rng = cursor.u32();
+    const guestState = cursor.take(cursor.u32());
+    requireCondition(cursor.offset === bytes.length, "snapshot trailing bytes");
+    return { rng, guestState };
+  }
+
+  function parseReplay(bytes) {
+    const cursor = new Cursor(bytes);
+    requireCondition(magic(cursor.take(4)) === "TAR1", "replay magic");
+    requireCondition(cursor.u16() === 1 && cursor.u16() === 64, "replay header");
+    const cartridgeSHA256 = cursor.take(32);
+    cursor.u32();
+    cursor.u32();
+    const gameIDLength = cursor.u16();
+    const gameVersionLength = cursor.u16();
+    const snapshotLength = cursor.u32();
+    const stepCount = cursor.u32();
+    requireCondition(cursor.u32() === 0, "replay reserved field");
+    requireCondition(gameIDLength > 0 && gameIDLength <= 128, "game id length");
+    requireCondition(gameVersionLength > 0 && gameVersionLength <= 64,
+      "game version length");
+    requireCondition(snapshotLength > 0 && snapshotLength <= 1024 * 1024,
+      "snapshot length");
+    requireCondition(stepCount <= 65536, "step count");
+    cursor.take(gameIDLength);
+    cursor.take(gameVersionLength);
+    const snapshot = parseSnapshot(cursor.take(snapshotLength));
+    const steps = [];
+    for (let index = 0; index < stepCount; index += 1) {
+      steps.push({
+        buttons: cursor.u32(),
+        clockMs: cursor.u32(),
+        renderLength: cursor.u32(),
+        audioLength: cursor.u32(),
+        renderSHA256: cursor.take(32),
+        audioSHA256: cursor.take(32),
+      });
+    }
+    requireCondition(cursor.offset === bytes.length, "replay trailing bytes");
+    return {
+      cartridgeSHA256,
+      rng: snapshot.rng,
+      guestState: snapshot.guestState,
+      steps,
+    };
+  }
+
+  async function sha256(bytes) {
+    return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  }
+
+  try {
+    const parameters = new URLSearchParams(location.hash.slice(1));
+    const wasm = base64url(parameters.get("wasm") || "");
+    const replay = parseReplay(base64url(parameters.get("replay") || ""));
+    requireCondition(equalBytes(await sha256(wasm), replay.cartridgeSHA256),
+      "replay/cartridge SHA-256 mismatch");
+    const result = globalThis.runTinyArcadeWebKitOracle(wasm, {
+      rng: replay.rng,
+      guestState: Array.from(replay.guestState),
+      steps: replay.steps.map(step => ({
+        buttons: step.buttons,
+        clockMs: step.clockMs,
+      })),
+    });
+    requireCondition(result.frames.length === replay.steps.length, "frame count");
+    for (let index = 0; index < replay.steps.length; index += 1) {
+      const expected = replay.steps[index];
+      const render = Uint8Array.from(result.frames[index].render);
+      const audio = Uint8Array.from(result.frames[index].audio);
+      requireCondition(render.length === expected.renderLength, "render length " + index);
+      requireCondition(audio.length === expected.audioLength, "audio length " + index);
+      requireCondition(equalBytes(await sha256(render), expected.renderSHA256),
+        "render digest " + index);
+      requireCondition(equalBytes(await sha256(audio), expected.audioSHA256),
+        "audio digest " + index);
+    }
+    body.dataset.status = "pass";
+    body.textContent = "OK: H5 WebAssembly == tinyvm for "
+      + replay.steps.length + " exact frames";
+  } catch (error) {
+    fail(error && error.message ? error.message : String(error));
+  }
+})();
+</script>
+</html>

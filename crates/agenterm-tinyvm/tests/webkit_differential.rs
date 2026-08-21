@@ -1,4 +1,4 @@
-//! macOS-owned differential gate against WebKit's JavaScriptCore WASM engine.
+//! macOS-owned differential gate against JavaScriptCore and a real H5 browser.
 //!
 //! This is a development oracle, not an iOS product-runtime dependency.
 

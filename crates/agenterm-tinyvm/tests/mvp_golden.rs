@@ -882,7 +882,7 @@ const LEAF_TESTS: [(&str, &str); 79] = [
         "depth_well_replay_is_portable_bounded_and_tamper_evident",
     ),
     (
-        "development WebKit differential",
+        "development JSC + H5 differential",
         "webkit_matches_tinyvm_replay",
     ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
