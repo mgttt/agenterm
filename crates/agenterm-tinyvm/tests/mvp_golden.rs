@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 91] = [
+const LEAF_TESTS: [(&str, &str); 94] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -932,6 +932,18 @@ const LEAF_TESTS: [(&str, &str); 91] = [
     (
         "iOS Simulator App container wiring",
         "ios_wasi_host_simulator_container",
+    ),
+    (
+        "indexed guest-memory callback context",
+        "typed_host_can_borrow_selected_defined_memories_by_standard_index",
+    ),
+    (
+        "generalize memory-zero call-scoped borrowing",
+        "typed_host_can_borrow_selected_defined_memories_by_standard_index",
+    ),
+    (
+        "explicit selected-memory callback context",
+        "selected_memory_context_preserves_aliasing_for_imported_memories",
     ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
     ("#78", "issue78_runtimes_stay_out_of_the_crate"),

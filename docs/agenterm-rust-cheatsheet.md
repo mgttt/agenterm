@@ -2739,3 +2739,12 @@ directory, and keep the default feature/header pair unchanged. Prove both
 directions: run the optional artifact inside a booted Simulator container, and
 scan the default archive/header tree to ensure the optional symbol prefix and
 module never leak into bundled-only consumers.
+
+For multi-memory Wasm host callbacks, do not pass a copied array of memory
+buffers or silently keep treating memory zero as universal. Pass a call-scoped
+context that resolves the standard memory index to a read or mutable guard.
+Tie each guard to the synchronous callback lifetime; require the mutable guard
+to release its exclusive context borrow before another index can be accessed.
+This preserves aliases for imported memories, avoids whole-memory copies, and
+lets `RefCell` reject shared-handle conflicts without using `unsafe` to defeat
+the ownership model.

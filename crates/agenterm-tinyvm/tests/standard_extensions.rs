@@ -1440,6 +1440,113 @@ fn standard_typed_host_imports_preserve_all_value_kinds() {
 }
 
 #[test]
+fn typed_host_can_borrow_selected_defined_memories_by_standard_index() {
+    let bytes = wat::parse_str(
+        r#"(module
+          (import "host" "touch" (func $touch (param i32) (result i32)))
+          (memory 1)
+          (memory 1)
+          (func (export "run") (result i32)
+            i32.const 42
+            call $touch))"#,
+    )
+    .expect("compile selected-memory host fixture");
+    let mut module = must_ok(
+        WasmModule::from_bytes(&bytes),
+        "load selected-memory module",
+    );
+    must_ok(
+        module.bind_import_typed_in_place_with_memories(
+            "host",
+            "touch",
+            |args, results, memories| {
+                assert_eq!(memories.len(), 2);
+                assert!(!memories.is_empty());
+                assert!(memories.memory(2)?.is_none());
+                {
+                    let first = memories.memory(0)?.expect("defined memory zero");
+                    assert_eq!(first[7], 0);
+                }
+                let mut second = memories.memory_mut(1)?.expect("defined memory one");
+                second[7] = 0xA5;
+                results[0] = args[0];
+                Ok(())
+            },
+        ),
+        "bind selected-memory host callback",
+    );
+    assert!(
+        must_ok(
+            module.invoke_by_name("run", &[]),
+            "invoke selected-memory host",
+        ) == [Val::I32(42)]
+    );
+
+    let mut wrong = must_ok(
+        WasmModule::from_bytes(&bytes),
+        "reload selected-memory result mismatch",
+    );
+    must_ok(
+        wrong.bind_import_typed_in_place_with_memories(
+            "host",
+            "touch",
+            |_args, results, _memories| {
+                results[0] = Val::I64(42);
+                Ok(())
+            },
+        ),
+        "bind selected-memory result mismatch",
+    );
+    assert!(matches!(
+        wrong.invoke_by_name("run", &[]),
+        Err(WasmError::Trap("host result type"))
+    ));
+}
+
+#[test]
+fn selected_memory_context_preserves_aliasing_for_imported_memories() {
+    let bytes = wat::parse_str(
+        r#"(module
+          (import "host" "left" (memory 1 2))
+          (import "host" "right" (memory 1 2))
+          (import "host" "touch" (func $touch (result i32)))
+          (func (export "run") (result i32) call $touch))"#,
+    )
+    .expect("compile imported selected-memory fixture");
+    let shared = must_ok(WasmMemory::new(1, Some(2)), "allocate shared memory");
+    let mut module = must_ok(
+        WasmModule::from_bytes(&bytes),
+        "load imported selected-memory module",
+    );
+    must_ok(
+        module.bind_memory_import("host", "left", &shared),
+        "bind left memory alias",
+    );
+    must_ok(
+        module.bind_memory_import("host", "right", &shared),
+        "bind right memory alias",
+    );
+    must_ok(
+        module.bind_import_typed_in_place_with_memories(
+            "host",
+            "touch",
+            |_args, results, memories| {
+                {
+                    let mut left = memories.memory_mut(0)?.expect("left imported memory");
+                    left[9] = 77;
+                }
+                let right = memories.memory(1)?.expect("right imported memory");
+                results[0] = Val::I32(i32::from(right[9]));
+                Ok(())
+            },
+        ),
+        "bind aliased selected-memory callback",
+    );
+    assert!(must_ok(module.invoke_by_name("run", &[]), "invoke aliased host") == [Val::I32(77)]);
+    assert_eq!(must_ok(shared.view(), "inspect shared memory")[9], 77);
+}
+
+#[test]
 fn standard_typed_host_funcref_results_are_instance_bounded() {
     let bytes = funcref_host_module();
     let mut null = must_ok(WasmModule::from_bytes(&bytes), "load funcref host module");

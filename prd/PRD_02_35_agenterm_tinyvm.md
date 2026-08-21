@@ -92,7 +92,7 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── owned host ABI                                   [~]
 │   │   ├── typed standard function imports               [x]
 │   │   ├── bounded in-place host dispatch                [x]
-│   │   └── indexed guest-memory callback context          [ ]
+│   │   └── indexed guest-memory callback context          [x]
 │   ├── standard resource imports                        [~]
 │   │   ├── standard imported globals                     [x]
 │   │   ├── standard imported linear memories             [x]
@@ -148,8 +148,8 @@ agenterm-tinyvm (35)                                      [~]
 │   │   ├── physical frame-time/resource evidence         [ ]
 │   │   └── physical audio-session evidence               [ ]
 │   ├── P1 — reusable native modules                     [~]
-│   │   ├── generalize memory-zero call-scoped borrowing   [ ]
-│   │   ├── explicit selected-memory callback context      [ ]
+│   │   ├── generalize memory-zero call-scoped borrowing   [x]
+│   │   ├── explicit selected-memory callback context      [x]
 │   │   ├── versioned native import conventions           [ ]
 │   │   ├── converter-visible compatibility reports       [ ]
 │   │   └── platform-neutral host architecture            [~]
@@ -386,6 +386,7 @@ Current evidence owners:
 - [Optional WASI Preview 1 profile](../docs/tinyvm-wasi-preview1.md)
 - [Capability-based std host](../docs/tinyvm-std-host.md)
 - [Optional iOS WASI host](../docs/tinyvm-ios-wasi-host.md)
+- [Selected-memory host callbacks](../docs/tinyvm-selected-memory-host.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)

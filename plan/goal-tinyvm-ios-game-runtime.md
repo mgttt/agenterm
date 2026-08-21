@@ -3361,3 +3361,31 @@ three-game tinyvm/JSC/H5 differential; warnings-denied Clippy passes. Linked
 default sizes remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64, while the
 stripped default static core remains 101,256 bytes with selftest 42. Physical-
 iPhone container behavior remains open.
+
+## One-hundred-third executable increment — selected-memory host callbacks
+
+The typed bounded host door now has an opt-in multi-memory form. Its public
+`WasmHostMemories` context resolves the module's standard memory index space to
+call-scoped read or mutable guards. It owns and copies no guest bytes; the host
+cannot retain a guard after the synchronous callback returns, and a mutable
+guard must release its exclusive context borrow before another index is
+accessed. Existing memory-zero callbacks remain source-compatible for profiles
+that deliberately require one memory.
+
+This closes the abstraction gap between tinyvm's existing standard multi-memory
+engine and future versioned native modules. Defined memories remain distinct;
+multiple imported indexes bound to one `WasmMemory` preserve shared identity and
+runtime borrow checks rather than becoming snapshots or unsafe raw pointers.
+
+Evidence on 2026-08-22: one independently WAT-compiled module exposes two
+defined memories to a typed import, selects memory one, rejects an absent index
+and returns the exact typed result. A second module binds two imported memory
+indexes to the same host object; mutation through index zero is observed
+through index one and by the external owner. The 23-test standard-extension
+suite, 94-leaf executable PRD trace map and warnings-denied all-feature/all-
+target Clippy pass. The complete all-feature/all-target package passes all 128
+library tests and every non-ignored integration test, including both iOS
+XCFramework gates and the three-game tinyvm/JSC/H5 differential. The no-default
+library passes all 115 tests and warnings-denied Clippy. Default linked sizes are
+1,602,104 bytes arm64 and 1,677,312 bytes x86_64; the stripped static core
+remains 101,256 bytes with selftest 42.

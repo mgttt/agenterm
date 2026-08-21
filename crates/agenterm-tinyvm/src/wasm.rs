@@ -976,6 +976,49 @@ impl MemorySlot {
     }
 }
 
+/// Call-scoped access to every live standard linear memory of an instance.
+///
+/// A host callback may borrow one selected memory by standard memory index.
+/// The guard cannot outlive the callback, and Rust's borrowing rules prevent a
+/// second access through this context while a mutable view remains live.
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+pub struct HostMemories<'a> {
+    memories: &'a mut [MemorySlot],
+}
+
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+impl HostMemories<'_> {
+    /// Number of memories in the instance's standard memory index space.
+    pub fn len(&self) -> usize {
+        self.memories.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.memories.is_empty()
+    }
+
+    /// Borrow one selected memory for reading, or return `None` for an absent
+    /// standard memory index.
+    pub fn memory(&self, memory_index: usize) -> Result<Option<MemoryView<'_>>, WasmError> {
+        self.memories
+            .get(memory_index)
+            .map(MemorySlot::view)
+            .transpose()
+    }
+
+    /// Borrow one selected memory for mutation, or return `None` for an absent
+    /// standard memory index.
+    pub fn memory_mut(
+        &mut self,
+        memory_index: usize,
+    ) -> Result<Option<MemoryViewMut<'_>>, WasmError> {
+        self.memories
+            .get_mut(memory_index)
+            .map(MemorySlot::view_mut)
+            .transpose()
+    }
+}
+
 impl Global {
     pub fn new(value: Val, mutable: bool) -> Self {
         Self {
@@ -3146,6 +3189,9 @@ type TypedHostImpl = dyn Fn(&[Val], usize, &mut [u8]) -> Result<Vec<Val>, WasmEr
 type BoundedHostImpl = dyn Fn(&[i32], &mut [i32], &mut [u8]) -> Result<(), WasmError>;
 #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
 type TypedBoundedHostImpl = dyn Fn(&[Val], &mut [Val], &mut [u8]) -> Result<(), WasmError>;
+#[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+type TypedBoundedMemoriesHostImpl =
+    dyn for<'a> Fn(&[Val], &mut [Val], &mut HostMemories<'a>) -> Result<(), WasmError>;
 const MAX_BOUNDED_HOST_ARITY: usize = 16;
 
 enum HostBinding {
@@ -3160,6 +3206,8 @@ enum HostBinding {
     Bounded(Rc<BoundedHostImpl>),
     #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
     TypedBounded(Rc<TypedBoundedHostImpl>),
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    TypedBoundedMemories(Rc<TypedBoundedMemoriesHostImpl>),
 }
 
 /// The value type byte of a runtime value.
@@ -4771,6 +4819,47 @@ impl Module {
         Ok(())
     }
 
+    /// Bind a typed, allocation-free host callback with call-scoped access to
+    /// every standard linear memory by index.
+    ///
+    /// This is the reusable native-module door for multi-memory guests. A
+    /// returned [`MemoryView`] or [`MemoryViewMut`] is tied to the callback and
+    /// cannot be retained by the host. Existing memory-zero callbacks remain
+    /// available for embeddings whose contract deliberately declares one
+    /// memory.
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    pub fn bind_import_typed_in_place_with_memories<F>(
+        &mut self,
+        module: &str,
+        field: &str,
+        f: F,
+    ) -> Result<(), WasmError>
+    where
+        F: for<'a> Fn(&[Val], &mut [Val], &mut HostMemories<'a>) -> Result<(), WasmError> + 'static,
+    {
+        let mut found = false;
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                found = true;
+                let host = &self.hosts[position];
+                if host.n_params > MAX_BOUNDED_HOST_ARITY || host.n_results > MAX_BOUNDED_HOST_ARITY
+                {
+                    return Err(WasmError::Trap("bounded host arity"));
+                }
+            }
+        }
+        if !found {
+            return Err(WasmError::Trap("no imported function named"));
+        }
+        let shared: Rc<TypedBoundedMemoriesHostImpl> = Rc::new(f);
+        for (position, desc) in self.import_descs.iter().enumerate() {
+            if desc.module == module && desc.field == field {
+                self.hosts[position].binding = HostBinding::TypedBoundedMemories(shared.clone());
+            }
+        }
+        Ok(())
+    }
+
     /// Bind one exact import slot to a bounded in-place host implementation.
     ///
     /// Game embeddings validate unique imports before calling this internal
@@ -5487,6 +5576,71 @@ impl Module {
                     })
                 }
             }
+            #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+            HostBinding::TypedBoundedMemories(_) => Err(WasmError::Trap(
+                "selected-memory host requires memory context",
+            )),
+        }
+    }
+
+    #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+    fn call_host_with_memories(
+        &self,
+        index: usize,
+        args: &[Val],
+        memories: &mut [MemorySlot],
+        force_owned: bool,
+    ) -> Result<CallValues, WasmError> {
+        let host = self
+            .hosts
+            .get(index)
+            .ok_or(WasmError::Trap("host function"))?;
+        if args.len() != host.n_params {
+            return Err(WasmError::Trap("host function"));
+        }
+        let signature = host
+            .sig
+            .and_then(|signature_index| self.types.get(signature_index))
+            .ok_or(WasmError::Trap("host function type"))?;
+        if !values_have_types(args, &signature.params) {
+            return Err(WasmError::Trap("host argument type"));
+        }
+        let HostBinding::TypedBoundedMemories(callback) = &host.binding else {
+            return Err(WasmError::Trap("selected-memory host binding"));
+        };
+        let owned = if force_owned {
+            let mut values = Vec::new();
+            values
+                .try_reserve_exact(host.n_results)
+                .map_err(|_| WasmError::Trap("host results"))?;
+            Some(values)
+        } else {
+            None
+        };
+        let mut values = [Val::I32(0); MAX_BOUNDED_HOST_ARITY];
+        for (slot, &value_type) in values.iter_mut().zip(&signature.results) {
+            *slot = zero_of_valtype(value_type)?;
+        }
+        callback(
+            args,
+            &mut values[..host.n_results],
+            &mut HostMemories { memories },
+        )?;
+        if !host_results_are_valid(
+            &values[..host.n_results],
+            &signature.results,
+            self.hosts.len() + self.funcs.len(),
+        ) {
+            return Err(WasmError::Trap("host result type"));
+        }
+        if let Some(mut owned) = owned {
+            owned.extend_from_slice(&values[..host.n_results]);
+            Ok(CallValues::Owned(owned))
+        } else {
+            Ok(CallValues::BoundedTyped {
+                values,
+                len: host.n_results,
+            })
         }
     }
 
@@ -5620,6 +5774,20 @@ impl Module {
                     });
                 }
                 let force_owned = callers.is_empty();
+                #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
+                let values = if matches!(
+                    &self.hosts[index].binding,
+                    HostBinding::TypedBoundedMemories(_)
+                ) {
+                    self.call_host_with_memories(index, &args, memories, force_owned)?
+                } else if let Some(memory) = memories.first_mut() {
+                    let mut memory = memory.view_mut()?;
+                    self.call_host(index, &args, &mut memory, force_owned)?
+                } else {
+                    let mut empty = [];
+                    self.call_host(index, &args, &mut empty, force_owned)?
+                };
+                #[cfg(all(feature = "staticcore", not(feature = "std")))]
                 let values = if let Some(memory) = memories.first_mut() {
                     let mut memory = memory.view_mut()?;
                     self.call_host(index, &args, &mut memory, force_owned)?

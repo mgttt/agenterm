@@ -103,6 +103,7 @@ pub mod wasm;
 #[cfg(not(all(feature = "staticcore", not(feature = "std"))))]
 pub use wasm::{
     ExternReference as WasmExternReference, FunctionReference as WasmFunctionReference,
+    HostMemories as WasmHostMemories,
 };
 pub use wasm::{
     Function as WasmFunction, Global as WasmGlobal, GlobalImportDesc, ImportDesc,
